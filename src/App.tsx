@@ -1,22 +1,22 @@
-import { useState } from 'react'
-import { Button } from '@mui/material'
 import './App.css'
+import { Box } from '@mui/material'
+
+import ODEs from './components/ODEs.tsx'
+import StateSpace from './components/StateSpace.tsx'
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <>
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <h1>Fork</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-      </div>
-      <div>
-        <Button variant="contained">Hello World</Button>
-      </div>
-    </>
+      <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
+        <Box sx={{ flex: 2, overflow: 'auto', pr: 2 }}>
+          <StateSpace />
+        </Box>
+        <Box sx={{ flex: 1, overflow: 'auto', pl: 2 }}>
+          <ODEs />
+        </Box>
+      </Box>
+    </Box>
   )
 }
 

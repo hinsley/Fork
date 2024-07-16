@@ -9,6 +9,7 @@
     }
   ],
   "compilerOptions": {
+    "jsx": "react-jsx",
     "types": ["@types/babel__template"]
   }
 }
