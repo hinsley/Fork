@@ -11,7 +11,7 @@ const mathboxOptions = {
 }
 
 export default function StateSpace() {
-	const numberOfPoints = 1e4
+	const numberOfPoints = 3e2
 	const [points, setPoints] = useState(globalThis.Array.from({ length: numberOfPoints }, (_, i) => [(i+1)/numberOfPoints, 0, 0]))
 
 	const spatialScale = 1e2
