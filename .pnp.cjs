@@ -35,12 +35,14 @@ const RAW_RUNTIME_STATE =
           ["@popperjs/core", "npm:2.11.8"],\
           ["@types/react", "npm:18.3.3"],\
           ["@types/react-dom", "npm:18.3.0"],\
+          ["@types/react-transition-group", "npm:4.4.10"],\
           ["@types/three", "npm:0.148.0"],\
           ["@vitejs/plugin-react", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:4.3.1"],\
           ["mathbox", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:2.3.2-rc1"],\
           ["mathbox-react", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:0.3.0"],\
           ["react", "npm:18.3.1"],\
           ["react-dom", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:18.3.1"],\
+          ["react-transition-group", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:4.4.5"],\
           ["three", "npm:0.148.0"],\
           ["threestrap", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:0.5.1"],\
           ["tsc", "npm:2.0.4"],\
@@ -943,7 +945,7 @@ const RAW_RUNTIME_STATE =
           ["react", "npm:18.3.1"],\
           ["react-dom", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:18.3.1"],\
           ["react-is", "npm:18.3.1"],\
-          ["react-transition-group", "virtual:0547202767450f401cbd52881698550218693f70f4113311e95a9fba72b2b3cd15551575e362cf810f84bdda08dc4c51f26487a46c3d94d257fe168f6d628b1e#npm:4.4.5"]\
+          ["react-transition-group", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:4.4.5"]\
         ],\
         "packagePeers": [\
           "@emotion/react",\
@@ -2023,12 +2025,14 @@ const RAW_RUNTIME_STATE =
           ["@popperjs/core", "npm:2.11.8"],\
           ["@types/react", "npm:18.3.3"],\
           ["@types/react-dom", "npm:18.3.0"],\
+          ["@types/react-transition-group", "npm:4.4.10"],\
           ["@types/three", "npm:0.148.0"],\
           ["@vitejs/plugin-react", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:4.3.1"],\
           ["mathbox", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:2.3.2-rc1"],\
           ["mathbox-react", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:0.3.0"],\
           ["react", "npm:18.3.1"],\
           ["react-dom", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:18.3.1"],\
+          ["react-transition-group", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:4.4.5"],\
           ["three", "npm:0.148.0"],\
           ["threestrap", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:0.5.1"],\
           ["tsc", "npm:2.0.4"],\
@@ -2878,10 +2882,10 @@ const RAW_RUNTIME_STATE =
         ],\
         "linkType": "SOFT"\
       }],\
-      ["virtual:0547202767450f401cbd52881698550218693f70f4113311e95a9fba72b2b3cd15551575e362cf810f84bdda08dc4c51f26487a46c3d94d257fe168f6d628b1e#npm:4.4.5", {\
-        "packageLocation": "./.yarn/__virtual__/react-transition-group-virtual-fc03e06101/3/.yarn/berry/cache/react-transition-group-npm-4.4.5-98ea4ef96e-10c0.zip/node_modules/react-transition-group/",\
+      ["virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:4.4.5", {\
+        "packageLocation": "./.yarn/__virtual__/react-transition-group-virtual-de2672170a/3/.yarn/berry/cache/react-transition-group-npm-4.4.5-98ea4ef96e-10c0.zip/node_modules/react-transition-group/",\
         "packageDependencies": [\
-          ["react-transition-group", "virtual:0547202767450f401cbd52881698550218693f70f4113311e95a9fba72b2b3cd15551575e362cf810f84bdda08dc4c51f26487a46c3d94d257fe168f6d628b1e#npm:4.4.5"],\
+          ["react-transition-group", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:4.4.5"],\
           ["@babel/runtime", "npm:7.24.8"],\
           ["@types/react", "npm:18.3.3"],\
           ["@types/react-dom", "npm:18.3.0"],\
