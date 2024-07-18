@@ -52,7 +52,7 @@ export default function StateSpace() {
 				options={mathboxOptions}
 				containerStyle={{ height: "100%", width: "100%" }}
 			>
-				<Cartesian range={[[-10, 10], [-10, 10], [-10, 10]]} scale={[5, 5, 5]}>
+				<Cartesian range={[[-5, 5], [-5, 5], [-5, 5]]}>
 					<Axis axis="x" color="orange" width={4} />
 					<Axis axis="y" color="blue" width={4} />
 					<Axis axis="z" color="green" width={4} />
