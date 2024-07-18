@@ -659,6 +659,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@mui/icons-material@npm:^5.16.4":
+  version: 5.16.4
+  resolution: "@mui/icons-material@npm:5.16.4"
+  dependencies:
+    "@babel/runtime": "npm:^7.23.9"
+  peerDependencies:
+    "@mui/material": ^5.0.0
+    "@types/react": ^17.0.0 || ^18.0.0
+    react: ^17.0.0 || ^18.0.0
+  peerDependenciesMeta:
+    "@types/react":
+      optional: true
+  checksum: 10c0/e6cd3b64dd02d21182f0a0509d412a084fdea8752e4a202907cd1cf92a5476ec87e6074a409ebcb9a35e29c91d20729e9eddd9530c1d3755a93b0f56cf3be519
+  languageName: node
+  linkType: hard
+
 "@mui/material@npm:^5.16.2":
   version: 5.16.2
   resolution: "@mui/material@npm:5.16.2"
@@ -1608,6 +1624,7 @@ __metadata:
     "@emotion/react": "npm:^11.11.4"
     "@emotion/styled": "npm:^11.11.5"
     "@fontsource/roboto": "npm:^5.0.13"
+    "@mui/icons-material": "npm:^5.16.4"
     "@mui/material": "npm:^5.16.2"
     "@popperjs/core": "npm:^2.11.8"
     "@types/react": "npm:^18.3.3"

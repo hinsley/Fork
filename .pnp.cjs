@@ -30,6 +30,7 @@ const RAW_RUNTIME_STATE =
           ["@emotion/react", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:11.11.4"],\
           ["@emotion/styled", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:11.11.5"],\
           ["@fontsource/roboto", "npm:5.0.13"],\
+          ["@mui/icons-material", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:5.16.4"],\
           ["@mui/material", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:5.16.2"],\
           ["@popperjs/core", "npm:2.11.8"],\
           ["@types/react", "npm:18.3.3"],\
@@ -881,6 +882,33 @@ const RAW_RUNTIME_STATE =
         "packageLocation": "../../.yarn/berry/cache/@mui-core-downloads-tracker-npm-5.16.2-f2d9cc4600-10c0.zip/node_modules/@mui/core-downloads-tracker/",\
         "packageDependencies": [\
           ["@mui/core-downloads-tracker", "npm:5.16.2"]\
+        ],\
+        "linkType": "HARD"\
+      }]\
+    ]],\
+    ["@mui/icons-material", [\
+      ["npm:5.16.4", {\
+        "packageLocation": "../../.yarn/berry/cache/@mui-icons-material-npm-5.16.4-d62c35da3a-10c0.zip/node_modules/@mui/icons-material/",\
+        "packageDependencies": [\
+          ["@mui/icons-material", "npm:5.16.4"]\
+        ],\
+        "linkType": "SOFT"\
+      }],\
+      ["virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:5.16.4", {\
+        "packageLocation": "./.yarn/__virtual__/@mui-icons-material-virtual-2a818b9db6/3/.yarn/berry/cache/@mui-icons-material-npm-5.16.4-d62c35da3a-10c0.zip/node_modules/@mui/icons-material/",\
+        "packageDependencies": [\
+          ["@mui/icons-material", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:5.16.4"],\
+          ["@babel/runtime", "npm:7.24.8"],\
+          ["@mui/material", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:5.16.2"],\
+          ["@types/mui__material", null],\
+          ["@types/react", "npm:18.3.3"],\
+          ["react", "npm:18.3.1"]\
+        ],\
+        "packagePeers": [\
+          "@mui/material",\
+          "@types/mui__material",\
+          "@types/react",\
+          "react"\
         ],\
         "linkType": "HARD"\
       }]\
@@ -1990,6 +2018,7 @@ const RAW_RUNTIME_STATE =
           ["@emotion/react", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:11.11.4"],\
           ["@emotion/styled", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:11.11.5"],\
           ["@fontsource/roboto", "npm:5.0.13"],\
+          ["@mui/icons-material", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:5.16.4"],\
           ["@mui/material", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:5.16.2"],\
           ["@popperjs/core", "npm:2.11.8"],\
           ["@types/react", "npm:18.3.3"],\
