@@ -9,12 +9,9 @@ import TopBar from './components/TopBar.tsx'
 export default function App() {
   const [currentView, setCurrentView] = useState('state-space')
   const [equations, setEquations] = useState<Equation[]>([
-    // { variable: 'x', expression: '10*(y-x)' },
-    // { variable: 'y', expression: 'x*(28-z)-y' },
-    // { variable: 'z', expression: 'x*y-8/3*z' }
-    { variable: 'x', expression: '3e-3*(10*1e2*(this.y-this.x))'},
-    { variable: 'y', expression: '3e-3*(this.x*1e2*(28-this.z*1e2)-this.y*1e2)'},
-    { variable: 'z', expression: '3e-3*(this.x*1e2*this.y*1e2-8/3*this.z*1e2)'}
+    { variable: 'x', expression: '10*(y-x)' },
+    { variable: 'y', expression: 'x*(28-z)-y' },
+    { variable: 'z', expression: 'x*y-8/3*z' }
   ])
 
   return (

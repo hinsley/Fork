@@ -40,6 +40,7 @@ const RAW_RUNTIME_STATE =
           ["@vitejs/plugin-react", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:4.3.1"],\
           ["mathbox", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:2.3.2-rc1"],\
           ["mathbox-react", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:0.3.0"],\
+          ["mathjs", "npm:13.0.3"],\
           ["react", "npm:18.3.1"],\
           ["react-dom", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:18.3.1"],\
           ["react-transition-group", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:4.4.5"],\
@@ -1685,6 +1686,15 @@ const RAW_RUNTIME_STATE =
         "linkType": "HARD"\
       }]\
     ]],\
+    ["complex.js", [\
+      ["npm:2.1.1", {\
+        "packageLocation": "../../.yarn/berry/cache/complex.js-npm-2.1.1-2beaccef20-10c0.zip/node_modules/complex.js/",\
+        "packageDependencies": [\
+          ["complex.js", "npm:2.1.1"]\
+        ],\
+        "linkType": "HARD"\
+      }]\
+    ]],\
     ["convert-source-map", [\
       ["npm:1.9.0", {\
         "packageLocation": "../../.yarn/berry/cache/convert-source-map-npm-1.9.0-e294555f4b-10c0.zip/node_modules/convert-source-map/",\
@@ -1787,6 +1797,15 @@ const RAW_RUNTIME_STATE =
         "packagePeers": [\
           "@types/supports-color",\
           "supports-color"\
+        ],\
+        "linkType": "HARD"\
+      }]\
+    ]],\
+    ["decimal.js", [\
+      ["npm:10.4.3", {\
+        "packageLocation": "../../.yarn/berry/cache/decimal.js-npm-10.4.3-e7d483387c-10c0.zip/node_modules/decimal.js/",\
+        "packageDependencies": [\
+          ["decimal.js", "npm:10.4.3"]\
         ],\
         "linkType": "HARD"\
       }]\
@@ -1967,6 +1986,15 @@ const RAW_RUNTIME_STATE =
         "linkType": "HARD"\
       }]\
     ]],\
+    ["escape-latex", [\
+      ["npm:1.2.0", {\
+        "packageLocation": "../../.yarn/berry/cache/escape-latex-npm-1.2.0-1481ca81a7-10c0.zip/node_modules/escape-latex/",\
+        "packageDependencies": [\
+          ["escape-latex", "npm:1.2.0"]\
+        ],\
+        "linkType": "HARD"\
+      }]\
+    ]],\
     ["escape-string-regexp", [\
       ["npm:1.0.5", {\
         "packageLocation": "../../.yarn/berry/cache/escape-string-regexp-npm-1.0.5-3284de402f-10c0.zip/node_modules/escape-string-regexp/",\
@@ -2030,6 +2058,7 @@ const RAW_RUNTIME_STATE =
           ["@vitejs/plugin-react", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:4.3.1"],\
           ["mathbox", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:2.3.2-rc1"],\
           ["mathbox-react", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:0.3.0"],\
+          ["mathjs", "npm:13.0.3"],\
           ["react", "npm:18.3.1"],\
           ["react-dom", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:18.3.1"],\
           ["react-transition-group", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:4.4.5"],\
@@ -2040,6 +2069,15 @@ const RAW_RUNTIME_STATE =
           ["vite", "virtual:40fdfb0c52a53f745b2419573264d89f02e89b06421324772310e91b7965d8e4d36ec5b3968504d35a4beff29995ddadd639ded0324bb07ce32f1841f5cc3565#npm:5.3.4"]\
         ],\
         "linkType": "SOFT"\
+      }]\
+    ]],\
+    ["fraction.js", [\
+      ["npm:4.3.7", {\
+        "packageLocation": "../../.yarn/berry/cache/fraction.js-npm-4.3.7-c2c7e95a8e-10c0.zip/node_modules/fraction.js/",\
+        "packageDependencies": [\
+          ["fraction.js", "npm:4.3.7"]\
+        ],\
+        "linkType": "HARD"\
       }]\
     ]],\
     ["fs-minipass", [\
@@ -2323,6 +2361,15 @@ const RAW_RUNTIME_STATE =
         "linkType": "HARD"\
       }]\
     ]],\
+    ["javascript-natural-sort", [\
+      ["npm:0.7.1", {\
+        "packageLocation": "../../.yarn/berry/cache/javascript-natural-sort-npm-0.7.1-9018625996-10c0.zip/node_modules/javascript-natural-sort/",\
+        "packageDependencies": [\
+          ["javascript-natural-sort", "npm:0.7.1"]\
+        ],\
+        "linkType": "HARD"\
+      }]\
+    ]],\
     ["js-tokens", [\
       ["npm:4.0.0", {\
         "packageLocation": "../../.yarn/berry/cache/js-tokens-npm-4.0.0-0ac852e9e2-10c0.zip/node_modules/js-tokens/",\
@@ -2487,6 +2534,24 @@ const RAW_RUNTIME_STATE =
           "mathbox",\
           "react",\
           "three"\
+        ],\
+        "linkType": "HARD"\
+      }]\
+    ]],\
+    ["mathjs", [\
+      ["npm:13.0.3", {\
+        "packageLocation": "../../.yarn/berry/cache/mathjs-npm-13.0.3-6879fcfea7-10c0.zip/node_modules/mathjs/",\
+        "packageDependencies": [\
+          ["mathjs", "npm:13.0.3"],\
+          ["@babel/runtime", "npm:7.24.8"],\
+          ["complex.js", "npm:2.1.1"],\
+          ["decimal.js", "npm:10.4.3"],\
+          ["escape-latex", "npm:1.2.0"],\
+          ["fraction.js", "npm:4.3.7"],\
+          ["javascript-natural-sort", "npm:0.7.1"],\
+          ["seedrandom", "npm:3.0.5"],\
+          ["tiny-emitter", "npm:2.1.0"],\
+          ["typed-function", "npm:4.2.1"]\
         ],\
         "linkType": "HARD"\
       }]\
@@ -3002,6 +3067,15 @@ const RAW_RUNTIME_STATE =
         "linkType": "HARD"\
       }]\
     ]],\
+    ["seedrandom", [\
+      ["npm:3.0.5", {\
+        "packageLocation": "../../.yarn/berry/cache/seedrandom-npm-3.0.5-6946e8f8db-10c0.zip/node_modules/seedrandom/",\
+        "packageDependencies": [\
+          ["seedrandom", "npm:3.0.5"]\
+        ],\
+        "linkType": "HARD"\
+      }]\
+    ]],\
     ["semver", [\
       ["npm:6.3.1", {\
         "packageLocation": "../../.yarn/berry/cache/semver-npm-6.3.1-bcba31fdbe-10c0.zip/node_modules/semver/",\
@@ -3283,6 +3357,15 @@ const RAW_RUNTIME_STATE =
         "linkType": "HARD"\
       }]\
     ]],\
+    ["tiny-emitter", [\
+      ["npm:2.1.0", {\
+        "packageLocation": "../../.yarn/berry/cache/tiny-emitter-npm-2.1.0-2a4d94f487-10c0.zip/node_modules/tiny-emitter/",\
+        "packageDependencies": [\
+          ["tiny-emitter", "npm:2.1.0"]\
+        ],\
+        "linkType": "HARD"\
+      }]\
+    ]],\
     ["to-fast-properties", [\
       ["npm:2.0.0", {\
         "packageLocation": "../../.yarn/berry/cache/to-fast-properties-npm-2.0.0-0dc60cc481-10c0.zip/node_modules/to-fast-properties/",\
@@ -3297,6 +3380,15 @@ const RAW_RUNTIME_STATE =
         "packageLocation": "../../.yarn/berry/cache/tsc-npm-2.0.4-e331b066cb-10c0.zip/node_modules/tsc/",\
         "packageDependencies": [\
           ["tsc", "npm:2.0.4"]\
+        ],\
+        "linkType": "HARD"\
+      }]\
+    ]],\
+    ["typed-function", [\
+      ["npm:4.2.1", {\
+        "packageLocation": "../../.yarn/berry/cache/typed-function-npm-4.2.1-68f0b6c302-10c0.zip/node_modules/typed-function/",\
+        "packageDependencies": [\
+          ["typed-function", "npm:4.2.1"]\
         ],\
         "linkType": "HARD"\
       }]\

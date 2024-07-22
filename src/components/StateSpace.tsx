@@ -2,8 +2,12 @@ import { useState } from 'react'
 import { Box } from '@mui/material'
 import { Array, Axis, Cartesian, ContainedMathbox, Grid, Point } from 'mathbox-react'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { compile } from 'mathjs'
 
 import { Equation } from './ODEEditor'
+
+const SPATIAL_SCALING = 2e-2
+const TIME_SCALING = 1e0
 
 const mathboxOptions = {
 	plugins: ["core", "controls", "cursor"],
@@ -14,35 +18,41 @@ const mathboxOptions = {
 
 export default function StateSpace({ equations }: { equations: Equation[] }) {
 	const numberOfPoints = 3e3
-	const [points, setPoints] = useState(globalThis.Array.from({ length: numberOfPoints }, (_, i) => [(i+1)/numberOfPoints, 0, 0]))
+	const [points, setPoints] = useState(globalThis.Array.from({ length: numberOfPoints }, (_, i) => [(i+1) * 1e2 / numberOfPoints, 0, 0]))
 
-	function dx(x: number, y: number, z: number) {
-		return Function(`"use strict"; return ${equations[0].expression}`).bind({'x': x, 'y': y, 'z': z})()
-	}
-	function dy(x: number, y: number, z: number) {
-		return Function(`"use strict"; return ${equations[1].expression}`).bind({'x': x, 'y': y, 'z': z})()
-	}
-	function dz(x: number, y: number, z: number) {
-		return Function(`"use strict"; return ${equations[2].expression}`).bind({'x': x, 'y': y, 'z': z})()
-	}
+	const dx = compile(equations[0].expression)
+	const dy = compile(equations[1].expression)
+	const dz = compile(equations[2].expression)
 
 	// Runge-Kutta 4th order method.
 	const rk4 = (x: number, y: number, z: number, dt: number) => {
-		const k1x = dx(x, y, z)
-		const k1y = dy(x, y, z)
-		const k1z = dz(x, y, z)
+		const k1x = dx.evaluate({'x': x, 'y': y, 'z': z})
+		const k1y = dy.evaluate({'x': x, 'y': y, 'z': z})
+		const k1z = dz.evaluate({'x': x, 'y': y, 'z': z})
 
-		const k2x = dx(x + 0.5 * dt * k1x, y + 0.5 * dt * k1y, z + 0.5 * dt * k1z)
-		const k2y = dy(x + 0.5 * dt * k1x, y + 0.5 * dt * k1y, z + 0.5 * dt * k1z)
-		const k2z = dz(x + 0.5 * dt * k1x, y + 0.5 * dt * k1y, z + 0.5 * dt * k1z)
+		const h2x = x + 0.5 * dt * k1x
+		const h2y = y + 0.5 * dt * k1y
+		const h2z = z + 0.5 * dt * k1z
 
-		const k3x = dx(x + 0.5 * dt * k2x, y + 0.5 * dt * k2y, z + 0.5 * dt * k2z)
-		const k3y = dy(x + 0.5 * dt * k2x, y + 0.5 * dt * k2y, z + 0.5 * dt * k2z)
-		const k3z = dz(x + 0.5 * dt * k2x, y + 0.5 * dt * k2y, z + 0.5 * dt * k2z)
+		const k2x = dx.evaluate({'x': h2x, 'y': h2y, 'z': h2z})
+		const k2y = dy.evaluate({'x': h2x, 'y': h2y, 'z': h2z})
+		const k2z = dz.evaluate({'x': h2x, 'y': h2y, 'z': h2z})
 
-		const k4x = dx(x + dt * k3x, y + dt * k3y, z + dt * k3z)
-		const k4y = dy(x + dt * k3x, y + dt * k3y, z + dt * k3z)
-		const k4z = dz(x + dt * k3x, y + dt * k3y, z + dt * k3z)
+		const h3x = x + 0.5 * dt * k2x
+		const h3y = y + 0.5 * dt * k2y
+		const h3z = z + 0.5 * dt * k2z
+
+		const k3x = dx.evaluate({'x': h3x, 'y': h3y, 'z': h3z})
+		const k3y = dy.evaluate({'x': h3x, 'y': h3y, 'z': h3z})
+		const k3z = dz.evaluate({'x': h3x, 'y': h3y, 'z': h3z})
+
+		const h4x = x + dt * k3x
+		const h4y = y + dt * k3y
+		const h4z = z + dt * k3z
+
+		const k4x = dx.evaluate({'x': h4x, 'y': h4y, 'z': h4z})
+		const k4y = dy.evaluate({'x': h4x, 'y': h4y, 'z': h4z})
+		const k4z = dz.evaluate({'x': h4x, 'y': h4y, 'z': h4z})
 
 		const newX = x + (dt / 6) * (k1x + 2 * k2x + 2 * k3x + k4x)
 		const newY = y + (dt / 6) * (k1y + 2 * k2y + 2 * k3y + k4y)
@@ -58,10 +68,10 @@ export default function StateSpace({ equations }: { equations: Equation[] }) {
 				options={mathboxOptions}
 				containerStyle={{ height: "100%", width: "100%" }}
 			>
-				<Cartesian range={[[-5, 5], [-5, 5], [-5, 5]]}>
-					<Axis axis="x" color="orange" width={4} />
-					<Axis axis="y" color="blue" width={4} />
-					<Axis axis="z" color="green" width={4} />
+				<Cartesian scale={[32 * SPATIAL_SCALING, 32 * SPATIAL_SCALING, 32 * SPATIAL_SCALING]}>
+					<Axis axis="x" color="orange" width={64 * SPATIAL_SCALING} />
+					<Axis axis="y" color="blue" width={64 * SPATIAL_SCALING} />
+					<Axis axis="z" color="green" width={64 * SPATIAL_SCALING} />
 					<Grid axes="xz" />
 				</Cartesian>
 				<Array
@@ -69,8 +79,8 @@ export default function StateSpace({ equations }: { equations: Equation[] }) {
 					channels={3}
 					items={numberOfPoints}
 					expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
-						setPoints(points.map((point) => rk4(point[0], point[1], point[2], dt)))
-						points.forEach(point => emit(point[0], point[1], point[2]))
+						setPoints(points.map((point) => rk4(point[0], point[1], point[2], dt * TIME_SCALING)))
+						points.forEach(point => emit(point[1] * SPATIAL_SCALING, point[2] * SPATIAL_SCALING, point[0] * SPATIAL_SCALING))
 					}}
 				/>
 				<Point points="#points" shape="sphere" color="red" size={2} />
