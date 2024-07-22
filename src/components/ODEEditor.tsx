@@ -1,20 +1,19 @@
-import { useState } from 'react'
+import React from 'react'
 import { Box, Button, Collapse, IconButton, Stack, TextField, Tooltip } from '@mui/material'
 import DeleteIcon from '@mui/icons-material/Delete'
 import { TransitionGroup } from 'react-transition-group'
 
-interface Equation {
+interface ODEEditorProps {
+  equations: Equation[]
+  setEquations: React.Dispatch<React.SetStateAction<Equation[]>>
+}
+
+export interface Equation {
   variable: string
   expression: string
 }
 
-export default function ODEs() {
-  const [equations, setEquations] = useState<Equation[]>([
-    { variable: 'x', expression: '10*(y-x)' },
-    { variable: 'y', expression: 'x*(28-z)-y' },
-    { variable: 'z', expression: 'x*y-8/3*z' }
-  ])
-
+export default function ODEEditor({equations, setEquations }: ODEEditorProps) {
   const addEquation = () => {
     setEquations([...equations, { variable: '', expression: '' }])
   }

@@ -2,12 +2,20 @@ import { useState } from 'react'
 import './App.css'
 import { Box } from '@mui/material'
 
-import ODEs from './components/ODEs.tsx'
+import ODEEditor, { Equation } from './components/ODEEditor.tsx'
 import StateSpace from './components/StateSpace.tsx'
 import TopBar from './components/TopBar.tsx'
 
 export default function App() {
   const [currentView, setCurrentView] = useState('state-space')
+  const [equations, setEquations] = useState<Equation[]>([
+    // { variable: 'x', expression: '10*(y-x)' },
+    // { variable: 'y', expression: 'x*(28-z)-y' },
+    // { variable: 'z', expression: 'x*y-8/3*z' }
+    { variable: 'x', expression: '3e-3*(10*1e2*(this.y-this.x))'},
+    { variable: 'y', expression: '3e-3*(this.x*1e2*(28-this.z*1e2)-this.y*1e2)'},
+    { variable: 'z', expression: '3e-3*(this.x*1e2*this.y*1e2-8/3*this.z*1e2)'}
+  ])
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -17,11 +25,11 @@ export default function App() {
           {(() => {
             switch (currentView) {
               case 'state-space':
-                return <StateSpace />
+                return <StateSpace equations={equations} />
               case 'equations':
-                return <ODEs />
+                return <ODEEditor equations={equations} setEquations={setEquations} />
               default:
-                return null
+                return <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><h1>Not implemented</h1></Box>
             }
           })()}
         </Box>

@@ -3,6 +3,8 @@ import { Box } from '@mui/material'
 import { Array, Axis, Cartesian, ContainedMathbox, Grid, Point } from 'mathbox-react'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
+import { Equation } from './ODEEditor'
+
 const mathboxOptions = {
 	plugins: ["core", "controls", "cursor"],
 	controls: {
@@ -10,15 +12,20 @@ const mathboxOptions = {
 	}
 }
 
-export default function StateSpace() {
+export default function StateSpace({ equations }: { equations: Equation[] }) {
 	const numberOfPoints = 3e3
 	const [points, setPoints] = useState(globalThis.Array.from({ length: numberOfPoints }, (_, i) => [(i+1)/numberOfPoints, 0, 0]))
 
-	const spatialScale = 1e2
-	const temporalScale = 3e-3
-	const dx = (x: number, y: number, z: number) => temporalScale * (10 * (y * spatialScale - x * spatialScale))
-	const dy = (x: number, y: number, z: number) => temporalScale*(x*spatialScale*(28-z*spatialScale)-y*spatialScale)
-	const dz = (x: number, y: number, z: number) => temporalScale*(x*spatialScale*y*spatialScale-8/3*z*spatialScale)
+	function dx(x: number, y: number, z: number) {
+		return Function(`"use strict"; return ${equations[0].expression}`).bind({'x': x, 'y': y, 'z': z})()
+	}
+	function dy(x: number, y: number, z: number) {
+		return Function(`"use strict"; return ${equations[1].expression}`).bind({'x': x, 'y': y, 'z': z})()
+	}
+	function dz(x: number, y: number, z: number) {
+		return Function(`"use strict"; return ${equations[2].expression}`).bind({'x': x, 'y': y, 'z': z})()
+	}
+
 	// Runge-Kutta 4th order method.
 	const rk4 = (x: number, y: number, z: number, dt: number) => {
 		const k1x = dx(x, y, z)
@@ -43,7 +50,6 @@ export default function StateSpace() {
 
 		return [newX, newY, newZ]
 	}
-
 
 	return (
 		<Box sx={{ height: '100%', width: '100%', overflow: 'hidden' }}>
