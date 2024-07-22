@@ -8,6 +8,7 @@ import { Equation } from './ODEEditor'
 
 const SPATIAL_SCALING = 2e-2
 const TIME_SCALING = 1e0
+const DISTANCE_LIMIT = 1e4
 
 const mathboxOptions = {
 	plugins: ["core", "controls", "cursor"],
@@ -57,6 +58,25 @@ export default function StateSpace({ equations }: { equations: Equation[] }) {
 		const newX = x + (dt / 6) * (k1x + 2 * k2x + 2 * k3x + k4x)
 		const newY = y + (dt / 6) * (k1y + 2 * k2y + 2 * k3y + k4y)
 		const newZ = z + (dt / 6) * (k1z + 2 * k2z + 2 * k3z + k4z)
+
+		const distance = Math.sqrt(newX * newX + newY * newY + newZ * newZ)
+
+		if (distance > DISTANCE_LIMIT) {
+			// Reset to random distance from the origin with Gaussian weighting
+			const u = Math.random()
+			const v = Math.random()
+			const r = Math.sqrt(-2 * Math.log(u))
+			const theta = 2 * Math.PI * v
+			const phi = Math.acos(2 * Math.random() - 1)
+
+			const gaussianX = r * Math.sin(phi) * Math.cos(theta)
+			const gaussianY = r * Math.sin(phi) * Math.sin(theta)
+			const gaussianZ = r * Math.cos(phi)
+
+			const scale = DISTANCE_LIMIT * 1e-2 // Adjust this value to control the spread
+
+			return [gaussianX * scale, gaussianY * scale, gaussianZ * scale]
+		}
 
 		return [newX, newY, newZ]
 	}
