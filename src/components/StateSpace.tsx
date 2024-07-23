@@ -18,67 +18,64 @@ const mathboxOptions = {
 }
 
 export default function StateSpace({ equations }: { equations: Equation[] }) {
+	let eqs = [...equations]
+	while (eqs.length < 3) { // Stub in zero for the extra equations if there are less than three.
+		let i = eqs.length
+		let varName = `x${i}`
+		while (eqs.some(eq => eq.variable === varName)) {
+			// Ensure there are no duplicate variable names.
+			i++
+			varName = `x${i}`
+		}
+		eqs.push({
+			variable: varName,
+			expression: '0'
+		})
+	}
+	
 	const numberOfPoints = 3e3
-	const [points, setPoints] = useState(globalThis.Array.from({ length: numberOfPoints }, (_, i) => [(i+1) * 1e2 / numberOfPoints, 0, 0]))
+	const [points, setPoints] = useState(globalThis.Array.from({ length: numberOfPoints }, (_, i) => [(i+1) * 1e2 / numberOfPoints, ...globalThis.Array(eqs.length - 1).fill(0)]))
 
-	const dx = compile(equations[0].expression)
-	const dy = compile(equations[1].expression)
-	const dz = compile(equations[2].expression)
+	const compiledEquations = eqs.map(eq => compile(eq.expression))
 
 	// Runge-Kutta 4th order method.
-	const rk4 = (x: number, y: number, z: number, dt: number) => {
-		const k1x = dx.evaluate({'x': x, 'y': y, 'z': z})
-		const k1y = dy.evaluate({'x': x, 'y': y, 'z': z})
-		const k1z = dz.evaluate({'x': x, 'y': y, 'z': z})
+	function rk4(point: number[], dt: number) {
+		let scope: { [key: string]: number } = {}
+		eqs.forEach((eq, i) => {
+			scope[eq.variable] = point[i]
+		})
+		const k1 = compiledEquations.map(eq => eq.evaluate(scope))
 
-		const h2x = x + 0.5 * dt * k1x
-		const h2y = y + 0.5 * dt * k1y
-		const h2z = z + 0.5 * dt * k1z
+		const h2 = point.map((p, i) => p + 0.5 * dt * k1[i])
+		equations.forEach((eq, i) => {
+			scope[eq.variable] = h2[i]
+		})
+		const k2 = compiledEquations.map(eq => eq.evaluate(scope))
 
-		const k2x = dx.evaluate({'x': h2x, 'y': h2y, 'z': h2z})
-		const k2y = dy.evaluate({'x': h2x, 'y': h2y, 'z': h2z})
-		const k2z = dz.evaluate({'x': h2x, 'y': h2y, 'z': h2z})
+		const h3 = point.map((p, i) => p + 0.5 * dt * k2[i])
+		equations.forEach((eq, i) => {
+			scope[eq.variable] = h3[i]
+		})
+		const k3 = compiledEquations.map(eq => eq.evaluate(scope))
 
-		const h3x = x + 0.5 * dt * k2x
-		const h3y = y + 0.5 * dt * k2y
-		const h3z = z + 0.5 * dt * k2z
+		const h4 = point.map((p, i) => p + dt * k3[i])
+		equations.forEach((eq, i) => {
+			scope[eq.variable] = h4[i]
+		})
+		const k4 = compiledEquations.map(eq => eq.evaluate(scope))
 
-		const k3x = dx.evaluate({'x': h3x, 'y': h3y, 'z': h3z})
-		const k3y = dy.evaluate({'x': h3x, 'y': h3y, 'z': h3z})
-		const k3z = dz.evaluate({'x': h3x, 'y': h3y, 'z': h3z})
+		const newPoint = point.map((p, i) => p + (dt / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]))
 
-		const h4x = x + dt * k3x
-		const h4y = y + dt * k3y
-		const h4z = z + dt * k3z
+		const distance = Math.sqrt(newPoint.reduce((sum, component) => sum + component * component, 0))
 
-		const k4x = dx.evaluate({'x': h4x, 'y': h4y, 'z': h4z})
-		const k4y = dy.evaluate({'x': h4x, 'y': h4y, 'z': h4z})
-		const k4z = dz.evaluate({'x': h4x, 'y': h4y, 'z': h4z})
-
-		const newX = x + (dt / 6) * (k1x + 2 * k2x + 2 * k3x + k4x)
-		const newY = y + (dt / 6) * (k1y + 2 * k2y + 2 * k3y + k4y)
-		const newZ = z + (dt / 6) * (k1z + 2 * k2z + 2 * k3z + k4z)
-
-		const distance = Math.sqrt(newX * newX + newY * newY + newZ * newZ)
-
+		// If too far from the origin.
 		if (distance > DISTANCE_LIMIT) {
-			// Reset to random distance from the origin with Gaussian weighting
-			const u = Math.random()
-			const v = Math.random()
-			const r = Math.sqrt(-2 * Math.log(u))
-			const theta = 2 * Math.PI * v
-			const phi = Math.acos(2 * Math.random() - 1)
-
-			const gaussianX = r * Math.sin(phi) * Math.cos(theta)
-			const gaussianY = r * Math.sin(phi) * Math.sin(theta)
-			const gaussianZ = r * Math.cos(phi)
-
-			const scale = DISTANCE_LIMIT * 1e-2 // Adjust this value to control the spread
-
-			return [gaussianX * scale, gaussianY * scale, gaussianZ * scale]
+			// Rescale point to be a unit distance from the origin.
+			const scaleFactor = 1 / distance
+			return newPoint.map(component => component * scaleFactor)
 		}
 
-		return [newX, newY, newZ]
+		return newPoint
 	}
 
 	return (
@@ -99,7 +96,7 @@ export default function StateSpace({ equations }: { equations: Equation[] }) {
 					channels={3}
 					items={numberOfPoints}
 					expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
-						setPoints(points.map((point) => rk4(point[0], point[1], point[2], dt * TIME_SCALING)))
+						setPoints(points.map((point) => rk4(point, dt * TIME_SCALING)))
 						points.forEach(point => emit(point[1] * SPATIAL_SCALING, point[2] * SPATIAL_SCALING, point[0] * SPATIAL_SCALING))
 					}}
 				/>
