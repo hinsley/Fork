@@ -2,6 +2,7 @@ import React from 'react'
 import { Box, Button, Collapse, IconButton, Stack, TextField, Tooltip } from '@mui/material'
 import DeleteIcon from '@mui/icons-material/Delete'
 import { TransitionGroup } from 'react-transition-group'
+import { compile, EvalFunction } from 'mathjs'
 
 interface ODEEditorProps {
   equations: Equation[]
@@ -11,6 +12,7 @@ interface ODEEditorProps {
 export interface Equation {
   variable: string
   expression: string
+  compiled?: EvalFunction
 }
 
 export default function ODEEditor({equations, setEquations }: ODEEditorProps) {
@@ -22,9 +24,12 @@ export default function ODEEditor({equations, setEquations }: ODEEditorProps) {
     setEquations(equations.filter((_, i) => i !== index))
   }
 
-  const updateEquation = (index: number, field: keyof Equation, value: string) => {
+  const updateEquation = (index: number, field: keyof Equation, value: string | EvalFunction) => {
     const newEquations = [...equations]
-    newEquations[index][field] = value
+    newEquations[index][field] = value as any
+    if (field === 'expression') {
+      newEquations[index].compiled = compile(value as string)
+    }
     setEquations(newEquations)
   }
 

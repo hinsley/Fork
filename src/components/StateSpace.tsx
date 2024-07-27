@@ -5,9 +5,12 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { compile } from 'mathjs'
 
 import { Equation } from './ODEEditor'
+import rk4 from '../math/odesolvers/rk4'
+import euler from '../math/odesolvers/euler'
 
 const SPATIAL_SCALING = 2e-2
-const TIME_SCALING = 1e0
+const TIME_SCALING = 1e-0
+const NUMBER_OF_POINTS = 3e3
 const DISTANCE_LIMIT = 1e4
 
 const mathboxOptions = {
@@ -29,42 +32,16 @@ export default function StateSpace({ equations }: { equations: Equation[] }) {
 		}
 		eqs.push({
 			variable: varName,
-			expression: '0'
+			expression: '0',
+			compiled: compile('0')
 		})
 	}
 	
-	const numberOfPoints = 3e3
-	const [points, setPoints] = useState(globalThis.Array.from({ length: numberOfPoints }, (_, i) => [(i+1) * 1e2 / numberOfPoints, ...globalThis.Array(eqs.length - 1).fill(0)]))
+	const [points, setPoints] = useState(globalThis.Array.from({ length: NUMBER_OF_POINTS }, (_, i) => [(i+1) * 1e2 / NUMBER_OF_POINTS, ...globalThis.Array(eqs.length - 1).fill(0)]))
 
-	const compiledEquations = eqs.map(eq => compile(eq.expression))
-
-	// Runge-Kutta 4th order method.
-	function rk4(point: number[], dt: number) {
-		let scope: { [key: string]: number } = {}
-		eqs.forEach((eq, i) => {
-			scope[eq.variable] = point[i]
-		})
-		const k1 = compiledEquations.map(eq => eq.evaluate(scope))
-
-		const h2 = point.map((p, i) => p + 0.5 * dt * k1[i])
-		equations.forEach((eq, i) => {
-			scope[eq.variable] = h2[i]
-		})
-		const k2 = compiledEquations.map(eq => eq.evaluate(scope))
-
-		const h3 = point.map((p, i) => p + 0.5 * dt * k2[i])
-		equations.forEach((eq, i) => {
-			scope[eq.variable] = h3[i]
-		})
-		const k3 = compiledEquations.map(eq => eq.evaluate(scope))
-
-		const h4 = point.map((p, i) => p + dt * k3[i])
-		equations.forEach((eq, i) => {
-			scope[eq.variable] = h4[i]
-		})
-		const k4 = compiledEquations.map(eq => eq.evaluate(scope))
-
-		const newPoint = point.map((p, i) => p + (dt / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]))
+	// Progress a point forward in time.
+	function stepPoint(point: number[], dt: number) {
+		const newPoint = rk4(eqs, point, dt)
 
 		const distance = Math.sqrt(newPoint.reduce((sum, component) => sum + component * component, 0))
 
@@ -94,9 +71,9 @@ export default function StateSpace({ equations }: { equations: Equation[] }) {
 				<Array
 					id="points"
 					channels={3}
-					items={numberOfPoints}
+					items={NUMBER_OF_POINTS}
 					expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
-						setPoints(points.map((point) => rk4(point, dt * TIME_SCALING)))
+						setPoints(points.map((point) => stepPoint(point, dt * TIME_SCALING)))
 						points.forEach(point => emit(point[1] * SPATIAL_SCALING, point[2] * SPATIAL_SCALING, point[0] * SPATIAL_SCALING))
 					}}
 				/>

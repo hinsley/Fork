@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import './App.css'
 import { Box } from '@mui/material'
+import { compile } from 'mathjs'
 
 import ODEEditor, { Equation } from './components/ODEEditor.tsx'
 import StateSpace from './components/StateSpace.tsx'
@@ -13,6 +14,10 @@ export default function App() {
     { variable: 'y', expression: 'x*(28-z)-y' },
     { variable: 'z', expression: 'x*y-8/3*z' }
   ])
+  // Compile equations.
+  for (const equation of equations) {
+    equation.compiled = compile(equation.expression)
+  }
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
