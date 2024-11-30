@@ -8,6 +8,8 @@ import { Equation } from './ODEEditor'
 import rk4 from '../math/odesolvers/rk4'
 import euler from '../math/odesolvers/euler'
 
+import LLE from '../math/lyapunovexponents/lle'
+
 const SPATIAL_SCALING = 2e-2
 const TIME_SCALING = 1e-0
 const NUMBER_OF_POINTS = 3e3
@@ -37,6 +39,14 @@ export default function StateSpace({ equations }: { equations: Equation[] }) {
 		})
 	}
 	
+	// Calculate LLE at startup.
+	const lle = useState(() => {
+		const value = LLE(eqs)
+		console.log(`Leading Lyapunov Exponent: ${value}`)
+		return value
+	})[0]
+
+	// Initialize trajectories to plot in "realtime".
 	const [points, setPoints] = useState(globalThis.Array.from({ length: NUMBER_OF_POINTS }, (_, i) => [(i+1) * 1e2 / NUMBER_OF_POINTS, ...globalThis.Array(eqs.length - 1).fill(0)]))
 
 	// Progress a point forward in time.
