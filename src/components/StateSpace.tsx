@@ -8,6 +8,7 @@ import { Equation } from './ODEEditor'
 import rk4 from '../math/odesolvers/rk4'
 import euler from '../math/odesolvers/euler'
 
+import jacobian from '../math/differentiation/jacobian'
 import LLE from '../math/lyapunovexponents/lle'
 
 const SPATIAL_SCALING = 2e-2
@@ -40,9 +41,15 @@ export default function StateSpace({ equations }: { equations: Equation[] }) {
 	}
 	
 	// Calculate LLE at startup.
-	const lle = useState(() => {
+	const _lle = useState(() => {
 		const value = LLE(eqs)
 		console.log(`Leading Lyapunov Exponent: ${value}`)
+		return value
+	})[0]
+
+	const _jacobian = useState(() => {
+		const value = jacobian(eqs)
+		console.log(`Jacobian: ${value([0, 0, 0])}`)
 		return value
 	})[0]
 
