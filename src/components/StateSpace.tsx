@@ -59,22 +59,26 @@ export default function StateSpace({ equations }: { equations: Equation[] }) {
 		const minMagnitude = Math.min(...absLyapunovExponents)
 		value[absLyapunovExponents.indexOf(minMagnitude)] = 0
 
+		return value
+	})[0]
+
+	const _lyapunovDimension = useState(() => {
 		// Calculate the Lyapunov dimension.
 		var spectralSum = 0
 		var lyapunovDimensionFloor = 0
-		for (var i = 0; i < value.length; i++) {
-			spectralSum += value[i]
+		for (var i = 0; i < _lyapunovSpectrum.length; i++) {
+			spectralSum += _lyapunovSpectrum[i]
 			if (spectralSum < 0) {
 				lyapunovDimensionFloor = i
-				spectralSum -= value[i]
+				spectralSum -= _lyapunovSpectrum[i]
 				break
 			}
 		}
-		const lyapunovDimension = lyapunovDimensionFloor + spectralSum / Math.abs(value[lyapunovDimensionFloor])
+		const lyapunovDimension = lyapunovDimensionFloor + spectralSum / Math.abs(_lyapunovSpectrum[lyapunovDimensionFloor])
 		console.log(`Lyapunov Dimension: ${lyapunovDimension}`)
 
-		return value
-	})[0]
+		return lyapunovDimension
+	})
 
 	// Initialize trajectories to plot in "realtime".
 	const [points, setPoints] = useState(globalThis.Array.from({ length: NUMBER_OF_POINTS }, (_, i) => [(i+1) * 1e2 / NUMBER_OF_POINTS, ...globalThis.Array(eqs.length - 1).fill(0)]))
