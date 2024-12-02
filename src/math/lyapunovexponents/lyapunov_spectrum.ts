@@ -1,14 +1,17 @@
+import { Matrix, index, norm, qr, range, squeeze, subset, zeros } from 'mathjs'
+
 import { Equation } from '../../components/ODEEditor'
-import rk4 from '../odesolvers/rk4'
+import euler from '../odesolvers/euler'
+import jacobian from '../differentiation/jacobian'
 
 // Lyapunov spectrum calculation. See section 3.2.2 of the book by George Datseris.
 
-const epsilon = 1e-6 // Perturbation for initial condition and scaling.
+const radius = 1e1 // Perturbation for initial condition.
 
-// Parameters for evolution and convergence
-const dt = 1e-1 // Time step
-const evolveSteps = 1e2 // Steps between rescaling
-const maxSteps = 3e4 // Maximum total steps
+// Parameters for evolution and convergence.
+const dt = 3e-3 // Time step.
+const rescaleSteps = 3e1 // Steps between rescaling.
+const maxSteps = 1e3 // Maximum total steps.
 
 /**
  * Gets an initial condition near the origin for Lyapunov exponent calculation.
@@ -16,5 +19,78 @@ const maxSteps = 3e4 // Maximum total steps
  * @returns Initial condition.
  */
 function getInitialCondition(equations: Equation[]): number[] {
-  return equations.map(() => (Math.random() - 0.5) * epsilon)
+  return equations.map(() => (Math.random() - 0.5) * radius * 2)
+}
+
+/**
+ * Produces a random orthogonal matrix.
+ * @param size - The size of the matrix.
+ * @returns Orthogonal matrix.
+ */
+function getRandomOrthogonalMatrix(size: number): Matrix {
+  // Form a random matrix.
+  const mat = zeros(size, size)
+  // Fill matrix with random values between -1 and 1
+  for (let i = 0; i < size; i++) {
+    for (let j = 0; j < size; j++) {
+      mat.set([i, j], Math.random() * 2 - 1)
+    }
+  }
+
+  // Perform QR factorization.
+  const result = qr(mat)
+  const Q = result["Q"]
+
+  return Q
+}
+
+export default function lyapunovSpectrum(equations: Equation[], Ttr: number = 0): number[] {
+  var point = getInitialCondition(equations)
+
+  if (Ttr > 0) {
+    console.log("Running transient.")
+    // Evolve initial condition for Ttr steps to allow for transient decay.
+    for (let i = 0; i < Ttr / dt; i++) {
+      point = euler(equations, point, dt)
+    }
+    console.log("Transient complete.")
+  }
+
+  const jacobian_function = jacobian(equations)
+  var deviations = getRandomOrthogonalMatrix(equations.length)
+  var lyapunovExponents: number[] = equations.map(() => 0)
+  var stepsSinceLastRescale = 0
+
+  for (let i = 0; i < maxSteps; i++) {
+    const jac = jacobian_function(point)
+    const result = euler(equations, point, dt, deviations, jac)
+    point = result[0] as number[]
+    deviations = result[1] as Matrix
+
+    stepsSinceLastRescale++
+    if (stepsSinceLastRescale == rescaleSteps) { // Rescale period.
+      stepsSinceLastRescale = 0
+
+      // Rescale deviations.
+      const result = qr(deviations)
+      const Q = result["Q"]
+      const R = result["R"]
+      deviations = Q
+      
+      // Calculate and accumulate Lyapunov exponents
+      for (var j = 0; j < equations.length; j++) {
+        lyapunovExponents[j] += Math.log(Math.abs(R.get([j, j])))
+      }
+    }
+  }
+
+  // Normalize by evolution time.
+  lyapunovExponents = lyapunovExponents.map(lyapunovExponent => lyapunovExponent / maxSteps / dt)
+
+  // Replace Lyapunov exponent of smallest magnitude with zero.
+  const absLyapunovExponents = lyapunovExponents.map(lyapunovExponent => Math.abs(lyapunovExponent))
+  const minMagnitude = Math.min(...absLyapunovExponents)
+  lyapunovExponents[absLyapunovExponents.indexOf(minMagnitude)] = 0
+
+  return lyapunovExponents
 }

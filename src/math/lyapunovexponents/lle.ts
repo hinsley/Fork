@@ -5,10 +5,10 @@ import rk4 from '../odesolvers/rk4'
 
 const epsilon = 1e-6 // Perturbation for initial condition and scaling.
 
-// Parameters for evolution and convergence
-const dt = 1e-1 // Time step
-const evolveSteps = 1e2 // Steps between rescaling
-const maxSteps = 3e4 // Maximum total steps
+// Parameters for evolution and convergence.
+const dt = 1e-1 // Time step.
+const evolveSteps = 1e2 // Steps between rescaling.
+const maxSteps = 3e4 // Maximum total steps.
 
 /**
  * Gets two initial conditions near the origin for Lyapunov exponent calculation.

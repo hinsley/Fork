@@ -10,6 +10,7 @@ import euler from '../math/odesolvers/euler'
 
 import jacobian from '../math/differentiation/jacobian'
 import LLE from '../math/lyapunovexponents/lle'
+import lyapunovSpectrum from '../math/lyapunovexponents/lyapunov_spectrum'
 
 const SPATIAL_SCALING = 2e-2
 const TIME_SCALING = 1e-0
@@ -43,13 +44,35 @@ export default function StateSpace({ equations }: { equations: Equation[] }) {
 	// Calculate LLE at startup.
 	const _lle = useState(() => {
 		const value = LLE(eqs)
-		console.log(`Leading Lyapunov Exponent: ${value}`)
+		console.log(`Leading Lyapunov Exponent (from co-evolution): ${value}`)
 		return value
 	})[0]
 
-	const _jacobian = useState(() => {
-		const value = jacobian(eqs)
-		console.log(`Jacobian: ${value([0, 0, 0])}`)
+	const _lyapunovSpectrum = useState(() => {
+		const value = lyapunovSpectrum(eqs, 3e2)
+		console.log(`Lyapunov Spectrum (from tangent integrator): ${value}`)
+		console.log("Substituting LLE from co-evolution.")
+		value[0] = _lle
+
+		// Replace Lyapunov exponent of smallest magnitude with zero.
+		const absLyapunovExponents = value.map(lyapunovExponent => Math.abs(lyapunovExponent))
+		const minMagnitude = Math.min(...absLyapunovExponents)
+		value[absLyapunovExponents.indexOf(minMagnitude)] = 0
+
+		// Calculate the Lyapunov dimension.
+		var spectralSum = 0
+		var lyapunovDimensionFloor = 0
+		for (var i = 0; i < value.length; i++) {
+			spectralSum += value[i]
+			if (spectralSum < 0) {
+				lyapunovDimensionFloor = i
+				spectralSum -= value[i]
+				break
+			}
+		}
+		const lyapunovDimension = lyapunovDimensionFloor + spectralSum / Math.abs(value[lyapunovDimensionFloor])
+		console.log(`Lyapunov Dimension: ${lyapunovDimension}`)
+
 		return value
 	})[0]
 

@@ -1,4 +1,4 @@
-import { compile, derivative } from 'mathjs'
+import { Matrix, derivative, matrix } from 'mathjs'
 
 import { Equation } from '../../components/ODEEditor'
 
@@ -8,7 +8,7 @@ import { Equation } from '../../components/ODEEditor'
  * @returns A function that takes a point in the state space as an array of numbers and returns the
  * Jacobian matrix at that point.
  */
-export default function jacobian(equations: Equation[]): (point: number[]) => number[][] {
+export default function jacobian(equations: Equation[]): (point: number[]) => Matrix {
   // Each row corresponds to an equation.
   // Each column (more specifically, entry within a row) corresponds to a differentiation variable.
   return (point: number[]) => {
@@ -17,10 +17,10 @@ export default function jacobian(equations: Equation[]): (point: number[]) => nu
       scope[eq.variable] = point[i]
     })
 
-    return equations.map(equation => 
+    return matrix(equations.map(equation => 
       equations.map(varEquation =>
         derivative(equation.expression, varEquation.variable).evaluate(scope)
       )
-    )
+    ))
   }
 }
