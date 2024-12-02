@@ -1,11 +1,18 @@
-import { Equation } from '../../components/ODEEditor'
+import { Equation, Parameter } from '../../components/ODEEditor'
 
 // Runge-Kutta 4th order method.
-export default function rk4(equations: Equation[], point: number[], stepSize: number) {
+export default function rk4(equations: Equation[],
+                            parameters: Parameter[],
+                            point: number[],
+                            stepSize: number) {
   let scope: { [key: string]: number } = {}
   equations.forEach((eq, i) => {
     scope[eq.variable] = point[i]
   })
+  parameters.forEach((param, _) => {
+    scope[param.name] = param.value
+  })
+
   const k1 = equations.map(eq => eq.compiled?.evaluate(scope))
 
   const h2 = point.map((p, i) => p + 0.5 * stepSize * k1[i])

@@ -1,6 +1,6 @@
 import { Matrix, index, norm, qr, range, squeeze, subset, zeros } from 'mathjs'
 
-import { Equation } from '../../components/ODEEditor'
+import { Equation, Parameter } from '../../components/ODEEditor'
 import euler from '../odesolvers/euler'
 import jacobian from '../differentiation/jacobian'
 
@@ -44,26 +44,26 @@ function getRandomOrthogonalMatrix(size: number): Matrix {
   return Q
 }
 
-export default function lyapunovSpectrum(equations: Equation[], Ttr: number = 0): number[] {
+export default function lyapunovSpectrum(equations: Equation[], parameters: Parameter[], Ttr: number = 0): number[] {
   var point = getInitialCondition(equations)
 
   if (Ttr > 0) {
     console.log("Running transient.")
     // Evolve initial condition for Ttr steps to allow for transient decay.
     for (let i = 0; i < Ttr / dt; i++) {
-      point = euler(equations, point, dt)
+      point = euler(equations, parameters, point, dt)
     }
     console.log("Transient complete.")
   }
 
-  const jacobian_function = jacobian(equations)
+  const jacobian_function = jacobian(equations, parameters)
   var deviations = getRandomOrthogonalMatrix(equations.length)
   var lyapunovExponents: number[] = equations.map(() => 0)
   var stepsSinceLastRescale = 0
 
   for (let i = 0; i < maxSteps; i++) {
     const jac = jacobian_function(point)
-    const result = euler(equations, point, dt, deviations, jac)
+    const result = euler(equations, parameters, point, dt, deviations, jac)
     point = result[0] as number[]
     deviations = result[1] as Matrix
 

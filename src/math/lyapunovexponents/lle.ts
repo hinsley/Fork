@@ -1,4 +1,4 @@
-import { Equation } from '../../components/ODEEditor'
+import { Equation, Parameter } from '../../components/ODEEditor'
 import rk4 from '../odesolvers/rk4'
 
 // Leading Lyapunov exponent calculation.
@@ -59,7 +59,7 @@ function rescaleNeighbor(trajectory: number[], neighbor: number[]): [number, num
  * @param equations - System of ODEs to analyze.
  * @returns Leading Lyapunov exponent value.
  */
-export default function LLE(equations: Equation[]): number {
+export default function LLE(equations: Equation[], parameters: Parameter[]): number {
   // Get initial conditions.
   let [trajectory, neighbor] = getInitialConditions(equations)
   
@@ -72,8 +72,8 @@ export default function LLE(equations: Equation[]): number {
   while (numSteps < maxSteps) {
     // Evolve both trajectories for several steps.
     for (let i = 0; i < evolveSteps; i++) {
-      trajectory = rk4(equations, trajectory, dt)
-      neighbor = rk4(equations, neighbor, dt)
+      trajectory = rk4(equations, parameters, trajectory, dt)
+      neighbor = rk4(equations, parameters, neighbor, dt)
     }
     
     // Rescale the neighbor trajectory and get distance.

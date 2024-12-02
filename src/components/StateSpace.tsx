@@ -4,7 +4,7 @@ import { Array, Axis, Cartesian, ContainedMathbox, Grid, Label, Point, Text } fr
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { compile } from 'mathjs'
 
-import { Equation } from './ODEEditor'
+import { Equation, Parameter } from './ODEEditor'
 import rk4 from '../math/odesolvers/rk4'
 import euler from '../math/odesolvers/euler'
 
@@ -24,7 +24,7 @@ const mathboxOptions = {
 	}
 }
 
-export default function StateSpace({ equations }: { equations: Equation[] }) {
+export default function StateSpace({ equations, parameters }: { equations: Equation[], parameters: Parameter[] }) {
 	let eqs = [...equations]
 	while (eqs.length < 3) { // Stub in zero for the extra equations if there are less than three.
 		let i = eqs.length
@@ -43,13 +43,13 @@ export default function StateSpace({ equations }: { equations: Equation[] }) {
 	
 	// Calculate LLE at startup.
 	const _lle = useState(() => {
-		const value = LLE(eqs)
+		const value = LLE(eqs, parameters)
 		console.log(`Leading Lyapunov Exponent (from co-evolution): ${value}`)
 		return value
 	})[0]
 
 	const _lyapunovSpectrum = useState(() => {
-		const value = lyapunovSpectrum(eqs, 3e2)
+		const value = lyapunovSpectrum(eqs, parameters, 3e2)
 		console.log(`Lyapunov Spectrum (from tangent integrator): ${value}`)
 		console.log("Substituting LLE from co-evolution.")
 		value[0] = _lle
@@ -85,7 +85,7 @@ export default function StateSpace({ equations }: { equations: Equation[] }) {
 
 	// Progress a point forward in time.
 	function stepPoint(point: number[], dt: number) {
-		const newPoint = rk4(eqs, point, dt)
+		const newPoint = rk4(eqs, parameters, point, dt)
 
 		const distance = Math.sqrt(newPoint.reduce((sum, component) => sum + component * component, 0))
 

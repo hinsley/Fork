@@ -1,9 +1,10 @@
 import { Matrix, add, multiply } from 'mathjs'
 
-import { Equation } from '../../components/ODEEditor'
+import { Equation, Parameter } from '../../components/ODEEditor'
 
 // Euler's method.
 export default function euler(equations: Equation[],
+                              parameters: Parameter[],
                               point: number[],
                               stepSize: number,
                               deviations: Matrix|null = null,
@@ -11,6 +12,9 @@ export default function euler(equations: Equation[],
   const scope: { [key: string]: number } = {}
   equations.forEach((eq, i) => {
     scope[eq.variable] = point[i]
+  })
+  parameters.forEach((param, _) => {
+    scope[param.name] = param.value
   })
 
   const derivative = equations.map(eq => eq.compiled?.evaluate(scope))
