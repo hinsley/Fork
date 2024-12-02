@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Box } from '@mui/material'
-import { Array, Axis, Cartesian, ContainedMathbox, Grid, Point } from 'mathbox-react'
+import { Array, Axis, Cartesian, ContainedMathbox, Grid, Label, Point, Text } from 'mathbox-react'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { compile } from 'mathjs'
 
@@ -107,11 +107,41 @@ export default function StateSpace({ equations }: { equations: Equation[] }) {
 				containerStyle={{ height: "100%", width: "100%" }}
 			>
 				<Cartesian scale={[32 * SPATIAL_SCALING, 32 * SPATIAL_SCALING, 32 * SPATIAL_SCALING]}>
-					<Axis axis="x" color="orange" width={64 * SPATIAL_SCALING} />
-					<Axis axis="y" color="blue" width={64 * SPATIAL_SCALING} />
-					<Axis axis="z" color="green" width={64 * SPATIAL_SCALING} />
+					<Axis axis="x" color="orange" width={64 * SPATIAL_SCALING} visible={equations.length >= 2} />
+					<Axis axis="y" color="blue" width={64 * SPATIAL_SCALING} visible={equations.length >= 3} />
+					<Axis axis="z" color="green" width={64 * SPATIAL_SCALING} visible={equations.length >= 1} />
 					<Grid axes="xz" />
 				</Cartesian>
+				<Array
+					id="y-label-array"
+					channels={3}
+					items={1}
+					expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
+						emit(36 * SPATIAL_SCALING, 3 * SPATIAL_SCALING, 0)
+					}}
+				/>
+				<Text id="y-label" data={[equations.length >= 2 ? equations[1].variable : '']} width={32 * SPATIAL_SCALING} />
+				<Label text="#y-label" />
+				<Array
+					id="z-label-array"
+					channels={3}
+					items={1}
+					expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
+						emit(0, 39 * SPATIAL_SCALING, 0)
+					}}
+				/>
+				<Text id="z-label" data={[equations.length >= 3 ? equations[2].variable : '']} width={32 * SPATIAL_SCALING} />
+				<Label text="#z-label" />
+				<Array
+					id="x-label-array"
+					channels={3}
+					items={1}
+					expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
+						emit(0, 3 * SPATIAL_SCALING, 36 * SPATIAL_SCALING)
+					}}
+				/>
+				<Text id="x-label" data={[equations.length >= 1 ? equations[0].variable : '']} width={32 * SPATIAL_SCALING} />
+				<Label text="#x-label" />
 				<Array
 					id="points"
 					channels={3}
