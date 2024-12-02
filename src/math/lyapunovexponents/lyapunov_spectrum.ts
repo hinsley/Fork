@@ -8,11 +8,6 @@ import jacobian from '../differentiation/jacobian'
 
 const radius = 1e1 // Perturbation for initial condition.
 
-// Parameters for evolution and convergence.
-const dt = 1e-2 // Time step.
-const rescaleSteps = 3e1 // Steps between rescaling.
-const maxSteps = 3e2 // Maximum total steps.
-
 /**
  * Gets an initial condition near the origin for Lyapunov exponent calculation.
  * Uses a small random perturbation from origin to avoid starting exactly at a fixed point.
@@ -44,16 +39,20 @@ function getRandomOrthogonalMatrix(size: number): Matrix {
   return Q
 }
 
-export default function lyapunovSpectrum(equations: Equation[], parameters: Parameter[], Ttr: number = 0): number[] {
+export default function lyapunovSpectrum(equations: Equation[],
+                                         parameters: Parameter[],
+                                         dt: number = 1e-2, // Time step.
+                                         rescaleSteps: number = 3e1, // Steps between rescaling.
+                                         maxSteps: number = 3e2, // Maximum total steps.
+                                         Ttr: number = 0 // Transient steps to discard.
+                                        ): number[] {
   var point = getInitialCondition(equations)
 
   if (Ttr > 0) {
-    console.log("Running transient.")
     // Evolve initial condition for Ttr steps to allow for transient decay.
     for (let i = 0; i < Ttr / dt; i++) {
       point = rk4(equations, parameters, point, dt)
     }
-    console.log("Transient complete.")
   }
 
   const jacobian_function = jacobian(equations, parameters)

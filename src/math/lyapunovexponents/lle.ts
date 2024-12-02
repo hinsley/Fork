@@ -5,21 +5,27 @@ import rk4 from '../odesolvers/rk4'
 
 const epsilon = 1e-6 // Perturbation for initial condition and scaling.
 
-// Parameters for evolution and convergence.
-const dt = 1e-1 // Time step.
-const evolveSteps = 1e2 // Steps between rescaling.
-const maxSteps = 3e4 // Maximum total steps.
-
 /**
  * Gets two initial conditions near the origin for Lyapunov exponent calculation.
  * Uses a small random perturbation from origin to avoid starting exactly at a fixed point.
  * @returns Two initial conditions.
  */
-function getInitialConditions(equations: Equation[]): [number[], number[]] {
-  return [
-    equations.map(() => (Math.random() - 0.5) * epsilon),
-    equations.map(() => (Math.random() - 0.5) * epsilon)
-  ]
+function getInitialConditions(equations: Equation[],
+                              parameters: Parameter[],
+                              dt: number = 1e-1, // Time step.
+                              Ttr: number = 0 // Transient steps to discard.
+                             ): [number[], number[]] {
+  var point = equations.map(() => (Math.random() - 0.5) * epsilon)
+
+  if (Ttr > 0) {
+    // Evolve initial condition for Ttr steps to allow for transient decay.
+    for (let i = 0; i < Ttr; i++) {
+      point = rk4(equations, parameters, point, dt)
+    }
+  }
+  const neighbor = equations.map((_, i) => point[i] + (Math.random() - 0.5) * epsilon)
+
+  return [point, neighbor]
 }
 
 /**
@@ -59,9 +65,15 @@ function rescaleNeighbor(trajectory: number[], neighbor: number[]): [number, num
  * @param equations - System of ODEs to analyze.
  * @returns Leading Lyapunov exponent value.
  */
-export default function LLE(equations: Equation[], parameters: Parameter[]): number {
+export default function LLE(equations: Equation[],
+                            parameters: Parameter[],
+                            dt: number = 1e-1, // Time step.
+                            evolveSteps: number = 1e2, // Steps between rescaling.
+                            maxSteps: number = 3e4, // Maximum total steps.
+                            Ttr: number = 0 // Transient steps to discard.
+                           ): number {
   // Get initial conditions.
-  let [trajectory, neighbor] = getInitialConditions(equations)
+  let [trajectory, neighbor] = getInitialConditions(equations, parameters, dt, Ttr)
   
   // Track sum of log growth rates.
   let sumLogGrowth = 0

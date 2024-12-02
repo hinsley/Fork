@@ -66,10 +66,10 @@ export default function ODEEditor({ equations, setEquations, parameters, setPara
     <Box sx={{ height: "100%", width: "100%", overflow: "auto", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
       <Box sx={{ width: "1024px", maxWidth: "100%" }}>
         <h3>ODE System</h3>
-          <TransitionGroup component={Stack} spacing={2} sx={{ mb: 2 }}>
-            {equations.map((equation, index) => (
-              <Collapse key={index}>
-                <Box sx={{ display: "flex", alignItems: "center" }}>
+        <TransitionGroup component={Stack} spacing={2} sx={{ mb: 2 }}>
+          {equations.map((equation, index) => (
+            <Collapse key={index}>
+              <Box sx={{ display: "flex", alignItems: "center" }}>
                 <TextField
                   label="Variable"
                   value={equation.variable}
@@ -89,17 +89,17 @@ export default function ODEEditor({ equations, setEquations, parameters, setPara
                   </IconButton>
                 </Tooltip>
               </Box>
-              </Collapse>
-            ))}
-          </TransitionGroup>
-          <Button variant="contained" onClick={addEquation} fullWidth>
-            New Variable
-          </Button>
-          <h3>Parameters</h3>
-          <TransitionGroup component={Stack} spacing={2} sx={{ mb: 2 }}>
-            {parameters.map((parameter, index) => (
-              <Collapse key={index}>
-                <Box sx={{ display: "flex", alignItems: "center" }}>
+            </Collapse>
+          ))}
+        </TransitionGroup>
+        <Button variant="contained" onClick={addEquation} fullWidth>
+          New Variable
+        </Button>
+        <h3>Parameters</h3>
+        <TransitionGroup component={Stack} spacing={2} sx={{ mb: 2 }}>
+          {parameters.map((parameter, index) => (
+            <Collapse key={index}>
+              <Box sx={{ display: "flex", alignItems: "center" }}>
                 <TextField
                   label="Parameter"
                   value={parameters[index].name}
@@ -119,12 +119,12 @@ export default function ODEEditor({ equations, setEquations, parameters, setPara
                   </IconButton>
                 </Tooltip>
               </Box>
-              </Collapse>
-            ))}
-          </TransitionGroup>
-          <Button variant="contained" onClick={addParameter} fullWidth>
-            New Parameter
-          </Button>
+            </Collapse>
+          ))}
+        </TransitionGroup>
+        <Button variant="contained" onClick={addParameter} fullWidth>
+          New Parameter
+        </Button>
       </Box>
     </Box>
   )

@@ -10,29 +10,33 @@ export default function MenuDrawer({ setCurrentView }: { setCurrentView: (view: 
   }
 
   const DrawerList = (
-    <Box sx={{ width: '100%' }} role="presentation">
+    <Box sx={{ width: "100%" }} role="presentation">
       <List>
         {[
           // Menu drawer items.
           {
-            text: 'State space',
-            view: 'state-space'
+            text: "State space",
+            view: "state-space"
           },
           {
-            text: 'System equations',
-            view: 'equations'
+            text: "System equations",
+            view: "equations"
           },
           {
-            text: 'Continuation',
-            view: 'continuation'
+            text: "Continuation",
+            view: "continuation"
           },
           {
-            text: 'Systems',
-            view: 'systems'
+            text: "Attractor analysis",
+            view: "attractor-analysis"
           },
           {
-            text: 'Settings',
-            view: 'settings'
+            text: "Systems",
+            view: "systems"
+          },
+          {
+            text: "Settings",
+            view: "settings"
           }
         ].map((item) => (
           <ListItem key={item.text} disablePadding>
@@ -42,7 +46,7 @@ export default function MenuDrawer({ setCurrentView }: { setCurrentView: (view: 
                 setOpen(false)
               }}
             >
-              <ListItemText primary={item.text} sx={{ textAlign: 'center' }} />
+              <ListItemText primary={item.text} sx={{ textAlign: "center" }} />
             </ListItemButton>
           </ListItem>
         ))}

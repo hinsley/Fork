@@ -40,45 +40,6 @@ export default function StateSpace({ equations, parameters }: { equations: Equat
 			compiled: compile('0')
 		})
 	}
-	
-	// Calculate LLE at startup.
-	const _lle = useState(() => {
-		const value = LLE(eqs, parameters)
-		console.log(`Leading Lyapunov Exponent (from co-evolution): ${value}`)
-		return value
-	})[0]
-
-	const _lyapunovSpectrum = useState(() => {
-		const value = lyapunovSpectrum(eqs, parameters, 3e2)
-		console.log(`Lyapunov Spectrum (from tangent integrator): ${value}`)
-		console.log("Substituting LLE from co-evolution.")
-		value[0] = _lle
-
-		// Replace Lyapunov exponent of smallest magnitude with zero.
-		const absLyapunovExponents = value.map(lyapunovExponent => Math.abs(lyapunovExponent))
-		const minMagnitude = Math.min(...absLyapunovExponents)
-		value[absLyapunovExponents.indexOf(minMagnitude)] = 0
-
-		return value
-	})[0]
-
-	const _lyapunovDimension = useState(() => {
-		// Calculate the Lyapunov dimension.
-		var spectralSum = 0
-		var lyapunovDimensionFloor = 0
-		for (var i = 0; i < _lyapunovSpectrum.length; i++) {
-			spectralSum += _lyapunovSpectrum[i]
-			if (spectralSum < 0) {
-				lyapunovDimensionFloor = i
-				spectralSum -= _lyapunovSpectrum[i]
-				break
-			}
-		}
-		const lyapunovDimension = lyapunovDimensionFloor + spectralSum / Math.abs(_lyapunovSpectrum[lyapunovDimensionFloor])
-		console.log(`Lyapunov Dimension: ${lyapunovDimension}`)
-
-		return lyapunovDimension
-	})
 
 	// Initialize trajectories to plot in "realtime".
 	const [points, setPoints] = useState(globalThis.Array.from({ length: NUMBER_OF_POINTS }, (_, i) => [(i+1) * 1e2 / NUMBER_OF_POINTS, ...globalThis.Array(eqs.length - 1).fill(0)]))
