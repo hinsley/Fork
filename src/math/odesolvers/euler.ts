@@ -8,7 +8,7 @@ export default function euler(equations: Equation[],
                               point: number[],
                               stepSize: number,
                               deviations: Matrix|null = null,
-                              jacobian: Matrix|null = null): number[]|[number[], Matrix] {
+                              jacobian_function: ((point: number[]) => Matrix)|null = null): number[]|[number[], Matrix] {
   const scope: { [key: string]: number } = {}
   equations.forEach((eq, i) => {
     scope[eq.variable] = point[i]
@@ -21,8 +21,8 @@ export default function euler(equations: Equation[],
 
   const newPoint = point.map((x, i) => x + stepSize * derivative[i])
 
-  if (deviations && jacobian) { // Tangent space integration.
-    const newDeviations = add(deviations, multiply(multiply(jacobian, deviations), stepSize))
+  if (deviations && jacobian_function) { // Tangent space integration.
+    const newDeviations = add(deviations, multiply(multiply(jacobian_function(point), deviations), stepSize))
 
     return [
       newPoint,

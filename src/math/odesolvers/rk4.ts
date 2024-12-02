@@ -1,10 +1,14 @@
+import { Matrix, add, multiply } from 'mathjs'
+
 import { Equation, Parameter } from '../../components/ODEEditor'
 
 // Runge-Kutta 4th order method.
 export default function rk4(equations: Equation[],
                             parameters: Parameter[],
                             point: number[],
-                            stepSize: number) {
+                            stepSize: number,
+                            deviations: Matrix|null = null,
+                            jacobian_function: ((point: number[]) => Matrix)|null = null): number[]|[number[], Matrix] {
   let scope: { [key: string]: number } = {}
   equations.forEach((eq, i) => {
     scope[eq.variable] = point[i]
@@ -33,7 +37,38 @@ export default function rk4(equations: Equation[],
   })
   const k4 = equations.map(eq => eq.compiled?.evaluate(scope))
 
-  return point.map((p, i) =>
+  const newPoint = point.map((p, i) =>
     p + stepSize / 6 * (k1[i] + 2 * (k2[i] + k3[i]) + k4[i])
   )
+
+  if (deviations && jacobian_function) { // Tangent space integration.
+    const t1 = multiply(jacobian_function(point), deviations)
+    const t2 = multiply(jacobian_function(h2), deviations)
+    const t3 = multiply(jacobian_function(h3), deviations)
+    const t4 = multiply(jacobian_function(h4), deviations)
+
+    const newDeviations = add(
+      deviations,
+      multiply(
+        add(
+          t1,
+          add(
+            multiply(
+              2,
+              add(t2, t3)
+            ),
+            t4
+          )
+        ),
+        stepSize / 6
+      )
+    )
+
+    return [
+      newPoint,
+      newDeviations
+    ]
+  }
+
+  return newPoint
 }

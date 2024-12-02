@@ -17,7 +17,7 @@ export default function App() {
   const [parameters, setParameters] = useState<Parameter[]>([
     { name: "s", value: 10 },
     { name: "b", value: 8/3 },
-    { name: "r", value: 20 }
+    { name: "r", value: 28 }
   ])
   // Compile equations.
   for (const equation of equations) {

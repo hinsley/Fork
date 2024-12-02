@@ -1,7 +1,7 @@
 import { Matrix, index, norm, qr, range, squeeze, subset, zeros } from 'mathjs'
 
 import { Equation, Parameter } from '../../components/ODEEditor'
-import euler from '../odesolvers/euler'
+import rk4 from '../odesolvers/euler'
 import jacobian from '../differentiation/jacobian'
 
 // Lyapunov spectrum calculation. See section 3.2.2 of the book by George Datseris.
@@ -9,9 +9,9 @@ import jacobian from '../differentiation/jacobian'
 const radius = 1e1 // Perturbation for initial condition.
 
 // Parameters for evolution and convergence.
-const dt = 3e-3 // Time step.
+const dt = 1e-2 // Time step.
 const rescaleSteps = 3e1 // Steps between rescaling.
-const maxSteps = 1e3 // Maximum total steps.
+const maxSteps = 3e2 // Maximum total steps.
 
 /**
  * Gets an initial condition near the origin for Lyapunov exponent calculation.
@@ -51,7 +51,7 @@ export default function lyapunovSpectrum(equations: Equation[], parameters: Para
     console.log("Running transient.")
     // Evolve initial condition for Ttr steps to allow for transient decay.
     for (let i = 0; i < Ttr / dt; i++) {
-      point = euler(equations, parameters, point, dt)
+      point = rk4(equations, parameters, point, dt)
     }
     console.log("Transient complete.")
   }
@@ -62,8 +62,7 @@ export default function lyapunovSpectrum(equations: Equation[], parameters: Para
   var stepsSinceLastRescale = 0
 
   for (let i = 0; i < maxSteps; i++) {
-    const jac = jacobian_function(point)
-    const result = euler(equations, parameters, point, dt, deviations, jac)
+    const result = rk4(equations, parameters, point, dt, deviations, jacobian_function)
     point = result[0] as number[]
     deviations = result[1] as Matrix
 
