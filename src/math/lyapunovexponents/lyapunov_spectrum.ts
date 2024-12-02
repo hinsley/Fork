@@ -87,10 +87,5 @@ export default function lyapunovSpectrum(equations: Equation[], Ttr: number = 0)
   // Normalize by evolution time.
   lyapunovExponents = lyapunovExponents.map(lyapunovExponent => lyapunovExponent / maxSteps / dt)
 
-  // Replace Lyapunov exponent of smallest magnitude with zero.
-  const absLyapunovExponents = lyapunovExponents.map(lyapunovExponent => Math.abs(lyapunovExponent))
-  const minMagnitude = Math.min(...absLyapunovExponents)
-  lyapunovExponents[absLyapunovExponents.indexOf(minMagnitude)] = 0
-
   return lyapunovExponents
 }
