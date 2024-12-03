@@ -83,15 +83,13 @@ export default function LyapunovSpectrum({ equations, parameters }: { equations:
         <TextField
           label="Lyapunov spectrum"
           value={_lyapunovSpectrum}
-          sx={{ width: "fit-content" }}
+          sx={{ width: "fit-content", mr: 1 }}
           InputProps={{ readOnly: true }}
         />
-      </Box>
-      <Box sx={{ display: "flex", alignItems: "center" }}>
         <TextField
           label="Lyapunov (attractor) dimension"
           value={lyapunovDimension}
-          sx={{ width: "fit-content" }}
+          sx={{ width: "fit-content", ml: 1 }}
           InputProps={{ readOnly: true }}
         />
       </Box>

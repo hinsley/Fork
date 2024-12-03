@@ -137,15 +137,13 @@ export default function PowerSpectrum({ equations, parameters }: { equations: Eq
         <TextField
           label="Power spectrum"
           value={powerSpectrum.join(", ")}
-          sx={{ width: "fit-content" }}
+          sx={{ width: "fit-content", mr: 1 }}
           InputProps={{ readOnly: true }}
         />
-      </Box>
-      <Box sx={{ display: "flex", alignItems: "center" }}>
         <TextField
           label="Timeseries"
           value={timeseries.join(", ")}
-          sx={{ width: "fit-content" }}
+          sx={{ width: "fit-content", ml: 1 }}
           InputProps={{ readOnly: true }}
         />
       </Box>
