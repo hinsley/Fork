@@ -121,7 +121,8 @@ export default function PowerSpectrum({ equations, parameters }: { equations: Eq
           yaxis: {
             type: logY ? "log" : "linear",
             title: "Power/Frequency (amp^2/Hz)"
-          }
+          },
+          width: 640
         }}
       />
       <Plot
@@ -130,7 +131,12 @@ export default function PowerSpectrum({ equations, parameters }: { equations: Eq
           y: timeseries,
           type: "scatter"
         }]}
-        layout={{ title: "Timeseries", xaxis: { title: "Time (s)" }, yaxis: { title: variable } }}
+        layout={{
+          title: "Timeseries",
+          xaxis: { title: "Time (s)" },
+          yaxis: { title: variable },
+          width: 640
+        }}
       />
       <h4>Numerical data</h4>
       <Box sx={{ display: "flex", alignItems: "center" }}>
