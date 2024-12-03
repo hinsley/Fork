@@ -27,10 +27,6 @@ export function powerSpectralDensity(equations: Equation[],
 
   const variableFunction = compile(variable)
 
-  const projectionVector = equations.map(() => Math.random() - 0.5)
-  const norm = Math.sqrt(projectionVector.reduce((sum, component) => sum + component * component, 0))
-  const projectionAxis = projectionVector.map(component => component / norm)
-
   // Initialize array to store projected timeseries.
   const timeseries: number[] = new Array(maxSteps)
 
@@ -44,7 +40,7 @@ export function powerSpectralDensity(equations: Equation[],
     parameters.forEach((param, _) => {
       scope[param.name] = param.value
     })
-    timeseries[i] = evaluate(variable, scope)
+    timeseries[i] = variableFunction.evaluate(scope)
 
     // Evolve system one step.
     point = rk4(equations, parameters, point, dt) as number[]
@@ -52,7 +48,7 @@ export function powerSpectralDensity(equations: Equation[],
 
   // Compute power spectral density.
   const frequencyContributions = fft(timeseries).slice(0, Math.ceil(timeseries.length/2))
-  const powerSpectralDensity = frequencyContributions.map(component => component.abs()**2)
+  const powerSpectralDensity = frequencyContributions.map(component => component.abs()**2 * dt)
 
   return powerSpectralDensity
 }

@@ -7,16 +7,16 @@ import { range } from 'mathjs'
 import { powerSpectralDensity } from '../../math/powerspectraldensity/psd'
 
 export default function PowerSpectrum({ equations, parameters }: { equations: Equation[], parameters: Parameter[] }) {
-  const [dt, setDt] = useState<number>(1e-2)
+  const [dt, setDt] = useState<number>(1e-1)
   const [Ttr, setTtr] = useState<number>(3e2)
-  const [integrationSteps, setIntegrationSteps] = useState<number>(2**16)
+  const [integrationSteps, setIntegrationSteps] = useState<number>(19)
   const [variable, setVariable] = useState<string>("sqrt(x^2+y^2+z^2)")
 
   const [powerSpectrum, setPowerSpectrum] = useState<number[]>([])
 
   function calculate() {
-    const _psd = powerSpectralDensity(equations, parameters, variable, dt, Ttr, integrationSteps)
-    setPowerSpectrum(_psd.map(component => component.toFixed(3)))
+    const _psd = powerSpectralDensity(equations, parameters, variable, dt, Ttr, 2**integrationSteps)
+    setPowerSpectrum(_psd)
   }
 
   return <Box>
@@ -37,18 +37,16 @@ export default function PowerSpectrum({ equations, parameters }: { equations: Eq
       </Box>
       <Box sx={{ display: "flex", alignItems: "center" }}>
         <TextField
-          label="Integration steps"
+          label="Integration steps (2^n)"
           value={integrationSteps}
           onChange={(e) => setIntegrationSteps(Number(e.target.value))}
-          sx={{ width: "fit-content", ml: 1 }}
+          sx={{ width: "fit-content", mr: 1 }}
         />
-      </Box>
-      <Box sx={{ display: "flex", alignItems: "center" }}>
         <TextField
           label="Timeseries variable"
           value={variable}
           onChange={(e) => setVariable(e.target.value)}
-          sx={{ width: "fit-content" }}
+          sx={{ width: "fit-content", ml: 1 }}
         />
       </Box>
       <Button
@@ -60,7 +58,7 @@ export default function PowerSpectrum({ equations, parameters }: { equations: Eq
       </Button>
       <Plot
         data={[{
-          x: range(0, Math.ceil(powerSpectrum.length/2)).map(i => i / powerSpectrum.length / dt),
+          x: Array.from({length: Math.ceil(powerSpectrum.length/2)}, (_, i) => i / powerSpectrum.length / dt),
           y: powerSpectrum, type: "scatter"
         }]}
         layout={{
