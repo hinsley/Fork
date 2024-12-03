@@ -1,4 +1,4 @@
-import { compile, evaluate, dot, fft } from 'mathjs'
+import { compile, evaluate, dot, fft, max } from 'mathjs'
 
 import { Equation, Parameter } from '../../components/ODEEditor'
 import rk4 from '../odesolvers/rk4'
@@ -47,10 +47,11 @@ export function powerSpectralDensity(equations: Equation[],
   }
 
   // Compute power spectral density.
-  const frequencyContributions = fft(timeseries).slice(0, Math.ceil(timeseries.length/2))
-  console.log(frequencyContributions)
-  const powerSpectralDensity = frequencyContributions.map(component => component.abs()**2 * dt)
+  const nyquistIndex = Math.ceil(timeseries.length/2)
+  const frequencyContributions = fft(timeseries).slice(0, nyquistIndex)
+  const powerSpectralDensity = frequencyContributions.map(component => component.abs()**2 * 2 * dt / nyquistIndex)
+  powerSpectralDensity[0] /= 2
+  powerSpectralDensity[powerSpectralDensity.length - 1] /= 2
 
   return [timeseries, powerSpectralDensity]
 }
-

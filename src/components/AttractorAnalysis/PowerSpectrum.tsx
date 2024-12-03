@@ -13,14 +13,27 @@ export default function PowerSpectrum({ equations, parameters }: { equations: Eq
   const [variable, setVariable] = useState<string>("sqrt(x^2+y^2+z^2)")
 
   const [timeseries, setTimeseries] = useState<number[]>([])
+  const [iterates, setIterates] = useState<number>(0)
   const [powerSpectrum, setPowerSpectrum] = useState<number[]>([])
   const [logX, setLogX] = useState<boolean>(true)
   const [logY, setLogY] = useState<boolean>(true)
 
   function calculate() {
     const [_timeseries, _psd] = powerSpectralDensity(equations, parameters, variable, dt, Ttr, 2**integrationSteps)
+    if (isNaN(_timeseries[_timeseries.length-1])) {
+      console.log("NaN in timeseries data.")
+      return
+    }
     setTimeseries(_timeseries)
-    setPowerSpectrum(_psd)
+    if (iterates === 0) {
+      setPowerSpectrum(_psd)
+    } else {
+      for (var i = 0; i < _psd.length; i++) {
+        _psd[i] = (powerSpectrum[i] * iterates + _psd[i]) / (iterates + 1)
+      }
+      setPowerSpectrum(_psd)
+    }
+    setIterates(iterates + 1)
   }
 
   return <Box>
@@ -53,14 +66,27 @@ export default function PowerSpectrum({ equations, parameters }: { equations: Eq
           sx={{ width: "fit-content", ml: 1 }}
         />
       </Box>
-      <Button
-        variant="contained"
-        onClick={calculate}
-        sx={{ width: "fit-content" }}
-      >
-        Calculate
-      </Button>
       <Box sx={{ display: "flex", alignItems: "center" }}>
+        <Button
+          variant="contained"
+          onClick={calculate}
+          sx={{ width: "fit-content", mr: 1 }}
+        >
+          Iterate PSD
+        </Button>
+        <Button
+          variant="contained"
+          onClick={() => {
+            setIterates(0)
+            setTimeseries([])
+            setPowerSpectrum([])
+          }}
+          sx={{ width: "fit-content", ml: 1 }}
+        >
+          Reset PSD
+        </Button>
+      </Box>
+      <Box sx={{ display: "flex", alignItems: "center", pt: 4 }}>
         <FormControlLabel
           control={
             <Checkbox
@@ -83,23 +109,28 @@ export default function PowerSpectrum({ equations, parameters }: { equations: Eq
       <Plot
         data={[{
           x: Array.from({length: Math.ceil(powerSpectrum.length/2)}, (_, i) => i / powerSpectrum.length / dt),
-          y: powerSpectrum, type: "scatter"
+          y: powerSpectrum,
+          type: "scatter"
         }]}
         layout={{
-          title: "Power Spectrum",
+          title: "Power Spectrum (" + iterates + " iterates)",
           xaxis: {
             type: logX ? "log" : "linear",
             title: "Frequency (Hz)"
           },
           yaxis: {
             type: logY ? "log" : "linear",
-            title: "Power (x^2/Hz)"
+            title: "Power/Frequency (amp^2/Hz)"
           }
         }}
       />
       <Plot
-        data={[{ x: range(0, timeseries.length).map(i => i * dt), y: timeseries, type: "scatter" }]}
-        layout={{ title: "Timeseries" }}
+        data={[{
+          x: Array.from({length: timeseries.length}, (_, i) => i * dt),
+          y: timeseries,
+          type: "scatter"
+        }]}
+        layout={{ title: "Timeseries", xaxis: { title: "Time (s)" }, yaxis: { title: variable } }}
       />
       <h4>Numerical data</h4>
       <Box sx={{ display: "flex", alignItems: "center" }}>
