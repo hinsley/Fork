@@ -39,7 +39,7 @@ export default function LyapunovSpectrum({ equations, parameters }: { equations:
       }
     }
     const _lyapunovDimension = lyapunovDimensionFloor + spectralSum / Math.abs(__lyapunovSpectrum[lyapunovDimensionFloor])
-    setLyapunovDimension(_lyapunovDimension)
+    setLyapunovDimension(_lyapunovDimension.toFixed(4))
   }
 
   return <Box>
