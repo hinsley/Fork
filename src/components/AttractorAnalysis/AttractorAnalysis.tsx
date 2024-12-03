@@ -1,6 +1,5 @@
 import React, { useState } from 'react'
-import { Box, Button, Collapse, IconButton, Stack, TextField, Tooltip } from '@mui/material'
-import { TransitionGroup } from 'react-transition-group'
+import { Box, TextField } from '@mui/material'
 import { Equation, Parameter } from '../ODEEditor'
 
 import LyapunovSpectrum from './LyapunovSpectrum'

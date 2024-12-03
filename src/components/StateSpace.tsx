@@ -6,11 +6,6 @@ import { compile } from 'mathjs'
 
 import { Equation, Parameter } from './ODEEditor'
 import rk4 from '../math/odesolvers/rk4'
-import euler from '../math/odesolvers/euler'
-
-import jacobian from '../math/differentiation/jacobian'
-import LLE from '../math/lyapunovexponents/lle'
-import lyapunovSpectrum from '../math/lyapunovexponents/lyapunov_spectrum'
 
 const SPATIAL_SCALING = 2e-2
 const TIME_SCALING = 1e-0

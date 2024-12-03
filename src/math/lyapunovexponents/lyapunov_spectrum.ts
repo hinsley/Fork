@@ -1,4 +1,4 @@
-import { Matrix, index, norm, qr, range, squeeze, subset, zeros } from 'mathjs'
+import { Matrix, qr, zeros } from 'mathjs'
 
 import { Equation, Parameter } from '../../components/ODEEditor'
 import rk4 from '../odesolvers/euler'

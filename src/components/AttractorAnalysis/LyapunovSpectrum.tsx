@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Box, Button, Text, TextField, Stack } from '@mui/material'
+import { Box, Button, TextField, Stack } from '@mui/material'
 import { Equation, Parameter } from '../ODEEditor'
 
 // import lle from '../../math/lyapunovexponents/lle'
