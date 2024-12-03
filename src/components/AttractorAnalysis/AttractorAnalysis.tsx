@@ -16,8 +16,8 @@ export default function AttractorAnalysis({ equations, parameters }: AttractorAn
   const [mode, setMode] = useState(defaultMode)
 
   return (
-    <Box sx={{ height: "100%", width: "100%", overflow: "auto", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
-      <Box sx={{ width: "1024px", maxWidth: "100%" }}>
+    <Box sx={{ height: "100%", width: "100%", overflow: "auto", display: "flex", flexDirection: "column", alignItems: "center" }}>
+      <Box sx={{ mt: 8, mb: 8, width: "1024px", maxWidth: "100%" }}>
         <h3>Attractor Analysis</h3>
         <Box sx={{ mb: 2 }}>
           <TextField

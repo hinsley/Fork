@@ -15,7 +15,7 @@ export function powerSpectralDensity(equations: Equation[],
                                      dt: number = 1e-2, // Time step.
                                      maxSteps: number = 2**16, // Maximum total steps. Powers of 2 are most efficient for FFT.
                                      Ttr: number = 0 // Transient steps to discard.
-                                    ): number[] {
+                                    ): [number[], number[]] {
   var point = getInitialCondition(equations)
 
   if (Ttr > 0) {
@@ -48,7 +48,9 @@ export function powerSpectralDensity(equations: Equation[],
 
   // Compute power spectral density.
   const frequencyContributions = fft(timeseries).slice(0, Math.ceil(timeseries.length/2))
+  console.log(frequencyContributions)
   const powerSpectralDensity = frequencyContributions.map(component => component.abs()**2 * dt)
 
-  return powerSpectralDensity
+  return [timeseries, powerSpectralDensity]
 }
+
