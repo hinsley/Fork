@@ -50,8 +50,8 @@ export default function lyapunovSpectrum(equations: Equation[],
 
   if (Ttr > 0) {
     // Evolve initial condition for Ttr steps to allow for transient decay.
-    for (let i = 0; i < Ttr / dt; i++) {
-      point = rk4(equations, parameters, point, dt)
+    for (let i = 0; i < Ttr; i++) {
+      point = rk4(equations, parameters, point, dt) as number[]
     }
   }
 

@@ -20,7 +20,7 @@ function getInitialConditions(equations: Equation[],
   if (Ttr > 0) {
     // Evolve initial condition for Ttr steps to allow for transient decay.
     for (let i = 0; i < Ttr; i++) {
-      point = rk4(equations, parameters, point, dt)
+      point = rk4(equations, parameters, point, dt) as number[]
     }
   }
   const neighbor = equations.map((_, i) => point[i] + (Math.random() - 0.5) * epsilon)

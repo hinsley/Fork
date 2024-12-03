@@ -3,6 +3,7 @@ import { Box, TextField } from '@mui/material'
 import { Equation, Parameter } from '../ODEEditor'
 
 import LyapunovSpectrum from './LyapunovSpectrum'
+import PowerSpectrum from './PowerSpectrum'
 
 interface AttractorAnalysisProps {
   equations: Equation[]
@@ -28,15 +29,15 @@ export default function AttractorAnalysis({ equations, parameters }: AttractorAn
             onChange={(e) => setMode(e.target.value)}
           >
             <option value="lyapunov">Lyapunov spectrum</option>
-            <option value="power">Power spectrum (not yet implemented)</option>
+            <option value="power">Power spectrum</option>
           </TextField>
         </Box>
         {(() => {
           switch (mode) {
             case "lyapunov":
               return <LyapunovSpectrum equations={equations} parameters={parameters} />
-            // case "power":
-            //   return <PowerSpectrum equations={equations} parameters={parameters} />
+            case "power":
+              return <PowerSpectrum equations={equations} parameters={parameters} />
             default:
               return <Box sx={{ mb: 2 }}><h4>Not implemented</h4></Box>
           }

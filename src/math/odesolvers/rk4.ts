@@ -8,8 +8,9 @@ export default function rk4(equations: Equation[],
                             point: number[],
                             stepSize: number,
                             deviations: Matrix|null = null,
-                            jacobian_function: ((point: number[]) => Matrix)|null = null): number[]|[number[], Matrix] {
-  let scope: { [key: string]: number } = {}
+                            jacobian_function: ((point: number[]) => Matrix)|null = null
+                           ): number[]|[number[], Matrix] {
+  const scope: { [key: string]: number } = {}
   equations.forEach((eq, i) => {
     scope[eq.variable] = point[i]
   })
