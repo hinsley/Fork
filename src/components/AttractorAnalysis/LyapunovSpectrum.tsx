@@ -43,7 +43,6 @@ export default function LyapunovSpectrum({ equations, parameters }: { equations:
   }
 
   return <Box>
-    <h4>Lyapunov spectrum</h4>
     <Stack spacing={2} sx={{ mb: 2, alignItems: "center" }}>
       <Box sx={{ display: "flex", alignItems: "center" }}>
         <TextField
