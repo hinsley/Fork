@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Box, Button, TextField, Stack } from '@mui/material'
 import { Equation, Parameter } from '../ODEEditor'
 
-// import lle from '../../math/lyapunovexponents/lle'
+// import lle from '../../math/lyapunovexponents/lle' // Comment this out.
 import lyapunovSpectrum from '../../math/lyapunovexponents/lyapunov_spectrum'
 
 export default function LyapunovSpectrum({ equations, parameters }: { equations: Equation[], parameters: Parameter[] }) {
@@ -15,9 +15,9 @@ export default function LyapunovSpectrum({ equations, parameters }: { equations:
   const [lyapunovDimension, setLyapunovDimension] = useState("Not calculated")
 
   const calculate = () => {
-    // const _lle = lle(equations, parameters, dt, stepsBetweenRescaling, integrationSteps, Ttr)
+    // const _lle = lle(equations, parameters, dt, stepsBetweenRescaling, integrationSteps, Ttr) // Comment this out.
     const __lyapunovSpectrum = lyapunovSpectrum(equations, parameters, dt, stepsBetweenRescaling, integrationSteps, Ttr)
-    // __lyapunovSpectrum[0] = _lle
+    // __lyapunovSpectrum[0] = _lle // Comment this out.
 
     const absLyapunovExponents = __lyapunovSpectrum.map((lyapunovExponent: number) => Math.abs(lyapunovExponent))
     const minMagnitude = Math.min(...absLyapunovExponents)

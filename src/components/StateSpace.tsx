@@ -37,7 +37,7 @@ export default function StateSpace({ equations, parameters }: { equations: Equat
 	}
 
 	// Initialize trajectories to plot in "realtime".
-	const [points, setPoints] = useState(globalThis.Array.from({ length: NUMBER_OF_POINTS }, (_, i) => [(i+1) * 1e2 / NUMBER_OF_POINTS, ...globalThis.Array(eqs.length - 1).fill(0)]))
+	const [points, setPoints] = useState(globalThis.Array.from({ length: NUMBER_OF_POINTS }, (_, i) => [(i+1) * 1e2 / NUMBER_OF_POINTS, ...globalThis.Array(eqs.length - 1).fill((Math.random() - 0.5) * 1e-6)]))
 
 	// Progress a point forward in time.
 	function stepPoint(point: number[], dt: number) {

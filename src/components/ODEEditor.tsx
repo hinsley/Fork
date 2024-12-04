@@ -64,7 +64,7 @@ export default function ODEEditor({ equations, setEquations, parameters, setPara
 
   return (
     <Box sx={{ height: "100%", width: "100%", overflow: "auto", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
-      <Box sx={{ width: "1024px", maxWidth: "100%" }}>
+      <Box sx={{ mt: 8,mb: 8, width: "1024px", maxWidth: "100%" }}>
         <h3>ODE System</h3>
         <TransitionGroup component={Stack} spacing={2} sx={{ mb: 2 }}>
           {equations.map((equation, index) => (

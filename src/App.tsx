@@ -6,6 +6,7 @@ import { compile } from 'mathjs'
 import AttractorAnalysis from './components/AttractorAnalysis/AttractorAnalysis.tsx'
 import ODEEditor, { Equation, Parameter } from './components/ODEEditor.tsx'
 import StateSpace from './components/StateSpace.tsx'
+import Systems from './components/Systems.tsx'
 import TopBar from './components/TopBar.tsx'
 
 export default function App() {
@@ -38,6 +39,8 @@ export default function App() {
                 return <ODEEditor equations={equations} setEquations={setEquations} parameters={parameters} setParameters={setParameters} />
               case "attractor-analysis":
                 return <AttractorAnalysis equations={equations} parameters={parameters} />
+              case "systems":
+                return <Systems equations={equations} setEquations={setEquations} parameters={parameters} setParameters={setParameters} />
               default:
                 return <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}><h1>Not implemented</h1></Box>
             }

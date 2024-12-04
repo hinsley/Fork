@@ -3,7 +3,7 @@ import { compile, evaluate, dot, fft, max } from 'mathjs'
 import { Equation, Parameter } from '../../components/ODEEditor'
 import rk4 from '../odesolvers/rk4'
 
-const radius = 1e1 // Initial condition radius.
+const radius = 1e0 // Initial condition radius.
 
 function getInitialCondition(equations: Equation[]): number[] {
   return equations.map(() => (Math.random() - 0.5) * radius * 2)

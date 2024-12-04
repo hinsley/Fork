@@ -6,7 +6,7 @@ import jacobian from '../differentiation/jacobian'
 
 // Lyapunov spectrum calculation. See section 3.2.2 of the book by George Datseris.
 
-const radius = 1e1 // Perturbation for initial condition.
+const radius = 1e0 // Perturbation for initial condition.
 
 /**
  * Gets an initial condition near the origin for Lyapunov exponent calculation.

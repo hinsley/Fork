@@ -23,9 +23,8 @@ export default function AttractorAnalysis({ equations, parameters }: AttractorAn
           <TextField
             select
             label="Analysis mode"
-            defaultValue={defaultMode}
+            value={mode}
             SelectProps={{ native: true }}
-            sx={{ mr: 1 }}
             onChange={(e) => setMode(e.target.value)}
           >
             <option value="lyapunov">Lyapunov spectrum</option>

@@ -9,7 +9,7 @@ import { powerSpectralDensity } from '../../math/powerspectraldensity/psd'
 export default function PowerSpectrum({ equations, parameters }: { equations: Equation[], parameters: Parameter[] }) {
   const [dt, setDt] = useState<number>(3e-2)
   const [Ttr, setTtr] = useState<number>(3e2)
-  const [integrationSteps, setIntegrationSteps] = useState<number>(19)
+  const [integrationSteps, setIntegrationSteps] = useState<number>(16)
   const [variable, setVariable] = useState<string>("sqrt(x^2+y^2+z^2)")
 
   const [timeseries, setTimeseries] = useState<number[]>([])
@@ -19,7 +19,7 @@ export default function PowerSpectrum({ equations, parameters }: { equations: Eq
   const [logY, setLogY] = useState<boolean>(true)
 
   function calculate() {
-    const [_timeseries, _psd] = powerSpectralDensity(equations, parameters, variable, dt, Ttr, 2**integrationSteps)
+    const [_timeseries, _psd] = powerSpectralDensity(equations, parameters, variable, dt, 2**integrationSteps, Ttr)
     if (isNaN(_timeseries[_timeseries.length-1])) {
       console.log("NaN in timeseries data.")
       return
@@ -120,7 +120,7 @@ export default function PowerSpectrum({ equations, parameters }: { equations: Eq
           },
           yaxis: {
             type: logY ? "log" : "linear",
-            title: "Power/Frequency (amp^2/Hz)"
+            title: "Power (amp^2/Hz)"
           },
           width: 640
         }}
