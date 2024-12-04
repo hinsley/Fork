@@ -60,13 +60,13 @@ export default function lyapunovSpectrum(equations: Equation[],
   var lyapunovExponents: number[] = equations.map(() => 0)
   var stepsSinceLastRescale = 0
 
-  for (let i = 0; i < maxSteps; i++) {
+  for (let i = 0; i < Ttr + maxSteps; i++) {
     const result = rk4(equations, parameters, point, dt, deviations, jacobian_function)
     point = result[0] as number[]
     deviations = result[1] as Matrix
 
     stepsSinceLastRescale++
-    if (stepsSinceLastRescale == rescaleSteps) { // Rescale period.
+    if (stepsSinceLastRescale == rescaleSteps || i == Ttr) { // Rescale period.
       stepsSinceLastRescale = 0
 
       // Rescale deviations.
@@ -76,8 +76,10 @@ export default function lyapunovSpectrum(equations: Equation[],
       deviations = Q
       
       // Calculate and accumulate Lyapunov exponents
-      for (var j = 0; j < equations.length; j++) {
-        lyapunovExponents[j] += Math.log(Math.abs(R.get([j, j])))
+      if (Ttr < i) {
+        for (var j = 0; j < equations.length; j++) {
+          lyapunovExponents[j] += Math.log(Math.abs(R.get([j, j])))
+        }
       }
     }
   }
