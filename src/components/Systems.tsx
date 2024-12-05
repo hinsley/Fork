@@ -81,6 +81,16 @@ export default function Systems({ setEquations, setParameters }: SystemsProps) {
           { name: "c", value: 14 }
         ])
         break
+      case "thomas":
+        setEquations([
+          { variable: "x", expression: "sin(y)-b*x" },
+          { variable: "y", expression: "sin(z)-b*y" },
+          { variable: "z", expression: "sin(x)-b*z" }
+        ])
+        setParameters([
+          { name: "b", value: 0.208186 }
+        ])
+        break
     }
   }
 
@@ -102,6 +112,7 @@ export default function Systems({ setEquations, setParameters }: SystemsProps) {
             <option value="lorenz">Lorenz</option>
             <option value="lorenz-84">Lorenz 84</option>
             <option value="rossler">R&ouml;ssler</option>
+            <option value="thomas">Thomas</option>
           </TextField>
         </Box>
         <Box sx={{ mb: 2 }}>
