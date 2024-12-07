@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Box } from '@mui/material'
-import { Array, Axis, Cartesian, ContainedMathbox, Grid, Interval, Label, Line, Point, Text } from 'mathbox-react'
+import { Array, Axis, Cartesian, ContainedMathbox, Grid, Label, Line, Point, Text } from 'mathbox-react'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { compile } from 'mathjs'
 
@@ -45,9 +45,6 @@ export default function StateSpace({ equations, parameters, stateEntities }: Sta
 
 	// Initialize trajectories to plot in "realtime".
 	const [points, setPoints] = useState(globalThis.Array.from({ length: NUMBER_OF_POINTS }, (_, i) => [(i+1) * 1e2 / NUMBER_OF_POINTS, ...globalThis.Array(eqs.length - 1).fill((Math.random() - 0.5) * 1e-6)]))
-
-	// Track whether each state entity has already been rendered (should only render each entity once).
-	const [renderedStateEntity, setRenderedStateEntity] = useState<Record<string, boolean>>({})
 
 	// Progress a point forward in time.
 	function stepPoint(point: number[], dt: number) {
@@ -119,26 +116,27 @@ export default function StateSpace({ equations, parameters, stateEntities }: Sta
 					}}
 				/>
 				<Point points="#points" shape="sphere" color="red" size={2} />
-				{ // Render integrated curve state entities.
+				{ // Render state entities.
 				stateEntities.map((entity, i) => {
 					switch (entity.type) {
 						case "Orbit":
-							const curveCoordinatesReordered = entity.data.curve.map(point => [
-								point.length >= 1 ? point[1] * SPATIAL_SCALING : 0,
-								point.length >= 2 ? point[2] * SPATIAL_SCALING : 0,
-								point.length >= 3 ? point[0] * SPATIAL_SCALING : 0
-							])
+							var curveCoordinatesReordered: number[][] = []
 							if (entity.data.curve.length > 1) {
+								curveCoordinatesReordered = entity.data.curve.map(point => [
+									point.length >= 2 ? point[1] * SPATIAL_SCALING : 0,
+									point.length >= 3 ? point[2] * SPATIAL_SCALING : 0,
+									point.length >= 1 ? point[0] * SPATIAL_SCALING : 0
+								])
 								return (<>
 									<Array
 										id={"Orbit-" + i}
-										channels={entity.data.curve.length == 0 ? 0 : entity.data.curve[0].length}
+										live={false}
+										channels={entity.data.curve.length == 0 ? 0 : 3}
 										items={1}
 										data={curveCoordinatesReordered}
 									/>
 									<Line points={"#Orbit-" + i} color="blue" start={false} end={false} width={1} />
-								</>
-								)
+								</>)
 							}
 							break
 					}

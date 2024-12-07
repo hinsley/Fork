@@ -59,6 +59,21 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
     }
   }, [open])
 
+  // Handle changes in the number of equations.
+  useEffect(() => {
+    const oldInitialConditions = updatedStateEntity.data.initialConditions
+    if (oldInitialConditions.length < equations.length) {
+      // New system is higher dimensional.
+      updatedStateEntity.data.initialConditions = [
+        ...updatedStateEntity.data.initialConditions,
+        ...Array(equations.length - oldInitialConditions.length).fill(0)
+      ]
+    } else if (oldInitialConditions.length > equations.length) {
+      // New system is lower dimensional.
+      updatedStateEntity.data.initialConditions = updatedStateEntity.data.initialConditions.slice(0, equations.length)
+    }
+  }, [equations])
+
   function handleIntegrate() {
     const curve = integrateOrbitCurve(
       equations,
@@ -68,6 +83,7 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
       updatedStateEntity.data.timestep
     )
     setCurve(curve)
+    console.log(updatedStateEntity.data.initialConditions)
     updatedStateEntity.data.curve = curve
     setPreviewRenderKey(previewRenderKey + 1)
   }
@@ -110,7 +126,7 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
           {equations.map((equation, index) => (
             <Box key={index}>
               <TextField
-                label={equation.name}
+                label={equation.variable}
                 type="number"
                 value={updatedStateEntity.data.initialConditions[index]} // Need to make separate fields for each state variable.
                 onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, data: {
