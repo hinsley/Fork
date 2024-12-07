@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { Box } from '@mui/material'
-import { Array, Axis, Cartesian, ContainedMathbox, Grid, Label, Point, Text } from 'mathbox-react'
+import { Array, Axis, Cartesian, ContainedMathbox, Grid, Interval, Label, Line, Point, Text } from 'mathbox-react'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { compile } from 'mathjs'
 
 import { Equation, Parameter } from './ODEEditor'
 import rk4 from '../math/odesolvers/rk4'
+import { StateEntity } from './Continuation/StateEntities/StateEntitiesMenu'
 
 const SPATIAL_SCALING = 2e-2
 const TIME_SCALING = 1e-0
@@ -19,7 +20,13 @@ const mathboxOptions = {
 	}
 }
 
-export default function StateSpace({ equations, parameters }: { equations: Equation[], parameters: Parameter[] }) {
+interface StateSpaceProps {
+	equations: Equation[]
+	parameters: Parameter[]
+	stateEntities: StateEntity[]
+}
+
+export default function StateSpace({ equations, parameters, stateEntities }: StateSpaceProps) {
 	let eqs = [...equations]
 	while (eqs.length < 3) { // Stub in zero for the extra equations if there are less than three.
 		let i = eqs.length
@@ -39,11 +46,14 @@ export default function StateSpace({ equations, parameters }: { equations: Equat
 	// Initialize trajectories to plot in "realtime".
 	const [points, setPoints] = useState(globalThis.Array.from({ length: NUMBER_OF_POINTS }, (_, i) => [(i+1) * 1e2 / NUMBER_OF_POINTS, ...globalThis.Array(eqs.length - 1).fill((Math.random() - 0.5) * 1e-6)]))
 
+	// Track whether each state entity has already been rendered (should only render each entity once).
+	const [renderedStateEntity, setRenderedStateEntity] = useState<Record<string, boolean>>({})
+
 	// Progress a point forward in time.
 	function stepPoint(point: number[], dt: number) {
 		const newPoint = rk4(eqs, parameters, point, dt)
 
-		const distance = Math.sqrt(newPoint.reduce((sum, component) => sum + component * component, 0))
+		const distance = Math.sqrt((newPoint as number[]).reduce((sum, component) => sum + component * component, 0))
 
 		// If too far from the origin.
 		if (distance > DISTANCE_LIMIT) {
@@ -102,12 +112,38 @@ export default function StateSpace({ equations, parameters }: { equations: Equat
 					id="points"
 					channels={3}
 					items={NUMBER_OF_POINTS}
+					realtime={true}
 					expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
 						setPoints(points.map((point) => stepPoint(point, dt * TIME_SCALING)))
 						points.forEach(point => emit(point[1] * SPATIAL_SCALING, point[2] * SPATIAL_SCALING, point[0] * SPATIAL_SCALING))
 					}}
 				/>
 				<Point points="#points" shape="sphere" color="red" size={2} />
+				{ // Render integrated curve state entities.
+				stateEntities.map((entity, i) => {
+					switch (entity.type) {
+						case "Orbit":
+							const curveCoordinatesReordered = entity.data.curve.map(point => [
+								point.length >= 1 ? point[1] * SPATIAL_SCALING : 0,
+								point.length >= 2 ? point[2] * SPATIAL_SCALING : 0,
+								point.length >= 3 ? point[0] * SPATIAL_SCALING : 0
+							])
+							if (entity.data.curve.length > 1) {
+								return (<>
+									<Array
+										id={"Orbit-" + i}
+										channels={entity.data.curve.length == 0 ? 0 : entity.data.curve[0].length}
+										items={1}
+										data={curveCoordinatesReordered}
+									/>
+									<Line points={"#Orbit-" + i} color="blue" start={false} end={false} width={1} />
+								</>
+								)
+							}
+							break
+					}
+					return <></>
+				})}
 			</ContainedMathbox>
 		</Box>
 	)

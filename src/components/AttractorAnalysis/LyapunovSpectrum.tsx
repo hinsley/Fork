@@ -6,6 +6,8 @@ import { Equation, Parameter } from '../ODEEditor'
 import lyapunovSpectrum from '../../math/lyapunovexponents/lyapunov_spectrum'
 
 export default function LyapunovSpectrum({ equations, parameters }: { equations: Equation[], parameters: Parameter[] }) {
+  // TODO: Show the initial conditions used for reproducibility.
+
   const [dt, setDt] = useState(1e-2)
   const [Ttr, setTtr] = useState(3e2)
   const [stepsBetweenRescaling, setStepsBetweenRescaling] = useState(3e1)
