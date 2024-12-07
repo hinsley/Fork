@@ -110,7 +110,7 @@ export default function StateEntitiesMenu({ equations, parameters, stateEntities
       <Button variant="contained" color="primary" onClick={handleEditStateEntityButtonClick}>Edit</Button>
       <Button variant="contained" color="primary" onClick={handleDeleteStateEntityButtonClick}>Delete</Button>
     </Box>
-    <Box sx={{ width: "480px", height: "100%", pt: "0" }}>
+    <Box sx={{ width: "480px", maxWidth: "100%", height: "100%", pt: "0" }}>
       <List component="nav" >
         {stateEntities.map((entity, index) => (
           <Container key={index}>
