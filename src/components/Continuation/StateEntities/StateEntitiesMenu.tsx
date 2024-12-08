@@ -35,6 +35,28 @@ export default function StateEntitiesMenu({ equations, parameters, stateEntities
     }
   }
 
+  function handleDuplicateStateEntityButtonClick() {
+    if (selectedIndex === null) {
+      alert("You must select a state entity to duplicate.")
+      return
+    }
+    const newStateEntity = { ...stateEntities[selectedIndex] }
+    
+    // Generate a unique name by adding (copy N) where N increments until unique
+    let baseName = stateEntities[selectedIndex].name
+    let copyNum = 2
+    let newName = baseName + " (copy)"
+    
+    while (stateEntities.some(entity => entity.name === newName)) {
+      newName = baseName + ` (copy ${copyNum})`
+      copyNum++
+    }
+    
+    newStateEntity.name = newName
+    setStateEntities([newStateEntity, ...stateEntities])
+    setSelectedIndex(0)
+  }
+
   function handleEditStateEntityButtonClick(_: MouseEvent) {
     if (selectedIndex === null) {
       alert("You must select a state entity to edit.")
@@ -108,6 +130,7 @@ export default function StateEntitiesMenu({ equations, parameters, stateEntities
     <Box sx={{ display: "flex", flexDirection: "row", gap: "16px" }}>
       <Button variant="contained" color="primary" onClick={handleNewStateEntityButtonClick}>New</Button>
       <Button variant="contained" color="primary" onClick={handleEditStateEntityButtonClick}>Edit</Button>
+      <Button variant="contained" color="primary" onClick={handleDuplicateStateEntityButtonClick}>Duplicate</Button>
       <Button variant="contained" color="primary" onClick={handleDeleteStateEntityButtonClick}>Delete</Button>
     </Box>
     <Box sx={{ width: "480px", maxWidth: "100%", height: "100%", pt: "0" }}>
