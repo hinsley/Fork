@@ -17,35 +17,35 @@ import StateSpace from "../../../StateSpace"
 import { Equation, Parameter } from "../../../ODEEditor"
 import { StateEntity } from "../StateEntitiesMenu"
 
-import integrateOrbitCurve from "../../../../math/stateentitycalculation/integrate_orbit_curve"
+import solveEquilibrium from "../../../../math/stateentitycalculation/solve_equilibrium"
 
-export interface OrbitData {
-  initialConditions: number[]
-  integrationTime: number
-  timestep: number
-  curve: number[][]
+export interface EquilibriumData {
+  initialGuess: number[]
+  maxSteps: number
+  dampingFactor: number
+  point: number[]
 }
 
-export interface OrbitEntity extends StateEntity {
-  data: OrbitData
+export interface EquilibriumEntity extends StateEntity {
+  data: EquilibriumData
 }
 
-interface EditOrbitDialogProps {
+interface EditEquilibriumDialogProps {
   equations: Equation[]
   open: boolean
-  onClose: (setOrbitDialogOpen: Dispatch<SetStateAction<boolean>>, updatedStateEntity?: StateEntity) => boolean
+  onClose: (setEquilibriumDialogOpen: Dispatch<SetStateAction<boolean>>, updatedStateEntity?: StateEntity) => boolean
   parameters: Parameter[]
-  setOrbitDialogOpen: Dispatch<SetStateAction<boolean>>
+  setEquilibriumDialogOpen: Dispatch<SetStateAction<boolean>>
   stateEntities: StateEntity[]
-  stateEntity: OrbitEntity | null // The Orbit state entity.
+  stateEntity: EquilibriumEntity | null // The Equilibrium state entity.
 }
 
-export default function EditOrbitDialog({ equations, parameters, setOrbitDialogOpen, open, onClose, stateEntities, stateEntity }: EditOrbitDialogProps) {
+export default function EditEquilibriumDialog({ equations, parameters, setEquilibriumDialogOpen, open, onClose, stateEntities, stateEntity }: EditEquilibriumDialogProps) {
   if (stateEntity === null) {
     return null
   }
 
-  const [curve, setCurve] = useState<number[][]>([])
+  const [point, setPoint] = useState(stateEntity.data.point)
   const [previewRenderKey, setPreviewRenderKey] = useState(0)
   const [previewShowAllStateEntities, setPreviewShowAllStateEntities] = useState(false)
   const [updatedStateEntity, setUpdatedStateEntity] = useState(stateEntity)
@@ -64,21 +64,30 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
     setPreviewRenderKey(previewRenderKey + 1)
   }, [previewShowAllStateEntities])
 
-  function handleIntegrate() {
-    const curve = integrateOrbitCurve(
+  function handleSolveEquilibrium() {
+    console.log("equations:", equations)
+    console.log("parameters:", parameters)
+    console.log("initial guess:", updatedStateEntity.data.initialGuess)
+    console.log("max steps:", updatedStateEntity.data.maxSteps)
+    console.log("damping factor:", updatedStateEntity.data.dampingFactor)
+    const newPoint = solveEquilibrium(
       equations,
       parameters,
-      updatedStateEntity.data.initialConditions,
-      updatedStateEntity.data.integrationTime,
-      updatedStateEntity.data.timestep
+      updatedStateEntity.data.initialGuess,
+      updatedStateEntity.data.maxSteps,
+      updatedStateEntity.data.dampingFactor
     )
-    setCurve(curve)
-    updatedStateEntity.data.curve = curve
+    setPoint(newPoint)
+    if (newPoint.some(isNaN)) {
+      alert("Equilibrium solver failed to converge. Try a different initial guess, increase maximum steps, or decrease damping factor.")
+      return
+    }
+    updatedStateEntity.data.point = newPoint
     setPreviewRenderKey(previewRenderKey + 1)
   }
 
   function handleCancel() {
-    onClose(setOrbitDialogOpen)
+    onClose(setEquilibriumDialogOpen)
     // Reset form fields in case edit button is clicked again.
     // Should be safe to assume stateEntity isn't null here.
     setUpdatedStateEntity(stateEntity as StateEntity)
@@ -93,14 +102,14 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
         return
       }
     }
-    if (!onClose(setOrbitDialogOpen, updatedStateEntity)) {
+    if (!onClose(setEquilibriumDialogOpen, updatedStateEntity)) {
       alert("Something went wrong; could not update state entity.")
     }
   }
 
-  return updatedStateEntity.type === "Orbit" ? (
+  return updatedStateEntity.type === "Equilibrium" ? (
     <Dialog open={open}>
-      <DialogTitle>Editing orbit "{stateEntity.name}"</DialogTitle>
+      <DialogTitle>Editing equilibrium "{stateEntity.name}"</DialogTitle>
       <DialogContent dividers>
         <Box>
           <TextField
@@ -110,60 +119,70 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
           />
         </Box>
         <Divider sx={{ my: 2 }} />
-        <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Initial conditions</div>
+        <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Initial guess</div>
         <Stack spacing={2}>
           {equations.map((equation, index) => (
             <Box key={index}>
               <TextField
                 label={equation.variable}
                 type="number"
-                value={updatedStateEntity.data.initialConditions[index]}
+                value={updatedStateEntity.data.initialGuess[index]}
                 onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, data: {
-                ...updatedStateEntity.data,
-                initialConditions: [
-                  ...updatedStateEntity.data.initialConditions.slice(0, index),
-                  Number(e.target.value),
-                  ...updatedStateEntity.data.initialConditions.slice(index + 1)
-                ]
+                  ...updatedStateEntity.data,
+                  initialGuess: [
+                    ...updatedStateEntity.data.initialGuess.slice(0, index),
+                    Number(e.target.value),
+                    ...updatedStateEntity.data.initialGuess.slice(index + 1)
+                  ]
                 }})}
               />
             </Box>
           ))}
         </Stack>
         <Divider sx={{ my: 2 }} />
-        <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Integration settings</div>
+        <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Iteration settings</div>
         <Box>
           <TextField
-            label="Integration time"
+            label="Maximum steps"
             type="number"
-            value={updatedStateEntity.data.integrationTime}
+            value={updatedStateEntity.data.maxSteps}
             onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, data: {
               ...updatedStateEntity.data,
-              integrationTime: Number(e.target.value)
+              maxSteps: Number(e.target.value)
             }})}
             sx={{ mb: 2 }}
           />
         </Box>
         <Box>
           <TextField
-            label="Timestep"
+            label="Damping factor"
             type="number"
-            value={updatedStateEntity.data.timestep}
+            value={updatedStateEntity.data.dampingFactor}
             onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, data: {
               ...updatedStateEntity.data,
-              timestep: Number(e.target.value)
+              dampingFactor: Number(e.target.value)
             }})}
             sx={{ mb: 2 }}
           />
         </Box>
         <Divider sx={{ my: 2 }} />
-        <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Curve</div>
+        <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Point</div>
+        <Stack spacing={2} sx={{ mb: 2 }}>
+          {equations.map((equation, index) => (
+            <TextField
+              label={equation.variable}
+              type="number"
+              value={isNaN(point[index]) ? "NaN" : point[index]}
+              key={index}
+            />
+          ))}
+        </Stack>
         <Button
           variant="contained"
           fullWidth
-          onClick={handleIntegrate}
+          onClick={handleSolveEquilibrium}
         >
-          Integrate
+          Solve
         </Button>
         <Divider sx={{ my: 2 }} />
         <StateSpace key={previewRenderKey} equations={equations} parameters={parameters} stateEntities={

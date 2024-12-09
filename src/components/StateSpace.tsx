@@ -8,6 +8,9 @@ import { Equation, Parameter } from './ODEEditor'
 import rk4 from '../math/odesolvers/rk4'
 import { StateEntity } from './Continuation/StateEntities/StateEntitiesMenu'
 
+import { EquilibriumData } from './Continuation/StateEntities/EditDialogs/EditEquilibriumDialog'
+import { OrbitData } from './Continuation/StateEntities/EditDialogs/EditOrbitDialog'
+
 const SPATIAL_SCALING = 2e-2
 const TIME_SCALING = 1e-0
 const NUMBER_OF_POINTS = 3e3
@@ -119,10 +122,26 @@ export default function StateSpace({ equations, parameters, stateEntities }: Sta
 				{ // Render state entities.
 				stateEntities.map((entity, i) => {
 					switch (entity.type) {
+						case "Equilibrium":
+							return (<>
+								<Array
+									id={"Equilibrium-" + i}
+									channels={3}
+									items={1}
+									expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
+										emit(
+											(entity.data as EquilibriumData).point.length >= 2 ? (entity.data as EquilibriumData).point[1] * SPATIAL_SCALING : 0,
+											(entity.data as EquilibriumData).point.length >= 3 ? (entity.data as EquilibriumData).point[2] * SPATIAL_SCALING : 0,
+											(entity.data as EquilibriumData).point.length >= 1 ? (entity.data as EquilibriumData).point[0] * SPATIAL_SCALING : 0
+										)
+									}}
+								/>
+								<Point points={"#Equilibrium-" + i} shape="sphere" color="green" size={6} />
+							</>)
 						case "Orbit":
 							var curveCoordinatesReordered: number[][] = []
-							if (entity.data.curve.length > 1) {
-								curveCoordinatesReordered = entity.data.curve.map(point => [
+							if ((entity.data as OrbitData).curve.length > 1) {
+								curveCoordinatesReordered = (entity.data as OrbitData).curve.map(point => [
 									point.length >= 2 ? point[1] * SPATIAL_SCALING : 0,
 									point.length >= 3 ? point[2] * SPATIAL_SCALING : 0,
 									point.length >= 1 ? point[0] * SPATIAL_SCALING : 0
@@ -131,7 +150,7 @@ export default function StateSpace({ equations, parameters, stateEntities }: Sta
 									<Array
 										id={"Orbit-" + i}
 										live={false}
-										channels={entity.data.curve.length == 0 ? 0 : 3}
+										channels={(entity.data as OrbitData).curve.length == 0 ? 0 : 3}
 										items={1}
 										data={curveCoordinatesReordered}
 									/>

@@ -13,6 +13,7 @@ import {
 
 import { Equation } from '../../ODEEditor'
 import { StateEntity } from './StateEntitiesMenu'
+import { EquilibriumData } from './EditDialogs/EditEquilibriumDialog'
 import { OrbitData } from './EditDialogs/EditOrbitDialog'
 
 interface NewStateEntityDialogProps {
@@ -33,8 +34,16 @@ export default function NewStateEntityDialog({ equations, open, onClose }: NewSt
   }
 
   function handleCreate() {
-    var stateEntityData: OrbitData
+    var stateEntityData: EquilibriumData | OrbitData
     switch (type) {
+      case "Equilibrium":
+        stateEntityData = {
+          initialGuess: equations.map(() => 0),
+          maxSteps: 1e2,
+          dampingFactor: 1,
+          point: equations.map(() => 0)
+        }
+        break
       case "Orbit":
         stateEntityData = {
           initialConditions: equations.map(() => 0),
@@ -73,6 +82,7 @@ export default function NewStateEntityDialog({ equations, open, onClose }: NewSt
         >
           <div style={{ fontWeight: "bold", marginBottom: "8px" }}>Entity Type:</div>
           <FormControlLabel value="Orbit" control={<Radio />} label="Orbit" />
+          <FormControlLabel value="Isocline" control={<Radio />} label="Isocline" />
           <FormControlLabel value="Equilibrium" control={<Radio />} label="Equilibrium" />
           <FormControlLabel value="Limit cycle" control={<Radio />} label="Limit cycle" />
         </RadioGroup>

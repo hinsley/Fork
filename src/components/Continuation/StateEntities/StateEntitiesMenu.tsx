@@ -2,14 +2,15 @@ import { Dispatch, MouseEvent, SetStateAction, useState } from 'react'
 import { Box, Button, Container, Divider, List, ListItemButton, ListItemText } from '@mui/material'
 // import { FixedSizeList, ListChildComponentProps } from 'react-window' // TODO: Work this in so huge lists are handled efficiently. See "virtualized lists" in the MUI docs.
 
-import EditOrbitDialog, { OrbitData } from './EditDialogs/EditOrbitDialog'
+import EditEquilibriumDialog, { EquilibriumData, EquilibriumEntity } from './EditDialogs/EditEquilibriumDialog'
+import EditOrbitDialog, { OrbitData, OrbitEntity } from './EditDialogs/EditOrbitDialog'
 import NewStateEntityDialog from './NewStateEntityDialog'
 import { Equation, Parameter } from '../../../ODEEditor'
 
 export interface StateEntity {
   name: string
   type: string
-  data: OrbitData
+  data: EquilibriumData | OrbitData
 }
 
 interface StateEntitiesMenuProps {
@@ -20,6 +21,7 @@ interface StateEntitiesMenuProps {
 }
 
 export default function StateEntitiesMenu({ equations, parameters, stateEntities, setStateEntities }: StateEntitiesMenuProps) {
+  const [editEquilibriumDialogOpen, setEditEquilibriumDialogOpen] = useState(false)
   const [editOrbitDialogOpen, setEditOrbitDialogOpen] = useState(false)
   const [newStateEntityDialogOpen, setNewStateEntityDialogOpen] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState<number|null>(null)
@@ -64,6 +66,9 @@ export default function StateEntitiesMenu({ equations, parameters, stateEntities
     }
 
     switch (stateEntities[selectedIndex].type) {
+      case "Equilibrium":
+        setEditEquilibriumDialogOpen(true)
+        break
       case "Orbit":
         setEditOrbitDialogOpen(true)
         break
@@ -146,6 +151,15 @@ export default function StateEntitiesMenu({ equations, parameters, stateEntities
             {index < stateEntities.length - 1 && <Divider />}
           </Container>
         ))}
+        <EditEquilibriumDialog
+          equations={equations}
+          open={editEquilibriumDialogOpen}
+          onClose={handleEditStateEntity}
+          parameters={parameters}
+          setEquilibriumDialogOpen={setEditEquilibriumDialogOpen}
+          stateEntities={stateEntities}
+          stateEntity={selectedIndex !== null ? stateEntities[selectedIndex] as EquilibriumEntity : null}
+        />
         <EditOrbitDialog
           equations={equations}
           open={editOrbitDialogOpen}
@@ -153,7 +167,7 @@ export default function StateEntitiesMenu({ equations, parameters, stateEntities
           parameters={parameters}
           setOrbitDialogOpen={setEditOrbitDialogOpen}
           stateEntities={stateEntities}
-          stateEntity={selectedIndex !== null ? stateEntities[selectedIndex] : null}
+          stateEntity={selectedIndex !== null ? stateEntities[selectedIndex] as OrbitEntity : null}
         />
         <NewStateEntityDialog
           equations={equations}
