@@ -37,9 +37,9 @@ export interface EquilibriumEntity extends StateEntity {
 
 interface EditEquilibriumDialogProps {
   equations: Equation[]
+  parameters: Parameter[]
   open: boolean
   onClose: (setEquilibriumDialogOpen: Dispatch<SetStateAction<boolean>>, updatedStateEntity?: StateEntity) => boolean
-  parameters: Parameter[]
   setEquilibriumDialogOpen: Dispatch<SetStateAction<boolean>>
   stateEntities: StateEntity[]
   stateEntity: EquilibriumEntity | null // The Equilibrium state entity.
@@ -260,7 +260,7 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
       </DialogContent>
       <DialogActions>
         <Button onClick={handleCancel}>Cancel</Button>
-        <Button onClick={handleAccept}>Accept</Button>
+        <Button onClick={handleAccept}>Save</Button>
       </DialogActions>
     </Dialog>
   ) : (<></>)

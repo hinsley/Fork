@@ -32,9 +32,9 @@ export interface OrbitEntity extends StateEntity {
 
 interface EditOrbitDialogProps {
   equations: Equation[]
+  parameters: Parameter[]
   open: boolean
   onClose: (setOrbitDialogOpen: Dispatch<SetStateAction<boolean>>, updatedStateEntity?: StateEntity) => boolean
-  parameters: Parameter[]
   setOrbitDialogOpen: Dispatch<SetStateAction<boolean>>
   stateEntities: StateEntity[]
   stateEntity: OrbitEntity | null // The Orbit state entity.
@@ -45,7 +45,6 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
     return null
   }
 
-  const [curve, setCurve] = useState<number[][]>([])
   const [previewRenderKey, setPreviewRenderKey] = useState(0)
   const [previewShowAllStateEntities, setPreviewShowAllStateEntities] = useState(false)
   const [previewShowRealtimeOrbits, setPreviewShowRealtimeOrbits] = useState(false)
@@ -74,7 +73,6 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
       updatedStateEntity.data.integrationTime,
       updatedStateEntity.data.timestep
     )
-    setCurve(curve)
     updatedStateEntity.data.curve = curve
     setPreviewRenderKey(previewRenderKey + 1)
   }
@@ -89,7 +87,7 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
   function handleAccept() {
     // Check whether the name of the edited state entity is unique.
     if (updatedStateEntity.name !== (stateEntity as StateEntity).name) { // Should be able to assume stateEntity isn't null here.
-      const isNameUnique = stateEntities.every((entity) => entity.name !== updatedStateEntity.name)
+      const isNameUnique = stateEntities.every((entity: StateEntity) => entity.name !== updatedStateEntity.name)
       if (!isNameUnique) {
         alert("A state entity with name \"" + updatedStateEntity.name + "\" already exists.")
         return
@@ -190,7 +188,7 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
       </DialogContent>
       <DialogActions>
         <Button onClick={handleCancel}>Cancel</Button>
-        <Button onClick={handleAccept}>Accept</Button>
+        <Button onClick={handleAccept}>Save</Button>
       </DialogActions>
     </Dialog>
   ) : (<></>)

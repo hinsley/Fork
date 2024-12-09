@@ -14,6 +14,7 @@ import {
 import { Equation } from '../../ODEEditor'
 import { StateEntity } from './StateEntitiesMenu'
 import { EquilibriumData } from './EditDialogs/EditEquilibriumDialog'
+import { IsoclineData } from './EditDialogs/EditIsoclineDialog'
 import { OrbitData } from './EditDialogs/EditOrbitDialog'
 
 interface NewStateEntityDialogProps {
@@ -44,6 +45,12 @@ export default function NewStateEntityDialog({ equations, open, onClose }: NewSt
           point: equations.map(() => NaN),
           eigenvalues: equations.map(() => NaN),
           eigenvectors: equations.map(() => equations.map(() => NaN))
+        }
+        break
+      case "Isocline":
+        stateEntityData = {
+          stepSizes: equations.map((_, i) => i < 2 ? 0.1 : 0),
+          squaresEndpoints: []
         }
         break
       case "Orbit":
@@ -83,10 +90,9 @@ export default function NewStateEntityDialog({ equations, open, onClose }: NewSt
           onChange={(e) => setType(e.target.value)}
         >
           <div style={{ fontWeight: "bold", marginBottom: "8px" }}>Entity Type:</div>
-          <FormControlLabel value="Orbit" control={<Radio />} label="Orbit" />
-          <FormControlLabel value="Isocline" control={<Radio />} label="Isocline" />
           <FormControlLabel value="Equilibrium" control={<Radio />} label="Equilibrium" />
-          <FormControlLabel value="Limit cycle" control={<Radio />} label="Limit cycle" />
+          <FormControlLabel value="Isocline" control={<Radio />} label="Isocline" />
+          <FormControlLabel value="Orbit" control={<Radio />} label="Orbit" />
         </RadioGroup>
       </DialogContent>
       <DialogActions>

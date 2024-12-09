@@ -10,6 +10,7 @@ import { StateEntity } from './Continuation/StateEntities/StateEntitiesMenu'
 
 import { EquilibriumData } from './Continuation/StateEntities/EditDialogs/EditEquilibriumDialog'
 import { OrbitData } from './Continuation/StateEntities/EditDialogs/EditOrbitDialog'
+import { IsoclineData } from './Continuation/StateEntities/EditDialogs/EditIsoclineDialog'
 
 const SPATIAL_SCALING = 2e-2
 const TIME_SCALING = 1e-0
@@ -137,6 +138,7 @@ export default function StateSpace({ equations, parameters, stateEntities, setti
 							return (<>
 								<Array
 									id={"Equilibrium-" + i}
+									live={false}
 									channels={3}
 									items={1}
 									expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
@@ -148,6 +150,24 @@ export default function StateSpace({ equations, parameters, stateEntities, setti
 									}}
 								/>
 								<Point points={"#Equilibrium-" + i} shape="sphere" color="green" size={6} />
+							</>)
+						case "Isocline":
+							return (<>
+								{(entity.data as IsoclineData).squaresEndpoints.map((squareEndpoints, j) => {
+									return (<>
+										<Array
+											id={"Isocline-" + i + "-square-" + j}
+											live={false}
+											channels={3}
+											items={
+												// square[1] == 5 || square[1] == 10 ? 2 : 1 // Saddles not implemented yet.
+												1
+											}
+											data={squareEndpoints}
+										/>
+										<Line points={"#Isocline-" + i + "-square-" + j} color="black" start={false} end={false} width={1} />
+									</>)
+								})}
 							</>)
 						case "Orbit":
 							var curveCoordinatesReordered: number[][] = []
@@ -161,7 +181,7 @@ export default function StateSpace({ equations, parameters, stateEntities, setti
 									<Array
 										id={"Orbit-" + i}
 										live={false}
-										channels={(entity.data as OrbitData).curve.length == 0 ? 0 : 3}
+										channels={3}
 										items={1}
 										data={curveCoordinatesReordered}
 									/>
