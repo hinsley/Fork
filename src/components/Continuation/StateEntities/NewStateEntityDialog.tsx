@@ -41,7 +41,9 @@ export default function NewStateEntityDialog({ equations, open, onClose }: NewSt
           initialGuess: equations.map(() => 0),
           maxSteps: 1e2,
           dampingFactor: 1,
-          point: equations.map(() => 0)
+          point: equations.map(() => NaN),
+          eigenvalues: equations.map(() => NaN),
+          eigenvectors: equations.map(() => equations.map(() => NaN))
         }
         break
       case "Orbit":

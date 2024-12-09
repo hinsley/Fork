@@ -2,7 +2,6 @@ import { useState } from 'react'
 import Plot from 'react-plotly.js'
 import { Button, Box, Checkbox, FormControlLabel, TextField, Stack } from '@mui/material'
 import { Equation, Parameter } from '../ODEEditor'
-import { range } from 'mathjs'
 
 import { powerSpectralDensity } from '../../math/powerspectraldensity/psd'
 

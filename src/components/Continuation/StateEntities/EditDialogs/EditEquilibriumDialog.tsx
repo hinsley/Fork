@@ -1,4 +1,6 @@
 import { Dispatch, SetStateAction, useEffect, useState } from 'react'
+import Plot from 'react-plotly.js'
+import { Complex3, isComplex } from 'mathjs'
 import {
   Box,
   Button,
@@ -17,6 +19,7 @@ import StateSpace from "../../../StateSpace"
 import { Equation, Parameter } from "../../../ODEEditor"
 import { StateEntity } from "../StateEntitiesMenu"
 
+import equilibriumEigenpairs from "../../../../math/stateentitycalculation/equilibrium_eigenpairs"
 import solveEquilibrium from "../../../../math/stateentitycalculation/solve_equilibrium"
 
 export interface EquilibriumData {
@@ -24,6 +27,8 @@ export interface EquilibriumData {
   maxSteps: number
   dampingFactor: number
   point: number[]
+  eigenvalues: number[] | Complex3[]
+  eigenvectors: number[][] | Complex3[][]
 }
 
 export interface EquilibriumEntity extends StateEntity {
@@ -48,7 +53,7 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
   const [point, setPoint] = useState(stateEntity.data.point)
   const [previewRenderKey, setPreviewRenderKey] = useState(0)
   const [previewShowAllStateEntities, setPreviewShowAllStateEntities] = useState(false)
-  const [updatedStateEntity, setUpdatedStateEntity] = useState(stateEntity)
+  const [updatedStateEntity, setUpdatedStateEntity] = useState<EquilibriumEntity>(stateEntity)
 
   useEffect(() => {
     if (open) {
@@ -65,11 +70,6 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
   }, [previewShowAllStateEntities])
 
   function handleSolveEquilibrium() {
-    console.log("equations:", equations)
-    console.log("parameters:", parameters)
-    console.log("initial guess:", updatedStateEntity.data.initialGuess)
-    console.log("max steps:", updatedStateEntity.data.maxSteps)
-    console.log("damping factor:", updatedStateEntity.data.dampingFactor)
     const newPoint = solveEquilibrium(
       equations,
       parameters,
@@ -78,12 +78,19 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
       updatedStateEntity.data.dampingFactor
     )
     setPoint(newPoint)
-    if (newPoint.some(isNaN)) {
-      alert("Equilibrium solver failed to converge. Try a different initial guess, increase maximum steps, or decrease damping factor.")
-      return
-    }
     updatedStateEntity.data.point = newPoint
     setPreviewRenderKey(previewRenderKey + 1)
+
+    if (newPoint.some(isNaN)) {
+      updatedStateEntity.data.eigenvalues = equations.map(() => NaN)
+      updatedStateEntity.data.eigenvectors = equations.map(() => equations.map(() => NaN))
+      alert("Equilibrium solver failed to converge. Try a different initial guess, increase maximum steps, or decrease damping factor.")
+      return
+    } else {
+      const [eigenvalues, eigenvectors] = equilibriumEigenpairs(equations, parameters, newPoint)
+      updatedStateEntity.data.eigenvalues = eigenvalues
+      updatedStateEntity.data.eigenvectors = eigenvectors
+    }
   }
 
   function handleCancel() {
@@ -171,9 +178,9 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
           {equations.map((equation, index) => (
             <TextField
               label={equation.variable}
-              type="number"
               value={isNaN(point[index]) ? "NaN" : point[index]}
               key={index}
+              InputProps={{ readOnly: true }}
             />
           ))}
         </Stack>
@@ -194,6 +201,47 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
         }/>
         <FormControlLabel control={<Checkbox checked={previewShowAllStateEntities} onChange={(e) => setPreviewShowAllStateEntities(e.target.checked)} />} label="Show all state entities" />
         {/* TODO: Add a toggle for points flowing in state space. */}
+        <Divider sx={{ my: 2 }} />
+        <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Eigenvalues</div>
+        <Plot
+          data={[
+            {
+              x: updatedStateEntity.data.eigenvalues.map((eigenvalue: number | Complex3) => isComplex(eigenvalue) ? eigenvalue.re : eigenvalue),
+              y: updatedStateEntity.data.eigenvalues.map((eigenvalue: number | Complex3) => isComplex(eigenvalue) ? eigenvalue.im : 0),
+              mode: "markers",
+              type: "scatter"
+            }
+          ]}
+          layout={{
+            title: "Eigenvalues",
+            width: 300,
+            height: 300,
+            xaxis: { title: "Real part" },
+            yaxis: { title: "Imaginary part" },
+          }}
+        />
+        <Stack spacing={2}>
+          {updatedStateEntity.data.eigenvalues.map((eigenvalue: number | Complex3, index: number) => (
+            <TextField
+              label={`Eigenvalue ${index + 1}`}
+              value={isNaN(eigenvalue) && !isComplex(eigenvalue) ? "NaN" : eigenvalue.toString()}
+              key={index}
+              InputProps={{ readOnly: true }}
+            />
+          ))}
+        </Stack>
+        <Divider sx={{ my: 2 }} />
+        <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Eigenvectors</div>
+        <Stack spacing={2}>
+          {updatedStateEntity.data.eigenvectors.map((eigenvector: number[] | Complex3[], index: number) => (
+            <TextField
+              label={`Eigenvector ${index + 1}`}
+              value={"[" + eigenvector.map((value: number | Complex3) => value.toString()).join(", ") + "]"}
+              key={index}
+              InputProps={{ readOnly: true }}
+            />
+          ))}
+        </Stack>
       </DialogContent>
       <DialogActions>
         <Button onClick={handleCancel}>Cancel</Button>

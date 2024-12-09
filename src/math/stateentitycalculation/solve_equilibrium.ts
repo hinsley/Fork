@@ -1,4 +1,4 @@
-import { Matrix, matrix, multiply, norm, pinv, subtract } from "mathjs"
+import { matrix, multiply, norm, pinv, subtract } from "mathjs"
 
 import { Equation, Parameter } from "../../ODEEditor"
 
