@@ -13,7 +13,7 @@ import {
   TextField
 } from '@mui/material'
 
-import StateSpace from "../../../StateSpace"
+import StateSpace, { defaultStateSpaceSettings } from "../../../StateSpace"
 import { Equation, Parameter } from "../../../ODEEditor"
 import { StateEntity } from "../StateEntitiesMenu"
 
@@ -48,6 +48,7 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
   const [curve, setCurve] = useState<number[][]>([])
   const [previewRenderKey, setPreviewRenderKey] = useState(0)
   const [previewShowAllStateEntities, setPreviewShowAllStateEntities] = useState(false)
+  const [previewShowRealtimeOrbits, setPreviewShowRealtimeOrbits] = useState(false)
   const [updatedStateEntity, setUpdatedStateEntity] = useState(stateEntity)
 
   useEffect(() => {
@@ -56,13 +57,14 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
       setUpdatedStateEntity(stateEntity)
       // Reset state space preview configuration.
       setPreviewShowAllStateEntities(false)
+      setPreviewShowRealtimeOrbits(false)
     }
   }, [open])
 
   useEffect(() => {
     // Update the preview when the state space preview settings are changed.
     setPreviewRenderKey(previewRenderKey + 1)
-  }, [previewShowAllStateEntities])
+  }, [previewShowAllStateEntities, previewShowRealtimeOrbits])
 
   function handleIntegrate() {
     const curve = integrateOrbitCurve(
@@ -172,9 +174,19 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
           stateEntities.map(entity => 
             entity.name === stateEntity.name ? updatedStateEntity : entity
           ) : [updatedStateEntity]
-        }/>
-        <FormControlLabel control={<Checkbox checked={previewShowAllStateEntities} onChange={(e) => setPreviewShowAllStateEntities(e.target.checked)} />} label="Show all state entities" />
-        {/* TODO: Add a toggle for points flowing in state space. */}
+        } settings={{ ...defaultStateSpaceSettings, realtimeOrbits: previewShowRealtimeOrbits }}/>
+        <Box>
+          <FormControlLabel
+            control={<Checkbox checked={previewShowAllStateEntities} onChange={(e) => setPreviewShowAllStateEntities(e.target.checked)} />}
+            label="Show all state entities"
+          />
+        </Box>
+        <Box>
+          <FormControlLabel
+            control={<Checkbox checked={previewShowRealtimeOrbits} onChange={(e) => setPreviewShowRealtimeOrbits(e.target.checked)} />}
+            label="Show realtime orbits"
+          />
+        </Box>
       </DialogContent>
       <DialogActions>
         <Button onClick={handleCancel}>Cancel</Button>

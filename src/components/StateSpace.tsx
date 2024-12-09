@@ -27,9 +27,18 @@ interface StateSpaceProps {
 	equations: Equation[]
 	parameters: Parameter[]
 	stateEntities: StateEntity[]
+	settings: StateSpaceSettings
 }
 
-export default function StateSpace({ equations, parameters, stateEntities }: StateSpaceProps) {
+export interface StateSpaceSettings {
+	realtimeOrbits: boolean
+}
+
+export const defaultStateSpaceSettings: StateSpaceSettings = {
+	realtimeOrbits: true
+}
+
+export default function StateSpace({ equations, parameters, stateEntities, settings }: StateSpaceProps) {
 	let eqs = [...equations]
 	while (eqs.length < 3) { // Stub in zero for the extra equations if there are less than three.
 		let i = eqs.length
@@ -47,7 +56,7 @@ export default function StateSpace({ equations, parameters, stateEntities }: Sta
 	}
 
 	// Initialize trajectories to plot in "realtime".
-	const [points, setPoints] = useState(globalThis.Array.from({ length: NUMBER_OF_POINTS }, (_, i) => [(i+1) * 1e2 / NUMBER_OF_POINTS, ...globalThis.Array(eqs.length - 1).fill((Math.random() - 0.5) * 1e-6)]))
+	const [points, setPoints] = useState(settings.realtimeOrbits ? globalThis.Array.from({ length: NUMBER_OF_POINTS }, (_, i) => [(i+1) * 1e2 / NUMBER_OF_POINTS, ...globalThis.Array(eqs.length - 1).fill((Math.random() - 0.5) * 1e-6)]) : [])
 
 	// Progress a point forward in time.
 	function stepPoint(point: number[], dt: number) {
@@ -108,17 +117,19 @@ export default function StateSpace({ equations, parameters, stateEntities }: Sta
 				/>
 				<Text id="x-label" data={[equations.length >= 1 ? equations[0].variable : '']} width={32 * SPATIAL_SCALING} />
 				<Label text="#x-label" />
-				<Array
-					id="points"
-					channels={3}
-					items={NUMBER_OF_POINTS}
-					realtime={true}
-					expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
-						setPoints(points.map((point) => stepPoint(point, dt * TIME_SCALING)))
-						points.forEach(point => emit(point[1] * SPATIAL_SCALING, point[2] * SPATIAL_SCALING, point[0] * SPATIAL_SCALING))
-					}}
-				/>
-				<Point points="#points" shape="sphere" color="red" size={2} />
+				{settings.realtimeOrbits && <>
+					<Array
+						id="points"
+						channels={3}
+						items={NUMBER_OF_POINTS}
+						realtime={true}
+						expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
+							setPoints(points.map((point) => stepPoint(point, dt * TIME_SCALING)))
+							points.forEach(point => emit(point[1] * SPATIAL_SCALING, point[2] * SPATIAL_SCALING, point[0] * SPATIAL_SCALING))
+						}}
+					/>
+					<Point points="#points" shape="sphere" color="red" size={2} />
+				</>}
 				{ // Render state entities.
 				stateEntities.map((entity, i) => {
 					switch (entity.type) {

@@ -4,7 +4,7 @@ import { Box } from '@mui/material'
 import { compile } from 'mathjs'
 
 import ODEEditor, { Equation, Parameter } from './components/ODEEditor.tsx'
-import StateSpace from './components/StateSpace.tsx'
+import StateSpace, { StateSpaceSettings, defaultStateSpaceSettings } from './components/StateSpace.tsx'
 import Continuation from './components/Continuation/Continuation.tsx'
 import { StateEntity } from './components/Continuation/StateEntities/StateEntitiesMenu.tsx'
 import AttractorAnalysis from './components/AttractorAnalysis/AttractorAnalysis.tsx'
@@ -38,7 +38,7 @@ export default function App() {
           {(() => {
             switch (currentView) {
               case "state-space":
-                return <StateSpace equations={equations} parameters={parameters} stateEntities={stateEntities} />
+                return <StateSpace equations={equations} parameters={parameters} stateEntities={stateEntities} settings={defaultStateSpaceSettings} />
               case "equations":
                 return <ODEEditor equations={equations} setEquations={setEquations} parameters={parameters} setParameters={setParameters} />
               case "continuation":

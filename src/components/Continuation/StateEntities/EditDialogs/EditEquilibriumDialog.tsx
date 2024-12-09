@@ -15,7 +15,7 @@ import {
   TextField
 } from '@mui/material'
 
-import StateSpace from "../../../StateSpace"
+import StateSpace, { defaultStateSpaceSettings } from "../../../StateSpace"
 import { Equation, Parameter } from "../../../ODEEditor"
 import { StateEntity } from "../StateEntitiesMenu"
 
@@ -50,9 +50,9 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
     return null
   }
 
-  const [point, setPoint] = useState(stateEntity.data.point)
   const [previewRenderKey, setPreviewRenderKey] = useState(0)
   const [previewShowAllStateEntities, setPreviewShowAllStateEntities] = useState(false)
+  const [previewShowRealtimeOrbits, setPreviewShowRealtimeOrbits] = useState(false)
   const [updatedStateEntity, setUpdatedStateEntity] = useState<EquilibriumEntity>(stateEntity)
 
   useEffect(() => {
@@ -61,13 +61,14 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
       setUpdatedStateEntity(stateEntity)
       // Reset state space preview configuration.
       setPreviewShowAllStateEntities(false)
+      setPreviewShowRealtimeOrbits(false)
     }
   }, [open])
 
   useEffect(() => {
     // Update the preview when the state space preview settings are changed.
     setPreviewRenderKey(previewRenderKey + 1)
-  }, [previewShowAllStateEntities])
+  }, [previewShowAllStateEntities, previewShowRealtimeOrbits])
 
   function handleSolveEquilibrium() {
     const newPoint = solveEquilibrium(
@@ -77,7 +78,6 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
       updatedStateEntity.data.maxSteps,
       updatedStateEntity.data.dampingFactor
     )
-    setPoint(newPoint)
     updatedStateEntity.data.point = newPoint
     setPreviewRenderKey(previewRenderKey + 1)
 
@@ -87,9 +87,14 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
       alert("Equilibrium solver failed to converge. Try a different initial guess, increase maximum steps, or decrease damping factor.")
       return
     } else {
-      const [eigenvalues, eigenvectors] = equilibriumEigenpairs(equations, parameters, newPoint)
-      updatedStateEntity.data.eigenvalues = eigenvalues
-      updatedStateEntity.data.eigenvectors = eigenvectors
+      try {
+        const [eigenvalues, eigenvectors] = equilibriumEigenpairs(equations, parameters, newPoint)
+        updatedStateEntity.data.eigenvalues = eigenvalues
+        updatedStateEntity.data.eigenvectors = eigenvectors
+      } catch (error) {
+        alert((error as Error).message)
+        return
+      }
     }
   }
 
@@ -178,7 +183,7 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
           {equations.map((equation, index) => (
             <TextField
               label={equation.variable}
-              value={isNaN(point[index]) ? "NaN" : point[index]}
+              value={isNaN(updatedStateEntity.data.point[index]) ? "NaN" : updatedStateEntity.data.point[index]}
               key={index}
               InputProps={{ readOnly: true }}
             />
@@ -198,9 +203,19 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
           stateEntities.map(entity => 
             entity.name === stateEntity.name ? updatedStateEntity : entity
           ) : [updatedStateEntity]
-        }/>
-        <FormControlLabel control={<Checkbox checked={previewShowAllStateEntities} onChange={(e) => setPreviewShowAllStateEntities(e.target.checked)} />} label="Show all state entities" />
-        {/* TODO: Add a toggle for points flowing in state space. */}
+        } settings={{ ...defaultStateSpaceSettings, realtimeOrbits: previewShowRealtimeOrbits }}/>
+        <Box>
+          <FormControlLabel
+            control={<Checkbox checked={previewShowAllStateEntities} onChange={(e) => setPreviewShowAllStateEntities(e.target.checked)} />}
+            label="Show all state entities"
+          />
+        </Box>
+        <Box>
+          <FormControlLabel
+            control={<Checkbox checked={previewShowRealtimeOrbits} onChange={(e) => setPreviewShowRealtimeOrbits(e.target.checked)} />}
+            label="Show realtime orbits"
+          />
+        </Box>
         <Divider sx={{ my: 2 }} />
         <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Eigenvalues</div>
         <Plot
