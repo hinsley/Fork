@@ -95,7 +95,7 @@ export default function conjoinLineSegments(
 
     if (node1LineStart !== -1) {
       // node1 is the start of an existing line (line1).
-      if (node2LineStart !== -1) {
+      if (node2LineStart !== -1 && node2LineStart !== node1LineStart) {
         // node2 is the start of an existing line (line2).
         // New line should be reverse-line1 concatenated by line2.
         // Reverse line1.
@@ -104,20 +104,20 @@ export default function conjoinLineSegments(
         lines[node1LineStart][0].next = lines[node2LineStart][0]
         lines[node2LineStart][0].prev = lines[node1LineStart][0]
         // Specify endpoints for new line.
-        newLine = [lines[node1LineStart][1], lines[node2LineEnd][1]]
+        newLine = [lines[node1LineStart][1], lines[node2LineStart][1]]
         // Remove line1 and line2 from lines.
         lines.splice(node1LineStart, 1)
         lines.splice(node2LineStart, 1)
         // Add new line to lines.
         lines.push(newLine)
-      } else if (node2LineEnd !== -1) {
+      } else if (node2LineEnd !== -1 && node2LineEnd !== node1LineStart) {
         // node2 is the end of an existing line (line2).
         // New line should be line2 concatenated by line1.
         // Conjoin the two lines at the new segment.
         lines[node1LineStart][0].prev = lines[node2LineEnd][1]
         lines[node2LineEnd][1].next = lines[node1LineStart][0]
         // Specify endpoints for new line.
-        newLine = [lines[node2LineStart][0], lines[node1LineEnd][1]]
+        newLine = [lines[node2LineEnd][0], lines[node1LineStart][1]]
         // Remove line1 and line2 from lines.
         lines.splice(node1LineStart, 1)
         lines.splice(node2LineEnd, 1)
@@ -133,7 +133,7 @@ export default function conjoinLineSegments(
       }
     } else if (node1LineEnd !== -1) {
       // node1 is the end of an existing line (line1).
-      if (node2LineStart !== -1) {
+      if (node2LineStart !== -1 && node2LineStart !== node1LineEnd) {
         // node2 is the start of an existing line (line2).
         // New line should be line1 concatenated by line2.
         // Conjoin the two lines at the new segment.
@@ -146,7 +146,7 @@ export default function conjoinLineSegments(
         lines.splice(node2LineStart, 1)
         // Add new line to lines.
         lines.push(newLine)
-      } else if (node2LineEnd !== -1) {
+      } else if (node2LineEnd !== -1 && node2LineEnd !== node1LineEnd) {
         // node2 is the end of an existing line (line2).
         // New line should be line1 concatenated by reverse-line2.
         // Reverse line2.

@@ -52,7 +52,7 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
 
   const [isoclineExpression, setIsoclineExpression] = useState(equations.length > 0 ? equations[0].expression : "")
   const [isoclineValue, setIsoclineValue] = useState(0)
-  const [resolutions, setResolutions] = useState<number[]>(equations.map((_, i) => i < 2 ? 20 : 1))
+  const [resolutions, setResolutions] = useState<number[]>(equations.map(() => 100))
 
   useEffect(() => {
     if (open) {

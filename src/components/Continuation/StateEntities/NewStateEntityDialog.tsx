@@ -50,8 +50,8 @@ export default function NewStateEntityDialog({ equations, open, onClose }: NewSt
       case "Isocline":
         stateEntityData = {
           lines: [],
-          ranges: equations.map((_, i) => i < 2 ? [-10, 10] : [0, 0]),
-          stepSizes: equations.map((_, i) => i < 2 ? 0.1 : 0)
+          ranges: equations.map(() => [-30, 30]),
+          stepSizes: equations.map(() => (30 - (-30)) / (100 - 1))
         }
         break
       case "Orbit":
