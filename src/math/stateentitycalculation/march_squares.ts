@@ -34,7 +34,8 @@ export default function marchSquares(
 
   const stepSizes = ranges.map((range, i) => (range[1] - range[0]) / Math.max(1, resolutions[i] - 1))
   const prevRow = Array(resolutions[0]).fill(NaN)
-  var prevValue = NaN
+  let prevValue = NaN
+  let prevRowPrevValue = NaN
   const squareTypes: [number[], number][] = []
 
   // Iterate over third dimension if it exists; otherwise just do one step.
@@ -52,10 +53,10 @@ export default function marchSquares(
         // Check if we're at least on the second row and the second entry of the current row.
         if (j > 0 && i > 0) {
           // Calculate the square type.
-          const squareType = (prevRow[i - 1] > isoclineValue ? 1 : 0)
-            + (prevRow[i] > isoclineValue ? 2 : 0)
-            + (value > isoclineValue ? 4 : 0)
-            + (prevValue > isoclineValue ? 8 : 0)
+          const squareType = (prevRowPrevValue > isoclineValue ? 8 : 0)
+            + (prevRow[i] > isoclineValue ? 4 : 0)
+            + (value > isoclineValue ? 2 : 0)
+            + (prevValue > isoclineValue ? 1 : 0)
 
           // Empty square types are associated with values 0 and 15.
           if (squareType !== 0 && squareType !== 15) {
@@ -68,16 +69,18 @@ export default function marchSquares(
               squareType
             ])
           }
+
+          // TODO: Handle saddles.
         }
         
+        // Cache for optimization.
+        prevRowPrevValue = prevRow[i]
+        prevRow[i] = value
         // Save previous value so it's not overwritten when we cache for the next row.
         prevValue = value
-        // Cache the value for square type calculation upon processing the next row.
-        prevRow[i] = value
       }
     }
   }
 
-  console.log(squareTypes)
   return squareTypes
 }

@@ -153,19 +153,16 @@ export default function StateSpace({ equations, parameters, stateEntities, setti
 							</>)
 						case "Isocline":
 							return (<>
-								{(entity.data as IsoclineData).squaresEndpoints.map((squareEndpoints, j) => {
+								{(entity.data as IsoclineData).lines.map((line, j) => {
 									return (<>
 										<Array
-											id={"Isocline-" + i + "-square-" + j}
+											id={"Isocline-" + i + "-line-" + j}
 											live={false}
 											channels={3}
-											items={
-												// square[1] == 5 || square[1] == 10 ? 2 : 1 // Saddles not implemented yet.
-												1
-											}
-											data={squareEndpoints}
+											items={1}
+											data={line}
 										/>
-										<Line points={"#Isocline-" + i + "-square-" + j} color="black" start={false} end={false} width={1} />
+										<Line points={"#Isocline-" + i + "-line-" + j} color="black" start={false} end={false} width={1} />
 									</>)
 								})}
 							</>)

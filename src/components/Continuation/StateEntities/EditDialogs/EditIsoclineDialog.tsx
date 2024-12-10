@@ -17,11 +17,13 @@ import StateSpace, { defaultStateSpaceSettings } from "../../../StateSpace"
 import { Equation, Parameter } from "../../../ODEEditor"
 import { StateEntity } from "../StateEntitiesMenu"
 
+import conjoinLineSegments from "../../../../math/stateentitycalculation/conjoin_line_segments"
 import marchSquares from "../../../../math/stateentitycalculation/march_squares"
 
 export interface IsoclineData {
+  lines: number[][][]
+  ranges: [number, number][]
   stepSizes: number[]
-  squaresEndpoints: [number[], number[]][]
 }
 
 export interface IsoclineEntity extends StateEntity {
@@ -50,8 +52,7 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
 
   const [isoclineExpression, setIsoclineExpression] = useState(equations.length > 0 ? equations[0].expression : "")
   const [isoclineValue, setIsoclineValue] = useState(0)
-  const [resolutions, setResolutions] = useState(equations.map((_, i) => i < 2 ? 21 : 1))
-  const [ranges, setRanges] = useState(equations.map((_, i) => i < 2 ? [-10, 10] : [0, 0]))
+  const [resolutions, setResolutions] = useState<number[]>(equations.map((_, i) => i < 2 ? 20 : 1))
 
   useEffect(() => {
     if (open) {
@@ -74,40 +75,44 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
       parameters,
       isoclineExpression,
       isoclineValue,
-      ranges,
+      updatedStateEntity.data.ranges,
       resolutions
     )
 
     // Rasterize squares into endpoints.
     const SPATIAL_SCALING = 2e-2 // TODO: Retrieve this from state space settings.
-    const squaresEndpoints: [number[], number[]][] = []
-    squareTypes.forEach((square: [number[], number], i: number) => {
-      var endPoints: [number[], number[]] = [[], []]
+    const squaresEndpoints: number[][][] = []
+    squareTypes.forEach((square: [number[], number], _: number) => {
+      let endPoints: number[][] = []
       const coords = [
         [
-          (square[0][1] - (updatedStateEntity.data as IsoclineData).stepSizes[1]) * SPATIAL_SCALING,
-          square[0][2] * SPATIAL_SCALING,
-          (square[0][0] - (updatedStateEntity.data as IsoclineData).stepSizes[0]) * SPATIAL_SCALING
+          square[0][1],
+          square[0][2],
+          square[0][0] - (updatedStateEntity.data as IsoclineData).stepSizes[0]
         ],
         [
-          (square[0][1] - (updatedStateEntity.data as IsoclineData).stepSizes[1]) * SPATIAL_SCALING,
-          square[0][2] * SPATIAL_SCALING,
-          square[0][0] * SPATIAL_SCALING
+          square[0][1],
+          square[0][2],
+          square[0][0]
         ],
         [
-          square[0][1] * SPATIAL_SCALING,
-          square[0][2] * SPATIAL_SCALING,
-          square[0][0] * SPATIAL_SCALING
+          square[0][1] - (updatedStateEntity.data as IsoclineData).stepSizes[1],
+          square[0][2],
+          square[0][0]
         ],
         [
-          square[0][1] * SPATIAL_SCALING,
-          square[0][2] * SPATIAL_SCALING,
-          (square[0][0] - (updatedStateEntity.data as IsoclineData).stepSizes[0]) * SPATIAL_SCALING
+          square[0][1] - (updatedStateEntity.data as IsoclineData).stepSizes[1],
+          square[0][2],
+          square[0][0] - (updatedStateEntity.data as IsoclineData).stepSizes[0]
         ]
       ]
       
       function averageCoords(coord1: number[], coord2: number[]) {
-        return [(coord1[0] + coord2[0]) / 2, (coord1[1] + coord2[1]) / 2, (coord1[2] + coord2[2]) / 2]
+        return [
+          (coord1[0] + coord2[0]) / 2,
+          (coord1[1] + coord2[1]) / 2,
+          (coord1[2] + coord2[2]) / 2
+        ]
       }
 
       switch (square[1]) {
@@ -140,10 +145,22 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
           ]
           break
         case 5:
-          // Saddle type 1. Not implemented yet.
+          // Saddle type 1. Union of types 2 and 7 (or 13 and 8).
+          endPoints = [
+            averageCoords(coords[0], coords[1]), // First line, first endpoint.
+            averageCoords(coords[1], coords[2]), // First line, second endpoint.
+            averageCoords(coords[1], coords[2]), // Second line, first endpoint.
+            averageCoords(coords[2], coords[3]) // Second line, second endpoint.
+          ]
           break
         case 10:
-          // Saddle type 2. Not implemented yet.
+          // Saddle type 2. Union of types 1 and 4 (or 14 and 11).
+          endPoints = [
+            averageCoords(coords[0], coords[1]), // First line, first endpoint.
+            averageCoords(coords[0], coords[3]), // First line, second endpoint.
+            averageCoords(coords[1], coords[2]), // Second line, first endpoint.
+            averageCoords(coords[2], coords[3]) // Second line, second endpoint.
+          ]
           break
         case 6:
         case 9:
@@ -155,15 +172,42 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
         case 7:
         case 8:
           endPoints = [
-            averageCoords(coords[1], coords[2]),
+            averageCoords(coords[0], coords[3]),
             averageCoords(coords[2], coords[3])
           ]
           break
       }
-      squaresEndpoints.push(endPoints)
+
+      for (let i = 0; i < endPoints.length; i += 2) {
+        squaresEndpoints.push([endPoints[i], endPoints[i + 1]])
+      }
     })
 
-    updatedStateEntity.data.squaresEndpoints = squaresEndpoints
+    // Collect line segments into lines based on agreeing endpoints.
+    let lines: number[][][] = []
+
+    // Get indices where each isocline layer begins.
+    const isoclineLayerIndices: number[] = [0]
+    for (let i = 1; i < squaresEndpoints.length; i++) {
+      if (squaresEndpoints[i][0][1] !== squaresEndpoints[i - 1][0][1]) {
+        isoclineLayerIndices.push(i)
+      }
+    }
+
+    // For each isocline layer, store lines as maximal chains of segments which
+    // meet at endpoints.
+    for (let i = 0; i < isoclineLayerIndices.length; i++) {
+      const layer = squaresEndpoints.slice(isoclineLayerIndices[i], isoclineLayerIndices[i + 1])
+      const layerLines = conjoinLineSegments(layer as [number[], number[]][])
+      lines = [...lines, ...layerLines]
+    }
+
+    // Save lines.
+    updatedStateEntity.data.lines = lines.map(line =>
+      line.map(point =>
+        point.map(coord => coord * SPATIAL_SCALING)
+      )
+    )
     setPreviewRenderKey(previewRenderKey + 1)
   }
 
@@ -171,7 +215,7 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
     onClose(setIsoclineDialogOpen)
     // Reset form fields in case edit button is clicked again.
     // Should be safe to assume stateEntity isn't null here.
-    setUpdatedStateEntity(stateEntity as StateEntity)
+    setUpdatedStateEntity(stateEntity as IsoclineEntity)
   }
 
   function handleAccept() {
@@ -198,7 +242,7 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
       ...updatedStateEntity.data,
       stepSizes: [
         ...updatedStateEntity.data.stepSizes.slice(0, index),
-        (ranges[index][1] - ranges[index][0]) / Math.max(1, Number(e.target.value) - 1),
+        (updatedStateEntity.data.ranges[index][1] - updatedStateEntity.data.ranges[index][0]) / Math.max(1, Number(e.target.value) - 1),
         ...updatedStateEntity.data.stepSizes.slice(index + 1)
       ]
     }})
@@ -243,24 +287,30 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
                   <TextField
                     label={equation.variable + " minimum"}
                     type="number"
-                    value={ranges[index][0]}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRanges([
-                      ...ranges.slice(0, index),
-                      [Number(e.target.value), ranges[index][1]],
-                      ...ranges.slice(index + 1)
-                    ])}
+                    value={updatedStateEntity.data.ranges[index][0]}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUpdatedStateEntity({...updatedStateEntity, data: {
+                      ...updatedStateEntity.data,
+                      ranges: [
+                        ...updatedStateEntity.data.ranges.slice(0, index),
+                        [Number(e.target.value), updatedStateEntity.data.ranges[index][1]],
+                        ...updatedStateEntity.data.ranges.slice(index + 1)
+                      ]
+                    }})}
                   />
                 </Box>
                 <Box key={index * 3 + 1}>
                   <TextField
                     label={equation.variable + " maximum"}
                     type="number"
-                    value={ranges[index][1]}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRanges([
-                      ...ranges.slice(0, index),
-                      [ranges[index][0], Number(e.target.value)],
-                      ...ranges.slice(index + 1)
-                    ])}
+                    value={updatedStateEntity.data.ranges[index][1]}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUpdatedStateEntity({...updatedStateEntity, data: {
+                      ...updatedStateEntity.data,
+                      ranges: [
+                        ...updatedStateEntity.data.ranges.slice(0, index),
+                        [updatedStateEntity.data.ranges[index][0], Number(e.target.value)],
+                        ...updatedStateEntity.data.ranges.slice(index + 1)
+                      ]
+                    }})}
                   />
                 </Box>
                 <Box key={index * 3 + 2}>
@@ -277,12 +327,15 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
                 <TextField
                   label={equation.variable + " value"}
                   type="number"
-                  value={ranges[index][0]}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRanges([
-                    ...ranges.slice(0, index),
-                    [Number(e.target.value), Number(e.target.value)],
-                    ...ranges.slice(index + 1)
-                  ])}
+                  value={updatedStateEntity.data.ranges[index][0]}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUpdatedStateEntity({...updatedStateEntity, data: {
+                    ...updatedStateEntity.data,
+                    ranges: [
+                      ...updatedStateEntity.data.ranges.slice(0, index),
+                      [Number(e.target.value), Number(e.target.value)],
+                      ...updatedStateEntity.data.ranges.slice(index + 1)
+                    ]
+                  }})}
                 />
               </Box>
             </>)}

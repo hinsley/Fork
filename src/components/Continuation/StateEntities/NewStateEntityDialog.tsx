@@ -35,7 +35,7 @@ export default function NewStateEntityDialog({ equations, open, onClose }: NewSt
   }
 
   function handleCreate() {
-    var stateEntityData: EquilibriumData | OrbitData
+    var stateEntityData: EquilibriumData | IsoclineData | OrbitData
     switch (type) {
       case "Equilibrium":
         stateEntityData = {
@@ -49,8 +49,9 @@ export default function NewStateEntityDialog({ equations, open, onClose }: NewSt
         break
       case "Isocline":
         stateEntityData = {
-          stepSizes: equations.map((_, i) => i < 2 ? 0.1 : 0),
-          squaresEndpoints: []
+          lines: [],
+          ranges: equations.map((_, i) => i < 2 ? [-10, 10] : [0, 0]),
+          stepSizes: equations.map((_, i) => i < 2 ? 0.1 : 0)
         }
         break
       case "Orbit":
