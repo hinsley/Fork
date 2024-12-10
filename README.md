@@ -2,6 +2,16 @@
 Fork is a browser-based numerical bifurcation continuation software application, supporting the analysis of smooth finite-dimensional maps and systems of ordinary differential equations.
 The goal is to support all popular mobile and desktop devices.
 
+## Supporters
+Fork is developed in my spare time and incentivized both by my personal use of the software and by [Patreon support](https://www.patreon.com/ForkDynamics).
+People who have supported Fork on Patreon are listed below.
+
+### Current Supporters
+
+- Christopher Hitzel
+- Jacob Price
+- Julien Brenneck
+
 ## Bifurcations by codimension
 A checkmark denotes that support for the bifurcation type has been implemented.
 I will have to study some more theory of numerical bifurcation analysis in maps before putting together a to-do list there.
