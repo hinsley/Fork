@@ -1,5 +1,6 @@
 import React, { Dispatch, SetStateAction, useEffect, useState } from "react"
 import {
+  Autocomplete,
   Box,
   Button,
   Checkbox,
@@ -52,10 +53,12 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
     return null
   }
 
+  const textFieldWidth = 230 // Pixel width of text fields.
+
   const [previewRenderKey, setPreviewRenderKey] = useState(0)
   const [previewShowAllStateEntities, setPreviewShowAllStateEntities] = useState(false)
   const [previewShowRealtimeOrbits, setPreviewShowRealtimeOrbits] = useState(false)
-  const [updatedStateEntity, setUpdatedStateEntity] = useState(stateEntity)
+  const [updatedStateEntity, setUpdatedStateEntity] = useState({...stateEntity})
 
   useEffect(() => {
     if (open) {
@@ -206,11 +209,17 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
     }
 
     // Save lines.
-    updatedStateEntity.data.lines = lines.map(line =>
-      line.map(point =>
-        point.map(coord => coord * SPATIAL_SCALING)
-      )
-    )
+    setUpdatedStateEntity({
+      ...updatedStateEntity,
+      data: {
+        ...updatedStateEntity.data,
+        lines: lines.map(line =>
+          line.map(point =>
+            point.map(coord => coord * SPATIAL_SCALING)
+          )
+        )
+      }
+    })
     setPreviewRenderKey(previewRenderKey + 1)
   }
 
@@ -260,26 +269,33 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
     <Dialog open={open}>
       <DialogTitle>Editing isocline "{stateEntity.name}"</DialogTitle>
       <DialogContent dividers>
-        <Box>
+        <Stack spacing={2} sx={{ alignItems: "center" }}>
           <TextField
             label="Name"
             value={updatedStateEntity.name}
             onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, name: e.target.value })}
+            sx={{ width: textFieldWidth }}
           />
-        </Box>
+        </Stack>
         <Divider sx={{ my: 2 }} />
         <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Isocline evaluation</div>
-        <Box sx={{ mb: 2 }}>
-          <TextField
-            label="Expression"
+        <Stack spacing={2} sx={{ alignItems: "center" }}>
+          <Autocomplete
+            freeSolo
+            disableClearable
+            options={equations.map(equation => equation.expression)}
             value={updatedStateEntity.formParameters.expression}
-            onChange={(e) => setUpdatedStateEntity({...updatedStateEntity, formParameters: {
-              ...updatedStateEntity.formParameters,
-              expression: e.target.value
-            }})}
+            onChange={(_, newValue) => setUpdatedStateEntity({...updatedStateEntity, formParameters: {
+                ...updatedStateEntity.formParameters,
+                expression: newValue === null ? "" : newValue
+              }})}
+            inputValue={updatedStateEntity.formParameters.expression}
+            onInputChange={(_, newValue) => setUpdatedStateEntity({...updatedStateEntity, formParameters: {
+                ...updatedStateEntity.formParameters,
+                expression: newValue === null ? "" : newValue
+              }})}
+            renderInput={(params) => <TextField {...params} sx={{ width: textFieldWidth }} label="Expression" />}
           />
-        </Box>
-        <Box>
           <TextField
             label="Value"
             type="number"
@@ -288,11 +304,12 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
               ...updatedStateEntity.formParameters,
               value: Number(e.target.value)
             }})}
+            sx={{ width: textFieldWidth }}
           />
-        </Box>
+        </Stack>
         <Divider sx={{ my: 2 }} />
         <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Variable ranges</div>
-        <Stack spacing={2}>
+        <Stack spacing={2} sx={{ alignItems: "center" }}>
           {equations.map((equation, index) => (
             <>
               <div style={{ fontStyle: "italic", marginBottom: "8px" }}>{equation.variable}</div>
@@ -310,6 +327,7 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
                         ...updatedStateEntity.data.ranges.slice(index + 1)
                       ]
                     }})}
+                    sx={{ width: textFieldWidth }}
                   />
                 </Box>
                 <Box key={index * 3 + 1}>
@@ -325,6 +343,7 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
                         ...updatedStateEntity.data.ranges.slice(index + 1)
                       ]
                     }})}
+                    sx={{ width: textFieldWidth }}
                   />
                 </Box>
                 <Box key={index * 3 + 2}>
@@ -333,6 +352,7 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
                     type="number"
                     value={updatedStateEntity.formParameters.resolutions[index]}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleSetResolution(e, index)}
+                    sx={{ width: textFieldWidth }}
                   />
                 </Box>
               </>
@@ -350,6 +370,7 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
                       ...updatedStateEntity.data.ranges.slice(index + 1)
                     ]
                   }})}
+                  sx={{ width: textFieldWidth }}
                 />
               </Box>
             </>)}
@@ -358,13 +379,15 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
         </Stack>
         <Divider sx={{ my: 2 }} />
         <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Isocline</div>
-        <Button
-          variant="contained"
-          fullWidth
-          onClick={handleCalculate}
-        >
-          Calculate
-        </Button>
+        <Stack spacing={2} sx={{ alignItems: "center" }}>
+          <Button
+            variant="contained"
+            onClick={handleCalculate}
+            sx={{ width: textFieldWidth }}
+          >
+            Calculate
+          </Button>
+        </Stack>
         <Divider sx={{ my: 2 }} />
         <StateSpace key={previewRenderKey} equations={equations} parameters={parameters} stateEntities={
           previewShowAllStateEntities ?

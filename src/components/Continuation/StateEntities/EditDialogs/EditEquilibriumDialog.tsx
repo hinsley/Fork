@@ -54,6 +54,8 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
     return null
   }
 
+  const textFieldWidth = 230 // Pixel width of text fields.
+
   const [previewRenderKey, setPreviewRenderKey] = useState(0)
   const [previewShowAllStateEntities, setPreviewShowAllStateEntities] = useState(false)
   const [previewShowRealtimeOrbits, setPreviewShowRealtimeOrbits] = useState(false)
@@ -127,16 +129,17 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
     <Dialog open={open}>
       <DialogTitle>Editing equilibrium "{stateEntity.name}"</DialogTitle>
       <DialogContent dividers>
-        <Box>
+        <Stack spacing={2} sx={{ alignItems: "center" }}>
           <TextField
             label="Name"
             value={updatedStateEntity.name}
             onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, name: e.target.value })}
+            sx={{ width: textFieldWidth }}
           />
-        </Box>
+        </Stack>
         <Divider sx={{ my: 2 }} />
         <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Initial guess</div>
-        <Stack spacing={2}>
+        <Stack spacing={2} sx={{ alignItems: "center" }}>
           {equations.map((equation, index) => (
             <Box key={index}>
               <TextField
@@ -151,13 +154,14 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
                     ...updatedStateEntity.formParameters.initialGuess.slice(index + 1)
                   ]
                 }})}
+                sx={{ width: textFieldWidth }}
               />
             </Box>
           ))}
         </Stack>
         <Divider sx={{ my: 2 }} />
         <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Iteration settings</div>
-        <Box>
+        <Stack spacing={2} sx={{ alignItems: "center" }}>
           <TextField
             label="Maximum steps"
             type="number"
@@ -166,10 +170,8 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
               ...updatedStateEntity.formParameters,
               maxSteps: Number(e.target.value)
             }})}
-            sx={{ mb: 2 }}
+            sx={{ width: textFieldWidth }}
           />
-        </Box>
-        <Box>
           <TextField
             label="Damping factor"
             type="number"
@@ -178,28 +180,29 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
               ...updatedStateEntity.formParameters,
               dampingFactor: Number(e.target.value)
             }})}
-            sx={{ mb: 2 }}
+            sx={{ width: textFieldWidth }}
           />
-        </Box>
+        </Stack>
         <Divider sx={{ my: 2 }} />
         <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Point</div>
-        <Stack spacing={2} sx={{ mb: 2 }}>
+        <Stack spacing={2} sx={{ mb: 2, alignItems: "center" }}>
           {equations.map((equation, index) => (
             <TextField
               label={equation.variable}
               value={isNaN(updatedStateEntity.data.point[index]) ? "NaN" : updatedStateEntity.data.point[index]}
               key={index}
               InputProps={{ readOnly: true }}
+              sx={{ width: textFieldWidth }}
             />
           ))}
+          <Button
+            variant="contained"
+            onClick={handleSolveEquilibrium}
+            sx={{ width: textFieldWidth }}
+          >
+            Solve
+          </Button>
         </Stack>
-        <Button
-          variant="contained"
-          fullWidth
-          onClick={handleSolveEquilibrium}
-        >
-          Solve
-        </Button>
         <Divider sx={{ my: 2 }} />
         <StateSpace key={previewRenderKey} equations={equations} parameters={parameters} stateEntities={
           previewShowAllStateEntities ?
@@ -239,25 +242,27 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
             yaxis: { title: "Imaginary part" },
           }}
         />
-        <Stack spacing={2}>
+        <Stack spacing={2} sx={{ alignItems: "center" }}>
           {updatedStateEntity.data.eigenvalues.map((eigenvalue: number | Complex3, index: number) => (
             <TextField
               label={`Eigenvalue ${index + 1}`}
               value={isNaN(eigenvalue) && !isComplex(eigenvalue) ? "NaN" : eigenvalue.toString()}
               key={index}
               InputProps={{ readOnly: true }}
+              sx={{ width: textFieldWidth }}
             />
           ))}
         </Stack>
         <Divider sx={{ my: 2 }} />
         <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Eigenvectors</div>
-        <Stack spacing={2}>
+        <Stack spacing={2} sx={{ alignItems: "center" }}>
           {updatedStateEntity.data.eigenvectors.map((eigenvector: number[] | Complex3[], index: number) => (
             <TextField
               label={`Eigenvector ${index + 1}`}
               value={"[" + eigenvector.map((value: number | Complex3) => value.toString()).join(", ") + "]"}
               key={index}
               InputProps={{ readOnly: true }}
+              sx={{ width: textFieldWidth }}
             />
           ))}
         </Stack>

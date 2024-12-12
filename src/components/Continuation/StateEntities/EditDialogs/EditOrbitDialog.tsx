@@ -49,6 +49,8 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
     return null
   }
 
+  const textFieldWidth = 230 // Pixel width of text fields.
+
   const [previewRenderKey, setPreviewRenderKey] = useState(0)
   const [previewShowAllStateEntities, setPreviewShowAllStateEntities] = useState(false)
   const [previewShowRealtimeOrbits, setPreviewShowRealtimeOrbits] = useState(false)
@@ -106,16 +108,17 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
     <Dialog open={open}>
       <DialogTitle>Editing orbit "{stateEntity.name}"</DialogTitle>
       <DialogContent dividers>
-        <Box>
+        <Stack spacing={2} sx={{ alignItems: "center" }}>
           <TextField
             label="Name"
             value={updatedStateEntity.name}
             onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, name: e.target.value })}
+            sx={{ width: textFieldWidth }}
           />
-        </Box>
+        </Stack>
         <Divider sx={{ my: 2 }} />
         <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Initial conditions</div>
-        <Stack spacing={2}>
+        <Stack spacing={2} sx={{ alignItems: "center" }}>
           {equations.map((equation, index) => (
             <Box key={index}>
               <TextField
@@ -130,13 +133,14 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
                   ...updatedStateEntity.formParameters.initialConditions.slice(index + 1)
                 ]
                 }})}
+                sx={{ width: textFieldWidth }}
               />
             </Box>
           ))}
         </Stack>
         <Divider sx={{ my: 2 }} />
         <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Integration settings</div>
-        <Box>
+        <Stack spacing={2} sx={{ alignItems: "center" }}>
           <TextField
             label="Integration time"
             type="number"
@@ -145,10 +149,8 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
               ...updatedStateEntity.formParameters,
               integrationTime: Number(e.target.value)
             }})}
-            sx={{ mb: 2 }}
+            sx={{ width: textFieldWidth }}
           />
-        </Box>
-        <Box>
           <TextField
             label="Timestep"
             type="number"
@@ -157,18 +159,20 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
               ...updatedStateEntity.formParameters,
               timestep: Number(e.target.value)
             }})}
-            sx={{ mb: 2 }}
+            sx={{ width: textFieldWidth }}
           />
-        </Box>
+        </Stack>
         <Divider sx={{ my: 2 }} />
         <div style={{ fontWeight: "bold", marginBottom: "16px" }}>Curve</div>
-        <Button
-          variant="contained"
-          fullWidth
-          onClick={handleIntegrate}
-        >
-          Integrate
-        </Button>
+        <Stack spacing={2} sx={{ alignItems: "center" }}>
+          <Button
+            variant="contained"
+            onClick={handleIntegrate}
+            sx={{ width: textFieldWidth }}
+          >
+            Integrate
+          </Button>
+        </Stack>
         <Divider sx={{ my: 2 }} />
         <StateSpace key={previewRenderKey} equations={equations} parameters={parameters} stateEntities={
           previewShowAllStateEntities ?
