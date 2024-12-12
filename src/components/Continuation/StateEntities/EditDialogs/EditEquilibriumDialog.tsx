@@ -23,16 +23,20 @@ import equilibriumEigenpairs from "../../../../math/stateentitycalculation/equil
 import solveEquilibrium from "../../../../math/stateentitycalculation/solve_equilibrium"
 
 export interface EquilibriumData {
-  initialGuess: number[]
-  maxSteps: number
-  dampingFactor: number
   point: number[]
   eigenvalues: number[] | Complex3[]
   eigenvectors: number[][] | Complex3[][]
 }
 
+export interface EquilibriumFormParameters {
+  initialGuess: number[]
+  maxSteps: number
+  dampingFactor: number
+}
+
 export interface EquilibriumEntity extends StateEntity {
   data: EquilibriumData
+  formParameters: EquilibriumFormParameters
 }
 
 interface EditEquilibriumDialogProps {
@@ -74,9 +78,9 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
     const newPoint = solveEquilibrium(
       equations,
       parameters,
-      updatedStateEntity.data.initialGuess,
-      updatedStateEntity.data.maxSteps,
-      updatedStateEntity.data.dampingFactor
+      updatedStateEntity.formParameters.initialGuess,
+      updatedStateEntity.formParameters.maxSteps,
+      updatedStateEntity.formParameters.dampingFactor
     )
     updatedStateEntity.data.point = newPoint
     setPreviewRenderKey(previewRenderKey + 1)
@@ -102,7 +106,7 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
     onClose(setEquilibriumDialogOpen)
     // Reset form fields in case edit button is clicked again.
     // Should be safe to assume stateEntity isn't null here.
-    setUpdatedStateEntity(stateEntity as StateEntity)
+    setUpdatedStateEntity(stateEntity as EquilibriumEntity)
   }
 
   function handleAccept() {
@@ -138,13 +142,13 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
               <TextField
                 label={equation.variable}
                 type="number"
-                value={updatedStateEntity.data.initialGuess[index]}
-                onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, data: {
-                  ...updatedStateEntity.data,
+                value={updatedStateEntity.formParameters.initialGuess[index]}
+                onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, formParameters: {
+                  ...updatedStateEntity.formParameters,
                   initialGuess: [
-                    ...updatedStateEntity.data.initialGuess.slice(0, index),
+                    ...updatedStateEntity.formParameters.initialGuess.slice(0, index),
                     Number(e.target.value),
-                    ...updatedStateEntity.data.initialGuess.slice(index + 1)
+                    ...updatedStateEntity.formParameters.initialGuess.slice(index + 1)
                   ]
                 }})}
               />
@@ -157,9 +161,9 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
           <TextField
             label="Maximum steps"
             type="number"
-            value={updatedStateEntity.data.maxSteps}
-            onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, data: {
-              ...updatedStateEntity.data,
+            value={updatedStateEntity.formParameters.maxSteps}
+            onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, formParameters: {
+              ...updatedStateEntity.formParameters,
               maxSteps: Number(e.target.value)
             }})}
             sx={{ mb: 2 }}
@@ -169,9 +173,9 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
           <TextField
             label="Damping factor"
             type="number"
-            value={updatedStateEntity.data.dampingFactor}
-            onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, data: {
-              ...updatedStateEntity.data,
+            value={updatedStateEntity.formParameters.dampingFactor}
+            onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, formParameters: {
+              ...updatedStateEntity.formParameters,
               dampingFactor: Number(e.target.value)
             }})}
             sx={{ mb: 2 }}

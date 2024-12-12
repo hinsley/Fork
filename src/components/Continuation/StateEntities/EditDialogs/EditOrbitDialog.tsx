@@ -20,14 +20,18 @@ import { StateEntity } from "../StateEntitiesMenu"
 import integrateOrbitCurve from "../../../../math/stateentitycalculation/integrate_orbit_curve"
 
 export interface OrbitData {
+  curve: number[][]
+}
+
+export interface OrbitFormParameters {
   initialConditions: number[]
   integrationTime: number
   timestep: number
-  curve: number[][]
 }
 
 export interface OrbitEntity extends StateEntity {
   data: OrbitData
+  formParameters: OrbitFormParameters
 }
 
 interface EditOrbitDialogProps {
@@ -69,9 +73,9 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
     const curve = integrateOrbitCurve(
       equations,
       parameters,
-      updatedStateEntity.data.initialConditions,
-      updatedStateEntity.data.integrationTime,
-      updatedStateEntity.data.timestep
+      updatedStateEntity.formParameters.initialConditions,
+      updatedStateEntity.formParameters.integrationTime,
+      updatedStateEntity.formParameters.timestep
     )
     updatedStateEntity.data.curve = curve
     setPreviewRenderKey(previewRenderKey + 1)
@@ -81,7 +85,7 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
     onClose(setOrbitDialogOpen)
     // Reset form fields in case edit button is clicked again.
     // Should be safe to assume stateEntity isn't null here.
-    setUpdatedStateEntity(stateEntity as StateEntity)
+    setUpdatedStateEntity(stateEntity as OrbitEntity)
   }
 
   function handleAccept() {
@@ -117,13 +121,13 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
               <TextField
                 label={equation.variable}
                 type="number"
-                value={updatedStateEntity.data.initialConditions[index]}
-                onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, data: {
-                ...updatedStateEntity.data,
+                value={updatedStateEntity.formParameters.initialConditions[index]}
+                onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, formParameters: {
+                ...updatedStateEntity.formParameters,
                 initialConditions: [
-                  ...updatedStateEntity.data.initialConditions.slice(0, index),
+                  ...updatedStateEntity.formParameters.initialConditions.slice(0, index),
                   Number(e.target.value),
-                  ...updatedStateEntity.data.initialConditions.slice(index + 1)
+                  ...updatedStateEntity.formParameters.initialConditions.slice(index + 1)
                 ]
                 }})}
               />
@@ -136,9 +140,9 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
           <TextField
             label="Integration time"
             type="number"
-            value={updatedStateEntity.data.integrationTime}
-            onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, data: {
-              ...updatedStateEntity.data,
+            value={updatedStateEntity.formParameters.integrationTime}
+            onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, formParameters: {
+              ...updatedStateEntity.formParameters,
               integrationTime: Number(e.target.value)
             }})}
             sx={{ mb: 2 }}
@@ -148,9 +152,9 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
           <TextField
             label="Timestep"
             type="number"
-            value={updatedStateEntity.data.timestep}
-            onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, data: {
-              ...updatedStateEntity.data,
+            value={updatedStateEntity.formParameters.timestep}
+            onChange={(e) => setUpdatedStateEntity({ ...updatedStateEntity, formParameters: {
+              ...updatedStateEntity.formParameters,
               timestep: Number(e.target.value)
             }})}
             sx={{ mb: 2 }}

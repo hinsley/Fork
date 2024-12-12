@@ -13,9 +13,9 @@ import {
 
 import { Equation } from '../../ODEEditor'
 import { StateEntity } from './StateEntitiesMenu'
-import { EquilibriumData } from './EditDialogs/EditEquilibriumDialog'
-import { IsoclineData } from './EditDialogs/EditIsoclineDialog'
-import { OrbitData } from './EditDialogs/EditOrbitDialog'
+import { EquilibriumData, EquilibriumFormParameters } from './EditDialogs/EditEquilibriumDialog'
+import { IsoclineData, IsoclineFormParameters } from './EditDialogs/EditIsoclineDialog'
+import { OrbitData, OrbitFormParameters } from './EditDialogs/EditOrbitDialog'
 
 interface NewStateEntityDialogProps {
   equations: Equation[]
@@ -35,16 +35,19 @@ export default function NewStateEntityDialog({ equations, open, onClose }: NewSt
   }
 
   function handleCreate() {
-    var stateEntityData: EquilibriumData | IsoclineData | OrbitData
+    let stateEntityData: EquilibriumData | IsoclineData | OrbitData
+    let stateEntityFormParameters: EquilibriumFormParameters | IsoclineFormParameters | OrbitFormParameters
     switch (type) {
       case "Equilibrium":
         stateEntityData = {
-          initialGuess: equations.map(() => 0),
-          maxSteps: 1e2,
-          dampingFactor: 1,
           point: equations.map(() => NaN),
           eigenvalues: equations.map(() => NaN),
           eigenvectors: equations.map(() => equations.map(() => NaN))
+        }
+        stateEntityFormParameters = {
+          initialGuess: equations.map(() => 0),
+          maxSteps: 1e2,
+          dampingFactor: 1
         }
         break
       case "Isocline":
@@ -53,13 +56,20 @@ export default function NewStateEntityDialog({ equations, open, onClose }: NewSt
           ranges: equations.map(() => [-30, 30]),
           stepSizes: equations.map(() => (30 - (-30)) / (100 - 1))
         }
+        stateEntityFormParameters = {
+          expression: equations.length > 0 ? equations[0].expression : "",
+          value: 0,
+          resolutions: equations.map(() => 100)
+        }
         break
       case "Orbit":
         stateEntityData = {
-          initialConditions: equations.map(() => 0),
-          integrationTime: 1e3,
-          timestep: 1e-2,
           curve: []
+        }
+        stateEntityFormParameters = {
+          initialConditions: equations.map(() => 0),
+          integrationTime: 1e2,
+          timestep: 1e-2
         }
         break
       default:
@@ -67,7 +77,7 @@ export default function NewStateEntityDialog({ equations, open, onClose }: NewSt
         alert("Creating state entities of type \"" + type + "\" is not yet supported.")
         return false
     }
-    if (onClose({ name: name, type: type, data: stateEntityData })) {
+    if (onClose({ name: name, type: type, data: stateEntityData, formParameters: stateEntityFormParameters })) {
       setName("")
       setType("")
     }

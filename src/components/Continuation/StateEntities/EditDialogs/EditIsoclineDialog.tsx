@@ -26,8 +26,15 @@ export interface IsoclineData {
   stepSizes: number[]
 }
 
+export interface IsoclineFormParameters {
+  expression: string
+  value: number
+  resolutions: number[]
+}
+
 export interface IsoclineEntity extends StateEntity {
   data: IsoclineData
+  formParameters: IsoclineFormParameters
 }
 
 interface EditIsoclineDialogProps {
@@ -50,10 +57,6 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
   const [previewShowRealtimeOrbits, setPreviewShowRealtimeOrbits] = useState(false)
   const [updatedStateEntity, setUpdatedStateEntity] = useState(stateEntity)
 
-  const [isoclineExpression, setIsoclineExpression] = useState(equations.length > 0 ? equations[0].expression : "")
-  const [isoclineValue, setIsoclineValue] = useState(0)
-  const [resolutions, setResolutions] = useState<number[]>(equations.map(() => 100))
-
   useEffect(() => {
     if (open) {
       // Make sure the stateEntity is always populated with the selected state entity.
@@ -73,10 +76,10 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
     const squareTypes = marchSquares(
       equations,
       parameters,
-      isoclineExpression,
-      isoclineValue,
+      updatedStateEntity.formParameters.expression,
+      updatedStateEntity.formParameters.value,
       updatedStateEntity.data.ranges,
-      resolutions
+      updatedStateEntity.formParameters.resolutions
     )
 
     // Rasterize squares into endpoints.
@@ -233,19 +236,24 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
   }
 
   function handleSetResolution(e: React.ChangeEvent<HTMLInputElement>, index: number) {
-    setResolutions([
-      ...resolutions.slice(0, index),
-      Number(e.target.value),
-      ...resolutions.slice(index + 1)
-    ])
-    setUpdatedStateEntity({...updatedStateEntity, data: {
-      ...updatedStateEntity.data,
-      stepSizes: [
-        ...updatedStateEntity.data.stepSizes.slice(0, index),
-        (updatedStateEntity.data.ranges[index][1] - updatedStateEntity.data.ranges[index][0]) / Math.max(1, Number(e.target.value) - 1),
-        ...updatedStateEntity.data.stepSizes.slice(index + 1)
-      ]
-    }})
+    setUpdatedStateEntity({...updatedStateEntity, 
+      formParameters: {
+        ...updatedStateEntity.formParameters,
+        resolutions: [
+          ...updatedStateEntity.formParameters.resolutions.slice(0, index),
+          Number(e.target.value),
+          ...updatedStateEntity.formParameters.resolutions.slice(index + 1)
+        ]
+      },
+      data: {
+        ...updatedStateEntity.data,
+        stepSizes: [
+          ...updatedStateEntity.data.stepSizes.slice(0, index),
+          (updatedStateEntity.data.ranges[index][1] - updatedStateEntity.data.ranges[index][0]) / Math.max(1, Number(e.target.value) - 1),
+          ...updatedStateEntity.data.stepSizes.slice(index + 1)
+        ]
+      }
+    })
   }
 
   return updatedStateEntity.type === "Isocline" ? (
@@ -264,16 +272,22 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
         <Box sx={{ mb: 2 }}>
           <TextField
             label="Expression"
-            value={isoclineExpression}
-            onChange={(e) => setIsoclineExpression(e.target.value)}
+            value={updatedStateEntity.formParameters.expression}
+            onChange={(e) => setUpdatedStateEntity({...updatedStateEntity, formParameters: {
+              ...updatedStateEntity.formParameters,
+              expression: e.target.value
+            }})}
           />
         </Box>
         <Box>
           <TextField
             label="Value"
             type="number"
-            value={isoclineValue}
-            onChange={(e) => setIsoclineValue(Number(e.target.value))}
+            value={updatedStateEntity.formParameters.value}
+            onChange={(e) => setUpdatedStateEntity({...updatedStateEntity, formParameters: {
+              ...updatedStateEntity.formParameters,
+              value: Number(e.target.value)
+            }})}
           />
         </Box>
         <Divider sx={{ my: 2 }} />
@@ -317,7 +331,7 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
                   <TextField
                     label={equation.variable + " resolution"}
                     type="number"
-                    value={resolutions[index]}
+                    value={updatedStateEntity.formParameters.resolutions[index]}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleSetResolution(e, index)}
                   />
                 </Box>
