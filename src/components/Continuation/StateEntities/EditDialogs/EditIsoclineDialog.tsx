@@ -88,102 +88,108 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
     // Rasterize squares into endpoints.
     const SPATIAL_SCALING = 2e-2 // TODO: Retrieve this from state space settings.
     const squaresEndpoints: number[][][] = []
-    squareTypes.forEach((square: [number[], number], _: number) => {
+    squareTypes.forEach((square: [number[], number, number, number, number, number], _: number) => {
       let endPoints: number[][] = []
       const coords = [
-        [
-          square[0][1],
-          square[0][2],
-          square[0][0] - (updatedStateEntity.data as IsoclineData).stepSizes[0]
-        ],
-        [
-          square[0][1],
-          square[0][2],
-          square[0][0]
-        ],
-        [
+        [ // Bottom right.
           square[0][1] - (updatedStateEntity.data as IsoclineData).stepSizes[1],
           square[0][2],
           square[0][0]
         ],
-        [
+        [ // Bottom left.
           square[0][1] - (updatedStateEntity.data as IsoclineData).stepSizes[1],
           square[0][2],
           square[0][0] - (updatedStateEntity.data as IsoclineData).stepSizes[0]
+        ],
+        [ // Top left.
+          square[0][1],
+          square[0][2],
+          square[0][0] - (updatedStateEntity.data as IsoclineData).stepSizes[0]
+        ],
+        [ // Top right.
+          square[0][1],
+          square[0][2],
+          square[0][0]
         ]
       ]
       
-      function averageCoords(coord1: number[], coord2: number[]) {
+      // Lerp between two coordinates. t should be in the interval [0, 1].
+      function lerpCoords(coord1: number[], coord2: number[], t: number) {
         return [
-          (coord1[0] + coord2[0]) / 2,
-          (coord1[1] + coord2[1]) / 2,
-          (coord1[2] + coord2[2]) / 2
+          coord1[0] + t * (coord2[0] - coord1[0]),
+          coord1[1] + t * (coord2[1] - coord1[1]),
+          coord1[2] + t * (coord2[2] - coord1[2])
         ]
       }
+
+      // Points on each edge of the square.
+      const bottomEdge = lerpCoords(coords[0], coords[1], square[2])
+      const leftEdge = lerpCoords(coords[1], coords[2], square[3])
+      const topEdge = lerpCoords(coords[2], coords[3], square[4])
+      const rightEdge = lerpCoords(coords[3], coords[0], square[5])
 
       switch (square[1]) {
         case 1:
         case 14:
           endPoints = [
-            averageCoords(coords[0], coords[1]),
-            averageCoords(coords[0], coords[3])
+            topEdge,
+            leftEdge
           ]
           break
         case 2:
         case 13:
           endPoints = [
-            averageCoords(coords[0], coords[1]),
-            averageCoords(coords[1], coords[2])
+            topEdge,
+            rightEdge
           ]
           break
         case 3:
         case 12:
           endPoints = [
-            averageCoords(coords[0], coords[3]),
-            averageCoords(coords[1], coords[2])
+            leftEdge,
+            rightEdge
           ]
           break
         case 4:
         case 11:
           endPoints = [
-            averageCoords(coords[1], coords[2]),
-            averageCoords(coords[2], coords[3])
+            rightEdge,
+            bottomEdge
           ]
           break
         case 5:
           // Saddle type 1. Union of types 2 and 7 (or 13 and 8).
           endPoints = [
-            averageCoords(coords[0], coords[1]), // First line, first endpoint.
-            averageCoords(coords[1], coords[2]), // First line, second endpoint.
-            averageCoords(coords[1], coords[2]), // Second line, first endpoint.
-            averageCoords(coords[2], coords[3]) // Second line, second endpoint.
+            topEdge, // First line, first endpoint.
+            rightEdge, // First line, second endpoint.
+            leftEdge, // Second line, first endpoint.
+            bottomEdge // Second line, second endpoint.
           ]
           break
         case 10:
           // Saddle type 2. Union of types 1 and 4 (or 14 and 11).
           endPoints = [
-            averageCoords(coords[0], coords[1]), // First line, first endpoint.
-            averageCoords(coords[0], coords[3]), // First line, second endpoint.
-            averageCoords(coords[1], coords[2]), // Second line, first endpoint.
-            averageCoords(coords[2], coords[3]) // Second line, second endpoint.
+            topEdge, // First line, first endpoint.
+            leftEdge, // First line, second endpoint.
+            rightEdge, // Second line, first endpoint.
+            bottomEdge // Second line, second endpoint.
           ]
           break
         case 6:
         case 9:
           endPoints = [
-            averageCoords(coords[0], coords[1]),
-            averageCoords(coords[2], coords[3])
+            topEdge,
+            bottomEdge
           ]
           break
         case 7:
         case 8:
           endPoints = [
-            averageCoords(coords[0], coords[3]),
-            averageCoords(coords[2], coords[3])
+            leftEdge,
+            bottomEdge
           ]
           break
       }
-
       for (let i = 0; i < endPoints.length; i += 2) {
         squaresEndpoints.push([endPoints[i], endPoints[i + 1]])
       }

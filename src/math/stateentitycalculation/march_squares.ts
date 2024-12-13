@@ -3,7 +3,12 @@ import { compile } from "mathjs"
 import { Equation, Parameter } from "../../components/ODEEditor"
 
 
-
+// The output is an array of squares.
+// In each square, the first entry (number[]) is the coordinate tuple of the square.
+// The second entry (number) is a value between 0 and 15 inclusive indicating the
+// square type.
+// The third, fourth, fifth, and sixth entries are the lerp values for the edges of
+// the square.
 export default function marchSquares(
   equations: Equation[],
   parameters: Parameter[],
@@ -11,7 +16,7 @@ export default function marchSquares(
   isoclineValue: number,
   ranges: [number, number][],
   resolutions: number[]
-): [number[], number][] {
+): [number[], number, number, number, number, number][] {
   // Validate that there are at least two equations.
   if (equations.length < 2) {
     throw new Error("There must be at least two equations.")
@@ -36,7 +41,7 @@ export default function marchSquares(
   const prevRow = Array(resolutions[0]).fill(NaN)
   let prevValue = NaN
   let prevRowPrevValue = NaN
-  const squareTypes: [number[], number][] = []
+  const squareTypes: [number[], number, number, number, number, number][] = []
 
   // Iterate over third dimension if it exists; otherwise just do one step.
   for (let k = 0; equations.length >= 3 ? k < resolutions[2] : k === 0; k++) {
@@ -49,6 +54,17 @@ export default function marchSquares(
           scope[equations[2].variable] = ranges[2][0] + stepSizes[2] * k
         }
         const value = compiledExpression.evaluate(scope)
+
+        // Calculate the lerp values for the edges of the square.
+        // Lerps are taken in the clockwise direction.
+        // Bottom edge.
+        const lerp1 = (isoclineValue - prevRow[i]) / (prevRowPrevValue - prevRow[i])
+        // Left edge.
+        const lerp2 = (isoclineValue - prevRowPrevValue) / (prevValue - prevRowPrevValue)
+        // Top edge.
+        const lerp3 = (isoclineValue - prevValue) / (value - prevValue)
+        // Right edge.
+        const lerp4 = (isoclineValue - value) / (prevRow[i] - value)
 
         // Check if we're at least on the second row and the second entry of the current row.
         if (j > 0 && i > 0) {
@@ -66,7 +82,11 @@ export default function marchSquares(
                 ranges[1][0] + stepSizes[1] * j,
                 equations.length >= 3 ? ranges[2][0] + stepSizes[2] * k : 0
               ],
-              squareType
+              squareType,
+              lerp1,
+              lerp2,
+              lerp3,
+              lerp4
             ])
           }
 
