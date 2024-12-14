@@ -1,21 +1,23 @@
-import { useRef, useState } from 'react'
+import { useRef, useState } from "react"
 import {
   Button,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControlLabel,
   Radio,
   RadioGroup,
+  Stack,
   TextField
-} from '@mui/material'
+} from "@mui/material"
 
-import { Equation } from '../../ODEEditor'
-import { StateEntity } from './StateEntitiesMenu'
-import { EquilibriumData, EquilibriumFormParameters } from './EditDialogs/EditEquilibriumDialog'
-import { IsoclineData, IsoclineFormParameters } from './EditDialogs/EditIsoclineDialog'
-import { OrbitData, OrbitFormParameters } from './EditDialogs/EditOrbitDialog'
+import { Equation } from "../../ODEEditor"
+import { StateEntity } from "./StateEntitiesMenu"
+import { EquilibriumData, EquilibriumFormParameters } from "./EditDialogs/EditEquilibriumDialog"
+import { IsoclineData, IsoclineFormParameters } from "./EditDialogs/EditIsoclineDialog"
+import { OrbitData, OrbitFormParameters } from "./EditDialogs/EditOrbitDialog"
 
 interface NewStateEntityDialogProps {
   equations: Equation[]
@@ -87,24 +89,29 @@ export default function NewStateEntityDialog({ equations, open, onClose }: NewSt
     <Dialog open={open}>
       <DialogTitle>Create State Entity</DialogTitle>
       <DialogContent dividers>
-        <TextField
-          label="Name"
-          value={name}
-          onChange={(e) => setName(e.target.value) }
-          sx={{ mb: 2 }}
-        />
-        <RadioGroup
-          ref={radioGroupRef}
-          aria-label="type"
-          name="type"
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-        >
-          <div style={{ fontWeight: "bold", marginBottom: "8px" }}>Entity Type:</div>
-          <FormControlLabel value="Equilibrium" control={<Radio />} label="Equilibrium" />
-          <FormControlLabel value="Isocline" control={<Radio />} label="Isocline" />
-          <FormControlLabel value="Orbit" control={<Radio />} label="Orbit" />
-        </RadioGroup>
+        <Stack spacing={2} sx={{ alignItems: "center" }}>
+          <TextField
+            label="Name"
+            value={name}
+            onChange={(e) => setName(e.target.value) }
+            sx={{ mb: 2 }}
+          />
+        </Stack>
+        <Divider sx={{ my: 2 }} />
+        <Stack spacing={2} sx={{ alignItems: "center" }}>
+            <RadioGroup
+              ref={radioGroupRef}
+            aria-label="type"
+            name="type"
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+          >
+            <div style={{ fontWeight: "bold", marginBottom: "8px" }}>Entity Type:</div>
+            <FormControlLabel value="Equilibrium" control={<Radio />} label="Equilibrium" />
+            <FormControlLabel value="Isocline" control={<Radio />} label="Isocline" />
+            <FormControlLabel value="Orbit" control={<Radio />} label="Orbit" />
+          </RadioGroup>
+        </Stack>
       </DialogContent>
       <DialogActions>
         <Button onClick={handleCancel}>Cancel</Button>

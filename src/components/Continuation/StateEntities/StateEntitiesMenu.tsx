@@ -1,6 +1,6 @@
 import { Dispatch, MouseEvent, SetStateAction, useState } from "react"
 import { Box, Button, Container, Divider, List, ListItemButton, ListItemText } from "@mui/material"
-// import { FixedSizeList, ListChildComponentProps } from 'react-window' // TODO: Work this in so huge lists are handled efficiently. See "virtualized lists" in the MUI docs.
+// import { FixedSizeList, ListChildComponentProps } from "react-window" // TODO: Work this in so huge lists are handled efficiently. See "virtualized lists" in the MUI docs.
 
 import EditEquilibriumDialog, { EquilibriumData, EquilibriumEntity, EquilibriumFormParameters } from "./EditDialogs/EditEquilibriumDialog"
 import EditIsoclineDialog, { IsoclineData, IsoclineEntity, IsoclineFormParameters } from "./EditDialogs/EditIsoclineDialog"
@@ -74,6 +74,7 @@ export default function StateEntitiesMenu({ equations, parameters, stateEntities
         break
       case "Isocline":
         setEditIsoclineDialogOpen(true)
+        break
       case "Orbit":
         setEditOrbitDialogOpen(true)
         break
