@@ -27,6 +27,10 @@ export default function MenuDrawer({ setCurrentView }: { setCurrentView: (view: 
             view: "continuation"
           },
           {
+            text: "Bifurcation diagram",
+            view: "bifurcation-diagram"
+          },
+          {
             text: "Attractor analysis",
             view: "attractor-analysis"
           },

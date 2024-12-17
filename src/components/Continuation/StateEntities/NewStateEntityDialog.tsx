@@ -44,7 +44,8 @@ export default function NewStateEntityDialog({ equations, open, onClose }: NewSt
         stateEntityData = {
           point: equations.map(() => NaN),
           eigenvalues: equations.map(() => NaN),
-          eigenvectors: equations.map(() => equations.map(() => NaN))
+          eigenvectors: equations.map(() => equations.map(() => NaN)),
+          parameters: []
         }
         stateEntityFormParameters = {
           initialGuess: equations.map(() => 0),

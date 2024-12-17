@@ -3,15 +3,18 @@ import { Box, TextField } from '@mui/material'
 import { Equation, Parameter } from '../ODEEditor'
 
 import StateEntitiesMenu, { StateEntity } from './StateEntities/StateEntitiesMenu'
+import ParameterSetsMenu, { ParameterSet } from './ParameterSets/ParameterSetsMenu'
 
 interface ContinuationProps {
   equations: Equation[]
   parameters: Parameter[]
   stateEntities: StateEntity[]
   setStateEntities: (stateEntities: StateEntity[]) => void
+  parameterSets: ParameterSet[]
+  setParameterSets: (parameterSets: ParameterSet[]) => void
 }
 
-export default function Continuation({ equations, parameters, stateEntities, setStateEntities }: ContinuationProps) {
+export default function Continuation({ equations, parameters, stateEntities, setStateEntities, parameterSets, setParameterSets }: ContinuationProps) {
   const defaultObjectType = "state-entities"
   
   const [objectType, setObjectType] = useState(defaultObjectType)
@@ -40,9 +43,17 @@ export default function Continuation({ equations, parameters, stateEntities, set
                 parameters={parameters}
                 stateEntities={stateEntities}
                 setStateEntities={setStateEntities}
+                parameterSets={parameterSets}
+                setParameterSets={setParameterSets}
               />
-            // case "parameter-sets":
-            //   return <PowerSpectrum equations={equations} parameters={parameters} />
+            case "parameter-sets":
+              return <ParameterSetsMenu
+                equations={equations}
+                parameters={parameters}
+                parameterSets={parameterSets}
+                setParameterSets={setParameterSets}
+                stateEntities={stateEntities}
+              />
             default:
               return <Box sx={{ mb: 2 }}><h4>Not implemented</h4></Box>
           }

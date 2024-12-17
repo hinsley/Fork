@@ -1,12 +1,12 @@
 import { matrix, multiply, norm, pinv, subtract } from "mathjs"
 
-import { Equation, Parameter } from "../../ODEEditor"
+import { Equation, Parameter } from "../../components/ODEEditor"
 
 import jacobian from "../differentiation/jacobian"
 
 export default function solveEquilibrium(
   equations: Equation[],
-  parameters: Parameter,
+  parameters: Parameter[],
   initialGuess: number[],
   maxSteps: number,
   dampingFactor: number

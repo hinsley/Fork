@@ -91,22 +91,36 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
   }
 
   function handleAccept() {
+    // Trim name.
+    const trimmedName = updatedStateEntity.name.trim()
+    const newUpdatedStateEntity = {
+      ...updatedStateEntity,
+      name: trimmedName
+    }
+    setUpdatedStateEntity(newUpdatedStateEntity)
     // Check whether the name of the edited state entity is unique.
-    if (updatedStateEntity.name !== (stateEntity as StateEntity).name) { // Should be able to assume stateEntity isn't null here.
-      const isNameUnique = stateEntities.every((entity: StateEntity) => entity.name !== updatedStateEntity.name)
+    if (trimmedName !== (stateEntity as StateEntity).name) { // Should be able to assume stateEntity isn't null here.
+      const isNameUnique = stateEntities.every((entity: StateEntity) => entity.name !== trimmedName)
       if (!isNameUnique) {
-        alert("A state entity with name \"" + updatedStateEntity.name + "\" already exists.")
+        alert("A state entity with name \"" + trimmedName + "\" already exists.")
         return
       }
     }
-    if (!onClose(setOrbitDialogOpen, updatedStateEntity)) {
+    // Check whether the name of the edited state entity is empty.
+    if (trimmedName === "") {
+      alert("State entity name cannot be empty.")
+      return
+    }
+    if (!onClose(setOrbitDialogOpen, newUpdatedStateEntity)) {
       alert("Something went wrong; could not update state entity.")
     }
   }
 
   return updatedStateEntity.type === "Orbit" ? (
     <Dialog open={open}>
-      <DialogTitle>Editing orbit "{stateEntity.name}"</DialogTitle>
+      <DialogTitle sx={{ width: textFieldWidth, wordWrap: "break-word" }}>
+        Editing orbit "{stateEntity.name}"
+      </DialogTitle>
       <DialogContent dividers>
         <Stack spacing={2} sx={{ alignItems: "center" }}>
           <TextField

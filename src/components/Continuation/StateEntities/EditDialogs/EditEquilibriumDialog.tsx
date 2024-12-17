@@ -18,6 +18,7 @@ import {
 import StateSpace, { defaultStateSpaceSettings } from "../../../StateSpace"
 import { Equation, Parameter } from "../../../ODEEditor"
 import { StateEntity } from "../StateEntitiesMenu"
+import { ParameterSet } from "../../ParameterSets/ParameterSetsMenu"
 
 import equilibriumEigenpairs from "../../../../math/stateentitycalculation/equilibrium_eigenpairs"
 import solveEquilibrium from "../../../../math/stateentitycalculation/solve_equilibrium"
@@ -26,6 +27,7 @@ export interface EquilibriumData {
   point: number[]
   eigenvalues: number[] | Complex3[]
   eigenvectors: number[][] | Complex3[][]
+  parameters: Parameter[]
 }
 
 export interface EquilibriumFormParameters {
@@ -35,6 +37,7 @@ export interface EquilibriumFormParameters {
 }
 
 export interface EquilibriumEntity extends StateEntity {
+  type: "Equilibrium"
   data: EquilibriumData
   formParameters: EquilibriumFormParameters
 }
@@ -47,11 +50,12 @@ interface EditEquilibriumDialogProps {
   setEquilibriumDialogOpen: Dispatch<SetStateAction<boolean>>
   stateEntities: StateEntity[]
   stateEntity: EquilibriumEntity | null // The Equilibrium state entity.
+  parameterSets: ParameterSet[]
 }
 
-export default function EditEquilibriumDialog({ equations, parameters, setEquilibriumDialogOpen, open, onClose, stateEntities, stateEntity }: EditEquilibriumDialogProps) {
+export default function EditEquilibriumDialog({ equations, parameters, setEquilibriumDialogOpen, open, onClose, stateEntities, stateEntity, parameterSets }: EditEquilibriumDialogProps) {
   if (stateEntity === null) {
-    return null
+    return <></>
   }
 
   const textFieldWidth = 230 // Pixel width of text fields.
@@ -76,7 +80,7 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
     setPreviewRenderKey(previewRenderKey + 1)
   }, [previewShowAllStateEntities, previewShowRealtimeOrbits])
 
-  function handleSolveEquilibrium() {
+  function handleSolveEquilibrium(): boolean {
     const newPoint = solveEquilibrium(
       equations,
       parameters,
@@ -91,17 +95,20 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
       updatedStateEntity.data.eigenvalues = equations.map(() => NaN)
       updatedStateEntity.data.eigenvectors = equations.map(() => equations.map(() => NaN))
       alert("Equilibrium solver failed to converge. Try a different initial guess, increase maximum steps, or decrease damping factor.")
-      return
+      return false
     } else {
       try {
         const [eigenvalues, eigenvectors] = equilibriumEigenpairs(equations, parameters, newPoint)
         updatedStateEntity.data.eigenvalues = eigenvalues
         updatedStateEntity.data.eigenvectors = eigenvectors
+        updatedStateEntity.data.parameters = parameters
       } catch (error) {
         alert((error as Error).message)
-        return
+        return false
       }
     }
+
+    return true
   }
 
   function handleCancel() {
@@ -111,23 +118,46 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
     setUpdatedStateEntity(stateEntity as EquilibriumEntity)
   }
 
-  function handleAccept() {
+  function handleAccept(): boolean {
+    // Trim name.
+    const trimmedName = updatedStateEntity.name.trim()
+    const newUpdatedStateEntity = {
+      ...updatedStateEntity,
+      name: trimmedName
+    }
+    setUpdatedStateEntity(newUpdatedStateEntity)
     // Check whether the name of the edited state entity is unique.
-    if (updatedStateEntity.name !== (stateEntity as StateEntity).name) { // Should be able to assume stateEntity isn't null here.
-      const isNameUnique = stateEntities.every((entity) => entity.name !== updatedStateEntity.name)
+    if (trimmedName !== (stateEntity as StateEntity).name) { // Should be able to assume stateEntity isn't null here.
+      const isNameUnique = stateEntities.every((entity) => entity.name !== trimmedName)
       if (!isNameUnique) {
-        alert("A state entity with name \"" + updatedStateEntity.name + "\" already exists.")
-        return
+        alert("A state entity with name \"" + trimmedName + "\" already exists.")
+        return false
       }
     }
-    if (!onClose(setEquilibriumDialogOpen, updatedStateEntity)) {
-      alert("Something went wrong; could not update state entity.")
+    // Check whether the name of the edited state entity is empty.
+    if (trimmedName === "") {
+      alert("State entity name cannot be empty.")
+      return false
     }
+    if (!onClose(setEquilibriumDialogOpen, newUpdatedStateEntity)) {
+      alert("Something went wrong; could not update state entity.")
+      return false
+    }
+    // Update all related parameter sets with this as the updated
+    // source entity.
+    parameterSets.forEach((parameterSet) => {
+      if (parameterSet.sourceEntity.name === (stateEntity as StateEntity).name) {
+        parameterSet.sourceEntity = updatedStateEntity
+      }
+    })
+    return true
   }
 
   return updatedStateEntity.type === "Equilibrium" ? (
     <Dialog open={open}>
-      <DialogTitle>Editing equilibrium "{stateEntity.name}"</DialogTitle>
+      <DialogTitle sx={{ width: textFieldWidth, wordWrap: "break-word" }}>
+        Editing equilibrium "{stateEntity.name}"
+      </DialogTitle>
       <DialogContent dividers>
         <Stack spacing={2} sx={{ alignItems: "center" }}>
           <TextField

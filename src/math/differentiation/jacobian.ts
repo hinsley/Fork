@@ -2,6 +2,8 @@ import { Matrix, derivative, matrix } from 'mathjs'
 
 import { Equation, Parameter } from '../../components/ODEEditor'
 
+// TODO: Add compilation of derivative expressions into callback.
+
 /**
  * Creates a function that computes the Jacobian matrix of the system of equations at a given point.
  * @param equations - The system of equations.

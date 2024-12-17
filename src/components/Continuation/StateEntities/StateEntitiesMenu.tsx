@@ -6,7 +6,8 @@ import EditEquilibriumDialog, { EquilibriumData, EquilibriumEntity, EquilibriumF
 import EditIsoclineDialog, { IsoclineData, IsoclineEntity, IsoclineFormParameters } from "./EditDialogs/EditIsoclineDialog"
 import EditOrbitDialog, { OrbitData, OrbitEntity, OrbitFormParameters } from "./EditDialogs/EditOrbitDialog"
 import NewStateEntityDialog from "./NewStateEntityDialog"
-import { Equation, Parameter } from "../../../ODEEditor"
+import { Equation, Parameter } from "../../ODEEditor"
+import { ParameterSet } from "../ParameterSets/ParameterSetsMenu"
 
 export interface StateEntity {
   data: EquilibriumData | IsoclineData | OrbitData
@@ -20,34 +21,46 @@ interface StateEntitiesMenuProps {
   parameters: Parameter[]
   stateEntities: StateEntity[]
   setStateEntities: (stateEntities: StateEntity[]) => void
+  parameterSets: ParameterSet[]
+  setParameterSets: (parameterSets: ParameterSet[]) => void
 }
 
-export default function StateEntitiesMenu({ equations, parameters, stateEntities, setStateEntities }: StateEntitiesMenuProps) {
+export default function StateEntitiesMenu({ equations, parameters, stateEntities, setStateEntities, parameterSets, setParameterSets }: StateEntitiesMenuProps) {
   const [editEquilibriumDialogOpen, setEditEquilibriumDialogOpen] = useState(false)
   const [editIsoclineDialogOpen, setEditIsoclineDialogOpen] = useState(false)
   const [editOrbitDialogOpen, setEditOrbitDialogOpen] = useState(false)
   const [newStateEntityDialogOpen, setNewStateEntityDialogOpen] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState<number|null>(null)
 
-  function handleDeleteStateEntityButtonClick() {
+  function handleDeleteStateEntityButtonClick(): boolean {
     if (selectedIndex === null) {
       alert("You must select a state entity to delete.")
-      return
+      return false
     }
-    if (confirm("Are you sure you want to delete " + stateEntities[selectedIndex].name + "?")) {
-      setStateEntities(stateEntities.filter((_, index) => index !== selectedIndex))
+    if (confirm("Are you sure you want to delete " + stateEntities[selectedIndex].name + "? This will also delete any parameter sets that use it as a source entity.")) {
+      // Delete all parameter sets that use this state entity as a source entity.
+      setParameterSets(parameterSets.filter((parameterSet) => parameterSet.sourceEntity.name !== stateEntities[selectedIndex].name))
+      // Delete the state entity.
+      setStateEntities([
+        ...stateEntities.slice(0, selectedIndex),
+        ...stateEntities.slice(selectedIndex + 1)
+      ])
+      // Deselect the state entity.
       setSelectedIndex(null)
+      return true
     }
+    return false
   }
 
-  function handleDuplicateStateEntityButtonClick() {
+  function handleDuplicateStateEntityButtonClick(): boolean {
     if (selectedIndex === null) {
       alert("You must select a state entity to duplicate.")
-      return
+      return false
     }
     const newStateEntity = { ...stateEntities[selectedIndex] }
     
-    // Generate a unique name by adding (copy N) where N increments until unique
+    // Generate a unique name by adding (copy N) where N increments
+    // until unique.
     let baseName = stateEntities[selectedIndex].name
     let copyNum = 2
     let newName = baseName + " (copy)"
@@ -60,27 +73,28 @@ export default function StateEntitiesMenu({ equations, parameters, stateEntities
     newStateEntity.name = newName
     setStateEntities([newStateEntity, ...stateEntities])
     setSelectedIndex(0)
+    return true
   }
 
-  function handleEditStateEntityButtonClick(_: MouseEvent) {
+  function handleEditStateEntityButtonClick(_: MouseEvent): boolean {
     if (selectedIndex === null) {
       alert("You must select a state entity to edit.")
-      return
+      return false
     }
 
     switch (stateEntities[selectedIndex].type) {
       case "Equilibrium":
         setEditEquilibriumDialogOpen(true)
-        break
+        return true
       case "Isocline":
         setEditIsoclineDialogOpen(true)
-        break
+        return true
       case "Orbit":
         setEditOrbitDialogOpen(true)
-        break
+        return true
       default:
         alert("Editing state entities of type \"" + stateEntities[selectedIndex].type + "\" is not yet supported.")
-        return
+        return false
     }
   }
 
@@ -92,26 +106,26 @@ export default function StateEntitiesMenu({ equations, parameters, stateEntities
     setNewStateEntityDialogOpen(true)
   }
 
-  function handleEditStateEntity(editStateEntityDialogOpen: Dispatch<SetStateAction<boolean>>, updatedStateEntity?: StateEntity) {
-    /* Commented out because it should be safe to assume selectedIndex isn't null when this is called.
-    if (selectedIndex === null) {
-      alert("You must select a state entity to edit.")
-      return
-    }
-    */
-  
+  function handleEditStateEntity(
+    editStateEntityDialogOpen: Dispatch<SetStateAction<boolean>>,
+    updatedStateEntity?: StateEntity
+  ) {
     editStateEntityDialogOpen(false)
 
     if (updatedStateEntity) {
-      // Update the appropriate state entity, searching by index of selected state entity in the menu.
-      setStateEntities(stateEntities.map((entity, index) => index === selectedIndex ? updatedStateEntity : entity))
+      // Update the appropriate state entity by combining slices before and after with the updated entity
+      setStateEntities([
+        ...stateEntities.slice(0, selectedIndex as number),
+        updatedStateEntity,
+        ...stateEntities.slice(selectedIndex as number + 1)
+      ])
       return true
     }
 
     return false
   }
 
-  function handleNewStateEntity(newStateEntity?: StateEntity) {
+  function handleNewStateEntity(newStateEntity?: StateEntity): boolean {
     if (newStateEntity) {
       // Trim whitespace from beginning and end of name.
       newStateEntity.name = newStateEntity.name.trim()
@@ -160,6 +174,7 @@ export default function StateEntitiesMenu({ equations, parameters, stateEntities
         <EditEquilibriumDialog
           equations={equations}
           parameters={parameters}
+          parameterSets={parameterSets}
           open={editEquilibriumDialogOpen}
           onClose={handleEditStateEntity}
           setEquilibriumDialogOpen={setEditEquilibriumDialogOpen}
