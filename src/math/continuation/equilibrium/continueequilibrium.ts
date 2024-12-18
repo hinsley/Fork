@@ -2,12 +2,13 @@ import {
   Matrix,
   add,
   derivative,
-  eigs,
+  lusolve,
   matrix,
   multiply,
   norm,
   pinv,
-  subtract
+  subtract,
+  transpose
 } from "mathjs"
 
 import { Equation, Parameter } from "../../../components/ODEEditor"
@@ -120,18 +121,14 @@ export default function continueEquilibrium(
   )
   points.push(x.valueOf() as number[])
   // Set initial direction (only varying the continuation parameter).
-  let v = matrix([1, ...new Array(initialPoint.length).fill(0)])
-  // Normalize direction.
-  v = multiply(v, 1 / (norm(v) as number))
-  // Choose forward or backward based on increasing or decreasing continuation parameter.
-  v = multiply(v, v.get([0]) / v.get([0]) * (forward ? 1 : -1))
+  let v = matrix([forward ? 1 : -1, ...new Array(initialPoint.length).fill(0)])
   // Set step size.
   let stepSize = initialStepSize
-  v = multiply(v, stepSize)
+  let R = matrix([1, ...new Array(equations.length).fill(0)])
 
   // Predictor loop.
   for (let point = 0; point < predictorMaxPoints; point++) {
-    let X = add(x, v) // X0
+    let X = add(x, multiply(v, stepSize)) // X0
     let V = v // V0
 
     // Corrector loop.
@@ -146,23 +143,33 @@ export default function continueEquilibrium(
       for (; step < correctorMaxSteps; step++) {
         const J = jac(X.valueOf() as number[])
         const B = matrix([V.valueOf() as number[], ...J.valueOf() as number[][]])
-        const Binv = pinv(B)
-        const R = matrix([0, ...multiply(J, V).valueOf() as number[]])
-        const F = vectorField(
-          equations,
-          parameters,
-          continuationParameter,
-          X.valueOf() as number[]
-        )
-        const Q = matrix([0, ...F])
-        const W = subtract(V, multiply(Binv, R))
-        V = multiply(W, 1 / (norm(W) as number))
-        const oldX = X
-        X = subtract(X, multiply(Binv, Q))
+        // const Binv = pinv(B)
+        let F: number[] = []
+        let dX: Matrix = matrix([])
+        // From MATCONT's newtcorr.m:
+        // Repeat twice with same Jacobian.
+        // Calculating the Jacobian is usually
+        // a lot more expensive than solving a
+        // system.
+        for (let i = 0; i < 2; i++) {
+          F = vectorField(
+            equations,
+            parameters,
+            continuationParameter,
+            X.valueOf() as number[]
+          )
+          const Q = matrix([0, ...F])
+          const W = matrix((transpose(lusolve(B, R)).valueOf() as number[][])[0])
+          // const W = multiply(Binv, R)
+          V = multiply(W, 1 / (norm(W) as number))
+          dX = matrix((transpose(lusolve(B, Q)).valueOf() as number[][])[0])
+          // dX = multiply(Binv, Q)
+          X = subtract(X, dX)
+        }
 
         if (
           (norm(F) as number) < eps0
-          && (norm(subtract(X, oldX)) as number) < eps1
+          && (norm(dX) as number) < eps1
         ) {
           converged = true
           break
@@ -173,7 +180,7 @@ export default function continueEquilibrium(
         // Did not converge; need to decrease step size.
         stepSize *= stepSizeDecrement
         // Reset X and V to X0 and V0.
-        X = add(x, v)
+        X = add(x, multiply(v, stepSize))
         V = v
       } else if (step < correctorStepsStepSizeIncrementThreshold) {
         // Converged too quickly; can increase step size.
@@ -183,7 +190,12 @@ export default function continueEquilibrium(
 
     // Once converged, set new point and direction.
     x = X
-    v = multiply(V, stepSize)
+    const J = jac(x.valueOf() as number[])
+    const B = matrix([V.valueOf() as number[], ...J.valueOf() as number[][]])
+    v = matrix((transpose(lusolve(B, R)).valueOf() as number[][])[0])
+    // const Binv = pinv(B)
+    // v = multiply(Binv, R)
+    v = multiply(v, 1 / (norm(v) as number))
     points.push(x.valueOf() as number[])
   }
 
