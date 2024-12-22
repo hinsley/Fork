@@ -12,8 +12,6 @@ import { EquilibriumData } from './Continuation/StateEntities/EditDialogs/EditEq
 import { OrbitData } from './Continuation/StateEntities/EditDialogs/EditOrbitDialog'
 import { IsoclineData } from './Continuation/StateEntities/EditDialogs/EditIsoclineDialog'
 
-const SPATIAL_SCALING = 2e-2
-const TIME_SCALING = 1e-0
 const NUMBER_OF_POINTS = 3e3
 const DISTANCE_LIMIT = 1e4
 
@@ -33,10 +31,18 @@ interface StateSpaceProps {
 
 export interface StateSpaceSettings {
 	realtimeOrbits: boolean
+	xScale: number
+	yScale: number
+	zScale: number
+	timeScale: number
 }
 
 export const defaultStateSpaceSettings: StateSpaceSettings = {
-	realtimeOrbits: true
+	realtimeOrbits: true,
+	xScale: 2e-2,
+	yScale: 2e-2,
+	zScale: 2e-2,
+	timeScale: 1
 }
 
 export default function StateSpace({ equations, parameters, stateEntities, settings }: StateSpaceProps) {
@@ -82,10 +88,13 @@ export default function StateSpace({ equations, parameters, stateEntities, setti
 				options={mathboxOptions}
 				containerStyle={{ height: "100%", width: "100%" }}
 			>
-				<Cartesian scale={[32 * SPATIAL_SCALING, 32 * SPATIAL_SCALING, 32 * SPATIAL_SCALING]}>
-					<Axis axis="x" color="orange" width={64 * SPATIAL_SCALING} visible={equations.length >= 2} />
-					<Axis axis="y" color="blue" width={64 * SPATIAL_SCALING} visible={equations.length >= 3} />
-					<Axis axis="z" color="green" width={64 * SPATIAL_SCALING} visible={equations.length >= 1} />
+				<Cartesian scale={[
+					32 * defaultStateSpaceSettings.yScale,
+					32 * defaultStateSpaceSettings.zScale,
+					32 * defaultStateSpaceSettings.xScale]}>
+					<Axis axis="x" color="orange" width={64 * defaultStateSpaceSettings.yScale} visible={equations.length >= 2} />
+					<Axis axis="y" color="blue" width={64 * defaultStateSpaceSettings.zScale} visible={equations.length >= 3} />
+					<Axis axis="z" color="green" width={64 * defaultStateSpaceSettings.xScale} visible={equations.length >= 1} />
 					<Grid axes="xz" />
 				</Cartesian>
 				<Array
@@ -93,30 +102,30 @@ export default function StateSpace({ equations, parameters, stateEntities, setti
 					channels={3}
 					items={1}
 					expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
-						emit(36 * SPATIAL_SCALING, 3 * SPATIAL_SCALING, 0)
+						emit(36 * defaultStateSpaceSettings.yScale, 3 * defaultStateSpaceSettings.zScale, 0)
 					}}
 				/>
-				<Text id="y-label" data={[equations.length >= 2 ? equations[1].variable : '']} width={32 * SPATIAL_SCALING} />
+				<Text id="y-label" data={[equations.length >= 2 ? equations[1].variable : '']} width={32 * defaultStateSpaceSettings.yScale} />
 				<Label text="#y-label" />
 				<Array
 					id="z-label-array"
 					channels={3}
 					items={1}
 					expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
-						emit(0, 39 * SPATIAL_SCALING, 0)
+						emit(0, 39 * defaultStateSpaceSettings.zScale, 0)
 					}}
 				/>
-				<Text id="z-label" data={[equations.length >= 3 ? equations[2].variable : '']} width={32 * SPATIAL_SCALING} />
+				<Text id="z-label" data={[equations.length >= 3 ? equations[2].variable : '']} width={32 * defaultStateSpaceSettings.zScale} />
 				<Label text="#z-label" />
 				<Array
 					id="x-label-array"
 					channels={3}
 					items={1}
 					expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
-						emit(0, 3 * SPATIAL_SCALING, 36 * SPATIAL_SCALING)
+						emit(0, 3 * defaultStateSpaceSettings.zScale, 36 * defaultStateSpaceSettings.xScale)
 					}}
 				/>
-				<Text id="x-label" data={[equations.length >= 1 ? equations[0].variable : '']} width={32 * SPATIAL_SCALING} />
+				<Text id="x-label" data={[equations.length >= 1 ? equations[0].variable : '']} width={32 * settings.xScale} />
 				<Label text="#x-label" />
 				{settings.realtimeOrbits && <>
 					<Array
@@ -125,8 +134,8 @@ export default function StateSpace({ equations, parameters, stateEntities, setti
 						items={NUMBER_OF_POINTS}
 						realtime={true}
 						expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
-							setPoints(points.map((point) => stepPoint(point, dt * TIME_SCALING)))
-							points.forEach(point => emit(point[1] * SPATIAL_SCALING, point[2] * SPATIAL_SCALING, point[0] * SPATIAL_SCALING))
+							setPoints(points.map((point) => stepPoint(point, dt * settings.timeScale)))
+							points.forEach(point => emit(point[1] * settings.yScale, point[2] * settings.zScale, point[0] * settings.xScale))
 						}}
 					/>
 					<Point points="#points" shape="sphere" color="red" size={2} />
@@ -143,9 +152,9 @@ export default function StateSpace({ equations, parameters, stateEntities, setti
 									items={1}
 									expr={(emit: (x: number, y: number, z: number) => void, i: number, t: number, dt: number) => {
 										emit(
-											(entity.data as EquilibriumData).point.length >= 2 ? (entity.data as EquilibriumData).point[1] * SPATIAL_SCALING : 0,
-											(entity.data as EquilibriumData).point.length >= 3 ? (entity.data as EquilibriumData).point[2] * SPATIAL_SCALING : 0,
-											(entity.data as EquilibriumData).point.length >= 1 ? (entity.data as EquilibriumData).point[0] * SPATIAL_SCALING : 0
+											(entity.data as EquilibriumData).point.length >= 2 ? (entity.data as EquilibriumData).point[1] * settings.yScale : 0,
+											(entity.data as EquilibriumData).point.length >= 3 ? (entity.data as EquilibriumData).point[2] * settings.zScale : 0,
+											(entity.data as EquilibriumData).point.length >= 1 ? (entity.data as EquilibriumData).point[0] * settings.xScale : 0
 										)
 									}}
 								/>
@@ -160,7 +169,11 @@ export default function StateSpace({ equations, parameters, stateEntities, setti
 											live={false}
 											channels={3}
 											items={1}
-											data={line}
+											data={line.map(point => point.map((coord, index) => coord * [
+												settings.yScale,
+												settings.zScale,
+												settings.xScale
+											][index]))}
 										/>
 										<Line points={"#Isocline-" + i + "-line-" + j} color="black" start={false} end={false} width={1} />
 									</>)
@@ -170,9 +183,9 @@ export default function StateSpace({ equations, parameters, stateEntities, setti
 							var curveCoordinatesReordered: number[][] = []
 							if ((entity.data as OrbitData).curve.length > 1) {
 								curveCoordinatesReordered = (entity.data as OrbitData).curve.map(point => [
-									point.length >= 2 ? point[1] * SPATIAL_SCALING : 0,
-									point.length >= 3 ? point[2] * SPATIAL_SCALING : 0,
-									point.length >= 1 ? point[0] * SPATIAL_SCALING : 0
+									point.length >= 2 ? point[1] * settings.yScale : 0,
+									point.length >= 3 ? point[2] * settings.zScale : 0,
+									point.length >= 1 ? point[0] * settings.xScale : 0
 								])
 								return (<>
 									<Array

@@ -11,6 +11,7 @@ import { ParameterSet } from "./components/Continuation/ParameterSets/ParameterS
 import BifurcationDiagram from "./components/BifurcationDiagram"
 import AttractorAnalysis from "./components/AttractorAnalysis/AttractorAnalysis"
 import Systems from "./components/Systems"
+import Settings from "./components/Settings"
 import TopBar from "./components/TopBar"
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
 
   const [stateEntities, setStateEntities] = useState<StateEntity[]>([])
   const [parameterSets, setParameterSets] = useState<ParameterSet[]>([])
+  const [stateSpaceSettings, setStateSpaceSettings] = useState<StateSpaceSettings>(defaultStateSpaceSettings)
 
   return (
     <Box sx={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -45,7 +47,7 @@ export default function App() {
                   equations={equations}
                   parameters={parameters}
                   stateEntities={stateEntities}
-                  settings={defaultStateSpaceSettings}
+                  settings={stateSpaceSettings}
                 />
               case "equations":
                 return <ODEEditor
@@ -58,6 +60,7 @@ export default function App() {
                 return <Continuation
                   equations={equations}
                   parameters={parameters}
+                  stateSpaceSettings={stateSpaceSettings}
                   stateEntities={stateEntities}
                   setStateEntities={setStateEntities}
                   parameterSets={parameterSets}
@@ -80,6 +83,13 @@ export default function App() {
                   setEquations={setEquations}
                   parameters={parameters}
                   setParameters={setParameters}
+                  setStateSpaceSettings={setStateSpaceSettings}
+                />
+              case "settings":
+                return <Settings
+                  equations={equations}
+                  stateSpaceSettings={stateSpaceSettings}
+                  setStateSpaceSettings={setStateSpaceSettings}
                 />
               default:
                 return <Box

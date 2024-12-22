@@ -15,7 +15,7 @@ import {
   TextField
 } from '@mui/material'
 
-import StateSpace, { defaultStateSpaceSettings } from "../../../StateSpace"
+import StateSpace, { StateSpaceSettings } from "../../../StateSpace"
 import { Equation, Parameter } from "../../../ODEEditor"
 import { StateEntity } from "../StateEntitiesMenu"
 import { ParameterSet } from "../../ParameterSets/ParameterSetsMenu"
@@ -45,6 +45,7 @@ export interface EquilibriumEntity extends StateEntity {
 interface EditEquilibriumDialogProps {
   equations: Equation[]
   parameters: Parameter[]
+  stateSpaceSettings: StateSpaceSettings
   open: boolean
   onClose: (setEquilibriumDialogOpen: Dispatch<SetStateAction<boolean>>, updatedStateEntity?: StateEntity) => boolean
   setEquilibriumDialogOpen: Dispatch<SetStateAction<boolean>>
@@ -53,7 +54,17 @@ interface EditEquilibriumDialogProps {
   parameterSets: ParameterSet[]
 }
 
-export default function EditEquilibriumDialog({ equations, parameters, setEquilibriumDialogOpen, open, onClose, stateEntities, stateEntity, parameterSets }: EditEquilibriumDialogProps) {
+export default function EditEquilibriumDialog({
+  equations,
+  parameters,
+  stateSpaceSettings,
+  open,
+  onClose,
+  setEquilibriumDialogOpen,
+  stateEntities,
+  stateEntity,
+  parameterSets
+}: EditEquilibriumDialogProps) {
   if (stateEntity === null) {
     return <></>
   }
@@ -240,7 +251,7 @@ export default function EditEquilibriumDialog({ equations, parameters, setEquili
           stateEntities.map(entity => 
             entity.name === stateEntity.name ? updatedStateEntity : entity
           ) : [updatedStateEntity]
-        } settings={{ ...defaultStateSpaceSettings, realtimeOrbits: previewShowRealtimeOrbits }}/>
+        } settings={{ ...stateSpaceSettings, realtimeOrbits: previewShowRealtimeOrbits }}/>
         <Box>
           <FormControlLabel
             control={<Checkbox checked={previewShowAllStateEntities} onChange={(e) => setPreviewShowAllStateEntities(e.target.checked)} />}

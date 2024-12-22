@@ -1,4 +1,4 @@
-import { Dispatch, SetStateAction, useEffect, useState } from 'react'
+import { Dispatch, SetStateAction, useEffect, useState } from "react"
 import {
   Box,
   Button,
@@ -11,9 +11,9 @@ import {
   FormControlLabel,
   Stack,
   TextField
-} from '@mui/material'
+} from "@mui/material"
 
-import StateSpace, { defaultStateSpaceSettings } from "../../../StateSpace"
+import StateSpace, { StateSpaceSettings } from "../../../StateSpace"
 import { Equation, Parameter } from "../../../ODEEditor"
 import { StateEntity } from "../StateEntitiesMenu"
 
@@ -37,6 +37,7 @@ export interface OrbitEntity extends StateEntity {
 interface EditOrbitDialogProps {
   equations: Equation[]
   parameters: Parameter[]
+  stateSpaceSettings: StateSpaceSettings
   open: boolean
   onClose: (setOrbitDialogOpen: Dispatch<SetStateAction<boolean>>, updatedStateEntity?: StateEntity) => boolean
   setOrbitDialogOpen: Dispatch<SetStateAction<boolean>>
@@ -44,7 +45,16 @@ interface EditOrbitDialogProps {
   stateEntity: OrbitEntity | null // The Orbit state entity.
 }
 
-export default function EditOrbitDialog({ equations, parameters, setOrbitDialogOpen, open, onClose, stateEntities, stateEntity }: EditOrbitDialogProps) {
+export default function EditOrbitDialog({
+  equations,
+  parameters,
+  stateSpaceSettings,
+  open,
+  onClose,
+  setOrbitDialogOpen,
+  stateEntities,
+  stateEntity
+}: EditOrbitDialogProps) {
   if (stateEntity === null) {
     return null
   }
@@ -194,7 +204,7 @@ export default function EditOrbitDialog({ equations, parameters, setOrbitDialogO
           stateEntities.map(entity => 
             entity.name === stateEntity.name ? updatedStateEntity : entity
           ) : [updatedStateEntity]
-        } settings={{ ...defaultStateSpaceSettings, realtimeOrbits: previewShowRealtimeOrbits }}/>
+        } settings={{ ...stateSpaceSettings, realtimeOrbits: previewShowRealtimeOrbits }}/>
         <Box>
           <FormControlLabel
             control={<Checkbox checked={previewShowAllStateEntities} onChange={(e) => setPreviewShowAllStateEntities(e.target.checked)} />}

@@ -2,6 +2,7 @@ import { Dispatch, MouseEvent, SetStateAction, useState } from "react"
 import { Box, Button, Container, Divider, List, ListItemButton, ListItemText } from "@mui/material"
 // import { FixedSizeList, ListChildComponentProps } from "react-window" // TODO: Work this in so huge lists are handled efficiently. See "virtualized lists" in the MUI docs.
 
+import { StateSpaceSettings } from "../../StateSpace"
 import EditEquilibriumDialog, { EquilibriumData, EquilibriumEntity, EquilibriumFormParameters } from "./EditDialogs/EditEquilibriumDialog"
 import EditIsoclineDialog, { IsoclineData, IsoclineEntity, IsoclineFormParameters } from "./EditDialogs/EditIsoclineDialog"
 import EditOrbitDialog, { OrbitData, OrbitEntity, OrbitFormParameters } from "./EditDialogs/EditOrbitDialog"
@@ -19,13 +20,22 @@ export interface StateEntity {
 interface StateEntitiesMenuProps {
   equations: Equation[]
   parameters: Parameter[]
+  stateSpaceSettings: StateSpaceSettings
   stateEntities: StateEntity[]
   setStateEntities: (stateEntities: StateEntity[]) => void
   parameterSets: ParameterSet[]
   setParameterSets: (parameterSets: ParameterSet[]) => void
 }
 
-export default function StateEntitiesMenu({ equations, parameters, stateEntities, setStateEntities, parameterSets, setParameterSets }: StateEntitiesMenuProps) {
+export default function StateEntitiesMenu({
+  equations,
+  parameters,
+  stateSpaceSettings,
+  stateEntities,
+  setStateEntities,
+  parameterSets,
+  setParameterSets
+}: StateEntitiesMenuProps) {
   const [editEquilibriumDialogOpen, setEditEquilibriumDialogOpen] = useState(false)
   const [editIsoclineDialogOpen, setEditIsoclineDialogOpen] = useState(false)
   const [editOrbitDialogOpen, setEditOrbitDialogOpen] = useState(false)
@@ -174,6 +184,7 @@ export default function StateEntitiesMenu({ equations, parameters, stateEntities
         <EditEquilibriumDialog
           equations={equations}
           parameters={parameters}
+          stateSpaceSettings={stateSpaceSettings}
           parameterSets={parameterSets}
           open={editEquilibriumDialogOpen}
           onClose={handleEditStateEntity}
@@ -184,6 +195,7 @@ export default function StateEntitiesMenu({ equations, parameters, stateEntities
         <EditIsoclineDialog
           equations={equations}
           parameters={parameters}
+          stateSpaceSettings={stateSpaceSettings}
           open={editIsoclineDialogOpen}
           onClose={handleEditStateEntity}
           setIsoclineDialogOpen={setEditIsoclineDialogOpen}
@@ -193,6 +205,7 @@ export default function StateEntitiesMenu({ equations, parameters, stateEntities
         <EditOrbitDialog
           equations={equations}
           parameters={parameters}
+          stateSpaceSettings={stateSpaceSettings}
           open={editOrbitDialogOpen}
           onClose={handleEditStateEntity}
           setOrbitDialogOpen={setEditOrbitDialogOpen}

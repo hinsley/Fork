@@ -14,7 +14,7 @@ import {
   TextField
 } from "@mui/material"
 
-import StateSpace, { defaultStateSpaceSettings } from "../../../StateSpace"
+import StateSpace, { StateSpaceSettings } from "../../../StateSpace"
 import { Equation, Parameter } from "../../../ODEEditor"
 import { StateEntity } from "../StateEntitiesMenu"
 
@@ -41,6 +41,7 @@ export interface IsoclineEntity extends StateEntity {
 interface EditIsoclineDialogProps {
   equations: Equation[]
   parameters: Parameter[]
+  stateSpaceSettings: StateSpaceSettings
   open: boolean
   onClose: (setIsoclineDialogOpen: Dispatch<SetStateAction<boolean>>, updatedStateEntity?: StateEntity) => boolean
   setIsoclineDialogOpen: Dispatch<SetStateAction<boolean>>
@@ -48,7 +49,16 @@ interface EditIsoclineDialogProps {
   stateEntity: IsoclineEntity | null // The Isocline state entity.
 }
 
-export default function EditIsoclineDialog({ equations, parameters, setIsoclineDialogOpen, open, onClose, stateEntities, stateEntity }: EditIsoclineDialogProps) {
+export default function EditIsoclineDialog({
+  equations,
+  parameters,
+  stateSpaceSettings,
+  setIsoclineDialogOpen,
+  open,
+  onClose,
+  stateEntities,
+  stateEntity
+}: EditIsoclineDialogProps) {
   if (stateEntity === null) {
     return null
   }
@@ -86,7 +96,6 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
     )
 
     // Rasterize squares into endpoints.
-    const SPATIAL_SCALING = 2e-2 // TODO: Retrieve this from state space settings.
     const squaresEndpoints: number[][][] = []
     squareTypes.forEach((square: [number[], number, number, number, number, number], _: number) => {
       let endPoints: number[][] = []
@@ -219,11 +228,7 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
       ...updatedStateEntity,
       data: {
         ...updatedStateEntity.data,
-        lines: lines.map(line =>
-          line.map(point =>
-            point.map(coord => coord * SPATIAL_SCALING)
-          )
-        )
+        lines: lines
       }
     })
     setPreviewRenderKey(previewRenderKey + 1)
@@ -415,7 +420,7 @@ export default function EditIsoclineDialog({ equations, parameters, setIsoclineD
           stateEntities.map(entity => 
             entity.name === stateEntity.name ? updatedStateEntity : entity
           ) : [updatedStateEntity]
-        } settings={{ ...defaultStateSpaceSettings, realtimeOrbits: previewShowRealtimeOrbits }}/>
+        } settings={{ ...stateSpaceSettings, realtimeOrbits: previewShowRealtimeOrbits }}/>
         <Box>
           <FormControlLabel
             control={<Checkbox checked={previewShowAllStateEntities} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPreviewShowAllStateEntities(e.target.checked)} />}

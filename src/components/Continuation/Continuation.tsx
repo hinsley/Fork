@@ -1,20 +1,30 @@
-import React, { useState } from 'react'
-import { Box, TextField } from '@mui/material'
-import { Equation, Parameter } from '../ODEEditor'
+import React, { useState } from "react"
+import { Box, TextField } from "@mui/material"
+import { Equation, Parameter } from "../ODEEditor"
 
-import StateEntitiesMenu, { StateEntity } from './StateEntities/StateEntitiesMenu'
-import ParameterSetsMenu, { ParameterSet } from './ParameterSets/ParameterSetsMenu'
+import { StateSpaceSettings } from "../StateSpace"
+import StateEntitiesMenu, { StateEntity } from "./StateEntities/StateEntitiesMenu"
+import ParameterSetsMenu, { ParameterSet } from "./ParameterSets/ParameterSetsMenu"
 
 interface ContinuationProps {
   equations: Equation[]
   parameters: Parameter[]
+  stateSpaceSettings: StateSpaceSettings
   stateEntities: StateEntity[]
   setStateEntities: (stateEntities: StateEntity[]) => void
   parameterSets: ParameterSet[]
   setParameterSets: (parameterSets: ParameterSet[]) => void
 }
 
-export default function Continuation({ equations, parameters, stateEntities, setStateEntities, parameterSets, setParameterSets }: ContinuationProps) {
+export default function Continuation({
+  equations,
+  parameters,
+  stateSpaceSettings,
+  stateEntities,
+  setStateEntities,
+  parameterSets,
+  setParameterSets
+}: ContinuationProps) {
   const defaultObjectType = "state-entities"
   
   const [objectType, setObjectType] = useState(defaultObjectType)
@@ -41,6 +51,7 @@ export default function Continuation({ equations, parameters, stateEntities, set
               return <StateEntitiesMenu
                 equations={equations}
                 parameters={parameters}
+                stateSpaceSettings={stateSpaceSettings}
                 stateEntities={stateEntities}
                 setStateEntities={setStateEntities}
                 parameterSets={parameterSets}

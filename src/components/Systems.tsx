@@ -1,15 +1,18 @@
-import React, { useState } from 'react'
-import { Box, Button, TextField } from '@mui/material'
-import { Equation, Parameter } from './ODEEditor'
+import React, { useState } from "react"
+import { Box, Button, TextField } from "@mui/material"
+
+import { StateSpaceSettings, defaultStateSpaceSettings } from "./StateSpace"
+import { Equation, Parameter } from "./ODEEditor"
 
 interface SystemsProps {
   equations: Equation[]
   setEquations: React.Dispatch<React.SetStateAction<Equation[]>>
   parameters: Parameter[]
   setParameters: React.Dispatch<React.SetStateAction<Parameter[]>>
+  setStateSpaceSettings: React.Dispatch<React.SetStateAction<StateSpaceSettings>>
 }
 
-export default function Systems({ setEquations, setParameters }: SystemsProps) {
+export default function Systems({ setEquations, setParameters, setStateSpaceSettings }: SystemsProps) {
   const defaultSystem = "lorenz"
 
   const [selectedSystem, setSelectedSystem] = useState(defaultSystem)
@@ -28,6 +31,12 @@ export default function Systems({ setEquations, setParameters }: SystemsProps) {
           { name: "c", value: 0.25 },
           { name: "d", value: 0.1 }
         ])
+        setStateSpaceSettings({
+          ...defaultStateSpaceSettings,
+          xScale: 0.3,
+          yScale: 0.3,
+          realtimeOrbits: false
+        })
         break
       case "fitzhugh-nagumo":
         setEquations([
@@ -41,6 +50,12 @@ export default function Systems({ setEquations, setParameters }: SystemsProps) {
           { name: "R", value: 0.1 },
           { name: "tau", value: 12.5 }
         ])
+        setStateSpaceSettings({
+          ...defaultStateSpaceSettings,
+          timeScale: 5,
+          xScale: 0.1,
+          yScale: 0.1
+        })
         break
       case "langford":
         setEquations([
@@ -56,6 +71,13 @@ export default function Systems({ setEquations, setParameters }: SystemsProps) {
           { name: "e", value: 0.25 },
           { name: "f", value: 0.1 }
         ])
+        setStateSpaceSettings({
+          ...defaultStateSpaceSettings,
+          timeScale: 1.5,
+          xScale: 0.2,
+          yScale: 0.2,
+          zScale: 0.2
+        })
         break
       case "lorenz":
         setEquations([
@@ -68,6 +90,7 @@ export default function Systems({ setEquations, setParameters }: SystemsProps) {
           { name: "b", value: 8/3 },
           { name: "r", value: 28 }
         ])
+        setStateSpaceSettings(defaultStateSpaceSettings)
         break
       case "lorenz-84":
         setEquations([
@@ -81,6 +104,12 @@ export default function Systems({ setEquations, setParameters }: SystemsProps) {
           { name: "F", value: 8 },
           { name: "G", value: 1 }
         ])
+        setStateSpaceSettings({
+          ...defaultStateSpaceSettings,
+          xScale: 0.1,
+          yScale: 0.1,
+          zScale: 0.1
+        })
         break
       case "rossler":
         setEquations([
@@ -93,6 +122,11 @@ export default function Systems({ setEquations, setParameters }: SystemsProps) {
           { name: "b", value: 0.1 },
           { name: "c", value: 14 }
         ])
+        setStateSpaceSettings({
+          ...defaultStateSpaceSettings,
+          timeScale: 2,
+          zScale: 0.015
+        })
         break
       case "thomas":
         setEquations([
@@ -103,6 +137,13 @@ export default function Systems({ setEquations, setParameters }: SystemsProps) {
         setParameters([
           { name: "b", value: 0.208186 }
         ])
+        setStateSpaceSettings({
+          ...defaultStateSpaceSettings,
+          timeScale: 4,
+          xScale: 0.1,
+          yScale: 0.1,
+          zScale: 0.1
+        })
         break
     }
   }
