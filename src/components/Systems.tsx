@@ -16,6 +16,19 @@ export default function Systems({ setEquations, setParameters }: SystemsProps) {
 
   const setSystem = () => {
     switch (selectedSystem) {
+      case "ecomod":
+        setEquations([
+          { variable: "x", expression: "r*x*(1-x)-x*y/(x+a)" },
+          { variable: "y", expression: "-c*y+x*y/(x+a)-d*y^2/(y^2+b^2)" }
+        ])
+        setParameters([
+          { name: "r", value: 2 },
+          { name: "a", value: 0.6 },
+          { name: "b", value: 0.25 },
+          { name: "c", value: 0.25 },
+          { name: "d", value: 0.1 }
+        ])
+        break
       case "fitzhugh-nagumo":
         setEquations([
           { variable: "v", expression: "v-v^3/3-w+R*I" },
@@ -107,6 +120,7 @@ export default function Systems({ setEquations, setParameters }: SystemsProps) {
             onChange={(e) => setSelectedSystem(e.target.value)}
             fullWidth
           >
+            <option value="ecomod">EcoMod</option>
             <option value="fitzhugh-nagumo">FitzHugh-Nagumo</option>
             <option value="langford">Langford</option>
             <option value="lorenz">Lorenz</option>

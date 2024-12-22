@@ -159,10 +159,11 @@ export default function continueEquilibrium(
             X.valueOf() as number[]
           )
           const Q = matrix([0, ...F])
-          const W = matrix((transpose(lusolve(B, R)).valueOf() as number[][])[0])
+          // const W = matrix((transpose(lusolve(B, R)).valueOf() as number[][])[0])
           // const W = multiply(Binv, R)
-          V = multiply(W, 1 / (norm(W) as number))
-          dX = matrix((transpose(lusolve(B, Q)).valueOf() as number[][])[0])
+          // V = multiply(W, 1 / (norm(W) as number))
+          // dX = matrix((transpose(lusolve(B, Q)).valueOf() as number[][])[0])
+          dX = matrix((transpose(lusolve(B, Q)).valueOf() as number[][])[0]) // PALC.
           // dX = multiply(Binv, Q)
           X = subtract(X, dX)
         }
@@ -197,6 +198,7 @@ export default function continueEquilibrium(
     // v = multiply(Binv, R)
     v = multiply(v, 1 / (norm(v) as number))
     points.push(x.valueOf() as number[])
+    console.log(x)
   }
 
   return points
