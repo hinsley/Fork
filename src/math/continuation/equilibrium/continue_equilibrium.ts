@@ -91,8 +91,9 @@ function newtonCorrector(
   correctorMaxSteps: number,
   eps0: number,
   eps1: number
-): [Matrix, Matrix] | null {
+): [Matrix, Matrix, Matrix] | null {
   const R = matrix([1, ...new Array(equations.length).fill(0)])
+  let J = matrix([])
 
   let X = add(x, multiply(v, stepSize)) // X0
   let V = v // V0
@@ -105,7 +106,7 @@ function newtonCorrector(
     }
     let step = 0
     for (; step < correctorMaxSteps; step++) {
-      const J = jac(X.valueOf() as number[])
+      J = jac(X.valueOf() as number[])
       const B = matrix([V.valueOf() as number[], ...J.valueOf() as number[][]])
       // const Binv = pinv(B)
       let F: number[] = []
@@ -157,7 +158,7 @@ function newtonCorrector(
     }
   }
 
-  return [X, V]
+  return [X, V, J]
 }
 
 /**
@@ -257,11 +258,10 @@ export default function continueEquilibrium(
     if (result === null) {
       return points
     }
-    const [X, V] = result
+    const [X, V, J] = result
 
     // Once converged, set new point and direction.
     x = X
-    const J = jac(x.valueOf() as number[])
     const B = matrix([V.valueOf() as number[], ...J.valueOf() as number[][]])
     v = matrix((transpose(lusolve(B, R)).valueOf() as number[][])[0])
     // const Binv = pinv(B)
