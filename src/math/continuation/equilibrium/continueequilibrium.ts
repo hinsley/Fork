@@ -26,11 +26,12 @@ function augmentedJacobian(
   return (point: number[]) => {
     const scope: { [key: string]: number } = {}
     equations.forEach((eq, i) => {
-      scope[eq.variable] = point[i]
+      scope[eq.variable] = point[i+1]
     })
     parameters.forEach((param, _) => {
       scope[param.name] = param.value
     })
+    scope[continuationParameter.name] = point[0]
 
     return matrix(equations.map(equation =>
       [
@@ -74,6 +75,92 @@ function augmentedPoint(
   return matrix([continuationParameterValue, ...point])
 }
 
+function newtonCorrector(
+  x: Matrix,
+  v: Matrix,
+  equations: Equation[],
+  parameters: Parameter[],
+  continuationParameter: Parameter,
+  jac: (point: number[]) => Matrix,
+  stepSize: number,
+  minimumStepSize: number,
+  maximumStepSize: number,
+  stepSizeDecrement: number,
+  stepSizeIncrement: number,
+  correctorStepsStepSizeIncrementThreshold: number,
+  correctorMaxSteps: number,
+  eps0: number,
+  eps1: number
+): [Matrix, Matrix] | null {
+  const R = matrix([1, ...new Array(equations.length).fill(0)])
+
+  let X = add(x, multiply(v, stepSize)) // X0
+  let V = v // V0
+
+  let converged = false
+  while (!converged) {
+    if (stepSize < minimumStepSize) {
+      // Not converging despite using minimum step size.
+      alert("Failed to converge: Reached minimum step size.")
+      return null
+    }
+    let step = 0
+    for (; step < correctorMaxSteps; step++) {
+      const J = jac(X.valueOf() as number[])
+      const B = matrix([V.valueOf() as number[], ...J.valueOf() as number[][]])
+      // const Binv = pinv(B)
+      let F: number[] = []
+      let dX: Matrix = matrix([])
+      // From MATCONT's newtcorr.m:
+      // "Repeat twice with same Jacobian.
+      // Calculating the Jacobian is usually
+      // a lot more expensive than solving a
+      // system."
+      // Note: This may not be true, since we
+      // aren't numerically computing the
+      // Jacobian at every step, but instead
+      // using a symbolically predetermined
+      // Jacobian.
+      for (let i = 0; i < 2; i++) {
+        F = vectorField(
+          equations,
+          parameters,
+          continuationParameter,
+          X.valueOf() as number[]
+        )
+        const Q = matrix([0, ...F])
+        const W = matrix((transpose(lusolve(B, R)).valueOf() as number[][])[0])
+        // const W = multiply(Binv, R)
+        V = multiply(W, 1 / (norm(W) as number))
+        // dX = matrix((transpose(lusolve(B, Q)).valueOf() as number[][])[0])
+        dX = matrix((transpose(lusolve(B, Q)).valueOf() as number[][])[0]) // PALC.
+        // dX = multiply(Binv, Q)
+        X = subtract(X, dX)
+      }
+
+      if (
+        (norm(F) as number) < eps0
+        && (norm(dX) as number) < eps1
+      ) {
+        converged = true
+      }
+    }
+
+    if (!converged) {
+      // Did not converge; need to decrease step size.
+      stepSize *= stepSizeDecrement
+      // Reset X and V to X0 and V0.
+      X = add(x, multiply(v, stepSize))
+      V = v
+    } else if (step < correctorStepsStepSizeIncrementThreshold) {
+      // Converged too quickly; can increase step size.
+      Math.min(stepSize *= stepSizeIncrement, maximumStepSize)
+    }
+  }
+
+  return [X, V]
+}
+
 /**
  * Calculate the continued equilibrium curve in extended state space.
  * @param equations 
@@ -113,6 +200,8 @@ export default function continueEquilibrium(
   const points: number[][] = []
   // Calculate the augmented Jacobian function.
   const jac = augmentedJacobian(equations, parameters, continuationParameter)
+  // R is used for corrector steps.
+  const R = matrix([1, ...new Array(equations.length).fill(0)])
   // Determine initial point in product space of
   // continuation parameter and state variables.
   let x = augmentedPoint(
@@ -122,72 +211,53 @@ export default function continueEquilibrium(
   points.push(x.valueOf() as number[])
   // Set initial direction (only varying the continuation parameter).
   let v = matrix([forward ? 1 : -1, ...new Array(initialPoint.length).fill(0)])
+  let result = newtonCorrector(
+    x,
+    v,
+    equations,
+    parameters,
+    continuationParameter,
+    jac,
+    initialStepSize,
+    minimumStepSize,
+    maximumStepSize,
+    stepSizeDecrement,
+    stepSizeIncrement,
+    correctorStepsStepSizeIncrementThreshold,
+    correctorMaxSteps,
+    eps0,
+    eps1
+  )
+  if (result === null) {
+    return points
+  }
+  [x, v] = result
   // Set step size.
   let stepSize = initialStepSize
-  let R = matrix([1, ...new Array(equations.length).fill(0)])
 
   // Predictor loop.
   for (let point = 0; point < predictorMaxPoints; point++) {
-    let X = add(x, multiply(v, stepSize)) // X0
-    let V = v // V0
-
-    // Corrector loop.
-    let converged = false
-    while (!converged) {
-      if (stepSize < minimumStepSize) {
-        // Not converging despite using minimum step size.
-        alert("Failed to converge: Reached minimum step size.")
-        return points
-      }
-      let step = 0
-      for (; step < correctorMaxSteps; step++) {
-        const J = jac(X.valueOf() as number[])
-        const B = matrix([V.valueOf() as number[], ...J.valueOf() as number[][]])
-        // const Binv = pinv(B)
-        let F: number[] = []
-        let dX: Matrix = matrix([])
-        // From MATCONT's newtcorr.m:
-        // Repeat twice with same Jacobian.
-        // Calculating the Jacobian is usually
-        // a lot more expensive than solving a
-        // system.
-        for (let i = 0; i < 2; i++) {
-          F = vectorField(
-            equations,
-            parameters,
-            continuationParameter,
-            X.valueOf() as number[]
-          )
-          const Q = matrix([0, ...F])
-          // const W = matrix((transpose(lusolve(B, R)).valueOf() as number[][])[0])
-          // const W = multiply(Binv, R)
-          // V = multiply(W, 1 / (norm(W) as number))
-          // dX = matrix((transpose(lusolve(B, Q)).valueOf() as number[][])[0])
-          dX = matrix((transpose(lusolve(B, Q)).valueOf() as number[][])[0]) // PALC.
-          // dX = multiply(Binv, Q)
-          X = subtract(X, dX)
-        }
-
-        if (
-          (norm(F) as number) < eps0
-          && (norm(dX) as number) < eps1
-        ) {
-          converged = true
-          break
-        }
-      }
-
-      if (!converged) {
-        // Did not converge; need to decrease step size.
-        stepSize *= stepSizeDecrement
-        // Reset X and V to X0 and V0.
-        X = add(x, multiply(v, stepSize))
-        V = v
-      } else if (step < correctorStepsStepSizeIncrementThreshold) {
-        // Converged too quickly; can increase step size.
-        Math.min(stepSize *= stepSizeIncrement, maximumStepSize)
-      }
+    result = newtonCorrector(
+      x,
+      v,
+      equations,
+      parameters,
+      continuationParameter,
+      jac,
+      stepSize,
+      minimumStepSize,
+      maximumStepSize,
+      stepSizeDecrement,
+      stepSizeIncrement,
+      correctorStepsStepSizeIncrementThreshold,
+      correctorMaxSteps,
+      eps0,
+      eps1
+    )
+    if (result === null) {
+      return points
     }
+    const [X, V] = result
 
     // Once converged, set new point and direction.
     x = X
@@ -198,7 +268,6 @@ export default function continueEquilibrium(
     // v = multiply(Binv, R)
     v = multiply(v, 1 / (norm(v) as number))
     points.push(x.valueOf() as number[])
-    console.log(x)
   }
 
   return points
