@@ -68,7 +68,7 @@ export default function NewParameterSetDialog({ parameters, parameterSets, state
           stepSizeIncrement: 3,
           correctorStepsStepSizeIncrementThreshold: 3,
           predictorMaxPoints: 1e2,
-          correctorMaxSteps: 10,
+          correctorMaxSteps: 3,
           eps0: 1e-6,
           eps1: 1e-6
         }
