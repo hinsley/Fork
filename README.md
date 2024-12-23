@@ -23,7 +23,7 @@ I will have to study some more theory of numerical bifurcation analysis in maps 
 
 ### ODE systems
 - Codimension 0
-    - [ ] Equilibrium
+    - [X] Equilibrium
     - [ ] Periodic Orbit
 - Codimension 1
     - [ ] Andronov-Hopf
