@@ -101,7 +101,6 @@ function newtonCorrector(
   while (!converged) {
     if (stepSize < minimumStepSize) {
       // Not converging despite using minimum step size.
-      alert("Failed to converge: Reached minimum step size.")
       return null
     }
     let step = 0
@@ -229,6 +228,7 @@ export default function continueEquilibrium(
     eps1
   )
   if (result === null) {
+    alert(`Failed to converge: Reached minimum step size. Solved ${points.length} on branch.`)
     return points
   }
   [x, v] = result
