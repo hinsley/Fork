@@ -40,7 +40,7 @@ I will have to study some more theory of numerical bifurcation analysis in maps 
     - [ ] Shilnikov-Hopf
 
 ## Rendering
-Fork uses [MathBox](https://github.com/unconed/mathbox) to render trajectories, bifurcation diagrams, and other visualizations.
+Fork uses [MathBox](https://github.com/unconed/mathbox) and [Plotly](https://plotly.com/javascript/) to render trajectories, bifurcation diagrams, and other visualizations.
 
 # Building
 Install `yarn` and run `yarn add vite` followed by `yarn vite`.
