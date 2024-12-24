@@ -18,7 +18,7 @@ import {
 import { Equation, Parameter } from "../../ODEEditor"
 import { ParameterSet } from "./ParameterSetsMenu"
 import { EquilibriumEntity } from "../StateEntities/EditDialogs/EditEquilibriumDialog"
-import continueEquilibrium from "../../../math/continuation/equilibrium/continueequilibrium"
+import continueEquilibrium from "../../../math/continuation/equilibrium/continue_equilibrium"
 
 import BifurcationDiagram from "../../BifurcationDiagram"
 

@@ -57,6 +57,30 @@ export default function Systems({ setEquations, setParameters, setStateSpaceSett
           yScale: 0.1
         })
         break
+      case "hindmarsh-rose":
+        setEquations([
+          { variable: "x", expression: "y-a*x^3+b*x^2+I-z" },
+          { variable: "y", expression: "c-d*x^2-y" },
+          { variable: "z", expression: "r*(s*(x-x1)-z)" }
+        ])
+        setParameters([
+          { name: "a", value: 1 },
+          { name: "b", value: 3 },
+          { name: "c", value: 1 },
+          { name: "d", value: 5 },
+          { name: "x1", value: -1.6 },
+          { name: "r", value: 0.006 },
+          { name: "s", value: 4 },
+          { name: "I", value: 3.2 }
+        ])
+        setStateSpaceSettings({
+          ...defaultStateSpaceSettings,
+          timeScale: 3.5,
+          xScale: 0.05,
+          yScale: 0.05,
+          zScale: 0.05
+        })
+        break
       case "langford":
         setEquations([
           { variable: "x", expression: "(z-b)*x-d*y" },
@@ -163,6 +187,7 @@ export default function Systems({ setEquations, setParameters, setStateSpaceSett
           >
             <option value="ecomod">EcoMod</option>
             <option value="fitzhugh-nagumo">FitzHugh-Nagumo</option>
+            <option value="hindmarsh-rose">Hindmarsh-Rose</option>
             <option value="langford">Langford</option>
             <option value="lorenz">Lorenz</option>
             <option value="lorenz-84">Lorenz 84</option>
