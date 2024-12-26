@@ -57,7 +57,8 @@ export default function NewParameterSetDialog({ parameters, parameterSets, state
     switch (type) {
       case "Equilibrium":
         data = {
-          continuationCurve: []
+          continuationCurve: [],
+          bifurcationPoints: []
         }
         formParameters = {
           continuationParameterIndex: null,

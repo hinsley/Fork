@@ -18,12 +18,13 @@ import {
 import { Equation, Parameter } from "../../ODEEditor"
 import { ParameterSet } from "./ParameterSetsMenu"
 import { EquilibriumEntity } from "../StateEntities/EditDialogs/EditEquilibriumDialog"
-import continueEquilibrium from "../../../math/continuation/equilibrium/continue_equilibrium"
+import continueEquilibrium, { BifurcationPoint } from "../../../math/continuation/equilibrium/continue_equilibrium"
 
 import BifurcationDiagram from "../../BifurcationDiagram"
 
 export interface EquilibriumParameterSetData {
   continuationCurve: number[][] // In cartesian product of parameter space and state space.
+  bifurcationPoints: BifurcationPoint[]
 }
 
 export interface EquilibriumParameterSetFormParameters {
@@ -122,7 +123,7 @@ export default function EditEquilibriumParameterSetDialog({
       alert("You must select a continuation parameter.")
       return false
     }
-    const result = continueEquilibrium(
+    const [points, codim1Bifurcations] = continueEquilibrium(
       equations,
       parameters,
       parameters[updatedParameterSet.formParameters.continuationParameterIndex],
@@ -142,7 +143,7 @@ export default function EditEquilibriumParameterSetDialog({
     setUpdatedParameterSet({
       ...updatedParameterSet,
       data: {
-        continuationCurve: result.map(continuationPoint => [
+        continuationCurve: points.map(continuationPoint => [
           ...parameters.slice(
             0,
             updatedParameterSet.formParameters.continuationParameterIndex as number // Can assume index not null.
@@ -152,7 +153,21 @@ export default function EditEquilibriumParameterSetDialog({
             updatedParameterSet.formParameters.continuationParameterIndex as number + 1 // Can assume index not null.
           ).map(parameter => parameter.value),
           ...continuationPoint.slice(1)
-        ])
+        ]),
+        bifurcationPoints: codim1Bifurcations.map(bifurcation => ({
+          point: [
+            ...parameters.slice(
+              0,
+              updatedParameterSet.formParameters.continuationParameterIndex as number // Can assume index not null.
+            ).map(parameter => parameter.value),
+            bifurcation.point[0],
+            ...parameters.slice(
+              updatedParameterSet.formParameters.continuationParameterIndex as number + 1 // Can assume index not null.
+            ).map(parameter => parameter.value),
+            ...bifurcation.point.slice(1)
+          ],
+          type: bifurcation.type
+        }))
       }
     })
     return true

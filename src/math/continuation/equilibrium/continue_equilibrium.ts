@@ -1,7 +1,9 @@
 import {
+  Complex3,
   Matrix,
   add,
   derivative,
+  eigs,
   lusolve,
   matrix,
   multiply,
@@ -12,6 +14,11 @@ import {
 } from "mathjs"
 
 import { Equation, Parameter } from "../../../components/ODEEditor"
+
+export interface BifurcationPoint {
+  point: number[]
+  type: string
+}
 
 // Compute Jacobian in augmented continuation space.
 // TODO: Add compilation of derivative expressions into callback.
@@ -196,8 +203,9 @@ export default function continueEquilibrium(
   correctorMaxSteps: number,
   eps0: number, // Tolerance for residual.
   eps1: number // Tolerance for search step.
-): number[][] {
+): [number[][], BifurcationPoint[]] {
   const points: number[][] = []
+  const codim1Bifurcations: BifurcationPoint[] = []
   // Calculate the augmented Jacobian function.
   const jac = augmentedJacobian(equations, parameters, continuationParameter)
   // R is used for corrector steps.
@@ -235,6 +243,11 @@ export default function continueEquilibrium(
   [x, v] = result
   // Set step size.
   let stepSize = initialStepSize
+  // Initialize cache for test function values.
+  let testFunctionValues: Record<string, [number, number]> = {
+    "Andronov-Hopf": [0, 0],
+    "Fold": [0, 0]
+  }
 
   // Predictor loop.
   for (let point = 0; point < predictorMaxPoints; point++) {
@@ -268,7 +281,52 @@ export default function continueEquilibrium(
     // v = multiply(Binv, R)
     v = multiply(v, 1 / (norm(v) as number))
     points.push(x.valueOf() as number[])
-  }
 
-  return points
+    // Update test function values.
+    // Calculate eigenvalues of state space Jacobian.
+    const stateJ = transpose(matrix(transpose(J).valueOf().slice(1)))
+    const eigendata = eigs(stateJ)
+    const eigenvalues = eigendata.values
+    for (const [testFunctionName, [_, value]] of Object.entries(testFunctionValues)) {
+      let newValue = 0
+      switch (testFunctionName) {
+        case "Andronov-Hopf":
+          newValue = 1 as Complex3
+          for (let i = 0; i < equations.length; i++) {
+            for (let j = i+1; j < equations.length; j++) {
+              newValue = multiply(newValue, add(eigenvalues.get([i]), eigenvalues.get([j])))
+            }
+          }
+          break
+        case "Fold":
+          // Detect direction of parameter variation.
+          newValue = points[points.length-1][0] - points[points.length-2][0]
+          break
+      }
+      testFunctionValues[testFunctionName] = [value, newValue]
+    }
+  
+    // Detect bifurcations.
+    // TODO: Introduce ability to specify singularity requirements for
+    // multiple test functions. For example, a neutral saddle and an
+    // Andronov-Hopf bifurcation should be distinguished.
+    if (points.length >= 3) {
+      for (const [testFunctionName, [prevValue, value]] of Object.entries(testFunctionValues)) {
+        if (value * prevValue < 0) {
+          codim1Bifurcations.push({
+            point: points[
+              points.length-{
+                "Andronov-Hopf": 1,
+                "Fold": 2,
+              }[testFunctionName]
+            ],
+            type: testFunctionName
+          })
+        }
+      }
+    }
+  }
+  
+  return [points, codim1Bifurcations]
 }
+

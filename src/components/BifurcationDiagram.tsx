@@ -136,6 +136,20 @@ export default function BifurcationDiagram({ equations, parameters, parameterSet
               showlegend: false,
               name: `${parameterSet.name} end`
             })),
+            // Codim 2 bifurcations.
+            ...parameterSets.filter(parameterSet => parameterSet.data.bifurcationPoints.length > 0)
+            .flatMap(parameterSet => parameterSet.data.bifurcationPoints.map(bifurcationPoint => ({
+              x: [bifurcationPoint.point[horizontalAxis]],
+              y: [bifurcationPoint.point[verticalAxis]],
+              type: "scatter",
+              mode: "markers",
+              marker: {
+                size: 5,
+                color: "green"
+              },
+              showlegend: false,
+              name: `${bifurcationPoint.type}`
+            })))
           ]}
           layout={{
             xaxis: { title: horizontalAxisTitle() },
