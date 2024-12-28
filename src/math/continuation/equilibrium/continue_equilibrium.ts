@@ -246,7 +246,8 @@ export default function continueEquilibrium(
   // Initialize cache for test function values.
   let testFunctionValues: Record<string, [number, number]> = {
     "Andronov-Hopf": [0, 0],
-    "Fold": [0, 0]
+    "Fold": [0, 0],
+    "Neutral Saddle": [0, 0]
   }
 
   // Predictor loop.
@@ -291,6 +292,7 @@ export default function continueEquilibrium(
       let newValue = 0
       switch (testFunctionName) {
         case "Andronov-Hopf":
+          // Detect product of sums of eigenvalues.
           newValue = 1 as Complex3
           for (let i = 0; i < equations.length; i++) {
             for (let j = i+1; j < equations.length; j++) {
@@ -302,28 +304,53 @@ export default function continueEquilibrium(
           // Detect direction of parameter variation.
           newValue = points[points.length-1][0] - points[points.length-2][0]
           break
+        case "Neutral Saddle":
+          // Detect product of sums of real parts of eigenvalues.
+          newValue = 1
+          for (let i = 0; i < equations.length; i++) {
+            for (let j = i+1; j < equations.length; j++) {
+              newValue += multiply(eigenvalues.get([i]), eigenvalues.get([j]))
+            }
+          }
+          break
       }
       testFunctionValues[testFunctionName] = [value, newValue]
     }
   
     // Detect bifurcations.
-    // TODO: Introduce ability to specify singularity requirements for
-    // multiple test functions. For example, a neutral saddle and an
-    // Andronov-Hopf bifurcation should be distinguished.
     if (points.length >= 3) {
+      const newCodim1Bifurcations: BifurcationPoint[] = []
       for (const [testFunctionName, [prevValue, value]] of Object.entries(testFunctionValues)) {
+        // Detect sign change in test functions.
         if (value * prevValue < 0) {
-          codim1Bifurcations.push({
+          newCodim1Bifurcations.push({
             point: points[
               points.length-{
                 "Andronov-Hopf": 1,
                 "Fold": 2,
+                "Neutral Saddle": 1
               }[testFunctionName]
             ],
             type: testFunctionName
           })
         }
       }
+
+      // If neutral saddle and Andronov-Hopf both detected, discard Andronov-Hopf.
+      let neutralSaddleIndex = newCodim1Bifurcations.findIndex(bif => bif.type === "Neutral Saddle")
+      let hopfIndex = newCodim1Bifurcations.findIndex(bif => bif.type === "Andronov-Hopf")
+      if (neutralSaddleIndex !== -1 && hopfIndex !== -1) {
+        newCodim1Bifurcations.splice(hopfIndex, 1)
+      }
+
+      // Discard neutral saddle if detected.
+      neutralSaddleIndex = newCodim1Bifurcations.findIndex(bif => bif.type === "Neutral Saddle")
+      if (neutralSaddleIndex !== -1) {
+        newCodim1Bifurcations.splice(neutralSaddleIndex, 1)
+      }
+
+      // Add new bifurcations.
+      codim1Bifurcations.push(...newCodim1Bifurcations)
     }
   }
   
