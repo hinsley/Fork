@@ -157,12 +157,123 @@ export default function Continuation({
 }: ContinuationProps) {
   const defaultObjectType = "state-entities"
   
-  const [objectType, setObjectType] = useState(defaultObjectType)
+  const [objectType, setObjectType] = useState(defaultObjectType);
+  const [limitCycleBranches, setLimitCycleBranches] = useState<LimitCycle[][]>([]);
+  
+  // TODO: This is a placeholder for actual bifurcation points from equilibrium continuation.
+  // This state would need to be populated by the equilibrium continuation logic.
+  const [equilibriumBifurcationPoints, setEquilibriumBifurcationPoints] = useState<BifurcationPoint[]>([]);
+
+  // TODO: The 'continuationParameterName' needs to be determined, likely from user selection in UI.
+  // For now, using a placeholder (e.g., the first parameter's name or a hardcoded one).
+  // This will be used to identify which parameter object to pass as 'lcContinuationParameter'
+  // and which ones to filter into 'lcFixedParams'.
+  const continuationParameterName = parameters.length > 0 ? parameters[0].name : "TODO_Define_Cont_Param_Name";
+
+  const initiateLCContinuationWrapper = (hopfPointData: BifurcationPoint) => {
+    const activeEquations = equations; // Using equations prop directly
+    const currentParameters = parameters; // Using parameters prop directly
+    
+    const systemDimension = activeEquations.length; // d
+
+    // Find the full Parameter object for the continuation parameter
+    const lcContinuationParameter = currentParameters.find(p => p.name === continuationParameterName);
+
+    if (!lcContinuationParameter) {
+      console.error(`Continuation parameter "${continuationParameterName}" not found for LC.`);
+      return;
+    }
+    
+    // Filter out the continuation parameter from the list of fixed parameters
+    const lcFixedParams = currentParameters.filter(p => p.name !== continuationParameterName);
+
+    // Default settings for LC continuation (make these configurable later)
+    const defaultNumShootingNodes = 20; // M
+    const defaultInitialAmplitude = 1e-3; // epsilon_lc
+    const defaultLcParameterStep = 0.1;
+    const defaultLcNumSteps = 50;
+    const defaultNewtonMaxIter = 20;
+    const defaultNewtonTol = 1e-7;
+    const defaultFdEpsilon = 1e-6;
+
+    console.log("Initiating LC continuation from Hopf with params:", {
+      hopfPointData,
+      activeEquations,
+      lcFixedParams,
+      lcContinuationParameter
+    });
+
+    const newBranch = handleStartLimitCycleContinuationFromHopf(
+      hopfPointData,
+      activeEquations,
+      lcFixedParams,
+      lcContinuationParameter, // Full parameter object
+      defaultNumShootingNodes,
+      defaultInitialAmplitude,
+      defaultLcParameterStep,
+      defaultLcNumSteps,
+      defaultNewtonMaxIter,
+      defaultNewtonTol,
+      defaultFdEpsilon
+    );
+
+    if (newBranch && newBranch.length > 0) {
+      setLimitCycleBranches(prevBranches => [...prevBranches, newBranch]);
+      console.log("New limit cycle branch computed and stored:", newBranch);
+    } else {
+      console.error("Failed to compute limit cycle branch from Hopf point.");
+    }
+  };
+  
+  // Example of how initiateLCContinuationWrapper might be triggered.
+  // This is for testing/demonstration; actual trigger would be UI-driven.
+  // React.useEffect(() => {
+  //   if (parameters.length > 0 && equations.length > 0) {
+  //      // Create a dummy hopf point for testing
+  //     const dummyHopfPoint: BifurcationPoint = {
+  //       type: "Andronov-Hopf",
+  //       point: [parameters[0].value, ...new Array(equations.length).fill(0.1)], // param_val, x1, ...
+  //       eigenvalues: [{re: 0, im: 1}, {re:0, im: -1}, {re: -0.5, im: 0}],
+  //       eigenvectors: [
+  //         { value: {re:0, im:1}, vector: matrix([[complex(0,1)],[complex(1,0)]]) },
+  //         { value: {re:0, im:-1}, vector: matrix([[complex(0,-1)],[complex(1,0)]]) },
+  //         { value: {re:-0.5, im:0}, vector: matrix([[1],[1]]) },
+  //       ]
+  //     };
+  //     console.log("Attempting to call initiateLCContinuationWrapper with dummy data from useEffect");
+  //     // initiateLCContinuationWrapper(dummyHopfPoint); // Uncomment to test
+  //   }
+  // }, [parameters, equations]); // Ensure it runs if params/equations change
+
 
   return (
     <Box sx={{ height: "100%", width: "100%", overflow: "auto", display: "flex", flexDirection: "column", alignItems: "center" }}>
       <Box sx={{ mt: 8, mb: 8, width: "1024px", maxWidth: "100%" }}>
         <h3>Continuation</h3>
+
+        {/* Display number of computed LC branches */}
+        <p>Limit Cycle Branches Computed: {limitCycleBranches.length}</p>
+
+        {/* Placeholder section for displaying bifurcation points and LC trigger buttons */}
+        {/* TODO: Replace this with actual integration where bifurcation points are displayed */}
+        <h4>Detected Equilibrium Bifurcation Points (Placeholder):</h4>
+        {equilibriumBifurcationPoints.length === 0 && <p>None yet.</p>}
+        {equilibriumBifurcationPoints.map((bp, index) => (
+          <div key={index} style={{ border: '1px solid #ccc', padding: '10px', marginBottom: '10px' }}>
+            <p>Point Coordinates: {bp.point.join(', ')}</p>
+            <p>Type: {bp.type}</p>
+            {bp.eigenvalues && (
+              <p>Eigenvalues: {bp.eigenvalues.map(e => `(${e.re.toFixed(3)}, ${e.im.toFixed(3)})`).join('; ')}</p>
+            )}
+            {bp.type === "Andronov-Hopf" && (
+              <button onClick={() => initiateLCContinuationWrapper(bp)} style={{ marginTop: '5px', padding: '5px 10px' }}>
+                Branch LC from Hopf
+              </button>
+            )}
+          </div>
+        ))}
+        <hr style={{ margin: '20px 0' }}/>
+
         <Box sx={{ mb: 2 }}>
           <TextField
             select

@@ -336,13 +336,13 @@ export function generateInitialGuessForLCFromHopf(
   if (hopfEquilibrium.length !== dimension ||
       criticalEigenvector_v_re.length !== dimension ||
       criticalEigenvector_v_im.length !== dimension) {
-    throw new Error("Dimension mismatch in input vectors.");
+    throw new Error("Dimension mismatch in input vectors."); // Re-typed
   }
   if (criticalFrequency_omega0 <= 0) {
-    throw new Error("Critical frequency omega_0 must be positive.");
+    throw new Error("Critical frequency omega_0 must be positive."); // Re-typed
   }
   if (numShootingNodes <= 0) {
-    throw new Error("Number of shooting nodes must be positive.");
+    throw new Error("Number of shooting nodes must be positive."); // Re-typed
   }
 
   const M = numShootingNodes;
@@ -374,7 +374,7 @@ export function generateInitialGuessForLCFromHopf(
 
   if (initialY.length !== M * d + 1) {
     // This should not happen if logic is correct
-    throw new Error("Internal error: Generated Y vector has incorrect length.");
+    throw new Error("Internal error: Generated Y vector has incorrect length."); // Re-typed
   }
 
   return initialY;
