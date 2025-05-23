@@ -1,5 +1,6 @@
 import {
   Complex3,
+  complex, // Added complex
   Matrix,
   add,
   derivative,
@@ -16,8 +17,10 @@ import {
 import { Equation, Parameter } from "../../../components/ODEEditor"
 
 export interface BifurcationPoint {
-  point: number[]
-  type: string
+  point: number[]; // [param_val, x1, ..., xd]
+  type: string;
+  eigenvalues?: Complex3[]; // Array of eigenvalues (mathjs Complex objects)
+  eigenvectors?: { value: Complex3, vector: Matrix }[]; // Raw output from mathjs eigs().eigenvectors
 }
 
 // Compute Jacobian in augmented continuation space.
@@ -289,15 +292,19 @@ export default function continueEquilibrium(
     const eigendata = eigs(stateJ)
     const eigenvalues = eigendata.values
     for (const [testFunctionName, [_, value]] of Object.entries(testFunctionValues)) {
-      let newValue = 0
+      let newValue: number | Complex3 = 0
       switch (testFunctionName) {
         case "Andronov-Hopf":
           // Detect product of sums of eigenvalues.
-          newValue = 1 as Complex3
+          newValue = 1 // Initialize as a number
           for (let i = 0; i < equations.length; i++) {
             for (let j = i+1; j < equations.length; j++) {
               newValue = multiply(newValue, add(eigenvalues.get([i]), eigenvalues.get([j])))
             }
+          }
+          // Ensure we store the real part for sign change detection
+          if (typeof newValue === 'object' && 're' in newValue && 'im' in newValue) {
+            newValue = newValue.re;
           }
           break
         case "Fold":
@@ -321,30 +328,48 @@ export default function continueEquilibrium(
     if (points.length >= 3) {
       const newCodim1Bifurcations: BifurcationPoint[] = []
       for (const [testFunctionName, [prevValue, value]] of Object.entries(testFunctionValues)) {
-        // Detect sign change in test functions.
-        if (value * prevValue < 0) {
-          newCodim1Bifurcations.push({
-            point: points[
-              points.length-{
-                "Andronov-Hopf": 1,
-                "Fold": 2,
-                "Neutral Saddle": 1
-              }[testFunctionName]
-            ],
-            type: testFunctionName
-          })
+        // prevValue is a number from testFunctionValues: Record<string, [number, number]>
+        // value is also a number for the same reason.
+
+        if (testFunctionName === "Andronov-Hopf") {
+          // For Andronov-Hopf, 'value' is guaranteed to be a real number from storage mechanism.
+          // 'prevValue' is also a number.
+          if (value * prevValue < 0) { // Direct usage for A-H
+            newCodim1Bifurcations.push({
+              point: points[
+                points.length-{
+                  "Andronov-Hopf": 1,
+                  "Fold": 2, 
+                  "Neutral Saddle": 1
+                }[testFunctionName]
+              ],
+              type: testFunctionName,
+              eigenvalues: eigendata.values.toArray().map((val: number | Complex3) => typeof val === 'number' ? complex(val, 0) : val),
+              eigenvectors: eigendata.eigenvectors
+            });
+          }
+        } else {
+          // For other test functions (e.g., Neutral Saddle, Fold),
+          const val = typeof value === 'object' && 're' in value && 'im' in value ? value.re : value as number;
+          if (val * prevValue < 0) {
+            newCodim1Bifurcations.push({
+              point: points[
+                points.length-{
+                  "Andronov-Hopf": 1,
+                  "Fold": 2,
+                  "Neutral Saddle": 1
+                }[testFunctionName]
+              ],
+              type: testFunctionName,
+              eigenvalues: eigendata.values.toArray().map((val: number | Complex3) => typeof val === 'number' ? complex(val, 0) : val),
+              eigenvectors: eigendata.eigenvectors
+            });
+          }
         }
       }
 
-      // If neutral saddle and Andronov-Hopf both detected, discard Andronov-Hopf.
-      let neutralSaddleIndex = newCodim1Bifurcations.findIndex(bif => bif.type === "Neutral Saddle")
-      let hopfIndex = newCodim1Bifurcations.findIndex(bif => bif.type === "Andronov-Hopf")
-      if (neutralSaddleIndex !== -1 && hopfIndex !== -1) {
-        newCodim1Bifurcations.splice(hopfIndex, 1)
-      }
-
       // Discard neutral saddle if detected.
-      neutralSaddleIndex = newCodim1Bifurcations.findIndex(bif => bif.type === "Neutral Saddle")
+      let neutralSaddleIndex = newCodim1Bifurcations.findIndex(bif => bif.type === "Neutral Saddle")
       if (neutralSaddleIndex !== -1) {
         newCodim1Bifurcations.splice(neutralSaddleIndex, 1)
       }
@@ -356,4 +381,3 @@ export default function continueEquilibrium(
   
   return [points, codim1Bifurcations]
 }
-
