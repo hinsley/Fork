@@ -21,8 +21,7 @@ The project is a **Monorepo** containing both the Rust core and the React fronte
 
 -   **Core (Rust)**: Handles all parsing, evaluation, integration, and numerical analysis.
 -   **Frontend (React)**: Handles visualization and user interaction.
-    -   **3D**: `react-three-fiber` (R3F) for orbits and manifolds.
-    -   **2D**: `react-plotly.js` for bifurcation diagrams and charts.
+    -   **Plots/3D**: `react-plotly.js` for orbits, manifolds, and bifurcation diagrams.
     -   **Bitmaps**: HTML5 Canvas for dense heatmaps (Lyapunov fractals).
 
 ## 3. Key Features & Modules
@@ -69,8 +68,8 @@ The project is a **Monorepo** containing both the Rust core and the React fronte
 
 ### Phase 4: Frontend Foundation
 9.  **React Setup**: (Completed) Vite project initialized in `/web`.
-10. **Rendering**: Install `react-three-fiber`, `drei`.
-11. **Integration**: Connect WASM output to R3F mesh updates.
+10. **Rendering**: Install `react-plotly.js`.
+11. **Integration**: Connect WASM output to Plotly charts.
 
 ### Phase 5: Advanced UI & Polish
 12. **System Editor**: UI for defining equations.

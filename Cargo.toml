@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "crates/fork_core",
+    "crates/fork_wasm"
+]
+
+[profile.release]
+lto = true
+opt-level = 3
+
