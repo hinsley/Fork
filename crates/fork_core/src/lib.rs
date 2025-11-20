@@ -1,3 +1,4 @@
+pub mod analysis;
 pub mod autodiff;
 pub mod equation_engine;
 pub mod equilibrium;

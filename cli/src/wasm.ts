@@ -63,5 +63,22 @@ export class WasmBridge {
         );
         return result as EquilibriumSolution;
     }
+
+    computeLyapunovExponents(
+        startState: number[],
+        startTime: number,
+        steps: number,
+        dt: number,
+        qrStride: number
+    ): number[] {
+        const result = this.instance.compute_lyapunov_exponents(
+            new Float64Array(startState),
+            startTime,
+            steps,
+            dt,
+            qrStride
+        );
+        return Array.from(result);
+    }
 }
 

@@ -1,3 +1,4 @@
+use fork_core::analysis::{lyapunov_exponents as core_lyapunov, LyapunovStepper};
 use fork_core::autodiff::Dual;
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
 use fork_core::equilibrium::{
@@ -5,12 +6,13 @@ use fork_core::equilibrium::{
 };
 use fork_core::solvers::{DiscreteMap, Tsit5, RK4};
 use fork_core::traits::{DynamicalSystem, Steppable};
+use js_sys::Float64Array;
 use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub struct WasmSystem {
-    system: EquationSystem<f64>,
+    system: EquationSystem,
     state: Vec<f64>,
     t: f64,
     solver: SolverType,
@@ -48,7 +50,7 @@ impl WasmSystem {
         }
 
         let system = EquationSystem::new(bytecodes, params);
-        let dim = system.dimension();
+        let dim = system.equations.len();
 
         let solver = match solver_name {
             "rk4" => SolverType::RK4(RK4::new(dim)),
@@ -96,15 +98,7 @@ impl WasmSystem {
     }
 
     pub fn compute_jacobian(&self) -> Vec<f64> {
-        let dual_params: Vec<Dual> = self
-            .system
-            .params
-            .iter()
-            .map(|&p| Dual::new(p, 0.0))
-            .collect();
-        let dual_system = EquationSystem::new(self.system.equations.clone(), dual_params);
-
-        let n = self.system.dimension();
+        let n = self.system.equations.len();
         let mut jacobian = vec![0.0; n * n];
         let mut dual_x = vec![Dual::new(0.0, 0.0); n];
         let mut dual_out = vec![Dual::new(0.0, 0.0); n];
@@ -114,13 +108,55 @@ impl WasmSystem {
             for i in 0..n {
                 dual_x[i] = Dual::new(self.state[i], if i == j { 1.0 } else { 0.0 });
             }
-            dual_system.apply(t_dual, &dual_x, &mut dual_out);
+            self.system.apply(t_dual, &dual_x, &mut dual_out);
             for i in 0..n {
                 jacobian[i * n + j] = dual_out[i].eps;
             }
         }
 
         jacobian
+    }
+
+    pub fn compute_lyapunov_exponents(
+        &self,
+        start_state: Vec<f64>,
+        start_time: f64,
+        steps: u32,
+        dt: f64,
+        qr_stride: u32,
+    ) -> Result<Float64Array, JsValue> {
+        let dim = self.system.equations.len();
+        if start_state.len() != dim {
+            return Err(JsValue::from_str("Initial state dimension mismatch."));
+        }
+        if steps == 0 {
+            return Err(JsValue::from_str(
+                "Lyapunov computation requires at least one step.",
+            ));
+        }
+        if dt <= 0.0 {
+            return Err(JsValue::from_str("dt must be positive."));
+        }
+        let stride = if qr_stride == 0 { 1 } else { qr_stride as usize };
+        let step_count = steps as usize;
+        let solver = match &self.solver {
+            SolverType::RK4(_) => LyapunovStepper::Rk4,
+            SolverType::Tsit5(_) => LyapunovStepper::Tsit5,
+            SolverType::Discrete(_) => LyapunovStepper::Discrete,
+        };
+
+        let exponents = core_lyapunov(
+            &self.system,
+            solver,
+            &start_state,
+            start_time,
+            step_count,
+            dt,
+            stride,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Lyapunov computation failed: {}", e)))?;
+
+        Ok(Float64Array::from(exponents.as_slice()))
     }
 
     pub fn solve_equilibrium(

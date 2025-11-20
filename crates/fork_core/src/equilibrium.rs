@@ -58,12 +58,12 @@ pub struct EquilibriumResult {
 }
 
 pub fn solve_equilibrium(
-    system: &EquationSystem<f64>,
+    system: &EquationSystem,
     kind: SystemKind,
     initial_guess: &[f64],
     settings: NewtonSettings,
 ) -> Result<EquilibriumResult> {
-    let dim = system.dimension();
+    let dim = system.equations.len();
     if dim == 0 {
         bail!("System has zero dimension.");
     }
@@ -129,12 +129,7 @@ pub fn solve_equilibrium(
     })
 }
 
-fn evaluate_residual(
-    system: &EquationSystem<f64>,
-    kind: SystemKind,
-    state: &[f64],
-    out: &mut [f64],
-) {
+fn evaluate_residual(system: &EquationSystem, kind: SystemKind, state: &[f64], out: &mut [f64]) {
     match kind {
         SystemKind::Flow => system.apply(0.0, state, out),
         SystemKind::Map => {
@@ -147,14 +142,11 @@ fn evaluate_residual(
 }
 
 fn compute_jacobian(
-    system: &EquationSystem<f64>,
+    system: &EquationSystem,
     kind: SystemKind,
     state: &[f64],
 ) -> Result<Vec<f64>> {
-    let dim = system.dimension();
-    let dual_params: Vec<Dual> = system.params.iter().map(|&p| Dual::new(p, 0.0)).collect();
-    let dual_system = EquationSystem::new(system.equations.clone(), dual_params);
-
+    let dim = system.equations.len();
     let mut jacobian = vec![0.0; dim * dim];
     let mut dual_state = vec![Dual::new(0.0, 0.0); dim];
     let mut dual_out = vec![Dual::new(0.0, 0.0); dim];
@@ -164,7 +156,7 @@ fn compute_jacobian(
         for i in 0..dim {
             dual_state[i] = Dual::new(state[i], if i == j { 1.0 } else { 0.0 });
         }
-        dual_system.apply(t_dual, &dual_state, &mut dual_out);
+        system.apply(t_dual, &dual_state, &mut dual_out);
         for i in 0..dim {
             let deriv = dual_out[i].eps;
             jacobian[i * dim + j] = match kind {

@@ -16,6 +16,7 @@ export interface OrbitObject {
   t_start: number;
   t_end: number;
   dt: number;
+  lyapunovExponents?: number[];
 }
 
 export interface ComplexValue {
