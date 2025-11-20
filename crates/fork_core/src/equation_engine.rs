@@ -1,21 +1,18 @@
-use crate::{
-    autodiff::Dual,
-    traits::{DynamicalSystem, Scalar},
-};
-use std::cell::RefCell;
+use crate::traits::{Scalar, DynamicalSystem};
 use std::collections::HashMap;
+use std::cell::RefCell;
 
 /// OpCodes for the Stack-based Virtual Machine.
 /// The VM operates on a stack of `Scalar` values (f64 or Dual).
 #[derive(Debug, Clone, Copy)]
 pub enum OpCode {
     /// Pushes a constant `f64` value onto the stack.
-    LoadConst(f64),
+    LoadConst(f64), 
     /// Pushes the value of a state variable (by index) onto the stack.
     /// Indices correspond to the order variables were defined (e.g., 0=x, 1=y).
-    LoadVar(usize),
+    LoadVar(usize), 
     /// Pushes the value of a parameter (by index) onto the stack.
-    LoadParam(usize),
+    LoadParam(usize), 
     /// Pops top two values (b, a), pushes (a + b).
     Add,
     /// Pops top two values (b, a), pushes (a - b).
@@ -49,19 +46,19 @@ impl Bytecode {
 }
 
 /// Stack-based Virtual Machine for evaluating equations.
-///
+/// 
 /// The VM is stateless; `execute` takes all necessary context:
 /// - `bytecode`: Instructions to run.
 /// - `vars`: Current state vector (read-only).
 /// - `params`: Parameter vector (read-only).
 /// - `stack`: A mutable buffer for intermediate computations.
-///
+/// 
 /// Returns the result of the evaluation (the value left on the stack).
 pub struct VM;
 
 impl VM {
     /// Executes the bytecode.
-    ///
+    /// 
     /// # Type Parameters
     /// * `T`: The scalar type (e.g., `f64` or `Dual`).
     pub fn execute<T: Scalar>(
@@ -140,8 +137,8 @@ pub enum Expr {
     Number(f64),
     Variable(String),
     Binary(Box<Expr>, char, Box<Expr>), // char is operator +, -, *, /, ^
-    Unary(char, Box<Expr>),             // -, s (sin), c (cos), e (exp)
-    Call(String, Box<Expr>),            // functions like sin(x)
+    Unary(char, Box<Expr>), // -, s (sin), c (cos), e (exp)
+    Call(String, Box<Expr>), // functions like sin(x)
 }
 
 /// Compiles an AST (`Expr`) into `Bytecode`.
@@ -229,13 +226,8 @@ pub fn parse(input: &str) -> Result<Expr, String> {
 enum Token {
     Number(f64),
     Identifier(String),
-    Plus,
-    Minus,
-    Star,
-    Slash,
-    Caret,
-    LParen,
-    RParen,
+    Plus, Minus, Star, Slash, Caret,
+    LParen, RParen,
 }
 
 fn tokenize(input: &str) -> Vec<Token> {
@@ -356,20 +348,20 @@ impl Parser {
     }
 
     fn parse_power(&mut self) -> Result<Expr, String> {
-        let mut left = self.parse_unary()?;
+         let mut left = self.parse_unary()?;
 
-        while let Some(token) = self.peek() {
-            match token {
-                Token::Caret => {
-                    self.consume();
-                    let right = self.parse_unary()?;
-                    left = Expr::Binary(Box::new(left), '^', Box::new(right));
-                }
-                _ => break,
-            }
-        }
-        Ok(left)
-    }
+         while let Some(token) = self.peek() {
+             match token {
+                 Token::Caret => {
+                     self.consume();
+                     let right = self.parse_unary()?;
+                     left = Expr::Binary(Box::new(left), '^', Box::new(right));
+                 }
+                 _ => break,
+             }
+         }
+         Ok(left)
+     }
 
     fn parse_unary(&mut self) -> Result<Expr, String> {
         if let Some(token) = self.peek() {
@@ -415,111 +407,33 @@ impl Parser {
 
 /// A concrete implementation of `DynamicalSystem` that uses the VM.
 /// Contains one compiled bytecode expression per state variable.
-pub struct EquationSystem {
+pub struct EquationSystem<T: Scalar> {
     pub equations: Vec<Bytecode>,
-    pub params: Vec<f64>,
-    pub param_map: HashMap<String, usize>,
-    pub var_map: HashMap<String, usize>,
-    // Separate stacks/param caches for f64 and Dual execution to avoid reallocations.
-    stack_f64: RefCell<Vec<f64>>,
-    stack_dual: RefCell<Vec<Dual>>,
-    pub(crate) params_dual: RefCell<Vec<Dual>>,
+    pub params: Vec<T>,
+    // Interior mutability for VM stack to avoid allocation in apply.
+    // Note: This makes the system !Sync. For parallelization, we'd need a different approach.
+    pub stack: RefCell<Vec<T>>, 
 }
 
-impl EquationSystem {
-    pub fn new(equations: Vec<Bytecode>, params: Vec<f64>) -> Self {
+impl<T: Scalar> EquationSystem<T> {
+    pub fn new(equations: Vec<Bytecode>, params: Vec<T>) -> Self {
         Self {
             equations,
             params,
-            param_map: HashMap::new(),
-            var_map: HashMap::new(),
-            stack_f64: RefCell::new(Vec::with_capacity(64)),
-            stack_dual: RefCell::new(Vec::with_capacity(64)),
-            params_dual: RefCell::new(Vec::new()),
-        }
-    }
-
-    pub fn set_maps(&mut self, param_map: HashMap<String, usize>, var_map: HashMap<String, usize>) {
-        self.param_map = param_map;
-        self.var_map = var_map;
-    }
-
-    pub fn ensure_dual_params(&self) {
-        let mut params_dual = self.params_dual.borrow_mut();
-        if params_dual.len() != self.params.len() {
-            params_dual.clear();
-            params_dual.extend(self.params.iter().map(|&p| Dual::new(p, 0.0)));
-        } else {
-            for (dst, &src) in params_dual.iter_mut().zip(self.params.iter()) {
-                *dst = Dual::new(src, 0.0);
-            }
-        }
-    }
-
-    /// Evaluates the equations using Dual numbers, differentiating with respect to a specific parameter.
-    /// The state variables `x` are treated as constants.
-    pub fn evaluate_dual_wrt_param(&self, x: &[f64], param_idx: usize, out: &mut [Dual]) {
-        self.ensure_dual_params();
-
-        {
-            let mut params = self.params_dual.borrow_mut();
-            params[param_idx].eps = 1.0;
-        }
-
-        let x_dual: Vec<Dual> = x.iter().map(|&v| Dual::new(v, 0.0)).collect();
-
-        let params = self.params_dual.borrow();
-        let mut stack = self.stack_dual.borrow_mut();
-        for (i, eq) in self.equations.iter().enumerate() {
-            out[i] = VM::execute(eq, &x_dual, &params, &mut stack);
+            stack: RefCell::new(Vec::with_capacity(64)),
         }
     }
 }
 
-impl DynamicalSystem<f64> for EquationSystem {
+impl<T: Scalar> DynamicalSystem<T> for EquationSystem<T> {
     fn dimension(&self) -> usize {
         self.equations.len()
     }
 
-    fn apply(&self, _t: f64, x: &[f64], out: &mut [f64]) {
-        let mut stack = self.stack_f64.borrow_mut();
+    fn apply(&self, _t: T, x: &[T], out: &mut [T]) {
+        let mut stack = self.stack.borrow_mut();
         for (i, eq) in self.equations.iter().enumerate() {
             out[i] = VM::execute(eq, x, &self.params, &mut stack);
         }
-    }
-}
-
-impl DynamicalSystem<Dual> for EquationSystem {
-    fn dimension(&self) -> usize {
-        self.equations.len()
-    }
-
-    fn apply(&self, _t: Dual, x: &[Dual], out: &mut [Dual]) {
-        self.ensure_dual_params();
-        let params = self.params_dual.borrow();
-        let mut stack = self.stack_dual.borrow_mut();
-        for (i, eq) in self.equations.iter().enumerate() {
-            out[i] = VM::execute(eq, x, &params, &mut stack);
-        }
-    }
-}
-
-impl DynamicalSystem<f64> for &EquationSystem {
-    fn dimension(&self) -> usize {
-        self.equations.len()
-    }
-
-    fn apply(&self, t: f64, x: &[f64], out: &mut [f64]) {
-        (*self).apply(t, x, out)
-    }
-}
-
-impl DynamicalSystem<Dual> for &EquationSystem {
-    fn dimension(&self) -> usize {
-        self.equations.len()
-    }
-
-    fn apply(&self, t: Dual, x: &[Dual], out: &mut [Dual]) {
-        (*self).apply(t, x, out)
     }
 }

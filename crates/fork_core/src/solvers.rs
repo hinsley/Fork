@@ -52,8 +52,7 @@ impl<T: Scalar> Steppable<T> for RK4<T> {
 
         // y_next = y + dt/6 * (k1 + 2k2 + 2k3 + k4)
         for i in 0..state.len() {
-            state[i] = state[i]
-                + dt * sixth * (self.k1[i] + two * self.k2[i] + two * self.k3[i] + self.k4[i]);
+            state[i] = state[i] + dt * sixth * (self.k1[i] + two * self.k2[i] + two * self.k3[i] + self.k4[i]);
         }
 
         *t = t0 + dt;
@@ -91,7 +90,7 @@ impl<T: Scalar> Tsit5<T> {
 impl<T: Scalar> Steppable<T> for Tsit5<T> {
     fn step(&mut self, system: &impl DynamicalSystem<T>, t: &mut T, state: &mut [T], dt: T) {
         let t0 = *t;
-
+        
         // Tsit5 Coefficients
         let c2 = T::from_f64(0.161).unwrap();
         let c3 = T::from_f64(0.327).unwrap();
@@ -100,7 +99,7 @@ impl<T: Scalar> Steppable<T> for Tsit5<T> {
         let c6 = T::from_f64(1.0).unwrap();
 
         let a21 = T::from_f64(0.161).unwrap();
-
+        
         let a31 = T::from_f64(-0.008480655492356989).unwrap();
         let a32 = T::from_f64(0.335480655492357).unwrap();
 
@@ -157,31 +156,19 @@ impl<T: Scalar> Steppable<T> for Tsit5<T> {
 
         // k5
         for i in 0..state.len() {
-            self.tmp[i] = state[i]
-                + dt * (a51 * self.k1[i] + a52 * self.k2[i] + a53 * self.k3[i] + a54 * self.k4[i]);
+            self.tmp[i] = state[i] + dt * (a51 * self.k1[i] + a52 * self.k2[i] + a53 * self.k3[i] + a54 * self.k4[i]);
         }
         system.apply(t0 + c5 * dt, &self.tmp, &mut self.k5);
 
         // k6
         for i in 0..state.len() {
-            self.tmp[i] = state[i]
-                + dt * (a61 * self.k1[i]
-                    + a62 * self.k2[i]
-                    + a63 * self.k3[i]
-                    + a64 * self.k4[i]
-                    + a65 * self.k5[i]);
+            self.tmp[i] = state[i] + dt * (a61 * self.k1[i] + a62 * self.k2[i] + a63 * self.k3[i] + a64 * self.k4[i] + a65 * self.k5[i]);
         }
         system.apply(t0 + c6 * dt, &self.tmp, &mut self.k6);
 
         // Update State
         for i in 0..state.len() {
-            state[i] = state[i]
-                + dt * (b1 * self.k1[i]
-                    + b2 * self.k2[i]
-                    + b3 * self.k3[i]
-                    + b4 * self.k4[i]
-                    + b5 * self.k5[i]
-                    + b6 * self.k6[i]);
+             state[i] = state[i] + dt * (b1 * self.k1[i] + b2 * self.k2[i] + b3 * self.k3[i] + b4 * self.k4[i] + b5 * self.k5[i] + b6 * self.k6[i]);
         }
 
         *t = t0 + dt;
@@ -208,12 +195,12 @@ impl<T: Scalar> Steppable<T> for DiscreteMap<T> {
         // x_{n+1} = f(x_n)
         // The equation system's apply method computes f(x) into out.
         system.apply(*t, state, &mut self.tmp);
-
+        
         // Update state
         for i in 0..state.len() {
             state[i] = self.tmp[i];
         }
-
+        
         // Update time (iteration count usually)
         // For maps, dt usually = 1.
         *t = *t + dt;

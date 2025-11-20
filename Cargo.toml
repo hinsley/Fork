@@ -3,12 +3,6 @@ members = [
     "crates/fork_core",
     "crates/fork_wasm"
 ]
-resolver = "2"
-
-[workspace.package]
-license = "MIT"
-repository = "https://github.com/hinsley/Fork"
-authors = ["Carter Hinsley <carterhinsley@gmail.com>"]
 
 [profile.release]
 lto = true

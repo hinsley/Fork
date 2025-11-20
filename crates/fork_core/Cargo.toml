@@ -2,18 +2,10 @@
 name = "fork_core"
 version = "0.1.0"
 edition = "2021"
-description = "Core library for Fork dynamical systems analysis"
-license.workspace = true
-repository.workspace = true
-authors.workspace = true
 
 [dependencies]
 num-traits = "0.2"
-num-complex = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
 anyhow = "1.0"
-nalgebra = { version = "0.34", features = ["std", "sparse"] }
-nalgebra-sparse = "0.11"
-
 

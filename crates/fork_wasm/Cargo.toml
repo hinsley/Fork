@@ -2,10 +2,6 @@
 name = "fork_wasm"
 version = "0.1.0"
 edition = "2021"
-description = "WASM bridge for the Fork core library"
-license.workspace = true
-repository.workspace = true
-authors.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -16,6 +12,4 @@ fork_core = { path = "../fork_core" }
 serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.5"
 js-sys = "0.3"
-console_error_panic_hook = "0.1.7"
-nalgebra = "0.34"  # DEBUG_PD_CURVE: Added for debug residual computation
-anyhow = "1.0"
+

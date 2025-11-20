@@ -27,3 +27,4 @@ pub trait Steppable<T: Scalar> {
     /// dt: step size
     fn step(&mut self, system: &impl DynamicalSystem<T>, t: &mut T, state: &mut [T], dt: T);
 }
+
