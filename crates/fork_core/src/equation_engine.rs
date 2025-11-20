@@ -1,4 +1,7 @@
-use crate::traits::{DynamicalSystem, Scalar};
+use crate::{
+    autodiff::Dual,
+    traits::{DynamicalSystem, Scalar},
+};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -412,33 +415,83 @@ impl Parser {
 
 /// A concrete implementation of `DynamicalSystem` that uses the VM.
 /// Contains one compiled bytecode expression per state variable.
-pub struct EquationSystem<T: Scalar> {
+pub struct EquationSystem {
     pub equations: Vec<Bytecode>,
-    pub params: Vec<T>,
-    // Interior mutability for VM stack to avoid allocation in apply.
-    // Note: This makes the system !Sync. For parallelization, we'd need a different approach.
-    pub stack: RefCell<Vec<T>>,
+    pub params: Vec<f64>,
+    // Separate stacks/param caches for f64 and Dual execution to avoid reallocations.
+    stack_f64: RefCell<Vec<f64>>,
+    stack_dual: RefCell<Vec<Dual>>,
+    params_dual: RefCell<Vec<Dual>>,
 }
 
-impl<T: Scalar> EquationSystem<T> {
-    pub fn new(equations: Vec<Bytecode>, params: Vec<T>) -> Self {
+impl EquationSystem {
+    pub fn new(equations: Vec<Bytecode>, params: Vec<f64>) -> Self {
         Self {
             equations,
             params,
-            stack: RefCell::new(Vec::with_capacity(64)),
+            stack_f64: RefCell::new(Vec::with_capacity(64)),
+            stack_dual: RefCell::new(Vec::with_capacity(64)),
+            params_dual: RefCell::new(Vec::new()),
+        }
+    }
+
+    fn ensure_dual_params(&self) {
+        let mut params_dual = self.params_dual.borrow_mut();
+        if params_dual.len() != self.params.len() {
+            params_dual.clear();
+            params_dual.extend(self.params.iter().map(|&p| Dual::new(p, 0.0)));
+        } else {
+            for (dst, &src) in params_dual.iter_mut().zip(self.params.iter()) {
+                *dst = Dual::new(src, 0.0);
+            }
         }
     }
 }
 
-impl<T: Scalar> DynamicalSystem<T> for EquationSystem<T> {
+impl DynamicalSystem<f64> for EquationSystem {
     fn dimension(&self) -> usize {
         self.equations.len()
     }
 
-    fn apply(&self, _t: T, x: &[T], out: &mut [T]) {
-        let mut stack = self.stack.borrow_mut();
+    fn apply(&self, _t: f64, x: &[f64], out: &mut [f64]) {
+        let mut stack = self.stack_f64.borrow_mut();
         for (i, eq) in self.equations.iter().enumerate() {
             out[i] = VM::execute(eq, x, &self.params, &mut stack);
         }
+    }
+}
+
+impl DynamicalSystem<Dual> for EquationSystem {
+    fn dimension(&self) -> usize {
+        self.equations.len()
+    }
+
+    fn apply(&self, _t: Dual, x: &[Dual], out: &mut [Dual]) {
+        self.ensure_dual_params();
+        let params = self.params_dual.borrow();
+        let mut stack = self.stack_dual.borrow_mut();
+        for (i, eq) in self.equations.iter().enumerate() {
+            out[i] = VM::execute(eq, x, &params, &mut stack);
+        }
+    }
+}
+
+impl DynamicalSystem<f64> for &EquationSystem {
+    fn dimension(&self) -> usize {
+        self.equations.len()
+    }
+
+    fn apply(&self, t: f64, x: &[f64], out: &mut [f64]) {
+        (*self).apply(t, x, out)
+    }
+}
+
+impl DynamicalSystem<Dual> for &EquationSystem {
+    fn dimension(&self) -> usize {
+        self.equations.len()
+    }
+
+    fn apply(&self, t: Dual, x: &[Dual], out: &mut [Dual]) {
+        (*self).apply(t, x, out)
     }
 }
