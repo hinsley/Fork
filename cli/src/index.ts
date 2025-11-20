@@ -186,7 +186,7 @@ async function createSystem() {
     }
 
     const config: SystemConfig = {
-        name: meta.name,
+        name: name,
         type: type,
         equations,
         params: paramValues,
@@ -510,6 +510,7 @@ async function manageOrbit(sysName: string, obj: OrbitObject) {
             choices: [
                 { name: 'Inspect Data', value: 'Inspect Data' },
                 { name: 'Extend Orbit', value: 'Extend Orbit' },
+                { name: 'Oseledets Solver', value: 'Oseledets Solver' },
                 new inquirer.Separator(),
                 { name: 'Rename Object', value: 'Rename Object' },
                 { name: 'Delete Object', value: 'Delete Object' },
@@ -562,24 +563,12 @@ async function manageOrbit(sysName: string, obj: OrbitObject) {
         }
 
         if (action === 'Inspect Data') {
-            console.log(chalk.yellow("Data Points:"));
-            const head = obj.data.slice(0, 5);
-            head.forEach((pt: number[]) => {
-                console.log(`  t=${pt[0].toFixed(3)}: [${pt.slice(1).map(x => x.toFixed(4)).join(', ')}]`);
-            });
+            await inspectOrbitData(sysName, obj);
+            continue;
+        }
 
-            if (obj.data.length > 10) {
-                console.log(chalk.gray("  ..."));
-            }
-
-            const tail = obj.data.slice(-5);
-            if (obj.data.length > 5) {
-                tail.forEach((pt: number[]) => {
-                    console.log(`  t=${pt[0].toFixed(3)}: [${pt.slice(1).map(x => x.toFixed(4)).join(', ')}]`);
-                });
-            }
-
-            await inquirer.prompt({ type: 'input', name: 'cont', message: 'Press enter to continue...' });
+        if (action === 'Oseledets Solver') {
+            await oseledetsSolverMenu(sysName, obj);
             continue;
         }
 
@@ -640,6 +629,174 @@ async function manageOrbit(sysName: string, obj: OrbitObject) {
             }
         }
     }
+}
+
+async function oseledetsSolverMenu(sysName: string, obj: OrbitObject) {
+    while (true) {
+        const { task } = await inquirer.prompt([{
+            type: 'list',
+            name: 'task',
+            message: 'Oseledets Solver',
+            choices: [
+                { name: 'Lyapunov Exponents', value: 'Lyapunov Exponents' },
+                {
+                    name: 'Covariant Lyapunov Exponents',
+                    value: 'Covariant Lyapunov Exponents',
+                    disabled: 'Coming soon'
+                },
+                new inquirer.Separator(),
+                { name: 'Back', value: 'Back' }
+            ]
+        }]);
+
+        if (task === 'Back') {
+            return;
+        }
+
+        if (task === 'Lyapunov Exponents') {
+            await runLyapunovExponents(sysName, obj);
+        }
+    }
+}
+
+async function runLyapunovExponents(sysName: string, obj: OrbitObject) {
+    const sysConfig = Storage.loadSystem(obj.systemName);
+    const duration = obj.t_end - obj.t_start;
+    if (duration <= 0) {
+        console.error(chalk.red("Orbit has no duration to analyze."));
+        return;
+    }
+
+    const { transientInput } = await inquirer.prompt([{
+        name: 'transientInput',
+        message: 'Transient time to discard:',
+        default: '0',
+        validate: (value: string) => {
+            const val = parseFloat(value);
+            if (Number.isNaN(val)) return "Please enter a number.";
+            if (val < 0 || val > duration) {
+                return `Value must be between 0 and ${duration.toFixed(6)}.`;
+            }
+            return true;
+        }
+    }]);
+
+    const transient = Math.min(
+        Math.max(parseFloat(transientInput) || 0, 0),
+        duration
+    );
+    const targetTime = obj.t_start + transient;
+
+    let startIndex = obj.data.length - 1;
+    for (let i = 0; i < obj.data.length; i++) {
+        if (obj.data[i][0] >= targetTime) {
+            startIndex = i;
+            break;
+        }
+    }
+
+    if (startIndex >= obj.data.length - 1) {
+        console.error(chalk.red("Transient leaves no data to analyze."));
+        return;
+    }
+
+    const steps = obj.data.length - startIndex - 1;
+
+    const { qrInput } = await inquirer.prompt([{
+        name: 'qrInput',
+        message: 'Steps between QR decompositions:',
+        default: '1',
+        validate: (value: string) => {
+            const n = parseInt(value, 10);
+            if (!Number.isFinite(n) || n <= 0) {
+                return "Enter a positive integer.";
+            }
+            return true;
+        }
+    }]);
+    const qrStride = Math.max(parseInt(qrInput, 10) || 1, 1);
+
+    const startState = obj.data[startIndex].slice(1);
+    const startTime = obj.data[startIndex][0];
+    const dt = obj.dt || (sysConfig.type === 'map' ? 1 : 0.01);
+
+    try {
+        const bridge = new WasmBridge(sysConfig);
+        const exponents = bridge.computeLyapunovExponents(
+            startState,
+            startTime,
+            steps,
+            dt,
+            qrStride
+        );
+        obj.lyapunovExponents = exponents;
+        Storage.saveObject(sysName, obj);
+        console.log(chalk.green("Lyapunov exponents computed and stored."));
+        await inspectOrbitData(sysName, obj);
+    } catch (err) {
+        const message = err instanceof Error ? err.message : `${err}`;
+        console.error(chalk.red("Lyapunov computation failed:"), message);
+    }
+}
+
+async function inspectOrbitData(sysName: string, obj: OrbitObject) {
+    console.log(chalk.yellow("Data Points:"));
+    const head = obj.data.slice(0, 5);
+    head.forEach((pt: number[]) => {
+        console.log(`  t=${pt[0].toFixed(3)}: [${pt.slice(1).map(x => x.toFixed(4)).join(', ')}]`);
+    });
+
+    if (obj.data.length > 10) {
+        console.log(chalk.gray("  ..."));
+    }
+
+    const tail = obj.data.slice(-5);
+    if (obj.data.length > 5) {
+        tail.forEach((pt: number[]) => {
+            console.log(`  t=${pt[0].toFixed(3)}: [${pt.slice(1).map(x => x.toFixed(4)).join(', ')}]`);
+        });
+    }
+
+    console.log('');
+    if (obj.lyapunovExponents && obj.lyapunovExponents.length > 0) {
+        console.log(chalk.yellow('Lyapunov Exponents:'));
+        obj.lyapunovExponents.forEach((lambda, idx) => {
+            console.log(`  λ${idx + 1}: ${lambda.toFixed(6)}`);
+        });
+        const dimension = kaplanYorkeDimension(obj.lyapunovExponents);
+        if (dimension !== null) {
+            console.log(chalk.cyan(`Lyapunov Dimension (Kaplan-Yorke): ${dimension.toFixed(6)}`));
+        }
+    } else {
+        console.log(chalk.gray('Lyapunov exponents not computed yet. Use the Oseledets Solver to compute them.'));
+    }
+
+    await inquirer.prompt({ type: 'input', name: 'cont', message: 'Press enter to continue...' });
+}
+
+function kaplanYorkeDimension(exponents: number[]): number | null {
+    if (!exponents.length) {
+        return null;
+    }
+    const sorted = [...exponents].sort((a, b) => b - a);
+    let partial = 0;
+    for (let i = 0; i < sorted.length; i++) {
+        const lambda = sorted[i];
+        const newSum = partial + lambda;
+        if (newSum >= 0) {
+            partial = newSum;
+            if (i === sorted.length - 1) {
+                return sorted.length;
+            }
+            continue;
+        }
+
+        if (Math.abs(lambda) < Number.EPSILON) {
+            return i;
+        }
+        return i + partial / Math.abs(lambda);
+    }
+    return sorted.length;
 }
 
 async function manageEquilibrium(sysName: string, obj: EquilibriumObject) {
