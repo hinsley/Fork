@@ -1,18 +1,18 @@
-use crate::traits::{Scalar, DynamicalSystem};
-use std::collections::HashMap;
+use crate::traits::{DynamicalSystem, Scalar};
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 /// OpCodes for the Stack-based Virtual Machine.
 /// The VM operates on a stack of `Scalar` values (f64 or Dual).
 #[derive(Debug, Clone, Copy)]
 pub enum OpCode {
     /// Pushes a constant `f64` value onto the stack.
-    LoadConst(f64), 
+    LoadConst(f64),
     /// Pushes the value of a state variable (by index) onto the stack.
     /// Indices correspond to the order variables were defined (e.g., 0=x, 1=y).
-    LoadVar(usize), 
+    LoadVar(usize),
     /// Pushes the value of a parameter (by index) onto the stack.
-    LoadParam(usize), 
+    LoadParam(usize),
     /// Pops top two values (b, a), pushes (a + b).
     Add,
     /// Pops top two values (b, a), pushes (a - b).
@@ -46,19 +46,19 @@ impl Bytecode {
 }
 
 /// Stack-based Virtual Machine for evaluating equations.
-/// 
+///
 /// The VM is stateless; `execute` takes all necessary context:
 /// - `bytecode`: Instructions to run.
 /// - `vars`: Current state vector (read-only).
 /// - `params`: Parameter vector (read-only).
 /// - `stack`: A mutable buffer for intermediate computations.
-/// 
+///
 /// Returns the result of the evaluation (the value left on the stack).
 pub struct VM;
 
 impl VM {
     /// Executes the bytecode.
-    /// 
+    ///
     /// # Type Parameters
     /// * `T`: The scalar type (e.g., `f64` or `Dual`).
     pub fn execute<T: Scalar>(
@@ -137,8 +137,8 @@ pub enum Expr {
     Number(f64),
     Variable(String),
     Binary(Box<Expr>, char, Box<Expr>), // char is operator +, -, *, /, ^
-    Unary(char, Box<Expr>), // -, s (sin), c (cos), e (exp)
-    Call(String, Box<Expr>), // functions like sin(x)
+    Unary(char, Box<Expr>),             // -, s (sin), c (cos), e (exp)
+    Call(String, Box<Expr>),            // functions like sin(x)
 }
 
 /// Compiles an AST (`Expr`) into `Bytecode`.
@@ -226,8 +226,13 @@ pub fn parse(input: &str) -> Result<Expr, String> {
 enum Token {
     Number(f64),
     Identifier(String),
-    Plus, Minus, Star, Slash, Caret,
-    LParen, RParen,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Caret,
+    LParen,
+    RParen,
 }
 
 fn tokenize(input: &str) -> Vec<Token> {
@@ -348,20 +353,20 @@ impl Parser {
     }
 
     fn parse_power(&mut self) -> Result<Expr, String> {
-         let mut left = self.parse_unary()?;
+        let mut left = self.parse_unary()?;
 
-         while let Some(token) = self.peek() {
-             match token {
-                 Token::Caret => {
-                     self.consume();
-                     let right = self.parse_unary()?;
-                     left = Expr::Binary(Box::new(left), '^', Box::new(right));
-                 }
-                 _ => break,
-             }
-         }
-         Ok(left)
-     }
+        while let Some(token) = self.peek() {
+            match token {
+                Token::Caret => {
+                    self.consume();
+                    let right = self.parse_unary()?;
+                    left = Expr::Binary(Box::new(left), '^', Box::new(right));
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
 
     fn parse_unary(&mut self) -> Result<Expr, String> {
         if let Some(token) = self.peek() {
@@ -412,7 +417,7 @@ pub struct EquationSystem<T: Scalar> {
     pub params: Vec<T>,
     // Interior mutability for VM stack to avoid allocation in apply.
     // Note: This makes the system !Sync. For parallelization, we'd need a different approach.
-    pub stack: RefCell<Vec<T>>, 
+    pub stack: RefCell<Vec<T>>,
 }
 
 impl<T: Scalar> EquationSystem<T> {

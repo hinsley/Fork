@@ -13,6 +13,9 @@ dist-ssr
 *.local
 target
 
+# CLI data artifacts
+cli/data/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
