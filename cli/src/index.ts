@@ -722,6 +722,7 @@ async function runLyapunovExponents(sysName: string, obj: OrbitObject) {
 
     try {
         const bridge = new WasmBridge(sysConfig);
+        console.log(chalk.yellow("Computing..."));
         const exponents = bridge.computeLyapunovExponents(
             startState,
             startTime,
@@ -765,7 +766,7 @@ async function inspectOrbitData(sysName: string, obj: OrbitObject) {
         });
         const dimension = kaplanYorkeDimension(obj.lyapunovExponents);
         if (dimension !== null) {
-            console.log(chalk.cyan(`Lyapunov Dimension (Kaplan-Yorke): ${dimension.toFixed(6)}`));
+            console.log(chalk.cyan(`Lyapunov Dimension: ${dimension.toFixed(6)}`));
         }
     } else {
         console.log(chalk.gray('Lyapunov exponents not computed yet. Use the Oseledets Solver to compute them.'));
