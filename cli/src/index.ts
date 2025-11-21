@@ -4,13 +4,14 @@ import { Storage } from './storage';
 import {
     AnalysisObject,
     ComplexValue,
+    CovariantLyapunovData,
     EquilibriumObject,
     EquilibriumRunSummary,
     EquilibriumSolverParams,
     SystemConfig,
     OrbitObject
 } from './types';
-import { WasmBridge } from './wasm';
+import { WasmBridge, CovariantLyapunovResponse } from './wasm';
 import { continuationMenu } from './continuation';
 import {
     ConfigEntry,
@@ -859,11 +860,7 @@ async function oseledetsSolverMenu(sysName: string, obj: OrbitObject) {
             message: 'Oseledets Solver',
             choices: [
                 { name: 'Lyapunov Exponents', value: 'Lyapunov Exponents' },
-                {
-                    name: 'Covariant Lyapunov Exponents',
-                    value: 'Covariant Lyapunov Exponents',
-                    disabled: 'Coming soon'
-                },
+                { name: 'Covariant Lyapunov Vectors', value: 'Covariant Lyapunov Vectors' },
                 new inquirer.Separator(),
                 { name: 'Back', value: 'Back' }
             ],
@@ -876,6 +873,8 @@ async function oseledetsSolverMenu(sysName: string, obj: OrbitObject) {
 
         if (task === 'Lyapunov Exponents') {
             await runLyapunovExponents(sysName, obj);
+        } else if (task === 'Covariant Lyapunov Vectors') {
+            await runCovariantLyapunovVectors(sysName, obj);
         }
     }
 }
@@ -885,6 +884,20 @@ async function runLyapunovExponents(sysName: string, obj: OrbitObject) {
     const duration = obj.t_end - obj.t_start;
     if (duration <= 0) {
         console.error(chalk.red("Orbit has no duration to analyze."));
+        return;
+    }
+
+    console.log(
+        chalk.cyan(
+            `Trajectory duration: ${duration.toFixed(6)} (t = ${obj.t_start.toFixed(
+                6
+            )} → ${obj.t_end.toFixed(6)})`
+        )
+    );
+
+    const dt = obj.dt || (sysConfig.type === 'map' ? 1 : 0.01);
+    if (dt <= 0) {
+        console.error(chalk.red("Invalid step size detected for this orbit."));
         return;
     }
 
@@ -966,7 +979,6 @@ async function runLyapunovExponents(sysName: string, obj: OrbitObject) {
 
     const startState = obj.data[startIndex].slice(1);
     const startTime = obj.data[startIndex][0];
-    const dt = obj.dt || (sysConfig.type === 'map' ? 1 : 0.01);
 
     try {
         const bridge = new WasmBridge(sysConfig);
@@ -985,6 +997,251 @@ async function runLyapunovExponents(sysName: string, obj: OrbitObject) {
     } catch (err) {
         const message = err instanceof Error ? err.message : `${err}`;
         console.error(chalk.red("Lyapunov computation failed:"), message);
+    }
+}
+
+async function runCovariantLyapunovVectors(sysName: string, obj: OrbitObject) {
+    const sysConfig = Storage.loadSystem(obj.systemName);
+    const duration = obj.t_end - obj.t_start;
+    if (duration <= 0) {
+        console.error(chalk.red("Orbit has no duration to analyze."));
+        return;
+    }
+
+    console.log(
+        chalk.cyan(
+            `Trajectory duration: ${duration.toFixed(6)} (t = ${obj.t_start.toFixed(
+                6
+            )} → ${obj.t_end.toFixed(6)})`
+        )
+    );
+
+    const dt = obj.dt || (sysConfig.type === 'map' ? 1 : 0.01);
+    if (dt <= 0) {
+        console.error(chalk.red("Invalid step size detected for this orbit."));
+        return;
+    }
+
+    let transientInput = '0';
+    let forwardInput = '0';
+    let backwardInput = '0';
+    let qrInput = '1';
+
+    const entries: ConfigEntry[] = [
+        {
+            id: 'transient',
+            label: 'Transient time to discard',
+            getDisplay: () => formatUnset(transientInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Transient time to discard:',
+                    default: transientInput,
+                    validate: (input: string) => {
+                        const val = parseFloat(input);
+                        if (!Number.isFinite(val) || val < 0 || val > duration) {
+                            return `Value must be between 0 and ${duration.toFixed(6)}.`;
+                        }
+                        return true;
+                    }
+                });
+                transientInput = value;
+            }
+        },
+        {
+            id: 'forward',
+            label: 'Forward transient (pre-window)',
+            getDisplay: () => formatUnset(forwardInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Forward transient (pre-window):',
+                    default: forwardInput,
+                    validate: (input: string) => {
+                        const val = parseFloat(input);
+                        if (!Number.isFinite(val) || val < 0) {
+                            return "Enter a non-negative number.";
+                        }
+                        const transient = Math.max(parseFloatOrDefault(transientInput, 0), 0);
+                        const remaining = duration - transient;
+                        if (val >= remaining) {
+                            return `Value must be less than ${remaining.toFixed(6)} to leave time for the window.`;
+                        }
+                        return true;
+                    }
+                });
+                forwardInput = value;
+            }
+        },
+        {
+            id: 'backward',
+            label: 'Backward transient (post-window)',
+            getDisplay: () => formatUnset(backwardInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Backward transient (post-window):',
+                    default: backwardInput,
+                    validate: (input: string) => {
+                        const val = parseFloat(input);
+                        if (!Number.isFinite(val) || val < 0) {
+                            return "Enter a non-negative number.";
+                        }
+                        return true;
+                    }
+                });
+                backwardInput = value;
+            }
+        },
+        {
+            id: 'qr',
+            label: 'Steps between QR decompositions',
+            getDisplay: () => formatUnset(qrInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Steps between QR decompositions:',
+                    default: qrInput,
+                    validate: (input: string) => {
+                        const n = parseInt(input, 10);
+                        if (!Number.isFinite(n) || n <= 0) {
+                            return "Enter a positive integer.";
+                        }
+                        return true;
+                    }
+                });
+                qrInput = value;
+            }
+        }
+    ];
+
+    let selection:
+        | {
+              transient: number;
+              totalAvailable: number;
+              forwardTime: number;
+              backwardTime: number;
+              qrStride: number;
+          }
+        | null = null;
+
+    while (!selection) {
+        const result = await runConfigMenu('Covariant Lyapunov Parameters', entries);
+        if (result === 'back') {
+            return;
+        }
+
+        const transient = Math.min(
+            Math.max(parseFloatOrDefault(transientInput, 0), 0),
+            duration
+        );
+        const totalAvailable = duration - transient;
+        if (totalAvailable <= 0) {
+            console.error(chalk.red("Transient leaves no data to analyze. Reduce it and try again."));
+            continue;
+        }
+
+        const forwardTime = Math.max(
+            Math.min(parseFloatOrDefault(forwardInput, 0), totalAvailable - dt),
+            0
+        );
+        const backwardTime = Math.max(parseFloatOrDefault(backwardInput, 0), 0);
+        const qrStride = Math.max(parseIntOrDefault(qrInput, 1), 1);
+
+        const transientSum = transient + forwardTime + backwardTime;
+        if (transientSum >= duration) {
+            console.error(
+                chalk.red(
+                    `Combined transient durations (${transientSum.toFixed(
+                        6
+                    )}) exceed the trajectory duration (${duration.toFixed(
+                        6
+                    )}). Adjust the values and try again.`
+                )
+            );
+            continue;
+        }
+
+        selection = { transient, totalAvailable, forwardTime, backwardTime, qrStride };
+    }
+
+    const { transient, totalAvailable, forwardTime, backwardTime, qrStride } = selection;
+    const remainingAfterForward = totalAvailable - forwardTime;
+    if (remainingAfterForward <= 0) {
+        console.error(chalk.red("Forward transient consumes all available time."));
+        return;
+    }
+    const targetTime = obj.t_start + transient;
+
+    let startIndex = obj.data.length - 1;
+    for (let i = 0; i < obj.data.length; i++) {
+        if (obj.data[i][0] >= targetTime) {
+            startIndex = i;
+            break;
+        }
+    }
+    if (startIndex >= obj.data.length - 1) {
+        console.error(chalk.red("Transient leaves no data to analyze."));
+        return;
+    }
+
+    const stepsAvailable = obj.data.length - startIndex - 1;
+    if (stepsAvailable <= 0) {
+        console.error(chalk.red("Not enough samples beyond the transient point."));
+        return;
+    }
+
+    const forwardSteps = Math.min(
+        Math.max(Math.floor(forwardTime / dt), 0),
+        Math.max(stepsAvailable - 1, 0)
+    );
+    if (forwardSteps >= stepsAvailable) {
+        console.error(chalk.red("Forward transient exceeds available samples."));
+        return;
+    }
+
+    const maxWindowSteps = Math.max(stepsAvailable - forwardSteps, 0);
+    if (maxWindowSteps === 0) {
+        console.error(chalk.red("No samples remain for the analysis window."));
+        return;
+    }
+
+    const windowSteps = maxWindowSteps;
+
+    const backwardSteps = Math.max(Math.floor(backwardTime / dt), 0);
+    const startState = obj.data[startIndex].slice(1);
+    const startTime = obj.data[startIndex][0];
+
+    try {
+        const bridge = new WasmBridge(sysConfig);
+        console.log(chalk.yellow("Computing covariant Lyapunov vectors..."));
+        const payload = bridge.computeCovariantLyapunovVectors(
+            startState,
+            startTime,
+            windowSteps,
+            dt,
+            qrStride,
+            forwardSteps,
+            backwardSteps
+        );
+
+        if (!payload.checkpoints || payload.vectors.length === 0) {
+            console.error(chalk.red("No covariant vectors returned by the solver."));
+            return;
+        }
+
+        const covariantData = reshapeCovariantVectors(payload);
+        obj.covariantVectors = covariantData;
+        Storage.saveObject(sysName, obj);
+        console.log(
+            chalk.green(
+                `Stored ${covariantData.vectors.length} covariant Lyapunov vector sets (dimension ${covariantData.dim}).`
+            )
+        );
+        await inspectOrbitData(sysName, obj);
+    } catch (err) {
+        const message = err instanceof Error ? err.message : `${err}`;
+        console.error(chalk.red("Covariant Lyapunov computation failed:"), message);
     }
 }
 
@@ -1020,6 +1277,25 @@ async function inspectOrbitData(sysName: string, obj: OrbitObject) {
         console.log(chalk.gray('Lyapunov exponents not computed yet. Use the Oseledets Solver to compute them.'));
     }
 
+    if (obj.covariantVectors && obj.covariantVectors.vectors.length > 0) {
+        console.log(chalk.yellow('Covariant Lyapunov Vectors:'));
+        console.log(`  Checkpoints: ${obj.covariantVectors.vectors.length}`);
+        const firstTime = obj.covariantVectors.times[0];
+        const lastTime = obj.covariantVectors.times[obj.covariantVectors.times.length - 1];
+        if (Number.isFinite(firstTime) && Number.isFinite(lastTime)) {
+            console.log(`  Time span: ${firstTime.toFixed(3)} → ${lastTime.toFixed(3)}`);
+        }
+        const preview = obj.covariantVectors.vectors[0];
+        if (preview) {
+            console.log(chalk.cyan('  First set:'));
+            preview.forEach((vec, idx) => {
+                console.log(`    v${idx + 1}: [${vec.map(v => v.toFixed(4)).join(', ')}]`);
+            });
+        }
+    } else {
+        console.log(chalk.gray('Covariant Lyapunov vectors not computed yet. Use the Oseledets Solver to compute them.'));
+    }
+
     await inquirer.prompt({ type: 'input', name: 'cont', message: 'Press enter to continue...' });
 }
 
@@ -1046,6 +1322,41 @@ function kaplanYorkeDimension(exponents: number[]): number | null {
         return i + partial / Math.abs(lambda);
     }
     return sorted.length;
+}
+
+function reshapeCovariantVectors(payload: CovariantLyapunovResponse): CovariantLyapunovData {
+    const { dimension, checkpoints, vectors, times } = payload;
+    if (dimension <= 0) {
+        throw new Error("Invalid dimension for covariant Lyapunov vectors.");
+    }
+    if (checkpoints <= 0) {
+        throw new Error("No checkpoints returned for covariant Lyapunov vectors.");
+    }
+    const expected = dimension * dimension * checkpoints;
+    if (vectors.length < expected) {
+        throw new Error("Covariant Lyapunov payload is incomplete.");
+    }
+
+    const shaped: number[][][] = [];
+    for (let step = 0; step < checkpoints; step++) {
+        const base = step * dimension * dimension;
+        const stepVectors: number[][] = [];
+        for (let vecIdx = 0; vecIdx < dimension; vecIdx++) {
+            const vec: number[] = [];
+            for (let component = 0; component < dimension; component++) {
+                const index = base + component * dimension + vecIdx;
+                vec.push(vectors[index]);
+            }
+            stepVectors.push(vec);
+        }
+        shaped.push(stepVectors);
+    }
+
+    return {
+        dim: dimension,
+        times: times.slice(0, checkpoints),
+        vectors: shaped
+    };
 }
 
 async function manageEquilibrium(sysName: string, obj: EquilibriumObject) {
