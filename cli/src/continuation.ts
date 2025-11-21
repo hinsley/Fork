@@ -3,6 +3,14 @@ import chalk from 'chalk';
 import { Storage } from './storage';
 import { WasmBridge } from './wasm';
 import { ContinuationBranchData, ContinuationObject, EquilibriumObject, SystemConfig } from './types';
+import {
+    ConfigEntry,
+    MENU_PAGE_SIZE,
+    formatUnset,
+    parseFloatOrDefault,
+    parseIntOrDefault,
+    runConfigMenu
+} from './menu';
 
 const NAME_REGEX = /^[a-zA-Z0-9_]+$/;
 
@@ -40,7 +48,7 @@ export async function continuationMenu(sysName: string) {
             name: 'selection',
             message: 'Continuation Menu',
             choices,
-            pageSize: 10
+            pageSize: MENU_PAGE_SIZE
         });
 
         if (selection === 'BACK') return;
@@ -57,7 +65,6 @@ export async function continuationMenu(sysName: string) {
 async function createBranch(sysName: string) {
     const sysConfig = Storage.loadSystem(sysName);
     
-    // 1. Select Equilibrium Object
     const objects = Storage.listObjects(sysName)
         .map(name => Storage.loadObject(sysName, name))
         .filter((obj): obj is EquilibriumObject => obj.type === 'equilibrium' && !!obj.solution);
@@ -67,60 +74,272 @@ async function createBranch(sysName: string) {
         return;
     }
 
-    const { eqObjName } = await inquirer.prompt({
-        type: 'list',
-        name: 'eqObjName',
-        message: 'Select Starting Equilibrium:',
-        choices: objects.map(o => o.name)
-    });
-    const eqObj = objects.find(o => o.name === eqObjName)!;
+    if (sysConfig.paramNames.length === 0) {
+        console.log(chalk.red("System has no parameters to continue. Add at least one parameter first."));
+        return;
+    }
 
-    // 2. Select Parameter
-    const { paramName } = await inquirer.prompt({
-        type: 'list',
-        name: 'paramName',
-        message: 'Select Continuation Parameter:',
-        choices: sysConfig.paramNames
-    });
+    let selectedEqName = objects[0]?.name ?? '';
+    let selectedParamName = sysConfig.paramNames[0] ?? '';
+    let branchName = '';
 
-    // 3. Name the branch
-    const { branchName } = await inquirer.prompt({
-        name: 'branchName',
-        message: 'Name for this Continuation Branch:',
-        validate: (val) => {
-            const valid = isValidName(val);
-            if (valid !== true) return valid;
-            if (Storage.listObjects(sysName).includes(val)) return "Object name already exists.";
-            return true;
+    let stepSizeInput = '0.01';
+    let maxStepsInput = '100';
+    let minStepSizeInput = '1e-5';
+    let maxStepSizeInput = '0.1';
+    let directionForward = true;
+    let correctorStepsInput = '4';
+    let correctorToleranceInput = '1e-6';
+    let stepToleranceInput = '1e-6';
+
+    const directionLabel = (forward: boolean) =>
+        forward ? 'Forward (Increasing Param)' : 'Backward (Decreasing Param)';
+
+    const entries: ConfigEntry[] = [
+        {
+            id: 'equilibrium',
+            label: 'Starting equilibrium',
+            section: 'Branch Settings',
+            getDisplay: () => selectedEqName || '(required)',
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    type: 'list',
+                    name: 'value',
+                    message: 'Select Starting Equilibrium:',
+                    choices: objects.map(o => ({
+                        name: `${o.name} (${o.solution ? 'solved' : 'unsolved'})`,
+                        value: o.name
+                    })),
+                    default: selectedEqName,
+                    pageSize: MENU_PAGE_SIZE
+                });
+                selectedEqName = value;
+            }
+        },
+        {
+            id: 'parameter',
+            label: 'Continuation parameter',
+            section: 'Branch Settings',
+            getDisplay: () => selectedParamName || '(required)',
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    type: 'list',
+                    name: 'value',
+                    message: 'Select Continuation Parameter:',
+                    choices: sysConfig.paramNames,
+                    default: selectedParamName,
+                    pageSize: MENU_PAGE_SIZE
+                });
+                selectedParamName = value;
+            }
+        },
+        {
+            id: 'branchName',
+            label: 'Branch name',
+            section: 'Branch Settings',
+            getDisplay: () => formatUnset(branchName),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Name for this Continuation Branch:',
+                    default: branchName || `${selectedEqName || 'branch'}_${selectedParamName || 'param'}`,
+                    validate: (val: string) => {
+                        const valid = isValidName(val);
+                        if (valid !== true) return valid;
+                        if (Storage.listObjects(sysName).includes(val)) return "Object name already exists.";
+                        return true;
+                    }
+                });
+                branchName = value;
+            }
+        },
+        {
+            id: 'stepSize',
+            label: 'Initial step size',
+            section: 'Predictor Settings',
+            getDisplay: () => formatUnset(stepSizeInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Initial Step Size:',
+                    default: stepSizeInput
+                });
+                stepSizeInput = value;
+            }
+        },
+        {
+            id: 'maxSteps',
+            label: 'Max points',
+            section: 'Predictor Settings',
+            getDisplay: () => formatUnset(maxStepsInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Max Points:',
+                    default: maxStepsInput
+                });
+                maxStepsInput = value;
+            }
+        },
+        {
+            id: 'minStep',
+            label: 'Min step size',
+            section: 'Predictor Settings',
+            getDisplay: () => formatUnset(minStepSizeInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Min Step Size:',
+                    default: minStepSizeInput
+                });
+                minStepSizeInput = value;
+            }
+        },
+        {
+            id: 'maxStep',
+            label: 'Max step size',
+            section: 'Predictor Settings',
+            getDisplay: () => formatUnset(maxStepSizeInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Max Step Size:',
+                    default: maxStepSizeInput
+                });
+                maxStepSizeInput = value;
+            }
+        },
+        {
+            id: 'direction',
+            label: 'Direction',
+            section: 'Predictor Settings',
+            getDisplay: () => directionLabel(directionForward),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    type: 'list',
+                    name: 'value',
+                    message: 'Direction:',
+                    choices: [
+                        { name: 'Forward (Increasing Param)', value: true },
+                        { name: 'Backward (Decreasing Param)', value: false }
+                    ],
+                    default: directionForward,
+                    pageSize: MENU_PAGE_SIZE
+                });
+                directionForward = value;
+            }
+        },
+        {
+            id: 'correctorSteps',
+            label: 'Corrector steps',
+            section: 'Corrector Settings',
+            getDisplay: () => formatUnset(correctorStepsInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Corrector steps:',
+                    default: correctorStepsInput,
+                    validate: (input: string) => {
+                        const parsed = parseInt(input, 10);
+                        if (!Number.isFinite(parsed) || parsed <= 0) {
+                            return 'Enter a positive integer.';
+                        }
+                        return true;
+                    }
+                });
+                correctorStepsInput = value;
+            }
+        },
+        {
+            id: 'correctorTolerance',
+            label: 'Corrector tolerance',
+            section: 'Corrector Settings',
+            getDisplay: () => formatUnset(correctorToleranceInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Corrector tolerance:',
+                    default: correctorToleranceInput,
+                    validate: (input: string) => {
+                        const parsed = parseFloat(input);
+                        if (!Number.isFinite(parsed) || parsed <= 0) {
+                            return 'Enter a positive number.';
+                        }
+                        return true;
+                    }
+                });
+                correctorToleranceInput = value;
+            }
+        },
+        {
+            id: 'stepTolerance',
+            label: 'Step tolerance',
+            section: 'Corrector Settings',
+            getDisplay: () => formatUnset(stepToleranceInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Step tolerance:',
+                    default: stepToleranceInput,
+                    validate: (input: string) => {
+                        const parsed = parseFloat(input);
+                        if (!Number.isFinite(parsed) || parsed <= 0) {
+                            return 'Enter a positive number.';
+                        }
+                        return true;
+                    }
+                });
+                stepToleranceInput = value;
+            }
         }
-    });
+    ];
 
-    // 4. Settings
-    const settings = await inquirer.prompt([
-        { name: 'step_size', message: 'Initial Step Size:', default: '0.01' },
-        { name: 'max_steps', message: 'Max Points:', default: '100' },
-        { name: 'min_step_size', message: 'Min Step Size:', default: '1e-5' },
-        { name: 'max_step_size', message: 'Max Step Size:', default: '0.1' },
-        { 
-            type: 'list', 
-            name: 'direction', 
-            message: 'Direction:', 
-            choices: [{name: 'Forward (Increasing Param)', value: true}, {name: 'Backward (Decreasing Param)', value: false}] 
+    while (true) {
+        const result = await runConfigMenu('Create Continuation Branch', entries);
+        if (result === 'back') {
+            return;
         }
-    ]);
 
-    // Parse settings
+        if (!selectedEqName) {
+            console.error(chalk.red('Please select a starting equilibrium.'));
+            continue;
+        }
+
+        if (!selectedParamName) {
+            console.error(chalk.red('Please select a continuation parameter.'));
+            continue;
+        }
+
+        if (!branchName) {
+            console.error(chalk.red('Please provide a branch name.'));
+            continue;
+        }
+
+        if (Storage.listObjects(sysName).includes(branchName)) {
+            console.error(chalk.red(`Object "${branchName}" already exists.`));
+            continue;
+        }
+
+        break;
+    }
+
+    const eqObj = objects.find(o => o.name === selectedEqName);
+    if (!eqObj) {
+        console.error(chalk.red('Selected equilibrium could not be found. Aborting.'));
+        return;
+    }
+
     const continuationSettings = {
-        step_size: parseFloat(settings.step_size),
-        min_step_size: parseFloat(settings.min_step_size),
-        max_step_size: parseFloat(settings.max_step_size),
-        max_steps: parseInt(settings.max_steps),
-        corrector_steps: 4, // Fixed for now
-        corrector_tolerance: 1e-6,
-        step_tolerance: 1e-6
+        step_size: Math.max(parseFloatOrDefault(stepSizeInput, 0.01), 1e-9),
+        min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-5), 1e-12),
+        max_step_size: Math.max(parseFloatOrDefault(maxStepSizeInput, 0.1), 1e-9),
+        max_steps: Math.max(parseIntOrDefault(maxStepsInput, 100), 1),
+        corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 4), 1),
+        corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-6), Number.EPSILON),
+        step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON)
     };
     
-    const forward = settings.direction;
+    const forward = directionForward;
 
     // 5. Run
     console.log(chalk.cyan("Running Continuation..."));
@@ -135,7 +354,7 @@ async function createBranch(sysName: string) {
         const bridge = new WasmBridge(runConfig);
         const branchData = bridge.compute_continuation(
             eqObj.solution!.state,
-            paramName,
+            selectedParamName,
             continuationSettings,
             forward
         );
@@ -144,8 +363,8 @@ async function createBranch(sysName: string) {
             type: 'continuation',
             name: branchName,
             systemName: sysName,
-            parameterName: paramName,
-            startObject: eqObjName,
+            parameterName: selectedParamName,
+            startObject: selectedEqName,
             data: branchData,
             settings: continuationSettings,
             timestamp: new Date().toISOString()
@@ -176,7 +395,8 @@ async function manageBranch(sysName: string, branch: ContinuationObject) {
                 { name: 'Extend Branch', value: 'Extend Branch' },
                 { name: 'Delete Branch', value: 'Delete Branch' },
                 { name: 'Back', value: 'Back' }
-            ]
+            ],
+            pageSize: MENU_PAGE_SIZE
         });
 
         if (action === 'Back') return;
@@ -210,7 +430,8 @@ async function extendBranch(sysName: string, branch: ContinuationObject) {
         choices: [
             { name: 'Forward (Append)', value: true },
             { name: 'Backward (Prepend)', value: false }
-        ]
+        ],
+        pageSize: MENU_PAGE_SIZE
     });
 
     const defaults = branch.settings || {};
