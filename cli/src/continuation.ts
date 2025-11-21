@@ -2,7 +2,14 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { Storage } from './storage';
 import { WasmBridge } from './wasm';
-import { ContinuationBranchData, ContinuationObject, EquilibriumObject, SystemConfig } from './types';
+import {
+    ContinuationBranchData,
+    ContinuationObject,
+    ContinuationPoint,
+    ContinuationEigenvalue,
+    EquilibriumObject,
+    SystemConfig
+} from './types';
 import {
     ConfigEntry,
     MENU_PAGE_SIZE,
@@ -352,12 +359,12 @@ async function createBranch(sysName: string) {
         }
 
         const bridge = new WasmBridge(runConfig);
-        const branchData = bridge.compute_continuation(
+        const branchData = normalizeBranchEigenvalues(bridge.compute_continuation(
             eqObj.solution!.state,
             selectedParamName,
             continuationSettings,
             forward
-        );
+        ));
 
         const branch: ContinuationObject = {
             type: 'continuation',
@@ -478,13 +485,13 @@ async function extendBranch(sysName: string, branch: ContinuationObject) {
         }
 
         const updatedData = bridge.extend_continuation(
-            branch.data,
+            serializeBranchDataForWasm(branch.data),
             branch.parameterName,
             continuationSettings,
             direction
         );
 
-        branch.data = updatedData;
+        branch.data = normalizeBranchEigenvalues(updatedData);
         branch.settings = continuationSettings; // Update last used settings
         
         Storage.saveObject(sysName, branch);
@@ -497,75 +504,392 @@ async function extendBranch(sysName: string, branch: ContinuationObject) {
     }
 }
 
-async function inspectBranch(sysName: string, branch: ContinuationObject) {
-    console.log(chalk.yellow("Continuation Data:"));
-    const pts = branch.data.points;
-    const indices = branch.data.indices || pts.map((_, i) => i); // Fallback if indices missing
+type BranchDetailResult = 'SUMMARY' | 'EXIT';
+const DETAIL_PAGE_SIZE = 10;
+
+async function inspectBranch(_sysName: string, branch: ContinuationObject) {
+    await hydrateEigenvalues(_sysName, branch);
+    const points = branch.data.points;
     
-    if (pts.length === 0) {
+    if (points.length === 0) {
+        console.log(chalk.yellow("Continuation Data:"));
         console.log("No points.");
         return;
     }
 
-    const pName = branch.parameterName;
-    
-    // Print header
-    console.log(`Index | ${pName.padEnd(10)} | Stability | Fold Test | Hopf Test | Neutral Test`);
-    
-    // Sort by index to show in order
-    const sortedMap = pts.map((p, i) => ({ p, idx: indices[i], originalIdx: i }))
-                         .sort((a, b) => a.idx - b.idx);
+    const indices = ensureBranchIndices(branch);
+    await browseBranchSummary(branch, indices);
+}
 
-    // Show first few, bifurcations, and last few
-    // But with arbitrary indices, we just want the extremes and special points.
-    const itemsToShow = new Set<number>();
-    
-    // First 5
-    for(let i=0; i<Math.min(5, sortedMap.length); i++) itemsToShow.add(i);
-    // Last 5
-    for(let i=Math.max(0, sortedMap.length-5); i<sortedMap.length; i++) itemsToShow.add(i);
-    
-    // Bifurcations (these indices in `data.bifurcations` are array indices, not logical indices)
-    branch.data.bifurcations.forEach(arrayIdx => {
-        // We need to find where this arrayIdx ended up in sortedMap?
-        // No, arrayIdx refers to `branch.data.points[arrayIdx]`.
-        // We want to show this point.
-        // Find `k` such that `sortedMap[k].originalIdx == arrayIdx`.
-        const k = sortedMap.findIndex(item => item.originalIdx === arrayIdx);
-        if (k !== -1) itemsToShow.add(k);
-    });
+function ensureBranchIndices(branch: ContinuationObject): number[] {
+    const pts = branch.data.points;
+    if (!branch.data.indices || branch.data.indices.length !== pts.length) {
+        branch.data.indices = pts.map((_, i) => i);
+    }
+    return branch.data.indices;
+}
 
-    const sortedShowIndices = Array.from(itemsToShow).sort((a,b) => a-b);
+async function hydrateEigenvalues(sysName: string, branch: ContinuationObject) {
+    const missingIndices = branch.data.points
+        .map((pt, idx) =>
+            !pt.eigenvalues || pt.eigenvalues.length === 0 || isNaN(pt.eigenvalues[0]?.re ?? NaN)
+                ? idx
+                : -1
+        )
+        .filter(idx => idx !== -1) as number[];
 
-    let lastPos = -1;
-    for (const i of sortedShowIndices) {
-        if (lastPos !== -1 && i > lastPos + 1) {
-            console.log("...");
-        }
-        const item = sortedMap[i];
-        const pt = item.p;
-        const tests = pt.test_function_values ?? {
-            fold: pt.test_function_value ?? 0,
-            hopf: 0,
-            neutral_saddle: 0
-        };
-        const stab = branch.data.bifurcations.includes(item.originalIdx) ? chalk.red(pt.stability) : pt.stability;
-        const foldVal = tests.fold.toPrecision(4).padEnd(10);
-        const hopfVal = tests.hopf.toPrecision(4).padEnd(10);
-        const neutralVal = tests.neutral_saddle.toPrecision(4).padEnd(13);
-        const line = `${item.idx.toString().padEnd(5)} | ${pt.param_value.toPrecision(5).padEnd(10)} | ${stab.toString().padEnd(9)} | ${foldVal} | ${hopfVal} | ${neutralVal}`;
-        console.log(line);
-        lastPos = i;
+    if (missingIndices.length === 0) {
+        return;
     }
 
-    if (branch.data.bifurcations.length > 0) {
-        console.log(chalk.yellow("\nBifurcations Detected:"));
-        branch.data.bifurcations.forEach(arrayIdx => {
-            const pt = branch.data.points[arrayIdx];
-            const idx = indices[arrayIdx];
-            console.log(`  Index ${idx}: ${pt.stability} at ${pName} = ${pt.param_value}`);
+    console.log(chalk.yellow(`Hydrating eigenvalues for ${missingIndices.length} continuation points...`));
+    const sysConfig = Storage.loadSystem(sysName);
+    const bridge = new WasmBridge(sysConfig);
+
+    missingIndices.forEach(idx => {
+        const pt = branch.data.points[idx];
+        pt.eigenvalues = bridge.computeEigenvalues(pt.state, branch.parameterName, pt.param_value);
+    });
+
+    Storage.saveObject(sysName, branch);
+}
+
+function buildSortedArrayOrder(indices: number[]): number[] {
+    return indices
+        .map((logicalIdx, arrayIdx) => ({ logicalIdx, arrayIdx }))
+        .sort((a, b) => a.logicalIdx - b.logicalIdx)
+        .map(entry => entry.arrayIdx);
+}
+
+async function browseBranchSummary(branch: ContinuationObject, indices: number[]) {
+    const sortedOrder = buildSortedArrayOrder(indices);
+    while (true) {
+        const summaryChoices = buildSummaryChoices(branch, indices, sortedOrder);
+        const choices: any[] = [...summaryChoices];
+        choices.push(new inquirer.Separator());
+        choices.push({ name: chalk.red('Exit Branch Viewer'), value: 'EXIT' });
+
+        const { selection } = await inquirer.prompt({
+            type: 'list',
+            name: 'selection',
+            message: 'Branch Summary',
+            choices,
+            pageSize: MENU_PAGE_SIZE
+        });
+
+        if (selection === 'EXIT') {
+            return;
+        }
+
+        if (typeof selection === 'string' && selection.startsWith('POINT:')) {
+            const targetIdx = parseInt(selection.split(':')[1], 10);
+            const detailResult = await browseBranchPoints(branch, indices, targetIdx, sortedOrder);
+            if (detailResult === 'EXIT') {
+                return;
+            }
+        }
+    }
+}
+
+function buildSummaryChoices(branch: ContinuationObject, indices: number[], sortedOrder: number[]) {
+    const pts = branch.data.points;
+    const choices: Array<{ name: string; value: string }> = [];
+    const startArrayIdx = sortedOrder[0];
+    const endArrayIdx = sortedOrder[sortedOrder.length - 1];
+    const pName = branch.parameterName;
+    const formatEntry = (label: string, arrayIdx: number) => {
+        const logicalIdx = indices[arrayIdx];
+        const paramVal = formatNumber(pts[arrayIdx].param_value);
+        const stability = pts[arrayIdx].stability;
+        const text = `${label} • Index ${logicalIdx} • ${pName}=${paramVal} • ${stability}`;
+        return { name: text, value: `POINT:${arrayIdx}` };
+    };
+
+    choices.push({
+        name: chalk.cyan(formatEntry('Start Point', startArrayIdx).name),
+        value: `POINT:${startArrayIdx}`
+    });
+
+    const bifEntries = branch.data.bifurcations
+        .map(arrayIdx => ({
+            arrayIdx,
+            logicalIdx: indices[arrayIdx],
+            param: formatNumber(pts[arrayIdx].param_value),
+            stability: pts[arrayIdx].stability
+        }))
+        .sort((a, b) => a.logicalIdx - b.logicalIdx);
+
+    bifEntries.forEach((entry, idx) => {
+        const label = chalk.red(
+            `Bifurcation ${idx + 1} • Index ${entry.logicalIdx} • ${pName}=${entry.param} • ${entry.stability}`
+        );
+        choices.push({ name: label, value: `POINT:${entry.arrayIdx}` });
+    });
+
+    if (endArrayIdx !== startArrayIdx) {
+        choices.push({
+            name: chalk.cyan(formatEntry('End Point', endArrayIdx).name),
+            value: `POINT:${endArrayIdx}`
         });
     }
 
-    await inquirer.prompt({ type: 'input', name: 'cont', message: 'Press enter to continue...' });
+    return choices;
+}
+
+async function browseBranchPoints(
+    branch: ContinuationObject,
+    indices: number[],
+    focusArrayIdx: number,
+    sortedOrder: number[]
+): Promise<BranchDetailResult> {
+    const pts = branch.data.points;
+    const total = pts.length;
+    const bifurcationSet = new Set(branch.data.bifurcations);
+    const logicalToSorted = new Map<number, number>();
+    sortedOrder.forEach((arrayIdx, sortedIdx) => {
+        logicalToSorted.set(indices[arrayIdx], sortedIdx);
+    });
+
+    const fallbackArrayIdx = Math.min(Math.max(focusArrayIdx, 0), total - 1);
+    let currentFocusArrayIdx = fallbackArrayIdx;
+    let currentFocusSortedIdx = sortedOrder.findIndex(idx => idx === currentFocusArrayIdx);
+    if (currentFocusSortedIdx === -1) {
+        currentFocusSortedIdx = 0;
+        currentFocusArrayIdx = sortedOrder[0];
+    }
+
+    let page = Math.floor(currentFocusSortedIdx / DETAIL_PAGE_SIZE);
+    const totalPages = Math.max(1, Math.ceil(total / DETAIL_PAGE_SIZE));
+
+    while (true) {
+        const start = page * DETAIL_PAGE_SIZE;
+        const end = Math.min(total, start + DETAIL_PAGE_SIZE);
+        const headerText = `Points ${start + 1}-${end} of ${total}`;
+        const choices: any[] = [
+            new inquirer.Separator(headerText),
+            {
+                name: page === 0 ? chalk.gray('◀ Previous Page') : '◀ Previous Page',
+                value: 'PREV_PAGE',
+                disabled: page === 0
+            },
+            {
+                name: page >= totalPages - 1 ? chalk.gray('Next Page ▶') : 'Next Page ▶',
+                value: 'NEXT_PAGE',
+                disabled: page >= totalPages - 1
+            },
+            { name: 'Jump to Logical Index...', value: 'JUMP_INDEX' },
+            { name: 'Back to Summary', value: 'SUMMARY' },
+            { name: chalk.red('Exit Branch Viewer'), value: 'EXIT' },
+            new inquirer.Separator()
+        ];
+
+        for (let sortedIdx = start; sortedIdx < end; sortedIdx++) {
+            const arrayIdx = sortedOrder[sortedIdx];
+            const row = formatPointRow(
+                branch,
+                indices,
+                arrayIdx,
+                bifurcationSet,
+                currentFocusArrayIdx
+            );
+            choices.push({ name: row, value: `POINT:${arrayIdx}` });
+        }
+
+        const { selection } = await inquirer.prompt({
+            type: 'list',
+            name: 'selection',
+            message: 'Inspect Branch Points',
+            choices,
+            pageSize: MENU_PAGE_SIZE
+        });
+
+        if (selection === 'PREV_PAGE') {
+            if (page > 0) {
+                page -= 1;
+                currentFocusSortedIdx = page * DETAIL_PAGE_SIZE;
+                currentFocusArrayIdx = sortedOrder[currentFocusSortedIdx];
+            }
+            continue;
+        }
+
+        if (selection === 'NEXT_PAGE') {
+            if (page < totalPages - 1) {
+                page += 1;
+                currentFocusSortedIdx = Math.min(page * DETAIL_PAGE_SIZE, sortedOrder.length - 1);
+                currentFocusArrayIdx = sortedOrder[currentFocusSortedIdx];
+            }
+            continue;
+        }
+
+        if (selection === 'JUMP_INDEX') {
+            const { target } = await inquirer.prompt({
+                type: 'input',
+                name: 'target',
+                message: 'Enter logical index:',
+                validate: (input: string) => {
+                    const value = Number(input);
+                    if (!Number.isInteger(value)) return 'Enter an integer.';
+                    if (!logicalToSorted.has(value)) return 'Index not found in branch.';
+                    return true;
+                }
+            });
+            const logicalIdx = Number(target);
+            const sortedIdx = logicalToSorted.get(logicalIdx)!;
+            currentFocusSortedIdx = sortedIdx;
+            currentFocusArrayIdx = sortedOrder[sortedIdx];
+            page = Math.floor(currentFocusSortedIdx / DETAIL_PAGE_SIZE);
+            continue;
+        }
+
+        if (selection === 'SUMMARY') {
+            return 'SUMMARY';
+        }
+
+        if (selection === 'EXIT') {
+            return 'EXIT';
+        }
+
+        if (typeof selection === 'string' && selection.startsWith('POINT:')) {
+            const arrayIdx = parseInt(selection.split(':')[1], 10);
+            currentFocusArrayIdx = arrayIdx;
+            currentFocusSortedIdx = sortedOrder.findIndex(idx => idx === arrayIdx);
+            if (currentFocusSortedIdx === -1) currentFocusSortedIdx = 0;
+            page = Math.floor(currentFocusSortedIdx / DETAIL_PAGE_SIZE);
+            await showPointDetails(branch, indices, arrayIdx, bifurcationSet.has(arrayIdx));
+        }
+    }
+}
+
+function formatPointRow(
+    branch: ContinuationObject,
+    indices: number[],
+    arrayIdx: number,
+    bifurcationSet: Set<number>,
+    focusIdx: number
+) {
+    const pt = branch.data.points[arrayIdx];
+    const logicalIdx = indices[arrayIdx];
+    const paramVal = formatNumber(pt.param_value);
+    const descriptor = summarizeEigenvalues(pt);
+    const typeLabel = pt.stability && pt.stability !== 'None' ? ` [${pt.stability}]` : '';
+
+    const prefix = bifurcationSet.has(arrayIdx) ? '*' : ' ';
+    let label = `${prefix} Index ${logicalIdx} | ${branch.parameterName}=${paramVal} | ${descriptor}${typeLabel}`;
+
+    if (arrayIdx === focusIdx) {
+        label = chalk.cyan(label);
+    } else if (bifurcationSet.has(arrayIdx)) {
+        label = chalk.red(label);
+    }
+
+    return label;
+}
+
+function summarizeEigenvalues(point: ContinuationPoint) {
+    const eigenvalues = point.eigenvalues || [];
+    if (eigenvalues.length === 0) {
+        return 'Eigenvalues: []';
+    }
+    const formatted = eigenvalues
+        .slice(0, 3)
+        .map(ev => `${formatNumberSafe(ev.re)}+${formatNumberSafe(ev.im)}i`);
+    const suffix = eigenvalues.length > 3 ? ' …' : '';
+    return `Eigenvalues: ${formatted.join(', ')}${suffix}`;
+}
+
+async function showPointDetails(
+    branch: ContinuationObject,
+    indices: number[],
+    arrayIdx: number,
+    isBifurcation: boolean
+) {
+    const pt = branch.data.points[arrayIdx];
+    const logicalIdx = indices[arrayIdx];
+
+    console.log('');
+    const headerSuffix = isBifurcation ? ' [Bifurcation]' : '';
+    console.log(chalk.yellow(`Point ${logicalIdx} (Array ${arrayIdx})${headerSuffix}`));
+    console.log(`Stability: ${pt.stability}`);
+    console.log(`Parameter (${branch.parameterName}): ${formatNumber(pt.param_value)}`);
+    console.log('Eigenvalues:');
+    if (pt.eigenvalues?.length) {
+        pt.eigenvalues.forEach((eig, idx) => {
+            console.log(
+                `  λ${idx}: ${formatNumberSafe(eig.re)} + ${formatNumberSafe(eig.im)}i`
+            );
+        });
+    } else {
+        console.log('  (none)');
+    }
+    console.log(`State: ${formatArray(pt.state)}`);
+
+    await inquirer.prompt({ type: 'input', name: 'cont', message: 'Press enter to return...' });
+}
+
+function formatArray(values: number[]) {
+    if (!values || values.length === 0) {
+        return '[]';
+    }
+    return `[${values.map(formatNumber).join(', ')}]`;
+}
+
+function formatNumber(value: number) {
+    if (!Number.isFinite(value)) {
+        return value.toString();
+    }
+    const absVal = Math.abs(value);
+    if ((absVal !== 0 && absVal < 1e-3) || absVal >= 1e4) {
+        return value.toExponential(4);
+    }
+    return value.toFixed(3);
+}
+
+function formatNumberSafe(value: number | undefined) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return 'NaN';
+    }
+    return formatNumber(value);
+}
+
+type EigenvalueWire = [number, number];
+
+function serializeBranchDataForWasm(data: ContinuationBranchData): any {
+    return {
+        ...data,
+        points: data.points.map(pt => ({
+            ...pt,
+            eigenvalues: (pt.eigenvalues as any[] | undefined)?.map(ev => {
+                if (Array.isArray(ev)) {
+                    return ev as EigenvalueWire;
+                }
+                return [ev?.re ?? 0, ev?.im ?? 0] as EigenvalueWire;
+            }) ?? []
+        })) as any
+    };
+}
+
+function normalizeBranchEigenvalues(data: ContinuationBranchData): ContinuationBranchData {
+    return {
+        ...data,
+        points: data.points.map(pt => ({
+            ...pt,
+            eigenvalues: normalizeEigenvalueArray(pt.eigenvalues as any)
+        }))
+    };
+}
+
+function normalizeEigenvalueArray(raw: any): ContinuationEigenvalue[] {
+    if (!raw) return [];
+    if (Array.isArray(raw)) {
+        return raw.map((val: any) => {
+            if (Array.isArray(val)) {
+                return { re: val[0] ?? 0, im: val[1] ?? 0 };
+            }
+            return {
+                re: typeof val?.re === 'number' ? val.re : Number(val?.re ?? 0),
+                im: typeof val?.im === 'number' ? val.im : Number(val?.im ?? 0)
+            };
+        });
+    }
+    return [];
 }

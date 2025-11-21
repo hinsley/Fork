@@ -1,4 +1,4 @@
-import { EquilibriumSolution, SystemConfig, ContinuationBranchData } from "./types";
+import { EquilibriumSolution, SystemConfig, ContinuationBranchData, ContinuationEigenvalue } from "./types";
 
 export type CovariantLyapunovResponse = {
     dimension: number;
@@ -135,4 +135,57 @@ export class WasmBridge {
             forward
         ) as ContinuationBranchData;
     }
+
+    computeEigenvalues(state: number[], parameterName: string, paramValue: number): ContinuationEigenvalue[] {
+        const raw = this.instance.compute_equilibrium_eigenvalues(
+            new Float64Array(state),
+            parameterName,
+            paramValue
+        );
+        return normalizeEigenvalues(raw);
+    }
+}
+
+function normalizeEigenvalues(raw: unknown): ContinuationEigenvalue[] {
+    if (!raw) return [];
+    if (Array.isArray(raw)) {
+        if (raw.length === 0) return [];
+        if (typeof raw[0] === "number") {
+            const nums = raw as number[];
+            const result: ContinuationEigenvalue[] = [];
+            for (let i = 0; i < nums.length; i += 2) {
+                result.push({
+                    re: nums[i] ?? 0,
+                    im: nums[i + 1] ?? 0
+                });
+            }
+            return result;
+        }
+        return raw.map((val: any) => {
+            if (Array.isArray(val) && val.length >= 2) {
+                return {
+                    re: typeof val[0] === "number" ? val[0] : 0,
+                    im: typeof val[1] === "number" ? val[1] : 0
+                };
+            }
+            return {
+                re: typeof val?.re === "number" ? val.re : Number(val?.re ?? 0),
+                im: typeof val?.im === "number" ? val.im : Number(val?.im ?? 0)
+            };
+        });
+    }
+
+    if (ArrayBuffer.isView(raw)) {
+        const nums = Array.from(raw as unknown as ArrayLike<number>);
+        const result: ContinuationEigenvalue[] = [];
+        for (let i = 0; i < nums.length; i += 2) {
+            result.push({
+                re: nums[i] ?? 0,
+                im: nums[i + 1] ?? 0
+            });
+        }
+        return result;
+    }
+
+    return [];
 }

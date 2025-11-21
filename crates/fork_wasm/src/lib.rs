@@ -3,8 +3,8 @@ use fork_core::analysis::{
 };
 use fork_core::autodiff::Dual;
 use fork_core::continuation::{
-    continue_parameter as core_continuation, extend_branch as core_extend_branch, ContinuationBranch,
-    ContinuationSettings,
+    continue_parameter as core_continuation, extend_branch as core_extend_branch,
+    compute_eigenvalues_for_state, ContinuationBranch, ContinuationSettings,
 };
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
 use fork_core::equilibrium::{
@@ -304,6 +304,39 @@ impl WasmSystem {
         ).map_err(|e| JsValue::from_str(&format!("Branch extension failed: {}", e)))?;
         
         to_value(&updated_branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn compute_equilibrium_eigenvalues(
+        &mut self,
+        state: Vec<f64>,
+        parameter_name: &str,
+        param_value: f64,
+    ) -> Result<JsValue, JsValue> {
+        let kind = match self.system_type {
+            SystemType::Flow => SystemKind::Flow,
+            SystemType::Map => SystemKind::Map,
+        };
+
+        let param_index = *self
+            .system
+            .param_map
+            .get(parameter_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
+
+        if state.len() != self.system.equations.len() {
+            return Err(JsValue::from_str("State dimension mismatch for eigenvalue computation."));
+        }
+
+        let eigenvalues = compute_eigenvalues_for_state(
+            &mut self.system,
+            kind,
+            &state,
+            param_index,
+            param_value,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Eigenvalue computation failed: {}", e)))?;
+
+        to_value(&eigenvalues).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 }
 
