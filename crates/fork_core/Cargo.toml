@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 num-traits = "0.2"
+num-complex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
 anyhow = "1.0"

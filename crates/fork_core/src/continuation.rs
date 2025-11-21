@@ -4,6 +4,7 @@ use crate::equilibrium::SystemKind;
 use crate::traits::DynamicalSystem;
 use anyhow::{anyhow, bail, Result};
 use nalgebra::{DMatrix, DVector, SymmetricEigen};
+use num_complex::Complex;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -21,6 +22,7 @@ pub struct ContinuationSettings {
 pub enum BifurcationType {
     None,
     Fold,
+    Hopf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,7 +31,28 @@ pub struct ContinuationPoint {
     pub param_value: f64,
     pub tangent: Vec<f64>, // Tangent in augmented space [param, state...]
     pub stability: BifurcationType,
-    pub test_function_value: f64,
+    pub test_function_values: TestFunctionValues,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct TestFunctionValues {
+    pub fold: f64,
+    pub hopf: f64,
+    pub neutral_saddle: f64,
+}
+
+impl TestFunctionValues {
+    fn new(fold: f64, hopf: f64, neutral_saddle: f64) -> Self {
+        Self {
+            fold,
+            hopf,
+            neutral_saddle,
+        }
+    }
+
+    fn is_finite(&self) -> bool {
+        self.fold.is_finite() && self.hopf.is_finite() && self.neutral_saddle.is_finite()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,9 +126,9 @@ pub fn extend_branch(
 
             // Converged
             system.params[param_index] = corrected_aug[0];
-            let test_val = compute_test_function(system, kind, &corrected_aug, param_index)?;
+            let test_vals = compute_test_functions(system, kind, &corrected_aug, param_index)?;
 
-            if !test_val.is_finite() {
+            if !test_vals.is_finite() {
                 step_size *= 0.5;
                 if step_size < settings.min_step_size {
                     break;
@@ -123,12 +146,17 @@ pub fn extend_branch(
                 state: corrected_aug.rows(1, dim).iter().cloned().collect(),
                 param_value: corrected_aug[0],
                 tangent: new_tangent.iter().cloned().collect(),
-                test_function_value: test_val,
+                test_function_values: test_vals,
                 stability: BifurcationType::None,
             };
 
-            let crossed = prev_cmp_point.test_function_value * new_pt.test_function_value < 0.0;
-            if crossed {
+            let prev_tests = prev_cmp_point.test_function_values;
+            let fold_crossed = prev_tests.fold * new_pt.test_function_values.fold < 0.0;
+            let hopf_crossed = prev_tests.hopf * new_pt.test_function_values.hopf < 0.0;
+            let neutral_crossed =
+                prev_tests.neutral_saddle * new_pt.test_function_values.neutral_saddle < 0.0;
+
+            if fold_crossed {
                 match refine_fold_point(
                     system,
                     kind,
@@ -148,10 +176,30 @@ pub fn extend_branch(
                         new_pt.stability = BifurcationType::Fold;
                     }
                 }
-            }
-
-            if crossed {
                 new_pt.stability = BifurcationType::Fold;
+            } else if hopf_crossed && !neutral_crossed {
+                match refine_hopf_point(
+                    system,
+                    kind,
+                    param_index,
+                    settings,
+                    &prev_cmp_point,
+                    &new_pt,
+                ) {
+                    Ok(refined) => {
+                        new_pt = refined;
+                    }
+                    Err(_err) => {
+                        #[cfg(test)]
+                        {
+                            println!("Hopf refinement failed: {:?}", _err);
+                        }
+                        new_pt.stability = BifurcationType::Hopf;
+                    }
+                }
+                new_pt.stability = BifurcationType::Hopf;
+            } else if hopf_crossed && neutral_crossed {
+                // Detected Hopf and neutral saddle simultaneously; suppress Hopf.
             }
             
             current_index += if is_append { 1 } else { -1 };
@@ -233,7 +281,7 @@ pub fn continue_parameter(
         if tangent[0] > 0.0 { tangent = -tangent; }
     }
 
-    let initial_test = compute_test_function(system, kind, &current_aug, param_index)?;
+    let initial_test = compute_test_functions(system, kind, &current_aug, param_index)?;
 
     let branch = ContinuationBranch {
         points: vec![ContinuationPoint {
@@ -241,7 +289,7 @@ pub fn continue_parameter(
             param_value: current_aug[0],
             tangent: tangent.iter().cloned().collect(),
             stability: BifurcationType::None,
-            test_function_value: initial_test,
+                test_function_values: initial_test,
         }],
         bifurcations: Vec::new(),
         indices: vec![0],
@@ -360,16 +408,16 @@ fn refine_fold_point(
         system,
         kind,
         &prev_aug,
-        prev_point.test_function_value,
+        prev_point.test_function_values.fold,
         &new_aug,
-        new_point.test_function_value,
+        new_point.test_function_values.fold,
         param_index,
         settings,
     )?;
 
     let start_param = system.params[param_index];
     system.params[param_index] = refined_aug[0];
-    let test_val = compute_test_function(system, kind, &refined_aug, param_index)?;
+    let test_vals = compute_test_functions(system, kind, &refined_aug, param_index)?;
     let j_ext = compute_extended_jacobian(system, kind, &refined_aug, param_index)?;
     let mut tangent = compute_nullspace_tangent(&j_ext)?;
     if tangent.norm() > 0.0 {
@@ -382,7 +430,48 @@ fn refine_fold_point(
         param_value: refined_aug[0],
         tangent: tangent.iter().cloned().collect(),
         stability: BifurcationType::Fold,
-        test_function_value: test_val,
+        test_function_values: test_vals,
+    })
+}
+
+fn refine_hopf_point(
+    system: &mut EquationSystem,
+    kind: SystemKind,
+    param_index: usize,
+    settings: ContinuationSettings,
+    prev_point: &ContinuationPoint,
+    new_point: &ContinuationPoint,
+) -> Result<ContinuationPoint> {
+    let dim = system.equations.len();
+    let prev_aug = continuation_point_to_aug(prev_point);
+    let new_aug = continuation_point_to_aug(new_point);
+    let refined_aug = solve_hopf_newton(
+        system,
+        kind,
+        &prev_aug,
+        prev_point.test_function_values.hopf,
+        &new_aug,
+        new_point.test_function_values.hopf,
+        param_index,
+        settings,
+    )?;
+
+    let start_param = system.params[param_index];
+    system.params[param_index] = refined_aug[0];
+    let test_vals = compute_test_functions(system, kind, &refined_aug, param_index)?;
+    let j_ext = compute_extended_jacobian(system, kind, &refined_aug, param_index)?;
+    let mut tangent = compute_nullspace_tangent(&j_ext)?;
+    if tangent.norm() > 0.0 {
+        tangent.normalize_mut();
+    }
+    system.params[param_index] = start_param;
+
+    Ok(ContinuationPoint {
+        state: refined_aug.rows(1, dim).iter().cloned().collect(),
+        param_value: refined_aug[0],
+        tangent: tangent.iter().cloned().collect(),
+        stability: BifurcationType::Hopf,
+        test_function_values: test_vals,
     })
 }
 
@@ -390,17 +479,17 @@ fn solve_fold_newton(
     system: &mut EquationSystem,
     kind: SystemKind,
     prev_aug: &DVector<f64>,
-    prev_test: f64,
+    prev_fold: f64,
     new_aug: &DVector<f64>,
-    new_test: f64,
+    new_fold: f64,
     param_index: usize,
     settings: ContinuationSettings,
 ) -> Result<DVector<f64>> {
     let dim = system.equations.len();
     let mut current = prev_aug.clone();
-    let denom = prev_test - new_test;
+    let denom = prev_fold - new_fold;
     if denom.abs() > 1e-12 {
-        let mut s = prev_test / denom;
+        let mut s = prev_fold / denom;
         if !s.is_finite() {
             s = 0.5;
         }
@@ -421,14 +510,15 @@ fn solve_fold_newton(
         evaluate_residual(system, kind, &current_state, &mut f_val);
         system.params[param_index] = old_param;
 
-        let test_val = compute_test_function(system, kind, &current, param_index)?;
+        let test_vals = compute_test_functions(system, kind, &current, param_index)?;
+        let test_val = test_vals.fold;
         let f_norm = DVector::from_vec(f_val.clone()).norm();
         if f_norm < settings.corrector_tolerance && test_val.abs() < settings.corrector_tolerance {
             system.params[param_index] = start_param;
             return Ok(current);
         }
 
-        let grad = compute_test_gradient(system, kind, &current, param_index)?;
+        let grad = compute_test_gradient(system, kind, &current, param_index, &|vals| vals.fold)?;
 
         let mut a = DMatrix::zeros(dim + 1, dim + 1);
         a.view_mut((0, 0), (dim, dim + 1)).copy_from(&j_ext);
@@ -458,11 +548,86 @@ fn solve_fold_newton(
     Err(anyhow!("Fold refinement did not converge"))
 }
 
+fn solve_hopf_newton(
+    system: &mut EquationSystem,
+    kind: SystemKind,
+    prev_aug: &DVector<f64>,
+    prev_hopf: f64,
+    new_aug: &DVector<f64>,
+    new_hopf: f64,
+    param_index: usize,
+    settings: ContinuationSettings,
+) -> Result<DVector<f64>> {
+    let dim = system.equations.len();
+    let mut current = prev_aug.clone();
+    let denom = prev_hopf - new_hopf;
+    if denom.abs() > 1e-12 {
+        let mut s = prev_hopf / denom;
+        if !s.is_finite() {
+            s = 0.5;
+        }
+        s = s.clamp(0.0, 1.0);
+        current = prev_aug + (new_aug - prev_aug) * s;
+    }
+
+    let start_param = system.params[param_index];
+
+    for _ in 0..settings.corrector_steps {
+        let j_ext = compute_extended_jacobian(system, kind, &current, param_index)?;
+        let current_param = current[0];
+        let current_state: Vec<f64> = current.rows(1, dim).iter().cloned().collect();
+
+        let old_param = system.params[param_index];
+        system.params[param_index] = current_param;
+        let mut f_val = vec![0.0; dim];
+        evaluate_residual(system, kind, &current_state, &mut f_val);
+        system.params[param_index] = old_param;
+
+        let test_vals = compute_test_functions(system, kind, &current, param_index)?;
+        let test_val = test_vals.hopf;
+        let f_norm = DVector::from_vec(f_val.clone()).norm();
+        if f_norm < settings.corrector_tolerance && test_val.abs() < settings.corrector_tolerance {
+            system.params[param_index] = start_param;
+            return Ok(current);
+        }
+
+        let grad =
+            compute_test_gradient(system, kind, &current, param_index, &|vals| vals.hopf)?;
+
+        let mut a = DMatrix::zeros(dim + 1, dim + 1);
+        a.view_mut((0, 0), (dim, dim + 1)).copy_from(&j_ext);
+        for i in 0..dim + 1 {
+            a[(dim, i)] = grad[i];
+        }
+
+        let mut rhs = DVector::zeros(dim + 1);
+        for i in 0..dim {
+            rhs[i] = -f_val[i];
+        }
+        rhs[dim] = -test_val;
+
+        let delta = a
+            .lu()
+            .solve(&rhs)
+            .ok_or_else(|| anyhow!("Hopf refinement linear solve failed"))?;
+        current += &delta;
+
+        if delta.norm() < settings.step_tolerance {
+            system.params[param_index] = start_param;
+            return Ok(current);
+        }
+    }
+
+    system.params[param_index] = start_param;
+    Err(anyhow!("Hopf refinement did not converge"))
+}
+
 fn compute_test_gradient(
     system: &mut EquationSystem,
     kind: SystemKind,
     aug_state: &DVector<f64>,
     param_index: usize,
+    selector: &dyn Fn(&TestFunctionValues) -> f64,
 ) -> Result<DVector<f64>> {
     let dim = system.equations.len();
     let mut grad = DVector::zeros(dim + 1);
@@ -472,21 +637,21 @@ fn compute_test_gradient(
         let mut perturbed = aug_state.clone();
         let step = base_eps * (1.0 + aug_state[i].abs());
         perturbed[i] += step;
-        let plus = compute_test_function(system, kind, &perturbed, param_index)?;
+        let plus = selector(&compute_test_functions(system, kind, &perturbed, param_index)?);
         perturbed[i] -= 2.0 * step;
-        let minus = compute_test_function(system, kind, &perturbed, param_index)?;
+        let minus = selector(&compute_test_functions(system, kind, &perturbed, param_index)?);
         grad[i] = (plus - minus) / (2.0 * step);
     }
 
     Ok(grad)
 }
 
-fn compute_test_function(
+fn compute_test_functions(
     system: &mut EquationSystem,
     kind: SystemKind,
     aug_state: &DVector<f64>,
     param_index: usize,
-) -> Result<f64> {
+) -> Result<TestFunctionValues> {
     let dim = system.equations.len();
     let param = aug_state[0];
     let state: Vec<f64> = aug_state.rows(1, dim).iter().cloned().collect();
@@ -495,13 +660,65 @@ fn compute_test_function(
     system.params[param_index] = param;
 
     let jac = crate::equilibrium::compute_jacobian(system, kind, &state)?;
-    
+
     system.params[param_index] = old_param;
 
     let mat = DMatrix::from_row_slice(dim, dim, &jac);
-    let det = mat.determinant();
+    let fold = mat.determinant();
 
-    Ok(det)
+    if !matches!(kind, SystemKind::Flow) || dim < 2 {
+        return Ok(TestFunctionValues::new(fold, 0.0, 0.0));
+    }
+
+    let eigenvalues = compute_eigenvalues(&mat)?;
+    let hopf = hopf_test_function(&eigenvalues).re;
+    let neutral = neutral_saddle_test_function(&eigenvalues);
+
+    Ok(TestFunctionValues::new(fold, hopf, neutral))
+}
+
+fn compute_eigenvalues(mat: &DMatrix<f64>) -> Result<Vec<Complex<f64>>> {
+    if mat.nrows() == 0 {
+        return Ok(Vec::new());
+    }
+
+    let eigen = mat.clone().complex_eigenvalues();
+    Ok(eigen.iter().cloned().collect())
+}
+
+fn hopf_test_function(eigenvalues: &[Complex<f64>]) -> Complex<f64> {
+    let mut product = Complex::new(1.0, 0.0);
+    for i in 0..eigenvalues.len() {
+        for j in (i + 1)..eigenvalues.len() {
+            product *= eigenvalues[i] + eigenvalues[j];
+        }
+    }
+    product
+}
+
+fn neutral_saddle_test_function(eigenvalues: &[Complex<f64>]) -> f64 {
+    const IMAG_EPS: f64 = 1e-8;
+    let mut product = 1.0;
+    let mut found_pair = false;
+
+    for i in 0..eigenvalues.len() {
+        if eigenvalues[i].im.abs() >= IMAG_EPS {
+            continue;
+        }
+        for j in (i + 1)..eigenvalues.len() {
+            if eigenvalues[j].im.abs() >= IMAG_EPS {
+                continue;
+            }
+            found_pair = true;
+            product *= eigenvalues[i].re + eigenvalues[j].re;
+        }
+    }
+
+    if found_pair {
+        product
+    } else {
+        1.0
+    }
 }
 
 fn compute_extended_jacobian(
