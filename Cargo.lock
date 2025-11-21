@@ -47,6 +47,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "nalgebra",
+ "num-complex",
  "num-traits",
  "serde",
  "thiserror",

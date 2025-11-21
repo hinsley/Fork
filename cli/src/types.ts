@@ -62,12 +62,19 @@ export interface EquilibriumObject {
   parameters?: number[]; // Snapshot of parameters when created (or last successfully solved)
 }
 
+export interface ContinuationTestFunctionValues {
+    fold: number;
+    hopf: number;
+    neutral_saddle: number;
+}
+
 export interface ContinuationPoint {
     state: number[];
     param_value: number;
     tangent: number[];
-    stability: "None" | "Fold";
-    test_function_value: number;
+    stability: "None" | "Fold" | "Hopf";
+    test_function_values?: ContinuationTestFunctionValues;
+    test_function_value?: number;
 }
 
 export interface ContinuationBranchData {
