@@ -1,5 +1,6 @@
 pub mod analysis;
 pub mod autodiff;
+pub mod continuation;
 pub mod equation_engine;
 pub mod equilibrium;
 pub mod solvers;
