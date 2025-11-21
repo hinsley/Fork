@@ -1,1195 +1,43 @@
-// NOTE: The submodules in continuation/ (equilibrium, periodic, problem) 
-// contain continuation problem implementations.
-
-#[path = "continuation/problem.rs"]
-pub mod problem;
-
-#[path = "continuation/periodic.rs"]
-pub mod periodic;
-
-#[path = "continuation/equilibrium.rs"]
-pub mod equilibrium;
-
-#[path = "continuation/types.rs"]
-pub mod types;
-
-#[path = "continuation/util.rs"]
-pub mod util;
-
-#[path = "continuation/codim1_curves/mod.rs"]
-pub mod codim1_curves;
-
-#[path = "continuation/lc_codim1_curves/mod.rs"]
-pub mod lc_codim1_curves;
-
-// Re-export types needed for external use
-pub use periodic::{
-    CollocationConfig, LimitCycleGuess, LimitCycleSetup,
-    continue_limit_cycle_collocation, extend_limit_cycle_collocation,
-    limit_cycle_setup_from_hopf, limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd,
-};
-pub use problem::{PointDiagnostics, TestFunctionValues};
-pub use types::{
-    BifurcationType, BranchType, ContinuationBranch, ContinuationPoint, ContinuationSettings,
-    Codim1CurveType, Codim2BifurcationType, Codim1CurvePoint, Codim1CurveBranch, StepResult,
-};
-pub use codim1_curves::{Codim2TestFunctions, FoldCurveProblem, HopfCurveProblem};
-pub use lc_codim1_curves::{LPCCurveProblem, PDCurveProblem, NSCurveProblem};
-pub use util::{
-    compute_nullspace_tangent, continuation_point_to_aug,
-    compute_eigenvalues, hopf_test_function, neutral_saddle_test_function,
-};
-
 use crate::autodiff::Dual;
 use crate::equation_engine::EquationSystem;
 use crate::equilibrium::SystemKind;
 use crate::traits::DynamicalSystem;
 use anyhow::{anyhow, bail, Result};
-use nalgebra::{DMatrix, DVector};
-use num_complex::Complex;
-pub use problem::ContinuationProblem;  // DEBUG_PD_CURVE: Made public for debug
+use nalgebra::{DMatrix, DVector, SymmetricEigen};
+use serde::{Deserialize, Serialize};
 
-// Generic continuation functions using ContinuationProblem trait
-
-/// Continues from an initial point using pseudo-arclength continuation (PALC).
-pub fn continue_with_problem<P: ContinuationProblem>(
-    problem: &mut P,
-    initial_point: ContinuationPoint,
-    settings: ContinuationSettings,
-    forward: bool,
-) -> Result<ContinuationBranch> {
-    let dim = problem.dimension();
-    
-    // Build initial augmented state [p, x...]
-    let mut prev_aug = DVector::zeros(dim + 1);
-    prev_aug[0] = initial_point.param_value;
-    for (i, &val) in initial_point.state.iter().enumerate() {
-        if i < dim {
-            prev_aug[i + 1] = val;
-        }
-    }
-    
-    // Initialize branch with starting point
-    let initial_diag = problem.diagnostics(&prev_aug)?;
-    let mut prev_diag = initial_diag.clone();
-    let mut branch = ContinuationBranch {
-        points: vec![ContinuationPoint {
-            state: initial_point.state.clone(),
-            param_value: initial_point.param_value,
-            stability: BifurcationType::None,
-            eigenvalues: initial_diag.eigenvalues,
-        }],
-        bifurcations: Vec::new(),
-        indices: vec![0],
-        branch_type: BranchType::default(),
-        upoldp: None,
-    };
-    
-    // Compute initial tangent and orient it based on requested parameter direction.
-    let mut prev_tangent = compute_tangent_from_problem(problem, &prev_aug)?;
-    let forward_sign = if forward { 1.0 } else { -1.0 };
-    
-    // When starting from a bifurcation (like Hopf), the tangent's parameter component
-    // may be near-zero due to the branch being nearly orthogonal to the parameter axis.
-    // For high-dimensional problems (like LC collocation), the normalized parameter component
-    // can be extremely small. We use a relative threshold and add a proportional bias.
-    let tangent_norm = prev_tangent.norm();
-    let relative_threshold = 0.01; // 1% of tangent norm
-    let param_component_threshold = relative_threshold * tangent_norm;
-    
-    if prev_tangent[0].abs() < param_component_threshold {
-        // Add a bias equal to the threshold value in the user's direction
-        prev_tangent[0] = param_component_threshold * forward_sign;
-        // Re-normalize
-        let norm = prev_tangent.norm();
-        if norm > 1e-12 {
-            prev_tangent = &prev_tangent / norm;
-        }
-    } else if prev_tangent[0] * forward_sign < 0.0 {
-        prev_tangent = -prev_tangent;
-    }
-    
-    // Set direction
-    let direction_sign = 1.0; // Direction is now encoded in the oriented tangent
-    let mut step_size = settings.step_size;
-    let mut current_index: i32 = 0;
-    let mut consecutive_failures = 0;
-    const MAX_CONSECUTIVE_FAILURES: usize = 20;
-    
-    for _step in 0..settings.max_steps {
-        // Predictor: predict along tangent
-        let pred_aug = &prev_aug + &prev_tangent * (step_size * direction_sign);
-        
-        // Corrector: solve using Newton-like iteration
-        let corrected_opt = correct_with_problem(
-            problem,
-            &pred_aug,
-            &prev_aug,
-            &prev_tangent,
-            settings.corrector_steps,
-            settings.corrector_tolerance,
-        )?;
-        
-        if let Some(corrected_aug) = corrected_opt {
-            if !corrected_aug.iter().all(|v| v.is_finite()) {
-                consecutive_failures += 1;
-                step_size *= 0.5;
-                if step_size < settings.min_step_size || consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                    break;
-                }
-                continue;
-            }
-            
-            // Compute new tangent
-            let new_tangent = compute_tangent_from_problem(problem, &corrected_aug)?;
-            if !new_tangent.iter().all(|v| v.is_finite()) {
-                consecutive_failures += 1;
-                step_size *= 0.5;
-                if step_size < settings.min_step_size || consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                    break;
-                }
-                continue;
-            }
-            
-            // Ensure tangent direction consistency (sign should match prev_tangent)
-            let dot_product: f64 = new_tangent.iter()
-                .zip(prev_tangent.iter())
-                .map(|(a, b)| a * b)
-                .sum();
-            let consistent_tangent = if dot_product < 0.0 {
-                -new_tangent  // Flip sign to maintain direction
-            } else {
-                new_tangent
-            };
-            
-            // Reset failure counter on success
-            consecutive_failures = 0;
-            
-            // Update problem state after successful step
-            problem.update_after_step(&corrected_aug)?;
-            
-            // Compute diagnostics for the new point
-            let diagnostics = problem.diagnostics(&corrected_aug)?;
-            
-            // Bifurcation detection via test function sign changes
-            let prev_tests = &prev_diag.test_values;
-            let new_tests = &diagnostics.test_values;
-            
-            // Detect limit cycle bifurcations
-            let cycle_fold_crossed = prev_tests.cycle_fold * new_tests.cycle_fold < 0.0;
-            let period_doubling_crossed = prev_tests.period_doubling * new_tests.period_doubling < 0.0;
-            let neimark_sacker_crossed = prev_tests.neimark_sacker * new_tests.neimark_sacker < 0.0;
-            
-            // Detect equilibrium bifurcations
-            let fold_crossed = prev_tests.fold * new_tests.fold < 0.0;
-            let hopf_crossed = prev_tests.hopf * new_tests.hopf < 0.0;
-            let neutral_saddle_crossed = prev_tests.neutral_saddle * new_tests.neutral_saddle < 0.0;
-
-            // Prioritize: Fold > Hopf > CycleFold > PeriodDoubling > NeimarkSacker
-            let bifurcation_type = if fold_crossed {
-                BifurcationType::Fold
-            } else if hopf_crossed {
-                BifurcationType::Hopf
-            } else if cycle_fold_crossed {
-                BifurcationType::CycleFold
-            } else if period_doubling_crossed {
-                BifurcationType::PeriodDoubling
-            } else if neimark_sacker_crossed {
-                BifurcationType::NeimarkSacker
-            } else if neutral_saddle_crossed {
-                BifurcationType::NeutralSaddle
-            } else {
-                BifurcationType::None
-            };
-            
-            // Refine bifurcation point if detected
-            let (final_aug, final_diag) = if bifurcation_type != BifurcationType::None {
-                match refine_bifurcation_bisection(
-                    problem,
-                    &prev_aug,
-                    prev_tests,
-                    &corrected_aug,
-                    new_tests,
-                    bifurcation_type,
-                    &prev_tangent,
-                    settings.corrector_steps,
-                    settings.corrector_tolerance,
-                ) {
-                    Ok((refined_aug, refined_diag)) => (refined_aug, refined_diag),
-                    Err(_) => (corrected_aug.clone(), diagnostics.clone()),
-                }
-            } else {
-                (corrected_aug.clone(), diagnostics.clone())
-            };
-            
-            // Create new point
-            current_index += forward_sign as i32;
-            let new_point = ContinuationPoint {
-                state: final_aug.rows(1, dim).iter().cloned().collect(),
-                param_value: final_aug[0],
-                stability: bifurcation_type,
-                eigenvalues: final_diag.eigenvalues.clone(),
-            };
-            
-            // Record bifurcation if detected
-            if bifurcation_type != BifurcationType::None {
-                branch.bifurcations.push(branch.points.len());
-            }
-            
-            branch.points.push(new_point);
-            branch.indices.push(current_index);
-            
-            // Adaptive step size - increase on success
-            step_size = (step_size * 1.2).min(settings.max_step_size);
-            
-            prev_aug = final_aug;
-            prev_tangent = consistent_tangent;
-            prev_diag = final_diag;
-        } else {
-            // Failed to converge, reduce step size
-            consecutive_failures += 1;
-            step_size *= 0.5;
-            if step_size < settings.min_step_size || consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                break;
-            }
-        }
-    }
-    
-    Ok(branch)
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ContinuationSettings {
+    pub step_size: f64,
+    pub min_step_size: f64,
+    pub max_step_size: f64,
+    pub max_steps: usize,
+    pub corrector_steps: usize,
+    pub corrector_tolerance: f64,
+    pub step_tolerance: f64,
 }
 
-// ============================================================================
-// Stepping-Based Continuation API (for progress reporting)
-// ============================================================================
-
-const MAX_CONSECUTIVE_FAILURES: usize = 20;
-
-/// A runner that holds continuation state and allows stepped execution for progress reporting.
-/// 
-/// Use this when you need to report progress during continuation:
-/// ```ignore
-/// let mut runner = ContinuationRunner::new(problem, initial_point, settings, forward)?;
-/// while !runner.is_done() {
-///     runner.run_steps(5)?;
-///     println!("Progress: {}/{}", runner.current_step(), runner.max_steps());
-/// }
-/// let branch = runner.take_result();
-/// ```
-pub struct ContinuationRunner<P: ContinuationProblem> {
-    problem: P,
-    prev_aug: DVector<f64>,
-    prev_tangent: DVector<f64>,
-    prev_diag: PointDiagnostics,
-    step_size: f64,
-    current_index: i32,
-    consecutive_failures: usize,
-    current_step: usize,
-    max_steps: usize,
-    settings: ContinuationSettings,
-    branch: ContinuationBranch,
-    done: bool,
-    dim: usize,
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum BifurcationType {
+    None,
+    Fold,
 }
 
-impl<P: ContinuationProblem> ContinuationRunner<P> {
-    /// Create a new continuation runner initialized from a starting point.
-    pub fn new(
-        mut problem: P,
-        initial_point: ContinuationPoint,
-        settings: ContinuationSettings,
-        forward: bool,
-    ) -> Result<Self> {
-        let dim = problem.dimension();
-        
-        // Build initial augmented state [p, x...]
-        let mut prev_aug = DVector::zeros(dim + 1);
-        prev_aug[0] = initial_point.param_value;
-        for (i, &val) in initial_point.state.iter().enumerate() {
-            if i < dim {
-                prev_aug[i + 1] = val;
-            }
-        }
-        
-        // Initialize branch with starting point
-        let initial_diag = problem.diagnostics(&prev_aug)?;
-        let prev_diag = initial_diag.clone();
-        let branch = ContinuationBranch {
-            points: vec![ContinuationPoint {
-                state: initial_point.state.clone(),
-                param_value: initial_point.param_value,
-                stability: BifurcationType::None,
-                eigenvalues: initial_diag.eigenvalues,
-            }],
-            bifurcations: Vec::new(),
-            indices: vec![0],
-            branch_type: BranchType::default(),
-            upoldp: None,
-        };
-        
-        // Compute initial tangent and orient it based on requested parameter direction.
-        let mut prev_tangent = compute_tangent_from_problem(&mut problem, &prev_aug)?;
-        let forward_sign = if forward { 1.0 } else { -1.0 };
-        
-        let tangent_norm = prev_tangent.norm();
-        let relative_threshold = 0.01;
-        let param_component_threshold = relative_threshold * tangent_norm;
-        
-        if prev_tangent[0].abs() < param_component_threshold {
-            prev_tangent[0] = param_component_threshold * forward_sign;
-            let norm = prev_tangent.norm();
-            if norm > 1e-12 {
-                prev_tangent = &prev_tangent / norm;
-            }
-        } else if prev_tangent[0] * forward_sign < 0.0 {
-            prev_tangent = -prev_tangent;
-        }
-        
-        Ok(Self {
-            problem,
-            prev_aug,
-            prev_tangent,
-            prev_diag,
-            step_size: settings.step_size,
-            current_index: 0,
-            consecutive_failures: 0,
-            current_step: 0,
-            max_steps: settings.max_steps,
-            settings,
-            branch,
-            done: false,
-            dim,
-        })
-    }
-
-    /// Create a new continuation runner with a user-specified initial tangent.
-    ///
-    /// This is intended for branch extension where the tangent is derived from
-    /// the existing branch or a secant direction.
-    pub fn new_with_tangent(
-        mut problem: P,
-        initial_point: ContinuationPoint,
-        mut initial_tangent: DVector<f64>,
-        settings: ContinuationSettings,
-    ) -> Result<Self> {
-        let dim = problem.dimension();
-
-        // Build initial augmented state [p, x...]
-        let mut prev_aug = DVector::zeros(dim + 1);
-        prev_aug[0] = initial_point.param_value;
-        for (i, &val) in initial_point.state.iter().enumerate() {
-            if i < dim {
-                prev_aug[i + 1] = val;
-            }
-        }
-
-        // Initialize branch with starting point
-        let initial_diag = problem.diagnostics(&prev_aug)?;
-        let prev_diag = initial_diag.clone();
-        let branch = ContinuationBranch {
-            points: vec![ContinuationPoint {
-                state: initial_point.state.clone(),
-                param_value: initial_point.param_value,
-                stability: BifurcationType::None,
-                eigenvalues: initial_diag.eigenvalues,
-            }],
-            bifurcations: Vec::new(),
-            indices: vec![0],
-            branch_type: BranchType::default(),
-            upoldp: None,
-        };
-
-        if initial_tangent.norm() < 1e-12 {
-            initial_tangent = compute_tangent_from_problem(&mut problem, &prev_aug)?;
-        }
-        let tangent_norm = initial_tangent.norm();
-        let prev_tangent = if tangent_norm > 1e-12 {
-            initial_tangent / tangent_norm
-        } else {
-            initial_tangent
-        };
-
-        Ok(Self {
-            problem,
-            prev_aug,
-            prev_tangent,
-            prev_diag,
-            step_size: settings.step_size,
-            current_index: 0,
-            consecutive_failures: 0,
-            current_step: 0,
-            max_steps: settings.max_steps,
-            settings,
-            branch,
-            done: false,
-            dim,
-        })
-    }
-    
-    /// Run a batch of continuation steps, returning progress information.
-    pub fn run_steps(&mut self, batch_size: usize) -> Result<StepResult> {
-        if self.done {
-            return Ok(self.step_result());
-        }
-        
-        for _ in 0..batch_size {
-            if self.current_step >= self.max_steps {
-                self.done = true;
-                break;
-            }
-            
-            if !self.single_step()? {
-                // Early termination due to step size or failure limit
-                self.done = true;
-                break;
-            }
-            
-            self.current_step += 1;
-        }
-        
-        Ok(self.step_result())
-    }
-    
-    /// Execute a single continuation step. Returns false if should terminate.
-    fn single_step(&mut self) -> Result<bool> {
-        // Predictor: predict along tangent
-        let direction_sign = 1.0;
-        let pred_aug = &self.prev_aug + &self.prev_tangent * (self.step_size * direction_sign);
-        
-        // Corrector: solve using Newton-like iteration
-        let corrected_opt = correct_with_problem(
-            &mut self.problem,
-            &pred_aug,
-            &self.prev_aug,
-            &self.prev_tangent,
-            self.settings.corrector_steps,
-            self.settings.corrector_tolerance,
-        )?;
-        
-        if let Some(corrected_aug) = corrected_opt {
-            if !corrected_aug.iter().all(|v| v.is_finite()) {
-                self.consecutive_failures += 1;
-                self.step_size *= 0.5;
-                if self.step_size < self.settings.min_step_size 
-                    || self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES 
-                {
-                    return Ok(false);
-                }
-                return Ok(true); // Continue trying
-            }
-            
-            // Compute new tangent
-            let new_tangent = compute_tangent_from_problem(&mut self.problem, &corrected_aug)?;
-            if !new_tangent.iter().all(|v| v.is_finite()) {
-                self.consecutive_failures += 1;
-                self.step_size *= 0.5;
-                if self.step_size < self.settings.min_step_size 
-                    || self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES 
-                {
-                    return Ok(false);
-                }
-                return Ok(true);
-            }
-            
-            // Ensure tangent direction consistency
-            let dot_product: f64 = new_tangent.iter()
-                .zip(self.prev_tangent.iter())
-                .map(|(a, b)| a * b)
-                .sum();
-            let consistent_tangent = if dot_product < 0.0 {
-                -new_tangent
-            } else {
-                new_tangent
-            };
-            
-            // Reset failure counter on success
-            self.consecutive_failures = 0;
-            
-            // Update problem state after successful step
-            self.problem.update_after_step(&corrected_aug)?;
-            
-            // Compute diagnostics for the new point
-            let diagnostics = self.problem.diagnostics(&corrected_aug)?;
-            
-            // Bifurcation detection via test function sign changes
-            let prev_tests = &self.prev_diag.test_values;
-            let new_tests = &diagnostics.test_values;
-            
-            // Detect limit cycle bifurcations
-            let cycle_fold_crossed = prev_tests.cycle_fold * new_tests.cycle_fold < 0.0;
-            let period_doubling_crossed = prev_tests.period_doubling * new_tests.period_doubling < 0.0;
-            let neimark_sacker_crossed = prev_tests.neimark_sacker * new_tests.neimark_sacker < 0.0;
-            
-            // Detect equilibrium bifurcations
-            let fold_crossed = prev_tests.fold * new_tests.fold < 0.0;
-            let hopf_crossed = prev_tests.hopf * new_tests.hopf < 0.0;
-            let neutral_saddle_crossed = prev_tests.neutral_saddle * new_tests.neutral_saddle < 0.0;
-
-            let bifurcation_type = if fold_crossed {
-                BifurcationType::Fold
-            } else if hopf_crossed {
-                BifurcationType::Hopf
-            } else if cycle_fold_crossed {
-                BifurcationType::CycleFold
-            } else if period_doubling_crossed {
-                BifurcationType::PeriodDoubling
-            } else if neimark_sacker_crossed {
-                BifurcationType::NeimarkSacker
-            } else if neutral_saddle_crossed {
-                BifurcationType::NeutralSaddle
-            } else {
-                BifurcationType::None
-            };
-            
-            // Refine bifurcation point if detected
-            let (final_aug, final_diag) = if bifurcation_type != BifurcationType::None {
-                match refine_bifurcation_bisection(
-                    &mut self.problem,
-                    &self.prev_aug,
-                    prev_tests,
-                    &corrected_aug,
-                    new_tests,
-                    bifurcation_type,
-                    &self.prev_tangent,
-                    self.settings.corrector_steps,
-                    self.settings.corrector_tolerance,
-                ) {
-                    Ok((refined_aug, refined_diag)) => (refined_aug, refined_diag),
-                    Err(_) => (corrected_aug.clone(), diagnostics.clone()),
-                }
-            } else {
-                (corrected_aug.clone(), diagnostics.clone())
-            };
-            
-            // Determine forward direction based on tangent
-            let forward_sign = if self.prev_tangent[0] >= 0.0 { 1 } else { -1 };
-            self.current_index += forward_sign;
-            
-            let new_point = ContinuationPoint {
-                state: final_aug.rows(1, self.dim).iter().cloned().collect(),
-                param_value: final_aug[0],
-                stability: bifurcation_type,
-                eigenvalues: final_diag.eigenvalues.clone(),
-            };
-            
-            // Record bifurcation if detected
-            if bifurcation_type != BifurcationType::None {
-                self.branch.bifurcations.push(self.branch.points.len());
-            }
-            
-            self.branch.points.push(new_point);
-            self.branch.indices.push(self.current_index);
-            
-            // Adaptive step size - increase on success
-            self.step_size = (self.step_size * 1.2).min(self.settings.max_step_size);
-            
-            self.prev_aug = final_aug;
-            self.prev_tangent = consistent_tangent;
-            self.prev_diag = final_diag;
-        } else {
-            // Failed to converge, reduce step size
-            self.consecutive_failures += 1;
-            self.step_size *= 0.5;
-            if self.step_size < self.settings.min_step_size 
-                || self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES 
-            {
-                return Ok(false);
-            }
-        }
-        
-        Ok(true)
-    }
-    
-    /// Check if continuation is complete.
-    pub fn is_done(&self) -> bool {
-        self.done
-    }
-    
-    /// Get current step number.
-    pub fn current_step(&self) -> usize {
-        self.current_step
-    }
-    
-    /// Get max steps.
-    pub fn max_steps(&self) -> usize {
-        self.max_steps
-    }
-    
-    /// Get step result for progress reporting.
-    pub fn step_result(&self) -> StepResult {
-        StepResult::new(
-            self.done,
-            self.current_step,
-            self.max_steps,
-            self.branch.points.len(),
-            self.branch.bifurcations.len(),
-            self.prev_aug[0],
-        )
-    }
-    
-    /// Take the final branch result, consuming the runner.
-    pub fn take_result(self) -> ContinuationBranch {
-        self.branch
-    }
-    
-    /// Get a reference to the branch.
-    pub fn branch(&self) -> &ContinuationBranch {
-        &self.branch
-    }
-    
-    /// Set the branch type (used for limit cycle continuation).
-    pub fn set_branch_type(&mut self, branch_type: BranchType) {
-        self.branch.branch_type = branch_type;
-    }
-
-    /// Set the upoldp field (used for limit cycle continuation).
-    pub fn set_upoldp(&mut self, upoldp: Option<Vec<Vec<f64>>>) {
-        self.branch.upoldp = upoldp;
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContinuationPoint {
+    pub state: Vec<f64>,
+    pub param_value: f64,
+    pub tangent: Vec<f64>, // Tangent in augmented space [param, state...]
+    pub stability: BifurcationType,
+    pub test_function_value: f64,
 }
 
-
-/// Extends an existing branch using pseudo-arclength continuation.
-/// Uses a secant predictor from the last two points to determine the continuation direction.
-pub fn extend_branch_with_problem<P: ContinuationProblem>(
-    problem: &mut P,
-    mut branch: ContinuationBranch,
-    settings: ContinuationSettings,
-    forward: bool,
-) -> Result<ContinuationBranch> {
-    if branch.points.is_empty() {
-        bail!("Cannot extend empty branch");
-    }
-    
-    // Get the endpoint to continue from based on forward/backward
-    // forward=true means append to the end (max index), forward=false means prepend (min index)
-    let (endpoint_idx, last_index, neighbor_idx, is_append) = if forward {
-        let max_idx_pos = branch.indices.iter().enumerate()
-            .max_by_key(|(_, &idx)| idx).unwrap().0;
-        // Find the previous point (second highest index)
-        let prev_idx_pos = if branch.points.len() > 1 {
-            branch.indices.iter().enumerate()
-                .filter(|(i, _)| *i != max_idx_pos)
-                .max_by_key(|(_, &idx)| idx)
-                .map(|(i, _)| i)
-        } else {
-            None
-        };
-        (max_idx_pos, branch.indices[max_idx_pos], prev_idx_pos, true)
-    } else {
-        let min_idx_pos = branch.indices.iter().enumerate()
-            .min_by_key(|(_, &idx)| idx).unwrap().0;
-        // Find the next point (second lowest index)  
-        let next_idx_pos = if branch.points.len() > 1 {
-            branch.indices.iter().enumerate()
-                .filter(|(i, _)| *i != min_idx_pos)
-                .min_by_key(|(_, &idx)| idx)
-                .map(|(i, _)| i)
-        } else {
-            None
-        };
-        (min_idx_pos, branch.indices[min_idx_pos], next_idx_pos, false)
-    };
-    
-    let endpoint = &branch.points[endpoint_idx];
-    
-    // Build augmented state for endpoint
-    let dim = problem.dimension();
-    let mut end_aug = DVector::zeros(dim + 1);
-    if endpoint.state.len() != dim {
-        anyhow::bail!("Dimension mismatch: branch point state has length {}, problem expects {}", endpoint.state.len(), dim);
-    }
-    end_aug[0] = endpoint.param_value;
-    for (i, &v) in endpoint.state.iter().enumerate() {
-        end_aug[i + 1] = v;
-    }
-    
-    // Compute secant direction from neighbor to endpoint if we have two points
-    let secant_direction = if let Some(neighbor_pos) = neighbor_idx {
-        let neighbor = &branch.points[neighbor_pos];
-        let mut neighbor_aug = DVector::zeros(dim + 1);
-        neighbor_aug[0] = neighbor.param_value;
-        for (i, &v) in neighbor.state.iter().enumerate() {
-            neighbor_aug[i + 1] = v;
-        }
-        
-        // Secant from neighbor to endpoint (the direction we were going)
-        let secant = if is_append {
-            &end_aug - &neighbor_aug  // From neighbor to endpoint
-        } else {
-            &neighbor_aug - &end_aug  // From endpoint to neighbor (reversed for prepend)
-        };
-        
-        if secant.norm() > 1e-12 {
-            Some(secant.normalize())
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    
-    // Compute tangent at endpoint
-    let mut tangent = compute_tangent_from_problem(problem, &end_aug)?;
-    
-    // Orient tangent to match secant direction (or use forward flag if no secant)
-    if let Some(secant) = secant_direction {
-        // Orient tangent to have positive dot product with secant
-        if tangent.dot(&secant) < 0.0 {
-            tangent = -tangent;
-        }
-    } else {
-        // Fall back to parameter direction if only one point
-        let forward_sign = if forward { 1.0 } else { -1.0 };
-        if tangent[0] * forward_sign < 0.0 {
-            tangent = -tangent;
-        }
-    }
-    
-    // Now run continuation with the correctly oriented tangent
-    let initial_point = ContinuationPoint {
-        state: endpoint.state.clone(),
-        param_value: endpoint.param_value,
-        stability: endpoint.stability.clone(),
-        eigenvalues: endpoint.eigenvalues.clone(),
-    };
-    
-    // Use continue_with_initial_tangent to preserve direction
-    let extension = continue_with_initial_tangent(
-        problem, 
-        initial_point, 
-        tangent.clone(),
-        settings
-    )?;
-    
-    // Merge extension into main branch (skip first point as it's the endpoint)
-    let index_offset = last_index;
-    let sign = if is_append { 1 } else { -1 };
-    let orig_count = branch.points.len();
-    for (i, pt) in extension.points.into_iter().enumerate().skip(1) {
-        branch.points.push(pt);
-        let idx = extension.indices.get(i).cloned().unwrap_or(i as i32);
-        branch.indices.push(index_offset + idx * sign);
-    }
-    
-    // Merge bifurcation indices (adjusting for new positions in merged branch)
-    // extension.bifurcations contains indices into extension.points (before skip)
-    // After merging, extension point i maps to branch.points[orig_count + i - 1] (skipping first)
-    for ext_bif_idx in extension.bifurcations {
-        if ext_bif_idx > 0 {
-            // Map to new position: orig_count + (ext_bif_idx - 1)
-            branch.bifurcations.push(orig_count + ext_bif_idx - 1);
-        }
-        // ext_bif_idx == 0 is the overlap point which already exists in branch, skip it
-    }
-    
-    Ok(branch)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContinuationBranch {
+    pub points: Vec<ContinuationPoint>,
+    pub bifurcations: Vec<usize>, // Indices of points where bifurcation was detected
+    pub indices: Vec<i32>, // Explicit indices relative to start point (0)
 }
-
-/// Continues from an initial point with a given initial tangent direction.
-pub fn continue_with_initial_tangent<P: ContinuationProblem>(
-    problem: &mut P,
-    initial_point: ContinuationPoint,
-    initial_tangent: DVector<f64>,
-    settings: ContinuationSettings,
-) -> Result<ContinuationBranch> {
-    let dim = problem.dimension();
-    
-    // Build initial augmented state
-    let mut prev_aug = DVector::zeros(dim + 1);
-    prev_aug[0] = initial_point.param_value;
-    for (i, &v) in initial_point.state.iter().enumerate() {
-        prev_aug[i + 1] = v;
-    }
-    
-    // Initialize branch with starting point
-    let initial_diag = problem.diagnostics(&prev_aug)?;
-    let mut prev_diag = initial_diag.clone();
-    let mut branch = ContinuationBranch {
-        points: vec![ContinuationPoint {
-            state: initial_point.state.clone(),
-            param_value: initial_point.param_value,
-            stability: BifurcationType::None,
-            eigenvalues: initial_diag.eigenvalues,
-        }],
-        bifurcations: Vec::new(),
-        indices: vec![0],
-        branch_type: BranchType::default(),
-        upoldp: None,
-    };
-    
-    // Use provided tangent (already oriented correctly)
-    let mut prev_tangent = initial_tangent;
-    if prev_tangent.norm() < 1e-12 {
-        prev_tangent = compute_tangent_from_problem(problem, &prev_aug)?;
-    }
-    
-    let mut step_size = settings.step_size;
-    let mut current_index: i32 = 0;
-    let mut consecutive_failures = 0;
-    const MAX_CONSECUTIVE_FAILURES: usize = 20;
-    
-    for _step in 0..settings.max_steps {
-        // Predictor: always step in positive tangent direction (tangent is already oriented)
-        let pred_aug = &prev_aug + &prev_tangent * step_size;
-        
-        // Corrector
-        let corrected_opt = correct_with_problem(
-            problem,
-            &pred_aug,
-            &prev_aug,
-            &prev_tangent,
-            settings.corrector_steps,
-            settings.corrector_tolerance,
-        )?;
-        
-        if let Some(corrected_aug) = corrected_opt {
-            if !corrected_aug.iter().all(|v| v.is_finite()) {
-                consecutive_failures += 1;
-                step_size *= 0.5;
-                if step_size < settings.min_step_size || consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                    break;
-                }
-                continue;
-            }
-            
-            consecutive_failures = 0;
-            
-            // Compute new tangent and orient it to match previous direction
-            let mut new_tangent = compute_tangent_from_problem(problem, &corrected_aug)?;
-            if new_tangent.dot(&prev_tangent) < 0.0 {
-                new_tangent = -new_tangent;
-            }
-            
-            // Compute diagnostics
-            let diag = problem.diagnostics(&corrected_aug)?;
-            
-            // Bifurcation detection via test function sign changes
-            let prev_tests = &prev_diag.test_values;
-            let new_tests = &diag.test_values;
-            
-            // Detect limit cycle bifurcations
-            let cycle_fold_crossed = prev_tests.cycle_fold * new_tests.cycle_fold < 0.0;
-            let period_doubling_crossed = prev_tests.period_doubling * new_tests.period_doubling < 0.0;
-            let neimark_sacker_crossed = prev_tests.neimark_sacker * new_tests.neimark_sacker < 0.0;
-            
-            // Detect equilibrium bifurcations
-            let fold_crossed = prev_tests.fold * new_tests.fold < 0.0;
-            let hopf_crossed = prev_tests.hopf * new_tests.hopf < 0.0;
-            let neutral_saddle_crossed = prev_tests.neutral_saddle * new_tests.neutral_saddle < 0.0;
-
-            // Prioritize: Fold > Hopf > CycleFold > PeriodDoubling > NeimarkSacker
-            let bifurcation_type = if fold_crossed {
-                BifurcationType::Fold
-            } else if hopf_crossed {
-                BifurcationType::Hopf
-            } else if cycle_fold_crossed {
-                BifurcationType::CycleFold
-            } else if period_doubling_crossed {
-                BifurcationType::PeriodDoubling
-            } else if neimark_sacker_crossed {
-                BifurcationType::NeimarkSacker
-            } else if neutral_saddle_crossed {
-                BifurcationType::NeutralSaddle
-            } else {
-                BifurcationType::None
-            };
-            
-            // Refine bifurcation point if detected
-            let (final_aug, final_diag) = if bifurcation_type != BifurcationType::None {
-                match refine_bifurcation_bisection(
-                    problem,
-                    &prev_aug,
-                    prev_tests,
-                    &corrected_aug,
-                    new_tests,
-                    bifurcation_type,
-                    &prev_tangent,
-                    settings.corrector_steps,
-                    settings.corrector_tolerance,
-                ) {
-                    Ok((refined_aug, refined_diag)) => (refined_aug, refined_diag),
-                    Err(_) => (corrected_aug.clone(), diag.clone()),
-                }
-            } else {
-                (corrected_aug.clone(), diag.clone())
-            };
-            
-            // Create new point with potentially refined state
-            let new_pt = ContinuationPoint {
-                state: final_aug.rows(1, dim).iter().cloned().collect(),
-                param_value: final_aug[0],
-                stability: bifurcation_type,
-                eigenvalues: final_diag.eigenvalues.clone(),
-            };
-            
-            // Record bifurcation if detected
-            if bifurcation_type != BifurcationType::None {
-                branch.bifurcations.push(branch.points.len());
-            }
-            
-            branch.points.push(new_pt);
-            branch.indices.push(current_index + 1);
-            current_index += 1;
-            
-            // Update problem state if needed
-            problem.update_after_step(&final_aug)?;
-            
-            prev_aug = final_aug;
-            prev_tangent = new_tangent;
-            prev_diag = final_diag;
-            
-            // Adaptive step size
-            step_size = (step_size * 1.2).min(settings.max_step_size);
-        } else {
-            consecutive_failures += 1;
-            step_size *= 0.5;
-            if step_size < settings.min_step_size || consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                break;
-            }
-        }
-    }
-    
-    Ok(branch)
-}
-
-/// Refines a bifurcation point using bisection.
-fn refine_bifurcation_bisection<P: ContinuationProblem>(
-    problem: &mut P,
-    prev_aug: &DVector<f64>,
-    prev_tests: &problem::TestFunctionValues,
-    new_aug: &DVector<f64>,
-    new_tests: &problem::TestFunctionValues,
-    bif_type: BifurcationType,
-    tangent: &DVector<f64>,
-    corrector_steps: usize,
-    tolerance: f64,
-) -> Result<(DVector<f64>, problem::PointDiagnostics)> {
-    const MAX_BISECTION_ITERS: usize = 10;
-    const TEST_TOLERANCE: f64 = 1e-6;
-    
-    let mut lo_aug = prev_aug.clone();
-    let mut hi_aug = new_aug.clone();
-    let mut lo_test = prev_tests.value_for(bif_type);
-    let mut hi_test = new_tests.value_for(bif_type);
-    
-    // Ensure lo_test < 0, hi_test > 0 for consistent bisection
-    if lo_test > hi_test {
-        std::mem::swap(&mut lo_aug, &mut hi_aug);
-        std::mem::swap(&mut lo_test, &mut hi_test);
-    }
-    
-    let mut best_aug = if lo_test.abs() < hi_test.abs() { lo_aug.clone() } else { hi_aug.clone() };
-    let mut best_diag = problem.diagnostics(&best_aug)?;
-    
-    for _ in 0..MAX_BISECTION_ITERS {
-        // Linear interpolation to estimate zero crossing
-        let denom = hi_test - lo_test;
-        let s = if denom.abs() > 1e-12 {
-            (-lo_test / denom).clamp(0.1, 0.9) // Avoid extreme ends
-        } else {
-            0.5
-        };
-        
-        let mid_aug = &lo_aug + (&hi_aug - &lo_aug) * s;
-        
-        // Correct back to solution manifold
-        let corrected = correct_with_problem(
-            problem,
-            &mid_aug,
-            &lo_aug,
-            tangent,
-            corrector_steps,
-            tolerance,
-        )?;
-        
-        let corrected_aug = match corrected {
-            Some(aug) => aug,
-            None => {
-                // Correction failed, try midpoint without correction
-                mid_aug
-            }
-        };
-        
-        // Compute diagnostics at corrected point
-        let diag = problem.diagnostics(&corrected_aug)?;
-        let mid_test = diag.test_values.value_for(bif_type);
-        
-        // Check convergence
-        if mid_test.abs() < TEST_TOLERANCE {
-            return Ok((corrected_aug, diag));
-        }
-        
-        // Update bracket
-        if mid_test < 0.0 {
-            lo_aug = corrected_aug.clone();
-            lo_test = mid_test;
-        } else {
-            hi_aug = corrected_aug.clone();
-            hi_test = mid_test;
-        }
-        
-        // Track best (closest to zero)
-        if mid_test.abs() < best_diag.test_values.value_for(bif_type).abs() {
-            best_aug = corrected_aug;
-            best_diag = diag;
-        }
-    }
-    
-    // Return best found even if not fully converged
-    Ok((best_aug, best_diag))
-}
-
-/// Computes the tangent vector using the Jacobian null space.
-fn compute_tangent_from_problem<P: ContinuationProblem>(
-    problem: &mut P,
-    aug_state: &DVector<f64>,
-) -> Result<DVector<f64>> {
-    let dim = problem.dimension();
-    let jac = problem.extended_jacobian(aug_state)?;
-    
-    // Validate Jacobian dimensions
-    if jac.nrows() != dim || jac.ncols() != dim + 1 {
-        bail!("Jacobian has unexpected dimensions: {}x{}, expected {}x{}", 
-              jac.nrows(), jac.ncols(), dim, dim + 1);
-    }
-    
-    // Try multiple bordering directions for robustness
-    // The tangent t satisfies: J * t = 0, ||t|| = 1
-    // We use the bordering method: solve [J; c^T] * t = [0; 1]
-    
-    let bordering_candidates = [
-        0,  // Parameter direction
-        dim, // Last state component (period for LC)
-        1,  // First state component
-    ];
-    
-    for &idx in &bordering_candidates {
-        // Build bordering vector
-        let mut c = DVector::zeros(dim + 1);
-        c[idx.min(dim)] = 1.0;
-        
-        // Build bordered system: [J; c^T] * t = [0; 1]
-        let mut bordered = DMatrix::zeros(dim + 1, dim + 1);
-        for i in 0..dim {
-            for j in 0..dim + 1 {
-                bordered[(i, j)] = jac[(i, j)];
-            }
-        }
-        for j in 0..dim + 1 {
-            bordered[(dim, j)] = c[j];
-        }
-        
-        // Right-hand side [0; 0; ...; 0; 1]
-        let mut rhs = DVector::zeros(dim + 1);
-        rhs[dim] = 1.0;
-        
-        // Solve using LU decomposition
-        let lu = bordered.lu();
-        if let Some(sol) = lu.solve(&rhs) {
-            let norm = sol.norm();
-            if norm > 1e-10 && sol.iter().all(|v| v.is_finite()) {
-                return Ok(sol / norm);
-            }
-        }
-    }
-    
-    // Fallback: use random-ish unit vector in nullspace approximation
-    // Just pick parameter direction
-    let mut tangent = DVector::zeros(dim + 1);
-    tangent[0] = 1.0;
-    Ok(tangent)
-}
-
-/// Corrects a predicted point using Moore-Penrose pseudo-arclength correction.
-///
-/// This uses a bordered pseudo-arclength corrector: solve the bordered system
-/// [J; v'] * delta = [F; 0], which minimizes the correction perpendicular to the tangent.
-/// Both state AND parameter are corrected.
-fn correct_with_problem<P: ContinuationProblem>(
-    problem: &mut P,
-    prediction: &DVector<f64>,
-    _prev_aug: &DVector<f64>,
-    prev_tangent: &DVector<f64>,
-    max_iters: usize,
-    tolerance: f64,
-) -> Result<Option<DVector<f64>>> {
-    let dim = problem.dimension();
-    let mut current = prediction.clone();
-    
-    // Use adaptive tangent for bordering - start with prev_tangent
-    let mut border_tangent = prev_tangent.clone();
-    
-    for _iter in 0..max_iters {
-        // Compute residual F(x)
-        let mut residual = DVector::zeros(dim);
-        problem.residual(&current, &mut residual)?;
-        
-        let res_norm = residual.norm();
-        
-        // Check convergence: F(x) should be small.
-        if res_norm < tolerance {
-            return Ok(Some(current));
-        }
-        
-        // Get the extended Jacobian [dF/dp | dF/dx], dim x (dim+1)
-        let jac = problem.extended_jacobian(&current)?;
-        
-        // Build bordered Jacobian: [J; v'] is (dim+1) x (dim+1)
-        let mut bordered = DMatrix::zeros(dim + 1, dim + 1);
-        for i in 0..dim {
-            for j in 0..(dim + 1) {
-                bordered[(i, j)] = jac[(i, j)];
-            }
-        }
-        for j in 0..(dim + 1) {
-            bordered[(dim, j)] = border_tangent[j];
-        }
-        
-        // Build extended RHS: [-F; 0]
-        let mut rhs = DVector::zeros(dim + 1);
-        for i in 0..dim {
-            rhs[i] = -residual[i];
-        }
-        rhs[dim] = 0.0;  // Tangent constraint: tangent . delta = 0
-        
-        // Solve bordered system
-        let lu = bordered.lu();
-        if let Some(delta) = lu.solve(&rhs) {
-            let delta_norm = delta.norm();
-
-            if !delta_norm.is_finite() {
-                return Ok(None);
-            }
-            
-            // Damping for large steps
-            let damping = if delta_norm > 1.0 { 0.5 / delta_norm } else { 1.0 };
-            
-            // Update ALL components including parameter (clone delta for later use)
-            current += &(damping * &delta);
-            
-            // Update tangent estimate for next iteration if delta is reasonable
-            if delta_norm > 1e-10 && delta_norm < 1e5 {
-                border_tangent = delta.clone() / delta_norm;
-            }
-        } else {
-            return Ok(None);
-        }
-    }
-    
-    // Final convergence check
-    let mut final_res = DVector::zeros(dim);
-    problem.residual(&current, &mut final_res)?;
-    let final_norm = final_res.norm();
-    
-    if final_norm < tolerance * 10.0 {
-        Ok(Some(current))
-    } else {
-        Ok(None)
-    }
-}
-
-// Types (ContinuationSettings, BifurcationType, ContinuationPoint, BranchType, ContinuationBranch)
-// are now in the types module and re-exported above.
 
 pub fn extend_branch(
     system: &mut EquationSystem,
@@ -1207,108 +55,45 @@ pub fn extend_branch(
     if branch.indices.len() != branch.points.len() {
         branch.indices = (0..branch.points.len() as i32).collect();
     }
-
-    let (endpoint_idx, last_index, is_append) = if forward {
-        let max_idx_pos = branch
-            .indices
-            .iter()
-            .enumerate()
-            .max_by_key(|(_, &idx)| idx)
-            .unwrap()
-            .0;
-        (max_idx_pos, branch.indices[max_idx_pos], true)
+    
+    let (prev_point, last_index, is_append) = if forward {
+        let max_idx_pos = branch.indices.iter().enumerate().max_by_key(|(_, &idx)| idx).unwrap().0;
+        (&branch.points[max_idx_pos], branch.indices[max_idx_pos], true)
     } else {
-        let min_idx_pos = branch
-            .indices
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, &idx)| idx)
-            .unwrap()
-            .0;
-        (min_idx_pos, branch.indices[min_idx_pos], false)
-    };
-    let mut prev_point = branch.points[endpoint_idx].clone();
-
-    // Find the neighbor point for secant computation
-    let neighbor_idx = if forward {
-        // Find second highest index
-        if branch.points.len() > 1 {
-            branch.indices.iter().enumerate()
-                .filter(|(i, _)| *i != endpoint_idx)
-                .max_by_key(|(_, &idx)| idx)
-                .map(|(i, _)| i)
-        } else {
-            None
-        }
-    } else {
-        // Find second lowest index
-        if branch.points.len() > 1 {
-            branch.indices.iter().enumerate()
-                .filter(|(i, _)| *i != endpoint_idx)
-                .min_by_key(|(_, &idx)| idx)
-                .map(|(i, _)| i)
-        } else {
-            None
-        }
+        let min_idx_pos = branch.indices.iter().enumerate().min_by_key(|(_, &idx)| idx).unwrap().0;
+        (&branch.points[min_idx_pos], branch.indices[min_idx_pos], false)
     };
 
     let start_param = system.params[param_index];
-
-    let mut prev_aug = continuation_point_to_aug(&prev_point);
-    let mut prev_tangent = tangent_for_point(system, kind, param_index, &prev_point)?;
     
-    // Compute secant from neighbor to endpoint and orient tangent accordingly
-    if let Some(neighbor_pos) = neighbor_idx {
-        let neighbor = &branch.points[neighbor_pos];
-        let neighbor_aug = continuation_point_to_aug(neighbor);
-        
-        // Secant from neighbor to endpoint (the direction we were going)
-        let secant = if is_append {
-            &prev_aug - &neighbor_aug  // From neighbor to endpoint
-        } else {
-            &neighbor_aug - &prev_aug  // From endpoint to neighbor (reversed for prepend)
-        };
-        
-        // Orient tangent to match secant direction
-        if secant.norm() > 1e-12 && prev_tangent.dot(&secant) < 0.0 {
-            prev_tangent = -prev_tangent;
-        }
-    } else {
-        // Fall back to forward flag if only one point
-        if !is_append {
-            prev_tangent = -prev_tangent;
-        }
-    }
+    let mut prev_aug = DVector::from_iterator(dim + 1, 
+        std::iter::once(prev_point.param_value).chain(prev_point.state.iter().cloned()));
+    let mut prev_tangent = DVector::from_vec(prev_point.tangent.clone());
     
-    let mut prev_diag = diagnostics_from_point(system, kind, param_index, &prev_point)?;
-
     let mut step_size = settings.step_size;
-    // Direction is now encoded in the tangent, always step forward
-    let direction_sign = 1.0;
-
+    let direction_sign = if is_append { 1.0 } else { -1.0 };
+    
     let mut new_points_data: Vec<(ContinuationPoint, i32)> = Vec::new();
-
+    
     let mut current_index = last_index;
 
     for _step in 0..settings.max_steps {
-        // Predictor: step in tangent direction (tangent is already oriented correctly)
+        // Predictor
         let pred_aug = &prev_aug + &prev_tangent * (step_size * direction_sign);
 
         // Corrector (PALC only)
         let corrected_opt = solve_palc(
-            system,
-            kind,
-            &pred_aug,
-            &prev_aug,
-            &prev_tangent,
-            param_index,
-            settings,
+            system, 
+            kind, 
+            &pred_aug, 
+            &prev_aug, 
+            &prev_tangent, 
+            param_index, 
+            settings
         )?;
 
         if let Some((corrected_aug, new_tangent)) = corrected_opt {
-            if !corrected_aug.iter().all(|v| v.is_finite())
-                || !new_tangent.iter().all(|v| v.is_finite())
-            {
+            if !corrected_aug.iter().all(|v| v.is_finite()) || !new_tangent.iter().all(|v| v.is_finite()) {
                 step_size *= 0.5;
                 if step_size < settings.min_step_size {
                     break;
@@ -1318,85 +103,60 @@ pub fn extend_branch(
 
             // Converged
             system.params[param_index] = corrected_aug[0];
-            let mut diagnostics =
-                compute_point_diagnostics(system, kind, &corrected_aug, param_index)?;
+            let test_val = compute_test_function(system, kind, &corrected_aug, param_index)?;
 
-            if !diagnostics.test_values.is_finite() {
+            if !test_val.is_finite() {
                 step_size *= 0.5;
                 if step_size < settings.min_step_size {
                     break;
                 }
                 continue;
             }
+            
+            let prev_cmp_point = if new_points_data.is_empty() {
+                prev_point.clone()
+            } else {
+                new_points_data.last().unwrap().0.clone()
+            };
 
             let mut new_pt = ContinuationPoint {
                 state: corrected_aug.rows(1, dim).iter().cloned().collect(),
                 param_value: corrected_aug[0],
+                tangent: new_tangent.iter().cloned().collect(),
+                test_function_value: test_val,
                 stability: BifurcationType::None,
-                eigenvalues: diagnostics.eigenvalues.clone(),
             };
 
-            let prev_tests = prev_diag.test_values;
-            let fold_crossed = prev_tests.fold * diagnostics.test_values.fold < 0.0;
-            let hopf_crossed = prev_tests.hopf * diagnostics.test_values.hopf < 0.0;
-            let neutral_crossed =
-                prev_tests.neutral_saddle * diagnostics.test_values.neutral_saddle < 0.0;
-
-            let mut current_tangent = new_tangent.clone();
-
-            if fold_crossed {
+            let crossed = prev_cmp_point.test_function_value * new_pt.test_function_value < 0.0;
+            if crossed {
                 match refine_fold_point(
                     system,
                     kind,
                     param_index,
                     settings,
-                    &prev_point,
-                    &prev_tests,
+                    &prev_cmp_point,
                     &new_pt,
-                    &diagnostics.test_values,
-                    &prev_tangent,
                 ) {
-                    Ok((refined_point, refined_diag, refined_tangent)) => {
-                        new_pt = refined_point;
-                        diagnostics = refined_diag;
-                        current_tangent = refined_tangent;
+                    Ok(refined) => {
+                        new_pt = refined;
                     }
                     Err(_err) => {
+                        #[cfg(test)]
+                        {
+                            println!("Fold refinement failed: {:?}", _err);
+                        }
                         new_pt.stability = BifurcationType::Fold;
                     }
                 }
-                new_pt.stability = BifurcationType::Fold;
-            } else if hopf_crossed && !neutral_crossed {
-                match refine_hopf_point(
-                    system,
-                    kind,
-                    param_index,
-                    settings,
-                    &prev_point,
-                    &prev_tests,
-                    &new_pt,
-                    &diagnostics.test_values,
-                    &prev_tangent,
-                ) {
-                    Ok((refined_point, refined_diag, refined_tangent)) => {
-                        new_pt = refined_point;
-                        diagnostics = refined_diag;
-                        current_tangent = refined_tangent;
-                    }
-                    Err(_err) => {
-                        new_pt.stability = BifurcationType::Hopf;
-                    }
-                }
-                new_pt.stability = BifurcationType::Hopf;
-            } else if hopf_crossed && neutral_crossed {
-                // Detected Hopf and neutral saddle simultaneously; suppress Hopf.
             }
 
+            if crossed {
+                new_pt.stability = BifurcationType::Fold;
+            }
+            
             current_index += if is_append { 1 } else { -1 };
             prev_aug = continuation_point_to_aug(&new_pt);
-            prev_tangent = current_tangent.clone();
-            prev_diag = diagnostics;
-            prev_point = new_pt.clone();
+            prev_tangent = DVector::from_vec(new_pt.tangent.clone());
             new_points_data.push((new_pt, current_index));
         } else {
             step_size *= 0.5;
@@ -1406,7 +166,7 @@ pub fn extend_branch(
             continue;
         }
     }
-
+    
     system.params[param_index] = start_param;
 
     if is_append {
@@ -1422,12 +182,12 @@ pub fn extend_branch(
         for bif_idx in &mut branch.bifurcations {
             *bif_idx += shift;
         }
-
+        
         for (pt, idx) in new_points_data.into_iter().rev() {
             branch.points.insert(0, pt);
             branch.indices.insert(0, idx);
         }
-
+        
         branch.bifurcations.clear();
         for i in 1..branch.points.len() {
             if branch.points[i].stability != BifurcationType::None {
@@ -1453,61 +213,137 @@ pub fn continue_parameter(
     }
 
     let start_param = system.params[param_index];
-
+    
     let mut current_aug = DVector::zeros(dim + 1);
     current_aug[0] = start_param;
     for i in 0..dim {
         current_aug[i + 1] = initial_state[i];
     }
 
-    let initial_diag = compute_point_diagnostics(system, kind, &current_aug, param_index)?;
+    let j_ext = compute_extended_jacobian(system, kind, &current_aug, param_index)?;
+    let mut tangent = compute_nullspace_tangent(&j_ext)?;
+
+    if tangent.norm() > 0.0 {
+        tangent.normalize_mut();
+    }
+
+    if forward {
+        if tangent[0] < 0.0 { tangent = -tangent; }
+    } else {
+        if tangent[0] > 0.0 { tangent = -tangent; }
+    }
+
+    let initial_test = compute_test_function(system, kind, &current_aug, param_index)?;
 
     let branch = ContinuationBranch {
         points: vec![ContinuationPoint {
             state: current_aug.rows(1, dim).iter().cloned().collect(),
             param_value: current_aug[0],
+            tangent: tangent.iter().cloned().collect(),
             stability: BifurcationType::None,
-            eigenvalues: initial_diag.eigenvalues,
+            test_function_value: initial_test,
         }],
         bifurcations: Vec::new(),
         indices: vec![0],
-        branch_type: BranchType::Equilibrium,
-        upoldp: None,
     };
 
-    extend_branch(system, kind, branch, param_index, settings, forward)
+    extend_branch(system, kind, branch, param_index, settings, true)
 }
 
-fn tangent_for_point(
-    system: &mut EquationSystem,
-    kind: SystemKind,
-    param_index: usize,
-    point: &ContinuationPoint,
-) -> Result<DVector<f64>> {
-    let aug = continuation_point_to_aug(point);
-    let j_ext = compute_extended_jacobian(system, kind, &aug, param_index)?;
-    let mut tangent = compute_nullspace_tangent(&j_ext)?;
-    if tangent.norm() > 0.0 {
-        tangent.normalize_mut();
+fn compute_nullspace_tangent(j_ext: &DMatrix<f64>) -> Result<DVector<f64>> {
+    if let Some(vec) = try_gram_eigen(j_ext) {
+        return Ok(vec);
     }
-    if tangent[0] < 0.0 {
-        tangent = -tangent;
+    compute_tangent_linear_solve(j_ext)
+}
+
+fn try_gram_eigen(j_ext: &DMatrix<f64>) -> Option<DVector<f64>> {
+    if j_ext.ncols() == 0 {
+        return None;
     }
-    Ok(tangent)
+
+    let gram = j_ext.transpose() * j_ext;
+    if gram.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+
+    let identity = DMatrix::identity(gram.nrows(), gram.ncols());
+    let mut epsilon = 0.0;
+
+    for _ in 0..5 {
+        let adjusted = if epsilon == 0.0 {
+            gram.clone()
+        } else {
+            &gram + identity.scale(epsilon)
+        };
+
+        let eig = SymmetricEigen::new(adjusted.clone());
+        if eig.eigenvalues.is_empty() {
+            return None;
+        }
+
+        let mut min_idx = 0;
+        let mut min_val = eig.eigenvalues[0];
+        for (i, &val) in eig.eigenvalues.iter().enumerate().skip(1) {
+            if !val.is_finite() {
+                continue;
+            }
+            if val < min_val {
+                min_val = val;
+                min_idx = i;
+            }
+        }
+
+        if !min_val.is_finite() {
+            epsilon = if epsilon == 0.0 { 1e-12 } else { epsilon * 10.0 };
+            continue;
+        }
+
+        let vec = eig.eigenvectors.column(min_idx).into_owned();
+        if vec.norm_squared() == 0.0 || vec.iter().any(|v| !v.is_finite()) {
+            return None;
+        }
+        return Some(vec);
+    }
+
+    None
 }
 
-fn diagnostics_from_point(
-    system: &mut EquationSystem,
-    kind: SystemKind,
-    param_index: usize,
-    point: &ContinuationPoint,
-) -> Result<PointDiagnostics> {
-    let aug = continuation_point_to_aug(point);
-    compute_point_diagnostics(system, kind, &aug, param_index)
+fn compute_tangent_linear_solve(j_ext: &DMatrix<f64>) -> Result<DVector<f64>> {
+    let dim = j_ext.nrows();
+    if dim == 0 {
+        bail!("Failed to compute tangent: zero-dimensional system");
+    }
+
+    let mut a = DMatrix::zeros(dim + 1, dim + 1);
+    a.view_mut((0, 0), (dim, dim + 1)).copy_from(j_ext);
+    let mut rhs = DVector::zeros(dim + 1);
+    rhs[dim] = 1.0;
+
+    for col in 0..=dim {
+        for j in 0..=dim {
+            a[(dim, j)] = 0.0;
+        }
+        a[(dim, col)] = 1.0;
+
+        if let Some(solution) = a.clone().lu().solve(&rhs) {
+            if solution.iter().all(|v| v.is_finite()) && solution.norm_squared() != 0.0 {
+                return Ok(solution);
+            }
+        }
+    }
+
+    bail!("Failed to compute tangent: all bordered solves singular")
 }
 
-// Tangent computation functions (compute_nullspace_tangent, try_gram_eigen, 
-// compute_tangent_linear_solve) and continuation_point_to_aug are now in util module.
+fn continuation_point_to_aug(point: &ContinuationPoint) -> DVector<f64> {
+    let mut aug = DVector::zeros(point.state.len() + 1);
+    aug[0] = point.param_value;
+    for (i, &val) in point.state.iter().enumerate() {
+        aug[i + 1] = val;
+    }
+    aug
+}
 
 fn refine_fold_point(
     system: &mut EquationSystem,
@@ -1515,11 +351,8 @@ fn refine_fold_point(
     param_index: usize,
     settings: ContinuationSettings,
     prev_point: &ContinuationPoint,
-    prev_tests: &TestFunctionValues,
     new_point: &ContinuationPoint,
-    new_tests: &TestFunctionValues,
-    prev_tangent: &DVector<f64>,
-) -> Result<(ContinuationPoint, PointDiagnostics, DVector<f64>)> {
+) -> Result<ContinuationPoint> {
     let dim = system.equations.len();
     let prev_aug = continuation_point_to_aug(prev_point);
     let new_aug = continuation_point_to_aug(new_point);
@@ -1527,99 +360,47 @@ fn refine_fold_point(
         system,
         kind,
         &prev_aug,
-        prev_tests.fold,
+        prev_point.test_function_value,
         &new_aug,
-        new_tests.fold,
+        new_point.test_function_value,
         param_index,
         settings,
     )?;
 
     let start_param = system.params[param_index];
     system.params[param_index] = refined_aug[0];
-    let diagnostics = compute_point_diagnostics(system, kind, &refined_aug, param_index)?;
+    let test_val = compute_test_function(system, kind, &refined_aug, param_index)?;
     let j_ext = compute_extended_jacobian(system, kind, &refined_aug, param_index)?;
     let mut tangent = compute_nullspace_tangent(&j_ext)?;
     if tangent.norm() > 0.0 {
         tangent.normalize_mut();
     }
-    if tangent.dot(prev_tangent) < 0.0 {
-        tangent = -tangent;
-    }
     system.params[param_index] = start_param;
 
-    let point = ContinuationPoint {
+    Ok(ContinuationPoint {
         state: refined_aug.rows(1, dim).iter().cloned().collect(),
         param_value: refined_aug[0],
+        tangent: tangent.iter().cloned().collect(),
         stability: BifurcationType::Fold,
-        eigenvalues: diagnostics.eigenvalues.clone(),
-    };
-
-    Ok((point, diagnostics, tangent))
-}
-
-fn refine_hopf_point(
-    system: &mut EquationSystem,
-    kind: SystemKind,
-    param_index: usize,
-    settings: ContinuationSettings,
-    prev_point: &ContinuationPoint,
-    prev_tests: &TestFunctionValues,
-    new_point: &ContinuationPoint,
-    new_tests: &TestFunctionValues,
-    prev_tangent: &DVector<f64>,
-) -> Result<(ContinuationPoint, PointDiagnostics, DVector<f64>)> {
-    let dim = system.equations.len();
-    let prev_aug = continuation_point_to_aug(prev_point);
-    let new_aug = continuation_point_to_aug(new_point);
-    let refined_aug = solve_hopf_newton(
-        system,
-        kind,
-        &prev_aug,
-        prev_tests.hopf,
-        &new_aug,
-        new_tests.hopf,
-        param_index,
-        settings,
-    )?;
-
-    let start_param = system.params[param_index];
-    system.params[param_index] = refined_aug[0];
-    let diagnostics = compute_point_diagnostics(system, kind, &refined_aug, param_index)?;
-    let j_ext = compute_extended_jacobian(system, kind, &refined_aug, param_index)?;
-    let mut tangent = compute_nullspace_tangent(&j_ext)?;
-    if tangent.norm() > 0.0 {
-        tangent.normalize_mut();
-    }
-    if tangent.dot(prev_tangent) < 0.0 {
-        tangent = -tangent;
-    }
-    system.params[param_index] = start_param;
-
-    let point = ContinuationPoint {
-        state: refined_aug.rows(1, dim).iter().cloned().collect(),
-        param_value: refined_aug[0],
-        stability: BifurcationType::Hopf,
-        eigenvalues: diagnostics.eigenvalues.clone(),
-    };
-
-    Ok((point, diagnostics, tangent))
+        test_function_value: test_val,
+    })
 }
 
 fn solve_fold_newton(
     system: &mut EquationSystem,
     kind: SystemKind,
     prev_aug: &DVector<f64>,
-    prev_fold: f64,
+    prev_test: f64,
     new_aug: &DVector<f64>,
-    new_fold: f64,
+    new_test: f64,
     param_index: usize,
     settings: ContinuationSettings,
 ) -> Result<DVector<f64>> {
     let dim = system.equations.len();
     let mut current = prev_aug.clone();
-    let denom = prev_fold - new_fold;
+    let denom = prev_test - new_test;
     if denom.abs() > 1e-12 {
-        let mut s = prev_fold / denom;
+        let mut s = prev_test / denom;
         if !s.is_finite() {
             s = 0.5;
         }
@@ -1640,15 +421,14 @@ fn solve_fold_newton(
         evaluate_residual(system, kind, &current_state, &mut f_val);
         system.params[param_index] = old_param;
 
-        let diag = compute_point_diagnostics(system, kind, &current, param_index)?;
-        let test_val = diag.test_values.fold;
+        let test_val = compute_test_function(system, kind, &current, param_index)?;
         let f_norm = DVector::from_vec(f_val.clone()).norm();
         if f_norm < settings.corrector_tolerance && test_val.abs() < settings.corrector_tolerance {
             system.params[param_index] = start_param;
             return Ok(current);
         }
 
-        let grad = compute_test_gradient(system, kind, &current, param_index, &|vals| vals.fold)?;
+        let grad = compute_test_gradient(system, kind, &current, param_index)?;
 
         let mut a = DMatrix::zeros(dim + 1, dim + 1);
         a.view_mut((0, 0), (dim, dim + 1)).copy_from(&j_ext);
@@ -1678,85 +458,11 @@ fn solve_fold_newton(
     Err(anyhow!("Fold refinement did not converge"))
 }
 
-fn solve_hopf_newton(
-    system: &mut EquationSystem,
-    kind: SystemKind,
-    prev_aug: &DVector<f64>,
-    prev_hopf: f64,
-    new_aug: &DVector<f64>,
-    new_hopf: f64,
-    param_index: usize,
-    settings: ContinuationSettings,
-) -> Result<DVector<f64>> {
-    let dim = system.equations.len();
-    let mut current = prev_aug.clone();
-    let denom = prev_hopf - new_hopf;
-    if denom.abs() > 1e-12 {
-        let mut s = prev_hopf / denom;
-        if !s.is_finite() {
-            s = 0.5;
-        }
-        s = s.clamp(0.0, 1.0);
-        current = prev_aug + (new_aug - prev_aug) * s;
-    }
-
-    let start_param = system.params[param_index];
-
-    for _ in 0..settings.corrector_steps {
-        let j_ext = compute_extended_jacobian(system, kind, &current, param_index)?;
-        let current_param = current[0];
-        let current_state: Vec<f64> = current.rows(1, dim).iter().cloned().collect();
-
-        let old_param = system.params[param_index];
-        system.params[param_index] = current_param;
-        let mut f_val = vec![0.0; dim];
-        evaluate_residual(system, kind, &current_state, &mut f_val);
-        system.params[param_index] = old_param;
-
-        let diag = compute_point_diagnostics(system, kind, &current, param_index)?;
-        let test_val = diag.test_values.hopf;
-        let f_norm = DVector::from_vec(f_val.clone()).norm();
-        if f_norm < settings.corrector_tolerance && test_val.abs() < settings.corrector_tolerance {
-            system.params[param_index] = start_param;
-            return Ok(current);
-        }
-
-        let grad = compute_test_gradient(system, kind, &current, param_index, &|vals| vals.hopf)?;
-
-        let mut a = DMatrix::zeros(dim + 1, dim + 1);
-        a.view_mut((0, 0), (dim, dim + 1)).copy_from(&j_ext);
-        for i in 0..dim + 1 {
-            a[(dim, i)] = grad[i];
-        }
-
-        let mut rhs = DVector::zeros(dim + 1);
-        for i in 0..dim {
-            rhs[i] = -f_val[i];
-        }
-        rhs[dim] = -test_val;
-
-        let delta = a
-            .lu()
-            .solve(&rhs)
-            .ok_or_else(|| anyhow!("Hopf refinement linear solve failed"))?;
-        current += &delta;
-
-        if delta.norm() < settings.step_tolerance {
-            system.params[param_index] = start_param;
-            return Ok(current);
-        }
-    }
-
-    system.params[param_index] = start_param;
-    Err(anyhow!("Hopf refinement did not converge"))
-}
-
 fn compute_test_gradient(
     system: &mut EquationSystem,
     kind: SystemKind,
     aug_state: &DVector<f64>,
     param_index: usize,
-    selector: &dyn Fn(&TestFunctionValues) -> f64,
 ) -> Result<DVector<f64>> {
     let dim = system.equations.len();
     let mut grad = DVector::zeros(dim + 1);
@@ -1766,23 +472,21 @@ fn compute_test_gradient(
         let mut perturbed = aug_state.clone();
         let step = base_eps * (1.0 + aug_state[i].abs());
         perturbed[i] += step;
-        let plus_diag = compute_point_diagnostics(system, kind, &perturbed, param_index)?;
-        let plus = selector(&plus_diag.test_values);
+        let plus = compute_test_function(system, kind, &perturbed, param_index)?;
         perturbed[i] -= 2.0 * step;
-        let minus_diag = compute_point_diagnostics(system, kind, &perturbed, param_index)?;
-        let minus = selector(&minus_diag.test_values);
+        let minus = compute_test_function(system, kind, &perturbed, param_index)?;
         grad[i] = (plus - minus) / (2.0 * step);
     }
 
     Ok(grad)
 }
 
-fn compute_point_diagnostics(
+fn compute_test_function(
     system: &mut EquationSystem,
     kind: SystemKind,
     aug_state: &DVector<f64>,
     param_index: usize,
-) -> Result<PointDiagnostics> {
+) -> Result<f64> {
     let dim = system.equations.len();
     let param = aug_state[0];
     let state: Vec<f64> = aug_state.rows(1, dim).iter().cloned().collect();
@@ -1791,46 +495,14 @@ fn compute_point_diagnostics(
     system.params[param_index] = param;
 
     let jac = crate::equilibrium::compute_jacobian(system, kind, &state)?;
-
+    
     system.params[param_index] = old_param;
 
     let mat = DMatrix::from_row_slice(dim, dim, &jac);
-    let fold = mat.determinant();
+    let det = mat.determinant();
 
-    let eigenvalues = compute_eigenvalues(&mat)?;
-    let (hopf, neutral) = if matches!(kind, SystemKind::Flow) && dim >= 2 {
-        (
-            hopf_test_function(&eigenvalues).re,
-            neutral_saddle_test_function(&eigenvalues),
-        )
-    } else {
-        (0.0, 0.0)
-    };
-
-    Ok(PointDiagnostics {
-        test_values: TestFunctionValues::equilibrium(fold, hopf, neutral),
-        eigenvalues,
-    })
+    Ok(det)
 }
-
-pub fn compute_eigenvalues_for_state(
-    system: &mut EquationSystem,
-    kind: SystemKind,
-    state: &[f64],
-    param_index: usize,
-    param_value: f64,
-) -> Result<Vec<Complex<f64>>> {
-    let mut aug = DVector::zeros(state.len() + 1);
-    aug[0] = param_value;
-    for (i, &val) in state.iter().enumerate() {
-        aug[i + 1] = val;
-    }
-    let diagnostics = compute_point_diagnostics(system, kind, &aug, param_index)?;
-    Ok(diagnostics.eigenvalues)
-}
-
-// Eigenvalue and bifurcation test functions (compute_eigenvalues, hopf_test_function, 
-// neutral_saddle_test_function) are now in util module.
 
 fn compute_extended_jacobian(
     system: &mut EquationSystem,
@@ -1846,14 +518,14 @@ fn compute_extended_jacobian(
 
     let old_param = system.params[param_index];
     system.params[param_index] = param;
-
+    
     let mut f_dual = vec![Dual::new(0.0, 0.0); dim];
     system.evaluate_dual_wrt_param(&state, param_index, &mut f_dual);
-
+    
     for i in 0..dim {
         j_ext[(i, 0)] = f_dual[i].eps;
     }
-
+    
     system.params[param_index] = old_param;
 
     let jac_x = crate::equilibrium::compute_jacobian(system, kind, &state)?;
@@ -1882,21 +554,21 @@ fn evaluate_residual(system: &EquationSystem, kind: SystemKind, state: &[f64], o
 fn solve_palc(
     system: &mut EquationSystem,
     kind: SystemKind,
-    pred_aug: &DVector<f64>,
-    _prev_aug: &DVector<f64>,
-    prev_tangent: &DVector<f64>,
+    pred_aug: &DVector<f64>, 
+    _prev_aug: &DVector<f64>, 
+    prev_tangent: &DVector<f64>, 
     param_index: usize,
     settings: ContinuationSettings,
 ) -> Result<Option<(DVector<f64>, DVector<f64>)>> {
     let dim = system.equations.len();
     let mut current_aug = pred_aug.clone();
-
+    
     for _ in 0..settings.corrector_steps {
         let j_ext = compute_extended_jacobian(system, kind, &current_aug, param_index)?;
-
+        
         let current_param = current_aug[0];
         let current_state: Vec<f64> = current_aug.rows(1, dim).iter().cloned().collect();
-
+        
         let old_p = system.params[param_index];
         system.params[param_index] = current_param;
         let mut f_val = vec![0.0; dim];
@@ -1905,7 +577,7 @@ fn solve_palc(
 
         let diff = &current_aug - pred_aug;
         let constraint_val = prev_tangent.dot(&diff);
-
+        
         let mut rhs = DVector::zeros(dim + 1);
         for i in 0..dim {
             rhs[i] = -f_val[i];
@@ -1915,9 +587,9 @@ fn solve_palc(
         if rhs.norm() < settings.corrector_tolerance {
             let j_ext_final = compute_extended_jacobian(system, kind, &current_aug, param_index)?;
             let mut new_tangent = compute_nullspace_tangent(&j_ext_final)?;
-
+            
             if new_tangent.norm() > 0.0 {
-                new_tangent.normalize_mut();
+                 new_tangent.normalize_mut();
             }
 
             let oriented_tangent = if new_tangent.dot(prev_tangent) < 0.0 {
@@ -1935,14 +607,12 @@ fn solve_palc(
             a[(dim, i)] = prev_tangent[i];
         }
 
-        let delta = a
-            .lu()
-            .solve(&rhs)
-            .ok_or_else(|| anyhow!("Singular matrix in PALC corrector"))?;
-
+        let delta = a.lu().solve(&rhs).ok_or_else(|| anyhow!("Singular matrix in PALC corrector"))?;
+        
         current_aug += &delta;
-
-        if delta.norm() < settings.step_tolerance {}
+        
+        if delta.norm() < settings.step_tolerance {
+        }
     }
 
     Ok(None)
@@ -1951,7 +621,7 @@ fn solve_palc(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
+    use crate::equation_engine::{Bytecode, OpCode, EquationSystem};
 
     #[test]
     fn test_palc_simple_fold() {
@@ -1961,15 +631,15 @@ mod tests {
         ops.push(OpCode::Pow);
         ops.push(OpCode::LoadParam(0));
         ops.push(OpCode::Add);
-
+        
         let eq = Bytecode { ops };
         let equations = vec![eq];
-        let params = vec![-1.0];
+        let params = vec![-1.0]; 
         let mut system = EquationSystem::new(equations, params);
-
-        let initial_state = vec![1.0];
+        
+        let initial_state = vec![1.0]; 
         let param_index = 0;
-
+        
         let settings = ContinuationSettings {
             step_size: 0.1,
             min_step_size: 1e-5,
@@ -1979,99 +649,20 @@ mod tests {
             corrector_tolerance: 1e-6,
             step_tolerance: 1e-6,
         };
-
-        let res = continue_parameter(
-            &mut system,
-            SystemKind::Flow,
-            &initial_state,
-            param_index,
-            settings,
-            true,
-        );
-
+        
+        let res = continue_parameter(&mut system, SystemKind::Flow, &initial_state, param_index, settings, true);
+        
         assert!(res.is_ok(), "Continuation failed: {:?}", res.err());
         let branch = res.unwrap();
-
+        
+        println!("Generated {} points", branch.points.len());
+        for (i, pt) in branch.points.iter().enumerate() {
+            println!("Pt {}: a={:.4}, x={:.4}, tan=[{:.3}, {:.3}]", 
+                i, pt.param_value, pt.state[0], pt.tangent[0], pt.tangent[1]);
+        }
+        
         assert!(branch.points.len() > 1);
         assert!(branch.points[1].param_value > -1.0);
         assert!(branch.points[1].state[0] < 1.0);
-    }
-
-    /// Test Hopf normal form: dx/dt = μx - y, dy/dt = x + μy
-    /// Linear part has eigenvalues μ ± i, so Hopf bifurcation at μ = 0.
-    #[test]
-    fn test_hopf_normal_form() {
-        // Build: dx/dt = mu*x - y (equation 0)
-        //        dy/dt = x + mu*y (equation 1)
-        // Equilibrium at origin for all mu.
-        // Eigenvalues: mu ± i => Hopf at mu = 0
-        
-        // Equation 0: mu*x - y = LoadParam(0)*LoadVar(0) - LoadVar(1)
-        let eq0_ops = vec![
-            OpCode::LoadParam(0),  // mu
-            OpCode::LoadVar(0),    // x
-            OpCode::Mul,           // mu*x
-            OpCode::LoadVar(1),    // y
-            OpCode::Sub,           // mu*x - y
-        ];
-        
-        // Equation 1: x + mu*y = LoadVar(0) + LoadParam(0)*LoadVar(1)
-        let eq1_ops = vec![
-            OpCode::LoadVar(0),    // x
-            OpCode::LoadParam(0),  // mu
-            OpCode::LoadVar(1),    // y
-            OpCode::Mul,           // mu*y
-            OpCode::Add,           // x + mu*y
-        ];
-
-        let equations = vec![
-            Bytecode { ops: eq0_ops },
-            Bytecode { ops: eq1_ops },
-        ];
-        let params = vec![-0.5]; // Start at mu = -0.5 (stable)
-        let mut system = EquationSystem::new(equations, params);
-
-        // Equilibrium is at origin
-        let initial_state = vec![0.0, 0.0];
-        let param_index = 0;
-
-        let settings = ContinuationSettings {
-            step_size: 0.05,
-            min_step_size: 1e-5,
-            max_step_size: 0.2,
-            max_steps: 50,
-            corrector_steps: 5,
-            corrector_tolerance: 1e-8,
-            step_tolerance: 1e-8,
-        };
-
-        let res = continue_parameter(
-            &mut system,
-            SystemKind::Flow,
-            &initial_state,
-            param_index,
-            settings,
-            true, // Forward: -0.5 -> positive
-        );
-
-        assert!(res.is_ok(), "Hopf NF continuation failed: {:?}", res.err());
-        let branch = res.unwrap();
-
-        // Check that we found a Hopf bifurcation
-        let hopf_points: Vec<_> = branch.points.iter()
-            .enumerate()
-            .filter(|(_, pt)| pt.stability == BifurcationType::Hopf)
-            .collect();
-
-        // We should find at least one Hopf bifurcation
-        assert!(!hopf_points.is_empty(), "Should detect Hopf bifurcation");
-        
-        // The Hopf should be near mu = 0
-        let hopf_param = hopf_points[0].1.param_value;
-        assert!(
-            hopf_param.abs() < 0.1,
-            "Hopf should be near mu=0, found at mu={:.6}",
-            hopf_param
-        );
     }
 }

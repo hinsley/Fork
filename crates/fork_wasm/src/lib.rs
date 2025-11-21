@@ -1,5 +1,9 @@
 use fork_core::analysis::{lyapunov_exponents as core_lyapunov, LyapunovStepper};
 use fork_core::autodiff::Dual;
+use fork_core::continuation::{
+    continue_parameter as core_continuation, extend_branch as core_extend_branch, ContinuationBranch,
+    ContinuationSettings,
+};
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
 use fork_core::equilibrium::{
     solve_equilibrium as core_equilibrium_solver, NewtonSettings, SystemKind,
@@ -7,7 +11,7 @@ use fork_core::equilibrium::{
 use fork_core::solvers::{DiscreteMap, Tsit5, RK4};
 use fork_core::traits::{DynamicalSystem, Steppable};
 use js_sys::Float64Array;
-use serde_wasm_bindgen::to_value;
+use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -49,7 +53,9 @@ impl WasmSystem {
             bytecodes.push(code);
         }
 
-        let system = EquationSystem::new(bytecodes, params);
+        let mut system = EquationSystem::new(bytecodes, params);
+        system.set_maps(compiler.param_map, compiler.var_map);
+        
         let dim = system.equations.len();
 
         let solver = match solver_name {
@@ -180,5 +186,68 @@ impl WasmSystem {
             .map_err(|e| JsValue::from_str(&format!("Equilibrium solve failed: {}", e)))?;
 
         to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn compute_continuation(
+        &mut self,
+        equilibrium_state: Vec<f64>,
+        parameter_name: &str,
+        settings_val: JsValue,
+        forward: bool,
+    ) -> Result<JsValue, JsValue> {
+        let settings: ContinuationSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
+            
+        let kind = match self.system_type {
+            SystemType::Flow => SystemKind::Flow,
+            SystemType::Map => SystemKind::Map,
+        };
+        
+        let param_index = *self.system.param_map.get(parameter_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
+        
+        let branch = core_continuation(
+            &mut self.system,
+            kind,
+            &equilibrium_state,
+            param_index,
+            settings,
+            forward
+        ).map_err(|e| JsValue::from_str(&format!("Continuation failed: {}", e)))?;
+        
+        to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn extend_continuation(
+        &mut self,
+        branch_val: JsValue,
+        parameter_name: &str,
+        settings_val: JsValue,
+        forward: bool,
+    ) -> Result<JsValue, JsValue> {
+        let settings: ContinuationSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
+        
+        let branch: ContinuationBranch = from_value(branch_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid branch data: {}", e)))?;
+
+        let kind = match self.system_type {
+            SystemType::Flow => SystemKind::Flow,
+            SystemType::Map => SystemKind::Map,
+        };
+        
+        let param_index = *self.system.param_map.get(parameter_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
+        
+        let updated_branch = core_extend_branch(
+            &mut self.system,
+            kind,
+            branch,
+            param_index,
+            settings,
+            forward
+        ).map_err(|e| JsValue::from_str(&format!("Branch extension failed: {}", e)))?;
+        
+        to_value(&updated_branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 }

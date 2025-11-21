@@ -11,6 +11,7 @@ if (!fs.existsSync(SYSTEMS_DIR)) fs.mkdirSync(SYSTEMS_DIR);
 
 // Helper to get objects dir for a specific system
 const getObjectsDir = (systemName: string) => path.join(SYSTEMS_DIR, systemName, 'objects');
+const getContinuationDir = (systemName: string) => path.join(SYSTEMS_DIR, systemName, 'continuation');
 
 export const Storage = {
   listSystems: (): string[] => {
@@ -73,5 +74,31 @@ export const Storage = {
     if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
     }
+  },
+
+  // Continuation Storage
+  listContinuations: (systemName: string): string[] => {
+    const contDir = getContinuationDir(systemName);
+    if (!fs.existsSync(contDir)) return [];
+    return fs.readdirSync(contDir).filter(f => f.endsWith('.json')).map(f => f.replace('.json', ''));
+  },
+
+  saveContinuation: (systemName: string, branch: AnalysisObject) => {
+      const contDir = getContinuationDir(systemName);
+      if (!fs.existsSync(contDir)) fs.mkdirSync(contDir, { recursive: true });
+      fs.writeFileSync(path.join(contDir, `${branch.name}.json`), JSON.stringify(branch, null, 2));
+  },
+
+  loadContinuation: (systemName: string, name: string): AnalysisObject => {
+      const contDir = getContinuationDir(systemName);
+      return JSON.parse(fs.readFileSync(path.join(contDir, `${name}.json`), 'utf-8'));
+  },
+
+  deleteContinuation: (systemName: string, name: string) => {
+      const contDir = getContinuationDir(systemName);
+      const filePath = path.join(contDir, `${name}.json`);
+      if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+      }
   }
 };

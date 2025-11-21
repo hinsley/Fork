@@ -229,9 +229,21 @@ impl Float for Dual {
     }
 
     fn powf(self, n: Self) -> Self {
-        // x^y = exp(y * ln(x))
+        // Special-case integer exponents (no ln needed, handles negative bases)
+        if n.eps == 0.0 {
+            let rounded = n.val.round();
+            if (n.val - rounded).abs() < 1e-12 {
+                return self.powi(rounded as i32);
+            }
+        }
+
+        // General case
         let val_pow = self.val.powf(n.val);
-        let eps_new = val_pow * (n.eps * self.val.ln() + n.val * self.eps / self.val);
+        let eps_new = if self.val == 0.0 {
+            0.0
+        } else {
+            val_pow * (n.eps * self.val.ln() + n.val * self.eps / self.val)
+        };
         Self::new(val_pow, eps_new)
     }
 
