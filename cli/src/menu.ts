@@ -45,7 +45,7 @@ export async function runConfigMenu(
         choices.push({ name: 'Back', value: CONFIG_BACK_VALUE });
 
         const { selection } = await inquirer.prompt({
-            type: 'rawlist',
+            type: 'list',
             name: 'selection',
             message: title,
             choices,
