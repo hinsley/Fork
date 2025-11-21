@@ -510,7 +510,7 @@ async function inspectBranch(sysName: string, branch: ContinuationObject) {
     const pName = branch.parameterName;
     
     // Print header
-    console.log(`Index | ${pName.padEnd(10)} | Stability | Fold Test`);
+    console.log(`Index | ${pName.padEnd(10)} | Stability | Fold Test | Hopf Test | Neutral Test`);
     
     // Sort by index to show in order
     const sortedMap = pts.map((p, i) => ({ p, idx: indices[i], originalIdx: i }))
@@ -544,8 +544,16 @@ async function inspectBranch(sysName: string, branch: ContinuationObject) {
         }
         const item = sortedMap[i];
         const pt = item.p;
+        const tests = pt.test_function_values ?? {
+            fold: pt.test_function_value ?? 0,
+            hopf: 0,
+            neutral_saddle: 0
+        };
         const stab = branch.data.bifurcations.includes(item.originalIdx) ? chalk.red(pt.stability) : pt.stability;
-        const line = `${item.idx.toString().padEnd(5)} | ${pt.param_value.toPrecision(5).padEnd(10)} | ${stab.toString().padEnd(9)} | ${pt.test_function_value.toPrecision(4)}`;
+        const foldVal = tests.fold.toPrecision(4).padEnd(10);
+        const hopfVal = tests.hopf.toPrecision(4).padEnd(10);
+        const neutralVal = tests.neutral_saddle.toPrecision(4).padEnd(13);
+        const line = `${item.idx.toString().padEnd(5)} | ${pt.param_value.toPrecision(5).padEnd(10)} | ${stab.toString().padEnd(9)} | ${foldVal} | ${hopfVal} | ${neutralVal}`;
         console.log(line);
         lastPos = i;
     }
