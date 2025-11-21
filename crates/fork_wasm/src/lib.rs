@@ -1,4 +1,6 @@
-use fork_core::analysis::{lyapunov_exponents as core_lyapunov, LyapunovStepper};
+use fork_core::analysis::{
+    covariant_lyapunov_vectors as core_clv, lyapunov_exponents as core_lyapunov, LyapunovStepper,
+};
 use fork_core::autodiff::Dual;
 use fork_core::continuation::{
     continue_parameter as core_continuation, extend_branch as core_extend_branch, ContinuationBranch,
@@ -11,6 +13,7 @@ use fork_core::equilibrium::{
 use fork_core::solvers::{DiscreteMap, Tsit5, RK4};
 use fork_core::traits::{DynamicalSystem, Steppable};
 use js_sys::Float64Array;
+use serde::Serialize;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 
@@ -165,6 +168,58 @@ impl WasmSystem {
         Ok(Float64Array::from(exponents.as_slice()))
     }
 
+    pub fn compute_covariant_lyapunov_vectors(
+        &self,
+        start_state: Vec<f64>,
+        start_time: f64,
+        window_steps: u32,
+        dt: f64,
+        qr_stride: u32,
+        forward_transient: u32,
+        backward_transient: u32,
+    ) -> Result<JsValue, JsValue> {
+        let dim = self.system.equations.len();
+        if start_state.len() != dim {
+            return Err(JsValue::from_str("Initial state dimension mismatch."));
+        }
+        if dt <= 0.0 {
+            return Err(JsValue::from_str("dt must be positive."));
+        }
+        if window_steps == 0 {
+            return Err(JsValue::from_str(
+                "Covariant Lyapunov computation requires a positive window.",
+            ));
+        }
+
+        let solver = match &self.solver {
+            SolverType::RK4(_) => LyapunovStepper::Rk4,
+            SolverType::Tsit5(_) => LyapunovStepper::Tsit5,
+            SolverType::Discrete(_) => LyapunovStepper::Discrete,
+        };
+
+        let result = core_clv(
+            &self.system,
+            solver,
+            &start_state,
+            start_time,
+            dt,
+            if qr_stride == 0 { 1 } else { qr_stride as usize },
+            window_steps as usize,
+            forward_transient as usize,
+            backward_transient as usize,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Covariant Lyapunov computation failed: {}", e)))?;
+
+        let payload = CovariantVectorsPayload {
+            dimension: result.dimension,
+            checkpoints: result.checkpoints,
+            times: result.times,
+            vectors: result.vectors,
+        };
+
+        to_value(&payload).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
     pub fn solve_equilibrium(
         &self,
         initial_guess: Vec<f64>,
@@ -250,4 +305,12 @@ impl WasmSystem {
         
         to_value(&updated_branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
+}
+
+#[derive(Serialize)]
+struct CovariantVectorsPayload {
+    dimension: usize,
+    checkpoints: usize,
+    times: Vec<f64>,
+    vectors: Vec<f64>,
 }
