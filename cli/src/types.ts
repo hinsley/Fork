@@ -17,6 +17,7 @@ export interface OrbitObject {
   t_end: number;
   dt: number;
   lyapunovExponents?: number[];
+  parameters?: number[]; // Snapshot of parameters when created
 }
 
 export interface ComplexValue {
@@ -57,6 +58,32 @@ export interface EquilibriumObject {
   solution?: EquilibriumSolution;
   lastSolverParams?: EquilibriumSolverParams;
   lastRun?: EquilibriumRunSummary;
+  parameters?: number[]; // Snapshot of parameters when created (or last successfully solved)
 }
 
-export type AnalysisObject = OrbitObject | EquilibriumObject;
+export interface ContinuationPoint {
+    state: number[];
+    param_value: number;
+    tangent: number[];
+    stability: "None" | "Fold";
+    test_function_value: number;
+}
+
+export interface ContinuationBranchData {
+    points: ContinuationPoint[];
+    bifurcations: number[];
+    indices: number[];
+}
+
+export interface ContinuationObject {
+    type: "continuation";
+    name: string;
+    systemName: string;
+    parameterName: string;
+    startObject: string; // Name of the equilibrium object used as seed
+    data: ContinuationBranchData;
+    settings: any; // Store settings used
+    timestamp: string;
+}
+
+export type AnalysisObject = OrbitObject | EquilibriumObject | ContinuationObject;

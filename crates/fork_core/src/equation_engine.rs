@@ -418,10 +418,12 @@ impl Parser {
 pub struct EquationSystem {
     pub equations: Vec<Bytecode>,
     pub params: Vec<f64>,
+    pub param_map: HashMap<String, usize>,
+    pub var_map: HashMap<String, usize>,
     // Separate stacks/param caches for f64 and Dual execution to avoid reallocations.
     stack_f64: RefCell<Vec<f64>>,
     stack_dual: RefCell<Vec<Dual>>,
-    params_dual: RefCell<Vec<Dual>>,
+    pub(crate) params_dual: RefCell<Vec<Dual>>,
 }
 
 impl EquationSystem {
@@ -429,13 +431,20 @@ impl EquationSystem {
         Self {
             equations,
             params,
+            param_map: HashMap::new(),
+            var_map: HashMap::new(),
             stack_f64: RefCell::new(Vec::with_capacity(64)),
             stack_dual: RefCell::new(Vec::with_capacity(64)),
             params_dual: RefCell::new(Vec::new()),
         }
     }
 
-    fn ensure_dual_params(&self) {
+    pub fn set_maps(&mut self, param_map: HashMap<String, usize>, var_map: HashMap<String, usize>) {
+        self.param_map = param_map;
+        self.var_map = var_map;
+    }
+
+    pub fn ensure_dual_params(&self) {
         let mut params_dual = self.params_dual.borrow_mut();
         if params_dual.len() != self.params.len() {
             params_dual.clear();
@@ -444,6 +453,25 @@ impl EquationSystem {
             for (dst, &src) in params_dual.iter_mut().zip(self.params.iter()) {
                 *dst = Dual::new(src, 0.0);
             }
+        }
+    }
+
+    /// Evaluates the equations using Dual numbers, differentiating with respect to a specific parameter.
+    /// The state variables `x` are treated as constants.
+    pub fn evaluate_dual_wrt_param(&self, x: &[f64], param_idx: usize, out: &mut [Dual]) {
+        self.ensure_dual_params();
+        
+        {
+            let mut params = self.params_dual.borrow_mut();
+            params[param_idx].eps = 1.0;
+        }
+        
+        let x_dual: Vec<Dual> = x.iter().map(|&v| Dual::new(v, 0.0)).collect();
+        
+        let params = self.params_dual.borrow();
+        let mut stack = self.stack_dual.borrow_mut();
+        for (i, eq) in self.equations.iter().enumerate() {
+            out[i] = VM::execute(eq, &x_dual, &params, &mut stack);
         }
     }
 }

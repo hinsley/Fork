@@ -141,7 +141,7 @@ fn evaluate_residual(system: &EquationSystem, kind: SystemKind, state: &[f64], o
     }
 }
 
-fn compute_jacobian(
+pub fn compute_jacobian(
     system: &EquationSystem,
     kind: SystemKind,
     state: &[f64],
