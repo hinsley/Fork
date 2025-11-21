@@ -17,6 +17,7 @@ export interface OrbitObject {
   t_end: number;
   dt: number;
   lyapunovExponents?: number[];
+  covariantVectors?: CovariantLyapunovData;
   parameters?: number[]; // Snapshot of parameters when created
 }
 
@@ -87,3 +88,9 @@ export interface ContinuationObject {
 }
 
 export type AnalysisObject = OrbitObject | EquilibriumObject | ContinuationObject;
+
+export interface CovariantLyapunovData {
+  dim: number;
+  times: number[];
+  vectors: number[][][]; // [checkpoint][vector][component]
+}
