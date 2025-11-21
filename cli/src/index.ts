@@ -12,6 +12,15 @@ import {
 } from './types';
 import { WasmBridge } from './wasm';
 import { continuationMenu } from './continuation';
+import {
+    ConfigEntry,
+    MENU_PAGE_SIZE,
+    formatUnset,
+    parseFloatOrDefault,
+    parseIntOrDefault,
+    parseListInput,
+    runConfigMenu
+} from './menu';
 
 const NAME_REGEX = /^[a-zA-Z0-9_]+$/;
 
@@ -53,7 +62,7 @@ async function mainMenu() {
       name: 'systemSelection',
       message: 'Select a system',
       choices: choices,
-      pageSize: 10
+      pageSize: MENU_PAGE_SIZE
     }]);
 
     if (systemSelection === 'EXIT') process.exit(0);
@@ -89,13 +98,17 @@ async function systemContext(initialSysName: string) {
             type: 'list',
             name: 'action',
             message: 'System Menu',
-            choices: choices
+            choices: choices,
+            pageSize: MENU_PAGE_SIZE
         }]);
 
         if (action === 'Back') return;
 
         if (action === 'Edit System') {
-            await editSystem(sys);
+            const updatedName = await editSystem(sys);
+            if (updatedName) {
+                sysName = updatedName;
+            }
         } else if (action === 'Duplicate System') {
             const { newName } = await inquirer.prompt({
                 name: 'newName',
@@ -146,18 +159,60 @@ async function createSystem() {
         return;
     }
 
-    const meta = await inquirer.prompt([
-      { 
-        name: 'typeChoice', 
-        type: 'list', 
-        choices: ['Flow', 'Map'], 
-        message: 'System Type (Flow = ODE, Map = Iterated Function):' 
-      },
-      { name: 'vars', message: 'Variables (comma separated, e.g. x,y,z):' },
-      { name: 'params', message: 'Parameters (comma separated, e.g. r,s,b):' }
-    ]);
+    let typeChoice = 'Flow';
+    let varsInput = 'x';
+    let paramsInput = '';
 
-    const type = meta.typeChoice.toLowerCase();
+    const metaEntries: ConfigEntry[] = [
+        {
+            id: 'typeChoice',
+            label: 'System Type',
+            getDisplay: () => typeChoice,
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    type: 'list',
+                    name: 'value',
+                    message: 'System Type (Flow = ODE, Map = Iterated Function):',
+                    choices: ['Flow', 'Map'],
+                    default: typeChoice
+                });
+                typeChoice = value;
+            }
+        },
+        {
+            id: 'vars',
+            label: 'Variables (comma separated)',
+            getDisplay: () => varsInput.trim().length > 0 ? varsInput : '(none)',
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Variables (comma separated, e.g. x,y,z):',
+                    default: varsInput
+                });
+                varsInput = value;
+            }
+        },
+        {
+            id: 'params',
+            label: 'Parameters (comma separated)',
+            getDisplay: () => paramsInput.trim().length > 0 ? paramsInput : '(none)',
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Parameters (comma separated, e.g. r,s,b):',
+                    default: paramsInput
+                });
+                paramsInput = value;
+            }
+        }
+    ];
+
+    const metaResult = await runConfigMenu('System Metadata', metaEntries);
+    if (metaResult === 'back') {
+        return;
+    }
+
+    const type = typeChoice.toLowerCase() as 'flow' | 'map';
 
     let defaultSolver = 'rk4';
     if (type === 'map') {
@@ -167,26 +222,71 @@ async function createSystem() {
             name: 'solver',
             type: 'list',
             choices: ['rk4', 'tsit5'],
-            message: 'Default Solver:'
+            message: 'Default Solver:',
+            pageSize: MENU_PAGE_SIZE
         });
         defaultSolver = solver;
     }
 
-    const varNames = meta.vars.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
-    const paramNames = meta.params.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
-    
-    const equations = [];
-    for (const v of varNames) {
-      const promptMsg = type === 'flow' ? `d${v}/dt = ` : `${v}_{n+1} = `;
-      const { eq } = await inquirer.prompt({ name: 'eq', message: promptMsg });
-      equations.push(eq);
+    const varNames = parseListInput(varsInput);
+    const paramNames = parseListInput(paramsInput);
+
+    const equations = varNames.map(() => '');
+
+    if (varNames.length > 0) {
+        const equationEntries: ConfigEntry[] = varNames.map((varName, idx) => {
+            const prefix = type === 'map' ? `${varName}_{n+1}` : `d${varName}/dt`;
+            return {
+                id: `eq_${idx}`,
+                label: `${prefix} equation`,
+                getDisplay: () => formatUnset(equations[idx]),
+                edit: async () => {
+                    const { eq } = await inquirer.prompt({
+                        name: 'eq',
+                        message: `${prefix} = `,
+                        default: equations[idx]
+                    });
+                    equations[idx] = eq;
+                }
+            };
+        });
+
+        const equationResult = await runConfigMenu('Define Equations', equationEntries);
+        if (equationResult === 'back') {
+            return;
+        }
     }
 
-    const paramValues = [];
-    for (const p of paramNames) {
-        const { val } = await inquirer.prompt({ name: 'val', message: `Default value for ${p}:` });
-        paramValues.push(parseFloat(val));
+    const paramValuesInput = paramNames.map(() => '0');
+
+    if (paramNames.length > 0) {
+        const paramEntries: ConfigEntry[] = paramNames.map((paramName, idx) => ({
+            id: `param_${idx}`,
+            label: `Default value for ${paramName}`,
+            getDisplay: () => formatUnset(paramValuesInput[idx]),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: `Default value for ${paramName}:`,
+                    default: paramValuesInput[idx],
+                    validate: (input: string) => {
+                        if (input.trim().length === 0) {
+                            return true;
+                        }
+                        return Number.isFinite(parseFloat(input)) ? true : 'Please enter a number.';
+                    }
+                });
+                paramValuesInput[idx] = value;
+            }
+        }));
+
+        const paramsResult = await runConfigMenu('Parameter Defaults', paramEntries);
+        if (paramsResult === 'back') {
+            return;
+        }
     }
+
+    const paramValues = paramValuesInput.map(value => parseFloatOrDefault(value, 0));
 
     const config: SystemConfig = {
         name: name,
@@ -202,7 +302,7 @@ async function createSystem() {
     console.log(chalk.green(`System ${config.name} (${config.type}) saved!`));
 }
 
-async function editSystem(sys: SystemConfig) {
+async function editSystem(sys: SystemConfig): Promise<string | undefined> {
     const originalName = sys.name;
     
     while (true) {
@@ -226,10 +326,13 @@ async function editSystem(sys: SystemConfig) {
             type: 'list',
             name: 'action',
             message: 'Edit Options',
-            choices
+            choices,
+            pageSize: MENU_PAGE_SIZE
         }]);
 
-        if (action === 'Cancel') return;
+        if (action === 'Cancel') {
+            return undefined;
+        }
         if (action === 'Save & Back') {
             if (sys.name !== originalName) {
                 Storage.deleteSystem(originalName);
@@ -237,10 +340,9 @@ async function editSystem(sys: SystemConfig) {
             Storage.saveSystem(sys);
             console.log(chalk.green("System saved."));
             if (sys.name !== originalName) {
-                 console.log(chalk.yellow("System name changed. Returning to main menu."));
-                 process.exit(0); 
+                 console.log(chalk.yellow("System name changed. Returning to system menu."));
             }
-            return;
+            return sys.name;
         }
         
         if (action === 'Edit Name') {
@@ -267,7 +369,8 @@ async function editSystem(sys: SystemConfig) {
                     type: 'list',
                     name: 'eqIdx',
                     message: 'Select Equation to Edit:',
-                    choices
+                    choices,
+                    pageSize: MENU_PAGE_SIZE
                 });
 
                 if (eqIdx === -1) break;
@@ -292,7 +395,8 @@ async function editSystem(sys: SystemConfig) {
                     type: 'list',
                     name: 'paramIdx',
                     message: 'Select Parameter to Edit:',
-                    choices
+                    choices,
+                    pageSize: MENU_PAGE_SIZE
                 });
 
                 if (paramIdx === -1) break;
@@ -311,7 +415,8 @@ async function editSystem(sys: SystemConfig) {
                 name: 'solver', 
                 message: 'Select Solver:', 
                 choices: ['rk4', 'tsit5'],
-                default: sys.solver
+                default: sys.solver,
+                pageSize: MENU_PAGE_SIZE
             });
             sys.solver = solver;
         }
@@ -342,7 +447,7 @@ async function objectsListMenu(sysName: string) {
             name: 'objName',
             message: 'Select Object to Manage',
             choices: choices,
-            pageSize: 10
+            pageSize: MENU_PAGE_SIZE
         });
 
         if (objName === 'BACK') return;
@@ -352,7 +457,8 @@ async function objectsListMenu(sysName: string) {
                 type: 'list',
                 name: 'objType',
                 message: 'Select Object Type to Create:',
-                choices: ['Orbit', 'Equilibrium', 'Back']
+                choices: ['Orbit', 'Equilibrium', 'Back'],
+                pageSize: MENU_PAGE_SIZE
             });
 
             if (objType === 'Back') continue;
@@ -386,28 +492,95 @@ async function createOrbit(sysName: string) {
         return;
     }
     
-    const ic = [];
-    for (const v of sysConfig.varNames) {
-        const { val } = await inquirer.prompt({ name: 'val', message: `Initial ${v}:`, default: '0' });
-        ic.push(parseFloat(val));
+    const initialStateInputs = sysConfig.varNames.map(() => '0');
+
+    if (initialStateInputs.length > 0) {
+        const initialEntries: ConfigEntry[] = sysConfig.varNames.map((varName, idx) => ({
+            id: `ic_${idx}`,
+            label: `Initial ${varName}`,
+            getDisplay: () => formatUnset(initialStateInputs[idx]),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: `Initial ${varName}:`,
+                    default: initialStateInputs[idx],
+                    validate: (input: string) => {
+                        if (input.trim().length === 0) {
+                            return true;
+                        }
+                        return Number.isFinite(parseFloat(input)) ? true : 'Please enter a number.';
+                    }
+                });
+                initialStateInputs[idx] = value;
+            }
+        }));
+
+        const initResult = await runConfigMenu('Initial Conditions', initialEntries);
+        if (initResult === 'back') {
+            return;
+        }
     }
+
+    const ic = initialStateInputs.map(val => parseFloatOrDefault(val, 0));
 
     const isMap = sysConfig.type === 'map';
-    const durationLabel = isMap ? 'Iterations (n):' : 'Duration (t):';
-    const defaultDuration = isMap ? '1000' : '100';
+    const durationLabel = isMap ? 'Iterations (n)' : 'Duration (t)';
+    const defaultDurationValue = isMap ? 1000 : 100;
+    const defaultDtValue = isMap ? 1 : 0.01;
+    let durationInput = defaultDurationValue.toString();
+    let dtInput = defaultDtValue.toString();
 
-    const simPrompts: any[] = [
-        { name: 't_end', message: durationLabel, default: defaultDuration }
+    const simEntries: ConfigEntry[] = [
+        {
+            id: 'duration',
+            label: durationLabel,
+            getDisplay: () => formatUnset(durationInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: `${durationLabel}:`,
+                    default: durationInput,
+                    validate: (input: string) => {
+                        if (input.trim().length === 0) {
+                            return true;
+                        }
+                        return Number.isFinite(parseFloat(input)) ? true : 'Please enter a number.';
+                    }
+                });
+                durationInput = value;
+            }
+        }
     ];
-    
+
     if (!isMap) {
-        simPrompts.splice(1, 0, { name: 'dt', message: 'Step size (dt):', default: '0.01' });
+        simEntries.push({
+            id: 'dt',
+            label: 'Step size (dt)',
+            getDisplay: () => formatUnset(dtInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Step size (dt):',
+                    default: dtInput,
+                    validate: (input: string) => {
+                        if (input.trim().length === 0) {
+                            return true;
+                        }
+                        return Number.isFinite(parseFloat(input)) ? true : 'Please enter a number.';
+                    }
+                });
+                dtInput = value;
+            }
+        });
     }
 
-    const sim = await inquirer.prompt(simPrompts);
+    const simResult = await runConfigMenu('Simulation Settings', simEntries);
+    if (simResult === 'back') {
+        return;
+    }
 
-    const t_end = parseFloat(sim.t_end);
-    const dt = isMap ? 1 : parseFloat(sim.dt);
+    const t_end = parseFloatOrDefault(durationInput, defaultDurationValue);
+    const dt = isMap ? defaultDtValue : parseFloatOrDefault(dtInput, defaultDtValue);
 
     console.log(chalk.cyan("Initializing WASM Engine..."));
     
@@ -520,7 +693,8 @@ async function manageOrbit(sysName: string, obj: OrbitObject) {
                 { name: 'Delete Object', value: 'Delete Object' },
                 new inquirer.Separator(),
                 { name: 'Back', value: 'Back' }
-            ]
+            ],
+            pageSize: MENU_PAGE_SIZE
         }]);
 
         if (action === 'Back') {
@@ -589,24 +763,66 @@ async function manageOrbit(sysName: string, obj: OrbitObject) {
                 bridge.set_t(lastT);
                 bridge.set_state(lastState);
 
-                const durationLabel = isMap ? 'Extend by how many iterations?' : 'Extend by how much time?';
-                const defaultDuration = isMap ? '1000' : '50';
+                const durationMessage = isMap
+                    ? 'Extend by how many iterations?'
+                    : 'Extend by how much time?';
+                const durationLabel = isMap ? 'Iterations to add' : 'Time to add';
+                const defaultDurationValue = isMap ? 1000 : 50;
+                const fallbackDt = obj.dt ?? 0.01;
+                let durationInput = defaultDurationValue.toString();
+                let dtInput = fallbackDt.toString();
 
-                const prompts: any[] = [
-                    { name: 'duration', message: durationLabel, default: defaultDuration }
+                const extendEntries: ConfigEntry[] = [
+                    {
+                        id: 'duration',
+                        label: durationLabel,
+                        getDisplay: () => formatUnset(durationInput),
+                        edit: async () => {
+                            const { value } = await inquirer.prompt({
+                                name: 'value',
+                                message: durationMessage,
+                                default: durationInput,
+                                validate: (input: string) => {
+                                    if (input.trim().length === 0) {
+                                        return true;
+                                    }
+                                    return Number.isFinite(parseFloat(input)) ? true : 'Please enter a number.';
+                                }
+                            });
+                            durationInput = value;
+                        }
+                    }
                 ];
 
                 if (!isMap) {
-                    prompts.push({
-                        name: 'dt',
-                        message: 'Step size (dt):',
-                        default: obj.dt ? obj.dt.toString() : '0.01'
+                    extendEntries.push({
+                        id: 'dt',
+                        label: 'Step size (dt)',
+                        getDisplay: () => formatUnset(dtInput),
+                        edit: async () => {
+                            const { value } = await inquirer.prompt({
+                                name: 'value',
+                                message: 'Step size (dt):',
+                                default: dtInput,
+                                validate: (input: string) => {
+                                    if (input.trim().length === 0) {
+                                        return true;
+                                    }
+                                    return Number.isFinite(parseFloat(input)) ? true : 'Please enter a number.';
+                                }
+                            });
+                            dtInput = value;
+                        }
                     });
                 }
 
-                const ans = await inquirer.prompt(prompts);
-                const t_add = parseFloat(ans.duration);
-                const dt = isMap ? 1 : (parseFloat(ans.dt) || obj.dt || 0.01);
+                const extendResult = await runConfigMenu('Extend Orbit Settings', extendEntries);
+                if (extendResult === 'back') {
+                    continue;
+                }
+
+                const t_add = parseFloatOrDefault(durationInput, defaultDurationValue);
+                const dt = isMap ? 1 : parseFloatOrDefault(dtInput, fallbackDt);
                 obj.dt = dt;
 
                 const steps = Math.ceil(t_add / dt);
@@ -650,7 +866,8 @@ async function oseledetsSolverMenu(sysName: string, obj: OrbitObject) {
                 },
                 new inquirer.Separator(),
                 { name: 'Back', value: 'Back' }
-            ]
+            ],
+            pageSize: MENU_PAGE_SIZE
         }]);
 
         if (task === 'Back') {
@@ -671,22 +888,62 @@ async function runLyapunovExponents(sysName: string, obj: OrbitObject) {
         return;
     }
 
-    const { transientInput } = await inquirer.prompt([{
-        name: 'transientInput',
-        message: 'Transient time to discard:',
-        default: '0',
-        validate: (value: string) => {
-            const val = parseFloat(value);
-            if (Number.isNaN(val)) return "Please enter a number.";
-            if (val < 0 || val > duration) {
-                return `Value must be between 0 and ${duration.toFixed(6)}.`;
+    let transientInput = '0';
+    let qrInput = '1';
+
+    const lyapunovEntries: ConfigEntry[] = [
+        {
+            id: 'transient',
+            label: 'Transient time to discard',
+            getDisplay: () => formatUnset(transientInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Transient time to discard:',
+                    default: transientInput,
+                    validate: (input: string) => {
+                        const val = parseFloat(input);
+                        if (!Number.isFinite(val)) {
+                            return "Please enter a number.";
+                        }
+                        if (val < 0 || val > duration) {
+                            return `Value must be between 0 and ${duration.toFixed(6)}.`;
+                        }
+                        return true;
+                    }
+                });
+                transientInput = value;
             }
-            return true;
+        },
+        {
+            id: 'qr',
+            label: 'Steps between QR decompositions',
+            getDisplay: () => formatUnset(qrInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Steps between QR decompositions:',
+                    default: qrInput,
+                    validate: (input: string) => {
+                        const n = parseInt(input, 10);
+                        if (!Number.isFinite(n) || n <= 0) {
+                            return "Enter a positive integer.";
+                        }
+                        return true;
+                    }
+                });
+                qrInput = value;
+            }
         }
-    }]);
+    ];
+
+    const lyapunovResult = await runConfigMenu('Lyapunov Parameters', lyapunovEntries);
+    if (lyapunovResult === 'back') {
+        return;
+    }
 
     const transient = Math.min(
-        Math.max(parseFloat(transientInput) || 0, 0),
+        Math.max(parseFloatOrDefault(transientInput, 0), 0),
         duration
     );
     const targetTime = obj.t_start + transient;
@@ -705,20 +962,7 @@ async function runLyapunovExponents(sysName: string, obj: OrbitObject) {
     }
 
     const steps = obj.data.length - startIndex - 1;
-
-    const { qrInput } = await inquirer.prompt([{
-        name: 'qrInput',
-        message: 'Steps between QR decompositions:',
-        default: '1',
-        validate: (value: string) => {
-            const n = parseInt(value, 10);
-            if (!Number.isFinite(n) || n <= 0) {
-                return "Enter a positive integer.";
-            }
-            return true;
-        }
-    }]);
-    const qrStride = Math.max(parseInt(qrInput, 10) || 1, 1);
+    const qrStride = Math.max(parseIntOrDefault(qrInput, 1), 1);
 
     const startState = obj.data[startIndex].slice(1);
     const startTime = obj.data[startIndex][0];
@@ -825,7 +1069,8 @@ async function manageEquilibrium(sysName: string, obj: EquilibriumObject) {
                 { name: 'Delete Object', value: 'Delete Object' },
                 new inquirer.Separator(),
                 { name: 'Back', value: 'Back' }
-            ]
+            ],
+            pageSize: MENU_PAGE_SIZE
         }]);
 
         if (action === 'Back') {
@@ -904,42 +1149,97 @@ async function executeEquilibriumSolver(
             ? defaultGuessSource
             : sysConfig.varNames.map((_, idx) => defaultGuessSource[idx] ?? 0);
 
-    const prompts: any[] = sysConfig.varNames.map((v, idx) => ({
-        name: `var_${idx}`,
-        message: `Initial ${v}:`,
-        default: baseGuess[idx]?.toString() ?? '0'
-    }));
+    const initialGuessInputs = sysConfig.varNames.map((_, idx) =>
+        baseGuess[idx]?.toString() ?? '0'
+    );
 
     const defaultMaxSteps = obj.lastSolverParams?.maxSteps ?? 25;
     const defaultDamping = obj.lastSolverParams?.dampingFactor ?? 1;
+    let maxStepsInput = defaultMaxSteps.toString();
+    let dampingInput = defaultDamping.toString();
 
-    prompts.push({
-        name: 'maxSteps',
-        message: 'Maximum Newton steps:',
-        default: defaultMaxSteps.toString()
-    });
+    const solverEntries: ConfigEntry[] = [
+        ...sysConfig.varNames.map((varName, idx) => ({
+            id: `var_${idx}`,
+            label: `Initial ${varName}`,
+            getDisplay: () => formatUnset(initialGuessInputs[idx]),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: `Initial ${varName}:`,
+                    default: initialGuessInputs[idx],
+                    validate: (input: string) => {
+                        if (input.trim().length === 0) {
+                            return true;
+                        }
+                        return Number.isFinite(parseFloat(input)) ? true : 'Please enter a number.';
+                    }
+                });
+                initialGuessInputs[idx] = value;
+            }
+        })),
+        {
+            id: 'maxSteps',
+            label: 'Maximum Newton steps',
+            getDisplay: () => formatUnset(maxStepsInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Maximum Newton steps:',
+                    default: maxStepsInput,
+                    validate: (input: string) => {
+                        const parsed = parseInt(input, 10);
+                        if (!Number.isFinite(parsed) || parsed <= 0) {
+                            return 'Enter a positive integer.';
+                        }
+                        return true;
+                    }
+                });
+                maxStepsInput = value;
+            }
+        },
+        {
+            id: 'damping',
+            label: 'Damping factor',
+            getDisplay: () => formatUnset(dampingInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Damping factor:',
+                    default: dampingInput,
+                    validate: (input: string) => {
+                        if (input.trim().length === 0) {
+                            return true;
+                        }
+                        return Number.isFinite(parseFloat(input)) && parseFloat(input) > 0
+                            ? true
+                            : 'Enter a positive number.';
+                    }
+                });
+                dampingInput = value;
+            }
+        }
+    ];
 
-    prompts.push({
-        name: 'damping',
-        message: 'Damping factor:',
-        default: defaultDamping.toString()
-    });
-
-    const answers = await inquirer.prompt(prompts);
+    const solverMenuResult = await runConfigMenu('Equilibrium Solver Parameters', solverEntries);
+    if (solverMenuResult === 'back') {
+        return false;
+    }
 
     const initialGuess = sysConfig.varNames.map((_, idx) => {
-        const value = parseFloat(answers[`var_${idx}`]);
-        return Number.isFinite(value) ? value : baseGuess[idx] ?? 0;
+        return parseFloatOrDefault(
+            initialGuessInputs[idx],
+            baseGuess[idx] ?? 0
+        );
     });
 
-    const maxStepsRaw = parseInt(answers.maxSteps, 10);
-    const dampingRaw = parseFloat(answers.damping);
+    const maxSteps = Math.max(parseIntOrDefault(maxStepsInput, defaultMaxSteps), 1);
+    const damping = parseFloatOrDefault(dampingInput, defaultDamping);
 
     const solverParams: EquilibriumSolverParams = {
         initialGuess: [...initialGuess],
-        maxSteps: Number.isFinite(maxStepsRaw) && maxStepsRaw > 0 ? maxStepsRaw : defaultMaxSteps,
-        dampingFactor:
-            Number.isFinite(dampingRaw) && dampingRaw > 0 ? dampingRaw : defaultDamping
+        maxSteps,
+        dampingFactor: damping > 0 ? damping : defaultDamping
     };
 
     obj.lastSolverParams = {
