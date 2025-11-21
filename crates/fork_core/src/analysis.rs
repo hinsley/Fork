@@ -6,6 +6,7 @@ use crate::{
 use anyhow::{anyhow, bail, Result};
 use nalgebra::linalg::QR;
 use nalgebra::DMatrix;
+use serde::Serialize;
 
 #[derive(Debug, Clone, Copy)]
 pub enum LyapunovStepper {
@@ -163,3 +164,255 @@ pub fn kaplan_yorke(exponents: &[f64]) -> f64 {
     k as f64
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct CovariantLyapunovResult {
+    pub dimension: usize,
+    pub checkpoints: usize,
+    pub times: Vec<f64>,
+    pub vectors: Vec<f64>,
+}
+
+pub fn covariant_lyapunov_vectors<S>(
+    system: S,
+    solver: LyapunovStepper,
+    initial_state: &[f64],
+    initial_time: f64,
+    dt: f64,
+    qr_stride: usize,
+    window_steps: usize,
+    forward_transient: usize,
+    backward_transient: usize,
+) -> Result<CovariantLyapunovResult>
+where
+    S: DynamicalSystem<f64> + DynamicalSystem<Dual>,
+{
+    if initial_state.is_empty() {
+        bail!("Initial state must have positive dimension.");
+    }
+    if dt <= 0.0 {
+        bail!("Step size dt must be positive.");
+    }
+    if qr_stride == 0 {
+        bail!("qr_stride must be at least 1.");
+    }
+    if window_steps == 0 {
+        bail!("Window size must be at least one step.");
+    }
+
+    let dim = initial_state.len();
+    let aug_dim = dim + dim * dim;
+    let mut augmented_state = vec![0.0; aug_dim];
+    augmented_state[..dim].copy_from_slice(initial_state);
+    for i in 0..dim {
+        for j in 0..dim {
+            augmented_state[dim + i * dim + j] = if i == j { 1.0 } else { 0.0 };
+        }
+    }
+
+    let tangent_system = TangentSystem::new(system, dim);
+    let mut stepper = solver.build(aug_dim);
+    let mut t = initial_time;
+    let mut steps_done = 0usize;
+    let mut since_last_qr = 0usize;
+    let total_steps = forward_transient
+        .checked_add(window_steps)
+        .and_then(|v| v.checked_add(backward_transient))
+        .ok_or_else(|| anyhow!("Requested durations overflow usize."))?;
+    if total_steps == 0 {
+        bail!("Total integration steps must be positive.");
+    }
+
+    let mut q_history: Vec<f64> = Vec::new();
+    let mut r_history: Vec<f64> = Vec::new();
+    let mut time_history: Vec<f64> = Vec::new();
+    let mut window_accum = 0usize;
+    let mut backward_accum = 0usize;
+
+    while steps_done < total_steps {
+        stepper.step(&tangent_system, &mut t, &mut augmented_state, dt);
+        steps_done += 1;
+        since_last_qr += 1;
+
+        if since_last_qr == qr_stride || steps_done == total_steps {
+            let block_steps = since_last_qr;
+            since_last_qr = 0;
+
+            let phi_slice = &mut augmented_state[dim..];
+            let (q_matrix, r_matrix) = thin_qr_positive(phi_slice, dim)?;
+            overwrite_slice_with_matrix(phi_slice, &q_matrix);
+
+            if steps_done <= forward_transient {
+                continue;
+            }
+
+            let mut stored = false;
+            if window_accum < window_steps {
+                append_matrix_row_major(&mut q_history, &q_matrix);
+                append_matrix_row_major(&mut r_history, &r_matrix);
+                time_history.push(t);
+                window_accum = window_accum.saturating_add(block_steps).min(window_steps);
+                stored = true;
+            } else if backward_accum < backward_transient {
+                append_matrix_row_major(&mut r_history, &r_matrix);
+                backward_accum = backward_accum
+                    .saturating_add(block_steps)
+                    .min(backward_transient);
+                stored = true;
+            }
+
+            if !stored && window_accum < window_steps {
+                return Err(anyhow!("Failed to store Gram-Schmidt data for the requested window. Consider reducing qr_stride."));
+            }
+
+            if window_accum == window_steps && backward_accum == backward_transient {
+                // All required data gathered; remaining integration (if any) is redundant.
+                break;
+            }
+        }
+    }
+
+    let dim_sq = dim * dim;
+    if q_history.is_empty() {
+        bail!("No CLV data stored. Ensure window duration exceeds qr_stride.");
+    }
+    if q_history.len() % dim_sq != 0 || r_history.len() % dim_sq != 0 {
+        bail!("Internal storage size mismatch while assembling CLVs.");
+    }
+
+    let window_count = q_history.len() / dim_sq;
+    let total_r_count = r_history.len() / dim_sq;
+    if total_r_count < window_count {
+        bail!("Insufficient R-history for backward pass.");
+    }
+
+    let mut c_matrix = unit_upper_triangular(dim);
+    for idx in (window_count..total_r_count).rev() {
+        let r_slice = &r_history[idx * dim_sq..(idx + 1) * dim_sq];
+        c_matrix = solve_upper(r_slice, &c_matrix, dim)?;
+        normalize_columns(&mut c_matrix, dim)?;
+    }
+
+    let mut clv_vectors = vec![0.0; q_history.len()];
+    let mut c_current = c_matrix;
+
+    for idx in (0..window_count).rev() {
+        let q_slice = &q_history[idx * dim_sq..(idx + 1) * dim_sq];
+        let r_slice = &r_history[idx * dim_sq..(idx + 1) * dim_sq];
+        let dest = &mut clv_vectors[idx * dim_sq..(idx + 1) * dim_sq];
+        matmul_row_major(q_slice, &c_current, dest, dim);
+        let next_c = solve_upper(r_slice, &c_current, dim)?;
+        c_current = next_c;
+        normalize_columns(&mut c_current, dim)?;
+    }
+
+    Ok(CovariantLyapunovResult {
+        dimension: dim,
+        checkpoints: window_count,
+        times: time_history,
+        vectors: clv_vectors,
+    })
+}
+
+fn thin_qr_positive(slice: &[f64], dim: usize) -> Result<(DMatrix<f64>, DMatrix<f64>)> {
+    if slice.len() != dim * dim {
+        bail!("Tangent matrix slice has incorrect size.");
+    }
+    let matrix = DMatrix::from_row_slice(dim, dim, slice);
+    let qr = QR::new(matrix);
+    let (mut q, mut r) = qr.unpack();
+    for i in 0..dim {
+        let diag = r[(i, i)];
+        if diag.abs() <= f64::EPSILON {
+            return Err(anyhow!(
+                "Encountered near-singular R matrix during orthonormalization."
+            ));
+        }
+        if diag < 0.0 {
+            for row in 0..dim {
+                q[(row, i)] = -q[(row, i)];
+            }
+            for col in i..dim {
+                r[(i, col)] = -r[(i, col)];
+            }
+        }
+    }
+    Ok((q, r))
+}
+
+fn overwrite_slice_with_matrix(slice: &mut [f64], matrix: &DMatrix<f64>) {
+    let dim = matrix.nrows();
+    for i in 0..dim {
+        for j in 0..dim {
+            slice[i * dim + j] = matrix[(i, j)];
+        }
+    }
+}
+
+fn append_matrix_row_major(target: &mut Vec<f64>, matrix: &DMatrix<f64>) {
+    let dim = matrix.nrows();
+    for i in 0..dim {
+        for j in 0..dim {
+            target.push(matrix[(i, j)]);
+        }
+    }
+}
+
+fn solve_upper(r: &[f64], rhs: &[f64], dim: usize) -> Result<Vec<f64>> {
+    let mut result = vec![0.0; dim * dim];
+    for col in 0..dim {
+        for row in (0..dim).rev() {
+            let mut value = rhs[row * dim + col];
+            for k in row + 1..dim {
+                value -= r[row * dim + k] * result[k * dim + col];
+            }
+            let diag = r[row * dim + row];
+            if diag.abs() <= f64::EPSILON {
+                return Err(anyhow!(
+                    "Encountered near-singular R matrix during backward substitution."
+                ));
+            }
+            result[row * dim + col] = value / diag;
+        }
+    }
+    Ok(result)
+}
+
+fn normalize_columns(matrix: &mut [f64], dim: usize) -> Result<()> {
+    for col in 0..dim {
+        let mut norm = 0.0;
+        for row in 0..dim {
+            let value = matrix[row * dim + col];
+            norm += value * value;
+        }
+        norm = norm.sqrt();
+        if norm <= f64::EPSILON {
+            return Err(anyhow!("Encountered degenerate CLV column during normalization."));
+        }
+        for row in 0..dim {
+            matrix[row * dim + col] /= norm;
+        }
+    }
+    Ok(())
+}
+
+fn matmul_row_major(a: &[f64], b: &[f64], dest: &mut [f64], dim: usize) {
+    for i in 0..dim {
+        for j in 0..dim {
+            let mut accum = 0.0;
+            for k in 0..dim {
+                accum += a[i * dim + k] * b[k * dim + j];
+            }
+            dest[i * dim + j] = accum;
+        }
+    }
+}
+
+fn unit_upper_triangular(dim: usize) -> Vec<f64> {
+    let mut matrix = vec![0.0; dim * dim];
+    for i in 0..dim {
+        for j in i..dim {
+            matrix[i * dim + j] = if i == j { 1.0 } else { 0.0 };
+        }
+    }
+    matrix
+}
