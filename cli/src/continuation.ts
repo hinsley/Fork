@@ -8,6 +8,7 @@ import {
     ContinuationPoint,
     ContinuationEigenvalue,
     EquilibriumObject,
+    LimitCycleMeta,
     SystemConfig
 } from './types';
 import {
@@ -27,6 +28,23 @@ function isValidName(name: string): boolean | string {
     return true;
 }
 
+type LimitCycleBranchConfig = {
+    branchName: string;
+    amplitude: number;
+    meshPoints: number;
+    degree: number;
+    directionForward: boolean;
+    continuationSettings: {
+        step_size: number;
+        min_step_size: number;
+        max_step_size: number;
+        max_steps: number;
+        corrector_steps: number;
+        corrector_tolerance: number;
+        step_tolerance: number;
+    };
+};
+
 export async function continuationMenu(sysName: string) {
     while (true) {
         const objects = Storage.listObjects(sysName);
@@ -34,20 +52,26 @@ export async function continuationMenu(sysName: string) {
             .map(name => Storage.loadObject(sysName, name))
             .filter((obj): obj is ContinuationObject => obj.type === 'continuation');
 
-        const choices = [];
-        choices.push({ name: 'Create New Branch', value: 'CREATE' });
+        const choices: any[] = [
+            { name: 'Create Equilibrium Branch', value: 'CREATE_EQ' },
+            new inquirer.Separator()
+        ];
 
         if (branches.length > 0) {
-            choices.push(new inquirer.Separator());
             branches.forEach(branch => {
-                choices.push({ 
-                    name: `${branch.name} (Param: ${branch.parameterName}, Pts: ${branch.data.points.length})`, 
-                    value: branch.name 
+                const kind = branch.branchKind ?? 'equilibrium';
+                const tag =
+                    kind === 'limitCycle'
+                        ? chalk.magenta('[LC]')
+                        : chalk.cyan('[EQ]');
+                choices.push({
+                    name: `${tag} ${branch.name} (Param: ${branch.parameterName}, Pts: ${branch.data.points.length})`,
+                    value: branch.name
                 });
             });
+            choices.push(new inquirer.Separator());
         }
 
-        choices.push(new inquirer.Separator());
         choices.push({ name: 'Back', value: 'BACK' });
 
         const { selection } = await inquirer.prompt({
@@ -60,8 +84,8 @@ export async function continuationMenu(sysName: string) {
 
         if (selection === 'BACK') return;
 
-        if (selection === 'CREATE') {
-            await createBranch(sysName);
+        if (selection === 'CREATE_EQ') {
+            await createEquilibriumBranch(sysName);
         } else {
             const branch = Storage.loadObject(sysName, selection) as ContinuationObject;
             await manageBranch(sysName, branch);
@@ -69,9 +93,8 @@ export async function continuationMenu(sysName: string) {
     }
 }
 
-async function createBranch(sysName: string) {
+async function createEquilibriumBranch(sysName: string) {
     const sysConfig = Storage.loadSystem(sysName);
-    
     const objects = Storage.listObjects(sysName)
         .map(name => Storage.loadObject(sysName, name))
         .filter((obj): obj is EquilibriumObject => obj.type === 'equilibrium' && !!obj.solution);
@@ -387,6 +410,379 @@ async function createBranch(sysName: string) {
     }
 }
 
+async function startLimitCycleBranch(
+    sysName: string,
+    sourceBranch: ContinuationObject,
+    pointIndex: number
+) {
+    const sysConfig = Storage.loadSystem(sysName);
+    const point = sourceBranch.data.points[pointIndex];
+    if (!point || point.stability !== 'Hopf') {
+        console.log(chalk.red('Selected point is not a Hopf bifurcation.'));
+        return;
+    }
+
+    const config = await configureLimitCycleBranch(sysName, sourceBranch, pointIndex);
+    if (!config) {
+        return;
+    }
+
+    const methodRequest = {
+        meshPoints: config.meshPoints,
+        degree: config.degree!,
+    };
+
+    console.log(chalk.cyan('Computing limit cycle branch...'));
+
+    try {
+        const bridge = new WasmBridge(sysConfig);
+        const response = bridge.compute_limit_cycle_from_hopf(
+            point.state,
+            point.param_value,
+            sourceBranch.parameterName,
+            methodRequest,
+            config.amplitude,
+            config.continuationSettings,
+            config.directionForward
+        );
+
+        const normalized = normalizeBranchEigenvalues(response.branch);
+        const limitCycleMeta: LimitCycleMeta = {
+            method: 'collocation',
+            meshPoints: response.meta.meshPoints ?? config.meshPoints,
+            degree: response.meta.degree ?? config.degree!,
+            phaseAnchor: response.meta.phaseAnchor,
+            phaseDirection: response.meta.phaseDirection
+        };
+
+        const newBranch: ContinuationObject = {
+            type: 'continuation',
+            name: config.branchName,
+            systemName: sysName,
+            parameterName: sourceBranch.parameterName,
+            startObject: `${sourceBranch.name}#${pointIndex}`,
+            data: normalized,
+            settings: config.continuationSettings,
+            timestamp: new Date().toISOString(),
+            branchKind: 'limitCycle',
+            limitCycleMeta
+        };
+
+        Storage.saveObject(sysName, newBranch);
+        console.log(
+            chalk.green(
+                `Limit cycle continuation successful! Generated ${newBranch.data.points.length} points.`
+            )
+        );
+        await inspectBranch(sysName, newBranch);
+    } catch (e) {
+        console.error(chalk.red('Limit cycle continuation failed:'), e);
+    }
+}
+
+async function configureLimitCycleBranch(
+    sysName: string,
+    branch: ContinuationObject,
+    pointIndex: number
+): Promise<LimitCycleBranchConfig | null> {
+    let branchName = `${branch.name}_LC_${pointIndex}`;
+    let amplitudeInput = '0.05';
+    let meshPointsInput = '60';
+    let degreeInput = '5';
+    let directionForward = true;
+
+    let stepSizeInput = '0.01';
+    let minStepInput = '1e-5';
+    let maxStepInput = '0.1';
+    let maxPointsInput = '200';
+    let correctorStepsInput = '4';
+    let correctorToleranceInput = '1e-6';
+    let stepToleranceInput = '1e-6';
+
+    const entries: ConfigEntry[] = [
+        {
+            id: 'branchName',
+            label: 'Branch name',
+            section: 'General',
+            getDisplay: () => formatUnset(branchName),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Name for this Limit Cycle Branch:',
+                    default: branchName,
+                    validate: (val: string) => {
+                        const valid = isValidName(val);
+                        if (valid !== true) return valid;
+                        return true;
+                    }
+                });
+                branchName = value;
+            }
+        },
+        {
+            id: 'amplitude',
+            label: 'Initial amplitude',
+            section: 'General',
+            getDisplay: () => formatUnset(amplitudeInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Initial amplitude perturbation:',
+                    default: amplitudeInput,
+                    validate: (val: string) => {
+                        const parsed = parseFloat(val);
+                        if (!Number.isFinite(parsed) || parsed <= 0) {
+                            return 'Enter a positive number.';
+                        }
+                        return true;
+                    }
+                });
+                amplitudeInput = value;
+            }
+        },
+        {
+            id: 'meshPoints',
+            label: 'Mesh points',
+            section: 'Method',
+            getDisplay: () => formatUnset(meshPointsInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Mesh points (sampling of orbit):',
+                    default: meshPointsInput,
+                    validate: (val: string) => {
+                        const parsed = parseInt(val, 10);
+                        if (!Number.isFinite(parsed) || parsed < 3) {
+                            return 'Enter an integer ≥ 3.';
+                        }
+                        return true;
+                    }
+                });
+                meshPointsInput = value;
+            }
+        },
+        {
+            id: 'degree',
+            label: 'Collocation degree',
+            section: 'Method',
+            getDisplay: () => formatUnset(degreeInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Collocation degree:',
+                    default: degreeInput,
+                    validate: (val: string) => {
+                        const parsed = parseInt(val, 10);
+                        if (!Number.isFinite(parsed) || parsed < 2) {
+                            return 'Enter an integer ≥ 2.';
+                        }
+                        return true;
+                    }
+                });
+                degreeInput = value;
+            }
+        },
+        {
+            id: 'direction',
+            label: 'Direction',
+            section: 'Predictor Settings',
+            getDisplay: () =>
+                directionForward ? 'Forward (Increasing Param)' : 'Backward (Decreasing Param)',
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    type: 'list',
+                    name: 'value',
+                    message: 'Direction:',
+                    choices: [
+                        { name: 'Forward (Increasing Param)', value: true },
+                        { name: 'Backward (Decreasing Param)', value: false }
+                    ],
+                    default: directionForward,
+                    pageSize: MENU_PAGE_SIZE
+                });
+                directionForward = value;
+            }
+        },
+        {
+            id: 'stepSize',
+            label: 'Initial step size',
+            section: 'Predictor Settings',
+            getDisplay: () => formatUnset(stepSizeInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Initial step size:',
+                    default: stepSizeInput
+                });
+                stepSizeInput = value;
+            }
+        },
+        {
+            id: 'maxSteps',
+            label: 'Max points',
+            section: 'Predictor Settings',
+            getDisplay: () => formatUnset(maxPointsInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Max points:',
+                    default: maxPointsInput
+                });
+                maxPointsInput = value;
+            }
+        },
+        {
+            id: 'minStep',
+            label: 'Min step size',
+            section: 'Predictor Settings',
+            getDisplay: () => formatUnset(minStepInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Min step size:',
+                    default: minStepInput
+                });
+                minStepInput = value;
+            }
+        },
+        {
+            id: 'maxStep',
+            label: 'Max step size',
+            section: 'Predictor Settings',
+            getDisplay: () => formatUnset(maxStepInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Max step size:',
+                    default: maxStepInput
+                });
+                maxStepInput = value;
+            }
+        },
+        {
+            id: 'correctorSteps',
+            label: 'Corrector steps',
+            section: 'Corrector Settings',
+            getDisplay: () => formatUnset(correctorStepsInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Corrector steps:',
+                    default: correctorStepsInput,
+                    validate: (input: string) => {
+                        const parsed = parseInt(input, 10);
+                        if (!Number.isFinite(parsed) || parsed <= 0) {
+                            return 'Enter a positive integer.';
+                        }
+                        return true;
+                    }
+                });
+                correctorStepsInput = value;
+            }
+        },
+        {
+            id: 'correctorTolerance',
+            label: 'Corrector tolerance',
+            section: 'Corrector Settings',
+            getDisplay: () => formatUnset(correctorToleranceInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Corrector tolerance:',
+                    default: correctorToleranceInput,
+                    validate: (input: string) => {
+                        const parsed = parseFloat(input);
+                        if (!Number.isFinite(parsed) || parsed <= 0) {
+                            return 'Enter a positive number.';
+                        }
+                        return true;
+                    }
+                });
+                correctorToleranceInput = value;
+            }
+        },
+        {
+            id: 'stepTolerance',
+            label: 'Step tolerance',
+            section: 'Corrector Settings',
+            getDisplay: () => formatUnset(stepToleranceInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Step tolerance:',
+                    default: stepToleranceInput,
+                    validate: (input: string) => {
+                        const parsed = parseFloat(input);
+                        if (!Number.isFinite(parsed) || parsed <= 0) {
+                            return 'Enter a positive number.';
+                        }
+                        return true;
+                    }
+                });
+                stepToleranceInput = value;
+            }
+        }
+    ];
+
+    while (true) {
+        const result = await runConfigMenu('Configure Limit Cycle Branch', entries);
+        if (result === 'back') {
+            return null;
+        }
+
+        if (!branchName) {
+            console.error(chalk.red('Please provide a branch name.'));
+            continue;
+        }
+
+        const existing = new Set(Storage.listObjects(sysName));
+        if (existing.has(branchName)) {
+            console.error(chalk.red(`Object "${branchName}" already exists.`));
+            continue;
+        }
+
+        const amplitude = parseFloat(amplitudeInput);
+        const meshPoints = parseInt(meshPointsInput, 10);
+        const degree = parseInt(degreeInput, 10);
+
+        if (!Number.isFinite(amplitude) || amplitude <= 0) {
+            console.error(chalk.red('Amplitude must be positive.'));
+            continue;
+        }
+        if (!Number.isFinite(meshPoints) || meshPoints < 3) {
+            console.error(chalk.red('Mesh points must be an integer ≥ 3.'));
+            continue;
+        }
+        if (!Number.isFinite(degree) || degree < 2) {
+            console.error(chalk.red('Collocation degree must be an integer ≥ 2.'));
+            continue;
+        }
+
+        return {
+            branchName,
+            amplitude,
+            meshPoints,
+            degree,
+            directionForward,
+            continuationSettings: {
+                step_size: Math.max(parseFloatOrDefault(stepSizeInput, 0.01), 1e-9),
+                min_step_size: Math.max(parseFloatOrDefault(minStepInput, 1e-5), 1e-12),
+                max_step_size: Math.max(parseFloatOrDefault(maxStepInput, 0.1), 1e-9),
+                max_steps: Math.max(parseIntOrDefault(maxPointsInput, 200), 1),
+                corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 4), 1),
+                corrector_tolerance: Math.max(
+                    parseFloatOrDefault(correctorToleranceInput, 1e-6),
+                    Number.EPSILON
+                ),
+                step_tolerance: Math.max(
+                    parseFloatOrDefault(stepToleranceInput, 1e-6),
+                    Number.EPSILON
+                )
+            }
+        };
+    }
+}
+
 async function manageBranch(sysName: string, branch: ContinuationObject) {
     while (true) {
         console.log(chalk.blue(`Branch: ${branch.name}`));
@@ -428,6 +824,15 @@ async function manageBranch(sysName: string, branch: ContinuationObject) {
 }
 
 async function extendBranch(sysName: string, branch: ContinuationObject) {
+    const kind = branch.branchKind ?? 'equilibrium';
+    if (kind === 'limitCycle') {
+        await extendLimitCycleBranch(sysName, branch);
+    } else {
+        await extendEquilibriumBranch(sysName, branch);
+    }
+}
+
+async function extendEquilibriumBranch(sysName: string, branch: ContinuationObject) {
     const sysConfig = Storage.loadSystem(sysName);
     
     const { direction } = await inquirer.prompt({
@@ -504,12 +909,79 @@ async function extendBranch(sysName: string, branch: ContinuationObject) {
     }
 }
 
+async function extendLimitCycleBranch(sysName: string, branch: ContinuationObject) {
+    const sysConfig = Storage.loadSystem(sysName);
+    const meta = branch.limitCycleMeta;
+    if (!meta) {
+        console.log(chalk.red("This branch is missing limit cycle metadata and cannot be extended."));
+        return;
+    }
+
+    if (!meta.phaseAnchor || !meta.phaseDirection) {
+        console.log(chalk.red("Incomplete limit cycle metadata; cannot extend branch."));
+        return;
+    }
+
+    const defaults = branch.settings || {};
+    const answers = await inquirer.prompt([
+        { name: 'max_steps', message: 'Max Points to Add (forward only):', default: '50' },
+        { name: 'step_size', message: 'Step Size:', default: defaults.step_size?.toString() || '0.01' }
+    ]);
+
+    const continuationSettings = {
+        step_size: parseFloat(answers.step_size),
+        min_step_size: defaults.min_step_size || 1e-5,
+        max_step_size: defaults.max_step_size || 0.1,
+        max_steps: parseInt(answers.max_steps, 10),
+        corrector_steps: defaults.corrector_steps || 4,
+        corrector_tolerance: defaults.corrector_tolerance || 1e-6,
+        step_tolerance: defaults.step_tolerance || 1e-6
+    };
+
+    console.log(chalk.cyan("Extending Limit Cycle Branch (forward only)..."));
+
+    try {
+        const bridge = new WasmBridge(sysConfig);
+        if (!branch.data.indices || branch.data.indices.length !== branch.data.points.length) {
+            branch.data.indices = branch.data.points.map((_, i) => i);
+        }
+
+        const response = bridge.extend_limit_cycle_branch(
+            serializeBranchDataForWasm(branch.data),
+            branch.parameterName,
+            meta,
+            continuationSettings,
+            true
+        );
+
+        branch.data = normalizeBranchEigenvalues(response.branch);
+        branch.limitCycleMeta = response.meta;
+        branch.settings = continuationSettings;
+
+        Storage.saveObject(sysName, branch);
+        console.log(chalk.green(`Extension successful! Total points: ${branch.data.points.length}`));
+        await inspectBranch(sysName, branch);
+    } catch (e) {
+        console.error(chalk.red("Limit cycle extension failed:"), e);
+    }
+}
+
 type BranchDetailResult = 'SUMMARY' | 'EXIT';
 const DETAIL_PAGE_SIZE = 10;
 
-async function inspectBranch(_sysName: string, branch: ContinuationObject) {
-    await hydrateEigenvalues(_sysName, branch);
+async function inspectBranch(sysName: string, branch: ContinuationObject) {
+    await hydrateEigenvalues(sysName, branch);
     const points = branch.data.points;
+    const kind = branch.branchKind ?? 'equilibrium';
+    console.log(chalk.blue(`Branch type: ${kind === 'limitCycle' ? 'Limit Cycle' : 'Equilibrium'}`));
+    if (kind === 'limitCycle' && branch.limitCycleMeta) {
+        const meta = branch.limitCycleMeta;
+        console.log(
+            chalk.blue(
+                `Method: ${meta.method}, mesh=${meta.meshPoints ?? 'n/a'}, degree=${meta.degree ?? 'n/a'}`
+            )
+        );
+    }
     
     if (points.length === 0) {
         console.log(chalk.yellow("Continuation Data:"));
@@ -518,7 +990,7 @@ async function inspectBranch(_sysName: string, branch: ContinuationObject) {
     }
 
     const indices = ensureBranchIndices(branch);
-    await browseBranchSummary(branch, indices);
+    await browseBranchSummary(sysName, branch, indices);
 }
 
 function ensureBranchIndices(branch: ContinuationObject): number[] {
@@ -561,11 +1033,21 @@ function buildSortedArrayOrder(indices: number[]): number[] {
         .map(entry => entry.arrayIdx);
 }
 
-async function browseBranchSummary(branch: ContinuationObject, indices: number[]) {
+async function browseBranchSummary(
+    sysName: string,
+    branch: ContinuationObject,
+    indices: number[]
+) {
     const sortedOrder = buildSortedArrayOrder(indices);
     while (true) {
         const summaryChoices = buildSummaryChoices(branch, indices, sortedOrder);
-        const choices: any[] = [...summaryChoices];
+        const choices: any[] = [
+            {
+                name: chalk.green('Browse all points (pagination)'),
+                value: 'BROWSE_ALL'
+            },
+            ...summaryChoices
+        ];
         choices.push(new inquirer.Separator());
         choices.push({ name: chalk.red('Exit Branch Viewer'), value: 'EXIT' });
 
@@ -581,9 +1063,29 @@ async function browseBranchSummary(branch: ContinuationObject, indices: number[]
             return;
         }
 
+        if (selection === 'BROWSE_ALL') {
+            const detailResult = await browseBranchPoints(
+                sysName,
+                branch,
+                indices,
+                sortedOrder[0],
+                sortedOrder
+            );
+            if (detailResult === 'EXIT') {
+                return;
+            }
+            continue;
+        }
+
         if (typeof selection === 'string' && selection.startsWith('POINT:')) {
             const targetIdx = parseInt(selection.split(':')[1], 10);
-            const detailResult = await browseBranchPoints(branch, indices, targetIdx, sortedOrder);
+            const detailResult = await browseBranchPoints(
+                sysName,
+                branch,
+                indices,
+                targetIdx,
+                sortedOrder
+            );
             if (detailResult === 'EXIT') {
                 return;
             }
@@ -637,6 +1139,7 @@ function buildSummaryChoices(branch: ContinuationObject, indices: number[], sort
 }
 
 async function browseBranchPoints(
+    sysName: string,
     branch: ContinuationObject,
     indices: number[],
     focusArrayIdx: number,
@@ -755,7 +1258,13 @@ async function browseBranchPoints(
             currentFocusSortedIdx = sortedOrder.findIndex(idx => idx === arrayIdx);
             if (currentFocusSortedIdx === -1) currentFocusSortedIdx = 0;
             page = Math.floor(currentFocusSortedIdx / DETAIL_PAGE_SIZE);
-            await showPointDetails(branch, indices, arrayIdx, bifurcationSet.has(arrayIdx));
+            await showPointDetails(
+                sysName,
+                branch,
+                indices,
+                arrayIdx,
+                bifurcationSet.has(arrayIdx)
+            );
         }
     }
 }
@@ -770,7 +1279,10 @@ function formatPointRow(
     const pt = branch.data.points[arrayIdx];
     const logicalIdx = indices[arrayIdx];
     const paramVal = formatNumber(pt.param_value);
-    const descriptor = summarizeEigenvalues(pt);
+    const descriptor = summarizeSpectralSummary(
+        pt,
+        (branch.branchKind ?? 'equilibrium') === 'limitCycle'
+    );
     const typeLabel = pt.stability && pt.stability !== 'None' ? ` [${pt.stability}]` : '';
 
     const prefix = bifurcationSet.has(arrayIdx) ? '*' : ' ';
@@ -785,19 +1297,21 @@ function formatPointRow(
     return label;
 }
 
-function summarizeEigenvalues(point: ContinuationPoint) {
+function summarizeSpectralSummary(point: ContinuationPoint, isLimitCycle: boolean) {
     const eigenvalues = point.eigenvalues || [];
+    const label = isLimitCycle ? 'Floquet multipliers' : 'Eigenvalues';
     if (eigenvalues.length === 0) {
-        return 'Eigenvalues: []';
+        return `${label}: []`;
     }
     const formatted = eigenvalues
         .slice(0, 3)
         .map(ev => `${formatNumberSafe(ev.re)}+${formatNumberSafe(ev.im)}i`);
     const suffix = eigenvalues.length > 3 ? ' …' : '';
-    return `Eigenvalues: ${formatted.join(', ')}${suffix}`;
+    return `${label}: ${formatted.join(', ')}${suffix}`;
 }
 
 async function showPointDetails(
+    sysName: string,
     branch: ContinuationObject,
     indices: number[],
     arrayIdx: number,
@@ -805,13 +1319,14 @@ async function showPointDetails(
 ) {
     const pt = branch.data.points[arrayIdx];
     const logicalIdx = indices[arrayIdx];
+    const isLimitCycle = (branch.branchKind ?? 'equilibrium') === 'limitCycle';
 
     console.log('');
     const headerSuffix = isBifurcation ? ' [Bifurcation]' : '';
     console.log(chalk.yellow(`Point ${logicalIdx} (Array ${arrayIdx})${headerSuffix}`));
     console.log(`Stability: ${pt.stability}`);
     console.log(`Parameter (${branch.parameterName}): ${formatNumber(pt.param_value)}`);
-    console.log('Eigenvalues:');
+    console.log(isLimitCycle ? 'Floquet multipliers:' : 'Eigenvalues:');
     if (pt.eigenvalues?.length) {
         pt.eigenvalues.forEach((eig, idx) => {
             console.log(
@@ -823,7 +1338,35 @@ async function showPointDetails(
     }
     console.log(`State: ${formatArray(pt.state)}`);
 
-    await inquirer.prompt({ type: 'input', name: 'cont', message: 'Press enter to return...' });
+    while (true) {
+        const actions: Array<{ name: string; value: string }> = [
+            { name: 'Back', value: 'BACK' }
+        ];
+        const isEquilibriumBranch = (branch.branchKind ?? 'equilibrium') === 'equilibrium';
+        if (isEquilibriumBranch && pt.stability === 'Hopf') {
+            actions.unshift({
+                name: 'Switch to Limit Cycle Branch from this Hopf point',
+                value: 'LC'
+            });
+        }
+
+        const { action } = await inquirer.prompt({
+            type: 'list',
+            name: 'action',
+            message: 'Point Actions',
+            choices: actions,
+            pageSize: MENU_PAGE_SIZE
+        });
+
+        if (action === 'BACK') {
+            return;
+        }
+
+        if (action === 'LC') {
+            await startLimitCycleBranch(sysName, branch, arrayIdx);
+            return;
+        }
+    }
 }
 
 function formatArray(values: number[]) {

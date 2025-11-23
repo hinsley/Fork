@@ -1,4 +1,11 @@
-import { EquilibriumSolution, SystemConfig, ContinuationBranchData, ContinuationEigenvalue } from "./types";
+import {
+    EquilibriumSolution,
+    SystemConfig,
+    ContinuationBranchData,
+    ContinuationEigenvalue,
+    LimitCycleBranchResponse,
+    LimitCycleMeta
+} from "./types";
 
 export type CovariantLyapunovResponse = {
     dimension: number;
@@ -134,6 +141,42 @@ export class WasmBridge {
             settings,
             forward
         ) as ContinuationBranchData;
+    }
+
+    compute_limit_cycle_from_hopf(
+        hopfState: number[],
+        hopfParam: number,
+        parameterName: string,
+        methodRequest: any,
+        amplitude: number,
+        settings: any,
+        forward: boolean
+    ): LimitCycleBranchResponse {
+        return this.instance.continue_limit_cycle_from_hopf(
+            new Float64Array(hopfState),
+            hopfParam,
+            parameterName,
+            methodRequest,
+            amplitude,
+            settings,
+            forward
+        ) as LimitCycleBranchResponse;
+    }
+
+    extend_limit_cycle_branch(
+        branchData: any,
+        parameterName: string,
+        meta: LimitCycleMeta,
+        settings: any,
+        forward: boolean
+    ): LimitCycleBranchResponse {
+        return this.instance.extend_limit_cycle_branch(
+            branchData,
+            parameterName,
+            meta,
+            settings,
+            forward
+        ) as LimitCycleBranchResponse;
     }
 
     computeEigenvalues(state: number[], parameterName: string, paramValue: number): ContinuationEigenvalue[] {
