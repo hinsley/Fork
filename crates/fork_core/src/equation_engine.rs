@@ -460,14 +460,14 @@ impl EquationSystem {
     /// The state variables `x` are treated as constants.
     pub fn evaluate_dual_wrt_param(&self, x: &[f64], param_idx: usize, out: &mut [Dual]) {
         self.ensure_dual_params();
-        
+
         {
             let mut params = self.params_dual.borrow_mut();
             params[param_idx].eps = 1.0;
         }
-        
+
         let x_dual: Vec<Dual> = x.iter().map(|&v| Dual::new(v, 0.0)).collect();
-        
+
         let params = self.params_dual.borrow();
         let mut stack = self.stack_dual.borrow_mut();
         for (i, eq) in self.equations.iter().enumerate() {
