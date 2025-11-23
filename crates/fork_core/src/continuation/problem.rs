@@ -80,11 +80,5 @@ pub trait ContinuationProblem {
 
     /// Return diagnostics (test functions, eigenvalues, etc.) for bifurcation detection.
     fn diagnostics(&mut self, aug_state: &DVector<f64>) -> Result<PointDiagnostics>;
-
-    /// Optional hook called after each successful continuation step.
-    /// Used by some problems to update internal state (e.g., phase conditions for LCs).
-    fn update_after_step(&mut self, _aug_state: &DVector<f64>) -> Result<()> {
-        Ok(()) // Default no-op
-    }
 }
 

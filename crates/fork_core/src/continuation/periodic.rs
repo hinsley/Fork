@@ -1,10 +1,9 @@
 use super::{
-    continue_with_problem, extend_branch_with_problem, BifurcationType, BranchType,
-    ContinuationBranch, ContinuationPoint, ContinuationSettings,
+    continue_with_problem, extend_branch_with_problem, BifurcationType, ContinuationBranch,
+    ContinuationPoint, ContinuationSettings,
 };
 use super::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
-#[allow(unused_imports)]
-use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
+use crate::equation_engine::EquationSystem;
 use crate::equilibrium::{compute_jacobian, SystemKind};
 use crate::traits::DynamicalSystem;
 use anyhow::{anyhow, bail, Result};
@@ -73,18 +72,6 @@ pub struct LimitCycleGuess {
     pub stage_states: Vec<Vec<Vec<f64>>>,
 }
 
-impl LimitCycleGuess {
-    pub fn to_aug(&self, _dim: usize) -> DVector<f64> {
-        let flat = flatten_collocation_state(&self.mesh_states, &self.stage_states, self.period);
-        let mut aug = DVector::zeros(flat.len() + 1);
-        aug[0] = self.param_value;
-        for (i, &v) in flat.iter().enumerate() {
-            aug[i + 1] = v;
-        }
-        aug
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LimitCycleSetup {
     pub guess: LimitCycleGuess,
@@ -102,21 +89,6 @@ impl LimitCycleSetup {
             phase_anchor: self.phase_anchor.clone(),
             phase_direction: self.phase_direction.clone(),
         }
-    }
-
-    pub fn to_problem<'a>(
-        &self,
-        system: &'a mut EquationSystem,
-        param_index: usize,
-    ) -> Result<PeriodicOrbitCollocationProblem<'a>> {
-        PeriodicOrbitCollocationProblem::new(
-            system,
-            param_index,
-            self.mesh_points,
-            self.collocation_degree,
-            self.phase_anchor.clone(),
-            self.phase_direction.clone(),
-        )
     }
 }
 
@@ -165,76 +137,47 @@ pub fn limit_cycle_setup_from_hopf(
     let lambda = eigenvalues[idx];
     let eigenvector = compute_complex_eigenvector(&mat, lambda)?;
 
-    // Orthogonalize real and imaginary parts as in MatCont's init_H_LC.m
-    // This rotation Q -> Q * exp(i*phi) makes Re(Q) orthogonal to Im(Q).
-    let mut d = 0.0;
-    let mut s = 0.0;
-    let mut r = 0.0;
-    for i in 0..dim {
-        let vr = eigenvector[i].re;
-        let vi = eigenvector[i].im;
-        d += vr * vr;
-        s += vi * vi;
-        r += vr * vi;
-    }
-    let phi = 0.5 * (2.0 * r).atan2(s - d);
-    let (sin_phi, cos_phi) = phi.sin_cos();
-
     let mut real_part = vec![0.0; dim];
     let mut imag_part = vec![0.0; dim];
     for i in 0..dim {
-        let vr = eigenvector[i].re;
-        let vi = eigenvector[i].im;
-        real_part[i] = vr * cos_phi - vi * sin_phi;
-        imag_part[i] = vr * sin_phi + vi * cos_phi;
+        real_part[i] = eigenvector[i].re;
+        imag_part[i] = eigenvector[i].im;
     }
-
-    // Normalize real part to define state perturbation and mesh
-    let norm_real = real_part.iter().map(|v| v * v).sum::<f64>().sqrt();
-    if norm_real == 0.0 {
-        bail!("Rotated real part of Hopf eigenvector is degenerate");
+    let norm = real_part
+        .iter()
+        .chain(imag_part.iter())
+        .map(|v| v * v)
+        .sum::<f64>()
+        .sqrt();
+    if norm == 0.0 {
+        bail!("Hopf eigenvector is degenerate");
     }
     for i in 0..dim {
-        real_part[i] /= norm_real;
-        imag_part[i] /= norm_real; // Keep relative scaling for imag part (velocity)
+        real_part[i] /= norm;
+        imag_part[i] /= norm;
     }
-
-    // Set phase direction to (normalized) imag part
-    let norm_imag = imag_part.iter().map(|v| v * v).sum::<f64>().sqrt();
-    if norm_imag == 0.0 {
-        bail!("Rotated imaginary part of Hopf eigenvector is degenerate");
+    let dir_norm = real_part.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if dir_norm == 0.0 {
+        bail!("Real part of Hopf eigenvector vanished; cannot define phase direction");
     }
-    let phase_direction: Vec<f64> = imag_part.iter().map(|v| v / norm_imag).collect();
+    let phase_direction: Vec<f64> = real_part.iter().map(|v| v / dir_norm).collect();
     let phase_anchor = hopf_state.to_vec();
 
     let period = 2.0 * PI / lambda.im;
-    let coeffs = CollocationCoefficients::new(degree)?;
     let mut mesh_states = Vec::with_capacity(mesh_points);
-    let mut stage_states = Vec::with_capacity(mesh_points);
-
     for k in 0..mesh_points {
-        // Sample mesh point at tau = k / mesh_points
-        let theta_mesh = 2.0 * PI * (k as f64) / (mesh_points as f64);
-        let mut m_state = vec![0.0; dim];
+        let theta = 2.0 * PI * (k as f64) / (mesh_points as f64);
+        let mut state = vec![0.0; dim];
         for i in 0..dim {
-            m_state[i] = hopf_state[i]
-                + amplitude * (real_part[i] * theta_mesh.cos() - imag_part[i] * theta_mesh.sin());
+            state[i] = hopf_state[i]
+                + amplitude * (real_part[i] * theta.cos() - imag_part[i] * theta.sin());
         }
-        mesh_states.push(m_state);
-
-        // Sample stage states within interval k at tau = (k + zeta_j) / mesh_points
-        let mut interval_stages = Vec::with_capacity(degree);
-        for &zeta in &coeffs.nodes {
-            let theta_stage = 2.0 * PI * (k as f64 + zeta) / (mesh_points as f64);
-            let mut s_state = vec![0.0; dim];
-            for i in 0..dim {
-                s_state[i] = hopf_state[i]
-                    + amplitude * (real_part[i] * theta_stage.cos() - imag_part[i] * theta_stage.sin());
-            }
-            interval_stages.push(s_state);
-        }
-        stage_states.push(interval_stages);
+        mesh_states.push(state);
     }
+
+    let coeffs = CollocationCoefficients::new(degree)?;
+    let stage_states =
+        build_stage_states_from_mesh(dim, mesh_points, degree, &coeffs.nodes, &mesh_states);
 
     let guess = LimitCycleGuess {
         param_value: hopf_param_value,
@@ -252,554 +195,7 @@ pub fn limit_cycle_setup_from_hopf(
     })
 }
 
-/// Initializes a limit cycle continuation from a computed orbit.
-///
-/// This follows the matcont `initOrbLC.m` algorithm:
-/// 1. Skip 1/3 of the orbit as transient
-/// 2. Find where the orbit returns close to the starting point (within tolerance)
-/// 3. Extract one cycle
-/// 4. Remesh to collocation grid using linear interpolation
-///
-/// # Arguments
-/// * `orbit_times` - Time values from the orbit (should be monotonically increasing)
-/// * `orbit_states` - State vectors at each time point (each should have `dim` elements)
-/// * `param_value` - Current value of the continuation parameter
-/// * `mesh_points` - Number of mesh intervals (ntst)
-/// * `degree` - Collocation degree (ncol)
-/// * `tolerance` - Tolerance for detecting when orbit returns to starting point
-pub fn limit_cycle_setup_from_orbit(
-    orbit_times: &[f64],
-    orbit_states: &[Vec<f64>],
-    param_value: f64,
-    mesh_points: usize,
-    degree: usize,
-    tolerance: f64,
-) -> Result<LimitCycleSetup> {
-    if mesh_points < 3 {
-        bail!("Limit cycle meshes require at least 3 points");
-    }
-    if orbit_times.len() < 10 {
-        bail!("Orbit too short - need at least 10 points");
-    }
-    if orbit_times.len() != orbit_states.len() {
-        bail!("orbit_times and orbit_states must have the same length");
-    }
-    let dim = orbit_states[0].len();
-    if dim == 0 {
-        bail!("State dimension must be positive");
-    }
-    for (i, state) in orbit_states.iter().enumerate() {
-        if state.len() != dim {
-            bail!("State {} has dimension {} but expected {}", i, state.len(), dim);
-        }
-    }
-    
-    // MatCont-style algorithm adapted for orbits that start off the attractor:
-    // 1. Use point at 1/3 as reference (after transient decay)
-    // 2. Search forward for the FIRST local minimum of distance (first return)
-    let n = orbit_times.len();
-    let ref_idx = n / 3;
-    let x_ref = &orbit_states[ref_idx];
-    let t_ref = orbit_times[ref_idx];
-    
-    // Skip a small portion after reference to avoid matching ourselves
-    // Use a small fixed skip (not percentage-based) to avoid skipping past the first return
-    let skip_start = ref_idx + 10;
-    
-    // Compute distances from x_ref to all points after skip_start
-    let mut distances: Vec<f64> = Vec::new();
-    for i in skip_start..n {
-        let x = &orbit_states[i];
-        let dist: f64 = x.iter()
-            .zip(x_ref.iter())
-            .map(|(a, b)| (a - b).abs())
-            .sum();
-        distances.push(dist);
-    }
-    
-    if distances.len() < 3 {
-        bail!("Not enough points after transient for cycle detection");
-    }
-    
-    // Find the FIRST local minimum that's within tolerance
-    // A local minimum is where distances[i-1] > distances[i] < distances[i+1]
-    let mut cycle_end = None;
-    for i in 1..distances.len()-1 {
-        if distances[i] < distances[i-1] && distances[i] < distances[i+1] {
-            // This is a local minimum
-            if distances[i] < tolerance {
-                cycle_end = Some(skip_start + i);
-                break;
-            }
-        }
-    }
-    
-    // If no local minimum found within tolerance, find the overall minimum
-    let min_dist = distances.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-    
-    let cycle_end = cycle_end.ok_or_else(|| {
-        anyhow!("No cycle detected: no local minimum within tolerance {}. \
-                 Closest approach: {:.6}. Try tolerance > {:.4} or longer orbit.",
-                 tolerance, min_dist, min_dist * 1.2)
-    })?;
-    
-    // Step 3: Extract one cycle (from ref_idx to cycle_end)
-    let period = orbit_times[cycle_end] - t_ref;
-    if period <= 0.0 {
-        bail!("Computed period is non-positive: {}", period);
-    }
-    
-    // Normalize times to [0, 1] for this cycle
-    let cycle_times: Vec<f64> = orbit_times[ref_idx..=cycle_end]
-        .iter()
-        .map(|t| (t - t_ref) / period)
-        .collect();
-    let cycle_states: Vec<&Vec<f64>> = orbit_states[ref_idx..=cycle_end].iter().collect();
-    
-    // Step 4: Remesh to collocation grid
-    // We need mesh_points mesh states at uniform intervals: tau = 0, 1/ntst, 2/ntst, ..., (ntst-1)/ntst
-    let mut mesh_states = Vec::with_capacity(mesh_points);
-    for k in 0..mesh_points {
-        let tau = k as f64 / mesh_points as f64;
-        let interpolated = interpolate_orbit_state(tau, &cycle_times, &cycle_states, dim)?;
-        mesh_states.push(interpolated);
-    }
-    
-    // Phase condition: use first mesh point and direction of flow at that point
-    // For simplicity, we use the initial direction (x1 - x0) normalized
-    let phase_anchor = mesh_states[0].clone();
-    let dx: Vec<f64> = mesh_states[1]
-        .iter()
-        .zip(mesh_states[0].iter())
-        .map(|(a, b)| a - b)
-        .collect();
-    let dx_norm: f64 = dx.iter().map(|v| v * v).sum::<f64>().sqrt();
-    let phase_direction = if dx_norm > 1e-12 {
-        dx.iter().map(|v| v / dx_norm).collect()
-    } else {
-        // Fallback: use a unit vector in first component
-        let mut dir = vec![0.0; dim];
-        dir[0] = 1.0;
-        dir
-    };
-    
-    // Build stage states via interpolation
-    let coeffs = CollocationCoefficients::new(degree)?;
-    let stage_states =
-        build_stage_states_from_mesh(dim, mesh_points, degree, &coeffs.nodes, &mesh_states);
-    
-    let guess = LimitCycleGuess {
-        param_value,
-        period,
-        mesh_states,
-        stage_states,
-    };
-    
-    Ok(LimitCycleSetup {
-        guess,
-        phase_anchor,
-        phase_direction,
-        mesh_points,
-        collocation_degree: degree,
-    })
-}
-
-/// Linearly interpolate orbit state at normalized time tau in [0, 1]
-fn interpolate_orbit_state(
-    tau: f64,
-    times: &[f64],
-    states: &[&Vec<f64>],
-    dim: usize,
-) -> Result<Vec<f64>> {
-    // Find the interval containing tau
-    let mut lower = 0;
-    for i in 0..times.len() - 1 {
-        if times[i] <= tau && tau <= times[i + 1] {
-            lower = i;
-            break;
-        }
-        if i == times.len() - 2 {
-            // tau is at or past the end
-            lower = times.len() - 2;
-        }
-    }
-    
-    let t0 = times[lower];
-    let t1 = times[lower + 1];
-    let dt = t1 - t0;
-    
-    if dt.abs() < 1e-15 {
-        // Degenerate interval, just return the state
-        return Ok(states[lower].clone());
-    }
-    
-    let alpha = (tau - t0) / dt;
-    let alpha = alpha.clamp(0.0, 1.0);
-    
-    let mut result = vec![0.0; dim];
-    for i in 0..dim {
-        result[i] = states[lower][i] * (1.0 - alpha) + states[lower + 1][i] * alpha;
-    }
-    
-    Ok(result)
-}
-
-
-/// Initializes a limit cycle continuation from a Period-Doubling bifurcation.
-///
-/// At a period-doubling bifurcation, a Floquet multiplier ╬╝ = -1 indicates the birth
-/// of a new limit cycle with twice the period. This function:
-/// 1. Extracts the current LC data from the PD point state
-/// 2. Computes the PD eigenvector (null vector of M + I where M is monodromy)
-/// 3. Constructs a doubled-period initial guess by perturbing with ┬▒h*eigenvector
-///
-/// # Arguments
-/// * `system` - The equation system
-/// * `param_index` - Index of the continuation parameter
-/// * `lc_state` - Flattened collocation state at the PD point [mesh, stages, period]
-/// * `param_value` - Parameter value at the PD point
-/// * `ntst` - Number of mesh intervals in the source LC
-/// * `ncol` - Collocation degree
-/// * `amplitude` - Perturbation amplitude (h) for stepping onto the new branch
-pub fn limit_cycle_setup_from_pd(
-    system: &mut EquationSystem,
-    param_index: usize,
-    lc_state: &[f64],
-    param_value: f64,
-    ntst: usize,
-    ncol: usize,
-    amplitude: f64,
-) -> Result<LimitCycleSetup> {
-    let dim = system.equations.len();
-    
-    // Parse the LC state to extract mesh, stages, period
-    let mesh_data_len = ntst * dim;
-    let stage_data_len = ntst * ncol * dim;
-    let expected_len = mesh_data_len + stage_data_len + 1;
-    
-    if lc_state.len() != expected_len {
-        bail!(
-            "Invalid LC state length: expected {} got {}",
-            expected_len,
-            lc_state.len()
-        );
-    }
-    
-    // Extract original mesh states
-    let mut mesh_states: Vec<Vec<f64>> = Vec::with_capacity(ntst);
-    for i in 0..ntst {
-        let start = i * dim;
-        mesh_states.push(lc_state[start..start + dim].to_vec());
-    }
-    
-    // Extract original period
-    let period = lc_state[mesh_data_len + stage_data_len];
-    
-    // Build the collocation problem to get the Jacobian for monodromy
-    let coeffs = CollocationCoefficients::new(ncol)?;
-    
-    // Create phase condition from original cycle
-    let phase_anchor = mesh_states[0].clone();
-    let mut phase_direction = vec![0.0; dim];
-    for d in 0..dim {
-        phase_direction[d] = mesh_states[1][d] - mesh_states[0][d];
-    }
-    let norm = phase_direction.iter().map(|v| v * v).sum::<f64>().sqrt();
-    if norm > 1e-12 {
-        for d in 0..dim {
-            phase_direction[d] /= norm;
-        }
-    }
-    
-    // Build stage states from mesh for creating the problem
-    let stage_states = build_stage_states_from_mesh(dim, ntst, ncol, &coeffs.nodes, &mesh_states);
-    
-    // Create the collocation problem
-    let mut problem = PeriodicOrbitCollocationProblem::new(
-        system,
-        param_index,
-        ntst,
-        ncol,
-        phase_anchor.clone(),
-        phase_direction.clone(),
-    )?;
-    
-    // Build the augmented state vector [param, mesh, stages, period]
-    let aug_len = 1 + mesh_data_len + stage_data_len + 1;
-    let mut aug_state = DVector::zeros(aug_len);
-    aug_state[0] = param_value;
-    
-    // Copy mesh states
-    for i in 0..ntst {
-        for d in 0..dim {
-            aug_state[1 + i * dim + d] = mesh_states[i][d];
-        }
-    }
-    
-    // Copy stage states
-    let stage_offset = 1 + mesh_data_len;
-    for i in 0..ntst {
-        for j in 0..ncol {
-            for d in 0..dim {
-                let idx = stage_offset + (i * ncol + j) * dim + d;
-                aug_state[idx] = stage_states[i][j][d];
-            }
-        }
-    }
-    
-    // Period
-    aug_state[aug_len - 1] = period;
-    
-    // Get the extended Jacobian (with periodic BC [I, -I])
-    let jac = problem.extended_jacobian(&aug_state)?;
-    
-    // ========== OPTIMIZED: Direct bordered solve for PD eigenvector ==========
-    // Instead of computing the full monodromy matrix, we use MATCONT's approach:
-    // 1. Modify the Jacobian to have flip BC [I, I] instead of periodic BC [I, -I]
-    // 2. Use bordered linear solve to find the null vector
-    // 3. Extract PD eigenvector from the mesh-state portion
-    //
-    // The flip BC changes the continuity equation from x(T) - x(0) = 0 to x(T) + x(0) = 0
-    // In the Jacobian, this means changing the coefficient on x(0) from -I to +I.
-    
-    // Jacobian layout (from extended_jacobian):
-    // - Rows 0 to ntst*ncol*dim - 1: Collocation equations  
-    // - Rows ntst*ncol*dim to ntst*ncol*dim + ntst*dim - 1: Continuity equations
-    // - Last row: Phase condition
-    // - Column 0: Parameter derivatives
-    // - Columns 1 to 1+ntst*dim: Mesh states (x_0, ..., x_{ntst-1})
-    // - Columns 1+ntst*dim to end-1: Stage states
-    // - Last column: Period
-    
-    let ncol_coord = ncol * dim;
-    let continuity_row_start = ntst * ncol_coord;
-    let mesh_col_start = 1;  // Skip parameter column
-    
-    // Create a copy of the Jacobian and modify BC for flip condition
-    // The last continuity block links x_{ntst-1} to x_0
-    // For periodic: C_{next} * dx_0 = -... (i.e., coefficient is -I on x_0)
-    // For flip: C_{next} * dx_0 = +... (coefficient is +I on x_0)
-    //
-    // We need to change the sign of the x_0 column in the last continuity equation
-    let mut jac_flip = jac.clone();
-    
-    // The last continuity equation is at row continuity_row_start + (ntst-1)*dim
-    // and has coefficients w.r.t. x_0 at columns mesh_col_start to mesh_col_start+dim
-    let last_cont_row = continuity_row_start + (ntst - 1) * dim;
-    for r in 0..dim {
-        for c in 0..dim {
-            // Change sign: x(T) - x(0) = 0 becomes x(T) + x(0) = 0
-            // The coefficient on x_0 changes from -1 on diagonal to +1
-            let col_idx = mesh_col_start + c;
-            let row_idx = last_cont_row + r;
-            jac_flip[(row_idx, col_idx)] = -jac_flip[(row_idx, col_idx)];
-        }
-    }
-    
-    // Remove parameter and period columns for the bordered system
-    // We only need the state part of the Jacobian (mesh + stages)
-    let state_dim = ntst * dim + ntst * ncol * dim;  // mesh + stages (no param, no period)
-    let n_rows = jac_flip.nrows() - 1;  // Exclude phase condition row
-    
-    // Extract the state-only part of the Jacobian (skip param col 0 and period col at end)
-    let mut jac_state = DMatrix::<f64>::zeros(n_rows, state_dim);
-    for r in 0..n_rows {
-        for c in 0..state_dim {
-            jac_state[(r, c)] = jac_flip[(r, c + 1)];  // Skip param column
-        }
-    }
-    
-    // Create bordered system: [J, b; b^T, 0] where b is a random-ish vector
-    // We use a simple bordering vector with some structure
-    let bordered_size = n_rows + 1;
-    let mut bordered = DMatrix::<f64>::zeros(bordered_size, state_dim + 1);
-    
-    // Copy Jacobian into bordered matrix
-    for r in 0..n_rows {
-        for c in 0..state_dim {
-            bordered[(r, c)] = jac_state[(r, c)];
-        }
-    }
-    
-    // Add bordering column (use alternating pattern for numerical stability)
-    for r in 0..n_rows {
-        bordered[(r, state_dim)] = if r % 2 == 0 { 1.0 } else { -1.0 };
-    }
-    
-    // Add bordering row
-    for c in 0..state_dim {
-        bordered[(n_rows, c)] = if c % 3 == 0 { 1.0 } else { 0.0 };
-    }
-    bordered[(n_rows, state_dim)] = 0.0;
-    
-    // RHS: [0, 0, ..., 0, 1]
-    let mut rhs = DVector::<f64>::zeros(bordered_size);
-    rhs[bordered_size - 1] = 1.0;
-    
-    // Solve the bordered system
-    let phi_full = bordered.clone().lu().solve(&rhs)
-        .ok_or_else(|| anyhow!("Bordered solve failed for PD eigenvector"))?;
-    
-    // Extract the mesh-state portion (first ntst*dim components)
-    // This is the PD eigenvector projected onto mesh points
-    let mesh_portion_len = ntst * dim;
-    let phi_mesh: Vec<f64> = phi_full.iter().take(mesh_portion_len).cloned().collect();
-    
-    // Reconstruct the eigenvector at x(0) - this is what we apply as the perturbation
-    // The phi_mesh contains the eigenvector at each mesh point; use the first one
-    let pd_eigenvector: Vec<f64> = phi_mesh[0..dim].to_vec();
-    
-    // Normalize the eigenvector
-    let eig_norm = pd_eigenvector.iter().map(|v| v * v).sum::<f64>().sqrt();
-    let pd_eigenvector: Vec<f64> = if eig_norm > 1e-12 {
-        pd_eigenvector.iter().map(|v| v / eig_norm).collect()
-    } else {
-        bail!("PD eigenvector is nearly zero - not at a period-doubling point");
-    };
-    
-    // Construct doubled-period mesh states
-    // First half: original + h * phi
-    // Second half: original - h * phi
-    let new_ntst = 2 * ntst;
-    let mut new_mesh_states: Vec<Vec<f64>> = Vec::with_capacity(new_ntst);
-    
-    // First half: original orbit + perturbation
-    for i in 0..ntst {
-        let mut state = mesh_states[i].clone();
-        for d in 0..dim {
-            state[d] += amplitude * pd_eigenvector[d];
-        }
-        new_mesh_states.push(state);
-    }
-    
-    // Second half: original orbit - perturbation
-    for i in 0..ntst {
-        let mut state = mesh_states[i].clone();
-        for d in 0..dim {
-            state[d] -= amplitude * pd_eigenvector[d];
-        }
-        new_mesh_states.push(state);
-    }
-    
-    // Build new stage states for doubled mesh
-    let new_stage_states = build_stage_states_from_mesh(
-        dim,
-        new_ntst,
-        ncol,
-        &coeffs.nodes,
-        &new_mesh_states,
-    );
-    
-    // New period is double the original
-    let new_period = 2.0 * period;
-    
-    // Phase condition from first point of new cycle
-    let new_phase_anchor = new_mesh_states[0].clone();
-    let mut new_phase_direction = vec![0.0; dim];
-    for d in 0..dim {
-        new_phase_direction[d] = new_mesh_states[1][d] - new_mesh_states[0][d];
-    }
-    let norm = new_phase_direction.iter().map(|v| v * v).sum::<f64>().sqrt();
-    if norm > 1e-12 {
-        for d in 0..dim {
-            new_phase_direction[d] /= norm;
-        }
-    }
-    
-    Ok(LimitCycleSetup {
-        guess: LimitCycleGuess {
-            param_value,
-            period: new_period,
-            mesh_states: new_mesh_states,
-            stage_states: new_stage_states,
-        },
-        phase_anchor: new_phase_anchor,
-        phase_direction: new_phase_direction,
-        mesh_points: new_ntst,
-        collocation_degree: ncol,
-    })
-}
-
-/// Helper function to compute the monodromy matrix from the collocation Jacobian.
-/// This extracts M using the shooting-based method.
-#[allow(dead_code)]
-fn compute_monodromy_matrix(
-    jac: &DMatrix<f64>,
-    dim: usize,
-    ntst: usize,
-    ncol: usize,
-) -> Result<DMatrix<f64>> {
-    let ncol_coord = ncol * dim;
-    let mesh_col_start = 1;
-    let stage_col_start = mesh_col_start + ntst * dim;
-    let continuity_row_start = ntst * ncol * dim;
-    
-    let mut monodromy = DMatrix::<f64>::identity(dim, dim);
-    
-    for interval in 0..ntst {
-        let cont_row = continuity_row_start + interval * dim;
-        let coll_row_start = interval * ncol_coord;
-        let stage_col = stage_col_start + interval * ncol_coord;
-        let mesh_col = mesh_col_start + interval * dim;
-        let next_mesh_col = mesh_col_start + ((interval + 1) % ntst) * dim;
-        
-        // Extract G_x, G_s
-        let mut g_x = DMatrix::<f64>::zeros(ncol_coord, dim);
-        for r in 0..ncol_coord {
-            for c in 0..dim {
-                g_x[(r, c)] = jac[(coll_row_start + r, mesh_col + c)];
-            }
-        }
-        
-        let mut g_s = DMatrix::<f64>::zeros(ncol_coord, ncol_coord);
-        for r in 0..ncol_coord {
-            for c in 0..ncol_coord {
-                g_s[(r, c)] = jac[(coll_row_start + r, stage_col + c)];
-            }
-        }
-        
-        let ds_dx = match g_s.clone().lu().solve(&-&g_x) {
-            Some(sol) => sol,
-            None => bail!("Monodromy: singular stage block at interval {}", interval),
-        };
-        
-        // Extract C_x, C_s, C_next
-        let mut c_x = DMatrix::<f64>::zeros(dim, dim);
-        for r in 0..dim {
-            for c in 0..dim {
-                c_x[(r, c)] = jac[(cont_row + r, mesh_col + c)];
-            }
-        }
-        
-        let mut c_s = DMatrix::<f64>::zeros(dim, ncol_coord);
-        for r in 0..dim {
-            for c in 0..ncol_coord {
-                c_s[(r, c)] = jac[(cont_row + r, stage_col + c)];
-            }
-        }
-        
-        let mut c_next = DMatrix::<f64>::zeros(dim, dim);
-        for r in 0..dim {
-            for c in 0..dim {
-                c_next[(r, c)] = jac[(cont_row + r, next_mesh_col + c)];
-            }
-        }
-        
-        let effective_c_x = &c_x + &c_s * &ds_dx;
-        
-        let t_i = match c_next.clone().lu().solve(&-&effective_c_x) {
-            Some(t) => t,
-            None => bail!("Monodromy: singular C_next at interval {}", interval),
-        };
-        
-        monodromy = &t_i * &monodromy;
-    }
-    
-    Ok(monodromy)
-}
-
-
-pub struct PeriodicOrbitCollocationProblem<'a> {
+struct PeriodicOrbitCollocationProblem<'a> {
     context: FlowContext<'a>,
     mesh_points: usize,
     degree: usize,
@@ -1150,19 +546,14 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
     }
 
     fn diagnostics(&mut self, aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
-        // Get the full BVP Jacobian
-        let jac = self.extended_jacobian(aug_state)?;
-        
-        // Extract multipliers using shooting-based monodromy from Jacobian
-        let multipliers = extract_multipliers_shooting(
-            &jac,
-            self.state_dim(),
-            self.mesh_points,
-            self.degree,
-        )?;
-        
-        // Compute test functions from multipliers
-        let (cycle_fold, period_doubling, neimark, eig_vals) = cycle_tests_from_multipliers(&multipliers);
+        let param = aug_state[0];
+        let period = aug_state[self.period_index()];
+        let mesh_states = self.mesh_states(aug_state);
+        let monodromy =
+            compute_trapezoid_monodromy(&mut self.context, param, &mesh_states, period)?;
+        let multipliers_vec: Vec<Complex<f64>> =
+            monodromy.clone().complex_eigenvalues().iter().cloned().collect();
+        let (cycle_fold, period_doubling, neimark, eig_vals) = cycle_tests(&multipliers_vec);
 
         Ok(PointDiagnostics {
             test_values: TestFunctionValues::limit_cycle(
@@ -1173,168 +564,6 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
             eigenvalues: eig_vals,
         })
     }
-}
-
-/// Shooting-based Floquet multiplier extraction from Jacobian.
-/// 
-/// We compute the monodromy by chaining local transfer matrices through each interval:
-/// M = T_{ntst-1} * T_{ntst-2} * ... * T_1 * T_0
-///
-/// For each interval, we eliminate stages using collocation equations and get the
-/// mesh-to-mesh transfer from continuity:
-/// T_i = -C_{next}^{-1} * (C_x + C_s * ds_dx)
-///
-/// This approach correctly handles our implicit periodicity BVP where last continuity
-/// equation wraps to x_0.
-pub fn extract_multipliers_shooting(
-    jac: &DMatrix<f64>,
-    dim: usize,
-    ntst: usize, 
-    ncol: usize,
-) -> Result<Vec<Complex<f64>>> {
-    // Our Jacobian layout:
-    // - Rows 0 to ntst*ncol*dim - 1: Stage residuals (collocation equations)
-    // - Rows ntst*ncol*dim to ntst*ncol*dim + ntst*dim - 1: Continuity equations
-    // - Last row: Phase condition
-    // 
-    // - Column 0: Parameter
-    // - Columns 1 to ntst*dim: Mesh states (x_0, x_1, ..., x_{ntst-1})
-    // - Columns ntst*dim+1 to ntst*dim + ntst*ncol*dim: Stages
-    // - Last column: Period
-    
-    let ncol_coord = ncol * dim;
-    let mesh_col_start = 1;
-    let stage_col_start = mesh_col_start + ntst * dim;
-    let continuity_row_start = ntst * ncol * dim;
-    
-    // Build monodromy by chaining local transfer matrices
-    let mut monodromy = DMatrix::<f64>::identity(dim, dim);
-    
-    for interval in 0..ntst {
-        let cont_row = continuity_row_start + interval * dim;
-        let coll_row_start = interval * ncol_coord;
-        let stage_col = stage_col_start + interval * ncol_coord;
-        let mesh_col = mesh_col_start + interval * dim;
-        
-        // For the last interval, next mesh wraps to x_0
-        let next_mesh_col = mesh_col_start + ((interval + 1) % ntst) * dim;
-        
-        // Extract G_x (collocation w.r.t. current mesh)
-        let mut g_x = DMatrix::<f64>::zeros(ncol_coord, dim);
-        for r in 0..ncol_coord {
-            for c in 0..dim {
-                g_x[(r, c)] = jac[(coll_row_start + r, mesh_col + c)];
-            }
-        }
-        
-        // Extract G_s (collocation w.r.t. stages)
-        let mut g_s = DMatrix::<f64>::zeros(ncol_coord, ncol_coord);
-        for r in 0..ncol_coord {
-            for c in 0..ncol_coord {
-                g_s[(r, c)] = jac[(coll_row_start + r, stage_col + c)];
-            }
-        }
-        
-        // Solve: ds_dx = -G_s^{-1} * G_x
-        let ds_dx = match g_s.clone().lu().solve(&-&g_x) {
-            Some(sol) => sol,
-            None => bail!("Monodromy: singular stage block at interval {}", interval),
-        };
-        
-        // Extract C_x (continuity w.r.t. current mesh)
-        let mut c_x = DMatrix::<f64>::zeros(dim, dim);
-        for r in 0..dim {
-            for c in 0..dim {
-                c_x[(r, c)] = jac[(cont_row + r, mesh_col + c)];
-            }
-        }
-        
-        // Extract C_s (continuity w.r.t. stages)
-        let mut c_s = DMatrix::<f64>::zeros(dim, ncol_coord);
-        for r in 0..dim {
-            for c in 0..ncol_coord {
-                c_s[(r, c)] = jac[(cont_row + r, stage_col + c)];
-            }
-        }
-        
-        // Extract C_next (continuity w.r.t. next mesh)
-        let mut c_next = DMatrix::<f64>::zeros(dim, dim);
-        for r in 0..dim {
-            for c in 0..dim {
-                c_next[(r, c)] = jac[(cont_row + r, next_mesh_col + c)];
-            }
-        }
-        
-        // Effective coefficient: C_x + C_s * ds_dx
-        let effective_c_x = &c_x + &c_s * &ds_dx;
-        
-        // Transfer matrix: T_i = -C_next^{-1} * effective_c_x
-        let t_i = match c_next.clone().lu().solve(&-&effective_c_x) {
-            Some(t) => t,
-            None => bail!("Monodromy: singular C_next at interval {}", interval),
-        };
-        
-        // Chain: M = T_i * M
-        monodromy = &t_i * &monodromy;
-    }
-    
-    let eigenvalues: Vec<Complex<f64>> = monodromy.complex_eigenvalues().iter().cloned().collect();
-    Ok(eigenvalues)
-}
-
-/// Bifurcation tests from Floquet multipliers with sanity check.
-/// 
-/// Returns (cycle_fold, period_doubling, neimark_sacker, eigenvalues).
-fn cycle_tests_from_multipliers(multipliers: &[Complex<f64>]) -> (f64, f64, f64, Vec<Complex<f64>>) {
-    if multipliers.is_empty() {
-        return (1.0, 1.0, 1.0, Vec::new());
-    }
-    
-    let values = multipliers.to_vec();
-    
-    // Find the trivial multiplier (should be closest to 1.0)
-    let mut trivial_idx = None;
-    let mut min_dist = f64::INFINITY;
-    for (idx, mu) in values.iter().enumerate() {
-        let dist = (mu - Complex::new(1.0, 0.0)).norm();
-        if dist < min_dist {
-            min_dist = dist;
-            trivial_idx = Some(idx);
-        }
-    }
-    
-    const TRIVIAL_TOLERANCE: f64 = 0.5;
-    if min_dist > TRIVIAL_TOLERANCE {
-        // Multipliers are garbage - return NaN test values to avoid false sign crossings
-        return (f64::NAN, f64::NAN, f64::NAN, values);
-    }
-    
-    // Period Doubling test: product of (╬╝ + 1) for non-trivial real multipliers
-    let mut pd_test = 1.0;
-    for (idx, mu) in values.iter().enumerate() {
-        if Some(idx) == trivial_idx {
-            continue;
-        }
-        if mu.im.abs() < 1e-8 {
-            pd_test *= mu.re + 1.0;
-        }
-    }
-    
-    // Neimark-Sacker test: product of (|╬╝|┬▓ - 1) for complex pairs
-    let mut ns_test = 1.0;
-    for (idx, mu) in values.iter().enumerate() {
-        if Some(idx) == trivial_idx {
-            continue;
-        }
-        if mu.im > 1e-8 {
-            ns_test *= mu.norm_sqr() - 1.0;
-        }
-    }
-    
-    // Cycle Fold: disabled (set to 1.0)
-    let cf_test = 1.0;
-    
-    (cf_test, pd_test, ns_test, values)
 }
 
 fn validate_mesh_states(
@@ -1404,14 +633,14 @@ fn flatten_collocation_state(
 }
 
 #[derive(Debug, Clone)]
-pub struct CollocationCoefficients {
-    pub nodes: Vec<f64>,
-    pub a: Vec<Vec<f64>>,
-    pub b: Vec<f64>,
+struct CollocationCoefficients {
+    nodes: Vec<f64>,
+    a: Vec<Vec<f64>>,
+    b: Vec<f64>,
 }
 
 impl CollocationCoefficients {
-    pub fn new(degree: usize) -> Result<Self> {
+    fn new(degree: usize) -> Result<Self> {
         if degree == 0 {
             bail!("Collocation degree must be at least 1");
         }
@@ -1431,7 +660,7 @@ impl CollocationCoefficients {
     }
 }
 
-pub fn gauss_legendre_nodes(degree: usize) -> Result<Vec<f64>> {
+fn gauss_legendre_nodes(degree: usize) -> Result<Vec<f64>> {
     if degree == 0 {
         bail!("Collocation degree must be positive");
     }
@@ -1452,7 +681,7 @@ pub fn gauss_legendre_nodes(degree: usize) -> Result<Vec<f64>> {
         nodes[i] = t;
         nodes[n - i - 1] = 1.0 - t;
     }
-    nodes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
     Ok(nodes)
 }
 
@@ -1510,7 +739,6 @@ fn integrate_polynomial(coeffs: &[f64], upper: f64) -> f64 {
     sum
 }
 
-#[allow(dead_code)]
 fn compute_trapezoid_monodromy(
     context: &mut FlowContext<'_>,
     param: f64,
@@ -1547,7 +775,6 @@ fn compute_trapezoid_monodromy(
     Ok(monodromy)
 }
 
-#[allow(dead_code)]
 fn cycle_tests(multipliers: &[Complex<f64>]) -> (f64, f64, f64, Vec<Complex<f64>>) {
     if multipliers.is_empty() {
         return (1.0, 1.0, 1.0, Vec::new());
@@ -1560,14 +787,14 @@ fn cycle_tests(multipliers: &[Complex<f64>]) -> (f64, f64, f64, Vec<Complex<f64>
         .min_by(|(_, a), (_, b)| {
             let da = (*a - Complex::new(1.0, 0.0)).norm_sqr();
             let db = (*b - Complex::new(1.0, 0.0)).norm_sqr();
-            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            da.partial_cmp(&db).unwrap()
         })
         .map(|(idx, _)| idx);
 
     let mut cycle_fold = 1.0;
     let mut period_doubling = 1.0;
     let mut neimark = 1.0;
-    const IMAG_EPS: f64 = 1e-5;
+    const IMAG_EPS: f64 = 1e-6;
 
     for (idx, mu) in values.iter().enumerate() {
         if Some(idx) == trivial_idx {
@@ -1576,7 +803,7 @@ fn cycle_tests(multipliers: &[Complex<f64>]) -> (f64, f64, f64, Vec<Complex<f64>
         if mu.im.abs() < IMAG_EPS {
             cycle_fold *= mu.re - 1.0;
             period_doubling *= mu.re + 1.0;
-        } else if mu.im > 0.0 {
+        } else {
             neimark *= mu.norm_sqr() - 1.0;
         }
     }
@@ -1600,7 +827,7 @@ fn compute_complex_eigenvector(
     let row_index = v_t.nrows().saturating_sub(1);
     let mut vector = Vec::with_capacity(dim);
     for i in 0..dim {
-        vector.push(v_t[(row_index, i)].conj());
+        vector.push(v_t[(row_index, i)]);
     }
     Ok(vector)
 }
@@ -1645,12 +872,7 @@ pub fn continue_limit_cycle_collocation(
         eigenvalues: Vec::new(),
     };
 
-    let mut branch = continue_with_problem(&mut problem, point, settings, forward)?;
-    branch.branch_type = BranchType::LimitCycle {
-        ntst: config.mesh_points,
-        ncol: config.degree,
-    };
-    Ok(branch)
+    continue_with_problem(&mut problem, point, settings, forward)
 }
 
 pub fn extend_limit_cycle_collocation(
@@ -1669,223 +891,6 @@ pub fn extend_limit_cycle_collocation(
         config.phase_anchor,
         config.phase_direction,
     )?;
-    let mut result = extend_branch_with_problem(&mut problem, branch, settings, forward)?;
-    result.branch_type = BranchType::LimitCycle {
-        ntst: config.mesh_points,
-        ncol: config.degree,
-    };
-    Ok(result)
+    extend_branch_with_problem(&mut problem, branch, settings, forward)
 }
 
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_period_doubling_detection() {
-        // Case 1: Before bifurcation (Stable, multipliers inside)
-        // Triv: 1.0, Stable: -0.99
-        let multipliers_before = vec![
-            Complex::new(1.0, 0.0),
-            Complex::new(-0.99, 1e-16),
-            Complex::new(0.01, 0.0),
-        ];
-        let (_, pd_before, _, _) = cycle_tests(&multipliers_before);
-        
-        // Case 2: At/After bifurcation (Unstable, multiplier past -1)
-        // Triv: 1.0, Unstable: -1.01
-        let multipliers_after = vec![
-            Complex::new(1.0, 0.0),
-            Complex::new(-1.01, 1e-16),
-            Complex::new(0.01, 0.0),
-        ];
-        let (_, pd_after, _, _) = cycle_tests(&multipliers_after);
-
-        println!("PD Before: {}, PD After: {}", pd_before, pd_after);
-        assert!(pd_before * pd_after < 0.0, "Period doubling test function should change sign");
-        
-        // Case 3: Exact hit
-        let multipliers_exact = vec![
-            Complex::new(1.0, 0.0),
-            Complex::new(-1.0, 1e-16),
-            Complex::new(0.01, 0.0),
-        ];
-        let (_, pd_exact, _, _) = cycle_tests(&multipliers_exact);
-        println!("PD Exact: {}", pd_exact);
-        assert!(pd_before * pd_exact <= 0.0, "Period doubling test should be zero or cross at exact hit");
-    }
-
-    #[test]
-    fn test_hopf_initialization_accuracy() {
-        // Linear Hopf system:
-        // dx/dt = mu*x - y
-        // dy/dt = x + mu*y
-        // Hopf at mu = 0, omega = 1
-        
-        // Eq 0: mu*x - y -> LoadParam(0) * LoadVar(0) - LoadVar(1)
-        let mut ops0 = Vec::new();
-        ops0.push(OpCode::LoadParam(0));
-        ops0.push(OpCode::LoadVar(0));
-        ops0.push(OpCode::Mul);
-        ops0.push(OpCode::LoadVar(1));
-        ops0.push(OpCode::Sub);
-        
-        // Eq 1: x + mu*y -> LoadVar(0) + LoadParam(0) * LoadVar(1)
-        let mut ops1 = Vec::new();
-        ops1.push(OpCode::LoadVar(0));
-        ops1.push(OpCode::LoadParam(0));
-        ops1.push(OpCode::LoadVar(1));
-        ops1.push(OpCode::Mul);
-        ops1.push(OpCode::Add);
-        
-        let equations = vec![Bytecode { ops: ops0 }, Bytecode { ops: ops1 }];
-        let params = vec![0.0]; // mu = 0
-        let mut system = EquationSystem::new(equations, params);
-        
-        let hopf_state = vec![0.0, 0.0];
-        let mu_index = 0;
-        let mu_value = 0.0;
-        let amplitude = 1e-4;
-        let ntst = 10;
-        let ncol = 4;
-        
-        let setup = limit_cycle_setup_from_hopf(
-            &mut system,
-            mu_index,
-            &hopf_state,
-            mu_value,
-            ntst,
-            ncol,
-            amplitude,
-        ).expect("Setup should succeed");
-        
-        // Correct the phase anchor to satisfy the point phase condition exactly at start
-        let mut setup = setup;
-        setup.phase_anchor = setup.guess.mesh_states[0].clone();
-
-        // Residual check
-        let mut problem = PeriodicOrbitCollocationProblem::new(
-            &mut system,
-            mu_index,
-            ntst,
-            ncol,
-            setup.phase_anchor.clone(),
-            setup.phase_direction.clone(),
-        ).expect("Problem creation should succeed");
-        
-        let flat_state = flatten_collocation_state(
-            &setup.guess.mesh_states,
-            &setup.guess.stage_states,
-            setup.guess.period
-        );
-        let mut aug_state = DVector::zeros(problem.dimension() + 1);
-        aug_state[0] = mu_value;
-        for (i, &v) in flat_state.iter().enumerate() {
-            aug_state[i + 1] = v;
-        }
-        
-        let mut res = DVector::zeros(problem.dimension());
-        problem.residual(&aug_state, &mut res).expect("Residual evaluation should succeed");
-        
-        let res_norm = res.norm();
-        
-        assert!(res_norm < 1e-8, "Residual norm {} is too high for linear Hopf", res_norm);
-    }
-
-    #[test]
-    fn test_hopf_continuation_direction() {
-        // Supercritical Hopf Normal Form:
-        // dx/dt = mu*x - y - x*(x^2 + y^2)
-        // dy/dt = x + mu*y - y*(x^2 + y^2)
-        // Hopf at mu = 0. Stable LC exists for mu > 0 with radius sqrt(mu).
-        
-        // Bytecode for x equation: mu*x - y - x*(x^2 + y^2)
-        let mut ops0 = Vec::new();
-        ops0.push(OpCode::LoadParam(0)); // mu
-        ops0.push(OpCode::LoadVar(0));   // x
-        ops0.push(OpCode::Mul);          // mu*x
-        ops0.push(OpCode::LoadVar(1));   // y
-        ops0.push(OpCode::Sub);          // mu*x - y
-        ops0.push(OpCode::LoadVar(0));   // x
-        ops0.push(OpCode::LoadVar(0));   // x
-        ops0.push(OpCode::LoadVar(0));   // x
-        ops0.push(OpCode::Mul);          // x^2
-        ops0.push(OpCode::LoadVar(1));   // y
-        ops0.push(OpCode::LoadVar(1));   // y
-        ops0.push(OpCode::Mul);          // y^2
-        ops0.push(OpCode::Add);          // x^2 + y^2
-        ops0.push(OpCode::Mul);          // x*(x^2 + y^2)
-        ops0.push(OpCode::Sub);          // mu*x - y - x*(x^2 + y^2)
-        
-        // Bytecode for y equation: x + mu*y - y*(x^2 + y^2)
-        let mut ops1 = Vec::new();
-        ops1.push(OpCode::LoadVar(0));   // x
-        ops1.push(OpCode::LoadParam(0)); // mu
-        ops1.push(OpCode::LoadVar(1));   // y
-        ops1.push(OpCode::Mul);          // mu*y
-        ops1.push(OpCode::Add);          // x + mu*y
-        ops1.push(OpCode::LoadVar(1));   // y
-        ops1.push(OpCode::LoadVar(0));   // x
-        ops1.push(OpCode::LoadVar(0));   // x
-        ops1.push(OpCode::Mul);          // x^2
-        ops1.push(OpCode::LoadVar(1));   // y
-        ops1.push(OpCode::LoadVar(1));   // y
-        ops1.push(OpCode::Mul);          // y^2
-        ops1.push(OpCode::Add);          // x^2 + y^2
-        ops1.push(OpCode::Mul);          // y*(x^2 + y^2)
-        ops1.push(OpCode::Sub);          // x + mu*y - y*(x^2 + y^2)
-        
-        let equations = vec![Bytecode { ops: ops0 }, Bytecode { ops: ops1 }];
-        let params = vec![0.0]; // Start at Hopf point mu = 0
-        let mut system = EquationSystem::new(equations, params);
-        
-        let ntst = 10;
-        let ncol = 4;
-        let amplitude = 1e-4;
-        
-        // 1. Setup LC guess from Hopf point at mu=0
-        let setup = limit_cycle_setup_from_hopf(
-            &mut system,
-            0,
-            &[0.0, 0.0],
-            0.0,
-            ntst,
-            ncol,
-            amplitude
-        ).expect("LC setup should succeed");
-        
-        // 2. Run forward continuation (should increase mu)
-        let settings = ContinuationSettings {
-            step_size: 0.1,
-            min_step_size: 1e-4,
-            max_step_size: 0.2,
-            max_steps: 50,
-            corrector_steps: 5,
-            corrector_tolerance: 1e-6,
-            step_tolerance: 1e-6,
-        };
-        
-        let mut problem = setup.to_problem(&mut system, 0).expect("to_problem failed");
-        let initial_aug = setup.guess.to_aug(problem.dimension());
-        let initial_tangent = super::super::compute_tangent_from_problem(&mut problem, &initial_aug).expect("tangent failed");
-        println!("Initial tangent[0] (mu): {}", initial_tangent[0]);
-        
-        let branch = continue_limit_cycle_collocation(
-            &mut system,
-            0,
-            setup.collocation_config(),
-            setup.guess,
-            settings,
-            true // Forward (should be mu > 0)
-        ).expect("Continuation should succeed");
-        
-        assert!(branch.points.len() > 1, "Should have generated more than one point");
-        let last_point = branch.points.last().unwrap();
-        
-        println!("Initial mu: {}, Final mu: {}", branch.points[0].param_value, last_point.param_value);
-        assert!(last_point.param_value > branch.points[0].param_value, 
-                "Continuation moved backward! Initial mu: {}, Final mu: {}", 
-                branch.points[0].param_value, last_point.param_value);
-    }
-}

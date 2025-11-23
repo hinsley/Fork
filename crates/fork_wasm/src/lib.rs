@@ -3,8 +3,10 @@ use fork_core::analysis::{
 };
 use fork_core::autodiff::Dual;
 use fork_core::continuation::{
+    compute_eigenvalues_for_state, continue_limit_cycle_collocation,
     continue_parameter as core_continuation, extend_branch as core_extend_branch,
-    compute_eigenvalues_for_state, ContinuationBranch, ContinuationSettings,
+    extend_limit_cycle_collocation, limit_cycle_setup_from_hopf, CollocationConfig,
+    ContinuationBranch, ContinuationSettings,
 };
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
 use fork_core::equilibrium::{
@@ -13,7 +15,7 @@ use fork_core::equilibrium::{
 use fork_core::solvers::{DiscreteMap, Tsit5, RK4};
 use fork_core::traits::{DynamicalSystem, Steppable};
 use js_sys::Float64Array;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 
@@ -37,6 +39,31 @@ enum SystemType {
     Map,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct JsLimitCycleRequest {
+    #[serde(rename = "meshPoints")]
+    mesh_points: usize,
+    degree: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct JsLimitCycleMeta {
+    method: String,
+    #[serde(rename = "meshPoints")]
+    mesh_points: Option<usize>,
+    degree: Option<usize>,
+    #[serde(rename = "phaseAnchor")]
+    phase_anchor: Vec<f64>,
+    #[serde(rename = "phaseDirection")]
+    phase_direction: Vec<f64>,
+}
+
+#[derive(Serialize)]
+struct LimitCycleBranchResponse {
+    branch: ContinuationBranch,
+    meta: JsLimitCycleMeta,
+}
+
 #[wasm_bindgen]
 impl WasmSystem {
     #[wasm_bindgen(constructor)]
@@ -58,7 +85,7 @@ impl WasmSystem {
 
         let mut system = EquationSystem::new(bytecodes, params);
         system.set_maps(compiler.param_map, compiler.var_map);
-        
+
         let dim = system.equations.len();
 
         let solver = match solver_name {
@@ -146,7 +173,11 @@ impl WasmSystem {
         if dt <= 0.0 {
             return Err(JsValue::from_str("dt must be positive."));
         }
-        let stride = if qr_stride == 0 { 1 } else { qr_stride as usize };
+        let stride = if qr_stride == 0 {
+            1
+        } else {
+            qr_stride as usize
+        };
         let step_count = steps as usize;
         let solver = match &self.solver {
             SolverType::RK4(_) => LyapunovStepper::Rk4,
@@ -203,7 +234,11 @@ impl WasmSystem {
             &start_state,
             start_time,
             dt,
-            if qr_stride == 0 { 1 } else { qr_stride as usize },
+            if qr_stride == 0 {
+                1
+            } else {
+                qr_stride as usize
+            },
             window_steps as usize,
             forward_transient as usize,
             backward_transient as usize,
@@ -252,24 +287,27 @@ impl WasmSystem {
     ) -> Result<JsValue, JsValue> {
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
-            
+
         let kind = match self.system_type {
             SystemType::Flow => SystemKind::Flow,
             SystemType::Map => SystemKind::Map,
         };
-        
-        let param_index = *self.system.param_map.get(parameter_name)
-            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
-        
+
+        let param_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
+
         let branch = core_continuation(
             &mut self.system,
             kind,
             &equilibrium_state,
             param_index,
             settings,
-            forward
-        ).map_err(|e| JsValue::from_str(&format!("Continuation failed: {}", e)))?;
-        
+            forward,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Continuation failed: {}", e)))?;
+
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
@@ -282,7 +320,7 @@ impl WasmSystem {
     ) -> Result<JsValue, JsValue> {
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
-        
+
         let branch: ContinuationBranch = from_value(branch_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid branch data: {}", e)))?;
 
@@ -290,20 +328,145 @@ impl WasmSystem {
             SystemType::Flow => SystemKind::Flow,
             SystemType::Map => SystemKind::Map,
         };
-        
-        let param_index = *self.system.param_map.get(parameter_name)
-            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
-        
+
+        let param_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
+
         let updated_branch = core_extend_branch(
             &mut self.system,
             kind,
             branch,
             param_index,
             settings,
-            forward
-        ).map_err(|e| JsValue::from_str(&format!("Branch extension failed: {}", e)))?;
-        
-        to_value(&updated_branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+            forward,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Branch extension failed: {}", e)))?;
+
+        to_value(&updated_branch)
+            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn continue_limit_cycle_from_hopf(
+        &mut self,
+        hopf_state: Vec<f64>,
+        hopf_param: f64,
+        parameter_name: &str,
+        method_val: JsValue,
+        amplitude: f64,
+        settings_val: JsValue,
+        forward: bool,
+    ) -> Result<JsValue, JsValue> {
+        if !matches!(self.system_type, SystemType::Flow) {
+            return Err(JsValue::from_str(
+                "Limit cycle continuation is only available for flow systems",
+            ));
+        }
+
+        let req: JsLimitCycleRequest = from_value(method_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid method settings: {}", e)))?;
+        let settings: ContinuationSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
+
+        let param_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
+
+        let setup = limit_cycle_setup_from_hopf(
+            &mut self.system,
+            param_index,
+            &hopf_state,
+            hopf_param,
+            req.mesh_points,
+            req.degree,
+            amplitude,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Failed to build initial guess: {}", e)))?;
+
+        let branch = continue_limit_cycle_collocation(
+            &mut self.system,
+            param_index,
+            setup.collocation_config(),
+            setup.guess.clone(),
+            settings,
+            forward,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Limit cycle continuation failed: {}", e)))?;
+        let response = LimitCycleBranchResponse {
+            branch,
+            meta: JsLimitCycleMeta {
+                method: "collocation".into(),
+                mesh_points: Some(setup.mesh_points),
+                degree: Some(setup.collocation_degree),
+                phase_anchor: setup.phase_anchor.clone(),
+                phase_direction: setup.phase_direction.clone(),
+            },
+        };
+
+        to_value(&response).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn extend_limit_cycle_branch(
+        &mut self,
+        branch_val: JsValue,
+        parameter_name: &str,
+        meta_val: JsValue,
+        settings_val: JsValue,
+        forward: bool,
+    ) -> Result<JsValue, JsValue> {
+        if !matches!(self.system_type, SystemType::Flow) {
+            return Err(JsValue::from_str(
+                "Limit cycle continuation is only available for flow systems",
+            ));
+        }
+
+        let branch: ContinuationBranch = from_value(branch_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid branch data: {}", e)))?;
+        let meta: JsLimitCycleMeta = from_value(meta_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid limit cycle metadata: {}", e)))?;
+        let settings: ContinuationSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
+
+        let param_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
+
+        if meta.method.as_str() != "collocation" {
+            return Err(JsValue::from_str(
+                "Only collocation-based limit cycle branches are supported.",
+            ));
+        }
+        let mesh_points = meta
+            .mesh_points
+            .ok_or_else(|| JsValue::from_str("Missing meshPoints for collocation branch"))?;
+        let degree = meta
+            .degree
+            .ok_or_else(|| JsValue::from_str("Missing degree for collocation branch"))?;
+        let config = CollocationConfig {
+            mesh_points,
+            degree,
+            phase_anchor: meta.phase_anchor.clone(),
+            phase_direction: meta.phase_direction.clone(),
+        };
+        let updated_branch = extend_limit_cycle_collocation(
+            &mut self.system,
+            param_index,
+            config,
+            branch,
+            settings,
+            forward,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Branch extension failed: {}", e)))?;
+
+        let response = LimitCycleBranchResponse {
+            branch: updated_branch,
+            meta,
+        };
+
+        to_value(&response).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
     pub fn compute_equilibrium_eigenvalues(
@@ -317,26 +480,23 @@ impl WasmSystem {
             SystemType::Map => SystemKind::Map,
         };
 
-        let param_index = *self
-            .system
-            .param_map
-            .get(parameter_name)
-            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
+        let param_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
 
         if state.len() != self.system.equations.len() {
-            return Err(JsValue::from_str("State dimension mismatch for eigenvalue computation."));
+            return Err(JsValue::from_str(
+                "State dimension mismatch for eigenvalue computation.",
+            ));
         }
 
-        let eigenvalues = compute_eigenvalues_for_state(
-            &mut self.system,
-            kind,
-            &state,
-            param_index,
-            param_value,
-        )
-        .map_err(|e| JsValue::from_str(&format!("Eigenvalue computation failed: {}", e)))?;
+        let eigenvalues =
+            compute_eigenvalues_for_state(&mut self.system, kind, &state, param_index, param_value)
+                .map_err(|e| JsValue::from_str(&format!("Eigenvalue computation failed: {}", e)))?;
 
-        to_value(&eigenvalues).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        to_value(&eigenvalues)
+            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 }
 

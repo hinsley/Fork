@@ -33,28 +33,19 @@ def discover_limit_cycle_branches(systems_root: Path) -> List[Dict[str, str]]:
         objects_dir = system_dir / "objects"
         if not objects_dir.exists():
             continue
-
-        # Objects-first layout: branches live under objects/<object>/branches/*.json.
-        for obj_dir in objects_dir.iterdir():
-            if not obj_dir.is_dir():
+        for obj_path in objects_dir.glob("*.json"):
+            data = json.loads(obj_path.read_text())
+            if data.get("type") != "continuation":
                 continue
-            branches_dir = obj_dir / "branches"
-            if not branches_dir.exists():
+            if (data.get("branchKind") or "equilibrium") != "limitCycle":
                 continue
-            for branch_path in branches_dir.glob("*.json"):
-                data = json.loads(branch_path.read_text())
-                if data.get("type") != "continuation":
-                    continue
-                if (data.get("branchType") or "equilibrium") != "limit_cycle":
-                    continue
-                records.append(
-                    {
-                        "system": system_dir.name,
-                        "branch": branch_path.stem,
-                        "path": str(branch_path),
-                        "parent_object": obj_dir.name,
-                    }
-                )
+            records.append(
+                {
+                    "system": system_dir.name,
+                    "branch": obj_path.stem,
+                    "path": str(obj_path),
+                }
+            )
     return sorted(records, key=lambda r: (r["system"], r["branch"]))
 
 
@@ -74,20 +65,18 @@ def prompt_branch(records: List[Dict[str, str]]) -> Dict[str, str]:
 def load_branch(
     systems_root: Path, system_name: str, branch_name: str
 ) -> Dict:
-    # Try to resolve by scanning all objects/*/branches/<branch>.json.
-    candidate_paths = list((systems_root / system_name / "objects").glob(f"*/branches/{branch_name}.json"))
-    if not candidate_paths:
+    branch_path = systems_root / system_name / "objects" / f"{branch_name}.json"
+    if not branch_path.exists():
         raise FileNotFoundError(
-            f'Branch "{branch_name}" not found under "{systems_root / system_name / "objects"}". '
-            "Use `objects/<object>/branches/<branch>.json`."
+            f'Branch file "{branch_path}" not found. '
+            "Use `cli/data/systems/<system>/objects/` for names."
         )
-    branch_path = candidate_paths[0]
     data = json.loads(branch_path.read_text())
     if data.get("type") != "continuation":
-        raise ValueError(f"{branch_path} is not a continuation branch.")
-    if (data.get("branchType") or "equilibrium") != "limit_cycle":
+        raise ValueError(f"{branch_path} is not a continuation object.")
+    if (data.get("branchKind") or "equilibrium") != "limitCycle":
         raise ValueError(
-            f'{branch_name} is not a limit-cycle branch (branchType={data.get("branchType")}).'
+            f'{branch_name} is not a limit-cycle branch (kind={data.get("branchKind")}).'
         )
     return data
 

@@ -70,7 +70,14 @@ export interface ContinuationEigenvalue {
 export interface ContinuationPoint {
     state: number[];
     param_value: number;
-    stability: "None" | "Fold" | "Hopf";
+    stability:
+        | "None"
+        | "Fold"
+        | "Hopf"
+        | "NeutralSaddle"
+        | "CycleFold"
+        | "PeriodDoubling"
+        | "NeimarkSacker";
     eigenvalues?: ContinuationEigenvalue[];
 }
 
@@ -78,6 +85,16 @@ export interface ContinuationBranchData {
     points: ContinuationPoint[];
     bifurcations: number[];
     indices: number[];
+}
+
+export type ContinuationBranchKind = "equilibrium" | "limitCycle";
+
+export interface LimitCycleMeta {
+    method: "collocation";
+    meshPoints?: number;
+    degree?: number;
+    phaseAnchor: number[];
+    phaseDirection: number[];
 }
 
 export interface ContinuationObject {
@@ -89,6 +106,13 @@ export interface ContinuationObject {
     data: ContinuationBranchData;
     settings: any; // Store settings used
     timestamp: string;
+    branchKind?: ContinuationBranchKind;
+    limitCycleMeta?: LimitCycleMeta;
+}
+
+export interface LimitCycleBranchResponse {
+    branch: ContinuationBranchData;
+    meta: LimitCycleMeta;
 }
 
 export type AnalysisObject = OrbitObject | EquilibriumObject | ContinuationObject;
