@@ -1,6 +1,6 @@
 use crate::{
     autodiff::{Dual, TangentSystem},
-    solvers::{DiscreteMap, RK4, Tsit5},
+    solvers::{DiscreteMap, Tsit5, RK4},
     traits::{DynamicalSystem, Steppable},
 };
 use anyhow::{anyhow, bail, Result};
@@ -386,7 +386,9 @@ fn normalize_columns(matrix: &mut [f64], dim: usize) -> Result<()> {
         }
         norm = norm.sqrt();
         if norm <= f64::EPSILON {
-            return Err(anyhow!("Encountered degenerate CLV column during normalization."));
+            return Err(anyhow!(
+                "Encountered degenerate CLV column during normalization."
+            ));
         }
         for row in 0..dim {
             matrix[row * dim + col] /= norm;
