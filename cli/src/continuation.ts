@@ -18,6 +18,13 @@ import {
     parseIntOrDefault,
     runConfigMenu
 } from './menu';
+import {
+    printHeader,
+    printField,
+    printSuccess,
+    printError,
+    printInfo
+} from './format';
 
 const NAME_REGEX = /^[a-zA-Z0-9_]+$/;
 
@@ -51,7 +58,7 @@ export async function continuationMenu(sysName: string) {
         choices.push({ name: 'Back', value: 'BACK' });
 
         const { selection } = await inquirer.prompt({
-            type: 'list',
+            type: 'rawlist',
             name: 'selection',
             message: 'Continuation Menu',
             choices,
@@ -110,7 +117,7 @@ async function createBranch(sysName: string) {
             getDisplay: () => selectedEqName || '(required)',
             edit: async () => {
                 const { value } = await inquirer.prompt({
-                    type: 'list',
+                    type: 'rawlist',
                     name: 'value',
                     message: 'Select Starting Equilibrium:',
                     choices: objects.map(o => ({
@@ -130,7 +137,7 @@ async function createBranch(sysName: string) {
             getDisplay: () => selectedParamName || '(required)',
             edit: async () => {
                 const { value } = await inquirer.prompt({
-                    type: 'list',
+                    type: 'rawlist',
                     name: 'value',
                     message: 'Select Continuation Parameter:',
                     choices: sysConfig.paramNames,
@@ -223,7 +230,7 @@ async function createBranch(sysName: string) {
             getDisplay: () => directionLabel(directionForward),
             edit: async () => {
                 const { value } = await inquirer.prompt({
-                    type: 'list',
+                    type: 'rawlist',
                     name: 'value',
                     message: 'Direction:',
                     choices: [
@@ -390,18 +397,22 @@ async function createBranch(sysName: string) {
 
 async function manageBranch(sysName: string, branch: ContinuationObject) {
     while (true) {
-        console.log(chalk.blue(`Branch: ${branch.name}`));
-        console.log(`Parameter: ${branch.parameterName}`);
-        console.log(`Points: ${branch.data.points.length}`);
+        printHeader(branch.name, `${branch.branchType || 'equilibrium'} continuation`);
+        printField('Parameter', branch.parameterName);
+        printField('Points', branch.data.points.length.toLocaleString());
+        printField('Bifurcations', branch.data.bifurcations.length.toString());
+        console.log('');
 
         const { action } = await inquirer.prompt({
-            type: 'list',
+            type: 'rawlist',
             name: 'action',
             message: 'Branch Actions',
             choices: [
                 { name: 'Inspect Data', value: 'Inspect Data' },
                 { name: 'Extend Branch', value: 'Extend Branch' },
+                new inquirer.Separator(),
                 { name: 'Delete Branch', value: 'Delete Branch' },
+                new inquirer.Separator(),
                 { name: 'Back', value: 'Back' }
             ],
             pageSize: MENU_PAGE_SIZE
@@ -410,7 +421,11 @@ async function manageBranch(sysName: string, branch: ContinuationObject) {
         if (action === 'Back') return;
 
         if (action === 'Inspect Data') {
-            await inspectBranch(sysName, branch);
+            const result = await inspectBranch(sysName, branch);
+            // If an LC branch was initiated from a Hopf point, exit to continuation menu
+            if (result === 'INITIATED_LC') {
+                return;
+            }
         } else if (action === 'Extend Branch') {
             await extendBranch(sysName, branch);
         } else if (action === 'Delete Branch') {
@@ -432,7 +447,7 @@ async function extendBranch(sysName: string, branch: ContinuationObject) {
     const sysConfig = Storage.loadSystem(sysName);
 
     const { direction } = await inquirer.prompt({
-        type: 'list',
+        type: 'rawlist',
         name: 'direction',
         message: 'Extension Direction:',
         choices: [
@@ -505,10 +520,10 @@ async function extendBranch(sysName: string, branch: ContinuationObject) {
     }
 }
 
-type BranchDetailResult = 'SUMMARY' | 'EXIT';
+type BranchDetailResult = 'SUMMARY' | 'EXIT' | 'INITIATED_LC';
 const DETAIL_PAGE_SIZE = 10;
 
-async function inspectBranch(sysName: string, branch: ContinuationObject) {
+async function inspectBranch(sysName: string, branch: ContinuationObject): Promise<'EXIT' | 'INITIATED_LC' | void> {
     await hydrateEigenvalues(sysName, branch);
     const points = branch.data.points;
 
@@ -519,7 +534,7 @@ async function inspectBranch(sysName: string, branch: ContinuationObject) {
     }
 
     const indices = ensureBranchIndices(branch);
-    await browseBranchSummary(sysName, branch, indices);
+    return await browseBranchSummary(sysName, branch, indices);
 }
 
 function ensureBranchIndices(branch: ContinuationObject): number[] {
@@ -562,7 +577,7 @@ function buildSortedArrayOrder(indices: number[]): number[] {
         .map(entry => entry.arrayIdx);
 }
 
-async function browseBranchSummary(sysName: string, branch: ContinuationObject, indices: number[]) {
+async function browseBranchSummary(sysName: string, branch: ContinuationObject, indices: number[]): Promise<'EXIT' | 'INITIATED_LC' | void> {
     const sortedOrder = buildSortedArrayOrder(indices);
     while (true) {
         const summaryChoices = buildSummaryChoices(branch, indices, sortedOrder);
@@ -571,7 +586,7 @@ async function browseBranchSummary(sysName: string, branch: ContinuationObject, 
         choices.push({ name: chalk.red('Exit Branch Viewer'), value: 'EXIT' });
 
         const { selection } = await inquirer.prompt({
-            type: 'list',
+            type: 'rawlist',
             name: 'selection',
             message: 'Branch Summary',
             choices,
@@ -579,14 +594,14 @@ async function browseBranchSummary(sysName: string, branch: ContinuationObject, 
         });
 
         if (selection === 'EXIT') {
-            return;
+            return 'EXIT';
         }
 
         if (typeof selection === 'string' && selection.startsWith('POINT:')) {
             const targetIdx = parseInt(selection.split(':')[1], 10);
             const detailResult = await browseBranchPoints(sysName, branch, indices, targetIdx, sortedOrder);
-            if (detailResult === 'EXIT') {
-                return;
+            if (detailResult === 'EXIT' || detailResult === 'INITIATED_LC') {
+                return detailResult;
             }
         }
     }
@@ -669,21 +684,21 @@ async function browseBranchPoints(
         const headerText = `Points ${start + 1}-${end} of ${total}`;
         const choices: any[] = [
             new inquirer.Separator(headerText),
-            {
-                name: page === 0 ? chalk.gray('◀ Previous Page') : '◀ Previous Page',
-                value: 'PREV_PAGE',
-                disabled: page === 0
-            },
-            {
-                name: page >= totalPages - 1 ? chalk.gray('Next Page ▶') : 'Next Page ▶',
-                value: 'NEXT_PAGE',
-                disabled: page >= totalPages - 1
-            },
-            { name: 'Jump to Logical Index...', value: 'JUMP_INDEX' },
-            { name: 'Back to Summary', value: 'SUMMARY' },
-            { name: chalk.red('Exit Branch Viewer'), value: 'EXIT' },
-            new inquirer.Separator()
         ];
+
+        // Only show pagination options when they're actually usable
+        if (page > 0) {
+            choices.push({ name: '◀ Previous Page', value: 'PREV_PAGE' });
+        }
+        if (page < totalPages - 1) {
+            choices.push({ name: 'Next Page ▶', value: 'NEXT_PAGE' });
+        }
+
+        choices.push({ name: 'Jump to Logical Index...', value: 'JUMP_INDEX' });
+        choices.push(new inquirer.Separator());
+        choices.push({ name: 'Back to Summary', value: 'SUMMARY' });
+        choices.push({ name: chalk.red('Exit Branch Viewer'), value: 'EXIT' });
+        choices.push(new inquirer.Separator());
 
         for (let sortedIdx = start; sortedIdx < end; sortedIdx++) {
             const arrayIdx = sortedOrder[sortedIdx];
@@ -698,7 +713,7 @@ async function browseBranchPoints(
         }
 
         const { selection } = await inquirer.prompt({
-            type: 'list',
+            type: 'rawlist',
             name: 'selection',
             message: 'Inspect Branch Points',
             choices,
@@ -757,7 +772,10 @@ async function browseBranchPoints(
             currentFocusSortedIdx = sortedOrder.findIndex(idx => idx === arrayIdx);
             if (currentFocusSortedIdx === -1) currentFocusSortedIdx = 0;
             page = Math.floor(currentFocusSortedIdx / DETAIL_PAGE_SIZE);
-            await showPointDetails(sysName, branch, indices, arrayIdx, bifurcationSet.has(arrayIdx));
+            const pointResult = await showPointDetails(sysName, branch, indices, arrayIdx, bifurcationSet.has(arrayIdx));
+            if (pointResult === 'INITIATED_LC') {
+                return 'INITIATED_LC';
+            }
         }
     }
 }
@@ -924,7 +942,7 @@ async function initiateLCFromHopf(
             getDisplay: () => directionLabel(directionForward),
             edit: async () => {
                 const { value } = await inquirer.prompt({
-                    type: 'list',
+                    type: 'rawlist',
                     name: 'value',
                     message: 'Direction:',
                     choices: [
@@ -1081,11 +1099,12 @@ async function showPointDetails(
     if (pt.stability === 'Hopf') {
         const choices = [
             { name: 'Initiate Limit Cycle Continuation', value: 'INITIATE_LC' },
+            new inquirer.Separator(),
             { name: 'Back', value: 'BACK' }
         ];
 
         const { action } = await inquirer.prompt({
-            type: 'list',
+            type: 'rawlist',
             name: 'action',
             message: 'Hopf Point Actions',
             choices,
