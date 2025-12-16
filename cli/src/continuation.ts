@@ -827,8 +827,8 @@ async function initiateLCFromHopf(
 ) {
     const sysConfig = Storage.loadSystem(sysName);
 
-    // Configuration defaults
-    let branchName = `lc_${branch.name}_${branch.parameterName}`;
+    // Configuration defaults - use lc_ prefix on source branch name (no need to add param again)
+    let branchName = `lc_${branch.name}`;
     let amplitudeInput = '0.1';
     let ntstInput = '20';
     let ncolInput = '4';
