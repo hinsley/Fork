@@ -105,3 +105,13 @@ export interface CovariantLyapunovData {
   times: number[];
   vectors: number[][][]; // [checkpoint][vector][component]
 }
+
+export interface LimitCycleMeta {
+  ntst: number;
+  ncol: number;
+}
+
+export interface LimitCycleBranchResponse {
+  branch: ContinuationBranchData;
+  meta: LimitCycleMeta;
+}

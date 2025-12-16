@@ -22,6 +22,16 @@ import {
     parseListInput,
     runConfigMenu
 } from './menu';
+import {
+    printHeader,
+    printField,
+    printArray,
+    printSuccess,
+    printError,
+    printInfo,
+    printDivider,
+    printBlank
+} from './format';
 
 const NAME_REGEX = /^[a-zA-Z0-9_]+$/;
 
@@ -40,49 +50,49 @@ function objectExists(sysName: string, objectName: string): boolean {
 }
 
 async function mainMenu() {
-  while (true) {
-    const systems = Storage.listSystems();
-    
-    const choices = [];
-    choices.push({ name: 'Create New System', value: 'CREATE' });
-    
-    if (systems.length > 0) {
+    while (true) {
+        const systems = Storage.listSystems();
+
+        const choices = [];
+        choices.push({ name: 'Create New System', value: 'CREATE' });
+
+        if (systems.length > 0) {
+            choices.push(new inquirer.Separator());
+            systems.forEach(name => {
+                const sys = Storage.loadSystem(name);
+                const typeLabel = sys.type ? `(${sys.type})` : '(unknown)';
+                choices.push({ name: `${name} ${typeLabel}`, value: name });
+            });
+        }
+
         choices.push(new inquirer.Separator());
-        systems.forEach(name => {
-            const sys = Storage.loadSystem(name);
-            const typeLabel = sys.type ? `(${sys.type})` : '(unknown)';
-            choices.push({ name: `${name} ${typeLabel}`, value: name });
-        });
-    }
-    
-    choices.push(new inquirer.Separator());
-    choices.push({ name: 'Exit', value: 'EXIT' });
+        choices.push({ name: 'Exit', value: 'EXIT' });
 
-    const { systemSelection } = await inquirer.prompt([{
-      type: 'list',
-      name: 'systemSelection',
-      message: 'Select a system',
-      choices: choices,
-      pageSize: MENU_PAGE_SIZE
-    }]);
+        const { systemSelection } = await inquirer.prompt([{
+            type: 'rawlist',
+            name: 'systemSelection',
+            message: 'Select a system',
+            choices: choices,
+            pageSize: MENU_PAGE_SIZE
+        }]);
 
-    if (systemSelection === 'EXIT') process.exit(0);
-    
-    if (systemSelection === 'CREATE') {
-        await createSystem();
-    } else {
-        await systemContext(systemSelection);
+        if (systemSelection === 'EXIT') process.exit(0);
+
+        if (systemSelection === 'CREATE') {
+            await createSystem();
+        } else {
+            await systemContext(systemSelection);
+        }
     }
-  }
 }
 
 async function systemContext(initialSysName: string) {
     let sysName = initialSysName;
-    
+
     while (true) {
         const sys = Storage.loadSystem(sysName);
-        const typeLabel = sys.type ? `(${sys.type})` : '(unknown)';
-        console.log(chalk.magenta(`\nActive System: ${sysName} ${typeLabel}`));
+        const typeLabel = sys.type || 'flow';
+        printHeader(sysName, `${typeLabel} system`);
 
         const choices = [
             { name: 'Objects', value: 'Objects' },
@@ -96,7 +106,7 @@ async function systemContext(initialSysName: string) {
         ];
 
         const { action } = await inquirer.prompt([{
-            type: 'list',
+            type: 'rawlist',
             name: 'action',
             message: 'System Menu',
             choices: choices,
@@ -122,11 +132,11 @@ async function systemContext(initialSysName: string) {
                 console.error(chalk.red(`System "${newName}" already exists.`));
                 continue;
             }
-            
+
             const newSys: SystemConfig = { ...sys, name: newName };
             Storage.saveSystem(newSys);
             console.log(chalk.green(`System duplicated as ${newName}`));
-            sysName = newName; 
+            sysName = newName;
             console.log(chalk.cyan(`Switching to duplicated system: ${sysName}`));
             continue;
         } else if (action === 'Delete System') {
@@ -136,7 +146,7 @@ async function systemContext(initialSysName: string) {
                 message: `Are you sure you want to delete ${sysName}?`,
                 default: false
             });
-    
+
             if (confirm) {
                 Storage.deleteSystem(sysName);
                 console.log(chalk.green(`System ${sysName} deleted.`));
@@ -171,7 +181,7 @@ async function createSystem() {
             getDisplay: () => typeChoice,
             edit: async () => {
                 const { value } = await inquirer.prompt({
-                    type: 'list',
+                    type: 'rawlist',
                     name: 'value',
                     message: 'System Type (Flow = ODE, Map = Iterated Function):',
                     choices: ['Flow', 'Map'],
@@ -221,7 +231,7 @@ async function createSystem() {
     } else {
         const { solver } = await inquirer.prompt({
             name: 'solver',
-            type: 'list',
+            type: 'rawlist',
             choices: ['rk4', 'tsit5'],
             message: 'Default Solver:',
             pageSize: MENU_PAGE_SIZE
@@ -305,26 +315,33 @@ async function createSystem() {
 
 async function editSystem(sys: SystemConfig): Promise<string | undefined> {
     const originalName = sys.name;
-    
+
     while (true) {
-        console.log(chalk.cyan(`Editing System: ${sys.name} (${sys.type || 'flow'})`));
-        console.log(`Solver: ${sys.solver}`);
-        console.log(`Variables: ${sys.varNames.join(', ')}`);
-        console.log(`Equations:`);
+        printHeader(`Edit: ${sys.name}`, `${sys.type || 'flow'} system`);
+        printField('Solver', sys.solver);
+        printField('Variables', sys.varNames.join(', '));
+        console.log(chalk.dim('  Equations:'));
         sys.varNames.forEach((v, i) => {
             const prefix = sys.type === 'map' ? `${v}_{n+1}` : `d${v}/dt`;
-            console.log(`  ${prefix} = ${sys.equations[i]}`);
+            console.log(`    ${chalk.cyan(prefix)} = ${sys.equations[i]}`);
         });
-        console.log(`Parameters:`);
-        sys.paramNames.forEach((p, i) => console.log(`  ${p} = ${sys.params[i]}`));
+        console.log(chalk.dim('  Parameters:'));
+        sys.paramNames.forEach((p, i) => console.log(`    ${chalk.cyan(p)} = ${sys.params[i]}`));
 
-        const choices = ['Edit Name', 'Edit Equations', 'Edit Parameters', 'Save & Back', 'Cancel'];
+        const choices: any[] = [
+            { name: 'Edit Name', value: 'Edit Name' },
+            { name: 'Edit Equations', value: 'Edit Equations' },
+            { name: 'Edit Parameters', value: 'Edit Parameters' },
+        ];
         if (!sys.type || sys.type === 'flow') {
-            choices.splice(3, 0, 'Change Solver');
+            choices.push({ name: 'Change Solver', value: 'Change Solver' });
         }
+        choices.push(new inquirer.Separator());
+        choices.push({ name: 'Save & Back', value: 'Save & Back' });
+        choices.push({ name: 'Cancel', value: 'Cancel' });
 
         const { action } = await inquirer.prompt([{
-            type: 'list',
+            type: 'rawlist',
             name: 'action',
             message: 'Edit Options',
             choices,
@@ -341,15 +358,15 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
             Storage.saveSystem(sys);
             console.log(chalk.green("System saved."));
             if (sys.name !== originalName) {
-                 console.log(chalk.yellow("System name changed. Returning to system menu."));
+                console.log(chalk.yellow("System name changed. Returning to system menu."));
             }
             return sys.name;
         }
-        
+
         if (action === 'Edit Name') {
-            const { name } = await inquirer.prompt({ 
-                name: 'name', 
-                message: 'New System Name:', 
+            const { name } = await inquirer.prompt({
+                name: 'name',
+                message: 'New System Name:',
                 default: sys.name,
                 validate: isValidName
             });
@@ -360,14 +377,15 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
             sys.name = name;
         } else if (action === 'Edit Equations') {
             while (true) {
-                const choices = sys.varNames.map((v, i) => {
+                const choices: any[] = sys.varNames.map((v, i) => {
                     const prefix = sys.type === 'map' ? `${v}_{n+1}` : `d${v}/dt`;
                     return { name: `${prefix} = ${sys.equations[i]}`, value: i };
                 });
+                choices.push(new inquirer.Separator());
                 choices.push({ name: 'Back', value: -1 });
 
                 const { eqIdx } = await inquirer.prompt({
-                    type: 'list',
+                    type: 'rawlist',
                     name: 'eqIdx',
                     message: 'Select Equation to Edit:',
                     choices,
@@ -378,22 +396,23 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
 
                 const v = sys.varNames[eqIdx];
                 const prefix = sys.type === 'map' ? `${v}_{n+1}` : `d${v}/dt`;
-                const { eq } = await inquirer.prompt({ 
-                    name: 'eq', 
-                    message: `${prefix} = `, 
-                    default: sys.equations[eqIdx] 
+                const { eq } = await inquirer.prompt({
+                    name: 'eq',
+                    message: `${prefix} = `,
+                    default: sys.equations[eqIdx]
                 });
                 sys.equations[eqIdx] = eq;
             }
         } else if (action === 'Edit Parameters') {
             while (true) {
-                const choices = sys.paramNames.map((p, i) => {
+                const choices: any[] = sys.paramNames.map((p, i) => {
                     return { name: `${p} = ${sys.params[i]}`, value: i };
                 });
+                choices.push(new inquirer.Separator());
                 choices.push({ name: 'Back', value: -1 });
 
                 const { paramIdx } = await inquirer.prompt({
-                    type: 'list',
+                    type: 'rawlist',
                     name: 'paramIdx',
                     message: 'Select Parameter to Edit:',
                     choices,
@@ -403,18 +422,18 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
                 if (paramIdx === -1) break;
 
                 const p = sys.paramNames[paramIdx];
-                const { val } = await inquirer.prompt({ 
-                    name: 'val', 
-                    message: `Value for ${p}:`, 
-                    default: sys.params[paramIdx].toString() 
+                const { val } = await inquirer.prompt({
+                    name: 'val',
+                    message: `Value for ${p}:`,
+                    default: sys.params[paramIdx].toString()
                 });
                 sys.params[paramIdx] = parseFloat(val);
             }
         } else if (action === 'Change Solver') {
-            const { solver } = await inquirer.prompt({ 
-                type: 'list',
-                name: 'solver', 
-                message: 'Select Solver:', 
+            const { solver } = await inquirer.prompt({
+                type: 'rawlist',
+                name: 'solver',
+                message: 'Select Solver:',
                 choices: ['rk4', 'tsit5'],
                 default: sys.solver,
                 pageSize: MENU_PAGE_SIZE
@@ -428,23 +447,23 @@ async function objectsListMenu(sysName: string) {
     while (true) {
         const objects = Storage.listObjects(sysName);
         const choices = [];
-        
+
         choices.push({ name: 'Create New Object', value: 'CREATE' });
 
         if (objects.length > 0) {
-             choices.push(new inquirer.Separator());
-             objects.forEach(name => {
-                 const obj = Storage.loadObject(sysName, name);
-                 if (obj.type === 'continuation') return; // Filter out continuation branches
-                 choices.push({ name: `${name} (${obj.type})`, value: name });
-             });
+            choices.push(new inquirer.Separator());
+            objects.forEach(name => {
+                const obj = Storage.loadObject(sysName, name);
+                if (obj.type === 'continuation') return; // Filter out continuation branches
+                choices.push({ name: `${name} (${obj.type})`, value: name });
+            });
         }
-        
+
         choices.push(new inquirer.Separator());
         choices.push({ name: 'Back', value: 'BACK' });
 
         const { objName } = await inquirer.prompt({
-            type: 'list',
+            type: 'rawlist',
             name: 'objName',
             message: 'Select Object to Manage',
             choices: choices,
@@ -452,14 +471,18 @@ async function objectsListMenu(sysName: string) {
         });
 
         if (objName === 'BACK') return;
-        
+
         if (objName === 'CREATE') {
             const { objType } = await inquirer.prompt({
-                type: 'list',
+                type: 'rawlist',
                 name: 'objType',
-                message: 'Select Object Type to Create:',
-                choices: ['Orbit', 'Equilibrium', 'Back'],
-                pageSize: MENU_PAGE_SIZE
+                message: 'Select Object Type:',
+                choices: [
+                    { name: 'Orbit', value: 'Orbit' },
+                    { name: 'Equilibrium', value: 'Equilibrium' },
+                    new inquirer.Separator(),
+                    { name: 'Back', value: 'Back' }
+                ],
             });
 
             if (objType === 'Back') continue;
@@ -470,11 +493,11 @@ async function objectsListMenu(sysName: string) {
                 await createEquilibrium(sysName);
             }
         } else {
-             const obj = Storage.loadObject(sysName, objName) as AnalysisObject;
-             // Should not happen due to filter, but safety check
-             if (obj.type !== 'continuation') {
-                 await manageObject(sysName, obj);
-             }
+            const obj = Storage.loadObject(sysName, objName) as AnalysisObject;
+            // Should not happen due to filter, but safety check
+            if (obj.type !== 'continuation') {
+                await manageObject(sysName, obj);
+            }
         }
     }
 }
@@ -492,7 +515,7 @@ async function createOrbit(sysName: string) {
         console.error(chalk.red(`Object "${objName}" already exists.`));
         return;
     }
-    
+
     const initialStateInputs = sysConfig.varNames.map(() => '0');
 
     if (initialStateInputs.length > 0) {
@@ -584,29 +607,29 @@ async function createOrbit(sysName: string) {
     const dt = isMap ? defaultDtValue : parseFloatOrDefault(dtInput, defaultDtValue);
 
     console.log(chalk.cyan("Initializing WASM Engine..."));
-    
+
     try {
         const bridge = new WasmBridge(sysConfig);
         bridge.set_state(ic);
-        
+
         const steps = Math.ceil(t_end / dt);
         const data = [];
-        
+
         let current_t = 0;
         data.push([current_t, ...ic]);
 
         const spinner = ['|', '/', '-', '\\'];
         process.stdout.write("Simulating... ");
 
-        const updateInterval = isMap ? 10000 : 1000; 
+        const updateInterval = isMap ? 10000 : 1000;
 
         for (let i = 0; i < steps; i++) {
             bridge.step(dt);
             current_t += dt;
             data.push([current_t, ...bridge.get_state()]);
-            
+
             if (i % updateInterval === 0) {
-                process.stdout.write(`\rSimulating... ${spinner[(i / updateInterval) % 4]} ${(i/steps*100).toFixed(0)}%`);
+                process.stdout.write(`\rSimulating... ${spinner[(i / updateInterval) % 4]} ${(i / steps * 100).toFixed(0)}%`);
             }
         }
         console.log(`\rSimulating... Done!   `);
@@ -674,15 +697,16 @@ async function manageObject(sysName: string, obj: AnalysisObject) {
 
 async function manageOrbit(sysName: string, obj: OrbitObject) {
     while (true) {
-        console.log(chalk.blue(`Loaded Object: ${obj.name} (${obj.type})`));
-        console.log(`System: ${obj.systemName}`);
+        printHeader(obj.name, 'orbit');
+        printField('System', obj.systemName);
         if (obj.parameters) {
-             console.log(`Parameters: [${obj.parameters.map(p => p.toPrecision(4)).join(', ')}]`);
+            printArray('Parameters', obj.parameters);
         }
-        console.log(`Points: ${obj.data.length}`);
+        printField('Data Points', obj.data.length.toLocaleString());
+        printBlank();
 
         const { action } = await inquirer.prompt([{
-            type: 'list',
+            type: 'rawlist',
             name: 'action',
             message: 'Object Actions',
             choices: [
@@ -855,7 +879,7 @@ async function manageOrbit(sysName: string, obj: OrbitObject) {
 async function oseledetsSolverMenu(sysName: string, obj: OrbitObject) {
     while (true) {
         const { task } = await inquirer.prompt([{
-            type: 'list',
+            type: 'rawlist',
             name: 'task',
             message: 'Oseledets Solver',
             choices: [
@@ -1117,12 +1141,12 @@ async function runCovariantLyapunovVectors(sysName: string, obj: OrbitObject) {
 
     let selection:
         | {
-              transient: number;
-              totalAvailable: number;
-              forwardTime: number;
-              backwardTime: number;
-              qrStride: number;
-          }
+            transient: number;
+            totalAvailable: number;
+            forwardTime: number;
+            backwardTime: number;
+            qrStride: number;
+        }
         | null = null;
 
     while (!selection) {
@@ -1361,15 +1385,17 @@ function reshapeCovariantVectors(payload: CovariantLyapunovResponse): CovariantL
 
 async function manageEquilibrium(sysName: string, obj: EquilibriumObject) {
     while (true) {
-        console.log(chalk.blue(`Loaded Object: ${obj.name} (${obj.type})`));
-        console.log(`System: ${obj.systemName}`);
+        printHeader(obj.name, 'equilibrium');
+        printField('System', obj.systemName);
         if (obj.parameters) {
-             console.log(`Parameters: [${obj.parameters.map(p => p.toPrecision(4)).join(', ')}]`);
+            printArray('Parameters', obj.parameters);
         }
-        console.log(`Solution: ${obj.solution ? 'available' : 'not yet computed'}`);
+        const solutionStatus = obj.solution ? chalk.green('✓ solved') : chalk.yellow('○ not computed');
+        printField('Solution', solutionStatus);
+        printBlank();
 
         const { action } = await inquirer.prompt([{
-            type: 'list',
+            type: 'rawlist',
             name: 'action',
             message: 'Object Actions',
             choices: [
