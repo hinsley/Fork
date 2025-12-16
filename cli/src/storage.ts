@@ -11,7 +11,7 @@ if (!fs.existsSync(SYSTEMS_DIR)) fs.mkdirSync(SYSTEMS_DIR);
 
 // Helper to get objects dir for a specific system
 const getObjectsDir = (systemName: string) => path.join(SYSTEMS_DIR, systemName, 'objects');
-const getContinuationDir = (systemName: string) => path.join(SYSTEMS_DIR, systemName, 'continuation');
+const getContinuationDir = (systemName: string) => path.join(SYSTEMS_DIR, systemName, 'branches');
 
 export const Storage = {
   listSystems: (): string[] => {
@@ -19,22 +19,22 @@ export const Storage = {
     // Systems are now directories
     return fs.readdirSync(SYSTEMS_DIR).filter(f => fs.statSync(path.join(SYSTEMS_DIR, f)).isDirectory());
   },
-  
+
   saveSystem: (config: SystemConfig) => {
     const sysDir = path.join(SYSTEMS_DIR, config.name);
     if (!fs.existsSync(sysDir)) fs.mkdirSync(sysDir, { recursive: true });
     // Save config as system.json inside the system folder
     fs.writeFileSync(path.join(sysDir, 'system.json'), JSON.stringify(config, null, 2));
   },
-  
+
   loadSystem: (name: string): SystemConfig => {
     const sysPath = path.join(SYSTEMS_DIR, name, 'system.json');
     // Backwards compatibility: try loading from old flat structure if folder doesn't exist
     if (!fs.existsSync(sysPath)) {
-        const oldPath = path.join(SYSTEMS_DIR, `${name}.json`);
-        if (fs.existsSync(oldPath)) {
-            return JSON.parse(fs.readFileSync(oldPath, 'utf-8'));
-        }
+      const oldPath = path.join(SYSTEMS_DIR, `${name}.json`);
+      if (fs.existsSync(oldPath)) {
+        return JSON.parse(fs.readFileSync(oldPath, 'utf-8'));
+      }
     }
     return JSON.parse(fs.readFileSync(sysPath, 'utf-8'));
   },
@@ -42,12 +42,12 @@ export const Storage = {
   deleteSystem: (name: string) => {
     const sysDir = path.join(SYSTEMS_DIR, name);
     if (fs.existsSync(sysDir)) {
-        fs.rmSync(sysDir, { recursive: true, force: true });
+      fs.rmSync(sysDir, { recursive: true, force: true });
     }
     // Also clean up old file if it exists
     const oldPath = path.join(SYSTEMS_DIR, `${name}.json`);
     if (fs.existsSync(oldPath)) {
-        fs.unlinkSync(oldPath);
+      fs.unlinkSync(oldPath);
     }
   },
 
@@ -72,7 +72,7 @@ export const Storage = {
     const objectsDir = getObjectsDir(systemName);
     const filePath = path.join(objectsDir, `${objectName}.json`);
     if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+      fs.unlinkSync(filePath);
     }
   },
 
@@ -84,21 +84,21 @@ export const Storage = {
   },
 
   saveContinuation: (systemName: string, branch: AnalysisObject) => {
-      const contDir = getContinuationDir(systemName);
-      if (!fs.existsSync(contDir)) fs.mkdirSync(contDir, { recursive: true });
-      fs.writeFileSync(path.join(contDir, `${branch.name}.json`), JSON.stringify(branch, null, 2));
+    const contDir = getContinuationDir(systemName);
+    if (!fs.existsSync(contDir)) fs.mkdirSync(contDir, { recursive: true });
+    fs.writeFileSync(path.join(contDir, `${branch.name}.json`), JSON.stringify(branch, null, 2));
   },
 
   loadContinuation: (systemName: string, name: string): AnalysisObject => {
-      const contDir = getContinuationDir(systemName);
-      return JSON.parse(fs.readFileSync(path.join(contDir, `${name}.json`), 'utf-8'));
+    const contDir = getContinuationDir(systemName);
+    return JSON.parse(fs.readFileSync(path.join(contDir, `${name}.json`), 'utf-8'));
   },
 
   deleteContinuation: (systemName: string, name: string) => {
-      const contDir = getContinuationDir(systemName);
-      const filePath = path.join(contDir, `${name}.json`);
-      if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-      }
+    const contDir = getContinuationDir(systemName);
+    const filePath = path.join(contDir, `${name}.json`);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
   }
 };
