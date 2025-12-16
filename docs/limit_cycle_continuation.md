@@ -1,32 +1,26 @@
-# Limit Cycle Continuation
+# Limit Cycle Continuation from Hopf Bifurcations
 
-This document describes how Fork implements limit cycle continuation, including initialization from both Hopf bifurcations and orbit data, the underlying numerical methods, and troubleshooting guidance.
+This document describes how Fork implements bifurcation from Hopf points to limit cycle continuation, including both the user-facing workflow and the underlying numerical methods.
 
 ## Table of Contents
 
 1. [Overview](#overview)
 2. [CLI Workflow](#cli-workflow)
-3. [Limit Cycle from Orbits](#limit-cycle-from-orbits)
-4. [Numerical Background](#numerical-background)
-5. [Hopf Point Detection and Refinement](#hopf-point-detection-and-refinement)
-6. [Limit Cycle Initialization from Hopf](#limit-cycle-initialization-from-hopf)
-7. [Orthogonal Collocation Discretization](#orthogonal-collocation-discretization)
-8. [The Continuation Problem](#the-continuation-problem)
-9. [Newton's Method and the Jacobian](#newtons-method-and-the-jacobian)
-10. [Branch Extension](#branch-extension)
-11. [Floquet Multiplier Extraction](#floquet-multiplier-extraction)
-12. [Best Practices for Accurate Floquet Multipliers](#best-practices-for-accurate-floquet-multipliers)
-13. [Branching to Period-Doubled Limit Cycles](#branching-to-period-doubled-limit-cycles)
+3. [Numerical Background](#numerical-background)
+4. [Hopf Point Detection and Refinement](#hopf-point-detection-and-refinement)
+5. [Limit Cycle Initialization from Hopf](#limit-cycle-initialization-from-hopf)
+6. [Orthogonal Collocation Discretization](#orthogonal-collocation-discretization)
+7. [The Continuation Problem](#the-continuation-problem)
+8. [Newton's Method and the Jacobian](#newtons-method-and-the-jacobian)
+9. [Branch Extension](#branch-extension)
 
 ---
 
 ## Overview
 
-Fork supports two methods for initiating limit cycle continuation:
+At a **Hopf bifurcation**, a pair of complex conjugate eigenvalues of the equilibrium's Jacobian crosses the imaginary axis. This marks the birth (or death) of a family of periodic orbits—**limit cycles**—that emanate from the equilibrium point.
 
-2. **From Orbit Data**: If you have an orbit that converges to a stable limit cycle (e.g., from numerical integration), Fork can extract one period and use it to initialize limit cycle continuation.
-
-3. **From Period-Doubling (PD) Bifurcation**: When a limit cycle undergoes a period-doubling bifurcation, a new limit cycle family emerges with double the period. Fork can branch from a detected PD point to this new family.
+Fork provides automated detection of Hopf bifurcations during equilibrium continuation and allows continuation of the limit cycle family in a chosen parameter.
 
 ### Key Concepts
 
@@ -77,152 +71,8 @@ After continuation completes, you can inspect the limit cycle branch:
 - Each point contains the full limit cycle profile
 - Eigenvalues (Floquet multipliers) indicate stability
 - Use the plotting script to visualize all cycles together
-### Step 5: Branch to Double Period (PD only)
-
-If a Period-Doubling (PD) bifurcation is detected (Floquet multiplier crosses -1):
-1. Inspect the branch points and find the point marked "PeriodDoubling".
-2. Select the point and choose "Branch to Period-Doubled Limit Cycle".
-3. Configure the perturbation amplitude (default 0.01) and run continuation.
 
 ---
-
-## Limit Cycle from Orbits
-
-When you have an orbit that converges to a stable limit cycle but no nearby Hopf bifurcation is known, you can initialize limit cycle continuation directly from the orbit data.
-
-### When to Use This Method
-
-- The system has a stable limit cycle discovered via simulation
-- You want to track the limit cycle family as parameters vary
-- No Hopf bifurcation is nearby or easily accessible
-- You're working with a system where finding equilibria is difficult
-
-### CLI Workflow
-
-#### Step 1: Compute an Orbit
-
-First, create an orbit that converges to the limit cycle:
-
-```
-System Menu → Objects → Create New Object → Orbit
-```
-
-**Important**: The orbit should:
-- Run long enough to settle onto the attractor (bypass transients)
-- Include at least 2-3 complete periods after settling
-- Have sufficient time resolution (small dt or many iterations)
-
-**Recommended duration**: At least 100× the expected period.
-
-#### Step 2: Create Limit Cycle Branch
-
-```
-System Menu → Continuation → Create New Branch → Limit Cycle Branch
-→ [select orbit] → [configure]
-```
-
-#### Step 3: Configure Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| Cycle detection tolerance | 0.1 | Max distance to consider a "return" to reference point |
-| ntst | 20 | Number of mesh intervals |
-| ncol | 4 | Collocation points per interval |
-| Direction | forward | Parameter direction |
-| Max points | 50 | Continuation steps |
-
-### Implementation Details
-
-The orbit-to-LC algorithm follows [MatCont's `initOrbLC.m`](https://matcont.ugent.be/) approach:
-
-#### 1. Reference Point Selection
-
-Use the point at **1/3 of the orbit** as the reference. This skips any initial transient while the trajectory settles onto the attractor:
-
-```
-ref_idx = n / 3
-x_ref = orbit[ref_idx]
-t_ref = times[ref_idx]
-```
-
-#### 2. Cycle Detection
-
-Search forward from the reference point for the **first local minimum** of the distance function that falls within tolerance:
-
-```
-for i in skip_start..n:
-    dist = |x[i] - x_ref|
-    if dist is local minimum AND dist < tolerance:
-        cycle_end = i
-        break
-```
-
-The period is `T = times[cycle_end] - t_ref`.
-
-#### 3. Remeshing to Collocation Grid
-
-The detected cycle (from `ref_idx` to `cycle_end`) is linearly interpolated onto a uniform mesh:
-
-```
-for k in 0..ntst:
-    tau = k / ntst  # Normalized time [0, 1)
-    mesh_state[k] = interpolate(tau, cycle)
-```
-
-Stage (collocation) points are then computed by interpolating between mesh points at the Gauss-Legendre nodes.
-
-#### 4. Phase Condition
-
-The phase anchor is set to the first mesh point, and the phase direction is the normalized velocity at that point:
-
-```
-phase_anchor = mesh[0]
-phase_direction = normalize(mesh[1] - mesh[0])
-```
-
-### Troubleshooting
-
-#### "No cycle detected" Error
-
-**Cause**: The orbit doesn't return close enough to the reference point within the tolerance.
-
-**Solutions**:
-1. **Increase tolerance** (e.g., 0.1 → 0.5) if the orbit sampling is coarse
-2. **Compute a longer orbit** to include more complete cycles
-3. **Reduce integration step size** for finer sampling
-
-#### Period Is Wrong (Multiple Periods Detected)
-
-**Cause**: The algorithm found a return at 2T or 3T instead of T.
-
-**Solutions**:
-1. This was fixed by using a small fixed skip (`skip_start = ref_idx + 10`) instead of a percentage-based skip
-2. If still occurring, ensure the orbit has sufficient resolution near the first return
-
-#### Newton Corrector Fails After Initialization
-
-**Cause**: The initial guess from remeshing isn't accurate enough.
-
-**Solutions**:
-1. **Increase ntst** for better mesh resolution
-2. **Increase orbit duration** for more accurate cycle extraction
-3. **Check orbit quality** — ensure it's actually converged to the limit cycle
-
-#### Low-Resolution Limit Cycle Plot
-
-**Cause**: Only mesh endpoints are being plotted, not the full collocation profile.
-
-**Solution**: The plotting script (`plot_lc_branch.py`) now extracts both mesh and stage states for full resolution. Update to the latest version.
-
-### Comparison with Hopf Initialization
-
-| Aspect | From Hopf | From Orbit |
-|--------|-----------|------------|
-| **Initial guess quality** | Excellent (analytical) | Good (numerical) |
-| **Period accuracy** | Exact from eigenvalue | Approximate from sampling |
-| **Requirements** | Hopf bifurcation point | Orbit converging to LC |
-| **Unstable LCs** | Yes (can continue backward) | No (orbit won't converge) |
-| **Transient handling** | Not needed | Skips first 1/3 of orbit |
 
 ## Numerical Background
 
@@ -298,34 +148,16 @@ r² ≈ -μ / l₁
 
 ### Eigenvector-Based Initialization
 
-Fork uses the complex eigenvector q to construct an initial limit cycle guess, following the approach in MatCont's `init_H_LC.m`.
-
-#### Step 1: Eigenvector Rotation
-
-In general systems, the real and imaginary parts of the Hopf eigenvector are **not orthogonal**. This causes problems with the phase condition (explained below). To fix this, Fork rotates the eigenvector $q \to q \cdot e^{i\phi}$ such that the resulting $Re(q)$ and $Im(q)$ are orthogonal:
+Fork uses the complex eigenvector q to construct an initial limit cycle guess. Let q = qᵣ + i·qᵢ be the eigenvector for eigenvalue iω. The initial profile is:
 
 ```
-d = ||Re(q)||²
-s = ||Im(q)||²
-r = Re(q) · Im(q)
-φ = ½ atan2(2r, s - d)
-q ← q · exp(i·φ)
-```
-
-After rotation, $Re(q) \perp Im(q)$, and $Re(q)$ is normalized to unit length.
-
-#### Step 2: Initial Profile Construction
-
-The initial limit cycle profile is sampled at each mesh point:
-
-```
-x(θ) = x₀ + A·[Re(q)·cos(2πθ) - Im(q)·sin(2πθ)]
+x(θ) = x₀ + A·[qᵣ·cos(2πθ) - qᵢ·sin(2πθ)]
 ```
 
 for θ ∈ [0, 1], where:
 - **x₀** is the equilibrium at the Hopf point
 - **A** is the user-specified amplitude
-- **Re(q), Im(q)** are the rotated eigenvector components
+- **qᵣ, qᵢ** are real and imaginary parts of the eigenvector
 
 The initial period guess is:
 
@@ -333,36 +165,12 @@ The initial period guess is:
 T₀ = 2π / ω
 ```
 
-#### Step 3: Phase Condition Setup
-
-The phase condition pins the orbit's phase to avoid translational degeneracy. Fork sets:
-
-- **Phase anchor**: x₀ (the Hopf equilibrium)
-- **Phase direction**: Im(q) (the rotated imaginary part, normalized)
-
-This choice is critical. The initial guess at θ=0 is:
-```
-x(0) = x₀ + A·Re(q)
-```
-
-The phase condition requires:
-```
-(x(0) - x₀) · phase_direction = 0
-```
-
-Substituting:
-```
-A·Re(q) · Im(q) = 0  ✓ (satisfied because Re(q) ⊥ Im(q))
-```
-
-If the phase direction were set to Re(q) instead, the condition would force A=0, collapsing the guess to the equilibrium. This subtle bug caused incorrect continuation direction in earlier Fork versions.
-
 ### Choosing the Amplitude
 
 The amplitude parameter controls how far from the Hopf point the initial guess is placed:
 
-- **Too small** (<0.01): The cycle is nearly degenerate; Newton may have trouble
-- **Too large** (>1.0): Outside the basin of convergence
+- **Too small** (< 0.01): The cycle is nearly degenerate; Newton may have trouble
+- **Too large** (> 1.0): Outside the basin of convergence
 - **Sweet spot** (0.05–0.2): Usually works well
 
 For subcritical bifurcations (l₁ > 0), you may need to step in the negative parameter direction to find stable cycles.
@@ -559,242 +367,6 @@ Each continuation branch stores:
 - For limit cycles: `ntst`, `ncol`, `upoldp` (velocity profile)
 
 This metadata ensures the correct continuation function is called when extending.
-
----
-
-## Floquet Multiplier Extraction
-
-### What Are Floquet Multipliers?
-
-Floquet multipliers are eigenvalues of the **monodromy matrix** M, which describes how perturbations evolve after one period. For an n-dimensional system:
-- One multiplier is always exactly 1 (trivial multiplier, corresponding to perturbations along the orbit)
-- Other multipliers determine stability:
-  - All |μ| < 1: stable limit cycle
-  - Any |μ| > 1: unstable limit cycle
-
-### Algorithm: Sequential Block Elimination
-
-Fork extracts Floquet multipliers directly from the collocation Jacobian using **sequential block elimination**, chaining local transfer matrices through each mesh interval:
-
-```
-M = T_{ntst-1} × T_{ntst-2} × ... × T_1 × T_0
-```
-
-For each interval i:
-
-1. **Stage elimination**: Solve the collocation equations for stage sensitivities
-   ```
-   ds/dx = -G_s^{-1} × G_x
-   ```
-   where G_s is the stage-to-stage Jacobian and G_x is the mesh-to-stage Jacobian.
-
-2. **Continuity condensation**: Substitute into continuity equation
-   ```
-   effective_C_x = C_x + C_s × (ds/dx)
-   ```
-
-3. **Transfer matrix**: Compute mesh-to-mesh transfer
-   ```
-   T_i = -C_next^{-1} × effective_C_x
-   ```
-
-4. **Chain accumulation**:
-   ```
-   M = T_i × M
-   ```
-
-The final matrix M is the monodromy, and its eigenvalues are the Floquet multipliers.
-
-### Comparison with MATCONT's Approach
-
-MATCONT uses a **global S-matrix reduction** algorithm:
-
-| Aspect | Fork (Sequential) | MATCONT (Global S-matrix) |
-|--------|-------------------|---------------------------|
-| **Build phase** | Chain T_i matrices one interval at a time | Build full (ntst×dim) × ((ntst+1)×dim) S-matrix |
-| **Elimination** | Sequential dim×dim solves | Banded Gaussian elimination with pivoting |
-| **Memory** | O(dim²) working memory | O(ntst × dim²) for S-matrix |
-| **Computational cost** | O(ntst × (ncol×dim)³ + ntst × dim³) | O(ntst × (ncol×dim)³ + ntst × dim³) |
-| **BVP structure** | Implicit periodicity (last equation wraps to x₀) | Explicit boundary row (x₀ - x_{ntst} = 0) |
-
-Both approaches are **mathematically equivalent** and extract the same monodromy eigenvalues. The primary differences are:
-
-1. **Memory efficiency**: Sequential approach avoids allocating the full S-matrix
-2. **BVP compatibility**: Sequential approach naturally handles implicit periodicity; MATCONT requires explicit boundary variables
-
-### Why Not Use MATCONT's Exact Approach?
-
-Fork's BVP uses **implicit periodicity**: the last continuity equation wraps x_{ntst} back to x₀, meaning both endpoints share the same Jacobian column. MATCONT's algorithm assumes **explicit periodicity**: x_{ntst} is a separate variable with an explicit boundary equation x₀ - x_{ntst} = 0.
-
-The sequential approach correctly handles implicit periodicity by using modular indexing:
-```rust
-let next_mesh_col = mesh_col_start + ((interval + 1) % ntst) * dim;
-```
-
-This makes the last transfer matrix T_{ntst-1} directly map from x_{ntst-1} back to x₀.
-
-### Comparison with BifurcationKit.jl
-
-BifurcationKit.jl (Julia) offers **multiple Floquet computation methods**:
-
-| Method | Description | Comparison to Fork |
-|--------|-------------|-------------------|
-| **FloquetQaD** | "Quick and Dirty" — sequential matrix products along orbit | **Same approach as Fork** |
-| **Periodic Schur** | Uses periodic Schur decomposition (via PeriodicSchurBifurcationKit.jl) | More numerically stable, but more complex |
-
-BifurcationKit.jl's documentation notes that `FloquetQaD` "may suffer from precision issues, especially when dealing with many time sections or large/small Floquet exponents, due to accumulated errors."
-
-Fork's approach is equivalent to `FloquetQaD`. For most practical systems (moderate ntst, dim ≤ 10), precision is sufficient. The Periodic Schur method would be preferable for high-precision needs or very large/stiff systems.
-
-**Future enhancement**: To add Periodic Schur support, Fork would need to implement periodic QR iteration (computing eigenvalues of a matrix product without forming it). This would avoid error accumulation in the sequential products and provide better precision for extreme Floquet exponents (very stable or very unstable orbits). Reference implementations exist in SLICOT (Fortran) and PeriodicSchurBifurcationKit.jl (Julia).
-
-### Sanity Check
-
-Fork validates the computed multipliers before using them for bifurcation detection:
-
-```rust
-if trivial_distance > 0.5 {
-    // Multipliers are numerically corrupt
-    return (NaN, NaN, NaN, values);
-}
-```
-
-If no multiplier is within 0.5 of 1.0, the monodromy computation has broken down (often due to numerical issues on very stiff or long-period orbits). In this case, NaN test values are returned to prevent false bifurcation detections.
-
----
-
-## Best Practices for Accurate Floquet Multipliers
-
-### Mesh Resolution (ntst)
-
-The number of mesh intervals controls discretization accuracy:
-
-| ntst | Use Case |
-|------|----------|
-| 10–15 | Quick exploration, smooth orbits |
-| 20–30 | Default for most systems (recommended) |
-| 40–60 | Stiff systems, sharp transients, relaxation oscillations |
-| 80+ | Extreme precision needs (rarely necessary) |
-
-**Signs you need more mesh points:**
-- Trivial multiplier drifts from 1.0
-- Newton corrector struggles to converge
-- Orbit profile looks under-resolved
-
-### Collocation Degree (ncol)
-
-Higher degree = higher-order polynomial approximation per interval:
-
-| ncol | Description |
-|------|-------------|
-| 3 | Minimum for smooth problems |
-| 4 | Default (good balance of accuracy and cost) |
-| 5–6 | Higher precision or stiff systems |
-
-Generally, increasing ntst is more effective than increasing ncol for improving accuracy.
-
-### Step Size
-
-Continuation step size affects multiplier stability:
-
-- **Too large**: Newton may converge to a different orbit branch, causing multiplier jumps
-- **Too small**: Slow, but multipliers stay consistent
-- **Adaptive**: Fork adapts step size based on convergence — start with 0.01 and let it adjust
-
-**Tip**: If multipliers suddenly jump or the trivial multiplier deviates from 1.0, reduce step size and re-extend.
-
-### Initial Amplitude (from Hopf)
-
-When starting a limit cycle from a Hopf bifurcation:
-
-| Amplitude | Effect |
-|-----------|--------|
-| 0.01–0.05 | Very close to Hopf, may be numerically degenerate |
-| 0.05–0.2 | Sweet spot for most systems |
-| 0.5+ | May be outside convergence basin |
-
-If the initial Newton correction fails, try a smaller amplitude.
-
-### Troubleshooting Poor Multipliers
-
-| Symptom | Likely Cause | Fix |
-|---------|--------------|-----|
-| Trivial multiplier ≠ 1.0 | Mesh too coarse | Increase ntst |
-| Multipliers are NaN | Monodromy computation failed | Check orbit validity, increase ntst |
-| False bifurcation detection | Step size too large | Reduce step size, re-extend |
-| Very large/small multipliers | Highly unstable orbit | Consider Periodic Schur (future) |
-
-### Example: High-Precision Configuration
-
-For a stiff 3D system with relaxation oscillations:
-
-```
-ntst: 50
-ncol: 4
-step_size: 0.005
-corrector_tol: 1e-8
-```
-
-For a smooth 2D system:
-
-```
-ntst: 20
-ncol: 4
-step_size: 0.01
-corrector_tol: 1e-6
-```
-
----
-
-## Branching to Period-Doubled Limit Cycles
-
-Period-doubling (PD) branching allows you to follow the cascaded route to chaos by switching from a limit cycle of period $T$ to a new family of period $2T$.
-
-### When to Use This Method
-
-- A "PeriodDoubling" bifurcation is detected on your limit cycle branch.
-- You want to follow the period-doubling route to chaos (e.g., in the Rössler system).
-- You want to explore the stability of the doubled-period cycles.
-
-### CLI Workflow
-
-```
-Continuation Menu → [select LC branch] → Inspect Branch Points → [select PD point]
-→ Branch to Period-Doubled Limit Cycle
-```
-
-### Numerical Implementation
-
-The PD branching algorithm follows the approach in MatCont's `init_PD_LC2.m`:
-
-#### 1. PD Eigenvector Computation
-
-At a PD point, the monodromy matrix $M$ has an eigenvalue of -1 (the period-doubling multiplier). We first compute the corresponding eigenvector $v$:
-$$(M + I)v = 0$$
-where $I$ is the identity matrix. $v$ represents the direction in state space into which the orbit begins to "wobble" before spliting into a doubled period.
-
-#### 2. Doubled-Period Guess Construction
-
-We construct an initial guess for the doubled-period limit cycle by concatenating the original cycle with itself and adding a small perturbation in the direction of the PD eigenvector:
-
-1. **Base Mesh**: Concatenate two copies of the original mesh points. Adjust normalized time to $[0, 1]$.
-2. **Perturbation**: Add a small perturbation based on the PD eigenvector:
-   $$x_{new}(\tau) \approx x_{orig}(\tau \pmod{1/2}) + h \cdot v(\tau)$$
-   where $h$ is the perturbation amplitude (default 0.01).
-3. **Stage States**: Rebuild all collocation stage states using the perturbed mesh.
-
-#### 3. Predictor-Corrector Continuation
-
-Once the doubled-period guess is constructed (with $ntst_{new} = 2 \cdot ntst_{orig}$), Fork runs standard orthogonal collocation continuation to converge onto and track the new branch.
-
-### Comparison of LC Initiation Methods
-
-| Aspect | From Hopf | From Orbit | From PD Branching |
-|--------|-----------|------------|-------------------|
-| **Initial guess** | Normal form approx | Sampler from orbit | PD eigenvector perturb |
-| **New Period** | $\approx 2\pi/\omega$ | Sampler period | $\approx 2 \times$ original period |
-| **Mesh (ntst)** | User-defined | User-defined | $2 \times$ original ntst |
-| **Stability** | Any | Stable only | Any |
 
 ---
 

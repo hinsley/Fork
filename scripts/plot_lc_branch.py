@@ -33,29 +33,20 @@ def discover_lc_branches(systems_root: Path) -> List[Dict[str, Any]]:
         if not system_dir.is_dir():
             continue
         sys_name = system_dir.name
-
-        # Objects-first layout: branches live under objects/<object>/branches/*.json.
-        objects_dir = system_dir / "objects"
-        if not objects_dir.exists():
+        
+        # Look in branches/ directory only
+        branches_dir = system_dir / "branches"
+        if not branches_dir.exists():
             continue
 
-        for obj_dir in objects_dir.iterdir():
-            if not obj_dir.is_dir():
-                continue
-            branches_dir = obj_dir / "branches"
-            if not branches_dir.exists():
-                continue
-
-            for branch_file in branches_dir.glob("*.json"):
-                try:
-                    data = json.loads(branch_file.read_text())
-                except json.JSONDecodeError:
-                    continue
-
+        for branch_file in branches_dir.glob("*.json"):
+            try:
+                data = json.loads(branch_file.read_text())
+                
                 # Check if this is a continuation type
                 if data.get("type") != "continuation":
                     continue
-
+                
                 branch_data = data.get("data", {})
                 points = branch_data.get("points", [])
                 
@@ -71,25 +62,15 @@ def discover_lc_branches(systems_root: Path) -> List[Dict[str, Any]]:
                 if top_level_type == "limit_cycle":
                     is_lc = True
                     # Get mesh info from data.branch_type if available
-                    # Handle both { LimitCycle: {ntst, ncol} } and { type: 'LimitCycle', ntst, ncol } formats
-                    if isinstance(branch_data_type, dict):
-                        if "LimitCycle" in branch_data_type:
-                            lc_info = branch_data_type["LimitCycle"]
-                            ntst = lc_info.get("ntst", 0)
-                            ncol = lc_info.get("ncol", 0)
-                        elif branch_data_type.get("type") == "LimitCycle":
-                            ntst = branch_data_type.get("ntst", 0)
-                            ncol = branch_data_type.get("ncol", 0)
-                elif isinstance(branch_data_type, dict):
-                    if "LimitCycle" in branch_data_type:
+                    if isinstance(branch_data_type, dict) and "LimitCycle" in branch_data_type:
                         lc_info = branch_data_type["LimitCycle"]
                         ntst = lc_info.get("ntst", 0)
                         ncol = lc_info.get("ncol", 0)
-                        is_lc = True
-                    elif branch_data_type.get("type") == "LimitCycle":
-                        ntst = branch_data_type.get("ntst", 0)
-                        ncol = branch_data_type.get("ncol", 0)
-                        is_lc = True
+                elif isinstance(branch_data_type, dict) and "LimitCycle" in branch_data_type:
+                    lc_info = branch_data_type["LimitCycle"]
+                    ntst = lc_info.get("ntst", 0)
+                    ncol = lc_info.get("ncol", 0)
+                    is_lc = True
                 else:
                     # Detect LC by state size - LC states are much larger than equilibrium
                     first_state = points[0].get("state", [])
@@ -99,14 +80,11 @@ def discover_lc_branches(systems_root: Path) -> List[Dict[str, Any]]:
                     if state_len > 20:
                         is_lc = True
                         # Try to infer mesh parameters
-                        # Priority order: common dimensions first, then common ncol, then ntst variants
-                        for test_dim in [3, 2, 4, 5]:  # Most systems are 2D or 3D
-                            for test_ncol in [4, 3, 5]:  # ncol=4 is most common
-                                for test_ntst in [20, 40, 10, 80, 30, 60]:  # Include doubled values
-                                    # state = mesh_states + stage_states + period
-                                    # = ntst*dim + ntst*ncol*dim + 1 = ntst*dim*(ncol+1)+1
-                                    expected_len = test_ntst * test_dim * (test_ncol + 1) + 1
-                                    if state_len == expected_len:
+                        for test_ntst in [20, 10, 40]:
+                            for test_ncol in [4, 3, 5]:
+                                num_profile = test_ntst * test_ncol + 1
+                                for test_dim in [2, 3, 4, 5]:
+                                    if state_len == num_profile * test_dim + 1:
                                         ntst, ncol, dim = test_ntst, test_ncol, test_dim
                                         break
                                 if ntst > 0:
@@ -117,49 +95,18 @@ def discover_lc_branches(systems_root: Path) -> List[Dict[str, Any]]:
                         # Fallback: assume common defaults
                         if ntst == 0:
                             ntst, ncol = 20, 4
-                            dim = (state_len - 1) // (ntst * (ncol + 1))
+                            num_profile = ntst * ncol + 1
+                            dim = (state_len - 1) // num_profile
                 
                 if not is_lc:
                     continue
                 
-                # Fallback: If is_lc but we don't have ntst/ncol, infer from state size
-                if ntst == 0 or ncol == 0:
-                    first_state = points[0].get("state", [])
-                    state_len = len(first_state)
-                    
-                    # Try to infer mesh parameters from state length
-                    # Restructure to prioritize: common dims (2,3) with common ncol (4) first
-                    # Then try doubled ntst values, then unusual ncol
-                    if state_len > 20:
-                        # Priority order: common dimensions first, then common ncol, then ntst variants
-                        for test_dim in [3, 2, 4, 5]:  # Most systems are 2D or 3D
-                            for test_ncol in [4, 3, 5]:  # ncol=4 is most common
-                                for test_ntst in [20, 40, 10, 80, 30, 60]:  # Include doubled values
-                                    # state = mesh_states + stage_states + period
-                                    # = ntst*dim + ntst*ncol*dim + 1 = ntst*dim*(ncol+1)+1
-                                    expected_len = test_ntst * test_dim * (test_ncol + 1) + 1
-                                    if state_len == expected_len:
-                                        ntst, ncol, dim = test_ntst, test_ncol, test_dim
-                                        break
-                                if ntst > 0:
-                                    break
-                            if ntst > 0:
-                                break
-                        
-                        # Fallback: assume common defaults
-                        if ntst == 0:
-                            ntst, ncol = 20, 4
-                            # dim = (state_len - 1) // (ntst * (ncol + 1))
-                            # This is approximate since we can't invert cleanly
-                            total_mesh_stage = (state_len - 1)
-                            dim = total_mesh_stage // (ntst * (ncol + 1)) if ntst * (ncol + 1) > 0 else 0
-                
-                # Calculate dim if we have branch_type but dim is still 0
+                # Calculate dim if we have branch_type
                 if dim == 0 and ntst > 0 and ncol > 0:
                     first_state = points[0].get("state", [])
+                    num_profile_points = ntst * ncol + 1
                     total_state_len = len(first_state)
-                    # state = ntst*dim*(ncol+1)+1, so dim = (state_len-1)/(ntst*(ncol+1))
-                    dim = (total_state_len - 1) // (ntst * (ncol + 1)) if ntst * (ncol + 1) > 0 else 0
+                    dim = (total_state_len - 1) // num_profile_points if num_profile_points > 0 else 0
                 
                 if dim > 0:
                     records.append({
@@ -171,8 +118,9 @@ def discover_lc_branches(systems_root: Path) -> List[Dict[str, Any]]:
                         "ncol": ncol,
                         "dim": dim,
                         "param_name": data.get("parameterName", "param"),
-                        "parent_object": data.get("parentObject", obj_dir.name),
                     })
+            except (json.JSONDecodeError, KeyError):
+                continue
     
     return sorted(records, key=lambda r: (r["system"], r["branch"]))
 
@@ -238,50 +186,17 @@ def extract_limit_cycle(state: List[float], ntst: int, ncol: int, dim: int) -> n
     """
     Extract limit cycle profile from state vector.
     
-    Rust stores collocation state as:
-      [mesh_states (ntst points), stage_states (ntst*ncol points), period]
-    
-    We extract BOTH mesh and stage states for higher resolution plotting.
-    The states are interleaved to show the full collocation profile.
+    state = [profile_point_0, profile_point_1, ..., profile_point_N, period]
+    where each profile_point has 'dim' components.
     """
-    mesh_points = ntst  # Number of mesh intervals (NOT ntst+1, due to periodicity)
-    num_stages = ntst * ncol
-    mesh_data_len = mesh_points * dim
-    stage_data_len = num_stages * dim
-    full_state_len = (mesh_points + num_stages) * dim + 1
+    num_profile_points = ntst * ncol + 1
+    profile_data = state[:-1]  # Remove period at end
     
-    if len(state) < full_state_len:
-        # Fallback: try with ntst+1 mesh points (some formats)
-        mesh_points = ntst + 1
-        mesh_data_len = mesh_points * dim
-        full_state_len = (mesh_points + num_stages) * dim + 1
-    
-    if len(state) < mesh_data_len + 1:
+    if len(profile_data) != num_profile_points * dim:
         return np.array([])
     
-    # Extract mesh states
-    mesh_data = np.array(state[:mesh_data_len]).reshape(mesh_points, dim)
-    
-    # Try to extract stage states too for higher resolution
-    if len(state) >= mesh_data_len + stage_data_len + 1:
-        stage_data = np.array(state[mesh_data_len:mesh_data_len + stage_data_len]).reshape(num_stages, dim)
-        
-        # Interleave mesh and stage points for correct ordering
-        # Each interval has: mesh_point, then ncol stage points
-        full_profile = []
-        for i in range(min(ntst, mesh_points)):
-            full_profile.append(mesh_data[i])
-            for j in range(ncol):
-                stage_idx = i * ncol + j
-                if stage_idx < len(stage_data):
-                    full_profile.append(stage_data[stage_idx])
-        # Add final mesh point if we have ntst+1 mesh points
-        if mesh_points > ntst:
-            full_profile.append(mesh_data[-1])
-        profile = np.array(full_profile)
-    else:
-        # Mesh only
-        profile = mesh_data
+    # Reshape into (num_points, dim)
+    profile = np.array(profile_data).reshape(num_profile_points, dim)
     
     # Close the cycle by appending the first point
     profile = np.vstack([profile, profile[0:1]])
