@@ -187,6 +187,48 @@ export class WasmBridge {
         );
         return normalizeEigenvalues(raw);
     }
+
+    /**
+     * Initializes a limit cycle guess from a Hopf bifurcation point.
+     */
+    initLCFromHopf(
+        hopfState: number[],
+        parameterName: string,
+        paramValue: number,
+        amplitude: number,
+        ntst: number,
+        ncol: number
+    ): any {
+        return this.instance.init_lc_from_hopf(
+            new Float64Array(hopfState),
+            parameterName,
+            paramValue,
+            amplitude,
+            ntst,
+            ncol
+        );
+    }
+
+    /**
+     * Continues a limit cycle from an initial guess.
+     */
+    continueLimitCycle(
+        guess: any,
+        parameterName: string,
+        settings: any,
+        ntst: number,
+        ncol: number,
+        forward: boolean
+    ): ContinuationBranchData {
+        return this.instance.compute_limit_cycle_continuation(
+            guess,
+            parameterName,
+            settings,
+            ntst,
+            ncol,
+            forward
+        ) as ContinuationBranchData;
+    }
 }
 
 function normalizeEigenvalues(raw: unknown): ContinuationEigenvalue[] {

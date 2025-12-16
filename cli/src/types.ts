@@ -63,56 +63,39 @@ export interface EquilibriumObject {
 }
 
 export interface ContinuationEigenvalue {
-    re: number;
-    im: number;
+  re: number;
+  im: number;
 }
 
 export interface ContinuationPoint {
-    state: number[];
-    param_value: number;
-    stability:
-        | "None"
-        | "Fold"
-        | "Hopf"
-        | "NeutralSaddle"
-        | "CycleFold"
-        | "PeriodDoubling"
-        | "NeimarkSacker";
-    eigenvalues?: ContinuationEigenvalue[];
+  state: number[];
+  param_value: number;
+  stability: "None" | "Fold" | "Hopf";
+  eigenvalues?: ContinuationEigenvalue[];
 }
+
+export type BranchType =
+  | { type: 'Equilibrium' }
+  | { type: 'LimitCycle'; ntst: number; ncol: number };
 
 export interface ContinuationBranchData {
-    points: ContinuationPoint[];
-    bifurcations: number[];
-    indices: number[];
-}
-
-export type ContinuationBranchKind = "equilibrium" | "limitCycle";
-
-export interface LimitCycleMeta {
-    method: "collocation";
-    meshPoints?: number;
-    degree?: number;
-    phaseAnchor: number[];
-    phaseDirection: number[];
+  points: ContinuationPoint[];
+  bifurcations: number[];
+  indices: number[];
+  branch_type?: BranchType;
+  upoldp?: number[][];  // LC-specific velocity profile
 }
 
 export interface ContinuationObject {
-    type: "continuation";
-    name: string;
-    systemName: string;
-    parameterName: string;
-    startObject: string; // Name of the equilibrium object used as seed
-    data: ContinuationBranchData;
-    settings: any; // Store settings used
-    timestamp: string;
-    branchKind?: ContinuationBranchKind;
-    limitCycleMeta?: LimitCycleMeta;
-}
-
-export interface LimitCycleBranchResponse {
-    branch: ContinuationBranchData;
-    meta: LimitCycleMeta;
+  type: "continuation";
+  name: string;
+  systemName: string;
+  parameterName: string;
+  startObject: string; // Name of the equilibrium object used as seed
+  branchType: 'equilibrium' | 'limit_cycle';  // Human-readable branch type
+  data: ContinuationBranchData;
+  settings: any; // Store settings used
+  timestamp: string;
 }
 
 export type AnalysisObject = OrbitObject | EquilibriumObject | ContinuationObject;
