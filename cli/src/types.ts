@@ -96,6 +96,7 @@ export interface ContinuationObject {
   data: ContinuationBranchData;
   settings: any; // Store settings used
   timestamp: string;
+  params?: number[];  // Full parameter snapshot at branch creation
 }
 
 export type AnalysisObject = OrbitObject | EquilibriumObject | ContinuationObject;
