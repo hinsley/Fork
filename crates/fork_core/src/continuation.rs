@@ -1,18 +1,21 @@
-// NOTE: The submodules in continuation/ (collocation, equilibrium, hopf_init, etc.) 
-// contain continuation problem implementations. We expose hopf_init and collocation
-// types needed for Hopf-to-LC initialization via the CLI.
+// NOTE: The submodules in continuation/ (equilibrium, periodic, problem) 
+// contain continuation problem implementations.
 
 #[path = "continuation/problem.rs"]
 pub mod problem;
 
-#[path = "continuation/hopf_init.rs"]
-pub mod hopf_init;
+#[path = "continuation/periodic.rs"]
+pub mod periodic;
 
-#[path = "continuation/collocation.rs"]  
-mod collocation;
+#[path = "continuation/equilibrium.rs"]
+pub mod equilibrium;
 
 // Re-export types needed for external use
-pub use collocation::{CollocationConfig, LimitCycleGuess, continue_limit_cycle, extend_limit_cycle};
+pub use periodic::{
+    CollocationConfig, LimitCycleGuess, LimitCycleSetup,
+    continue_limit_cycle_collocation, extend_limit_cycle_collocation,
+    limit_cycle_setup_from_hopf,
+};
 
 use crate::autodiff::Dual;
 use crate::equation_engine::EquationSystem;
@@ -46,6 +49,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
     
     // Initialize branch with starting point
     let initial_diag = problem.diagnostics(&prev_aug)?;
+    let mut prev_diag = initial_diag.clone();
     let mut branch = ContinuationBranch {
         points: vec![ContinuationPoint {
             state: initial_point.state.clone(),
@@ -82,7 +86,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
                  tangent_p, tangent_period, prev_tangent.norm());
     }
     
-    for step in 0..settings.max_steps {
+    for _step in 0..settings.max_steps {
         // Predictor: predict along tangent
         let pred_aug = &prev_aug + &prev_tangent * (step_size * direction_sign);
         
@@ -153,14 +157,39 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             // Compute diagnostics for the new point
             let diagnostics = problem.diagnostics(&corrected_aug)?;
             
+            // Bifurcation detection via test function sign changes
+            let prev_tests = &prev_diag.test_values;
+            let new_tests = &diagnostics.test_values;
+            
+            // Detect limit cycle bifurcations (check LC test functions)
+            let cycle_fold_crossed = prev_tests.cycle_fold * new_tests.cycle_fold <= 0.0;
+            let period_doubling_crossed = prev_tests.period_doubling * new_tests.period_doubling <= 0.0;
+            let neimark_sacker_crossed = prev_tests.neimark_sacker * new_tests.neimark_sacker <= 0.0;
+            
+            // Prioritize: CycleFold > PeriodDoubling > NeimarkSacker
+            let bifurcation_type = if cycle_fold_crossed {
+                BifurcationType::CycleFold
+            } else if period_doubling_crossed {
+                BifurcationType::PeriodDoubling
+            } else if neimark_sacker_crossed {
+                BifurcationType::NeimarkSacker
+            } else {
+                BifurcationType::None
+            };
+            
             // Create new point
             current_index += direction_sign as i32;
             let new_point = ContinuationPoint {
                 state: corrected_aug.rows(1, dim).iter().cloned().collect(),
                 param_value: corrected_aug[0],
-                stability: BifurcationType::None,
-                eigenvalues: diagnostics.eigenvalues,
+                stability: bifurcation_type,
+                eigenvalues: diagnostics.eigenvalues.clone(),
             };
+            
+            // Record bifurcation if detected
+            if bifurcation_type != BifurcationType::None {
+                branch.bifurcations.push(branch.points.len());
+            }
             
             branch.points.push(new_point);
             branch.indices.push(current_index);
@@ -173,6 +202,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             
             prev_aug = corrected_aug;
             prev_tangent = consistent_tangent;
+            prev_diag = diagnostics;
         } else {
             // Failed to converge, reduce step size
             #[cfg(test)]
@@ -237,6 +267,9 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
     // Build augmented state for endpoint
     let dim = problem.dimension();
     let mut end_aug = DVector::zeros(dim + 1);
+    if endpoint.state.len() != dim {
+        anyhow::bail!("Dimension mismatch: branch point state has length {}, problem expects {}", endpoint.state.len(), dim);
+    }
     end_aug[0] = endpoint.param_value;
     for (i, &v) in endpoint.state.iter().enumerate() {
         end_aug[i + 1] = v;
@@ -302,14 +335,23 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
     // Merge extension into main branch (skip first point as it's the endpoint)
     let index_offset = last_index;
     let sign = if is_append { 1 } else { -1 };
+    let orig_count = branch.points.len();
     for (i, pt) in extension.points.into_iter().enumerate().skip(1) {
         branch.points.push(pt);
         let idx = extension.indices.get(i).cloned().unwrap_or(i as i32);
         branch.indices.push(index_offset + idx * sign);
     }
     
-    // Preserve LC-specific metadata
-    // (branch_type and upoldp are already set, no need to modify)
+    // Merge bifurcation indices (adjusting for new positions in merged branch)
+    // extension.bifurcations contains indices into extension.points (before skip)
+    // After merging, extension point i maps to branch.points[orig_count + i - 1] (skipping first)
+    for ext_bif_idx in extension.bifurcations {
+        if ext_bif_idx > 0 {
+            // Map to new position: orig_count + (ext_bif_idx - 1)
+            branch.bifurcations.push(orig_count + ext_bif_idx - 1);
+        }
+        // ext_bif_idx == 0 is the overlap point which already exists in branch, skip it
+    }
     
     Ok(branch)
 }
@@ -332,6 +374,7 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
     
     // Initialize branch with starting point
     let initial_diag = problem.diagnostics(&prev_aug)?;
+    let mut prev_diag = initial_diag.clone();
     let mut branch = ContinuationBranch {
         points: vec![ContinuationPoint {
             state: initial_point.state.clone(),
@@ -391,23 +434,76 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             // Compute diagnostics
             let diag = problem.diagnostics(&corrected_aug)?;
             
-            // Create new point
+            // Bifurcation detection via test function sign changes
+            let prev_tests = &prev_diag.test_values;
+            let new_tests = &diag.test_values;
+            
+            // Detect limit cycle bifurcations (check LC test functions)
+            let cycle_fold_crossed = prev_tests.cycle_fold * new_tests.cycle_fold < 0.0;
+            let period_doubling_crossed = prev_tests.period_doubling * new_tests.period_doubling < 0.0;
+            let neimark_sacker_crossed = prev_tests.neimark_sacker * new_tests.neimark_sacker < 0.0;
+            
+            // Prioritize: CycleFold > PeriodDoubling > NeimarkSacker
+            let bifurcation_type = if cycle_fold_crossed {
+                BifurcationType::CycleFold
+            } else if period_doubling_crossed {
+                BifurcationType::PeriodDoubling
+            } else if neimark_sacker_crossed {
+                BifurcationType::NeimarkSacker
+            } else {
+                BifurcationType::None
+            };
+            
+            // If bifurcation detected, refine its location via bisection
+            // NOTE: Newton refinement with finite differences for test function gradients
+            // could also be used here for faster convergence, but bisection is simpler
+            // and more robust for the high-dimensional LC collocation problems.
+            let (final_aug, final_diag, final_bif_type) = if bifurcation_type != BifurcationType::None {
+                // Refine using bisection between prev_aug and corrected_aug
+                match refine_lc_bifurcation_bisection(
+                    problem,
+                    &prev_aug,
+                    prev_tests,
+                    &corrected_aug,
+                    new_tests,
+                    bifurcation_type,
+                    &prev_tangent,
+                    settings.corrector_steps,
+                    settings.corrector_tolerance,
+                ) {
+                    Ok((refined_aug, refined_diag)) => (refined_aug, refined_diag, bifurcation_type),
+                    Err(_) => {
+                        // Refinement failed, use the unrefined point
+                        (corrected_aug.clone(), diag.clone(), bifurcation_type)
+                    }
+                }
+            } else {
+                (corrected_aug.clone(), diag.clone(), BifurcationType::None)
+            };
+            
+            // Create new point with potentially refined state
             current_index += 1;
             let new_pt = ContinuationPoint {
-                state: corrected_aug.rows(1, dim).iter().cloned().collect(),
-                param_value: corrected_aug[0],
-                stability: BifurcationType::None,
-                eigenvalues: diag.eigenvalues,
+                state: final_aug.rows(1, dim).iter().cloned().collect(),
+                param_value: final_aug[0],
+                stability: final_bif_type,
+                eigenvalues: final_diag.eigenvalues.clone(),
             };
+            
+            // Record bifurcation if detected
+            if final_bif_type != BifurcationType::None {
+                branch.bifurcations.push(branch.points.len());
+            }
             
             branch.points.push(new_pt);
             branch.indices.push(current_index);
             
-            // Update problem state if needed
+            // Update problem state if needed (use original corrected_aug for continuation)
             problem.update_after_step(&corrected_aug)?;
             
             prev_aug = corrected_aug;
             prev_tangent = new_tangent;
+            prev_diag = diag;
             
             // Adaptive step size
             step_size = (step_size * 1.2).min(settings.max_step_size);
@@ -421,6 +517,114 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
     }
     
     Ok(branch)
+}
+
+/// Refines a limit cycle bifurcation point using bisection.
+/// 
+/// This function bisects between `prev_aug` and `new_aug` to find the point where
+/// the specified test function crosses zero. At each bisection step, the interpolated
+/// point is corrected back onto the solution manifold using Newton's method.
+///
+/// # Arguments
+/// * `problem` - The continuation problem (provides residual, Jacobian, diagnostics)
+/// * `prev_aug` - Augmented state before the bifurcation (test function has one sign)
+/// * `prev_tests` - Test function values at prev_aug
+/// * `new_aug` - Augmented state after the bifurcation (test function has opposite sign)
+/// * `new_tests` - Test function values at new_aug
+/// * `bif_type` - The type of bifurcation being refined
+/// * `tangent` - Tangent direction for the corrector
+/// * `corrector_steps` - Max Newton corrector iterations
+/// * `tolerance` - Convergence tolerance
+///
+/// # Note
+/// Newton refinement (solving the augmented system [F=0, ψ=0] with test function gradient
+/// computed via finite differences) could provide faster (quadratic) convergence but requires
+/// dim+1 extra monodromy evaluations per iteration. Bisection is simpler and sufficient
+/// for most applications.
+fn refine_lc_bifurcation_bisection<P: ContinuationProblem>(
+    problem: &mut P,
+    prev_aug: &DVector<f64>,
+    prev_tests: &problem::TestFunctionValues,
+    new_aug: &DVector<f64>,
+    new_tests: &problem::TestFunctionValues,
+    bif_type: BifurcationType,
+    tangent: &DVector<f64>,
+    corrector_steps: usize,
+    tolerance: f64,
+) -> Result<(DVector<f64>, problem::PointDiagnostics)> {
+    const MAX_BISECTION_ITERS: usize = 10;
+    const TEST_TOLERANCE: f64 = 1e-6;
+    
+    let mut lo_aug = prev_aug.clone();
+    let mut hi_aug = new_aug.clone();
+    let mut lo_test = prev_tests.value_for(bif_type);
+    let mut hi_test = new_tests.value_for(bif_type);
+    
+    // Ensure lo_test < 0, hi_test > 0 for consistent bisection
+    if lo_test > hi_test {
+        std::mem::swap(&mut lo_aug, &mut hi_aug);
+        std::mem::swap(&mut lo_test, &mut hi_test);
+    }
+    
+    let mut best_aug = if lo_test.abs() < hi_test.abs() { lo_aug.clone() } else { hi_aug.clone() };
+    let mut best_diag = problem.diagnostics(&best_aug)?;
+    
+    for _ in 0..MAX_BISECTION_ITERS {
+        // Linear interpolation to estimate zero crossing
+        let denom = hi_test - lo_test;
+        let s = if denom.abs() > 1e-12 {
+            (-lo_test / denom).clamp(0.1, 0.9) // Avoid extreme ends
+        } else {
+            0.5
+        };
+        
+        let mid_aug = &lo_aug + (&hi_aug - &lo_aug) * s;
+        
+        // Correct back to solution manifold
+        let corrected = correct_with_problem(
+            problem,
+            &mid_aug,
+            &lo_aug,
+            tangent,
+            corrector_steps,
+            tolerance,
+        )?;
+        
+        let corrected_aug = match corrected {
+            Some(aug) => aug,
+            None => {
+                // Correction failed, try midpoint without correction
+                mid_aug
+            }
+        };
+        
+        // Compute diagnostics at corrected point
+        let diag = problem.diagnostics(&corrected_aug)?;
+        let mid_test = diag.test_values.value_for(bif_type);
+        
+        // Check convergence
+        if mid_test.abs() < TEST_TOLERANCE {
+            return Ok((corrected_aug, diag));
+        }
+        
+        // Update bracket
+        if mid_test < 0.0 {
+            lo_aug = corrected_aug.clone();
+            lo_test = mid_test;
+        } else {
+            hi_aug = corrected_aug.clone();
+            hi_test = mid_test;
+        }
+        
+        // Track best (closest to zero)
+        if mid_test.abs() < best_diag.test_values.value_for(bif_type).abs() {
+            best_aug = corrected_aug;
+            best_diag = diag;
+        }
+    }
+    
+    // Return best found even if not fully converged
+    Ok((best_aug, best_diag))
 }
 
 /// Computes the tangent vector using the Jacobian null space.
@@ -506,7 +710,7 @@ fn correct_with_problem<P: ContinuationProblem>(
     // Use adaptive tangent for bordering - start with prev_tangent
     let mut border_tangent = prev_tangent.clone();
     
-    for iter in 0..max_iters {
+    for _iter in 0..max_iters {
         // Compute residual F(x)
         let mut residual = DVector::zeros(dim);
         problem.residual(&current, &mut residual)?;
@@ -620,6 +824,10 @@ pub enum BifurcationType {
     None,
     Fold,
     Hopf,
+    NeutralSaddle,
+    CycleFold,
+    PeriodDoubling,
+    NeimarkSacker,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -660,6 +868,7 @@ struct PointDiagnostics {
 
 /// Type of continuation branch.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
 pub enum BranchType {
     Equilibrium,
     LimitCycle { ntst: usize, ncol: usize },

@@ -664,8 +664,20 @@ async function extendBranch(sysName: string, branch: ContinuationObject) {
             branch.data.indices = branch.data.points.map((_, i) => i);
         }
 
+
+
+        // PATCH: Ensure branch_type is correct for Limit Cycles
+        // The stored branch data might have "Equilibrium" or missing branch_type due to legacy bugs,
+        // but the container `branch.branchType` is correct.
+        const branchDataToPass = serializeBranchDataForWasm(branch.data);
+        if (branch.branchType === 'limit_cycle') {
+            const ntst = branch.settings?.ntst ?? 20;
+            const ncol = branch.settings?.ncol ?? 4;
+            branchDataToPass.branch_type = { type: 'LimitCycle', ntst, ncol };
+        }
+
         const updatedData = bridge.extend_continuation(
-            serializeBranchDataForWasm(branch.data),
+            branchDataToPass,
             branch.parameterName,
             continuationSettings,
             directionForward
@@ -1849,7 +1861,9 @@ async function showPointDetails(
     const branchType = branch.branchType || 'equilibrium';
 
     console.log('');
-    const headerSuffix = isBifurcation ? ' [Bifurcation]' : '';
+    const headerSuffix = isBifurcation
+        ? ` [Bifurcation${pt.stability && pt.stability !== 'None' ? ': ' + pt.stability : ''}]`
+        : '';
     const typeLabel = branchType === 'limit_cycle' ? ' [Limit Cycle]' : '';
     console.log(chalk.yellow(`Point ${logicalIdx} (Array ${arrayIdx})${headerSuffix}${typeLabel}`));
 
@@ -1896,7 +1910,10 @@ async function showPointDetails(
         // Extract profile and compute metrics
         const { profilePoints, period } = extractLCProfile(pt.state, dim, ntst, ncol);
         const metrics = computeLCMetrics(profilePoints, period);
-        const stabilityLabel = interpretLCStability(pt.eigenvalues);
+        let stabilityLabel = interpretLCStability(pt.eigenvalues);
+        if (pt.stability && pt.stability !== 'None') {
+            stabilityLabel = pt.stability;
+        }
 
         console.log(chalk.cyan(`Period: ${formatNumber(metrics.period)}`));
         console.log(chalk.cyan(`Stability: ${stabilityLabel}`));
@@ -1922,7 +1939,7 @@ async function showPointDetails(
         if (pt.eigenvalues?.length) {
             pt.eigenvalues.forEach((eig, idx) => {
                 const mag = Math.sqrt(eig.re * eig.re + eig.im * eig.im);
-                const isTrivial = Math.abs(mag - 1.0) < 0.01 && Math.abs(eig.im) < 0.01;
+                const isTrivial = Math.abs(eig.re - 1.0) < 0.05 && Math.abs(eig.im) < 0.05;
                 const label = isTrivial ? ' (trivial)' : '';
                 console.log(
                     `  μ${idx}: ${formatNumberSafe(eig.re)} + ${formatNumberSafe(eig.im)}i  |μ|=${formatNumber(mag)}${label}`

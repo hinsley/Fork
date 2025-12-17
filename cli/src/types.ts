@@ -70,7 +70,7 @@ export interface ContinuationEigenvalue {
 export interface ContinuationPoint {
   state: number[];
   param_value: number;
-  stability: "None" | "Fold" | "Hopf";
+  stability: "None" | "Fold" | "Hopf" | "NeutralSaddle" | "CycleFold" | "PeriodDoubling" | "NeimarkSacker" | string;
   eigenvalues?: ContinuationEigenvalue[];
 }
 
