@@ -34,6 +34,138 @@ function isValidName(name: string): boolean | string {
     return true;
 }
 
+// ============== Limit Cycle Metrics ==============
+
+interface LimitCycleMetrics {
+    period: number;
+    ranges: { min: number; max: number; range: number }[];
+    means: number[];
+    rmsAmplitudes: number[];
+}
+
+/**
+ * Extract profile points from flat LC state.
+ * Flat state format: [profile_0, profile_1, ..., profile_N, period]
+ * Returns array of state vectors and the period.
+ */
+function extractLCProfile(
+    flatState: number[],
+    dim: number,
+    ntst: number,
+    ncol: number
+): { profilePoints: number[][]; period: number } {
+    const profilePointCount = ntst * ncol + 1;
+    const period = flatState[flatState.length - 1];
+    const profilePoints: number[][] = [];
+
+    for (let i = 0; i < profilePointCount; i++) {
+        const offset = i * dim;
+        profilePoints.push(flatState.slice(offset, offset + dim));
+    }
+
+    return { profilePoints, period };
+}
+
+/**
+ * Compute interpretable metrics from LC profile points.
+ */
+function computeLCMetrics(profilePoints: number[][], period: number): LimitCycleMetrics {
+    const dim = profilePoints[0]?.length || 0;
+    const n = profilePoints.length;
+
+    const ranges: { min: number; max: number; range: number }[] = [];
+    const means: number[] = [];
+    const rmsAmplitudes: number[] = [];
+
+    for (let d = 0; d < dim; d++) {
+        const values = profilePoints.map(pt => pt[d]);
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const mean = values.reduce((a, b) => a + b, 0) / n;
+
+        // RMS amplitude from mean
+        const rms = Math.sqrt(values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / n);
+
+        ranges.push({ min, max, range: max - min });
+        means.push(mean);
+        rmsAmplitudes.push(rms);
+    }
+
+    return { period, ranges, means, rmsAmplitudes };
+}
+
+/**
+ * Interpret Floquet multipliers into a simple stability label.
+ */
+function interpretLCStability(eigenvalues: ContinuationEigenvalue[] | undefined): string {
+    if (!eigenvalues || eigenvalues.length === 0) return 'unknown';
+
+    // Floquet multipliers: stable if all |λ| < 1 (except trivial λ=1)
+    let unstableCount = 0;
+    let hasNeimarkSacker = false;
+
+    for (const eig of eigenvalues) {
+        const magnitude = Math.sqrt(eig.re * eig.re + eig.im * eig.im);
+
+        // Skip trivial multiplier (≈1)
+        if (Math.abs(magnitude - 1.0) < 0.01 && Math.abs(eig.im) < 0.01) continue;
+
+        if (magnitude > 1.0 + 1e-6) {
+            unstableCount++;
+            // Complex pair with |λ| > 1 indicates Neimark-Sacker
+            if (Math.abs(eig.im) > 1e-6) hasNeimarkSacker = true;
+        }
+    }
+
+    if (unstableCount === 0) return 'stable';
+    if (hasNeimarkSacker) return `unstable (torus)`;
+    return `unstable (${unstableCount}D)`;
+}
+
+
+/**
+ * Get the best available parameter values for a branch.
+ * If the branch has params stored, use those.
+ * Otherwise, try to get from the source equilibrium object.
+ * Falls back to sysConfig.params as last resort.
+ */
+function getBranchParams(
+    sysName: string,
+    branch: ContinuationObject,
+    sysConfig: SystemConfig
+): number[] {
+    // If branch has params stored, use those
+    if (branch.params && branch.params.length === sysConfig.params.length) {
+        return [...branch.params];
+    }
+
+    // Try to get params from the source equilibrium object
+    // The startObject field contains the name of the equilibrium or parent branch
+    if (branch.startObject) {
+        try {
+            // First check if it's an equilibrium object
+            const eqObj = Storage.loadObject(sysName, branch.startObject);
+            if (eqObj && eqObj.type === 'equilibrium' && eqObj.parameters) {
+                if (eqObj.parameters.length === sysConfig.params.length) {
+                    return [...eqObj.parameters];
+                }
+            }
+
+            // Check if it's a parent branch
+            const parentBranch = Storage.loadContinuation(sysName, branch.startObject);
+            if (parentBranch && parentBranch.type === 'continuation') {
+                // Recursively get params from parent
+                return getBranchParams(sysName, parentBranch, sysConfig);
+            }
+        } catch {
+            // Object doesn't exist or can't be loaded, fall through to default
+        }
+    }
+
+    // Last resort: use current system config
+    return [...sysConfig.params];
+}
+
 export async function continuationMenu(sysName: string) {
     while (true) {
         const branchNames = Storage.listContinuations(sysName);
@@ -382,7 +514,8 @@ async function createBranch(sysName: string) {
             branchType: 'equilibrium',
             data: branchData,
             settings: continuationSettings,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            params: [...runConfig.params]  // Store full parameter snapshot
         };
 
         Storage.saveContinuation(sysName, branch);
@@ -422,8 +555,8 @@ async function manageBranch(sysName: string, branch: ContinuationObject) {
 
         if (action === 'Inspect Data') {
             const result = await inspectBranch(sysName, branch);
-            // If an LC branch was initiated from a Hopf point, exit to continuation menu
-            if (result === 'INITIATED_LC') {
+            // If a branch was initiated from a point, exit to continuation menu
+            if (result === 'INITIATED_LC' || result === 'INITIATED_BRANCH') {
                 return;
             }
         } else if (action === 'Extend Branch') {
@@ -445,54 +578,85 @@ async function manageBranch(sysName: string, branch: ContinuationObject) {
 
 async function extendBranch(sysName: string, branch: ContinuationObject) {
     const sysConfig = Storage.loadSystem(sysName);
-
-    const { direction } = await inquirer.prompt({
-        type: 'rawlist',
-        name: 'direction',
-        message: 'Extension Direction:',
-        choices: [
-            { name: 'Forward (Append)', value: true },
-            { name: 'Backward (Prepend)', value: false }
-        ],
-        pageSize: MENU_PAGE_SIZE
-    });
-
     const defaults = branch.settings || {};
 
-    const settings = await inquirer.prompt([
-        { name: 'max_steps', message: 'Max Points to Add:', default: '50' },
-        { name: 'step_size', message: 'Step Size:', default: defaults.step_size?.toString() || '0.01' },
-        // Reuse other settings from object if possible, or prompts?
-        // For simplicity, reusing old critical settings or prompts if missing.
-    ]);
+    // State for config menu
+    let directionForward = true;
+    let maxStepsInput = '50';
+    let stepSizeInput = defaults.step_size?.toString() || '0.01';
+
+    const directionLabel = (forward: boolean) =>
+        forward ? 'Forward (Append)' : 'Backward (Prepend)';
+
+    const entries: ConfigEntry[] = [
+        {
+            id: 'direction',
+            label: 'Direction',
+            section: 'Extension Settings',
+            getDisplay: () => directionLabel(directionForward),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    type: 'rawlist',
+                    name: 'value',
+                    message: 'Extension Direction:',
+                    choices: [
+                        { name: 'Forward (Append)', value: true },
+                        { name: 'Backward (Prepend)', value: false }
+                    ],
+                    default: directionForward ? 0 : 1,
+                    pageSize: MENU_PAGE_SIZE
+                });
+                directionForward = value;
+            }
+        },
+        {
+            id: 'maxSteps',
+            label: 'Max points to add',
+            section: 'Extension Settings',
+            getDisplay: () => formatUnset(maxStepsInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Max Points to Add:',
+                    default: maxStepsInput
+                });
+                maxStepsInput = value;
+            }
+        },
+        {
+            id: 'stepSize',
+            label: 'Step size',
+            section: 'Extension Settings',
+            getDisplay: () => formatUnset(stepSizeInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Step Size:',
+                    default: stepSizeInput
+                });
+                stepSizeInput = value;
+            }
+        }
+    ];
+
+    const result = await runConfigMenu(`Extend Branch: ${branch.name}`, entries);
+    if (result === 'back') {
+        return;
+    }
 
     const continuationSettings = {
-        step_size: parseFloat(settings.step_size),
+        step_size: parseFloatOrDefault(stepSizeInput, 0.01),
         min_step_size: defaults.min_step_size || 1e-5,
         max_step_size: defaults.max_step_size || 0.1,
-        max_steps: parseInt(settings.max_steps),
+        max_steps: parseIntOrDefault(maxStepsInput, 50),
         corrector_steps: defaults.corrector_steps || 4,
         corrector_tolerance: defaults.corrector_tolerance || 1e-6,
         step_tolerance: defaults.step_tolerance || 1e-6
     };
 
-    console.log(chalk.cyan(`Extending Branch ${direction ? 'Forward' : 'Backward'}...`));
+    console.log(chalk.cyan(`Extending Branch ${directionForward ? 'Forward' : 'Backward'}...`));
 
     try {
-        // Need to ensure we use the correct system parameters? 
-        // For continuation, we typically want the params to be what they were.
-        // But continuation traces a parameter change.
-        // The `extend_continuation` will pick up from the last point's state/param.
-        // However, other fixed parameters must be correct.
-
-        // We don't have a snapshot of *all* parameters in the branch object currently, 
-        // only `settings`. 
-        // Ideally we should have saved `parameters` in `ContinuationObject`.
-        // Since we didn't, we fall back to `sysConfig.params`. 
-        // If the user changed params since branch creation, this might be inconsistent.
-        // TODO: Add parameters snapshot to ContinuationObject in future refactor.
-        // For now, we assume system params haven't drastically changed or user wants current params.
-
         const bridge = new WasmBridge(sysConfig);
 
         // If indices are missing, fill them (migration)
@@ -504,26 +668,26 @@ async function extendBranch(sysName: string, branch: ContinuationObject) {
             serializeBranchDataForWasm(branch.data),
             branch.parameterName,
             continuationSettings,
-            direction
+            directionForward
         );
 
         branch.data = normalizeBranchEigenvalues(updatedData);
-        branch.settings = continuationSettings; // Update last used settings
+        branch.settings = continuationSettings;
 
         Storage.saveContinuation(sysName, branch);
-        console.log(chalk.green(`Extension successful! Total points: ${branch.data.points.length}`));
+        printSuccess(`Extension successful! Total points: ${branch.data.points.length}`);
 
         await inspectBranch(sysName, branch);
 
     } catch (e) {
-        console.error(chalk.red("Extension Failed:"), e);
+        printError(`Extension Failed: ${e}`);
     }
 }
 
-type BranchDetailResult = 'SUMMARY' | 'EXIT' | 'INITIATED_LC';
+type BranchDetailResult = 'SUMMARY' | 'EXIT' | 'INITIATED_LC' | 'INITIATED_BRANCH';
 const DETAIL_PAGE_SIZE = 10;
 
-async function inspectBranch(sysName: string, branch: ContinuationObject): Promise<'EXIT' | 'INITIATED_LC' | void> {
+async function inspectBranch(sysName: string, branch: ContinuationObject): Promise<'EXIT' | 'INITIATED_LC' | 'INITIATED_BRANCH' | void> {
     await hydrateEigenvalues(sysName, branch);
     const points = branch.data.points;
 
@@ -577,7 +741,7 @@ function buildSortedArrayOrder(indices: number[]): number[] {
         .map(entry => entry.arrayIdx);
 }
 
-async function browseBranchSummary(sysName: string, branch: ContinuationObject, indices: number[]): Promise<'EXIT' | 'INITIATED_LC' | void> {
+async function browseBranchSummary(sysName: string, branch: ContinuationObject, indices: number[]): Promise<'EXIT' | 'INITIATED_LC' | 'INITIATED_BRANCH' | void> {
     const sortedOrder = buildSortedArrayOrder(indices);
     while (true) {
         const summaryChoices = buildSummaryChoices(branch, indices, sortedOrder);
@@ -600,7 +764,7 @@ async function browseBranchSummary(sysName: string, branch: ContinuationObject, 
         if (typeof selection === 'string' && selection.startsWith('POINT:')) {
             const targetIdx = parseInt(selection.split(':')[1], 10);
             const detailResult = await browseBranchPoints(sysName, branch, indices, targetIdx, sortedOrder);
-            if (detailResult === 'EXIT' || detailResult === 'INITIATED_LC') {
+            if (detailResult === 'EXIT' || detailResult === 'INITIATED_LC' || detailResult === 'INITIATED_BRANCH') {
                 return detailResult;
             }
         }
@@ -773,8 +937,8 @@ async function browseBranchPoints(
             if (currentFocusSortedIdx === -1) currentFocusSortedIdx = 0;
             page = Math.floor(currentFocusSortedIdx / DETAIL_PAGE_SIZE);
             const pointResult = await showPointDetails(sysName, branch, indices, arrayIdx, bifurcationSet.has(arrayIdx));
-            if (pointResult === 'INITIATED_LC') {
-                return 'INITIATED_LC';
+            if (pointResult === 'INITIATED_LC' || pointResult === 'INITIATED_BRANCH') {
+                return pointResult;
             }
         }
     }
@@ -1021,7 +1185,19 @@ async function initiateLCFromHopf(
     console.log(chalk.cyan("Initializing limit cycle from Hopf bifurcation..."));
 
     try {
-        const bridge = new WasmBridge(sysConfig);
+        // Build system config with the parameter values from the source branch
+        const runConfig = { ...sysConfig };
+
+        // Get params from branch, falling back to source equilibrium if needed
+        runConfig.params = getBranchParams(sysName, branch, sysConfig);
+
+        // Update the source branch's continuation parameter to the Hopf point's value
+        const sourceParamIdx = sysConfig.paramNames.indexOf(branch.parameterName);
+        if (sourceParamIdx >= 0) {
+            runConfig.params[sourceParamIdx] = hopfPoint.param_value;
+        }
+
+        const bridge = new WasmBridge(runConfig);
 
         // Initialize LC guess from Hopf point
         const guess = bridge.initLCFromHopf(
@@ -1054,7 +1230,8 @@ async function initiateLCFromHopf(
             branchType: 'limit_cycle',
             data: branchData,
             settings: continuationSettings,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            params: [...runConfig.params]  // Store full parameter snapshot
         };
 
         Storage.saveContinuation(sysName, newBranch);
@@ -1068,59 +1245,755 @@ async function initiateLCFromHopf(
 }
 
 
+/**
+ * Initiates a new equilibrium continuation branch from a point on an existing branch.
+ * Allows switching the continuation parameter.
+ */
+async function initiateEquilibriumBranchFromPoint(
+    sysName: string,
+    sourceBranch: ContinuationObject,
+    point: ContinuationPoint
+): Promise<boolean> {
+    const sysConfig = Storage.loadSystem(sysName);
+
+    if (sysConfig.paramNames.length === 0) {
+        printError("System has no parameters to continue. Add at least one parameter first.");
+        return false;
+    }
+
+    // Default to a different parameter than the source branch if possible
+    let selectedParamName = sysConfig.paramNames.find(p => p !== sourceBranch.parameterName)
+        || sysConfig.paramNames[0];
+    let branchName = '';
+    let stepSizeInput = '0.01';
+    let maxStepsInput = '100';
+    let minStepSizeInput = '1e-5';
+    let maxStepSizeInput = '0.1';
+    let directionForward = true;
+    let correctorStepsInput = '4';
+    let correctorToleranceInput = '1e-6';
+    let stepToleranceInput = '1e-6';
+
+    const directionLabel = (forward: boolean) =>
+        forward ? 'Forward (Increasing Param)' : 'Backward (Decreasing Param)';
+
+    const entries: ConfigEntry[] = [
+        {
+            id: 'parameter',
+            label: 'Continuation parameter',
+            section: 'Branch Settings',
+            getDisplay: () => {
+                const isSame = selectedParamName === sourceBranch.parameterName;
+                return isSame ? `${selectedParamName} (same as source)` : selectedParamName;
+            },
+            edit: async () => {
+                const choices = sysConfig.paramNames.map(p => ({
+                    name: p === sourceBranch.parameterName ? `${p} (current branch param)` : p,
+                    value: p
+                }));
+                const { value } = await inquirer.prompt({
+                    type: 'rawlist',
+                    name: 'value',
+                    message: 'Select Continuation Parameter:',
+                    choices,
+                    default: selectedParamName,
+                    pageSize: MENU_PAGE_SIZE
+                });
+                selectedParamName = value;
+            }
+        },
+        {
+            id: 'branchName',
+            label: 'Branch name',
+            section: 'Branch Settings',
+            getDisplay: () => formatUnset(branchName),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Name for this Continuation Branch:',
+                    default: branchName || `${sourceBranch.name}_${selectedParamName}`,
+                    validate: (val: string) => {
+                        const valid = isValidName(val);
+                        if (valid !== true) return valid;
+                        if (Storage.listContinuations(sysName).includes(val)) return "Branch name already exists.";
+                        return true;
+                    }
+                });
+                branchName = value;
+            }
+        },
+        {
+            id: 'direction',
+            label: 'Direction',
+            section: 'Predictor Settings',
+            getDisplay: () => directionLabel(directionForward),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    type: 'rawlist',
+                    name: 'value',
+                    message: 'Direction:',
+                    choices: [
+                        { name: 'Forward (Increasing Param)', value: true },
+                        { name: 'Backward (Decreasing Param)', value: false }
+                    ],
+                    default: directionForward,
+                    pageSize: MENU_PAGE_SIZE
+                });
+                directionForward = value;
+            }
+        },
+        {
+            id: 'stepSize',
+            label: 'Initial step size',
+            section: 'Predictor Settings',
+            getDisplay: () => formatUnset(stepSizeInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Initial Step Size:',
+                    default: stepSizeInput
+                });
+                stepSizeInput = value;
+            }
+        },
+        {
+            id: 'maxSteps',
+            label: 'Max points',
+            section: 'Predictor Settings',
+            getDisplay: () => formatUnset(maxStepsInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Max Points:',
+                    default: maxStepsInput
+                });
+                maxStepsInput = value;
+            }
+        },
+        {
+            id: 'minStep',
+            label: 'Min step size',
+            section: 'Predictor Settings',
+            getDisplay: () => formatUnset(minStepSizeInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Min Step Size:',
+                    default: minStepSizeInput
+                });
+                minStepSizeInput = value;
+            }
+        },
+        {
+            id: 'maxStep',
+            label: 'Max step size',
+            section: 'Predictor Settings',
+            getDisplay: () => formatUnset(maxStepSizeInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Max Step Size:',
+                    default: maxStepSizeInput
+                });
+                maxStepSizeInput = value;
+            }
+        },
+        {
+            id: 'correctorSteps',
+            label: 'Corrector steps',
+            section: 'Corrector Settings',
+            getDisplay: () => formatUnset(correctorStepsInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Corrector steps:',
+                    default: correctorStepsInput
+                });
+                correctorStepsInput = value;
+            }
+        },
+        {
+            id: 'correctorTolerance',
+            label: 'Corrector tolerance',
+            section: 'Corrector Settings',
+            getDisplay: () => formatUnset(correctorToleranceInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Corrector tolerance:',
+                    default: correctorToleranceInput
+                });
+                correctorToleranceInput = value;
+            }
+        },
+        {
+            id: 'stepTolerance',
+            label: 'Step tolerance',
+            section: 'Corrector Settings',
+            getDisplay: () => formatUnset(stepToleranceInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Step tolerance:',
+                    default: stepToleranceInput
+                });
+                stepToleranceInput = value;
+            }
+        }
+    ];
+
+    while (true) {
+        const result = await runConfigMenu('Create Equilibrium Branch from Point', entries);
+        if (result === 'back') {
+            return false;
+        }
+
+        if (!branchName) {
+            printError('Please provide a branch name.');
+            continue;
+        }
+
+        if (Storage.listContinuations(sysName).includes(branchName)) {
+            printError(`Branch "${branchName}" already exists.`);
+            continue;
+        }
+
+        break;
+    }
+
+    const continuationSettings = {
+        step_size: Math.max(parseFloatOrDefault(stepSizeInput, 0.01), 1e-9),
+        min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-5), 1e-12),
+        max_step_size: Math.max(parseFloatOrDefault(maxStepSizeInput, 0.1), 1e-9),
+        max_steps: Math.max(parseIntOrDefault(maxStepsInput, 100), 1),
+        corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 4), 1),
+        corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-6), Number.EPSILON),
+        step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON)
+    };
+
+    printInfo("Running Continuation...");
+
+    try {
+        // Build system config with the parameter values from the source branch
+        const runConfig = { ...sysConfig };
+
+        // Get params from branch, falling back to source equilibrium if needed
+        runConfig.params = getBranchParams(sysName, sourceBranch, sysConfig);
+
+        // Update the source branch's continuation parameter to the value at this point
+        const sourceParamIdx = sysConfig.paramNames.indexOf(sourceBranch.parameterName);
+        if (sourceParamIdx >= 0) {
+            runConfig.params[sourceParamIdx] = point.param_value;
+        }
+
+        const bridge = new WasmBridge(runConfig);
+        const branchData = normalizeBranchEigenvalues(bridge.compute_continuation(
+            point.state,
+            selectedParamName,
+            continuationSettings,
+            directionForward
+        ));
+
+        const newBranch: ContinuationObject = {
+            type: 'continuation',
+            name: branchName,
+            systemName: sysName,
+            parameterName: selectedParamName,
+            startObject: sourceBranch.name,
+            branchType: 'equilibrium',
+            data: branchData,
+            settings: continuationSettings,
+            timestamp: new Date().toISOString(),
+            params: [...runConfig.params]  // Store full parameter snapshot
+        };
+
+        Storage.saveContinuation(sysName, newBranch);
+        printSuccess(`Continuation successful! Generated ${branchData.points.length} points.`);
+
+        await inspectBranch(sysName, newBranch);
+        return true;
+
+    } catch (e) {
+        printError(`Continuation Failed: ${e}`);
+        return false;
+    }
+}
+
+/**
+ * Initiates a new limit cycle continuation branch from a point on an existing LC branch.
+ * Allows switching the continuation parameter.
+ */
+async function initiateLCBranchFromPoint(
+    sysName: string,
+    sourceBranch: ContinuationObject,
+    point: ContinuationPoint,
+    arrayIdx: number
+): Promise<boolean> {
+    const sysConfig = Storage.loadSystem(sysName);
+
+    if (sysConfig.paramNames.length === 0) {
+        printError("System has no parameters to continue. Add at least one parameter first.");
+        return false;
+    }
+
+    // Get LC metadata from the source branch's branch_type
+    const branchTypeData = sourceBranch.data.branch_type;
+    let sourceNtst = 20;
+    let sourceNcol = 4;
+    if (branchTypeData && typeof branchTypeData === 'object' && 'type' in branchTypeData) {
+        const bt = branchTypeData as { type: string; ntst?: number; ncol?: number };
+        if (bt.type === 'LimitCycle' && bt.ntst && bt.ncol) {
+            sourceNtst = bt.ntst;
+            sourceNcol = bt.ncol;
+        }
+    }
+
+    let ntstInput = sourceNtst.toString();
+    let ncolInput = sourceNcol.toString();
+
+
+    // Default to a different parameter than the source branch if possible
+    let selectedParamName = sysConfig.paramNames.find(p => p !== sourceBranch.parameterName)
+        || sysConfig.paramNames[0];
+    let branchName = '';
+    let stepSizeInput = '0.01';
+    let maxStepsInput = '50';
+    let minStepSizeInput = '1e-5';
+    let maxStepSizeInput = '0.1';
+    let directionForward = true;
+    let correctorStepsInput = '10';
+    let correctorToleranceInput = '1e-6';
+    let stepToleranceInput = '1e-6';
+
+    const directionLabel = (forward: boolean) =>
+        forward ? 'Forward (Increasing Param)' : 'Backward (Decreasing Param)';
+
+    const entries: ConfigEntry[] = [
+        {
+            id: 'parameter',
+            label: 'Continuation parameter',
+            section: 'Branch Settings',
+            getDisplay: () => {
+                const isSame = selectedParamName === sourceBranch.parameterName;
+                return isSame ? `${selectedParamName} (same as source)` : selectedParamName;
+            },
+            edit: async () => {
+                const choices = sysConfig.paramNames.map(p => ({
+                    name: p === sourceBranch.parameterName ? `${p} (current branch param)` : p,
+                    value: p
+                }));
+                const { value } = await inquirer.prompt({
+                    type: 'rawlist',
+                    name: 'value',
+                    message: 'Select Continuation Parameter:',
+                    choices,
+                    default: selectedParamName,
+                    pageSize: MENU_PAGE_SIZE
+                });
+                selectedParamName = value;
+            }
+        },
+        {
+            id: 'branchName',
+            label: 'Branch name',
+            section: 'Branch Settings',
+            getDisplay: () => formatUnset(branchName),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Name for this Limit Cycle Branch:',
+                    default: branchName || `${sourceBranch.name}_${selectedParamName}`,
+                    validate: (val: string) => {
+                        const valid = isValidName(val);
+                        if (valid !== true) return valid;
+                        if (Storage.listContinuations(sysName).includes(val)) return "Branch name already exists.";
+                        return true;
+                    }
+                });
+                branchName = value;
+            }
+        },
+        {
+            id: 'ntst',
+            label: 'Mesh intervals (ntst)',
+            section: 'Collocation Mesh',
+            getDisplay: () => formatUnset(ntstInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Number of mesh intervals:',
+                    default: ntstInput
+                });
+                ntstInput = value;
+            }
+        },
+        {
+            id: 'ncol',
+            label: 'Collocation points (ncol)',
+            section: 'Collocation Mesh',
+            getDisplay: () => formatUnset(ncolInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Collocation points per interval (2-7):',
+                    default: ncolInput
+                });
+                ncolInput = value;
+            }
+        },
+        {
+            id: 'direction',
+            label: 'Direction',
+            section: 'Predictor Settings',
+            getDisplay: () => directionLabel(directionForward),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    type: 'rawlist',
+                    name: 'value',
+                    message: 'Direction:',
+                    choices: [
+                        { name: 'Forward (Increasing Param)', value: true },
+                        { name: 'Backward (Decreasing Param)', value: false }
+                    ],
+                    default: directionForward,
+                    pageSize: MENU_PAGE_SIZE
+                });
+                directionForward = value;
+            }
+        },
+        {
+            id: 'stepSize',
+            label: 'Initial step size',
+            section: 'Predictor Settings',
+            getDisplay: () => formatUnset(stepSizeInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Initial Step Size:',
+                    default: stepSizeInput
+                });
+                stepSizeInput = value;
+            }
+        },
+        {
+            id: 'maxSteps',
+            label: 'Max points',
+            section: 'Predictor Settings',
+            getDisplay: () => formatUnset(maxStepsInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Max Points:',
+                    default: maxStepsInput
+                });
+                maxStepsInput = value;
+            }
+        },
+        {
+            id: 'correctorSteps',
+            label: 'Corrector steps',
+            section: 'Corrector Settings',
+            getDisplay: () => formatUnset(correctorStepsInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Corrector steps:',
+                    default: correctorStepsInput
+                });
+                correctorStepsInput = value;
+            }
+        },
+        {
+            id: 'correctorTolerance',
+            label: 'Corrector tolerance',
+            section: 'Corrector Settings',
+            getDisplay: () => formatUnset(correctorToleranceInput),
+            edit: async () => {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: 'Corrector tolerance:',
+                    default: correctorToleranceInput
+                });
+                correctorToleranceInput = value;
+            }
+        }
+    ];
+
+    while (true) {
+        const result = await runConfigMenu('Create Limit Cycle Branch from Point', entries);
+        if (result === 'back') {
+            return false;
+        }
+
+        if (!branchName) {
+            printError('Please provide a branch name.');
+            continue;
+        }
+
+        if (Storage.listContinuations(sysName).includes(branchName)) {
+            printError(`Branch "${branchName}" already exists.`);
+            continue;
+        }
+
+        break;
+    }
+
+    const ntst = parseIntOrDefault(ntstInput, 20);
+    const ncol = parseIntOrDefault(ncolInput, 4);
+
+    const continuationSettings = {
+        step_size: Math.max(parseFloatOrDefault(stepSizeInput, 0.01), 1e-9),
+        min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-5), 1e-12),
+        max_step_size: Math.max(parseFloatOrDefault(maxStepSizeInput, 0.1), 1e-9),
+        max_steps: Math.max(parseIntOrDefault(maxStepsInput, 50), 1),
+        corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
+        corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-6), Number.EPSILON),
+        step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON)
+    };
+
+    printInfo("Running Limit Cycle Continuation...");
+
+    try {
+        // Build system config with the parameter values from the source branch
+        const runConfig = { ...sysConfig };
+
+        // Get params from branch, falling back to source equilibrium if needed
+        runConfig.params = getBranchParams(sysName, sourceBranch, sysConfig);
+
+        // Update the source branch's continuation parameter to the value at this point
+        const sourceParamIdx = sysConfig.paramNames.indexOf(sourceBranch.parameterName);
+        if (sourceParamIdx >= 0) {
+            runConfig.params[sourceParamIdx] = point.param_value;
+        }
+
+        const bridge = new WasmBridge(runConfig);
+
+        // For LC continuation from a point, we need to construct an LC guess from the point data
+        // The point.state for LC points is flattened: [mesh_states..., stage_states..., period]
+        // Unflatten using source branch's ntst/ncol (not the user-input values, since we're reading existing data)
+
+        const dim = sysConfig.equations.length;
+        const flatState = point.state;
+
+        // Extract period from the end of the flat state
+        const period = flatState[flatState.length - 1];
+
+        // Calculate sizes based on source branch parameters
+        // profile_states expects ntst*ncol + 1 profile points
+        const profilePointCount = sourceNtst * sourceNcol + 1;
+
+        // Extract profile_states: profilePointCount arrays of dim floats each
+        // The flat state is [profile_point_0, ..., profile_point_N, period]
+        const profileStates: number[][] = [];
+        for (let i = 0; i < profilePointCount; i++) {
+            const offset = i * dim;
+            profileStates.push(flatState.slice(offset, offset + dim));
+        }
+
+        // Get the NEW continuation parameter's current value from runConfig
+        const newParamIdx = sysConfig.paramNames.indexOf(selectedParamName);
+        const newParamValue = newParamIdx >= 0 ? runConfig.params[newParamIdx] : point.param_value;
+
+        const lcGuess = {
+            param_value: newParamValue,  // Use NEW param's value, not old param's value
+            period: period,
+            profile_states: profileStates,
+            upoldp: sourceBranch.data.upoldp || []
+        };
+
+        const branchData = normalizeBranchEigenvalues(bridge.continueLimitCycle(
+            lcGuess,
+            selectedParamName,
+            continuationSettings,
+            ntst,
+            ncol,
+            directionForward
+        ));
+
+        const newBranch: ContinuationObject = {
+            type: 'continuation',
+            name: branchName,
+            systemName: sysName,
+            parameterName: selectedParamName,
+            startObject: sourceBranch.name,
+            branchType: 'limit_cycle',
+            data: branchData,
+            settings: continuationSettings,
+            timestamp: new Date().toISOString(),
+            params: [...runConfig.params]  // Store full parameter snapshot
+        };
+
+        Storage.saveContinuation(sysName, newBranch);
+        printSuccess(`Limit cycle continuation successful! Generated ${branchData.points.length} points.`);
+
+        await inspectBranch(sysName, newBranch);
+        return true;
+
+    } catch (e) {
+        printError(`Limit Cycle Continuation Failed: ${e}`);
+        return false;
+    }
+}
+
+
+
 async function showPointDetails(
     sysName: string,
     branch: ContinuationObject,
     indices: number[],
     arrayIdx: number,
     isBifurcation: boolean
-): Promise<'BACK' | 'INITIATED_LC'> {
+): Promise<'BACK' | 'INITIATED_LC' | 'INITIATED_BRANCH'> {
     const pt = branch.data.points[arrayIdx];
     const logicalIdx = indices[arrayIdx];
+    const branchType = branch.branchType || 'equilibrium';
 
     console.log('');
     const headerSuffix = isBifurcation ? ' [Bifurcation]' : '';
-    console.log(chalk.yellow(`Point ${logicalIdx} (Array ${arrayIdx})${headerSuffix}`));
-    console.log(`Stability: ${pt.stability}`);
-    console.log(`Parameter (${branch.parameterName}): ${formatNumber(pt.param_value)}`);
-    console.log('Eigenvalues:');
-    if (pt.eigenvalues?.length) {
-        pt.eigenvalues.forEach((eig, idx) => {
-            console.log(
-                `  λ${idx}: ${formatNumberSafe(eig.re)} + ${formatNumberSafe(eig.im)}i`
-            );
-        });
-    } else {
-        console.log('  (none)');
+    const typeLabel = branchType === 'limit_cycle' ? ' [Limit Cycle]' : '';
+    console.log(chalk.yellow(`Point ${logicalIdx} (Array ${arrayIdx})${headerSuffix}${typeLabel}`));
+
+    // Show all parameters, highlighting the continuation parameter
+    const sysConfig = Storage.loadSystem(sysName);
+    const paramNames = sysConfig.paramNames;
+
+    // Build current parameter values from branch.params (if available) + point.param_value for continuation param
+    const currentParams: number[] = branch.params && branch.params.length === paramNames.length
+        ? [...branch.params]
+        : [...sysConfig.params];
+
+    // Override the continuation parameter with the point's value
+    const contParamIdx = paramNames.indexOf(branch.parameterName);
+    if (contParamIdx >= 0) {
+        currentParams[contParamIdx] = pt.param_value;
     }
-    console.log(`State: ${formatArray(pt.state)}`);
 
-    // For Hopf bifurcations, show action menu
-    if (pt.stability === 'Hopf') {
-        const choices = [
-            { name: 'Initiate Limit Cycle Continuation', value: 'INITIATE_LC' },
-            new inquirer.Separator(),
-            { name: 'Back', value: 'BACK' }
-        ];
+    console.log(chalk.white('Parameters:'));
+    for (let i = 0; i < paramNames.length; i++) {
+        const isContParam = paramNames[i] === branch.parameterName;
+        const marker = isContParam ? ' ← continuation' : '';
+        const color = isContParam ? chalk.cyan : (x: string) => x;
+        console.log(color(`  ${paramNames[i]}: ${formatNumber(currentParams[i])}${marker}`));
+    }
 
-        const { action } = await inquirer.prompt({
-            type: 'rawlist',
-            name: 'action',
-            message: 'Hopf Point Actions',
-            choices,
-            pageSize: MENU_PAGE_SIZE
-        });
 
-        if (action === 'INITIATE_LC') {
-            await initiateLCFromHopf(sysName, branch, pt);
-            return 'INITIATED_LC';
+    if (branchType === 'limit_cycle') {
+        // Enhanced LC display
+        const dim = sysConfig.equations.length;
+        const varNames = sysConfig.varNames;
+
+        // Get ntst/ncol from branch_type
+        const branchTypeData = branch.data.branch_type;
+        let ntst = 20, ncol = 4;
+        if (branchTypeData && typeof branchTypeData === 'object' && 'type' in branchTypeData) {
+            const bt = branchTypeData as { type: string; ntst?: number; ncol?: number };
+            if (bt.type === 'LimitCycle' && bt.ntst && bt.ncol) {
+                ntst = bt.ntst;
+                ncol = bt.ncol;
+            }
         }
-        return 'BACK';
+
+        // Extract profile and compute metrics
+        const { profilePoints, period } = extractLCProfile(pt.state, dim, ntst, ncol);
+        const metrics = computeLCMetrics(profilePoints, period);
+        const stabilityLabel = interpretLCStability(pt.eigenvalues);
+
+        console.log(chalk.cyan(`Period: ${formatNumber(metrics.period)}`));
+        console.log(chalk.cyan(`Stability: ${stabilityLabel}`));
+
+        console.log('');
+        console.log(chalk.white('Amplitude (min → max):'));
+        for (let d = 0; d < dim; d++) {
+            const name = varNames[d] || `x${d}`;
+            const r = metrics.ranges[d];
+            console.log(`  ${name}: ${formatNumber(r.min)} → ${formatNumber(r.max)}  (range: ${formatNumber(r.range)})`);
+        }
+
+        console.log('');
+        console.log(chalk.white('Mean position & RMS amplitude:'));
+        for (let d = 0; d < dim; d++) {
+            const name = varNames[d] || `x${d}`;
+            console.log(`  ${name}: mean=${formatNumber(metrics.means[d])}, rms=${formatNumber(metrics.rmsAmplitudes[d])}`);
+        }
+
+        // Show Floquet multipliers
+        console.log('');
+        console.log(chalk.white('Floquet Multipliers:'));
+        if (pt.eigenvalues?.length) {
+            pt.eigenvalues.forEach((eig, idx) => {
+                const mag = Math.sqrt(eig.re * eig.re + eig.im * eig.im);
+                const isTrivial = Math.abs(mag - 1.0) < 0.01 && Math.abs(eig.im) < 0.01;
+                const label = isTrivial ? ' (trivial)' : '';
+                console.log(
+                    `  μ${idx}: ${formatNumberSafe(eig.re)} + ${formatNumberSafe(eig.im)}i  |μ|=${formatNumber(mag)}${label}`
+                );
+            });
+        } else {
+            console.log('  (none)');
+        }
+    } else {
+        // Equilibrium display (unchanged)
+        console.log(`Stability: ${pt.stability}`);
+        console.log('Eigenvalues:');
+        if (pt.eigenvalues?.length) {
+            pt.eigenvalues.forEach((eig, idx) => {
+                console.log(
+                    `  λ${idx}: ${formatNumberSafe(eig.re)} + ${formatNumberSafe(eig.im)}i`
+                );
+            });
+        } else {
+            console.log('  (none)');
+        }
+        console.log(`State: ${formatArray(pt.state)}`);
     }
 
-    await inquirer.prompt({ type: 'input', name: 'cont', message: 'Press enter to return...' });
+    // Build action menu based on branch type and point type
+    const choices: any[] = [];
+
+    if (branchType === 'equilibrium') {
+        // For equilibrium branches, always offer to create a new equilibrium branch
+        choices.push({ name: 'Create New Equilibrium Branch', value: 'NEW_EQ_BRANCH' });
+
+        // For Hopf points, also offer limit cycle continuation
+        if (pt.stability === 'Hopf') {
+            choices.push({ name: 'Initiate Limit Cycle Continuation', value: 'INITIATE_LC' });
+        }
+    } else if (branchType === 'limit_cycle') {
+        // For limit cycle branches, offer to create a new limit cycle branch
+        choices.push({ name: 'Create New Limit Cycle Branch', value: 'NEW_LC_BRANCH' });
+    }
+
+    choices.push(new inquirer.Separator());
+    choices.push({ name: 'Back', value: 'BACK' });
+
+    const menuTitle = pt.stability === 'Hopf' ? 'Hopf Point Actions' : 'Point Actions';
+
+    const { action } = await inquirer.prompt({
+        type: 'rawlist',
+        name: 'action',
+        message: menuTitle,
+        choices,
+        pageSize: MENU_PAGE_SIZE
+    });
+
+    if (action === 'NEW_EQ_BRANCH') {
+        const result = await initiateEquilibriumBranchFromPoint(sysName, branch, pt);
+        return result ? 'INITIATED_BRANCH' : 'BACK';
+    }
+
+    if (action === 'INITIATE_LC') {
+        await initiateLCFromHopf(sysName, branch, pt);
+        return 'INITIATED_LC';
+    }
+
+    if (action === 'NEW_LC_BRANCH') {
+        const result = await initiateLCBranchFromPoint(sysName, branch, pt, arrayIdx);
+        return result ? 'INITIATED_BRANCH' : 'BACK';
+    }
+
     return 'BACK';
 }
+
 
 function formatArray(values: number[]) {
     if (!values || values.length === 0) {
