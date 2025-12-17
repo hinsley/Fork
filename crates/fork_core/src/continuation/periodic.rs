@@ -681,7 +681,7 @@ fn gauss_legendre_nodes(degree: usize) -> Result<Vec<f64>> {
         nodes[i] = t;
         nodes[n - i - 1] = 1.0 - t;
     }
-    nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    nodes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     Ok(nodes)
 }
 
@@ -787,14 +787,14 @@ fn cycle_tests(multipliers: &[Complex<f64>]) -> (f64, f64, f64, Vec<Complex<f64>
         .min_by(|(_, a), (_, b)| {
             let da = (*a - Complex::new(1.0, 0.0)).norm_sqr();
             let db = (*b - Complex::new(1.0, 0.0)).norm_sqr();
-            da.partial_cmp(&db).unwrap()
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|(idx, _)| idx);
 
     let mut cycle_fold = 1.0;
     let mut period_doubling = 1.0;
     let mut neimark = 1.0;
-    const IMAG_EPS: f64 = 1e-6;
+    const IMAG_EPS: f64 = 1e-5;
 
     for (idx, mu) in values.iter().enumerate() {
         if Some(idx) == trivial_idx {
@@ -803,7 +803,7 @@ fn cycle_tests(multipliers: &[Complex<f64>]) -> (f64, f64, f64, Vec<Complex<f64>
         if mu.im.abs() < IMAG_EPS {
             cycle_fold *= mu.re - 1.0;
             period_doubling *= mu.re + 1.0;
-        } else {
+        } else if mu.im > 0.0 {
             neimark *= mu.norm_sqr() - 1.0;
         }
     }
@@ -894,3 +894,42 @@ pub fn extend_limit_cycle_collocation(
     extend_branch_with_problem(&mut problem, branch, settings, forward)
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_period_doubling_detection() {
+        // Case 1: Before bifurcation (Stable, multipliers inside)
+        // Triv: 1.0, Stable: -0.99
+        let multipliers_before = vec![
+            Complex::new(1.0, 0.0),
+            Complex::new(-0.99, 1e-16),
+            Complex::new(0.01, 0.0),
+        ];
+        let (_, pd_before, _, _) = cycle_tests(&multipliers_before);
+        
+        // Case 2: At/After bifurcation (Unstable, multiplier past -1)
+        // Triv: 1.0, Unstable: -1.01
+        let multipliers_after = vec![
+            Complex::new(1.0, 0.0),
+            Complex::new(-1.01, 1e-16),
+            Complex::new(0.01, 0.0),
+        ];
+        let (_, pd_after, _, _) = cycle_tests(&multipliers_after);
+
+        println!("PD Before: {}, PD After: {}", pd_before, pd_after);
+        assert!(pd_before * pd_after < 0.0, "Period doubling test function should change sign");
+        
+        // Case 3: Exact hit
+        let multipliers_exact = vec![
+            Complex::new(1.0, 0.0),
+            Complex::new(-1.0, 1e-16),
+            Complex::new(0.01, 0.0),
+        ];
+        let (_, pd_exact, _, _) = cycle_tests(&multipliers_exact);
+        println!("PD Exact: {}", pd_exact);
+        assert!(pd_before * pd_exact <= 0.0, "Period doubling test should be zero or cross at exact hit");
+    }
+}

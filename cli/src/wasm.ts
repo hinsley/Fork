@@ -135,8 +135,36 @@ export class WasmBridge {
         settings: any,
         forward: boolean
     ): ContinuationBranchData {
+
+
+        // Normalize branch_type for Wasm (Rust expects internally tagged enum)
+        const normalizedBranch = { ...branchData };
+
+        // Debugging: Log what we are receiving
+        // console.log("Extending branch with type:", normalizedBranch.branch_type);
+
+        if (typeof normalizedBranch.branch_type === 'string') {
+            const typeStr = (normalizedBranch.branch_type as string).toLowerCase();
+
+            if (typeStr === 'equilibrium') {
+                normalizedBranch.branch_type = { type: 'Equilibrium' };
+            } else if (typeStr === 'limit_cycle') {
+                // Attempt to recover LC config if possible, or assume it's lost and this will fail later
+                // But typically LC branches are created with objects.
+                // This handles legacy/string cases if any exist.
+                // For now, if it's 'limit_cycle' string, we can't easily reconstruct without ntst/ncol.
+                // Assuming standard flow creates objects.
+            }
+        } else if (!normalizedBranch.branch_type) {
+            // Default to Equilibrium if missing
+
+            normalizedBranch.branch_type = { type: 'Equilibrium' };
+        }
+
+
+
         return this.instance.extend_continuation(
-            branchData,
+            normalizedBranch,
             parameterName,
             settings,
             forward
