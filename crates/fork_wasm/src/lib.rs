@@ -3,11 +3,14 @@ use fork_core::analysis::{
 };
 use fork_core::autodiff::Dual;
 use fork_core::continuation::{
+    ContinuationBranch, ContinuationSettings, BranchType,
+    CollocationConfig, LimitCycleSetup,
+    continue_limit_cycle_collocation, extend_limit_cycle_collocation,
+    limit_cycle_setup_from_hopf,
+};
+use fork_core::continuation::equilibrium::{
     continue_parameter as core_continuation, extend_branch as core_extend_branch,
-    compute_eigenvalues_for_state, ContinuationBranch, ContinuationSettings,
-    hopf_init::{extract_hopf_data, init_limit_cycle_from_hopf},
-    CollocationConfig, LimitCycleGuess, continue_limit_cycle, extend_limit_cycle,
-    ContinuationPoint, BifurcationType, BranchType,
+    compute_eigenvalues_for_state,
 };
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
 use fork_core::equilibrium::{
@@ -51,6 +54,8 @@ impl WasmSystem {
         solver_name: &str,
         system_type: &str,
     ) -> Result<WasmSystem, JsValue> {
+        console_error_panic_hook::set_once();
+
         let compiler = Compiler::new(&var_names, &param_names);
         let mut bytecodes = Vec::new();
         for eq_str in equations {
@@ -286,8 +291,26 @@ impl WasmSystem {
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
         
-        let branch: ContinuationBranch = from_value(branch_val)
+        let mut branch: ContinuationBranch = from_value(branch_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid branch data: {}", e)))?;
+
+        // Auto-recover missing upoldp for LimitCycle branches
+        if let BranchType::LimitCycle { .. } = branch.branch_type {
+            if branch.upoldp.is_none() {
+                if let Some(last_pt) = branch.points.last() {
+                    let dim = self.system.equations.len();
+                    if last_pt.state.len() > dim {
+                        let x0 = &last_pt.state[0..dim];
+                        let period = *last_pt.state.last().unwrap_or(&1.0);
+                        let mut work = vec![0.0; dim];
+                        self.system.apply(0.0, x0, &mut work);
+                        // x'(0) = T * f(x0) (approx tangent for phase condition)
+                        let u0: Vec<f64> = work.iter().map(|&v| v * period).collect();
+                        branch.upoldp = Some(vec![u0]);
+                    }
+                }
+            }
+        }
 
         let param_index = *self.system.param_map.get(parameter_name)
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
@@ -308,15 +331,39 @@ impl WasmSystem {
                 ).map_err(|e| JsValue::from_str(&format!("Branch extension failed: {}", e)))?
             },
             BranchType::LimitCycle { ntst, ncol } => {
-                let config = CollocationConfig { ntst: *ntst, ncol: *ncol };
+                // Extract phase anchor and direction from upoldp
                 let upoldp = branch.upoldp.clone()
                     .ok_or_else(|| JsValue::from_str("Limit cycle branch missing upoldp data"))?;
-                extend_limit_cycle(
+                
+                // Use first point of upoldp as phase direction reference
+                let phase_direction = if !upoldp.is_empty() && !upoldp[0].is_empty() {
+                    let dir_norm: f64 = upoldp[0].iter().map(|v| v * v).sum::<f64>().sqrt();
+                    if dir_norm > 1e-12 {
+                        upoldp[0].iter().map(|v| v / dir_norm).collect()
+                    } else {
+                        upoldp[0].clone()
+                    }
+                } else {
+                    vec![1.0] // Fallback
+                };
+                
+                // Extract phase anchor from last point's state (first mesh point)
+                let last_pt = branch.points.last()
+                    .ok_or_else(|| JsValue::from_str("Branch has no points"))?;
+                let dim = self.system.equations.len();
+                let phase_anchor: Vec<f64> = last_pt.state.iter().take(dim).cloned().collect();
+                
+                let config = CollocationConfig {
+                    mesh_points: *ntst,
+                    degree: *ncol,
+                    phase_anchor,
+                    phase_direction,
+                };
+                extend_limit_cycle_collocation(
                     &mut self.system,
                     param_index,
-                    &config,
+                    config,
                     branch,
-                    upoldp,
                     settings,
                     forward
                 ).map_err(|e| JsValue::from_str(&format!("LC branch extension failed: {}", e)))?
@@ -360,7 +407,7 @@ impl WasmSystem {
     }
 
     /// Initializes a limit cycle guess from a Hopf bifurcation point.
-    /// Returns the LimitCycleGuess as a serialized JsValue.
+    /// Returns the LimitCycleSetup as a serialized JsValue.
     pub fn init_lc_from_hopf(
         &mut self,
         hopf_state: Vec<f64>,
@@ -376,45 +423,30 @@ impl WasmSystem {
             .get(parameter_name)
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
 
-        // Create a ContinuationPoint to pass to extract_hopf_data
-        let hopf_point = ContinuationPoint {
-            state: hopf_state,
+        let setup = limit_cycle_setup_from_hopf(
+            &mut self.system,
+            param_index,
+            &hopf_state,
             param_value,
-            stability: BifurcationType::Hopf,
-            eigenvalues: Vec::new(),
-        };
+            ntst as usize,
+            ncol as usize,
+            amplitude,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Failed to initialize limit cycle: {}", e)))?;
 
-        let old_param = self.system.params[param_index];
-        self.system.params[param_index] = param_value;
-
-        let hopf_data = extract_hopf_data(&mut self.system, &hopf_point, param_index)
-            .map_err(|e| JsValue::from_str(&format!("Failed to extract Hopf data: {}", e)))?;
-
-        let config = CollocationConfig {
-            ntst: ntst as usize,
-            ncol: ncol as usize,
-        };
-
-        let guess = init_limit_cycle_from_hopf(&hopf_data, amplitude, &config)
-            .map_err(|e| JsValue::from_str(&format!("Failed to initialize limit cycle: {}", e)))?;
-
-        self.system.params[param_index] = old_param;
-
-        to_value(&guess).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        to_value(&setup).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
-    /// Computes limit cycle continuation from an initial guess.
+    /// Computes limit cycle continuation from an initial setup (from init_lc_from_hopf).
     pub fn compute_limit_cycle_continuation(
         &mut self,
-        guess_val: JsValue,
+        setup_val: JsValue,
         parameter_name: &str,
         settings_val: JsValue,
-        ntst: u32,
-        ncol: u32,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
-        let guess: LimitCycleGuess = from_value(guess_val)
-            .map_err(|e| JsValue::from_str(&format!("Invalid limit cycle guess: {}", e)))?;
+        let setup: LimitCycleSetup = from_value(setup_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid limit cycle setup: {}", e)))?;
 
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
@@ -425,16 +457,13 @@ impl WasmSystem {
             .get(parameter_name)
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
 
-        let config = CollocationConfig {
-            ntst: ntst as usize,
-            ncol: ncol as usize,
-        };
+        let config = setup.collocation_config();
 
-        let branch = continue_limit_cycle(
+        let branch = continue_limit_cycle_collocation(
             &mut self.system,
             param_index,
-            &config,
-            guess,
+            config,
+            setup.guess,
             settings,
             forward,
         )
