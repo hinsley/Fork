@@ -10,11 +10,25 @@ pub mod periodic;
 #[path = "continuation/equilibrium.rs"]
 pub mod equilibrium;
 
+#[path = "continuation/types.rs"]
+pub mod types;
+
+#[path = "continuation/util.rs"]
+pub mod util;
+
 // Re-export types needed for external use
 pub use periodic::{
     CollocationConfig, LimitCycleGuess, LimitCycleSetup,
     continue_limit_cycle_collocation, extend_limit_cycle_collocation,
     limit_cycle_setup_from_hopf,
+};
+pub use problem::{PointDiagnostics, TestFunctionValues};
+pub use types::{
+    BifurcationType, BranchType, ContinuationBranch, ContinuationPoint, ContinuationSettings,
+};
+pub use util::{
+    compute_nullspace_tangent, continuation_point_to_aug,
+    compute_eigenvalues, hopf_test_function, neutral_saddle_test_function,
 };
 
 use crate::autodiff::Dual;
@@ -22,9 +36,8 @@ use crate::equation_engine::EquationSystem;
 use crate::equilibrium::SystemKind;
 use crate::traits::DynamicalSystem;
 use anyhow::{anyhow, bail, Result};
-use nalgebra::{DMatrix, DVector, SymmetricEigen};
+use nalgebra::{DMatrix, DVector};
 use num_complex::Complex;
-use serde::{Deserialize, Serialize};
 use problem::ContinuationProblem;
 
 // Generic continuation functions using ContinuationProblem trait
@@ -86,7 +99,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
                  tangent_p, tangent_period, prev_tangent.norm());
     }
     
-    for _step in 0..settings.max_steps {
+    for step in 0..settings.max_steps {
         // Predictor: predict along tangent
         let pred_aug = &prev_aug + &prev_tangent * (step_size * direction_sign);
         
@@ -710,7 +723,7 @@ fn correct_with_problem<P: ContinuationProblem>(
     // Use adaptive tangent for bordering - start with prev_tangent
     let mut border_tangent = prev_tangent.clone();
     
-    for _iter in 0..max_iters {
+    for iter in 0..max_iters {
         // Compute residual F(x)
         let mut residual = DVector::zeros(dim);
         problem.residual(&current, &mut residual)?;
@@ -808,88 +821,8 @@ fn correct_with_problem<P: ContinuationProblem>(
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct ContinuationSettings {
-    pub step_size: f64,
-    pub min_step_size: f64,
-    pub max_step_size: f64,
-    pub max_steps: usize,
-    pub corrector_steps: usize,
-    pub corrector_tolerance: f64,
-    pub step_tolerance: f64,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-pub enum BifurcationType {
-    None,
-    Fold,
-    Hopf,
-    NeutralSaddle,
-    CycleFold,
-    PeriodDoubling,
-    NeimarkSacker,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContinuationPoint {
-    pub state: Vec<f64>,
-    pub param_value: f64,
-    pub stability: BifurcationType,
-    #[serde(default)]
-    pub eigenvalues: Vec<Complex<f64>>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct TestFunctionValues {
-    pub fold: f64,
-    pub hopf: f64,
-    pub neutral_saddle: f64,
-}
-
-impl TestFunctionValues {
-    fn new(fold: f64, hopf: f64, neutral_saddle: f64) -> Self {
-        Self {
-            fold,
-            hopf,
-            neutral_saddle,
-        }
-    }
-
-    fn is_finite(&self) -> bool {
-        self.fold.is_finite() && self.hopf.is_finite() && self.neutral_saddle.is_finite()
-    }
-}
-
-#[derive(Debug, Clone)]
-struct PointDiagnostics {
-    test_values: TestFunctionValues,
-    eigenvalues: Vec<Complex<f64>>,
-}
-
-/// Type of continuation branch.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type")]
-pub enum BranchType {
-    Equilibrium,
-    LimitCycle { ntst: usize, ncol: usize },
-}
-
-impl Default for BranchType {
-    fn default() -> Self {
-        BranchType::Equilibrium
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContinuationBranch {
-    pub points: Vec<ContinuationPoint>,
-    pub bifurcations: Vec<usize>, // Indices of points where bifurcation was detected
-    pub indices: Vec<i32>,        // Explicit indices relative to start point (0)
-    #[serde(default)]
-    pub branch_type: BranchType,  // Type of branch (equilibrium or limit cycle)
-    #[serde(default)]
-    pub upoldp: Option<Vec<Vec<f64>>>,  // LC-specific: velocity profile for phase condition
-}
+// Types (ContinuationSettings, BifurcationType, ContinuationPoint, BranchType, ContinuationBranch)
+// are now in the types module and re-exported above.
 
 pub fn extend_branch(
     system: &mut EquationSystem,
@@ -1214,104 +1147,8 @@ fn diagnostics_from_point(
     compute_point_diagnostics(system, kind, &aug, param_index)
 }
 
-fn compute_nullspace_tangent(j_ext: &DMatrix<f64>) -> Result<DVector<f64>> {
-    if let Some(vec) = try_gram_eigen(j_ext) {
-        return Ok(vec);
-    }
-    compute_tangent_linear_solve(j_ext)
-}
-
-fn try_gram_eigen(j_ext: &DMatrix<f64>) -> Option<DVector<f64>> {
-    if j_ext.ncols() == 0 {
-        return None;
-    }
-
-    let gram = j_ext.transpose() * j_ext;
-    if gram.iter().any(|v| !v.is_finite()) {
-        return None;
-    }
-
-    let identity = DMatrix::identity(gram.nrows(), gram.ncols());
-    let mut epsilon = 0.0;
-
-    for _ in 0..5 {
-        let adjusted = if epsilon == 0.0 {
-            gram.clone()
-        } else {
-            &gram + identity.scale(epsilon)
-        };
-
-        let eig = SymmetricEigen::new(adjusted.clone());
-        if eig.eigenvalues.is_empty() {
-            return None;
-        }
-
-        let mut min_idx = 0;
-        let mut min_val = eig.eigenvalues[0];
-        for (i, &val) in eig.eigenvalues.iter().enumerate().skip(1) {
-            if !val.is_finite() {
-                continue;
-            }
-            if val < min_val {
-                min_val = val;
-                min_idx = i;
-            }
-        }
-
-        if !min_val.is_finite() {
-            epsilon = if epsilon == 0.0 {
-                1e-12
-            } else {
-                epsilon * 10.0
-            };
-            continue;
-        }
-
-        let vec = eig.eigenvectors.column(min_idx).into_owned();
-        if vec.norm_squared() == 0.0 || vec.iter().any(|v| !v.is_finite()) {
-            return None;
-        }
-        return Some(vec);
-    }
-
-    None
-}
-
-fn compute_tangent_linear_solve(j_ext: &DMatrix<f64>) -> Result<DVector<f64>> {
-    let dim = j_ext.nrows();
-    if dim == 0 {
-        bail!("Failed to compute tangent: zero-dimensional system");
-    }
-
-    let mut a = DMatrix::zeros(dim + 1, dim + 1);
-    a.view_mut((0, 0), (dim, dim + 1)).copy_from(j_ext);
-    let mut rhs = DVector::zeros(dim + 1);
-    rhs[dim] = 1.0;
-
-    for col in 0..=dim {
-        for j in 0..=dim {
-            a[(dim, j)] = 0.0;
-        }
-        a[(dim, col)] = 1.0;
-
-        if let Some(solution) = a.clone().lu().solve(&rhs) {
-            if solution.iter().all(|v| v.is_finite()) && solution.norm_squared() != 0.0 {
-                return Ok(solution);
-            }
-        }
-    }
-
-    bail!("Failed to compute tangent: all bordered solves singular")
-}
-
-fn continuation_point_to_aug(point: &ContinuationPoint) -> DVector<f64> {
-    let mut aug = DVector::zeros(point.state.len() + 1);
-    aug[0] = point.param_value;
-    for (i, &val) in point.state.iter().enumerate() {
-        aug[i + 1] = val;
-    }
-    aug
-}
+// Tangent computation functions (compute_nullspace_tangent, try_gram_eigen, 
+// compute_tangent_linear_solve) and continuation_point_to_aug are now in util module.
 
 fn refine_fold_point(
     system: &mut EquationSystem,
@@ -1612,7 +1449,7 @@ fn compute_point_diagnostics(
     };
 
     Ok(PointDiagnostics {
-        test_values: TestFunctionValues::new(fold, hopf, neutral),
+        test_values: TestFunctionValues::equilibrium(fold, hopf, neutral),
         eigenvalues,
     })
 }
@@ -1633,49 +1470,8 @@ pub fn compute_eigenvalues_for_state(
     Ok(diagnostics.eigenvalues)
 }
 
-fn compute_eigenvalues(mat: &DMatrix<f64>) -> Result<Vec<Complex<f64>>> {
-    if mat.nrows() == 0 {
-        return Ok(Vec::new());
-    }
-
-    let eigen = mat.clone().complex_eigenvalues();
-    Ok(eigen.iter().cloned().collect())
-}
-
-fn hopf_test_function(eigenvalues: &[Complex<f64>]) -> Complex<f64> {
-    let mut product = Complex::new(1.0, 0.0);
-    for i in 0..eigenvalues.len() {
-        for j in (i + 1)..eigenvalues.len() {
-            product *= eigenvalues[i] + eigenvalues[j];
-        }
-    }
-    product
-}
-
-fn neutral_saddle_test_function(eigenvalues: &[Complex<f64>]) -> f64 {
-    const IMAG_EPS: f64 = 1e-8;
-    let mut product = 1.0;
-    let mut found_pair = false;
-
-    for i in 0..eigenvalues.len() {
-        if eigenvalues[i].im.abs() >= IMAG_EPS {
-            continue;
-        }
-        for j in (i + 1)..eigenvalues.len() {
-            if eigenvalues[j].im.abs() >= IMAG_EPS {
-                continue;
-            }
-            found_pair = true;
-            product *= eigenvalues[i].re + eigenvalues[j].re;
-        }
-    }
-
-    if found_pair {
-        product
-    } else {
-        1.0
-    }
-}
+// Eigenvalue and bifurcation test functions (compute_eigenvalues, hopf_test_function, 
+// neutral_saddle_test_function) are now in util module.
 
 fn compute_extended_jacobian(
     system: &mut EquationSystem,
@@ -1848,5 +1644,90 @@ mod tests {
         assert!(branch.points.len() > 1);
         assert!(branch.points[1].param_value > -1.0);
         assert!(branch.points[1].state[0] < 1.0);
+    }
+
+    /// Test Hopf normal form: dx/dt = μx - y, dy/dt = x + μy
+    /// Linear part has eigenvalues μ ± i, so Hopf bifurcation at μ = 0.
+    #[test]
+    fn test_hopf_normal_form() {
+        // Build: dx/dt = mu*x - y (equation 0)
+        //        dy/dt = x + mu*y (equation 1)
+        // Equilibrium at origin for all mu.
+        // Eigenvalues: mu ± i => Hopf at mu = 0
+        
+        // Equation 0: mu*x - y = LoadParam(0)*LoadVar(0) - LoadVar(1)
+        let eq0_ops = vec![
+            OpCode::LoadParam(0),  // mu
+            OpCode::LoadVar(0),    // x
+            OpCode::Mul,           // mu*x
+            OpCode::LoadVar(1),    // y
+            OpCode::Sub,           // mu*x - y
+        ];
+        
+        // Equation 1: x + mu*y = LoadVar(0) + LoadParam(0)*LoadVar(1)
+        let eq1_ops = vec![
+            OpCode::LoadVar(0),    // x
+            OpCode::LoadParam(0),  // mu
+            OpCode::LoadVar(1),    // y
+            OpCode::Mul,           // mu*y
+            OpCode::Add,           // x + mu*y
+        ];
+
+        let equations = vec![
+            Bytecode { ops: eq0_ops },
+            Bytecode { ops: eq1_ops },
+        ];
+        let params = vec![-0.5]; // Start at mu = -0.5 (stable)
+        let mut system = EquationSystem::new(equations, params);
+
+        // Equilibrium is at origin
+        let initial_state = vec![0.0, 0.0];
+        let param_index = 0;
+
+        let settings = ContinuationSettings {
+            step_size: 0.05,
+            min_step_size: 1e-5,
+            max_step_size: 0.2,
+            max_steps: 50,
+            corrector_steps: 5,
+            corrector_tolerance: 1e-8,
+            step_tolerance: 1e-8,
+        };
+
+        let res = continue_parameter(
+            &mut system,
+            SystemKind::Flow,
+            &initial_state,
+            param_index,
+            settings,
+            true, // Forward: -0.5 -> positive
+        );
+
+        assert!(res.is_ok(), "Hopf NF continuation failed: {:?}", res.err());
+        let branch = res.unwrap();
+
+        println!("Hopf NF: Generated {} points", branch.points.len());
+        
+        // Check that we found a Hopf bifurcation
+        let hopf_points: Vec<_> = branch.points.iter()
+            .enumerate()
+            .filter(|(_, pt)| pt.stability == BifurcationType::Hopf)
+            .collect();
+        
+        println!("Found {} Hopf points", hopf_points.len());
+        for (i, pt) in &hopf_points {
+            println!("  Point {}: mu = {:.6}", i, pt.param_value);
+        }
+
+        // We should find at least one Hopf bifurcation
+        assert!(!hopf_points.is_empty(), "Should detect Hopf bifurcation");
+        
+        // The Hopf should be near mu = 0
+        let hopf_param = hopf_points[0].1.param_value;
+        assert!(
+            hopf_param.abs() < 0.1,
+            "Hopf should be near mu=0, found at mu={:.6}",
+            hopf_param
+        );
     }
 }
