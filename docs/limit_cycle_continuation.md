@@ -13,6 +13,8 @@ This document describes how Fork implements bifurcation from Hopf points to limi
 7. [The Continuation Problem](#the-continuation-problem)
 8. [Newton's Method and the Jacobian](#newtons-method-and-the-jacobian)
 9. [Branch Extension](#branch-extension)
+10. [Floquet Multiplier Extraction](#floquet-multiplier-extraction)
+11. [Best Practices for Accurate Floquet Multipliers](#best-practices-for-accurate-floquet-multipliers)
 
 ---
 
@@ -367,6 +369,190 @@ Each continuation branch stores:
 - For limit cycles: `ntst`, `ncol`, `upoldp` (velocity profile)
 
 This metadata ensures the correct continuation function is called when extending.
+
+---
+
+## Floquet Multiplier Extraction
+
+### What Are Floquet Multipliers?
+
+Floquet multipliers are eigenvalues of the **monodromy matrix** M, which describes how perturbations evolve after one period. For an n-dimensional system:
+- One multiplier is always exactly 1 (trivial multiplier, corresponding to perturbations along the orbit)
+- Other multipliers determine stability:
+  - All |μ| < 1: stable limit cycle
+  - Any |μ| > 1: unstable limit cycle
+
+### Algorithm: Sequential Block Elimination
+
+Fork extracts Floquet multipliers directly from the collocation Jacobian using **sequential block elimination**, chaining local transfer matrices through each mesh interval:
+
+```
+M = T_{ntst-1} × T_{ntst-2} × ... × T_1 × T_0
+```
+
+For each interval i:
+
+1. **Stage elimination**: Solve the collocation equations for stage sensitivities
+   ```
+   ds/dx = -G_s^{-1} × G_x
+   ```
+   where G_s is the stage-to-stage Jacobian and G_x is the mesh-to-stage Jacobian.
+
+2. **Continuity condensation**: Substitute into continuity equation
+   ```
+   effective_C_x = C_x + C_s × (ds/dx)
+   ```
+
+3. **Transfer matrix**: Compute mesh-to-mesh transfer
+   ```
+   T_i = -C_next^{-1} × effective_C_x
+   ```
+
+4. **Chain accumulation**:
+   ```
+   M = T_i × M
+   ```
+
+The final matrix M is the monodromy, and its eigenvalues are the Floquet multipliers.
+
+### Comparison with MATCONT's Approach
+
+MATCONT uses a **global S-matrix reduction** algorithm:
+
+| Aspect | Fork (Sequential) | MATCONT (Global S-matrix) |
+|--------|-------------------|---------------------------|
+| **Build phase** | Chain T_i matrices one interval at a time | Build full (ntst×dim) × ((ntst+1)×dim) S-matrix |
+| **Elimination** | Sequential dim×dim solves | Banded Gaussian elimination with pivoting |
+| **Memory** | O(dim²) working memory | O(ntst × dim²) for S-matrix |
+| **Computational cost** | O(ntst × (ncol×dim)³ + ntst × dim³) | O(ntst × (ncol×dim)³ + ntst × dim³) |
+| **BVP structure** | Implicit periodicity (last equation wraps to x₀) | Explicit boundary row (x₀ - x_{ntst} = 0) |
+
+Both approaches are **mathematically equivalent** and extract the same monodromy eigenvalues. The primary differences are:
+
+1. **Memory efficiency**: Sequential approach avoids allocating the full S-matrix
+2. **BVP compatibility**: Sequential approach naturally handles implicit periodicity; MATCONT requires explicit boundary variables
+
+### Why Not Use MATCONT's Exact Approach?
+
+Fork's BVP uses **implicit periodicity**: the last continuity equation wraps x_{ntst} back to x₀, meaning both endpoints share the same Jacobian column. MATCONT's algorithm assumes **explicit periodicity**: x_{ntst} is a separate variable with an explicit boundary equation x₀ - x_{ntst} = 0.
+
+The sequential approach correctly handles implicit periodicity by using modular indexing:
+```rust
+let next_mesh_col = mesh_col_start + ((interval + 1) % ntst) * dim;
+```
+
+This makes the last transfer matrix T_{ntst-1} directly map from x_{ntst-1} back to x₀.
+
+### Comparison with BifurcationKit.jl
+
+BifurcationKit.jl (Julia) offers **multiple Floquet computation methods**:
+
+| Method | Description | Comparison to Fork |
+|--------|-------------|-------------------|
+| **FloquetQaD** | "Quick and Dirty" — sequential matrix products along orbit | **Same approach as Fork** |
+| **Periodic Schur** | Uses periodic Schur decomposition (via PeriodicSchurBifurcationKit.jl) | More numerically stable, but more complex |
+
+BifurcationKit.jl's documentation notes that `FloquetQaD` "may suffer from precision issues, especially when dealing with many time sections or large/small Floquet exponents, due to accumulated errors."
+
+Fork's approach is equivalent to `FloquetQaD`. For most practical systems (moderate ntst, dim ≤ 10), precision is sufficient. The Periodic Schur method would be preferable for high-precision needs or very large/stiff systems.
+
+**Future enhancement**: To add Periodic Schur support, Fork would need to implement periodic QR iteration (computing eigenvalues of a matrix product without forming it). This would avoid error accumulation in the sequential products and provide better precision for extreme Floquet exponents (very stable or very unstable orbits). Reference implementations exist in SLICOT (Fortran) and PeriodicSchurBifurcationKit.jl (Julia).
+
+### Sanity Check
+
+Fork validates the computed multipliers before using them for bifurcation detection:
+
+```rust
+if trivial_distance > 0.5 {
+    // Multipliers are numerically corrupt
+    return (NaN, NaN, NaN, values);
+}
+```
+
+If no multiplier is within 0.5 of 1.0, the monodromy computation has broken down (often due to numerical issues on very stiff or long-period orbits). In this case, NaN test values are returned to prevent false bifurcation detections.
+
+---
+
+## Best Practices for Accurate Floquet Multipliers
+
+### Mesh Resolution (ntst)
+
+The number of mesh intervals controls discretization accuracy:
+
+| ntst | Use Case |
+|------|----------|
+| 10–15 | Quick exploration, smooth orbits |
+| 20–30 | Default for most systems (recommended) |
+| 40–60 | Stiff systems, sharp transients, relaxation oscillations |
+| 80+ | Extreme precision needs (rarely necessary) |
+
+**Signs you need more mesh points:**
+- Trivial multiplier drifts from 1.0
+- Newton corrector struggles to converge
+- Orbit profile looks under-resolved
+
+### Collocation Degree (ncol)
+
+Higher degree = higher-order polynomial approximation per interval:
+
+| ncol | Description |
+|------|-------------|
+| 3 | Minimum for smooth problems |
+| 4 | Default (good balance of accuracy and cost) |
+| 5–6 | Higher precision or stiff systems |
+
+Generally, increasing ntst is more effective than increasing ncol for improving accuracy.
+
+### Step Size
+
+Continuation step size affects multiplier stability:
+
+- **Too large**: Newton may converge to a different orbit branch, causing multiplier jumps
+- **Too small**: Slow, but multipliers stay consistent
+- **Adaptive**: Fork adapts step size based on convergence — start with 0.01 and let it adjust
+
+**Tip**: If multipliers suddenly jump or the trivial multiplier deviates from 1.0, reduce step size and re-extend.
+
+### Initial Amplitude (from Hopf)
+
+When starting a limit cycle from a Hopf bifurcation:
+
+| Amplitude | Effect |
+|-----------|--------|
+| 0.01–0.05 | Very close to Hopf, may be numerically degenerate |
+| 0.05–0.2 | Sweet spot for most systems |
+| 0.5+ | May be outside convergence basin |
+
+If the initial Newton correction fails, try a smaller amplitude.
+
+### Troubleshooting Poor Multipliers
+
+| Symptom | Likely Cause | Fix |
+|---------|--------------|-----|
+| Trivial multiplier ≠ 1.0 | Mesh too coarse | Increase ntst |
+| Multipliers are NaN | Monodromy computation failed | Check orbit validity, increase ntst |
+| False bifurcation detection | Step size too large | Reduce step size, re-extend |
+| Very large/small multipliers | Highly unstable orbit | Consider Periodic Schur (future) |
+
+### Example: High-Precision Configuration
+
+For a stiff 3D system with relaxation oscillations:
+
+```
+ntst: 50
+ncol: 4
+step_size: 0.005
+corrector_tol: 1e-8
+```
+
+For a smooth 2D system:
+
+```
+ntst: 20
+ncol: 4
+step_size: 0.01
+corrector_tol: 1e-6
+```
 
 ---
 
