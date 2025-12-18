@@ -69,3 +69,11 @@ Before considering a Fork Core or Fork CLI change complete:
 - [ ] WASM rebuilt (if Fork Core modified)
 - [ ] CLI tested interactively
 - [ ] Affected workflows verified end-to-end
+
+## Code Coverage
+
+When modifying math or solver logic in **Fork Core**, you should aim to maintain or improve test coverage.
+
+1. **Verify Coverage Locally**: Use `cargo llvm-cov` to check coverage before pushing.
+2. **Review CI Reports**: Check the Codecov report on GitHub Pull Requests to ensure new code is properly tested.
+3. **Target Critical Paths**: Ensure complex algorithms (like continuation, bifurcation detection, or Jacobian calculations) have near-100% region coverage.
