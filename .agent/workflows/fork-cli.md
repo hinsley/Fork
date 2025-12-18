@@ -109,9 +109,18 @@ Main Menu
 1. Run equilibrium continuation (see above)
 2. Inspect the branch to find Hopf bifurcation points
 3. Select a Hopf point (marked with * or labeled "Hopf")
-4. Select `1` (Initiate Limit Cycle Continuation)
+4. Select `2` (Initiate Limit Cycle Continuation)
 5. Configure amplitude, discretization (ntst, ncol), and continuation settings
 6. Select `Continue` to compute limit cycle branch
+
+### Inspecting Limit Cycle Branches
+
+1. Navigate to Continuation menu
+2. Select a limit cycle branch (labeled `limit_cycle continuation`)
+3. Select `1` (Inspect Data)
+4. Browse points — each shows **Multipliers** (Floquet multipliers, not eigenvalues)
+5. Look for trivial multiplier near 1.0 to verify accuracy
+6. Bifurcations detected: Period-Doubling (multiplier at -1), Neimark-Sacker (complex pair on unit circle)
 
 ## Text Input Prompts
 
