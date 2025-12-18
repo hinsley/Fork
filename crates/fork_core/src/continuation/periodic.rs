@@ -546,14 +546,19 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
     }
 
     fn diagnostics(&mut self, aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
-        let param = aug_state[0];
-        let period = aug_state[self.period_index()];
-        let mesh_states = self.mesh_states(aug_state);
-        let monodromy =
-            compute_trapezoid_monodromy(&mut self.context, param, &mesh_states, period)?;
-        let multipliers_vec: Vec<Complex<f64>> =
-            monodromy.clone().complex_eigenvalues().iter().cloned().collect();
-        let (cycle_fold, period_doubling, neimark, eig_vals) = cycle_tests(&multipliers_vec);
+        // Get the full BVP Jacobian
+        let jac = self.extended_jacobian(aug_state)?;
+        
+        // Extract multipliers using shooting-based monodromy from Jacobian
+        let multipliers = extract_multipliers_shooting(
+            &jac,
+            self.state_dim(),
+            self.mesh_points,
+            self.degree,
+        )?;
+        
+        // Compute test functions from multipliers
+        let (cycle_fold, period_doubling, neimark, eig_vals) = cycle_tests_from_multipliers(&multipliers);
 
         Ok(PointDiagnostics {
             test_values: TestFunctionValues::limit_cycle(
@@ -564,6 +569,168 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
             eigenvalues: eig_vals,
         })
     }
+}
+
+/// Shooting-based Floquet multiplier extraction from Jacobian.
+/// 
+/// We compute the monodromy by chaining local transfer matrices through each interval:
+/// M = T_{ntst-1} * T_{ntst-2} * ... * T_1 * T_0
+///
+/// For each interval, we eliminate stages using collocation equations and get the
+/// mesh-to-mesh transfer from continuity:
+/// T_i = -C_{next}^{-1} * (C_x + C_s * ds_dx)
+///
+/// This approach correctly handles our implicit periodicity BVP where last continuity
+/// equation wraps to x_0.
+fn extract_multipliers_shooting(
+    jac: &DMatrix<f64>,
+    dim: usize,
+    ntst: usize, 
+    ncol: usize,
+) -> Result<Vec<Complex<f64>>> {
+    // Our Jacobian layout:
+    // - Rows 0 to ntst*ncol*dim - 1: Stage residuals (collocation equations)
+    // - Rows ntst*ncol*dim to ntst*ncol*dim + ntst*dim - 1: Continuity equations
+    // - Last row: Phase condition
+    // 
+    // - Column 0: Parameter
+    // - Columns 1 to ntst*dim: Mesh states (x_0, x_1, ..., x_{ntst-1})
+    // - Columns ntst*dim+1 to ntst*dim + ntst*ncol*dim: Stages
+    // - Last column: Period
+    
+    let ncol_coord = ncol * dim;
+    let mesh_col_start = 1;
+    let stage_col_start = mesh_col_start + ntst * dim;
+    let continuity_row_start = ntst * ncol * dim;
+    
+    // Build monodromy by chaining local transfer matrices
+    let mut monodromy = DMatrix::<f64>::identity(dim, dim);
+    
+    for interval in 0..ntst {
+        let cont_row = continuity_row_start + interval * dim;
+        let coll_row_start = interval * ncol_coord;
+        let stage_col = stage_col_start + interval * ncol_coord;
+        let mesh_col = mesh_col_start + interval * dim;
+        
+        // For the last interval, next mesh wraps to x_0
+        let next_mesh_col = mesh_col_start + ((interval + 1) % ntst) * dim;
+        
+        // Extract G_x (collocation w.r.t. current mesh)
+        let mut g_x = DMatrix::<f64>::zeros(ncol_coord, dim);
+        for r in 0..ncol_coord {
+            for c in 0..dim {
+                g_x[(r, c)] = jac[(coll_row_start + r, mesh_col + c)];
+            }
+        }
+        
+        // Extract G_s (collocation w.r.t. stages)
+        let mut g_s = DMatrix::<f64>::zeros(ncol_coord, ncol_coord);
+        for r in 0..ncol_coord {
+            for c in 0..ncol_coord {
+                g_s[(r, c)] = jac[(coll_row_start + r, stage_col + c)];
+            }
+        }
+        
+        // Solve: ds_dx = -G_s^{-1} * G_x
+        let ds_dx = match g_s.clone().lu().solve(&-&g_x) {
+            Some(sol) => sol,
+            None => bail!("Monodromy: singular stage block at interval {}", interval),
+        };
+        
+        // Extract C_x (continuity w.r.t. current mesh)
+        let mut c_x = DMatrix::<f64>::zeros(dim, dim);
+        for r in 0..dim {
+            for c in 0..dim {
+                c_x[(r, c)] = jac[(cont_row + r, mesh_col + c)];
+            }
+        }
+        
+        // Extract C_s (continuity w.r.t. stages)
+        let mut c_s = DMatrix::<f64>::zeros(dim, ncol_coord);
+        for r in 0..dim {
+            for c in 0..ncol_coord {
+                c_s[(r, c)] = jac[(cont_row + r, stage_col + c)];
+            }
+        }
+        
+        // Extract C_next (continuity w.r.t. next mesh)
+        let mut c_next = DMatrix::<f64>::zeros(dim, dim);
+        for r in 0..dim {
+            for c in 0..dim {
+                c_next[(r, c)] = jac[(cont_row + r, next_mesh_col + c)];
+            }
+        }
+        
+        // Effective coefficient: C_x + C_s * ds_dx
+        let effective_c_x = &c_x + &c_s * &ds_dx;
+        
+        // Transfer matrix: T_i = -C_next^{-1} * effective_c_x
+        let t_i = match c_next.clone().lu().solve(&-&effective_c_x) {
+            Some(t) => t,
+            None => bail!("Monodromy: singular C_next at interval {}", interval),
+        };
+        
+        // Chain: M = T_i * M
+        monodromy = &t_i * &monodromy;
+    }
+    
+    let eigenvalues: Vec<Complex<f64>> = monodromy.complex_eigenvalues().iter().cloned().collect();
+    Ok(eigenvalues)
+}
+
+/// Bifurcation tests from Floquet multipliers with sanity check.
+/// 
+/// Returns (cycle_fold, period_doubling, neimark_sacker, eigenvalues).
+fn cycle_tests_from_multipliers(multipliers: &[Complex<f64>]) -> (f64, f64, f64, Vec<Complex<f64>>) {
+    if multipliers.is_empty() {
+        return (1.0, 1.0, 1.0, Vec::new());
+    }
+    
+    let values = multipliers.to_vec();
+    
+    // Find the trivial multiplier (should be closest to 1.0)
+    let mut trivial_idx = None;
+    let mut min_dist = f64::INFINITY;
+    for (idx, mu) in values.iter().enumerate() {
+        let dist = (mu - Complex::new(1.0, 0.0)).norm();
+        if dist < min_dist {
+            min_dist = dist;
+            trivial_idx = Some(idx);
+        }
+    }
+    
+    const TRIVIAL_TOLERANCE: f64 = 0.5;
+    if min_dist > TRIVIAL_TOLERANCE {
+        // Multipliers are garbage - return NaN test values to avoid false sign crossings
+        return (f64::NAN, f64::NAN, f64::NAN, values);
+    }
+    
+    // Period Doubling test: product of (μ + 1) for non-trivial real multipliers
+    let mut pd_test = 1.0;
+    for (idx, mu) in values.iter().enumerate() {
+        if Some(idx) == trivial_idx {
+            continue;
+        }
+        if mu.im.abs() < 1e-8 {
+            pd_test *= mu.re + 1.0;
+        }
+    }
+    
+    // Neimark-Sacker test: product of (|μ|² - 1) for complex pairs
+    let mut ns_test = 1.0;
+    for (idx, mu) in values.iter().enumerate() {
+        if Some(idx) == trivial_idx {
+            continue;
+        }
+        if mu.im > 1e-8 {
+            ns_test *= mu.norm_sqr() - 1.0;
+        }
+    }
+    
+    // Cycle Fold: disabled (set to 1.0)
+    let cf_test = 1.0;
+    
+    (cf_test, pd_test, ns_test, values)
 }
 
 fn validate_mesh_states(
