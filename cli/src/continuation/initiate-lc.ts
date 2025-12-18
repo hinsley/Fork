@@ -9,7 +9,7 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
-import { ContinuationObject, ContinuationPoint, LimitCycleObject } from '../types';
+import { ContinuationObject, ContinuationPoint } from '../types';
 import {
   ConfigEntry,
   MENU_PAGE_SIZE,
@@ -21,7 +21,7 @@ import {
 import { printSuccess, printError, printInfo } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
 import { isValidName, getBranchParams } from './utils';
-import { runLimitCycleContinuationWithProgress } from './progress';
+import { inspectBranch } from './inspect';
 
 /**
  * Initiates limit cycle continuation from a Hopf bifurcation point.
@@ -42,14 +42,12 @@ import { runLimitCycleContinuationWithProgress } from './progress';
 export async function initiateLCFromHopf(
   sysName: string,
   branch: ContinuationObject,
-  hopfPoint: ContinuationPoint,
-  hopfPointIndex: number
-): Promise<ContinuationObject | null> {
+  hopfPoint: ContinuationPoint
+) {
   const sysConfig = Storage.loadSystem(sysName);
 
-  // Configuration defaults.
-  let limitCycleObjectName = `lc_hopf_${branch.name}`;
-  let branchName = `${limitCycleObjectName}_${branch.parameterName}`;
+  // Configuration defaults - use lc_ prefix on source branch name (no need to add param again)
+  let branchName = `lc_${branch.name}`;
   let amplitudeInput = '0.1';
   let ntstInput = '20';
   let ncolInput = '4';
@@ -67,29 +65,6 @@ export async function initiateLCFromHopf(
 
   const entries: ConfigEntry[] = [
     {
-      id: 'limitCycleObjectName',
-      label: 'Limit cycle object name',
-      section: 'Branch Settings',
-      getDisplay: () => limitCycleObjectName || '(required)',
-      edit: async () => {
-        const { value } = await inquirer.prompt({
-          name: 'value',
-          message: 'Name for the new Limit Cycle Object:',
-          default: limitCycleObjectName,
-          validate: (val: string) => {
-            const valid = isValidName(val);
-            if (valid !== true) return valid;
-            if (Storage.listObjects(sysName).includes(val)) return "Object name already exists.";
-            return true;
-          }
-        });
-        limitCycleObjectName = value;
-        if (!branchName) {
-          branchName = `${limitCycleObjectName}_${branch.parameterName}`;
-        }
-      }
-    },
-    {
       id: 'branchName',
       label: 'Branch name',
       section: 'Branch Settings',
@@ -97,13 +72,12 @@ export async function initiateLCFromHopf(
       edit: async () => {
         const { value } = await inquirer.prompt({
           name: 'value',
-          message: 'Name for the initial Limit Cycle Branch:',
-          default: branchName || `${limitCycleObjectName}_${branch.parameterName}`,
+          message: 'Name for this Limit Cycle Branch:',
+          default: branchName,
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;
-            if (!limitCycleObjectName) return "Select a limit cycle object name first.";
-            if (Storage.listBranches(sysName, limitCycleObjectName).includes(val)) return "Branch name already exists.";
+            if (Storage.listContinuations(sysName).includes(val)) return "Branch name already exists.";
             return true;
           }
         });
@@ -233,12 +207,7 @@ export async function initiateLCFromHopf(
   while (true) {
     const result = await runConfigMenu('Initiate Limit Cycle from Hopf', entries);
     if (result === 'back') {
-      return null;
-    }
-
-    if (!limitCycleObjectName) {
-      console.error(chalk.red('Please provide a limit cycle object name.'));
-      continue;
+      return;
     }
 
     if (!branchName) {
@@ -246,12 +215,7 @@ export async function initiateLCFromHopf(
       continue;
     }
 
-    if (Storage.listObjects(sysName).includes(limitCycleObjectName)) {
-      console.error(chalk.red(`Object "${limitCycleObjectName}" already exists.`));
-      continue;
-    }
-
-    if (Storage.listBranches(sysName, limitCycleObjectName).includes(branchName)) {
+    if (Storage.listContinuations(sysName).includes(branchName)) {
       console.error(chalk.red(`Branch "${branchName}" already exists.`));
       continue;
     }
@@ -300,28 +264,23 @@ export async function initiateLCFromHopf(
       ncol
     );
 
-    console.log(chalk.cyan(`Running limit cycle continuation (max ${continuationSettings.max_steps} steps)...`));
+    console.log(chalk.cyan("Running limit cycle continuation..."));
 
-    const branchData = normalizeBranchEigenvalues(
-      runLimitCycleContinuationWithProgress(
-        bridge,
-        guess,
-        branch.parameterName,
-        continuationSettings,
-        directionForward,
-        'LC Continuation'
-      )
-    );
-
-    // Ensure branch_type is included with mesh parameters for plotting scripts.
-    branchData.branch_type = branchData.branch_type ?? { type: 'LimitCycle', ntst, ncol };
+    // Run continuation
+    const branchData = normalizeBranchEigenvalues(bridge.continueLimitCycle(
+      guess,
+      branch.parameterName,
+      continuationSettings,
+      ntst,
+      ncol,
+      directionForward
+    ));
 
     const newBranch: ContinuationObject = {
       type: 'continuation',
       name: branchName,
       systemName: sysName,
       parameterName: branch.parameterName,
-      parentObject: limitCycleObjectName,
       startObject: branch.name,
       branchType: 'limit_cycle',
       data: branchData,
@@ -330,39 +289,13 @@ export async function initiateLCFromHopf(
       params: [...runConfig.params]  // Store full parameter snapshot
     };
 
-    const seedPoint = branchData.points[0];
-    const seedState = seedPoint?.state ?? [];
-    const seedPeriod = seedState.length > 0 ? seedState[seedState.length - 1] : NaN;
-
-    const lcObj: LimitCycleObject = {
-      type: 'limit_cycle',
-      name: limitCycleObjectName,
-      systemName: sysName,
-      origin: {
-        type: 'hopf',
-        equilibriumObjectName: branch.parentObject,
-        equilibriumBranchName: branch.name,
-        pointIndex: hopfPointIndex,
-      },
-      ntst,
-      ncol,
-      period: seedPeriod,
-      state: [...seedState],
-      parameters: [...runConfig.params],
-      parameterName: branch.parameterName,
-      paramValue: seedPoint?.param_value,
-      floquetMultipliers: seedPoint?.eigenvalues,
-      createdAt: new Date().toISOString(),
-    };
-
-    Storage.saveObject(sysName, lcObj);
-    Storage.saveBranch(sysName, limitCycleObjectName, newBranch);
+    Storage.saveContinuation(sysName, newBranch);
     console.log(chalk.green(`Limit cycle continuation successful! Generated ${branchData.points.length} points.`));
-    return newBranch;
+
+    await inspectBranch(sysName, newBranch);
 
   } catch (e) {
     console.error(chalk.red("Limit Cycle Continuation Failed:"), e);
-    return null;
   }
 }
 
@@ -389,13 +322,12 @@ export async function initiateLCBranchFromPoint(
   sourceBranch: ContinuationObject,
   point: ContinuationPoint,
   arrayIdx: number
-): Promise<ContinuationObject | null> {
+): Promise<boolean> {
   const sysConfig = Storage.loadSystem(sysName);
-  const parentObject = sourceBranch.parentObject;
 
   if (sysConfig.paramNames.length === 0) {
     printError("System has no parameters to continue. Add at least one parameter first.");
-    return null;
+    return false;
   }
 
   // Get LC metadata from the source branch's branch_type
@@ -409,6 +341,9 @@ export async function initiateLCBranchFromPoint(
       sourceNcol = bt.ncol;
     }
   }
+
+  let ntstInput = sourceNtst.toString();
+  let ncolInput = sourceNcol.toString();
 
 
   // Default to a different parameter than the source branch if possible
@@ -465,7 +400,7 @@ export async function initiateLCBranchFromPoint(
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;
-            if (Storage.listBranches(sysName, parentObject).includes(val)) return "Branch name already exists.";
+            if (Storage.listContinuations(sysName).includes(val)) return "Branch name already exists.";
             return true;
           }
         });
@@ -473,12 +408,31 @@ export async function initiateLCBranchFromPoint(
       }
     },
     {
-      id: 'mesh',
-      label: 'Discretization (inherited)',
+      id: 'ntst',
+      label: 'Mesh intervals (ntst)',
       section: 'Collocation Mesh',
-      getDisplay: () => `${sourceNtst}×${sourceNcol}`,
+      getDisplay: () => formatUnset(ntstInput),
       edit: async () => {
-        printInfo("NTST/NCOL are inherited from the source branch for safety.");
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Number of mesh intervals:',
+          default: ntstInput
+        });
+        ntstInput = value;
+      }
+    },
+    {
+      id: 'ncol',
+      label: 'Collocation points (ncol)',
+      section: 'Collocation Mesh',
+      getDisplay: () => formatUnset(ncolInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Collocation points per interval (2-7):',
+          default: ncolInput
+        });
+        ncolInput = value;
       }
     },
     {
@@ -562,7 +516,7 @@ export async function initiateLCBranchFromPoint(
   while (true) {
     const result = await runConfigMenu('Create Limit Cycle Branch from Point', entries);
     if (result === 'back') {
-      return null;
+      return false;
     }
 
     if (!branchName) {
@@ -570,7 +524,7 @@ export async function initiateLCBranchFromPoint(
       continue;
     }
 
-    if (Storage.listBranches(sysName, parentObject).includes(branchName)) {
+    if (Storage.listContinuations(sysName).includes(branchName)) {
       printError(`Branch "${branchName}" already exists.`);
       continue;
     }
@@ -578,8 +532,8 @@ export async function initiateLCBranchFromPoint(
     break;
   }
 
-  const ntst = sourceNtst;
-  const ncol = sourceNcol;
+  const ntst = parseIntOrDefault(ntstInput, 20);
+  const ncol = parseIntOrDefault(ncolInput, 4);
 
   const continuationSettings = {
     step_size: Math.max(parseFloatOrDefault(stepSizeInput, 0.01), 1e-9),
@@ -591,7 +545,7 @@ export async function initiateLCBranchFromPoint(
     step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON)
   };
 
-  printInfo(`Running LC continuation (max ${continuationSettings.max_steps} steps)...`);
+  printInfo("Running Limit Cycle Continuation...");
 
   try {
     // Build system config with the parameter values from the source branch
@@ -618,55 +572,43 @@ export async function initiateLCBranchFromPoint(
     // Extract period from the end of the flat state
     const period = flatState[flatState.length - 1];
 
-    // Extract mesh states from the flattened collocation state.
-    // Layout: [mesh_states (ntst points), stage_states (ntst*ncol points), period].
-    const meshStates: number[][] = [];
-    for (let i = 0; i < sourceNtst; i++) {
+    // Calculate sizes based on source branch parameters
+    // profile_states expects ntst*ncol + 1 profile points
+    const profilePointCount = sourceNtst * sourceNcol + 1;
+
+    // Extract profile_states: profilePointCount arrays of dim floats each
+    // The flat state is [profile_point_0, ..., profile_point_N, period]
+    const profileStates: number[][] = [];
+    for (let i = 0; i < profilePointCount; i++) {
       const offset = i * dim;
-      meshStates.push(flatState.slice(offset, offset + dim));
+      profileStates.push(flatState.slice(offset, offset + dim));
     }
 
     // Get the NEW continuation parameter's current value from runConfig
     const newParamIdx = sysConfig.paramNames.indexOf(selectedParamName);
     const newParamValue = newParamIdx >= 0 ? runConfig.params[newParamIdx] : point.param_value;
 
-    // Need to wrap the raw guess in a LimitCycleSetup-like structure
-    // The WASM expects mesh_points, collocation_degree, phase_anchor, phase_direction
-    const lcSetup = {
-      guess: {
-        param_value: newParamValue,
-        period: period,
-        mesh_states: meshStates,
-        stage_states: []  // Will be built by the core
-      },
-      mesh_points: sourceNtst,
-      collocation_degree: sourceNcol,
-      phase_anchor: meshStates[0] || [],
-      phase_direction: meshStates.length > 1
-        ? meshStates[1].map((v: number, i: number) => v - meshStates[0][i])
-        : (meshStates[0] || []).map(() => 1.0)
+    const lcGuess = {
+      param_value: newParamValue,  // Use NEW param's value, not old param's value
+      period: period,
+      profile_states: profileStates,
+      upoldp: sourceBranch.data.upoldp || []
     };
 
-    const branchData = normalizeBranchEigenvalues(
-      runLimitCycleContinuationWithProgress(
-        bridge,
-        lcSetup,
-        selectedParamName,
-        continuationSettings,
-        directionForward,
-        'LC Continuation'
-      )
-    );
-
-    // Ensure branch_type is present for plotting and for branch extensions.
-    branchData.branch_type = branchData.branch_type ?? { type: 'LimitCycle', ntst: sourceNtst, ncol: sourceNcol };
+    const branchData = normalizeBranchEigenvalues(bridge.continueLimitCycle(
+      lcGuess,
+      selectedParamName,
+      continuationSettings,
+      ntst,
+      ncol,
+      directionForward
+    ));
 
     const newBranch: ContinuationObject = {
       type: 'continuation',
       name: branchName,
       systemName: sysName,
       parameterName: selectedParamName,
-      parentObject,
       startObject: sourceBranch.name,
       branchType: 'limit_cycle',
       data: branchData,
@@ -675,322 +617,14 @@ export async function initiateLCBranchFromPoint(
       params: [...runConfig.params]  // Store full parameter snapshot
     };
 
-    Storage.saveBranch(sysName, parentObject, newBranch);
+    Storage.saveContinuation(sysName, newBranch);
     printSuccess(`Limit cycle continuation successful! Generated ${branchData.points.length} points.`);
-    return newBranch;
+
+    await inspectBranch(sysName, newBranch);
+    return true;
 
   } catch (e) {
     printError(`Limit Cycle Continuation Failed: ${e}`);
-    return null;
-  }
-}
-
-/**
- * Initiates a period-doubled limit cycle branch from a period-doubling bifurcation.
- * 
- * This follows a standard period-doubling branching approach:
- * 1. Takes the LC state at the PD point.
- * 2. Prompts for perturbation amplitude (h) and continuation settings.
- * 3. Calls WASM to compute the PD eigenvector and build a doubled-period guess.
- * 4. Resumes continuation on the new branch.
- * 
- * @param sysName - Name of the dynamical system
- * @param sourceBranch - The LC branch where the PD was detected
- * @param pdPoint - The point data for the PD bifurcation
- * @param pdPointIdx - The array index of the point in sourceBranch
- */
-export async function initiateLCFromPD(
-  sysName: string,
-  sourceBranch: ContinuationObject,
-  pdPoint: ContinuationPoint,
-  pdPointIdx: number
-): Promise<ContinuationObject | null> {
-  const sysConfig = Storage.loadSystem(sysName);
-  const bridge = new WasmBridge(sysConfig);
-
-  // Extract source ntst/ncol from branch metadata
-  let sourceNtst = 20, sourceNcol = 4;
-  const btData = sourceBranch.data.branch_type as any;
-  if (btData?.type === 'LimitCycle' && btData.ntst && btData.ncol) {
-    sourceNtst = btData.ntst;
-    sourceNcol = btData.ncol;
-  }
-
-  // Configuration defaults
-  let limitCycleObjectName = `lc_pd_${sourceBranch.name}_idx${pdPointIdx}`;
-  let branchName = `${limitCycleObjectName}_${sourceBranch.parameterName}`;
-  let amplitudeInput = '0.01'; // Default h=0.01 for PD branching
-  let stepSizeInput = '0.01';
-  let maxStepsInput = '50';
-  let minStepSizeInput = '1e-5';
-  let maxStepSizeInput = '0.1';
-  let directionForward = true;
-  let correctorStepsInput = '10';
-  let correctorToleranceInput = '1e-6';
-  let stepToleranceInput = '1e-6';
-
-  const directionLabel = (forward: boolean) =>
-    forward ? 'Forward (Increasing Param)' : 'Backward (Decreasing Param)';
-
-  const entries: ConfigEntry[] = [
-    {
-      id: 'limitCycleObjectName',
-      label: 'Limit cycle object name',
-      section: 'Branch Settings',
-      getDisplay: () => limitCycleObjectName || '(required)',
-      edit: async () => {
-        const { value } = await inquirer.prompt({
-          name: 'value',
-          message: 'Name for the new Period-Doubled Limit Cycle Object:',
-          default: limitCycleObjectName,
-          validate: (val: string) => {
-            const valid = isValidName(val);
-            if (valid !== true) return valid;
-            if (Storage.listObjects(sysName).includes(val)) return "Object name already exists.";
-            return true;
-          }
-        });
-        limitCycleObjectName = value;
-        if (!branchName) {
-          branchName = `${limitCycleObjectName}_${sourceBranch.parameterName}`;
-        }
-      }
-    },
-    {
-      id: 'branchName',
-      label: 'Branch name',
-      section: 'Branch Settings',
-      getDisplay: () => branchName || '(required)',
-      edit: async () => {
-        const { value } = await inquirer.prompt({
-          name: 'value',
-          message: 'Name for the initial Period-Doubled Branch:',
-          default: branchName || `${limitCycleObjectName}_${sourceBranch.parameterName}`,
-          validate: (val: string) => {
-            const valid = isValidName(val);
-            if (valid !== true) return valid;
-            if (!limitCycleObjectName) return "Select a limit cycle object name first.";
-            if (Storage.listBranches(sysName, limitCycleObjectName).includes(val)) return "Branch name already exists.";
-            return true;
-          }
-        });
-        branchName = value;
-      }
-    },
-    {
-      id: 'amplitude',
-      label: 'Perturbation Amplitude (h)',
-      section: 'PD Initialization',
-      getDisplay: () => amplitudeInput,
-      edit: async () => {
-        const { value } = await inquirer.prompt({
-          name: 'value',
-          message: 'Enter perturbation amplitude (e.g., 0.01):',
-          default: amplitudeInput,
-        });
-        amplitudeInput = value;
-      }
-    },
-    {
-      id: 'ntst',
-      label: 'Mesh intervals (NTST)',
-      section: 'Discretization (will be doubled)',
-      getDisplay: () => `${sourceNtst} (-> ${sourceNtst * 2} in doubled cycle)`,
-      edit: async () => {
-        printInfo("NTST is inherited from the source branch and doubled for the new branch.");
-      }
-    },
-    {
-      id: 'ncol',
-      label: 'Collocation degree (NCOL)',
-      section: 'Discretization',
-      getDisplay: () => sourceNcol.toString(),
-      edit: async () => {
-        const { value } = await inquirer.prompt({
-          name: 'value',
-          message: 'Collocation degree:',
-          default: sourceNcol.toString(),
-        });
-        sourceNcol = parseIntOrDefault(value, sourceNcol);
-      }
-    },
-    {
-      id: 'direction',
-      label: 'Direction',
-      section: 'Continuation Settings',
-      getDisplay: () => directionLabel(directionForward),
-      edit: async () => {
-        const { value } = await inquirer.prompt({
-          type: 'list',
-          name: 'value',
-          message: 'Select parameter direction:',
-          choices: [
-            { name: directionLabel(true), value: true },
-            { name: directionLabel(false), value: false }
-          ],
-          default: directionForward
-        });
-        directionForward = value;
-      }
-    },
-    {
-      id: 'stepSize',
-      label: 'Initial step size',
-      section: 'Algorithm Parameters',
-      getDisplay: () => stepSizeInput,
-      edit: async () => {
-        const { value } = await inquirer.prompt({
-          name: 'value',
-          message: 'Initial step size:',
-          default: stepSizeInput,
-        });
-        stepSizeInput = value;
-      }
-    },
-    {
-      id: 'maxSteps',
-      label: 'Max steps',
-      section: 'Algorithm Parameters',
-      getDisplay: () => maxStepsInput,
-      edit: async () => {
-        const { value } = await inquirer.prompt({
-          name: 'value',
-          message: 'Maximum continuation steps:',
-          default: maxStepsInput,
-        });
-        maxStepsInput = value;
-      }
-    }
-  ];
-
-  const result = await runConfigMenu('Branch to Period-Doubled Limit Cycle', entries);
-  if (result === 'back') return null;
-
-  if (!limitCycleObjectName) {
-    printError("Please provide a limit cycle object name.");
-    return null;
-  }
-
-  if (Storage.listObjects(sysName).includes(limitCycleObjectName)) {
-    printError(`Object "${limitCycleObjectName}" already exists.`);
-    return null;
-  }
-
-  if (!branchName) {
-    printError("Please provide a branch name.");
-    return null;
-  }
-
-  if (Storage.listBranches(sysName, limitCycleObjectName).includes(branchName)) {
-    printError(`Branch "${branchName}" already exists.`);
-    return null;
-  }
-
-  const runConfig = {
-    branchName,
-    params: getBranchParams(sysName, sourceBranch, sysConfig),
-    amplitude: parseFloatOrDefault(amplitudeInput, 0.01),
-    settings: {
-      step_size: parseFloatOrDefault(stepSizeInput, 0.01),
-      max_steps: parseIntOrDefault(maxStepsInput, 50),
-      min_step_size: parseFloatOrDefault(minStepSizeInput, 1e-5),
-      max_step_size: parseFloatOrDefault(maxStepSizeInput, 0.1),
-      corrector_steps: parseIntOrDefault(correctorStepsInput, 10),
-      corrector_tolerance: parseFloatOrDefault(correctorToleranceInput, 1e-6),
-      step_tolerance: parseFloatOrDefault(stepToleranceInput, 1e-6),
-    }
-  };
-
-  // Update the source branch's continuation parameter to the PD point's value
-  const sourceParamIdx = sysConfig.paramNames.indexOf(sourceBranch.parameterName);
-  if (sourceParamIdx >= 0) {
-    runConfig.params[sourceParamIdx] = pdPoint.param_value;
-  }
-
-  try {
-    console.log(chalk.cyan("Initializing period-doubled limit cycle..."));
-
-    // Call WASM to build the doubled-period setup
-    const setup = bridge.initLCFromPD(
-      pdPoint.state,
-      sourceBranch.parameterName,
-      pdPoint.param_value,
-      sourceNtst,
-      sourceNcol,
-      runConfig.amplitude
-    );
-
-    console.log(chalk.cyan(`Running limit cycle continuation for doubled period (max ${runConfig.settings.max_steps} steps)...`));
-    const branchData = normalizeBranchEigenvalues(
-      runLimitCycleContinuationWithProgress(
-        bridge,
-        setup,
-        sourceBranch.parameterName,
-        runConfig.settings,
-        directionForward,
-        'PD Continuation'
-      )
-    );
-
-    // Ensure branch_type is included with mesh parameters for plotting scripts.
-    if (!branchData.branch_type) {
-      branchData.branch_type = { type: 'LimitCycle', ntst: sourceNtst * 2, ncol: sourceNcol };
-    }
-
-    const newBranch: ContinuationObject = {
-      type: 'continuation',
-      name: branchName,
-      systemName: sysName,
-      parameterName: sourceBranch.parameterName,
-      parentObject: limitCycleObjectName,
-      startObject: sourceBranch.name,
-      branchType: 'limit_cycle',
-      data: branchData,
-      settings: runConfig.settings,
-      timestamp: new Date().toISOString(),
-      params: [...runConfig.params]
-    };
-
-    const seedPoint = branchData.points[0];
-    const seedState = seedPoint?.state ?? [];
-    const seedPeriod = seedState.length > 0 ? seedState[seedState.length - 1] : NaN;
-
-    let objNtst = sourceNtst * 2;
-    let objNcol = sourceNcol;
-    const bt = branchData.branch_type as any;
-    if (bt?.type === 'LimitCycle' && typeof bt.ntst === 'number' && typeof bt.ncol === 'number') {
-      objNtst = bt.ntst;
-      objNcol = bt.ncol;
-    }
-
-    const lcObj: LimitCycleObject = {
-      type: 'limit_cycle',
-      name: limitCycleObjectName,
-      systemName: sysName,
-      origin: {
-        type: 'pd',
-        sourceLimitCycleObjectName: sourceBranch.parentObject,
-        sourceBranchName: sourceBranch.name,
-        pointIndex: pdPointIdx,
-      },
-      ntst: objNtst,
-      ncol: objNcol,
-      period: seedPeriod,
-      state: [...seedState],
-      parameters: [...runConfig.params],
-      parameterName: sourceBranch.parameterName,
-      paramValue: seedPoint?.param_value,
-      floquetMultipliers: seedPoint?.eigenvalues,
-      createdAt: new Date().toISOString(),
-    };
-
-    Storage.saveObject(sysName, lcObj);
-    Storage.saveBranch(sysName, limitCycleObjectName, newBranch);
-    printSuccess(`PD Branching successful! Generated ${branchData.points.length} points.`);
-    return newBranch;
-
-  } catch (e) {
-    printError(`PD Branching Failed: ${e}`);
-    return null;
+    return false;
   }
 }

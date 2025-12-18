@@ -9,7 +9,7 @@ import {
   SystemConfig
 } from '../types';
 
-import { isValidName as isValidNameShared } from '../naming';
+const NAME_REGEX = /^[a-zA-Z0-9_]+$/;
 
 /**
  * Validates a branch or object name.
@@ -19,7 +19,11 @@ import { isValidName as isValidNameShared } from '../naming';
  * @param name - The name to validate
  * @returns true if valid, or an error message string if invalid
  */
-export const isValidName = isValidNameShared;
+export function isValidName(name: string): boolean | string {
+  if (!name || name.length === 0) return "Name cannot be empty.";
+  if (!NAME_REGEX.test(name)) return "Name must contain only alphanumeric characters and underscores (no spaces).";
+  return true;
+}
 
 /**
  * Get the best available parameter values for a branch.
@@ -37,15 +41,27 @@ export function getBranchParams(
     return [...branch.params];
   }
 
-  // Try to get params from the parent object.
-  try {
-    const obj = Storage.loadObject(sysName, branch.parentObject) as any;
-    const params = obj?.parameters as number[] | undefined;
-    if (Array.isArray(params) && params.length === sysConfig.params.length) {
-      return [...params];
+  // Try to get params from the source equilibrium object
+  // The startObject field contains the name of the equilibrium or parent branch
+  if (branch.startObject) {
+    try {
+      // First check if it's an equilibrium object
+      const eqObj = Storage.loadObject(sysName, branch.startObject);
+      if (eqObj && eqObj.type === 'equilibrium' && eqObj.parameters) {
+        if (eqObj.parameters.length === sysConfig.params.length) {
+          return [...eqObj.parameters];
+        }
+      }
+
+      // Check if it's a parent branch
+      const parentBranch = Storage.loadContinuation(sysName, branch.startObject);
+      if (parentBranch && parentBranch.type === 'continuation') {
+        // Recursively get params from parent
+        return getBranchParams(sysName, parentBranch, sysConfig);
+      }
+    } catch {
+      // Object doesn't exist or can't be loaded, fall through to default
     }
-  } catch {
-    // Fall through to default.
   }
 
   // Last resort: use current system config
@@ -103,26 +119,6 @@ export function formatNumber(value: number): string {
     return value.toExponential(4);
   }
   return value.toFixed(3);
-}
-
-/**
- * Formats a number with full precision for detailed displays.
- * 
- * Uses more significant figures than formatNumber for when precision matters.
- * 
- * @param value - Number to format
- * @returns Formatted string representation with high precision
- */
-export function formatNumberFullPrecision(value: number): string {
-  if (!Number.isFinite(value)) {
-    return value.toString();
-  }
-  const absVal = Math.abs(value);
-  if ((absVal !== 0 && absVal < 1e-6) || absVal >= 1e6) {
-    return value.toExponential(10);
-  }
-  // Use toPrecision for consistent significant figures
-  return value.toPrecision(12).replace(/\.?0+$/, '');
 }
 
 /**

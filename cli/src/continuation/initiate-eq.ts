@@ -20,7 +20,7 @@ import {
 import { printSuccess, printError, printInfo } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
 import { isValidName, getBranchParams } from './utils';
-import { runEquilibriumContinuationWithProgress } from './progress';
+import { inspectBranch } from './inspect';
 
 /**
  * Initiates a new equilibrium continuation branch from a point on an existing branch.
@@ -43,13 +43,12 @@ export async function initiateEquilibriumBranchFromPoint(
   sysName: string,
   sourceBranch: ContinuationObject,
   point: ContinuationPoint
-): Promise<ContinuationObject | null> {
+): Promise<boolean> {
   const sysConfig = Storage.loadSystem(sysName);
-  const parentObject = sourceBranch.parentObject;
 
   if (sysConfig.paramNames.length === 0) {
     printError("System has no parameters to continue. Add at least one parameter first.");
-    return null;
+    return false;
   }
 
   // Default to a different parameter than the source branch if possible
@@ -106,7 +105,7 @@ export async function initiateEquilibriumBranchFromPoint(
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;
-            if (Storage.listBranches(sysName, parentObject).includes(val)) return "Branch name already exists.";
+            if (Storage.listContinuations(sysName).includes(val)) return "Branch name already exists.";
             return true;
           }
         });
@@ -236,7 +235,7 @@ export async function initiateEquilibriumBranchFromPoint(
   while (true) {
     const result = await runConfigMenu('Create Equilibrium Branch from Point', entries);
     if (result === 'back') {
-      return null;
+      return false;
     }
 
     if (!branchName) {
@@ -244,7 +243,7 @@ export async function initiateEquilibriumBranchFromPoint(
       continue;
     }
 
-    if (Storage.listBranches(sysName, parentObject).includes(branchName)) {
+    if (Storage.listContinuations(sysName).includes(branchName)) {
       printError(`Branch "${branchName}" already exists.`);
       continue;
     }
@@ -262,7 +261,8 @@ export async function initiateEquilibriumBranchFromPoint(
     step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON)
   };
 
-  printInfo(`Computing continuation (max ${continuationSettings.max_steps} steps)...`);
+  printInfo("Running Continuation...");
+
   try {
     // Build system config with the parameter values from the source branch
     const runConfig = { ...sysConfig };
@@ -277,23 +277,18 @@ export async function initiateEquilibriumBranchFromPoint(
     }
 
     const bridge = new WasmBridge(runConfig);
-    const branchData = normalizeBranchEigenvalues(
-      runEquilibriumContinuationWithProgress(
-        bridge,
-        point.state,
-        selectedParamName,
-        continuationSettings,
-        directionForward,
-        'Continuation'
-      )
-    );
+    const branchData = normalizeBranchEigenvalues(bridge.compute_continuation(
+      point.state,
+      selectedParamName,
+      continuationSettings,
+      directionForward
+    ));
 
     const newBranch: ContinuationObject = {
       type: 'continuation',
       name: branchName,
       systemName: sysName,
       parameterName: selectedParamName,
-      parentObject,
       startObject: sourceBranch.name,
       branchType: 'equilibrium',
       data: branchData,
@@ -302,12 +297,14 @@ export async function initiateEquilibriumBranchFromPoint(
       params: [...runConfig.params]  // Store full parameter snapshot
     };
 
-    Storage.saveBranch(sysName, parentObject, newBranch);
+    Storage.saveContinuation(sysName, newBranch);
     printSuccess(`Continuation successful! Generated ${branchData.points.length} points.`);
-    return newBranch;
+
+    await inspectBranch(sysName, newBranch);
+    return true;
 
   } catch (e) {
     printError(`Continuation Failed: ${e}`);
-    return null;
+    return false;
   }
 }

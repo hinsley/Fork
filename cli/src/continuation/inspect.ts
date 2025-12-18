@@ -10,7 +10,6 @@ import chalk from 'chalk';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
 import { ContinuationObject, ContinuationPoint } from '../types';
-import { NavigationRequest } from '../navigation';
 import { MENU_PAGE_SIZE } from '../menu';
 import {
   extractLCProfile,
@@ -20,19 +19,15 @@ import {
 import {
   ensureBranchIndices,
   buildSortedArrayOrder,
-  getBranchParams,
   formatNumber,
-  formatNumberFullPrecision,
   formatNumberSafe,
   formatArray,
   summarizeEigenvalues
 } from './utils';
-import { initiateLCFromHopf, initiateLCBranchFromPoint, initiateLCFromPD } from './initiate-lc';
+import { initiateLCFromHopf, initiateLCBranchFromPoint } from './initiate-lc';
 import { initiateEquilibriumBranchFromPoint } from './initiate-eq';
-import { initiateFoldCurve, initiateHopfCurve, initiateLPCCurve, initiatePDCurve, initiateNSCurve } from './initiate-codim1';
-import { printProgress, printProgressComplete } from '../format';
 
-type BranchDetailResult = 'SUMMARY' | 'EXIT' | NavigationRequest;
+type BranchDetailResult = 'SUMMARY' | 'EXIT' | 'INITIATED_LC' | 'INITIATED_BRANCH';
 const DETAIL_PAGE_SIZE = 10;
 
 /**
@@ -169,7 +164,7 @@ export async function browseBranchPoints(
       if (currentFocusSortedIdx === -1) currentFocusSortedIdx = 0;
       page = Math.floor(currentFocusSortedIdx / DETAIL_PAGE_SIZE);
       const pointResult = await showPointDetails(sysName, branch, indices, arrayIdx, bifurcationSet.has(arrayIdx));
-      if (pointResult !== 'BACK') {
+      if (pointResult === 'INITIATED_LC' || pointResult === 'INITIATED_BRANCH') {
         return pointResult;
       }
     }
@@ -187,11 +182,7 @@ export async function browseBranchPoints(
  * @param indices - Logical index mapping for points
  * @returns Navigation result indicating user action
  */
-export async function browseBranchSummary(
-  sysName: string,
-  branch: ContinuationObject,
-  indices: number[]
-): Promise<NavigationRequest | void> {
+export async function browseBranchSummary(sysName: string, branch: ContinuationObject, indices: number[]): Promise<'EXIT' | 'INITIATED_LC' | 'INITIATED_BRANCH' | void> {
   const sortedOrder = buildSortedArrayOrder(indices);
   while (true) {
     const summaryChoices = buildSummaryChoices(branch, indices, sortedOrder);
@@ -208,16 +199,13 @@ export async function browseBranchSummary(
     });
 
     if (selection === 'EXIT') {
-      return;
+      return 'EXIT';
     }
 
     if (typeof selection === 'string' && selection.startsWith('POINT:')) {
       const targetIdx = parseInt(selection.split(':')[1], 10);
       const detailResult = await browseBranchPoints(sysName, branch, indices, targetIdx, sortedOrder);
-      if (detailResult === 'EXIT') {
-        return;
-      }
-      if (detailResult !== 'SUMMARY') {
+      if (detailResult === 'EXIT' || detailResult === 'INITIATED_LC' || detailResult === 'INITIATED_BRANCH') {
         return detailResult;
       }
     }
@@ -302,27 +290,12 @@ export function formatPointRow(
 ) {
   const pt = branch.data.points[arrayIdx];
   const logicalIdx = indices[arrayIdx];
+  const paramVal = formatNumber(pt.param_value);
   const descriptor = summarizeEigenvalues(pt, branch.branchType);
   const typeLabel = pt.stability && pt.stability !== 'None' ? ` [${pt.stability}]` : '';
 
-  // Format parameter display based on branch type
-  let paramDisplay: string;
-  if (branch.branchType === 'fold_curve' || branch.branchType === 'hopf_curve') {
-    // Two-parameter branch: show both p1 and p2
-    const p1Val = formatNumber(pt.param_value);
-    const p2Val = pt.param2_value !== undefined ? formatNumber(pt.param2_value) : '?';
-    const branchTypeData = branch.data.branch_type as { param1_name?: string; param2_name?: string } | undefined;
-    const p1Name = branchTypeData?.param1_name ?? 'p1';
-    const p2Name = branchTypeData?.param2_name ?? 'p2';
-    paramDisplay = `${p1Name}=${p1Val}, ${p2Name}=${p2Val}`;
-  } else {
-    // Single-parameter branch
-    const paramVal = formatNumber(pt.param_value);
-    paramDisplay = `${branch.parameterName}=${paramVal}`;
-  }
-
   const prefix = bifurcationSet.has(arrayIdx) ? '*' : ' ';
-  let label = `${prefix} Index ${logicalIdx} | ${paramDisplay} | ${descriptor}${typeLabel}`;
+  let label = `${prefix} Index ${logicalIdx} | ${branch.parameterName}=${paramVal} | ${descriptor}${typeLabel}`;
 
   if (arrayIdx === focusIdx) {
     label = chalk.cyan(label);
@@ -344,11 +317,6 @@ export function formatPointRow(
  * @param branch - The continuation branch to hydrate (mutated in place)
  */
 export async function hydrateEigenvalues(sysName: string, branch: ContinuationObject) {
-  // Skip hydration for codim-1 curves - they have two parameters and different eigenvalue semantics
-  if (branch.branchType === 'fold_curve' || branch.branchType === 'hopf_curve') {
-    return;
-  }
-
   const missingIndices = branch.data.points
     .map((pt, idx) =>
       !pt.eigenvalues || pt.eigenvalues.length === 0 || isNaN(pt.eigenvalues[0]?.re ?? NaN)
@@ -361,25 +329,16 @@ export async function hydrateEigenvalues(sysName: string, branch: ContinuationOb
     return;
   }
 
-  const total = missingIndices.length;
-  const updateInterval = Math.max(1, Math.floor(total / 100));
-  printProgress(0, total, 'Hydrating eigenvalues');
+  console.log(chalk.yellow(`Hydrating eigenvalues for ${missingIndices.length} continuation points...`));
   const sysConfig = Storage.loadSystem(sysName);
-  const runConfig = { ...sysConfig };
-  runConfig.params = getBranchParams(sysName, branch, sysConfig);
-  const bridge = new WasmBridge(runConfig);
+  const bridge = new WasmBridge(sysConfig);
 
-  missingIndices.forEach((idx, position) => {
+  missingIndices.forEach(idx => {
     const pt = branch.data.points[idx];
     pt.eigenvalues = bridge.computeEigenvalues(pt.state, branch.parameterName, pt.param_value);
-    const current = position + 1;
-    if (current % updateInterval === 0 || current === total) {
-      printProgress(current, total, 'Hydrating eigenvalues');
-    }
   });
 
-  printProgressComplete('Hydrating eigenvalues');
-  Storage.saveBranch(sysName, branch.parentObject, branch);
+  Storage.saveContinuation(sysName, branch);
 }
 
 /**
@@ -392,10 +351,7 @@ export async function hydrateEigenvalues(sysName: string, branch: ContinuationOb
  * @param branch - The continuation branch to inspect
  * @returns Navigation result indicating how the user exited
  */
-export async function inspectBranch(
-  sysName: string,
-  branch: ContinuationObject
-): Promise<NavigationRequest | void> {
+export async function inspectBranch(sysName: string, branch: ContinuationObject): Promise<'EXIT' | 'INITIATED_LC' | 'INITIATED_BRANCH' | void> {
   await hydrateEigenvalues(sysName, branch);
   const points = branch.data.points;
 
@@ -432,7 +388,7 @@ export async function showPointDetails(
   indices: number[],
   arrayIdx: number,
   isBifurcation: boolean
-): Promise<'BACK' | NavigationRequest> {
+): Promise<'BACK' | 'INITIATED_LC' | 'INITIATED_BRANCH'> {
   const pt = branch.data.points[arrayIdx];
   const logicalIdx = indices[arrayIdx];
   const branchType = branch.branchType || 'equilibrium';
@@ -453,47 +409,22 @@ export async function showPointDetails(
     ? [...branch.params]
     : [...sysConfig.params];
 
-  // Handle two-parameter branches (fold_curve, hopf_curve) specially
-  if (branchType === 'fold_curve' || branchType === 'hopf_curve') {
-    // Get param names from branch_type
-    const branchTypeData = branch.data.branch_type as { param1_name?: string; param2_name?: string } | undefined;
-    const p1Name = branchTypeData?.param1_name ?? 'p1';
-    const p2Name = branchTypeData?.param2_name ?? 'p2';
+  // Override the continuation parameter with the point's value
+  const contParamIdx = paramNames.indexOf(branch.parameterName);
+  if (contParamIdx >= 0) {
+    currentParams[contParamIdx] = pt.param_value;
+  }
 
-    // Update parameters from the point's values
-    const p1Idx = paramNames.indexOf(p1Name);
-    const p2Idx = paramNames.indexOf(p2Name);
-    if (p1Idx >= 0) currentParams[p1Idx] = pt.param_value;
-    if (p2Idx >= 0 && pt.param2_value !== undefined) currentParams[p2Idx] = pt.param2_value;
-
-    console.log(chalk.white('Parameters:'));
-    for (let i = 0; i < paramNames.length; i++) {
-      const isContParam = paramNames[i] === p1Name || paramNames[i] === p2Name;
-      const marker = isContParam ? ' ← continuation' : '';
-      const color = isContParam ? chalk.cyan : (x: string) => x;
-      console.log(color(`  ${paramNames[i]}: ${formatNumberFullPrecision(currentParams[i])}${marker}`));
-    }
-  } else {
-    // Standard single-parameter branch handling
-    // Override the continuation parameter with the point's value
-    const contParamIdx = paramNames.indexOf(branch.parameterName);
-    if (contParamIdx >= 0) {
-      currentParams[contParamIdx] = pt.param_value;
-    }
-
-    console.log(chalk.white('Parameters:'));
-    for (let i = 0; i < paramNames.length; i++) {
-      const isContParam = paramNames[i] === branch.parameterName;
-      const marker = isContParam ? ' ← continuation' : '';
-      const color = isContParam ? chalk.cyan : (x: string) => x;
-      console.log(color(`  ${paramNames[i]}: ${formatNumberFullPrecision(currentParams[i])}${marker}`));
-    }
+  console.log(chalk.white('Parameters:'));
+  for (let i = 0; i < paramNames.length; i++) {
+    const isContParam = paramNames[i] === branch.parameterName;
+    const marker = isContParam ? ' ← continuation' : '';
+    const color = isContParam ? chalk.cyan : (x: string) => x;
+    console.log(color(`  ${paramNames[i]}: ${formatNumber(currentParams[i])}${marker}`));
   }
 
 
-  // All LC-based branches (limit_cycle plus codim1 LC curves) get enhanced LC display
-  const lcBasedBranches = ['limit_cycle', 'pd_curve', 'lpc_curve', 'ns_curve'];
-  if (lcBasedBranches.includes(branchType)) {
+  if (branchType === 'limit_cycle') {
     // Enhanced LC display
     const dim = sysConfig.equations.length;
     const varNames = sysConfig.varNames;
@@ -503,9 +434,7 @@ export async function showPointDetails(
     let ntst = 20, ncol = 4;
     if (branchTypeData && typeof branchTypeData === 'object' && 'type' in branchTypeData) {
       const bt = branchTypeData as { type: string; ntst?: number; ncol?: number };
-      // Handle LimitCycle and all codim1 LC curve types
-      const lcTypes = ['LimitCycle', 'PDCurve', 'LPCCurve', 'NSCurve'];
-      if (lcTypes.includes(bt.type) && bt.ntst && bt.ncol) {
+      if (bt.type === 'LimitCycle' && bt.ntst && bt.ncol) {
         ntst = bt.ntst;
         ncol = bt.ncol;
       }
@@ -575,35 +504,13 @@ export async function showPointDetails(
     // For equilibrium branches, always offer to create a new equilibrium branch
     choices.push({ name: 'Create New Equilibrium Branch', value: 'NEW_EQ_BRANCH' });
 
-    // For Hopf points, also offer limit cycle continuation and Hopf curve continuation
+    // For Hopf points, also offer limit cycle continuation
     if (pt.stability === 'Hopf') {
       choices.push({ name: 'Initiate Limit Cycle Continuation', value: 'INITIATE_LC' });
-      choices.push({ name: 'Continue Hopf Curve (2-parameter)', value: 'CONTINUE_HOPF_CURVE' });
-    }
-
-    // For Fold points, offer fold curve continuation
-    if (pt.stability === 'Fold') {
-      choices.push({ name: 'Continue Fold Curve (2-parameter)', value: 'CONTINUE_FOLD_CURVE' });
     }
   } else if (branchType === 'limit_cycle') {
     // For limit cycle branches, offer to create a new limit cycle branch
     choices.push({ name: 'Create New Limit Cycle Branch', value: 'NEW_LC_BRANCH' });
-
-    // For Period Doubling points, offer to branch to double period or continue PD curve
-    if (pt.stability === 'PeriodDoubling') {
-      choices.push({ name: 'Branch to Period-Doubled Limit Cycle', value: 'BRANCH_PD' });
-      choices.push({ name: 'Continue PD Curve (2-parameter)', value: 'CONTINUE_PD_CURVE' });
-    }
-
-    // For Cycle Fold (LPC) points, offer LPC curve continuation
-    if (pt.stability === 'CycleFold') {
-      choices.push({ name: 'Continue LPC Curve (2-parameter)', value: 'CONTINUE_LPC_CURVE' });
-    }
-
-    // For Neimark-Sacker points, offer NS curve continuation
-    if (pt.stability === 'NeimarkSacker') {
-      choices.push({ name: 'Continue NS Curve (2-parameter)', value: 'CONTINUE_NS_CURVE' });
-    }
   }
 
   choices.push(new inquirer.Separator());
@@ -620,114 +527,18 @@ export async function showPointDetails(
   });
 
   if (action === 'NEW_EQ_BRANCH') {
-    const newBranch = await initiateEquilibriumBranchFromPoint(sysName, branch, pt);
-    if (!newBranch) return 'BACK';
-    return {
-      kind: 'OPEN_BRANCH',
-      objectName: newBranch.parentObject,
-      branchName: newBranch.name,
-      autoInspect: true,
-    };
+    const result = await initiateEquilibriumBranchFromPoint(sysName, branch, pt);
+    return result ? 'INITIATED_BRANCH' : 'BACK';
   }
 
   if (action === 'INITIATE_LC') {
-    const newBranch = await initiateLCFromHopf(sysName, branch, pt, logicalIdx);
-    if (!newBranch) return 'BACK';
-    return {
-      kind: 'OPEN_BRANCH',
-      objectName: newBranch.parentObject,
-      branchName: newBranch.name,
-      autoInspect: true,
-    };
+    await initiateLCFromHopf(sysName, branch, pt);
+    return 'INITIATED_LC';
   }
 
   if (action === 'NEW_LC_BRANCH') {
-    const newBranch = await initiateLCBranchFromPoint(sysName, branch, pt, arrayIdx);
-    if (!newBranch) return 'BACK';
-    return {
-      kind: 'OPEN_BRANCH',
-      objectName: newBranch.parentObject,
-      branchName: newBranch.name,
-      autoInspect: true,
-    };
-  }
-
-  if (action === 'BRANCH_PD') {
-    const newBranch = await initiateLCFromPD(sysName, branch, pt, arrayIdx);
-    if (!newBranch) return 'BACK';
-    return {
-      kind: 'OPEN_BRANCH',
-      objectName: newBranch.parentObject,
-      branchName: newBranch.name,
-      autoInspect: true,
-    };
-  }
-
-  // Codim-1 curve continuation handlers
-  if (action === 'CONTINUE_FOLD_CURVE') {
-    const newBranch = await initiateFoldCurve(sysName, branch, pt, arrayIdx);
-    if (newBranch) {
-      return {
-        kind: 'OPEN_BRANCH' as const,
-        objectName: newBranch.parentObject,
-        branchName: newBranch.name,
-        autoInspect: true,
-      };
-    }
-    return 'BACK';
-  }
-
-  if (action === 'CONTINUE_HOPF_CURVE') {
-    const newBranch = await initiateHopfCurve(sysName, branch, pt, arrayIdx);
-    if (newBranch) {
-      return {
-        kind: 'OPEN_BRANCH' as const,
-        objectName: newBranch.parentObject,
-        branchName: newBranch.name,
-        autoInspect: true,
-      };
-    }
-    return 'BACK';
-  }
-
-  // LC codim-1 curve continuation handlers
-  if (action === 'CONTINUE_LPC_CURVE') {
-    const newBranch = await initiateLPCCurve(sysName, branch, pt, arrayIdx);
-    if (newBranch) {
-      return {
-        kind: 'OPEN_BRANCH' as const,
-        objectName: newBranch.parentObject,
-        branchName: newBranch.name,
-        autoInspect: true,
-      };
-    }
-    return 'BACK';
-  }
-
-  if (action === 'CONTINUE_PD_CURVE') {
-    const newBranch = await initiatePDCurve(sysName, branch, pt, arrayIdx);
-    if (newBranch) {
-      return {
-        kind: 'OPEN_BRANCH' as const,
-        objectName: newBranch.parentObject,
-        branchName: newBranch.name,
-        autoInspect: true,
-      };
-    }
-    return 'BACK';
-  }
-
-  if (action === 'CONTINUE_NS_CURVE') {
-    const newBranch = await initiateNSCurve(sysName, branch, pt, arrayIdx);
-    if (newBranch) {
-      return {
-        kind: 'OPEN_BRANCH' as const,
-        objectName: newBranch.parentObject,
-        branchName: newBranch.name,
-        autoInspect: true,
-      };
-    }
-    return 'BACK';
+    const result = await initiateLCBranchFromPoint(sysName, branch, pt, arrayIdx);
+    return result ? 'INITIATED_BRANCH' : 'BACK';
   }
 
   return 'BACK';

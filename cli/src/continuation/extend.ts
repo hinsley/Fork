@@ -9,7 +9,6 @@ import chalk from 'chalk';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
 import { ContinuationObject } from '../types';
-import { NavigationRequest } from '../navigation';
 import {
   ConfigEntry,
   MENU_PAGE_SIZE,
@@ -21,8 +20,6 @@ import {
 import { printSuccess, printError } from '../format';
 import { serializeBranchDataForWasm, normalizeBranchEigenvalues } from './serialization';
 import { inspectBranch } from './inspect';
-import { getBranchParams } from './utils';
-import { runContinuationExtensionWithProgress } from './progress';
 
 /**
  * Extends an existing continuation branch in either the forward or backward direction.
@@ -38,10 +35,7 @@ import { runContinuationExtensionWithProgress } from './progress';
  * @param sysName - Name of the dynamical system
  * @param branch - The continuation branch object to extend
  */
-export async function extendBranch(
-  sysName: string,
-  branch: ContinuationObject
-): Promise<NavigationRequest | void> {
+export async function extendBranch(sysName: string, branch: ContinuationObject) {
   const sysConfig = Storage.loadSystem(sysName);
   const defaults = branch.settings || {};
 
@@ -119,11 +113,10 @@ export async function extendBranch(
     step_tolerance: defaults.step_tolerance || 1e-6
   };
 
-  console.log(chalk.cyan(`Extending branch ${directionForward ? 'forward' : 'backward'} (max ${continuationSettings.max_steps} points)...`));
+  console.log(chalk.cyan(`Extending Branch ${directionForward ? 'Forward' : 'Backward'}...`));
+
   try {
-    const runConfig = { ...sysConfig };
-    runConfig.params = getBranchParams(sysName, branch, sysConfig);
-    const bridge = new WasmBridge(runConfig);
+    const bridge = new WasmBridge(sysConfig);
 
     // If indices are missing, fill them (migration)
     if (!branch.data.indices) {
@@ -161,25 +154,22 @@ export async function extendBranch(
     }
 
 
-    const updatedData = runContinuationExtensionWithProgress(
-      bridge,
+    const updatedData = bridge.extend_continuation(
       branchDataToPass,
       branch.parameterName,
       continuationSettings,
-      directionForward,
-      'Extension'
+      directionForward
     );
 
     branch.data = normalizeBranchEigenvalues(updatedData);
     branch.settings = continuationSettings;
 
-    Storage.saveBranch(sysName, branch.parentObject, branch);
+    Storage.saveContinuation(sysName, branch);
     printSuccess(`Extension successful! Total points: ${branch.data.points.length}`);
 
-    return await inspectBranch(sysName, branch);
+    await inspectBranch(sysName, branch);
 
   } catch (e) {
     printError(`Extension Failed: ${e}`);
-    return;
   }
 }
