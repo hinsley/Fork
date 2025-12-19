@@ -24,7 +24,7 @@ import {
   formatArray,
   summarizeEigenvalues
 } from './utils';
-import { initiateLCFromHopf, initiateLCBranchFromPoint } from './initiate-lc';
+import { initiateLCFromHopf, initiateLCBranchFromPoint, initiateLCFromPD } from './initiate-lc';
 import { initiateEquilibriumBranchFromPoint } from './initiate-eq';
 
 type BranchDetailResult = 'SUMMARY' | 'EXIT' | 'INITIATED_LC' | 'INITIATED_BRANCH';
@@ -511,6 +511,11 @@ export async function showPointDetails(
   } else if (branchType === 'limit_cycle') {
     // For limit cycle branches, offer to create a new limit cycle branch
     choices.push({ name: 'Create New Limit Cycle Branch', value: 'NEW_LC_BRANCH' });
+
+    // For Period Doubling points, offer to branch to double period
+    if (pt.stability === 'PeriodDoubling') {
+      choices.push({ name: 'Branch to Period-Doubled Limit Cycle', value: 'BRANCH_PD' });
+    }
   }
 
   choices.push(new inquirer.Separator());
@@ -538,6 +543,11 @@ export async function showPointDetails(
 
   if (action === 'NEW_LC_BRANCH') {
     const result = await initiateLCBranchFromPoint(sysName, branch, pt, arrayIdx);
+    return result ? 'INITIATED_BRANCH' : 'BACK';
+  }
+
+  if (action === 'BRANCH_PD') {
+    const result = await initiateLCFromPD(sysName, branch, pt, arrayIdx);
     return result ? 'INITIATED_BRANCH' : 'BACK';
   }
 
