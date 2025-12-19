@@ -16,6 +16,7 @@ This document describes how Fork implements limit cycle continuation, including 
 10. [Branch Extension](#branch-extension)
 11. [Floquet Multiplier Extraction](#floquet-multiplier-extraction)
 12. [Best Practices for Accurate Floquet Multipliers](#best-practices-for-accurate-floquet-multipliers)
+13. [Branching to Period-Doubled Limit Cycles](#branching-to-period-doubled-limit-cycles)
 
 ---
 
@@ -23,9 +24,9 @@ This document describes how Fork implements limit cycle continuation, including 
 
 Fork supports two methods for initiating limit cycle continuation:
 
-1. **From Hopf Bifurcation**: At a Hopf bifurcation, a pair of complex conjugate eigenvalues crosses the imaginary axis, marking the birth of a family of periodic orbits. Fork detects Hopf points during equilibrium continuation and allows continuation of the emerging limit cycle family.
-
 2. **From Orbit Data**: If you have an orbit that converges to a stable limit cycle (e.g., from numerical integration), Fork can extract one period and use it to initialize limit cycle continuation.
+
+3. **From Period-Doubling (PD) Bifurcation**: When a limit cycle undergoes a period-doubling bifurcation, a new limit cycle family emerges with double the period. Fork can branch from a detected PD point to this new family.
 
 ### Key Concepts
 
@@ -76,6 +77,12 @@ After continuation completes, you can inspect the limit cycle branch:
 - Each point contains the full limit cycle profile
 - Eigenvalues (Floquet multipliers) indicate stability
 - Use the plotting script to visualize all cycles together
+### Step 5: Branch to Double Period (PD only)
+
+If a Period-Doubling (PD) bifurcation is detected (Floquet multiplier crosses -1):
+1. Inspect the branch points and find the point marked "PeriodDoubling".
+2. Select the point and choose "Branch to Period-Doubled Limit Cycle".
+3. Configure the perturbation amplitude (default 0.01) and run continuation.
 
 ---
 
@@ -694,6 +701,58 @@ ncol: 4
 step_size: 0.01
 corrector_tol: 1e-6
 ```
+
+---
+
+## Branching to Period-Doubled Limit Cycles
+
+Period-doubling (PD) branching allows you to follow the cascaded route to chaos by switching from a limit cycle of period $T$ to a new family of period $2T$.
+
+### When to Use This Method
+
+- A "PeriodDoubling" bifurcation is detected on your limit cycle branch.
+- You want to follow the period-doubling route to chaos (e.g., in the Rössler system).
+- You want to explore the stability of the doubled-period cycles.
+
+### CLI Workflow
+
+```
+Continuation Menu → [select LC branch] → Inspect Branch Points → [select PD point]
+→ Branch to Period-Doubled Limit Cycle
+```
+
+### Numerical Implementation
+
+The PD branching algorithm follows the approach in MatCont's `init_PD_LC2.m`:
+
+#### 1. PD Eigenvector Computation
+
+At a PD point, the monodromy matrix $M$ has an eigenvalue of -1 (the period-doubling multiplier). We first compute the corresponding eigenvector $v$:
+$$(M + I)v = 0$$
+where $I$ is the identity matrix. $v$ represents the direction in state space into which the orbit begins to "wobble" before spliting into a doubled period.
+
+#### 2. Doubled-Period Guess Construction
+
+We construct an initial guess for the doubled-period limit cycle by concatenating the original cycle with itself and adding a small perturbation in the direction of the PD eigenvector:
+
+1. **Base Mesh**: Concatenate two copies of the original mesh points. Adjust normalized time to $[0, 1]$.
+2. **Perturbation**: Add a small perturbation based on the PD eigenvector:
+   $$x_{new}(\tau) \approx x_{orig}(\tau \pmod{1/2}) + h \cdot v(\tau)$$
+   where $h$ is the perturbation amplitude (default 0.01).
+3. **Stage States**: Rebuild all collocation stage states using the perturbed mesh.
+
+#### 3. Predictor-Corrector Continuation
+
+Once the doubled-period guess is constructed (with $ntst_{new} = 2 \cdot ntst_{orig}$), Fork runs standard orthogonal collocation continuation to converge onto and track the new branch.
+
+### Comparison of LC Initiation Methods
+
+| Aspect | From Hopf | From Orbit | From PD Branching |
+|--------|-----------|------------|-------------------|
+| **Initial guess** | Normal form approx | Sampler from orbit | PD eigenvector perturb |
+| **New Period** | $\approx 2\pi/\omega$ | Sampler period | $\approx 2 \times$ original period |
+| **Mesh (ntst)** | User-defined | User-defined | $2 \times$ original ntst |
+| **Stability** | Any | Stable only | Any |
 
 ---
 

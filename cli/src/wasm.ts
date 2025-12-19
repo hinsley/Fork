@@ -269,6 +269,34 @@ export class WasmBridge {
         );
     }
 
+    /**
+     * Initializes a period-doubled limit cycle from a period-doubling bifurcation.
+     * Takes the LC state at the PD point and constructs a doubled-period initial guess.
+     * 
+     * @param lcState - Flattened collocation state at the PD point [mesh, stages, period]
+     * @param parameterName - Name of the continuation parameter
+     * @param paramValue - Parameter value at the PD point
+     * @param ntst - Number of mesh intervals in the source LC
+     * @param ncol - Collocation points per interval
+     * @param amplitude - Perturbation amplitude for stepping onto the new branch
+     */
+    initLCFromPD(
+        lcState: number[],
+        parameterName: string,
+        paramValue: number,
+        ntst: number,
+        ncol: number,
+        amplitude: number
+    ): any {
+        return this.instance.init_lc_from_pd(
+            new Float64Array(lcState),
+            parameterName,
+            paramValue,
+            ntst,
+            ncol,
+            amplitude
+        );
+    }
 
     /**
      * Continues a limit cycle from an initial guess.

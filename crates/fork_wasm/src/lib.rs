@@ -6,7 +6,7 @@ use fork_core::continuation::{
     ContinuationBranch, ContinuationSettings, BranchType,
     CollocationConfig, LimitCycleSetup,
     continue_limit_cycle_collocation, extend_limit_cycle_collocation,
-    limit_cycle_setup_from_hopf, limit_cycle_setup_from_orbit,
+    limit_cycle_setup_from_hopf, limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd,
 };
 use fork_core::continuation::equilibrium::{
     continue_parameter as core_continuation, extend_branch as core_extend_branch,
@@ -480,6 +480,38 @@ impl WasmSystem {
             tolerance,
         )
         .map_err(|e| JsValue::from_str(&format!("Failed to initialize limit cycle from orbit: {}", e)))?;
+
+        to_value(&setup).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    /// Initializes a period-doubled limit cycle from a period-doubling bifurcation.
+    /// Takes the LC state at the PD point and constructs a doubled-period initial guess
+    /// by computing the PD eigenvector and perturbing the original orbit.
+    pub fn init_lc_from_pd(
+        &mut self,
+        lc_state: Vec<f64>,
+        param_name: &str,
+        param_value: f64,
+        ntst: u32,
+        ncol: u32,
+        amplitude: f64,
+    ) -> Result<JsValue, JsValue> {
+        let param_index = *self
+            .system
+            .param_map
+            .get(param_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param_name)))?;
+
+        let setup = limit_cycle_setup_from_pd(
+            &mut self.system,
+            param_index,
+            &lc_state,
+            param_value,
+            ntst as usize,
+            ncol as usize,
+            amplitude,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Failed to initialize LC from PD: {}", e)))?;
 
         to_value(&setup).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }

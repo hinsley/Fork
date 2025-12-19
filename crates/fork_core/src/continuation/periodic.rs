@@ -1,6 +1,6 @@
 use super::{
-    continue_with_problem, extend_branch_with_problem, BifurcationType, ContinuationBranch,
-    ContinuationPoint, ContinuationSettings,
+    continue_with_problem, extend_branch_with_problem, BifurcationType, BranchType,
+    ContinuationBranch, ContinuationPoint, ContinuationSettings,
 };
 use super::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
 use crate::equation_engine::EquationSystem;
@@ -385,6 +385,359 @@ fn interpolate_orbit_state(
     }
     
     Ok(result)
+}
+
+
+/// Initializes a limit cycle continuation from a Period-Doubling bifurcation.
+///
+/// At a period-doubling bifurcation, a Floquet multiplier μ = -1 indicates the birth
+/// of a new limit cycle with twice the period. This function:
+/// 1. Extracts the current LC data from the PD point state
+/// 2. Computes the PD eigenvector (null vector of M + I where M is monodromy)
+/// 3. Constructs a doubled-period initial guess by perturbing with ±h*eigenvector
+///
+/// # Arguments
+/// * `system` - The equation system
+/// * `param_index` - Index of the continuation parameter
+/// * `lc_state` - Flattened collocation state at the PD point [mesh, stages, period]
+/// * `param_value` - Parameter value at the PD point
+/// * `ntst` - Number of mesh intervals in the source LC
+/// * `ncol` - Collocation degree
+/// * `amplitude` - Perturbation amplitude (h) for stepping onto the new branch
+pub fn limit_cycle_setup_from_pd(
+    system: &mut EquationSystem,
+    param_index: usize,
+    lc_state: &[f64],
+    param_value: f64,
+    ntst: usize,
+    ncol: usize,
+    amplitude: f64,
+) -> Result<LimitCycleSetup> {
+    let dim = system.equations.len();
+    
+    // Parse the LC state to extract mesh, stages, period
+    let mesh_data_len = ntst * dim;
+    let stage_data_len = ntst * ncol * dim;
+    let expected_len = mesh_data_len + stage_data_len + 1;
+    
+    if lc_state.len() != expected_len {
+        bail!(
+            "Invalid LC state length: expected {} got {}",
+            expected_len,
+            lc_state.len()
+        );
+    }
+    
+    // Extract original mesh states
+    let mut mesh_states: Vec<Vec<f64>> = Vec::with_capacity(ntst);
+    for i in 0..ntst {
+        let start = i * dim;
+        mesh_states.push(lc_state[start..start + dim].to_vec());
+    }
+    
+    // Extract original period
+    let period = lc_state[mesh_data_len + stage_data_len];
+    
+    // Build the collocation problem to get the Jacobian for monodromy
+    let coeffs = CollocationCoefficients::new(ncol)?;
+    
+    // Create phase condition from original cycle
+    let phase_anchor = mesh_states[0].clone();
+    let mut phase_direction = vec![0.0; dim];
+    for d in 0..dim {
+        phase_direction[d] = mesh_states[1][d] - mesh_states[0][d];
+    }
+    let norm = phase_direction.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if norm > 1e-12 {
+        for d in 0..dim {
+            phase_direction[d] /= norm;
+        }
+    }
+    
+    // Build stage states from mesh for creating the problem
+    let stage_states = build_stage_states_from_mesh(dim, ntst, ncol, &coeffs.nodes, &mesh_states);
+    
+    // Create the collocation problem
+    let mut problem = PeriodicOrbitCollocationProblem::new(
+        system,
+        param_index,
+        ntst,
+        ncol,
+        phase_anchor.clone(),
+        phase_direction.clone(),
+    )?;
+    
+    // Build the augmented state vector [param, mesh, stages, period]
+    let aug_len = 1 + mesh_data_len + stage_data_len + 1;
+    let mut aug_state = DVector::zeros(aug_len);
+    aug_state[0] = param_value;
+    
+    // Copy mesh states
+    for i in 0..ntst {
+        for d in 0..dim {
+            aug_state[1 + i * dim + d] = mesh_states[i][d];
+        }
+    }
+    
+    // Copy stage states
+    let stage_offset = 1 + mesh_data_len;
+    for i in 0..ntst {
+        for j in 0..ncol {
+            for d in 0..dim {
+                let idx = stage_offset + (i * ncol + j) * dim + d;
+                aug_state[idx] = stage_states[i][j][d];
+            }
+        }
+    }
+    
+    // Period
+    aug_state[aug_len - 1] = period;
+    
+    // Get the extended Jacobian (with periodic BC [I, -I])
+    let jac = problem.extended_jacobian(&aug_state)?;
+    
+    // ========== OPTIMIZED: Direct bordered solve for PD eigenvector ==========
+    // Instead of computing the full monodromy matrix, we use MATCONT's approach:
+    // 1. Modify the Jacobian to have flip BC [I, I] instead of periodic BC [I, -I]
+    // 2. Use bordered linear solve to find the null vector
+    // 3. Extract PD eigenvector from the mesh-state portion
+    //
+    // The flip BC changes the continuity equation from x(T) - x(0) = 0 to x(T) + x(0) = 0
+    // In the Jacobian, this means changing the coefficient on x(0) from -I to +I.
+    
+    // Jacobian layout (from extended_jacobian):
+    // - Rows 0 to ntst*ncol*dim - 1: Collocation equations  
+    // - Rows ntst*ncol*dim to ntst*ncol*dim + ntst*dim - 1: Continuity equations
+    // - Last row: Phase condition
+    // - Column 0: Parameter derivatives
+    // - Columns 1 to 1+ntst*dim: Mesh states (x_0, ..., x_{ntst-1})
+    // - Columns 1+ntst*dim to end-1: Stage states
+    // - Last column: Period
+    
+    let ncol_coord = ncol * dim;
+    let continuity_row_start = ntst * ncol_coord;
+    let mesh_col_start = 1;  // Skip parameter column
+    
+    // Create a copy of the Jacobian and modify BC for flip condition
+    // The last continuity block links x_{ntst-1} to x_0
+    // For periodic: C_{next} * dx_0 = -... (i.e., coefficient is -I on x_0)
+    // For flip: C_{next} * dx_0 = +... (coefficient is +I on x_0)
+    //
+    // We need to change the sign of the x_0 column in the last continuity equation
+    let mut jac_flip = jac.clone();
+    
+    // The last continuity equation is at row continuity_row_start + (ntst-1)*dim
+    // and has coefficients w.r.t. x_0 at columns mesh_col_start to mesh_col_start+dim
+    let last_cont_row = continuity_row_start + (ntst - 1) * dim;
+    for r in 0..dim {
+        for c in 0..dim {
+            // Change sign: x(T) - x(0) = 0 becomes x(T) + x(0) = 0
+            // The coefficient on x_0 changes from -1 on diagonal to +1
+            let col_idx = mesh_col_start + c;
+            let row_idx = last_cont_row + r;
+            jac_flip[(row_idx, col_idx)] = -jac_flip[(row_idx, col_idx)];
+        }
+    }
+    
+    // Remove parameter and period columns for the bordered system
+    // We only need the state part of the Jacobian (mesh + stages)
+    let state_dim = ntst * dim + ntst * ncol * dim;  // mesh + stages (no param, no period)
+    let n_rows = jac_flip.nrows() - 1;  // Exclude phase condition row
+    
+    // Extract the state-only part of the Jacobian (skip param col 0 and period col at end)
+    let mut jac_state = DMatrix::<f64>::zeros(n_rows, state_dim);
+    for r in 0..n_rows {
+        for c in 0..state_dim {
+            jac_state[(r, c)] = jac_flip[(r, c + 1)];  // Skip param column
+        }
+    }
+    
+    // Create bordered system: [J, b; b^T, 0] where b is a random-ish vector
+    // We use a simple bordering vector with some structure
+    let bordered_size = n_rows + 1;
+    let mut bordered = DMatrix::<f64>::zeros(bordered_size, state_dim + 1);
+    
+    // Copy Jacobian into bordered matrix
+    for r in 0..n_rows {
+        for c in 0..state_dim {
+            bordered[(r, c)] = jac_state[(r, c)];
+        }
+    }
+    
+    // Add bordering column (use alternating pattern for numerical stability)
+    for r in 0..n_rows {
+        bordered[(r, state_dim)] = if r % 2 == 0 { 1.0 } else { -1.0 };
+    }
+    
+    // Add bordering row
+    for c in 0..state_dim {
+        bordered[(n_rows, c)] = if c % 3 == 0 { 1.0 } else { 0.0 };
+    }
+    bordered[(n_rows, state_dim)] = 0.0;
+    
+    // RHS: [0, 0, ..., 0, 1]
+    let mut rhs = DVector::<f64>::zeros(bordered_size);
+    rhs[bordered_size - 1] = 1.0;
+    
+    // Solve the bordered system
+    let phi_full = bordered.clone().lu().solve(&rhs)
+        .ok_or_else(|| anyhow!("Bordered solve failed for PD eigenvector"))?;
+    
+    // Extract the mesh-state portion (first ntst*dim components)
+    // This is the PD eigenvector projected onto mesh points
+    let mesh_portion_len = ntst * dim;
+    let phi_mesh: Vec<f64> = phi_full.iter().take(mesh_portion_len).cloned().collect();
+    
+    // Reconstruct the eigenvector at x(0) - this is what we apply as the perturbation
+    // The phi_mesh contains the eigenvector at each mesh point; use the first one
+    let pd_eigenvector: Vec<f64> = phi_mesh[0..dim].to_vec();
+    
+    // Normalize the eigenvector
+    let eig_norm = pd_eigenvector.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let pd_eigenvector: Vec<f64> = if eig_norm > 1e-12 {
+        pd_eigenvector.iter().map(|v| v / eig_norm).collect()
+    } else {
+        bail!("PD eigenvector is nearly zero - not at a period-doubling point");
+    };
+    
+    // Construct doubled-period mesh states
+    // First half: original + h * phi
+    // Second half: original - h * phi
+    let new_ntst = 2 * ntst;
+    let mut new_mesh_states: Vec<Vec<f64>> = Vec::with_capacity(new_ntst);
+    
+    // First half: original orbit + perturbation
+    for i in 0..ntst {
+        let mut state = mesh_states[i].clone();
+        for d in 0..dim {
+            state[d] += amplitude * pd_eigenvector[d];
+        }
+        new_mesh_states.push(state);
+    }
+    
+    // Second half: original orbit - perturbation
+    for i in 0..ntst {
+        let mut state = mesh_states[i].clone();
+        for d in 0..dim {
+            state[d] -= amplitude * pd_eigenvector[d];
+        }
+        new_mesh_states.push(state);
+    }
+    
+    // Build new stage states for doubled mesh
+    let new_stage_states = build_stage_states_from_mesh(
+        dim,
+        new_ntst,
+        ncol,
+        &coeffs.nodes,
+        &new_mesh_states,
+    );
+    
+    // New period is double the original
+    let new_period = 2.0 * period;
+    
+    // Phase condition from first point of new cycle
+    let new_phase_anchor = new_mesh_states[0].clone();
+    let mut new_phase_direction = vec![0.0; dim];
+    for d in 0..dim {
+        new_phase_direction[d] = new_mesh_states[1][d] - new_mesh_states[0][d];
+    }
+    let norm = new_phase_direction.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if norm > 1e-12 {
+        for d in 0..dim {
+            new_phase_direction[d] /= norm;
+        }
+    }
+    
+    Ok(LimitCycleSetup {
+        guess: LimitCycleGuess {
+            param_value,
+            period: new_period,
+            mesh_states: new_mesh_states,
+            stage_states: new_stage_states,
+        },
+        phase_anchor: new_phase_anchor,
+        phase_direction: new_phase_direction,
+        mesh_points: new_ntst,
+        collocation_degree: ncol,
+    })
+}
+
+/// Helper function to compute the monodromy matrix from the collocation Jacobian.
+/// This extracts M using the shooting-based method.
+fn compute_monodromy_matrix(
+    jac: &DMatrix<f64>,
+    dim: usize,
+    ntst: usize,
+    ncol: usize,
+) -> Result<DMatrix<f64>> {
+    let ncol_coord = ncol * dim;
+    let mesh_col_start = 1;
+    let stage_col_start = mesh_col_start + ntst * dim;
+    let continuity_row_start = ntst * ncol * dim;
+    
+    let mut monodromy = DMatrix::<f64>::identity(dim, dim);
+    
+    for interval in 0..ntst {
+        let cont_row = continuity_row_start + interval * dim;
+        let coll_row_start = interval * ncol_coord;
+        let stage_col = stage_col_start + interval * ncol_coord;
+        let mesh_col = mesh_col_start + interval * dim;
+        let next_mesh_col = mesh_col_start + ((interval + 1) % ntst) * dim;
+        
+        // Extract G_x, G_s
+        let mut g_x = DMatrix::<f64>::zeros(ncol_coord, dim);
+        for r in 0..ncol_coord {
+            for c in 0..dim {
+                g_x[(r, c)] = jac[(coll_row_start + r, mesh_col + c)];
+            }
+        }
+        
+        let mut g_s = DMatrix::<f64>::zeros(ncol_coord, ncol_coord);
+        for r in 0..ncol_coord {
+            for c in 0..ncol_coord {
+                g_s[(r, c)] = jac[(coll_row_start + r, stage_col + c)];
+            }
+        }
+        
+        let ds_dx = match g_s.clone().lu().solve(&-&g_x) {
+            Some(sol) => sol,
+            None => bail!("Monodromy: singular stage block at interval {}", interval),
+        };
+        
+        // Extract C_x, C_s, C_next
+        let mut c_x = DMatrix::<f64>::zeros(dim, dim);
+        for r in 0..dim {
+            for c in 0..dim {
+                c_x[(r, c)] = jac[(cont_row + r, mesh_col + c)];
+            }
+        }
+        
+        let mut c_s = DMatrix::<f64>::zeros(dim, ncol_coord);
+        for r in 0..dim {
+            for c in 0..ncol_coord {
+                c_s[(r, c)] = jac[(cont_row + r, stage_col + c)];
+            }
+        }
+        
+        let mut c_next = DMatrix::<f64>::zeros(dim, dim);
+        for r in 0..dim {
+            for c in 0..dim {
+                c_next[(r, c)] = jac[(cont_row + r, next_mesh_col + c)];
+            }
+        }
+        
+        let effective_c_x = &c_x + &c_s * &ds_dx;
+        
+        let t_i = match c_next.clone().lu().solve(&-&effective_c_x) {
+            Some(t) => t,
+            None => bail!("Monodromy: singular C_next at interval {}", interval),
+        };
+        
+        monodromy = &t_i * &monodromy;
+    }
+    
+    Ok(monodromy)
 }
 
 
@@ -1232,7 +1585,12 @@ pub fn continue_limit_cycle_collocation(
         eigenvalues: Vec::new(),
     };
 
-    continue_with_problem(&mut problem, point, settings, forward)
+    let mut branch = continue_with_problem(&mut problem, point, settings, forward)?;
+    branch.branch_type = BranchType::LimitCycle {
+        ntst: config.mesh_points,
+        ncol: config.degree,
+    };
+    Ok(branch)
 }
 
 pub fn extend_limit_cycle_collocation(
@@ -1251,7 +1609,12 @@ pub fn extend_limit_cycle_collocation(
         config.phase_anchor,
         config.phase_direction,
     )?;
-    extend_branch_with_problem(&mut problem, branch, settings, forward)
+    let mut result = extend_branch_with_problem(&mut problem, branch, settings, forward)?;
+    result.branch_type = BranchType::LimitCycle {
+        ntst: config.mesh_points,
+        ncol: config.degree,
+    };
+    Ok(result)
 }
 
 

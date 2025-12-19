@@ -90,11 +90,14 @@ def discover_lc_branches(systems_root: Path) -> List[Dict[str, Any]]:
                     if state_len > 20:
                         is_lc = True
                         # Try to infer mesh parameters
-                        for test_ntst in [20, 10, 40]:
-                            for test_ncol in [4, 3, 5]:
-                                num_profile = test_ntst * test_ncol + 1
-                                for test_dim in [2, 3, 4, 5]:
-                                    if state_len == num_profile * test_dim + 1:
+                        # Priority order: common dimensions first, then common ncol, then ntst variants
+                        for test_dim in [3, 2, 4, 5]:  # Most systems are 2D or 3D
+                            for test_ncol in [4, 3, 5]:  # ncol=4 is most common
+                                for test_ntst in [20, 40, 10, 80, 30, 60]:  # Include doubled values
+                                    # state = mesh_states + stage_states + period
+                                    # = ntst*dim + ntst*ncol*dim + 1 = ntst*dim*(ncol+1)+1
+                                    expected_len = test_ntst * test_dim * (test_ncol + 1) + 1
+                                    if state_len == expected_len:
                                         ntst, ncol, dim = test_ntst, test_ncol, test_dim
                                         break
                                 if ntst > 0:
@@ -105,18 +108,49 @@ def discover_lc_branches(systems_root: Path) -> List[Dict[str, Any]]:
                         # Fallback: assume common defaults
                         if ntst == 0:
                             ntst, ncol = 20, 4
-                            num_profile = ntst * ncol + 1
-                            dim = (state_len - 1) // num_profile
+                            dim = (state_len - 1) // (ntst * (ncol + 1))
                 
                 if not is_lc:
                     continue
                 
-                # Calculate dim if we have branch_type
+                # Fallback: If is_lc but we don't have ntst/ncol, infer from state size
+                if ntst == 0 or ncol == 0:
+                    first_state = points[0].get("state", [])
+                    state_len = len(first_state)
+                    
+                    # Try to infer mesh parameters from state length
+                    # Restructure to prioritize: common dims (2,3) with common ncol (4) first
+                    # Then try doubled ntst values, then unusual ncol
+                    if state_len > 20:
+                        # Priority order: common dimensions first, then common ncol, then ntst variants
+                        for test_dim in [3, 2, 4, 5]:  # Most systems are 2D or 3D
+                            for test_ncol in [4, 3, 5]:  # ncol=4 is most common
+                                for test_ntst in [20, 40, 10, 80, 30, 60]:  # Include doubled values
+                                    # state = mesh_states + stage_states + period
+                                    # = ntst*dim + ntst*ncol*dim + 1 = ntst*dim*(ncol+1)+1
+                                    expected_len = test_ntst * test_dim * (test_ncol + 1) + 1
+                                    if state_len == expected_len:
+                                        ntst, ncol, dim = test_ntst, test_ncol, test_dim
+                                        break
+                                if ntst > 0:
+                                    break
+                            if ntst > 0:
+                                break
+                        
+                        # Fallback: assume common defaults
+                        if ntst == 0:
+                            ntst, ncol = 20, 4
+                            # dim = (state_len - 1) // (ntst * (ncol + 1))
+                            # This is approximate since we can't invert cleanly
+                            total_mesh_stage = (state_len - 1)
+                            dim = total_mesh_stage // (ntst * (ncol + 1)) if ntst * (ncol + 1) > 0 else 0
+                
+                # Calculate dim if we have branch_type but dim is still 0
                 if dim == 0 and ntst > 0 and ncol > 0:
                     first_state = points[0].get("state", [])
-                    num_profile_points = ntst * ncol + 1
                     total_state_len = len(first_state)
-                    dim = (total_state_len - 1) // num_profile_points if num_profile_points > 0 else 0
+                    # state = ntst*dim*(ncol+1)+1, so dim = (state_len-1)/(ntst*(ncol+1))
+                    dim = (total_state_len - 1) // (ntst * (ncol + 1)) if ntst * (ncol + 1) > 0 else 0
                 
                 if dim > 0:
                     records.append({
