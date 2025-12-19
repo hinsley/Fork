@@ -20,7 +20,7 @@ pub mod util;
 pub use periodic::{
     CollocationConfig, LimitCycleGuess, LimitCycleSetup,
     continue_limit_cycle_collocation, extend_limit_cycle_collocation,
-    limit_cycle_setup_from_hopf,
+    limit_cycle_setup_from_hopf, limit_cycle_setup_from_orbit,
 };
 pub use problem::{PointDiagnostics, TestFunctionValues};
 pub use types::{
