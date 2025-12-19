@@ -271,8 +271,6 @@ export async function initiateLCFromHopf(
       guess,
       branch.parameterName,
       continuationSettings,
-      ntst,
-      ncol,
       directionForward
     ));
 
@@ -588,19 +586,27 @@ export async function initiateLCBranchFromPoint(
     const newParamIdx = sysConfig.paramNames.indexOf(selectedParamName);
     const newParamValue = newParamIdx >= 0 ? runConfig.params[newParamIdx] : point.param_value;
 
-    const lcGuess = {
-      param_value: newParamValue,  // Use NEW param's value, not old param's value
-      period: period,
-      profile_states: profileStates,
-      upoldp: sourceBranch.data.upoldp || []
+    // Need to wrap the raw guess in a LimitCycleSetup-like structure
+    // The WASM expects mesh_points, collocation_degree, phase_anchor, phase_direction
+    const lcSetup = {
+      guess: {
+        param_value: newParamValue,
+        period: period,
+        mesh_states: profileStates,
+        stage_states: []  // Will be built by the core
+      },
+      mesh_points: ntst,
+      collocation_degree: ncol,
+      phase_anchor: profileStates[0] || [],
+      phase_direction: profileStates.length > 1
+        ? profileStates[1].map((v: number, i: number) => v - profileStates[0][i])
+        : profileStates[0].map(() => 1.0)
     };
 
     const branchData = normalizeBranchEigenvalues(bridge.continueLimitCycle(
-      lcGuess,
+      lcSetup,
       selectedParamName,
       continuationSettings,
-      ntst,
-      ncol,
       directionForward
     ));
 

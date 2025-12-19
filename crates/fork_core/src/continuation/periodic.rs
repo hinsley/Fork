@@ -195,6 +195,199 @@ pub fn limit_cycle_setup_from_hopf(
     })
 }
 
+/// Initializes a limit cycle continuation from a computed orbit.
+///
+/// This follows the matcont `initOrbLC.m` algorithm:
+/// 1. Skip 1/3 of the orbit as transient
+/// 2. Find where the orbit returns close to the starting point (within tolerance)
+/// 3. Extract one cycle
+/// 4. Remesh to collocation grid using linear interpolation
+///
+/// # Arguments
+/// * `orbit_times` - Time values from the orbit (should be monotonically increasing)
+/// * `orbit_states` - State vectors at each time point (each should have `dim` elements)
+/// * `param_value` - Current value of the continuation parameter
+/// * `mesh_points` - Number of mesh intervals (ntst)
+/// * `degree` - Collocation degree (ncol)
+/// * `tolerance` - Tolerance for detecting when orbit returns to starting point
+pub fn limit_cycle_setup_from_orbit(
+    orbit_times: &[f64],
+    orbit_states: &[Vec<f64>],
+    param_value: f64,
+    mesh_points: usize,
+    degree: usize,
+    tolerance: f64,
+) -> Result<LimitCycleSetup> {
+    if mesh_points < 3 {
+        bail!("Limit cycle meshes require at least 3 points");
+    }
+    if orbit_times.len() < 10 {
+        bail!("Orbit too short - need at least 10 points");
+    }
+    if orbit_times.len() != orbit_states.len() {
+        bail!("orbit_times and orbit_states must have the same length");
+    }
+    let dim = orbit_states[0].len();
+    if dim == 0 {
+        bail!("State dimension must be positive");
+    }
+    for (i, state) in orbit_states.iter().enumerate() {
+        if state.len() != dim {
+            bail!("State {} has dimension {} but expected {}", i, state.len(), dim);
+        }
+    }
+    
+    // MatCont-style algorithm adapted for orbits that start off the attractor:
+    // 1. Use point at 1/3 as reference (after transient decay)
+    // 2. Search forward for the FIRST local minimum of distance (first return)
+    let n = orbit_times.len();
+    let ref_idx = n / 3;
+    let x_ref = &orbit_states[ref_idx];
+    let t_ref = orbit_times[ref_idx];
+    
+    // Skip a small portion after reference to avoid matching ourselves
+    // Use a small fixed skip (not percentage-based) to avoid skipping past the first return
+    let skip_start = ref_idx + 10;
+    
+    // Compute distances from x_ref to all points after skip_start
+    let mut distances: Vec<f64> = Vec::new();
+    for i in skip_start..n {
+        let x = &orbit_states[i];
+        let dist: f64 = x.iter()
+            .zip(x_ref.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        distances.push(dist);
+    }
+    
+    if distances.len() < 3 {
+        bail!("Not enough points after transient for cycle detection");
+    }
+    
+    // Find the FIRST local minimum that's within tolerance
+    // A local minimum is where distances[i-1] > distances[i] < distances[i+1]
+    let mut cycle_end = None;
+    for i in 1..distances.len()-1 {
+        if distances[i] < distances[i-1] && distances[i] < distances[i+1] {
+            // This is a local minimum
+            if distances[i] < tolerance {
+                cycle_end = Some(skip_start + i);
+                break;
+            }
+        }
+    }
+    
+    // If no local minimum found within tolerance, find the overall minimum
+    let min_dist = distances.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+    
+    let cycle_end = cycle_end.ok_or_else(|| {
+        anyhow!("No cycle detected: no local minimum within tolerance {}. \
+                 Closest approach: {:.6}. Try tolerance > {:.4} or longer orbit.",
+                 tolerance, min_dist, min_dist * 1.2)
+    })?;
+    
+    // Step 3: Extract one cycle (from ref_idx to cycle_end)
+    let period = orbit_times[cycle_end] - t_ref;
+    if period <= 0.0 {
+        bail!("Computed period is non-positive: {}", period);
+    }
+    
+    // Normalize times to [0, 1] for this cycle
+    let cycle_times: Vec<f64> = orbit_times[ref_idx..=cycle_end]
+        .iter()
+        .map(|t| (t - t_ref) / period)
+        .collect();
+    let cycle_states: Vec<&Vec<f64>> = orbit_states[ref_idx..=cycle_end].iter().collect();
+    
+    // Step 4: Remesh to collocation grid
+    // We need mesh_points mesh states at uniform intervals: tau = 0, 1/ntst, 2/ntst, ..., (ntst-1)/ntst
+    let mut mesh_states = Vec::with_capacity(mesh_points);
+    for k in 0..mesh_points {
+        let tau = k as f64 / mesh_points as f64;
+        let interpolated = interpolate_orbit_state(tau, &cycle_times, &cycle_states, dim)?;
+        mesh_states.push(interpolated);
+    }
+    
+    // Phase condition: use first mesh point and direction of flow at that point
+    // For simplicity, we use the initial direction (x1 - x0) normalized
+    let phase_anchor = mesh_states[0].clone();
+    let dx: Vec<f64> = mesh_states[1]
+        .iter()
+        .zip(mesh_states[0].iter())
+        .map(|(a, b)| a - b)
+        .collect();
+    let dx_norm: f64 = dx.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let phase_direction = if dx_norm > 1e-12 {
+        dx.iter().map(|v| v / dx_norm).collect()
+    } else {
+        // Fallback: use a unit vector in first component
+        let mut dir = vec![0.0; dim];
+        dir[0] = 1.0;
+        dir
+    };
+    
+    // Build stage states via interpolation
+    let coeffs = CollocationCoefficients::new(degree)?;
+    let stage_states =
+        build_stage_states_from_mesh(dim, mesh_points, degree, &coeffs.nodes, &mesh_states);
+    
+    let guess = LimitCycleGuess {
+        param_value,
+        period,
+        mesh_states,
+        stage_states,
+    };
+    
+    Ok(LimitCycleSetup {
+        guess,
+        phase_anchor,
+        phase_direction,
+        mesh_points,
+        collocation_degree: degree,
+    })
+}
+
+/// Linearly interpolate orbit state at normalized time tau in [0, 1]
+fn interpolate_orbit_state(
+    tau: f64,
+    times: &[f64],
+    states: &[&Vec<f64>],
+    dim: usize,
+) -> Result<Vec<f64>> {
+    // Find the interval containing tau
+    let mut lower = 0;
+    for i in 0..times.len() - 1 {
+        if times[i] <= tau && tau <= times[i + 1] {
+            lower = i;
+            break;
+        }
+        if i == times.len() - 2 {
+            // tau is at or past the end
+            lower = times.len() - 2;
+        }
+    }
+    
+    let t0 = times[lower];
+    let t1 = times[lower + 1];
+    let dt = t1 - t0;
+    
+    if dt.abs() < 1e-15 {
+        // Degenerate interval, just return the state
+        return Ok(states[lower].clone());
+    }
+    
+    let alpha = (tau - t0) / dt;
+    let alpha = alpha.clamp(0.0, 1.0);
+    
+    let mut result = vec![0.0; dim];
+    for i in 0..dim {
+        result[i] = states[lower][i] * (1.0 - alpha) + states[lower + 1][i] * alpha;
+    }
+    
+    Ok(result)
+}
+
+
 struct PeriodicOrbitCollocationProblem<'a> {
     context: FlowContext<'a>,
     mesh_points: usize,
