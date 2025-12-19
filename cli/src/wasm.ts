@@ -238,22 +238,51 @@ export class WasmBridge {
     }
 
     /**
+     * Initializes a limit cycle guess from a computed orbit.
+     * The orbit should have converged to a stable limit cycle.
+     * 
+     * @param orbitTimes - Time values from the orbit
+     * @param orbitStates - State vectors at each time point (as 2D array)
+     * @param paramValue - Current value of the continuation parameter
+     * @param ntst - Number of mesh intervals
+     * @param ncol - Collocation points per interval
+     * @param tolerance - Tolerance for cycle detection (recurrence)
+     */
+    initLCFromOrbit(
+        orbitTimes: number[],
+        orbitStates: number[][],
+        paramValue: number,
+        ntst: number,
+        ncol: number,
+        tolerance: number
+    ): any {
+        // Flatten the 2D orbit states into 1D array
+        const flatStates = orbitStates.flat();
+
+        return this.instance.init_lc_from_orbit(
+            new Float64Array(orbitTimes),
+            new Float64Array(flatStates),
+            paramValue,
+            ntst,
+            ncol,
+            tolerance
+        );
+    }
+
+
+    /**
      * Continues a limit cycle from an initial guess.
      */
     continueLimitCycle(
-        guess: any,
+        setup: any,
         parameterName: string,
         settings: any,
-        ntst: number,
-        ncol: number,
         forward: boolean
     ): ContinuationBranchData {
         return this.instance.compute_limit_cycle_continuation(
-            guess,
+            setup,
             parameterName,
             settings,
-            ntst,
-            ncol,
             forward
         ) as ContinuationBranchData;
     }

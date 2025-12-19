@@ -38,6 +38,9 @@ export {
   initiateLCBranchFromPoint
 } from './initiate-lc';
 
+// Re-export LC initiation from orbit
+export { initiateLCFromOrbit } from './initiate-lc-from-orbit';
+
 // Re-export equilibrium branch initiation
 export { initiateEquilibriumBranchFromPoint } from './initiate-eq';
 

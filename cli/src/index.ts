@@ -13,6 +13,7 @@ import {
 } from './types';
 import { WasmBridge, CovariantLyapunovResponse } from './wasm';
 import { continuationMenu } from './continuation';
+
 import {
     ConfigEntry,
     MENU_PAGE_SIZE,
@@ -774,6 +775,8 @@ async function manageOrbit(sysName: string, obj: OrbitObject) {
             await oseledetsSolverMenu(sysName, obj);
             continue;
         }
+
+
 
         if (action === 'Extend Orbit') {
             const sysConfig = Storage.loadSystem(obj.systemName);
