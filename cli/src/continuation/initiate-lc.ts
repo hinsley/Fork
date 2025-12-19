@@ -634,3 +634,226 @@ export async function initiateLCBranchFromPoint(
     return false;
   }
 }
+
+/**
+ * Initiates a period-doubled limit cycle branch from a period-doubling bifurcation.
+ * 
+ * This follows the MatCont init_PD_LC approach:
+ * 1. Takes the LC state at the PD point.
+ * 2. Prompts for perturbation amplitude (h) and continuation settings.
+ * 3. Calls WASM to compute the PD eigenvector and build a doubled-period guess.
+ * 4. Resumes continuation on the new branch.
+ * 
+ * @param sysName - Name of the dynamical system
+ * @param sourceBranch - The LC branch where the PD was detected
+ * @param pdPoint - The point data for the PD bifurcation
+ * @param pdPointIdx - The array index of the point in sourceBranch
+ */
+export async function initiateLCFromPD(
+  sysName: string,
+  sourceBranch: ContinuationObject,
+  pdPoint: ContinuationPoint,
+  pdPointIdx: number
+): Promise<boolean> {
+  const sysConfig = Storage.loadSystem(sysName);
+  const bridge = new WasmBridge(sysConfig);
+
+  // Extract source ntst/ncol from branch metadata
+  let sourceNtst = 20, sourceNcol = 4;
+  const btData = sourceBranch.data.branch_type as any;
+  if (btData?.type === 'LimitCycle' && btData.ntst && btData.ncol) {
+    sourceNtst = btData.ntst;
+    sourceNcol = btData.ncol;
+  }
+
+  // Configuration defaults
+  let branchName = `pd_${sourceBranch.name}_idx${pdPointIdx}`;
+  let amplitudeInput = '0.01'; // Default h=0.01 for PD branching
+  let stepSizeInput = '0.01';
+  let maxStepsInput = '50';
+  let minStepSizeInput = '1e-5';
+  let maxStepSizeInput = '0.1';
+  let directionForward = true;
+  let correctorStepsInput = '10';
+  let correctorToleranceInput = '1e-6';
+  let stepToleranceInput = '1e-6';
+
+  const directionLabel = (forward: boolean) =>
+    forward ? 'Forward (Increasing Param)' : 'Backward (Decreasing Param)';
+
+  const entries: ConfigEntry[] = [
+    {
+      id: 'branchName',
+      label: 'Branch name',
+      section: 'Branch Settings',
+      getDisplay: () => branchName || '(required)',
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Name for the Period-Doubled Branch:',
+          default: branchName,
+          validate: (val: string) => {
+            const valid = isValidName(val);
+            if (valid !== true) return valid;
+            if (Storage.listContinuations(sysName).includes(val)) return "Branch name already exists.";
+            return true;
+          }
+        });
+        branchName = value;
+      }
+    },
+    {
+      id: 'amplitude',
+      label: 'Perturbation Amplitude (h)',
+      section: 'PD Initialization',
+      getDisplay: () => amplitudeInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Enter perturbation amplitude (MatCont h parameter, e.g. 0.01):',
+          default: amplitudeInput,
+        });
+        amplitudeInput = value;
+      }
+    },
+    {
+      id: 'ntst',
+      label: 'Mesh intervals (NTST)',
+      section: 'Discretization (will be doubled)',
+      getDisplay: () => `${sourceNtst} (-> ${sourceNtst * 2} in doubled cycle)`,
+      edit: async () => {
+        printInfo("NTST is inherited from the source branch and doubled for the new branch.");
+      }
+    },
+    {
+      id: 'ncol',
+      label: 'Collocation degree (NCOL)',
+      section: 'Discretization',
+      getDisplay: () => sourceNcol.toString(),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Collocation degree:',
+          default: sourceNcol.toString(),
+        });
+        sourceNcol = parseIntOrDefault(value, sourceNcol);
+      }
+    },
+    {
+      id: 'direction',
+      label: 'Direction',
+      section: 'Continuation Settings',
+      getDisplay: () => directionLabel(directionForward),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          type: 'list',
+          name: 'value',
+          message: 'Select parameter direction:',
+          choices: [
+            { name: directionLabel(true), value: true },
+            { name: directionLabel(false), value: false }
+          ],
+          default: directionForward
+        });
+        directionForward = value;
+      }
+    },
+    {
+      id: 'stepSize',
+      label: 'Initial step size',
+      section: 'Algorithm Parameters',
+      getDisplay: () => stepSizeInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Initial step size:',
+          default: stepSizeInput,
+        });
+        stepSizeInput = value;
+      }
+    },
+    {
+      id: 'maxSteps',
+      label: 'Max steps',
+      section: 'Algorithm Parameters',
+      getDisplay: () => maxStepsInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Maximum continuation steps:',
+          default: maxStepsInput,
+        });
+        maxStepsInput = value;
+      }
+    }
+  ];
+
+  const result = await runConfigMenu('Branch to Period-Doubled Limit Cycle', entries);
+  if (result === 'back') return false;
+
+  const runConfig = {
+    branchName,
+    params: getBranchParams(sysName, sourceBranch, sysConfig),
+    amplitude: parseFloatOrDefault(amplitudeInput, 0.01),
+    settings: {
+      step_size: parseFloatOrDefault(stepSizeInput, 0.01),
+      max_steps: parseIntOrDefault(maxStepsInput, 50),
+      min_step_size: parseFloatOrDefault(minStepSizeInput, 1e-5),
+      max_step_size: parseFloatOrDefault(maxStepSizeInput, 0.1),
+      corrector_steps: parseIntOrDefault(correctorStepsInput, 10),
+      corrector_tolerance: parseFloatOrDefault(correctorToleranceInput, 1e-6),
+      step_tolerance: parseFloatOrDefault(stepToleranceInput, 1e-6),
+    }
+  };
+
+  // Update the source branch's continuation parameter to the PD point's value
+  const sourceParamIdx = sysConfig.paramNames.indexOf(sourceBranch.parameterName);
+  if (sourceParamIdx >= 0) {
+    runConfig.params[sourceParamIdx] = pdPoint.param_value;
+  }
+
+  try {
+    console.log(chalk.cyan("Initializing period-doubled limit cycle..."));
+
+    // Call WASM to build the doubled-period setup
+    const setup = bridge.initLCFromPD(
+      pdPoint.state,
+      sourceBranch.parameterName,
+      pdPoint.param_value,
+      sourceNtst,
+      sourceNcol,
+      runConfig.amplitude
+    );
+
+    console.log(chalk.cyan("Running limit cycle continuation for doubled period..."));
+    const branchData = normalizeBranchEigenvalues(bridge.continueLimitCycle(
+      setup,
+      sourceBranch.parameterName,
+      runConfig.settings,
+      directionForward
+    ));
+
+    const newBranch: ContinuationObject = {
+      type: 'continuation',
+      name: branchName,
+      systemName: sysName,
+      parameterName: sourceBranch.parameterName,
+      startObject: sourceBranch.name,
+      branchType: 'limit_cycle',
+      data: branchData,
+      settings: runConfig.settings,
+      timestamp: new Date().toISOString(),
+      params: [...runConfig.params]
+    };
+
+    Storage.saveContinuation(sysName, newBranch);
+    printSuccess(`PD Branching successful! Generated ${branchData.points.length} points.`);
+
+    await inspectBranch(sysName, newBranch);
+    return true;
+
+  } catch (e) {
+    printError(`PD Branching Failed: ${e}`);
+    return false;
+  }
+}
