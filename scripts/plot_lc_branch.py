@@ -62,15 +62,25 @@ def discover_lc_branches(systems_root: Path) -> List[Dict[str, Any]]:
                 if top_level_type == "limit_cycle":
                     is_lc = True
                     # Get mesh info from data.branch_type if available
-                    if isinstance(branch_data_type, dict) and "LimitCycle" in branch_data_type:
+                    # Handle both { LimitCycle: {ntst, ncol} } and { type: 'LimitCycle', ntst, ncol } formats
+                    if isinstance(branch_data_type, dict):
+                        if "LimitCycle" in branch_data_type:
+                            lc_info = branch_data_type["LimitCycle"]
+                            ntst = lc_info.get("ntst", 0)
+                            ncol = lc_info.get("ncol", 0)
+                        elif branch_data_type.get("type") == "LimitCycle":
+                            ntst = branch_data_type.get("ntst", 0)
+                            ncol = branch_data_type.get("ncol", 0)
+                elif isinstance(branch_data_type, dict):
+                    if "LimitCycle" in branch_data_type:
                         lc_info = branch_data_type["LimitCycle"]
                         ntst = lc_info.get("ntst", 0)
                         ncol = lc_info.get("ncol", 0)
-                elif isinstance(branch_data_type, dict) and "LimitCycle" in branch_data_type:
-                    lc_info = branch_data_type["LimitCycle"]
-                    ntst = lc_info.get("ntst", 0)
-                    ncol = lc_info.get("ncol", 0)
-                    is_lc = True
+                        is_lc = True
+                    elif branch_data_type.get("type") == "LimitCycle":
+                        ntst = branch_data_type.get("ntst", 0)
+                        ncol = branch_data_type.get("ncol", 0)
+                        is_lc = True
                 else:
                     # Detect LC by state size - LC states are much larger than equilibrium
                     first_state = points[0].get("state", [])
@@ -186,17 +196,50 @@ def extract_limit_cycle(state: List[float], ntst: int, ncol: int, dim: int) -> n
     """
     Extract limit cycle profile from state vector.
     
-    state = [profile_point_0, profile_point_1, ..., profile_point_N, period]
-    where each profile_point has 'dim' components.
-    """
-    num_profile_points = ntst * ncol + 1
-    profile_data = state[:-1]  # Remove period at end
+    Rust stores collocation state as:
+      [mesh_states (ntst points), stage_states (ntst*ncol points), period]
     
-    if len(profile_data) != num_profile_points * dim:
+    We extract BOTH mesh and stage states for higher resolution plotting.
+    The states are interleaved to show the full collocation profile.
+    """
+    mesh_points = ntst  # Number of mesh intervals (NOT ntst+1, due to periodicity)
+    num_stages = ntst * ncol
+    mesh_data_len = mesh_points * dim
+    stage_data_len = num_stages * dim
+    full_state_len = (mesh_points + num_stages) * dim + 1
+    
+    if len(state) < full_state_len:
+        # Fallback: try with ntst+1 mesh points (some formats)
+        mesh_points = ntst + 1
+        mesh_data_len = mesh_points * dim
+        full_state_len = (mesh_points + num_stages) * dim + 1
+    
+    if len(state) < mesh_data_len + 1:
         return np.array([])
     
-    # Reshape into (num_points, dim)
-    profile = np.array(profile_data).reshape(num_profile_points, dim)
+    # Extract mesh states
+    mesh_data = np.array(state[:mesh_data_len]).reshape(mesh_points, dim)
+    
+    # Try to extract stage states too for higher resolution
+    if len(state) >= mesh_data_len + stage_data_len + 1:
+        stage_data = np.array(state[mesh_data_len:mesh_data_len + stage_data_len]).reshape(num_stages, dim)
+        
+        # Interleave mesh and stage points for correct ordering
+        # Each interval has: mesh_point, then ncol stage points
+        full_profile = []
+        for i in range(min(ntst, mesh_points)):
+            full_profile.append(mesh_data[i])
+            for j in range(ncol):
+                stage_idx = i * ncol + j
+                if stage_idx < len(stage_data):
+                    full_profile.append(stage_data[stage_idx])
+        # Add final mesh point if we have ntst+1 mesh points
+        if mesh_points > ntst:
+            full_profile.append(mesh_data[-1])
+        profile = np.array(full_profile)
+    else:
+        # Mesh only
+        profile = mesh_data
     
     # Close the cycle by appending the first point
     profile = np.vstack([profile, profile[0:1]])

@@ -1,28 +1,31 @@
-# Limit Cycle Continuation from Hopf Bifurcations
+# Limit Cycle Continuation
 
-This document describes how Fork implements bifurcation from Hopf points to limit cycle continuation, including both the user-facing workflow and the underlying numerical methods.
+This document describes how Fork implements limit cycle continuation, including initialization from both Hopf bifurcations and orbit data, the underlying numerical methods, and troubleshooting guidance.
 
 ## Table of Contents
 
 1. [Overview](#overview)
 2. [CLI Workflow](#cli-workflow)
-3. [Numerical Background](#numerical-background)
-4. [Hopf Point Detection and Refinement](#hopf-point-detection-and-refinement)
-5. [Limit Cycle Initialization from Hopf](#limit-cycle-initialization-from-hopf)
-6. [Orthogonal Collocation Discretization](#orthogonal-collocation-discretization)
-7. [The Continuation Problem](#the-continuation-problem)
-8. [Newton's Method and the Jacobian](#newtons-method-and-the-jacobian)
-9. [Branch Extension](#branch-extension)
-10. [Floquet Multiplier Extraction](#floquet-multiplier-extraction)
-11. [Best Practices for Accurate Floquet Multipliers](#best-practices-for-accurate-floquet-multipliers)
+3. [Limit Cycle from Orbits](#limit-cycle-from-orbits)
+4. [Numerical Background](#numerical-background)
+5. [Hopf Point Detection and Refinement](#hopf-point-detection-and-refinement)
+6. [Limit Cycle Initialization from Hopf](#limit-cycle-initialization-from-hopf)
+7. [Orthogonal Collocation Discretization](#orthogonal-collocation-discretization)
+8. [The Continuation Problem](#the-continuation-problem)
+9. [Newton's Method and the Jacobian](#newtons-method-and-the-jacobian)
+10. [Branch Extension](#branch-extension)
+11. [Floquet Multiplier Extraction](#floquet-multiplier-extraction)
+12. [Best Practices for Accurate Floquet Multipliers](#best-practices-for-accurate-floquet-multipliers)
 
 ---
 
 ## Overview
 
-At a **Hopf bifurcation**, a pair of complex conjugate eigenvalues of the equilibrium's Jacobian crosses the imaginary axis. This marks the birth (or death) of a family of periodic orbits—**limit cycles**—that emanate from the equilibrium point.
+Fork supports two methods for initiating limit cycle continuation:
 
-Fork provides automated detection of Hopf bifurcations during equilibrium continuation and allows continuation of the limit cycle family in a chosen parameter.
+1. **From Hopf Bifurcation**: At a Hopf bifurcation, a pair of complex conjugate eigenvalues crosses the imaginary axis, marking the birth of a family of periodic orbits. Fork detects Hopf points during equilibrium continuation and allows continuation of the emerging limit cycle family.
+
+2. **From Orbit Data**: If you have an orbit that converges to a stable limit cycle (e.g., from numerical integration), Fork can extract one period and use it to initialize limit cycle continuation.
 
 ### Key Concepts
 
@@ -75,6 +78,144 @@ After continuation completes, you can inspect the limit cycle branch:
 - Use the plotting script to visualize all cycles together
 
 ---
+
+## Limit Cycle from Orbits
+
+When you have an orbit that converges to a stable limit cycle but no nearby Hopf bifurcation is known, you can initialize limit cycle continuation directly from the orbit data.
+
+### When to Use This Method
+
+- The system has a stable limit cycle discovered via simulation
+- You want to track the limit cycle family as parameters vary
+- No Hopf bifurcation is nearby or easily accessible
+- You're working with a system where finding equilibria is difficult
+
+### CLI Workflow
+
+#### Step 1: Compute an Orbit
+
+First, create an orbit that converges to the limit cycle:
+
+```
+System Menu → Objects → Create New Object → Orbit
+```
+
+**Important**: The orbit should:
+- Run long enough to settle onto the attractor (bypass transients)
+- Include at least 2-3 complete periods after settling
+- Have sufficient time resolution (small dt or many iterations)
+
+**Recommended duration**: At least 100× the expected period.
+
+#### Step 2: Create Limit Cycle Branch
+
+```
+System Menu → Continuation → Create New Branch → Limit Cycle Branch
+→ [select orbit] → [configure]
+```
+
+#### Step 3: Configure Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| Cycle detection tolerance | 0.1 | Max distance to consider a "return" to reference point |
+| ntst | 20 | Number of mesh intervals |
+| ncol | 4 | Collocation points per interval |
+| Direction | forward | Parameter direction |
+| Max points | 50 | Continuation steps |
+
+### Implementation Details
+
+The orbit-to-LC algorithm follows [MatCont's `initOrbLC.m`](https://matcont.ugent.be/) approach:
+
+#### 1. Reference Point Selection
+
+Use the point at **1/3 of the orbit** as the reference. This skips any initial transient while the trajectory settles onto the attractor:
+
+```
+ref_idx = n / 3
+x_ref = orbit[ref_idx]
+t_ref = times[ref_idx]
+```
+
+#### 2. Cycle Detection
+
+Search forward from the reference point for the **first local minimum** of the distance function that falls within tolerance:
+
+```
+for i in skip_start..n:
+    dist = |x[i] - x_ref|
+    if dist is local minimum AND dist < tolerance:
+        cycle_end = i
+        break
+```
+
+The period is `T = times[cycle_end] - t_ref`.
+
+#### 3. Remeshing to Collocation Grid
+
+The detected cycle (from `ref_idx` to `cycle_end`) is linearly interpolated onto a uniform mesh:
+
+```
+for k in 0..ntst:
+    tau = k / ntst  # Normalized time [0, 1)
+    mesh_state[k] = interpolate(tau, cycle)
+```
+
+Stage (collocation) points are then computed by interpolating between mesh points at the Gauss-Legendre nodes.
+
+#### 4. Phase Condition
+
+The phase anchor is set to the first mesh point, and the phase direction is the normalized velocity at that point:
+
+```
+phase_anchor = mesh[0]
+phase_direction = normalize(mesh[1] - mesh[0])
+```
+
+### Troubleshooting
+
+#### "No cycle detected" Error
+
+**Cause**: The orbit doesn't return close enough to the reference point within the tolerance.
+
+**Solutions**:
+1. **Increase tolerance** (e.g., 0.1 → 0.5) if the orbit sampling is coarse
+2. **Compute a longer orbit** to include more complete cycles
+3. **Reduce integration step size** for finer sampling
+
+#### Period Is Wrong (Multiple Periods Detected)
+
+**Cause**: The algorithm found a return at 2T or 3T instead of T.
+
+**Solutions**:
+1. This was fixed by using a small fixed skip (`skip_start = ref_idx + 10`) instead of a percentage-based skip
+2. If still occurring, ensure the orbit has sufficient resolution near the first return
+
+#### Newton Corrector Fails After Initialization
+
+**Cause**: The initial guess from remeshing isn't accurate enough.
+
+**Solutions**:
+1. **Increase ntst** for better mesh resolution
+2. **Increase orbit duration** for more accurate cycle extraction
+3. **Check orbit quality** — ensure it's actually converged to the limit cycle
+
+#### Low-Resolution Limit Cycle Plot
+
+**Cause**: Only mesh endpoints are being plotted, not the full collocation profile.
+
+**Solution**: The plotting script (`plot_lc_branch.py`) now extracts both mesh and stage states for full resolution. Update to the latest version.
+
+### Comparison with Hopf Initialization
+
+| Aspect | From Hopf | From Orbit |
+|--------|-----------|------------|
+| **Initial guess quality** | Excellent (analytical) | Good (numerical) |
+| **Period accuracy** | Exact from eigenvalue | Approximate from sampling |
+| **Requirements** | Hopf bifurcation point | Orbit converging to LC |
+| **Unstable LCs** | Yes (can continue backward) | No (orbit won't converge) |
+| **Transient handling** | Not needed | Skips first 1/3 of orbit |
 
 ## Numerical Background
 

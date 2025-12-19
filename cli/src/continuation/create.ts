@@ -1,7 +1,7 @@
 /**
  * Branch Creation Module
  * 
- * Handles creating new continuation branches from equilibrium points.
+ * Handles creating new continuation branches from equilibrium points or orbits.
  */
 
 import inquirer from 'inquirer';
@@ -10,7 +10,8 @@ import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
 import {
   ContinuationObject,
-  EquilibriumObject
+  EquilibriumObject,
+  OrbitObject
 } from '../types';
 import {
   ConfigEntry,
@@ -23,6 +24,89 @@ import {
 import { normalizeBranchEigenvalues } from './serialization';
 import { isValidName } from './utils';
 import { inspectBranch } from './inspect';
+import { initiateLCFromOrbit } from './initiate-lc-from-orbit';
+
+/**
+ * Entry point for creating a new continuation branch.
+ * 
+ * Prompts user to select branch type (Equilibrium or Limit Cycle), then
+ * routes to the appropriate creation flow.
+ * 
+ * @param sysName - Name of the dynamical system
+ */
+export async function createBranch(sysName: string) {
+  const { branchType } = await inquirer.prompt({
+    type: 'rawlist',
+    name: 'branchType',
+    message: 'Select Branch Type:',
+    choices: [
+      { name: 'Equilibrium Branch', value: 'equilibrium' },
+      { name: 'Limit Cycle Branch', value: 'limit_cycle' },
+      new inquirer.Separator(),
+      { name: 'Back', value: 'back' }
+    ],
+    pageSize: MENU_PAGE_SIZE
+  });
+
+  if (branchType === 'back') return;
+
+  if (branchType === 'equilibrium') {
+    await createEquilibriumBranch(sysName);
+  } else if (branchType === 'limit_cycle') {
+    await createLimitCycleBranch(sysName);
+  }
+}
+
+/**
+ * Creates a Limit Cycle branch from an orbit object.
+ * 
+ * Lists available orbit objects and prompts user to select one,
+ * then calls the LC-from-orbit initialization flow.
+ * 
+ * @param sysName - Name of the dynamical system
+ */
+async function createLimitCycleBranch(sysName: string) {
+  const sysConfig = Storage.loadSystem(sysName);
+
+  if (sysConfig.type === 'map') {
+    console.log(chalk.red("Limit cycle continuation is only available for flow (ODE) systems."));
+    return;
+  }
+
+  const orbits = Storage.listObjects(sysName)
+    .map(name => Storage.loadObject(sysName, name))
+    .filter((obj): obj is OrbitObject => obj.type === 'orbit');
+
+  if (orbits.length === 0) {
+    console.log(chalk.red("No orbit objects found. Compute an orbit that converges to a limit cycle first."));
+    return;
+  }
+
+  const choices = orbits.map(o => ({
+    name: `${o.name} (${o.data.length} points, t=[${o.t_start.toFixed(2)}, ${o.t_end.toFixed(2)}])`,
+    value: o.name
+  }));
+  choices.push(new (inquirer as any).Separator());
+  choices.push({ name: 'Back', value: 'BACK' });
+
+  const { selectedOrbit } = await inquirer.prompt({
+    type: 'rawlist',
+    name: 'selectedOrbit',
+    message: 'Select Orbit for Limit Cycle:',
+    choices,
+    pageSize: MENU_PAGE_SIZE
+  });
+
+  if (selectedOrbit === 'BACK') return;
+
+  const orbit = orbits.find(o => o.name === selectedOrbit);
+  if (!orbit) {
+    console.log(chalk.red("Selected orbit not found."));
+    return;
+  }
+
+  await initiateLCFromOrbit(sysName, orbit);
+}
 
 /**
  * Creates a new equilibrium continuation branch from a converged equilibrium point.
@@ -37,7 +121,7 @@ import { inspectBranch } from './inspect';
  * 
  * @param sysName - Name of the dynamical system
  */
-export async function createBranch(sysName: string) {
+async function createEquilibriumBranch(sysName: string) {
   const sysConfig = Storage.loadSystem(sysName);
 
   const objects = Storage.listObjects(sysName)

@@ -6,7 +6,7 @@ use fork_core::continuation::{
     ContinuationBranch, ContinuationSettings, BranchType,
     CollocationConfig, LimitCycleSetup,
     continue_limit_cycle_collocation, extend_limit_cycle_collocation,
-    limit_cycle_setup_from_hopf,
+    limit_cycle_setup_from_hopf, limit_cycle_setup_from_orbit,
 };
 use fork_core::continuation::equilibrium::{
     continue_parameter as core_continuation, extend_branch as core_extend_branch,
@@ -433,6 +433,53 @@ impl WasmSystem {
             amplitude,
         )
         .map_err(|e| JsValue::from_str(&format!("Failed to initialize limit cycle: {}", e)))?;
+
+        to_value(&setup).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    /// Initializes a limit cycle guess from a computed orbit.
+    /// The orbit should have converged to a stable limit cycle.
+    /// Returns the LimitCycleSetup as a serialized JsValue.
+    pub fn init_lc_from_orbit(
+        &self,
+        orbit_times: Vec<f64>,
+        orbit_states_flat: Vec<f64>,
+        param_value: f64,
+        ntst: u32,
+        ncol: u32,
+        tolerance: f64,
+    ) -> Result<JsValue, JsValue> {
+        let dim = self.system.equations.len();
+        
+        // Unflatten orbit_states: orbit_states_flat is [x0_0, x0_1, ..., x1_0, x1_1, ..., ...]
+        if orbit_states_flat.len() % dim != 0 {
+            return Err(JsValue::from_str(&format!(
+                "Orbit states length {} not divisible by dimension {}",
+                orbit_states_flat.len(), dim
+            )));
+        }
+        
+        let n_points = orbit_states_flat.len() / dim;
+        if n_points != orbit_times.len() {
+            return Err(JsValue::from_str(&format!(
+                "Orbit has {} time points but {} state vectors",
+                orbit_times.len(), n_points
+            )));
+        }
+        
+        let orbit_states: Vec<Vec<f64>> = (0..n_points)
+            .map(|i| orbit_states_flat[i * dim..(i + 1) * dim].to_vec())
+            .collect();
+        
+        let setup = limit_cycle_setup_from_orbit(
+            &orbit_times,
+            &orbit_states,
+            param_value,
+            ntst as usize,
+            ncol as usize,
+            tolerance,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Failed to initialize limit cycle from orbit: {}", e)))?;
 
         to_value(&setup).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
