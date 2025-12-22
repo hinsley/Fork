@@ -3,7 +3,7 @@ use super::{
     ContinuationBranch, ContinuationPoint, ContinuationSettings,
 };
 use super::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
-use crate::equation_engine::EquationSystem;
+use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
 use crate::equilibrium::{compute_jacobian, SystemKind};
 use crate::traits::DynamicalSystem;
 use anyhow::{anyhow, bail, Result};
@@ -72,6 +72,18 @@ pub struct LimitCycleGuess {
     pub stage_states: Vec<Vec<Vec<f64>>>,
 }
 
+impl LimitCycleGuess {
+    pub fn to_aug(&self, dim: usize) -> DVector<f64> {
+        let flat = flatten_collocation_state(&self.mesh_states, &self.stage_states, self.period);
+        let mut aug = DVector::zeros(flat.len() + 1);
+        aug[0] = self.param_value;
+        for (i, &v) in flat.iter().enumerate() {
+            aug[i + 1] = v;
+        }
+        aug
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LimitCycleSetup {
     pub guess: LimitCycleGuess,
@@ -89,6 +101,21 @@ impl LimitCycleSetup {
             phase_anchor: self.phase_anchor.clone(),
             phase_direction: self.phase_direction.clone(),
         }
+    }
+
+    pub fn to_problem<'a>(
+        &self,
+        system: &'a mut EquationSystem,
+        param_index: usize,
+    ) -> Result<PeriodicOrbitCollocationProblem<'a>> {
+        PeriodicOrbitCollocationProblem::new(
+            system,
+            param_index,
+            self.mesh_points,
+            self.collocation_degree,
+            self.phase_anchor.clone(),
+            self.phase_direction.clone(),
+        )
     }
 }
 
@@ -137,47 +164,76 @@ pub fn limit_cycle_setup_from_hopf(
     let lambda = eigenvalues[idx];
     let eigenvector = compute_complex_eigenvector(&mat, lambda)?;
 
+    // Orthogonalize real and imaginary parts as in MatCont's init_H_LC.m
+    // This rotation Q -> Q * exp(i*phi) makes Re(Q) orthogonal to Im(Q).
+    let mut d = 0.0;
+    let mut s = 0.0;
+    let mut r = 0.0;
+    for i in 0..dim {
+        let vr = eigenvector[i].re;
+        let vi = eigenvector[i].im;
+        d += vr * vr;
+        s += vi * vi;
+        r += vr * vi;
+    }
+    let phi = 0.5 * (2.0 * r).atan2(s - d);
+    let (sin_phi, cos_phi) = phi.sin_cos();
+
     let mut real_part = vec![0.0; dim];
     let mut imag_part = vec![0.0; dim];
     for i in 0..dim {
-        real_part[i] = eigenvector[i].re;
-        imag_part[i] = eigenvector[i].im;
+        let vr = eigenvector[i].re;
+        let vi = eigenvector[i].im;
+        real_part[i] = vr * cos_phi - vi * sin_phi;
+        imag_part[i] = vr * sin_phi + vi * cos_phi;
     }
-    let norm = real_part
-        .iter()
-        .chain(imag_part.iter())
-        .map(|v| v * v)
-        .sum::<f64>()
-        .sqrt();
-    if norm == 0.0 {
-        bail!("Hopf eigenvector is degenerate");
+
+    // Normalize real part to define state perturbation and mesh
+    let norm_real = real_part.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if norm_real == 0.0 {
+        bail!("Rotated real part of Hopf eigenvector is degenerate");
     }
     for i in 0..dim {
-        real_part[i] /= norm;
-        imag_part[i] /= norm;
+        real_part[i] /= norm_real;
+        imag_part[i] /= norm_real; // Keep relative scaling for imag part (velocity)
     }
-    let dir_norm = real_part.iter().map(|v| v * v).sum::<f64>().sqrt();
-    if dir_norm == 0.0 {
-        bail!("Real part of Hopf eigenvector vanished; cannot define phase direction");
+
+    // Set phase direction to (normalized) imag part
+    let norm_imag = imag_part.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if norm_imag == 0.0 {
+        bail!("Rotated imaginary part of Hopf eigenvector is degenerate");
     }
-    let phase_direction: Vec<f64> = real_part.iter().map(|v| v / dir_norm).collect();
+    let phase_direction: Vec<f64> = imag_part.iter().map(|v| v / norm_imag).collect();
     let phase_anchor = hopf_state.to_vec();
 
     let period = 2.0 * PI / lambda.im;
-    let mut mesh_states = Vec::with_capacity(mesh_points);
-    for k in 0..mesh_points {
-        let theta = 2.0 * PI * (k as f64) / (mesh_points as f64);
-        let mut state = vec![0.0; dim];
-        for i in 0..dim {
-            state[i] = hopf_state[i]
-                + amplitude * (real_part[i] * theta.cos() - imag_part[i] * theta.sin());
-        }
-        mesh_states.push(state);
-    }
-
     let coeffs = CollocationCoefficients::new(degree)?;
-    let stage_states =
-        build_stage_states_from_mesh(dim, mesh_points, degree, &coeffs.nodes, &mesh_states);
+    let mut mesh_states = Vec::with_capacity(mesh_points);
+    let mut stage_states = Vec::with_capacity(mesh_points);
+
+    for k in 0..mesh_points {
+        // Sample mesh point at tau = k / mesh_points
+        let theta_mesh = 2.0 * PI * (k as f64) / (mesh_points as f64);
+        let mut m_state = vec![0.0; dim];
+        for i in 0..dim {
+            m_state[i] = hopf_state[i]
+                + amplitude * (real_part[i] * theta_mesh.cos() - imag_part[i] * theta_mesh.sin());
+        }
+        mesh_states.push(m_state);
+
+        // Sample stage states within interval k at tau = (k + zeta_j) / mesh_points
+        let mut interval_stages = Vec::with_capacity(degree);
+        for &zeta in &coeffs.nodes {
+            let theta_stage = 2.0 * PI * (k as f64 + zeta) / (mesh_points as f64);
+            let mut s_state = vec![0.0; dim];
+            for i in 0..dim {
+                s_state[i] = hopf_state[i]
+                    + amplitude * (real_part[i] * theta_stage.cos() - imag_part[i] * theta_stage.sin());
+            }
+            interval_stages.push(s_state);
+        }
+        stage_states.push(interval_stages);
+    }
 
     let guess = LimitCycleGuess {
         param_value: hopf_param_value,
@@ -390,11 +446,11 @@ fn interpolate_orbit_state(
 
 /// Initializes a limit cycle continuation from a Period-Doubling bifurcation.
 ///
-/// At a period-doubling bifurcation, a Floquet multiplier μ = -1 indicates the birth
+/// At a period-doubling bifurcation, a Floquet multiplier ╬╝ = -1 indicates the birth
 /// of a new limit cycle with twice the period. This function:
 /// 1. Extracts the current LC data from the PD point state
 /// 2. Computes the PD eigenvector (null vector of M + I where M is monodromy)
-/// 3. Constructs a doubled-period initial guess by perturbing with ±h*eigenvector
+/// 3. Constructs a doubled-period initial guess by perturbing with ┬▒h*eigenvector
 ///
 /// # Arguments
 /// * `system` - The equation system
@@ -1251,7 +1307,7 @@ fn cycle_tests_from_multipliers(multipliers: &[Complex<f64>]) -> (f64, f64, f64,
         return (f64::NAN, f64::NAN, f64::NAN, values);
     }
     
-    // Period Doubling test: product of (μ + 1) for non-trivial real multipliers
+    // Period Doubling test: product of (╬╝ + 1) for non-trivial real multipliers
     let mut pd_test = 1.0;
     for (idx, mu) in values.iter().enumerate() {
         if Some(idx) == trivial_idx {
@@ -1262,7 +1318,7 @@ fn cycle_tests_from_multipliers(multipliers: &[Complex<f64>]) -> (f64, f64, f64,
         }
     }
     
-    // Neimark-Sacker test: product of (|μ|² - 1) for complex pairs
+    // Neimark-Sacker test: product of (|╬╝|┬▓ - 1) for complex pairs
     let mut ns_test = 1.0;
     for (idx, mu) in values.iter().enumerate() {
         if Some(idx) == trivial_idx {
@@ -1540,7 +1596,7 @@ fn compute_complex_eigenvector(
     let row_index = v_t.nrows().saturating_sub(1);
     let mut vector = Vec::with_capacity(dim);
     for i in 0..dim {
-        vector.push(v_t[(row_index, i)]);
+        vector.push(v_t[(row_index, i)].conj());
     }
     Ok(vector)
 }
@@ -1654,5 +1710,178 @@ mod tests {
         let (_, pd_exact, _, _) = cycle_tests(&multipliers_exact);
         println!("PD Exact: {}", pd_exact);
         assert!(pd_before * pd_exact <= 0.0, "Period doubling test should be zero or cross at exact hit");
+    }
+
+    #[test]
+    fn test_hopf_initialization_accuracy() {
+        // Linear Hopf system:
+        // dx/dt = mu*x - y
+        // dy/dt = x + mu*y
+        // Hopf at mu = 0, omega = 1
+        
+        // Eq 0: mu*x - y -> LoadParam(0) * LoadVar(0) - LoadVar(1)
+        let mut ops0 = Vec::new();
+        ops0.push(OpCode::LoadParam(0));
+        ops0.push(OpCode::LoadVar(0));
+        ops0.push(OpCode::Mul);
+        ops0.push(OpCode::LoadVar(1));
+        ops0.push(OpCode::Sub);
+        
+        // Eq 1: x + mu*y -> LoadVar(0) + LoadParam(0) * LoadVar(1)
+        let mut ops1 = Vec::new();
+        ops1.push(OpCode::LoadVar(0));
+        ops1.push(OpCode::LoadParam(0));
+        ops1.push(OpCode::LoadVar(1));
+        ops1.push(OpCode::Mul);
+        ops1.push(OpCode::Add);
+        
+        let equations = vec![Bytecode { ops: ops0 }, Bytecode { ops: ops1 }];
+        let params = vec![0.0]; // mu = 0
+        let mut system = EquationSystem::new(equations, params);
+        
+        let hopf_state = vec![0.0, 0.0];
+        let mu_index = 0;
+        let mu_value = 0.0;
+        let amplitude = 1e-4;
+        let ntst = 10;
+        let ncol = 4;
+        
+        let setup = limit_cycle_setup_from_hopf(
+            &mut system,
+            mu_index,
+            &hopf_state,
+            mu_value,
+            ntst,
+            ncol,
+            amplitude,
+        ).expect("Setup should succeed");
+        
+        // Correct the phase anchor to satisfy the point phase condition exactly at start
+        let mut setup = setup;
+        setup.phase_anchor = setup.guess.mesh_states[0].clone();
+
+        // Residual check
+        let mut problem = PeriodicOrbitCollocationProblem::new(
+            &mut system,
+            mu_index,
+            ntst,
+            ncol,
+            setup.phase_anchor.clone(),
+            setup.phase_direction.clone(),
+        ).expect("Problem creation should succeed");
+        
+        let flat_state = flatten_collocation_state(
+            &setup.guess.mesh_states,
+            &setup.guess.stage_states,
+            setup.guess.period
+        );
+        let mut aug_state = DVector::zeros(problem.dimension() + 1);
+        aug_state[0] = mu_value;
+        for (i, &v) in flat_state.iter().enumerate() {
+            aug_state[i + 1] = v;
+        }
+        
+        let mut res = DVector::zeros(problem.dimension());
+        problem.residual(&aug_state, &mut res).expect("Residual evaluation should succeed");
+        
+        let res_norm = res.norm();
+        
+        assert!(res_norm < 1e-8, "Residual norm {} is too high for linear Hopf", res_norm);
+    }
+
+    #[test]
+    fn test_hopf_continuation_direction() {
+        // Supercritical Hopf Normal Form:
+        // dx/dt = mu*x - y - x*(x^2 + y^2)
+        // dy/dt = x + mu*y - y*(x^2 + y^2)
+        // Hopf at mu = 0. Stable LC exists for mu > 0 with radius sqrt(mu).
+        
+        // Bytecode for x equation: mu*x - y - x*(x^2 + y^2)
+        let mut ops0 = Vec::new();
+        ops0.push(OpCode::LoadParam(0)); // mu
+        ops0.push(OpCode::LoadVar(0));   // x
+        ops0.push(OpCode::Mul);          // mu*x
+        ops0.push(OpCode::LoadVar(1));   // y
+        ops0.push(OpCode::Sub);          // mu*x - y
+        ops0.push(OpCode::LoadVar(0));   // x
+        ops0.push(OpCode::LoadVar(0));   // x
+        ops0.push(OpCode::LoadVar(0));   // x
+        ops0.push(OpCode::Mul);          // x^2
+        ops0.push(OpCode::LoadVar(1));   // y
+        ops0.push(OpCode::LoadVar(1));   // y
+        ops0.push(OpCode::Mul);          // y^2
+        ops0.push(OpCode::Add);          // x^2 + y^2
+        ops0.push(OpCode::Mul);          // x*(x^2 + y^2)
+        ops0.push(OpCode::Sub);          // mu*x - y - x*(x^2 + y^2)
+        
+        // Bytecode for y equation: x + mu*y - y*(x^2 + y^2)
+        let mut ops1 = Vec::new();
+        ops1.push(OpCode::LoadVar(0));   // x
+        ops1.push(OpCode::LoadParam(0)); // mu
+        ops1.push(OpCode::LoadVar(1));   // y
+        ops1.push(OpCode::Mul);          // mu*y
+        ops1.push(OpCode::Add);          // x + mu*y
+        ops1.push(OpCode::LoadVar(1));   // y
+        ops1.push(OpCode::LoadVar(0));   // x
+        ops1.push(OpCode::LoadVar(0));   // x
+        ops1.push(OpCode::Mul);          // x^2
+        ops1.push(OpCode::LoadVar(1));   // y
+        ops1.push(OpCode::LoadVar(1));   // y
+        ops1.push(OpCode::Mul);          // y^2
+        ops1.push(OpCode::Add);          // x^2 + y^2
+        ops1.push(OpCode::Mul);          // y*(x^2 + y^2)
+        ops1.push(OpCode::Sub);          // x + mu*y - y*(x^2 + y^2)
+        
+        let equations = vec![Bytecode { ops: ops0 }, Bytecode { ops: ops1 }];
+        let params = vec![0.0]; // Start at Hopf point mu = 0
+        let mut system = EquationSystem::new(equations, params);
+        
+        let ntst = 10;
+        let ncol = 4;
+        let amplitude = 1e-4;
+        
+        // 1. Setup LC guess from Hopf point at mu=0
+        let setup = limit_cycle_setup_from_hopf(
+            &mut system,
+            0,
+            &[0.0, 0.0],
+            0.0,
+            ntst,
+            ncol,
+            amplitude
+        ).expect("LC setup should succeed");
+        
+        // 2. Run forward continuation (should increase mu)
+        let settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-4,
+            max_step_size: 0.2,
+            max_steps: 50,
+            corrector_steps: 5,
+            corrector_tolerance: 1e-6,
+            step_tolerance: 1e-6,
+        };
+        
+        let mut problem = setup.to_problem(&mut system, 0).expect("to_problem failed");
+        let initial_aug = setup.guess.to_aug(problem.dimension());
+        let initial_tangent = super::super::compute_tangent_from_problem(&mut problem, &initial_aug).expect("tangent failed");
+        println!("Initial tangent[0] (mu): {}", initial_tangent[0]);
+        
+        let branch = continue_limit_cycle_collocation(
+            &mut system,
+            0,
+            setup.collocation_config(),
+            setup.guess,
+            settings,
+            true // Forward (should be mu > 0)
+        ).expect("Continuation should succeed");
+        
+        assert!(branch.points.len() > 1, "Should have generated more than one point");
+        let last_point = branch.points.last().unwrap();
+        
+        println!("Initial mu: {}, Final mu: {}", branch.points[0].param_value, last_point.param_value);
+        assert!(last_point.param_value > branch.points[0].param_value, 
+                "Continuation moved backward! Initial mu: {}, Final mu: {}", 
+                branch.points[0].param_value, last_point.param_value);
     }
 }

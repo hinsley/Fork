@@ -91,7 +91,18 @@ export interface ContinuationObject {
   name: string;
   systemName: string;
   parameterName: string;
-  startObject: string; // Name of the equilibrium object used as seed
+  /**
+   * Parent analysis object that owns this branch on disk.
+   *
+   * Branch files live under `objects/<parentObject>/branches/<name>.json`.
+   */
+  parentObject: string;
+  /**
+   * Name of the seed object/branch used to construct this branch.
+   *
+   * This is kept for provenance/debugging and should not be used for storage lookup.
+   */
+  startObject: string;
   branchType: 'equilibrium' | 'limit_cycle';  // Human-readable branch type
   data: ContinuationBranchData;
   settings: any; // Store settings used
@@ -99,7 +110,28 @@ export interface ContinuationObject {
   params?: number[];  // Full parameter snapshot at branch creation
 }
 
-export type AnalysisObject = OrbitObject | EquilibriumObject | ContinuationObject;
+export type LimitCycleOrigin =
+  | { type: 'orbit'; orbitName: string }
+  | { type: 'hopf'; equilibriumObjectName: string; equilibriumBranchName: string; pointIndex: number }
+  | { type: 'pd'; sourceLimitCycleObjectName: string; sourceBranchName: string; pointIndex: number };
+
+export interface LimitCycleObject {
+  type: "limit_cycle";
+  name: string;
+  systemName: string;
+  origin: LimitCycleOrigin;
+  ntst: number;
+  ncol: number;
+  period: number;
+  state: number[]; // Flattened collocation state: [mesh, stages, period].
+  parameters?: number[]; // Full parameter snapshot at creation.
+  parameterName?: string;
+  paramValue?: number;
+  floquetMultipliers?: ContinuationEigenvalue[];
+  createdAt: string;
+}
+
+export type AnalysisObject = OrbitObject | EquilibriumObject | LimitCycleObject | ContinuationObject;
 
 export interface CovariantLyapunovData {
   dim: number;

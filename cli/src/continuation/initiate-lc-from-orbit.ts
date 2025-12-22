@@ -9,7 +9,7 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
-import { OrbitObject, ContinuationObject } from '../types';
+import { LimitCycleObject, OrbitObject, ContinuationObject } from '../types';
 import {
   ConfigEntry,
   MENU_PAGE_SIZE,
@@ -22,6 +22,10 @@ import { printSuccess, printError, printInfo } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
 import { isValidName } from './utils';
 import { inspectBranch } from './inspect';
+
+export type InitiateLcFromOrbitOptions = {
+  autoInspect?: boolean;
+};
 
 /**
  * Initiates limit cycle continuation from a computed orbit.
@@ -40,22 +44,25 @@ import { inspectBranch } from './inspect';
  */
 export async function initiateLCFromOrbit(
   sysName: string,
-  orbit: OrbitObject
-): Promise<boolean> {
+  orbit: OrbitObject,
+  opts: InitiateLcFromOrbitOptions = {}
+): Promise<ContinuationObject | null> {
   const sysConfig = Storage.loadSystem(sysName);
+  const autoInspect = opts.autoInspect ?? true;
 
   if (sysConfig.paramNames.length === 0) {
     printError("System has no parameters to continue. Add at least one parameter first.");
-    return false;
+    return null;
   }
 
   if (sysConfig.type === 'map') {
     printError("Limit cycle continuation is only available for flow (ODE) systems.");
-    return false;
+    return null;
   }
 
   // Configuration defaults
-  let branchName = `lc_${orbit.name}`;
+  let limitCycleObjectName = `lc_${orbit.name}`;
+  let branchName = '';
   let selectedParamName = sysConfig.paramNames[0];
   let toleranceInput = '0.1';
   let ntstInput = '20';
@@ -74,6 +81,29 @@ export async function initiateLCFromOrbit(
 
   const entries: ConfigEntry[] = [
     {
+      id: 'limitCycleObjectName',
+      label: 'Limit cycle object name',
+      section: 'Branch Settings',
+      getDisplay: () => limitCycleObjectName || '(required)',
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Name for the new Limit Cycle Object:',
+          default: limitCycleObjectName,
+          validate: (val: string) => {
+            const valid = isValidName(val);
+            if (valid !== true) return valid;
+            if (Storage.listObjects(sysName).includes(val)) return "Object name already exists.";
+            return true;
+          }
+        });
+        limitCycleObjectName = value;
+        if (!branchName) {
+          branchName = `${limitCycleObjectName}_${selectedParamName}`;
+        }
+      }
+    },
+    {
       id: 'branchName',
       label: 'Branch name',
       section: 'Branch Settings',
@@ -81,12 +111,13 @@ export async function initiateLCFromOrbit(
       edit: async () => {
         const { value } = await inquirer.prompt({
           name: 'value',
-          message: 'Name for this Limit Cycle Branch:',
-          default: branchName,
+          message: 'Name for the initial Limit Cycle Branch:',
+          default: branchName || `${limitCycleObjectName}_${selectedParamName}`,
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;
-            if (Storage.listContinuations(sysName).includes(val)) return "Branch name already exists.";
+            if (!limitCycleObjectName) return "Select a limit cycle object name first.";
+            if (Storage.listBranches(sysName, limitCycleObjectName).includes(val)) return "Branch name already exists.";
             return true;
           }
         });
@@ -112,6 +143,9 @@ export async function initiateLCFromOrbit(
           pageSize: MENU_PAGE_SIZE
         });
         selectedParamName = value;
+        if (branchName.trim().length === 0 && limitCycleObjectName.trim().length > 0) {
+          branchName = `${limitCycleObjectName}_${selectedParamName}`;
+        }
       }
     },
     {
@@ -237,7 +271,12 @@ export async function initiateLCFromOrbit(
   while (true) {
     const result = await runConfigMenu('Initiate Limit Cycle from Orbit', entries);
     if (result === 'back') {
-      return false;
+      return null;
+    }
+
+    if (!limitCycleObjectName) {
+      printError('Please provide a limit cycle object name.');
+      continue;
     }
 
     if (!branchName) {
@@ -245,7 +284,7 @@ export async function initiateLCFromOrbit(
       continue;
     }
 
-    if (Storage.listContinuations(sysName).includes(branchName)) {
+    if (Storage.listBranches(sysName, limitCycleObjectName).includes(branchName)) {
       printError(`Branch "${branchName}" already exists.`);
       continue;
     }
@@ -308,14 +347,15 @@ export async function initiateLCFromOrbit(
       directionForward
     ));
 
-    // Ensure branch_type is included with mesh parameters for plotting scripts
-    branchData.branch_type = { type: 'LimitCycle', ntst, ncol };
+    // Ensure branch_type is included with mesh parameters for plotting scripts.
+    branchData.branch_type = branchData.branch_type ?? { type: 'LimitCycle', ntst, ncol };
 
     const newBranch: ContinuationObject = {
       type: 'continuation',
       name: branchName,
       systemName: sysName,
       parameterName: selectedParamName,
+      parentObject: limitCycleObjectName,
       startObject: orbit.name,
       branchType: 'limit_cycle',
       data: branchData,
@@ -324,14 +364,37 @@ export async function initiateLCFromOrbit(
       params: [...runConfig.params]
     };
 
-    Storage.saveContinuation(sysName, newBranch);
+    const seedPoint = branchData.points[0];
+    const seedState = seedPoint?.state ?? [];
+    const seedPeriod = seedState.length > 0 ? seedState[seedState.length - 1] : NaN;
+
+    const lcObj: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: limitCycleObjectName,
+      systemName: sysName,
+      origin: { type: 'orbit', orbitName: orbit.name },
+      ntst,
+      ncol,
+      period: seedPeriod,
+      state: [...seedState],
+      parameters: [...runConfig.params],
+      parameterName: selectedParamName,
+      paramValue: seedPoint?.param_value,
+      floquetMultipliers: seedPoint?.eigenvalues,
+      createdAt: new Date().toISOString(),
+    };
+
+    Storage.saveObject(sysName, lcObj);
+    Storage.saveBranch(sysName, limitCycleObjectName, newBranch);
     printSuccess(`Limit cycle continuation successful! Generated ${branchData.points.length} points.`);
 
-    await inspectBranch(sysName, newBranch);
-    return true;
+    if (autoInspect) {
+      await inspectBranch(sysName, newBranch);
+    }
+    return newBranch;
 
   } catch (e) {
     printError(`Limit Cycle Initialization Failed: ${e}`);
-    return false;
+    return null;
   }
 }

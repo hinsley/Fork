@@ -33,20 +33,29 @@ def discover_lc_branches(systems_root: Path) -> List[Dict[str, Any]]:
         if not system_dir.is_dir():
             continue
         sys_name = system_dir.name
-        
-        # Look in branches/ directory only
-        branches_dir = system_dir / "branches"
-        if not branches_dir.exists():
+
+        # Objects-first layout: branches live under objects/<object>/branches/*.json.
+        objects_dir = system_dir / "objects"
+        if not objects_dir.exists():
             continue
 
-        for branch_file in branches_dir.glob("*.json"):
-            try:
-                data = json.loads(branch_file.read_text())
-                
+        for obj_dir in objects_dir.iterdir():
+            if not obj_dir.is_dir():
+                continue
+            branches_dir = obj_dir / "branches"
+            if not branches_dir.exists():
+                continue
+
+            for branch_file in branches_dir.glob("*.json"):
+                try:
+                    data = json.loads(branch_file.read_text())
+                except json.JSONDecodeError:
+                    continue
+
                 # Check if this is a continuation type
                 if data.get("type") != "continuation":
                     continue
-                
+
                 branch_data = data.get("data", {})
                 points = branch_data.get("points", [])
                 
@@ -162,9 +171,8 @@ def discover_lc_branches(systems_root: Path) -> List[Dict[str, Any]]:
                         "ncol": ncol,
                         "dim": dim,
                         "param_name": data.get("parameterName", "param"),
+                        "parent_object": data.get("parentObject", obj_dir.name),
                     })
-            except (json.JSONDecodeError, KeyError):
-                continue
     
     return sorted(records, key=lambda r: (r["system"], r["branch"]))
 
