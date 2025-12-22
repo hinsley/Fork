@@ -20,7 +20,6 @@ import {
 import { printSuccess, printError, printInfo } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
 import { isValidName, getBranchParams } from './utils';
-import { inspectBranch } from './inspect';
 
 /**
  * Initiates a new equilibrium continuation branch from a point on an existing branch.
@@ -43,12 +42,13 @@ export async function initiateEquilibriumBranchFromPoint(
   sysName: string,
   sourceBranch: ContinuationObject,
   point: ContinuationPoint
-): Promise<boolean> {
+): Promise<ContinuationObject | null> {
   const sysConfig = Storage.loadSystem(sysName);
+  const parentObject = sourceBranch.parentObject;
 
   if (sysConfig.paramNames.length === 0) {
     printError("System has no parameters to continue. Add at least one parameter first.");
-    return false;
+    return null;
   }
 
   // Default to a different parameter than the source branch if possible
@@ -105,7 +105,7 @@ export async function initiateEquilibriumBranchFromPoint(
           validate: (val: string) => {
             const valid = isValidName(val);
             if (valid !== true) return valid;
-            if (Storage.listContinuations(sysName).includes(val)) return "Branch name already exists.";
+            if (Storage.listBranches(sysName, parentObject).includes(val)) return "Branch name already exists.";
             return true;
           }
         });
@@ -235,7 +235,7 @@ export async function initiateEquilibriumBranchFromPoint(
   while (true) {
     const result = await runConfigMenu('Create Equilibrium Branch from Point', entries);
     if (result === 'back') {
-      return false;
+      return null;
     }
 
     if (!branchName) {
@@ -243,7 +243,7 @@ export async function initiateEquilibriumBranchFromPoint(
       continue;
     }
 
-    if (Storage.listContinuations(sysName).includes(branchName)) {
+    if (Storage.listBranches(sysName, parentObject).includes(branchName)) {
       printError(`Branch "${branchName}" already exists.`);
       continue;
     }
@@ -289,6 +289,7 @@ export async function initiateEquilibriumBranchFromPoint(
       name: branchName,
       systemName: sysName,
       parameterName: selectedParamName,
+      parentObject,
       startObject: sourceBranch.name,
       branchType: 'equilibrium',
       data: branchData,
@@ -297,14 +298,12 @@ export async function initiateEquilibriumBranchFromPoint(
       params: [...runConfig.params]  // Store full parameter snapshot
     };
 
-    Storage.saveContinuation(sysName, newBranch);
+    Storage.saveBranch(sysName, parentObject, newBranch);
     printSuccess(`Continuation successful! Generated ${branchData.points.length} points.`);
-
-    await inspectBranch(sysName, newBranch);
-    return true;
+    return newBranch;
 
   } catch (e) {
     printError(`Continuation Failed: ${e}`);
-    return false;
+    return null;
   }
 }
