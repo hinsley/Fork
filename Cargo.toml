@@ -3,6 +3,7 @@ members = [
     "crates/fork_core",
     "crates/fork_wasm"
 ]
+resolver = "2"
 
 [profile.release]
 lto = true

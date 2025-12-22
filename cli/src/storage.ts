@@ -11,7 +11,11 @@ if (!fs.existsSync(SYSTEMS_DIR)) fs.mkdirSync(SYSTEMS_DIR);
 
 // Helper to get objects dir for a specific system
 const getObjectsDir = (systemName: string) => path.join(SYSTEMS_DIR, systemName, 'objects');
-const getContinuationDir = (systemName: string) => path.join(SYSTEMS_DIR, systemName, 'branches');
+const getSystemBranchesDirLegacy = (systemName: string) => path.join(SYSTEMS_DIR, systemName, 'branches');
+const getObjectDir = (systemName: string, objectName: string) =>
+  path.join(getObjectsDir(systemName), objectName);
+const getObjectBranchesDir = (systemName: string, objectName: string) =>
+  path.join(getObjectDir(systemName, objectName), 'branches');
 
 export const Storage = {
   listSystems: (): string[] => {
@@ -51,6 +55,81 @@ export const Storage = {
     }
   },
 
+  /**
+   * Purges legacy branch storage for a system.
+   *
+   * This is intentionally destructive by user request: we delete legacy continuation branches
+   * instead of migrating them to the new object-scoped layout.
+   *
+   * Legacy indicators:
+   * - A system-level `branches/` directory exists, or
+   * - Any `objects/*.json` file has `type === "continuation"`.
+   */
+  purgeLegacyBranches: (systemName: string): boolean => {
+    const sysDir = path.join(SYSTEMS_DIR, systemName);
+    const objectsDir = getObjectsDir(systemName);
+    const legacyBranchesDir = getSystemBranchesDirLegacy(systemName);
+
+    const hasLegacyBranchesDir = fs.existsSync(legacyBranchesDir);
+    let hasLegacyContinuationObjects = false;
+
+    if (fs.existsSync(objectsDir)) {
+      for (const entry of fs.readdirSync(objectsDir)) {
+        const full = path.join(objectsDir, entry);
+        if (!fs.statSync(full).isFile()) continue;
+        if (!entry.endsWith('.json')) continue;
+        try {
+          const obj = JSON.parse(fs.readFileSync(full, 'utf-8')) as AnalysisObject;
+          if ((obj as any)?.type === 'continuation') {
+            hasLegacyContinuationObjects = true;
+            break;
+          }
+        } catch {
+          // Ignore unreadable JSON files and continue scanning.
+        }
+      }
+    }
+
+    if (!hasLegacyBranchesDir && !hasLegacyContinuationObjects) {
+      return false;
+    }
+
+    // Delete legacy system-level branches directory.
+    if (hasLegacyBranchesDir) {
+      fs.rmSync(legacyBranchesDir, { recursive: true, force: true });
+    }
+
+    // Delete any continuation objects stored as top-level objects.
+    if (fs.existsSync(objectsDir)) {
+      for (const entry of fs.readdirSync(objectsDir)) {
+        const full = path.join(objectsDir, entry);
+        const stat = fs.statSync(full);
+        if (stat.isFile() && entry.endsWith('.json')) {
+          try {
+            const obj = JSON.parse(fs.readFileSync(full, 'utf-8')) as AnalysisObject;
+            if ((obj as any)?.type === 'continuation') {
+              fs.unlinkSync(full);
+            }
+          } catch {
+            // Ignore parse errors.
+          }
+        }
+
+        // Delete any object-scoped branches folders (legacy or otherwise) to ensure a clean slate.
+        if (stat.isDirectory()) {
+          const branchesDir = path.join(full, 'branches');
+          if (fs.existsSync(branchesDir)) {
+            fs.rmSync(branchesDir, { recursive: true, force: true });
+          }
+        }
+      }
+    }
+
+    // Ensure system directory still exists after deletions.
+    if (!fs.existsSync(sysDir)) fs.mkdirSync(sysDir, { recursive: true });
+    return true;
+  },
+
   listObjects: (systemName: string): string[] => {
     const objectsDir = getObjectsDir(systemName);
     if (!fs.existsSync(objectsDir)) return [];
@@ -74,31 +153,140 @@ export const Storage = {
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
+
+    // Also remove any associated object folder (branches, metadata, etc.).
+    const objDir = getObjectDir(systemName, objectName);
+    if (fs.existsSync(objDir)) {
+      fs.rmSync(objDir, { recursive: true, force: true });
+    }
   },
 
-  // Continuation Storage
-  listContinuations: (systemName: string): string[] => {
-    const contDir = getContinuationDir(systemName);
-    if (!fs.existsSync(contDir)) return [];
-    return fs.readdirSync(contDir).filter(f => f.endsWith('.json')).map(f => f.replace('.json', ''));
+  /**
+   * Renames an object and its associated object directory (if present).
+   */
+  renameObject: (systemName: string, oldName: string, newName: string) => {
+    const objectsDir = getObjectsDir(systemName);
+    const oldPath = path.join(objectsDir, `${oldName}.json`);
+    const newPath = path.join(objectsDir, `${newName}.json`);
+    if (fs.existsSync(oldPath)) {
+      fs.renameSync(oldPath, newPath);
+    }
+    const oldDir = getObjectDir(systemName, oldName);
+    const newDir = getObjectDir(systemName, newName);
+    if (fs.existsSync(oldDir)) {
+      fs.renameSync(oldDir, newDir);
+    }
+
+    // Update parentObject pointers in any stored branches.
+    const branchesDir = getObjectBranchesDir(systemName, newName);
+    if (fs.existsSync(branchesDir)) {
+      for (const entry of fs.readdirSync(branchesDir)) {
+        if (!entry.endsWith('.json')) continue;
+        const full = path.join(branchesDir, entry);
+        try {
+          const branch = JSON.parse(fs.readFileSync(full, 'utf-8')) as any;
+          if (branch?.type === 'continuation') {
+            branch.parentObject = newName;
+            fs.writeFileSync(full, JSON.stringify(branch, null, 2));
+          }
+        } catch {
+          // Ignore parse errors.
+        }
+      }
+    }
   },
 
-  saveContinuation: (systemName: string, branch: AnalysisObject) => {
-    const contDir = getContinuationDir(systemName);
-    if (!fs.existsSync(contDir)) fs.mkdirSync(contDir, { recursive: true });
-    fs.writeFileSync(path.join(contDir, `${branch.name}.json`), JSON.stringify(branch, null, 2));
+  // Object-scoped Branch Storage
+  /**
+   * Renames a stored branch for a given parent object.
+   *
+   * This updates both the on-disk filename and the `name` field inside the JSON payload.
+   * It also updates any provenance references from limit-cycle objects that point at the renamed branch.
+   */
+  renameBranch: (systemName: string, objectName: string, oldBranchName: string, newBranchName: string) => {
+    const branchesDir = getObjectBranchesDir(systemName, objectName);
+    const oldPath = path.join(branchesDir, `${oldBranchName}.json`);
+    const newPath = path.join(branchesDir, `${newBranchName}.json`);
+
+    if (!fs.existsSync(oldPath)) {
+      throw new Error(`Branch "${oldBranchName}" does not exist under object "${objectName}".`);
+    }
+    if (fs.existsSync(newPath)) {
+      throw new Error(`Branch "${newBranchName}" already exists under object "${objectName}".`);
+    }
+
+    const branch = JSON.parse(fs.readFileSync(oldPath, 'utf-8')) as any;
+    if (branch?.type !== 'continuation') {
+      throw new Error(`Refusing to rename non-branch payload at "${oldPath}".`);
+    }
+
+    branch.name = newBranchName;
+    branch.parentObject = objectName;
+
+    fs.writeFileSync(newPath, JSON.stringify(branch, null, 2));
+    fs.unlinkSync(oldPath);
+
+    // Update provenance pointers in limit-cycle objects that reference this branch by name.
+    const objectsDir = getObjectsDir(systemName);
+    if (!fs.existsSync(objectsDir)) {
+      return;
+    }
+
+    for (const entry of fs.readdirSync(objectsDir)) {
+      const full = path.join(objectsDir, entry);
+      if (!entry.endsWith('.json')) continue;
+      if (!fs.statSync(full).isFile()) continue;
+      try {
+        const obj = JSON.parse(fs.readFileSync(full, 'utf-8')) as any;
+        if (obj?.type !== 'limit_cycle') continue;
+        if (!obj.origin || typeof obj.origin !== 'object') continue;
+
+        let updated = false;
+
+        if (obj.origin.type === 'hopf' && obj.origin.equilibriumBranchName === oldBranchName) {
+          obj.origin.equilibriumBranchName = newBranchName;
+          updated = true;
+        }
+
+        if (obj.origin.type === 'pd' && obj.origin.sourceBranchName === oldBranchName) {
+          obj.origin.sourceBranchName = newBranchName;
+          updated = true;
+        }
+
+        if (updated) {
+          fs.writeFileSync(full, JSON.stringify(obj, null, 2));
+        }
+      } catch {
+        // Ignore parse errors.
+      }
+    }
   },
 
-  loadContinuation: (systemName: string, name: string): AnalysisObject => {
-    const contDir = getContinuationDir(systemName);
-    return JSON.parse(fs.readFileSync(path.join(contDir, `${name}.json`), 'utf-8'));
+  listBranches: (systemName: string, objectName: string): string[] => {
+    const branchesDir = getObjectBranchesDir(systemName, objectName);
+    if (!fs.existsSync(branchesDir)) return [];
+    return fs
+      .readdirSync(branchesDir)
+      .filter(f => f.endsWith('.json'))
+      .map(f => f.replace('.json', ''));
   },
 
-  deleteContinuation: (systemName: string, name: string) => {
-    const contDir = getContinuationDir(systemName);
-    const filePath = path.join(contDir, `${name}.json`);
+  saveBranch: (systemName: string, objectName: string, branch: AnalysisObject) => {
+    const branchesDir = getObjectBranchesDir(systemName, objectName);
+    if (!fs.existsSync(branchesDir)) fs.mkdirSync(branchesDir, { recursive: true });
+    fs.writeFileSync(path.join(branchesDir, `${(branch as any).name}.json`), JSON.stringify(branch, null, 2));
+  },
+
+  loadBranch: (systemName: string, objectName: string, branchName: string): AnalysisObject => {
+    const branchesDir = getObjectBranchesDir(systemName, objectName);
+    return JSON.parse(fs.readFileSync(path.join(branchesDir, `${branchName}.json`), 'utf-8'));
+  },
+
+  deleteBranch: (systemName: string, objectName: string, branchName: string) => {
+    const branchesDir = getObjectBranchesDir(systemName, objectName);
+    const filePath = path.join(branchesDir, `${branchName}.json`);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
-  }
+  },
 };

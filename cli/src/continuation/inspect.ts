@@ -10,6 +10,7 @@ import chalk from 'chalk';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
 import { ContinuationObject, ContinuationPoint } from '../types';
+import { NavigationRequest } from '../navigation';
 import { MENU_PAGE_SIZE } from '../menu';
 import {
   extractLCProfile,
@@ -19,6 +20,7 @@ import {
 import {
   ensureBranchIndices,
   buildSortedArrayOrder,
+  getBranchParams,
   formatNumber,
   formatNumberSafe,
   formatArray,
@@ -27,7 +29,7 @@ import {
 import { initiateLCFromHopf, initiateLCBranchFromPoint, initiateLCFromPD } from './initiate-lc';
 import { initiateEquilibriumBranchFromPoint } from './initiate-eq';
 
-type BranchDetailResult = 'SUMMARY' | 'EXIT' | 'INITIATED_LC' | 'INITIATED_BRANCH';
+type BranchDetailResult = 'SUMMARY' | 'EXIT' | NavigationRequest;
 const DETAIL_PAGE_SIZE = 10;
 
 /**
@@ -164,7 +166,7 @@ export async function browseBranchPoints(
       if (currentFocusSortedIdx === -1) currentFocusSortedIdx = 0;
       page = Math.floor(currentFocusSortedIdx / DETAIL_PAGE_SIZE);
       const pointResult = await showPointDetails(sysName, branch, indices, arrayIdx, bifurcationSet.has(arrayIdx));
-      if (pointResult === 'INITIATED_LC' || pointResult === 'INITIATED_BRANCH') {
+      if (pointResult !== 'BACK') {
         return pointResult;
       }
     }
@@ -182,7 +184,11 @@ export async function browseBranchPoints(
  * @param indices - Logical index mapping for points
  * @returns Navigation result indicating user action
  */
-export async function browseBranchSummary(sysName: string, branch: ContinuationObject, indices: number[]): Promise<'EXIT' | 'INITIATED_LC' | 'INITIATED_BRANCH' | void> {
+export async function browseBranchSummary(
+  sysName: string,
+  branch: ContinuationObject,
+  indices: number[]
+): Promise<NavigationRequest | void> {
   const sortedOrder = buildSortedArrayOrder(indices);
   while (true) {
     const summaryChoices = buildSummaryChoices(branch, indices, sortedOrder);
@@ -199,13 +205,16 @@ export async function browseBranchSummary(sysName: string, branch: ContinuationO
     });
 
     if (selection === 'EXIT') {
-      return 'EXIT';
+      return;
     }
 
     if (typeof selection === 'string' && selection.startsWith('POINT:')) {
       const targetIdx = parseInt(selection.split(':')[1], 10);
       const detailResult = await browseBranchPoints(sysName, branch, indices, targetIdx, sortedOrder);
-      if (detailResult === 'EXIT' || detailResult === 'INITIATED_LC' || detailResult === 'INITIATED_BRANCH') {
+      if (detailResult === 'EXIT') {
+        return;
+      }
+      if (detailResult !== 'SUMMARY') {
         return detailResult;
       }
     }
@@ -331,14 +340,16 @@ export async function hydrateEigenvalues(sysName: string, branch: ContinuationOb
 
   console.log(chalk.yellow(`Hydrating eigenvalues for ${missingIndices.length} continuation points...`));
   const sysConfig = Storage.loadSystem(sysName);
-  const bridge = new WasmBridge(sysConfig);
+  const runConfig = { ...sysConfig };
+  runConfig.params = getBranchParams(sysName, branch, sysConfig);
+  const bridge = new WasmBridge(runConfig);
 
   missingIndices.forEach(idx => {
     const pt = branch.data.points[idx];
     pt.eigenvalues = bridge.computeEigenvalues(pt.state, branch.parameterName, pt.param_value);
   });
 
-  Storage.saveContinuation(sysName, branch);
+  Storage.saveBranch(sysName, branch.parentObject, branch);
 }
 
 /**
@@ -351,7 +362,10 @@ export async function hydrateEigenvalues(sysName: string, branch: ContinuationOb
  * @param branch - The continuation branch to inspect
  * @returns Navigation result indicating how the user exited
  */
-export async function inspectBranch(sysName: string, branch: ContinuationObject): Promise<'EXIT' | 'INITIATED_LC' | 'INITIATED_BRANCH' | void> {
+export async function inspectBranch(
+  sysName: string,
+  branch: ContinuationObject
+): Promise<NavigationRequest | void> {
   await hydrateEigenvalues(sysName, branch);
   const points = branch.data.points;
 
@@ -388,7 +402,7 @@ export async function showPointDetails(
   indices: number[],
   arrayIdx: number,
   isBifurcation: boolean
-): Promise<'BACK' | 'INITIATED_LC' | 'INITIATED_BRANCH'> {
+): Promise<'BACK' | NavigationRequest> {
   const pt = branch.data.points[arrayIdx];
   const logicalIdx = indices[arrayIdx];
   const branchType = branch.branchType || 'equilibrium';
@@ -532,23 +546,47 @@ export async function showPointDetails(
   });
 
   if (action === 'NEW_EQ_BRANCH') {
-    const result = await initiateEquilibriumBranchFromPoint(sysName, branch, pt);
-    return result ? 'INITIATED_BRANCH' : 'BACK';
+    const newBranch = await initiateEquilibriumBranchFromPoint(sysName, branch, pt);
+    if (!newBranch) return 'BACK';
+    return {
+      kind: 'OPEN_BRANCH',
+      objectName: newBranch.parentObject,
+      branchName: newBranch.name,
+      autoInspect: true,
+    };
   }
 
   if (action === 'INITIATE_LC') {
-    await initiateLCFromHopf(sysName, branch, pt);
-    return 'INITIATED_LC';
+    const newBranch = await initiateLCFromHopf(sysName, branch, pt, logicalIdx);
+    if (!newBranch) return 'BACK';
+    return {
+      kind: 'OPEN_BRANCH',
+      objectName: newBranch.parentObject,
+      branchName: newBranch.name,
+      autoInspect: true,
+    };
   }
 
   if (action === 'NEW_LC_BRANCH') {
-    const result = await initiateLCBranchFromPoint(sysName, branch, pt, arrayIdx);
-    return result ? 'INITIATED_BRANCH' : 'BACK';
+    const newBranch = await initiateLCBranchFromPoint(sysName, branch, pt, arrayIdx);
+    if (!newBranch) return 'BACK';
+    return {
+      kind: 'OPEN_BRANCH',
+      objectName: newBranch.parentObject,
+      branchName: newBranch.name,
+      autoInspect: true,
+    };
   }
 
   if (action === 'BRANCH_PD') {
-    const result = await initiateLCFromPD(sysName, branch, pt, arrayIdx);
-    return result ? 'INITIATED_BRANCH' : 'BACK';
+    const newBranch = await initiateLCFromPD(sysName, branch, pt, arrayIdx);
+    if (!newBranch) return 'BACK';
+    return {
+      kind: 'OPEN_BRANCH',
+      objectName: newBranch.parentObject,
+      branchName: newBranch.name,
+      autoInspect: true,
+    };
   }
 
   return 'BACK';
