@@ -5,6 +5,11 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+license = "MIT"
+repository = "https://github.com/hinsley/Fork"
+authors = ["Carter Hinsley <carterhinsley@gmail.com>"]
+
 [profile.release]
 lto = true
 opt-level = 3
