@@ -1,18 +1,26 @@
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { Storage } from './storage';
+import { isValidName } from './naming';
+import { NavigationRequest } from './navigation';
 import {
     AnalysisObject,
     ComplexValue,
+    ContinuationObject,
     CovariantLyapunovData,
     EquilibriumObject,
     EquilibriumRunSummary,
     EquilibriumSolverParams,
+    LimitCycleObject,
     SystemConfig,
     OrbitObject
 } from './types';
 import { WasmBridge, CovariantLyapunovResponse } from './wasm';
-import { continuationMenu } from './continuation';
+
+import { createEquilibriumBranchForObject, createLimitCycleBranchForObject } from './continuation/create';
+import { extendBranch } from './continuation/extend';
+import { inspectBranch } from './continuation/inspect';
+import { initiateLCFromOrbit } from './continuation/initiate-lc-from-orbit';
 
 import {
     ConfigEntry,
@@ -34,20 +42,56 @@ import {
     printBlank
 } from './format';
 
-const NAME_REGEX = /^[a-zA-Z0-9_]+$/;
-
-function isValidName(name: string): boolean | string {
-    if (!name || name.length === 0) return "Name cannot be empty.";
-    if (!NAME_REGEX.test(name)) return "Name must contain only alphanumeric characters and underscores (no spaces).";
-    return true;
-}
-
 function systemExists(name: string): boolean {
     return Storage.listSystems().includes(name);
 }
 
 function objectExists(sysName: string, objectName: string): boolean {
     return Storage.listObjects(sysName).includes(objectName);
+}
+
+async function promptRename(
+    entityLabel: 'Object' | 'Branch',
+    currentName: string,
+    isTaken: (candidate: string) => boolean
+): Promise<string | null> {
+    const { newName } = await inquirer.prompt({
+        name: 'newName',
+        message: `New ${entityLabel} Name:`,
+        default: currentName,
+        validate: (val: string) => {
+            const valid = isValidName(val);
+            if (valid !== true) return valid;
+            if (val !== currentName && isTaken(val)) {
+                return `${entityLabel} "${val}" already exists.`;
+            }
+            return true;
+        }
+    });
+
+    if (newName === currentName) {
+        return null;
+    }
+    return newName;
+}
+
+async function openNavigation(sysName: string, nav: NavigationRequest): Promise<NavigationRequest | void> {
+    if (nav.kind !== 'OPEN_BRANCH') {
+        return;
+    }
+
+    if (!objectExists(sysName, nav.objectName)) {
+        printError(`Object "${nav.objectName}" was not found.`);
+        return;
+    }
+
+    const obj = Storage.loadObject(sysName, nav.objectName) as AnalysisObject;
+    if ((obj as any)?.type === 'continuation') {
+        printError(`"${nav.objectName}" is not an analysis object.`);
+        return;
+    }
+
+    return await manageObject(sysName, obj, nav);
 }
 
 async function mainMenu() {
@@ -89,6 +133,10 @@ async function mainMenu() {
 
 async function systemContext(initialSysName: string) {
     let sysName = initialSysName;
+  const didPurge = Storage.purgeLegacyBranches(sysName);
+  if (didPurge) {
+      printInfo(`Legacy continuation branches were deleted for system "${sysName}".`);
+  }
 
     while (true) {
         const sys = Storage.loadSystem(sysName);
@@ -97,7 +145,6 @@ async function systemContext(initialSysName: string) {
 
         const choices = [
             { name: 'Objects', value: 'Objects' },
-            { name: 'Continuation', value: 'Continuation' },
             new inquirer.Separator(),
             { name: 'Edit System', value: 'Edit System' },
             { name: 'Duplicate System', value: 'Duplicate System' },
@@ -155,8 +202,6 @@ async function systemContext(initialSysName: string) {
             }
         } else if (action === 'Objects') {
             await objectsListMenu(sysName);
-        } else if (action === 'Continuation') {
-            await continuationMenu(sysName);
         }
     }
 }
@@ -445,7 +490,14 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
 }
 
 async function objectsListMenu(sysName: string) {
+    let pendingNav: NavigationRequest | null = null;
     while (true) {
+        if (pendingNav) {
+            const nextNav = await openNavigation(sysName, pendingNav);
+            pendingNav = nextNav ?? null;
+            continue;
+        }
+
         const objects = Storage.listObjects(sysName);
         const choices = [];
 
@@ -489,21 +541,30 @@ async function objectsListMenu(sysName: string) {
             if (objType === 'Back') continue;
 
             if (objType === 'Orbit') {
-                await createOrbit(sysName);
+                const nav = await createOrbit(sysName);
+                if (nav) {
+                    pendingNav = nav;
+                }
             } else if (objType === 'Equilibrium') {
-                await createEquilibrium(sysName);
+                const nav = await createEquilibrium(sysName);
+                if (nav) {
+                    pendingNav = nav;
+                }
             }
         } else {
             const obj = Storage.loadObject(sysName, objName) as AnalysisObject;
             // Should not happen due to filter, but safety check
             if (obj.type !== 'continuation') {
-                await manageObject(sysName, obj);
+                const nav = await manageObject(sysName, obj);
+                if (nav) {
+                    pendingNav = nav;
+                }
             }
         }
     }
 }
 
-async function createOrbit(sysName: string) {
+async function createOrbit(sysName: string): Promise<NavigationRequest | void> {
     const sysConfig = Storage.loadSystem(sysName);
 
     const { objName } = await inquirer.prompt({
@@ -649,13 +710,13 @@ async function createOrbit(sysName: string) {
         Storage.saveObject(sysName, orbit);
         console.log(chalk.green(`Orbit ${orbit.name} saved with ${data.length} points.`));
 
-        await manageObject(sysName, orbit);
+        return await manageObject(sysName, orbit);
     } catch (e) {
         console.error(chalk.red("Simulation Failed:"), e);
     }
 }
 
-async function createEquilibrium(sysName: string) {
+async function createEquilibrium(sysName: string): Promise<NavigationRequest | void> {
     const sysConfig = Storage.loadSystem(sysName);
     const { name } = await inquirer.prompt({
         name: 'name',
@@ -685,18 +746,368 @@ async function createEquilibrium(sysName: string) {
     Storage.saveObject(sysName, eq);
     console.log(chalk.green(`Equilibrium ${name} created.`));
 
-    await manageEquilibrium(sysName, eq);
+    return await manageEquilibrium(sysName, eq);
 }
 
-async function manageObject(sysName: string, obj: AnalysisObject) {
+async function manageObject(
+    sysName: string,
+    obj: AnalysisObject,
+    nav?: NavigationRequest
+): Promise<NavigationRequest | void> {
     if (obj.type === 'orbit') {
-        await manageOrbit(sysName, obj as OrbitObject);
-    } else if (obj.type === 'equilibrium') {
-        await manageEquilibrium(sysName, obj as EquilibriumObject);
+        return await manageOrbit(sysName, obj as OrbitObject, nav);
+    }
+    if (obj.type === 'equilibrium') {
+        return await manageEquilibrium(sysName, obj as EquilibriumObject, nav);
+    }
+    if (obj.type === 'limit_cycle') {
+        return await manageLimitCycle(sysName, obj as LimitCycleObject, nav);
     }
 }
 
-async function manageOrbit(sysName: string, obj: OrbitObject) {
+async function manageBranch(
+    sysName: string,
+    branch: ContinuationObject,
+    opts: { autoInspect?: boolean } = {}
+): Promise<NavigationRequest | void> {
+    let autoInspect = opts.autoInspect ?? false;
+
+    while (true) {
+        if (autoInspect) {
+            autoInspect = false;
+            const nav = await inspectBranch(sysName, branch);
+            if (nav) {
+                if (nav.kind === 'OPEN_BRANCH' && nav.objectName === branch.parentObject) {
+                    branch = Storage.loadBranch(sysName, branch.parentObject, nav.branchName) as ContinuationObject;
+                    autoInspect = nav.autoInspect ?? false;
+                    continue;
+                }
+                return nav;
+            }
+            // Reload in case the branch was updated and saved by the inspector.
+            branch = Storage.loadBranch(sysName, branch.parentObject, branch.name) as ContinuationObject;
+        }
+
+        printHeader(branch.name, `${branch.branchType} continuation`);
+        printField('Parent object', branch.parentObject);
+        printField('Parameter', branch.parameterName);
+        printField('Points', branch.data.points.length.toLocaleString());
+        printField('Bifurcations', branch.data.bifurcations.length.toString());
+        printBlank();
+
+        const { action } = await inquirer.prompt({
+            type: 'rawlist',
+            name: 'action',
+            message: 'Branch Actions',
+            choices: [
+                { name: 'Inspect Data', value: 'Inspect Data' },
+                { name: 'Extend Branch', value: 'Extend Branch' },
+                new inquirer.Separator(),
+                { name: 'Rename Branch', value: 'Rename Branch' },
+                { name: 'Delete Branch', value: 'Delete Branch' },
+                new inquirer.Separator(),
+                { name: 'Back', value: 'Back' }
+            ],
+            pageSize: MENU_PAGE_SIZE
+        });
+
+        if (action === 'Back') return;
+
+        if (action === 'Inspect Data') {
+            const nav = await inspectBranch(sysName, branch);
+            if (nav) {
+                if (nav.kind === 'OPEN_BRANCH' && nav.objectName === branch.parentObject) {
+                    branch = Storage.loadBranch(sysName, branch.parentObject, nav.branchName) as ContinuationObject;
+                    autoInspect = nav.autoInspect ?? false;
+                    continue;
+                }
+                return nav;
+            }
+            branch = Storage.loadBranch(sysName, branch.parentObject, branch.name) as ContinuationObject;
+            continue;
+        }
+
+        if (action === 'Extend Branch') {
+            const nav = await extendBranch(sysName, branch);
+            if (nav) {
+                if (nav.kind === 'OPEN_BRANCH' && nav.objectName === branch.parentObject) {
+                    branch = Storage.loadBranch(sysName, branch.parentObject, nav.branchName) as ContinuationObject;
+                    autoInspect = nav.autoInspect ?? false;
+                    continue;
+                }
+                return nav;
+            }
+            branch = Storage.loadBranch(sysName, branch.parentObject, branch.name) as ContinuationObject;
+            continue;
+        }
+
+        if (action === 'Rename Branch') {
+            const newName = await promptRename(
+                'Branch',
+                branch.name,
+                candidate => Storage.listBranches(sysName, branch.parentObject).includes(candidate)
+            );
+
+            if (!newName) {
+                continue;
+            }
+
+            const oldName = branch.name;
+            try {
+                Storage.renameBranch(sysName, branch.parentObject, oldName, newName);
+                branch = Storage.loadBranch(sysName, branch.parentObject, newName) as ContinuationObject;
+                console.log(chalk.green(`Branch renamed to ${newName}.`));
+            } catch (err: any) {
+                printError(err?.message ?? 'Failed to rename branch.');
+            }
+            continue;
+        }
+
+        if (action === 'Delete Branch') {
+            const { confirm } = await inquirer.prompt({
+                type: 'confirm',
+                name: 'confirm',
+                message: `Delete branch ${branch.name}?`,
+                default: false
+            });
+            if (confirm) {
+                Storage.deleteBranch(sysName, branch.parentObject, branch.name);
+                return;
+            }
+        }
+    }
+}
+
+async function equilibriumBranchesMenu(
+    sysName: string,
+    obj: EquilibriumObject,
+    opts: { autoOpenBranchName?: string; autoInspect?: boolean } = {}
+): Promise<NavigationRequest | void> {
+    let autoOpenBranchName = opts.autoOpenBranchName;
+    let autoInspect = opts.autoInspect ?? false;
+
+    while (true) {
+        if (autoOpenBranchName) {
+            const target = autoOpenBranchName;
+            autoOpenBranchName = undefined;
+            const branch = Storage.loadBranch(sysName, obj.name, target) as ContinuationObject;
+            const nav = await manageBranch(sysName, branch, { autoInspect });
+            autoInspect = false;
+            if (nav) return nav;
+        }
+
+        const branchNames = Storage.listBranches(sysName, obj.name);
+        const branches = branchNames
+            .map(name => Storage.loadBranch(sysName, obj.name, name))
+            .filter((b): b is ContinuationObject => (b as any)?.type === 'continuation')
+            .filter(b => b.branchType === 'equilibrium');
+
+        const choices: Array<{ name: string; value: string } | inquirer.Separator> = [];
+        choices.push({ name: 'Create New Branch', value: 'CREATE' });
+
+        if (branches.length > 0) {
+            choices.push(new inquirer.Separator());
+            branches.forEach(branch => {
+                choices.push({
+                    name: `${branch.name} (Param: ${branch.parameterName}, Pts: ${branch.data.points.length})`,
+                    value: branch.name
+                });
+            });
+        }
+
+        choices.push(new inquirer.Separator());
+        choices.push({ name: 'Back', value: 'BACK' });
+
+        const { selection } = await inquirer.prompt({
+            type: 'rawlist',
+            name: 'selection',
+            message: `Branches (Equilibrium: ${obj.name})`,
+            choices,
+            pageSize: MENU_PAGE_SIZE
+        });
+
+        if (selection === 'BACK') return;
+
+        if (selection === 'CREATE') {
+            const nav = await createEquilibriumBranchForObject(sysName, obj);
+            if (nav) return nav;
+            continue;
+        }
+
+        const branch = Storage.loadBranch(sysName, obj.name, selection) as ContinuationObject;
+        const nav = await manageBranch(sysName, branch);
+        if (nav) return nav;
+    }
+}
+
+async function limitCycleBranchesMenu(
+    sysName: string,
+    obj: LimitCycleObject,
+    opts: { autoOpenBranchName?: string; autoInspect?: boolean } = {}
+): Promise<NavigationRequest | void> {
+    let autoOpenBranchName = opts.autoOpenBranchName;
+    let autoInspect = opts.autoInspect ?? false;
+
+    while (true) {
+        if (autoOpenBranchName) {
+            const target = autoOpenBranchName;
+            autoOpenBranchName = undefined;
+            const branch = Storage.loadBranch(sysName, obj.name, target) as ContinuationObject;
+            const nav = await manageBranch(sysName, branch, { autoInspect });
+            autoInspect = false;
+            if (nav) return nav;
+        }
+
+        const branchNames = Storage.listBranches(sysName, obj.name);
+        const branches = branchNames
+            .map(name => Storage.loadBranch(sysName, obj.name, name))
+            .filter((b): b is ContinuationObject => (b as any)?.type === 'continuation')
+            .filter(b => b.branchType === 'limit_cycle');
+
+        const choices: Array<{ name: string; value: string } | inquirer.Separator> = [];
+        choices.push({ name: 'Create New Branch', value: 'CREATE' });
+
+        if (branches.length > 0) {
+            choices.push(new inquirer.Separator());
+            branches.forEach(branch => {
+                choices.push({
+                    name: `${branch.name} (Param: ${branch.parameterName}, Pts: ${branch.data.points.length})`,
+                    value: branch.name
+                });
+            });
+        }
+
+        choices.push(new inquirer.Separator());
+        choices.push({ name: 'Back', value: 'BACK' });
+
+        const { selection } = await inquirer.prompt({
+            type: 'rawlist',
+            name: 'selection',
+            message: `Branches (Limit Cycle: ${obj.name})`,
+            choices,
+            pageSize: MENU_PAGE_SIZE
+        });
+
+        if (selection === 'BACK') return;
+
+        if (selection === 'CREATE') {
+            const nav = await createLimitCycleBranchForObject(sysName, obj);
+            if (nav) return nav;
+            continue;
+        }
+
+        const branch = Storage.loadBranch(sysName, obj.name, selection) as ContinuationObject;
+        const nav = await manageBranch(sysName, branch);
+        if (nav) return nav;
+    }
+}
+
+async function manageLimitCycle(
+    sysName: string,
+    obj: LimitCycleObject,
+    nav?: NavigationRequest
+): Promise<NavigationRequest | void> {
+    let pendingNav = nav;
+
+    while (true) {
+        if (pendingNav && pendingNav.kind === 'OPEN_BRANCH' && pendingNav.objectName === obj.name) {
+            const branchNav = await limitCycleBranchesMenu(sysName, obj, {
+                autoOpenBranchName: pendingNav.branchName,
+                autoInspect: pendingNav.autoInspect
+            });
+            if (branchNav) return branchNav;
+            obj = Storage.loadObject(sysName, obj.name) as LimitCycleObject;
+            pendingNav = undefined;
+            continue;
+        }
+
+        printHeader(obj.name, 'limit cycle');
+        printField('System', obj.systemName);
+        printField('Mesh', `${obj.ntst}×${obj.ncol}`);
+        printField('Period', Number.isFinite(obj.period) ? obj.period.toString() : 'NaN');
+        if (obj.parameters) {
+            printArray('Parameters', obj.parameters);
+        }
+        printBlank();
+
+        const { action } = await inquirer.prompt([{
+            type: 'rawlist',
+            name: 'action',
+            message: 'Object Actions',
+            choices: [
+                { name: 'Branches', value: 'Branches' },
+                { name: 'Inspect State', value: 'Inspect State' },
+                new inquirer.Separator(),
+                { name: 'Rename Object', value: 'Rename Object' },
+                { name: 'Delete Object', value: 'Delete Object' },
+                new inquirer.Separator(),
+                { name: 'Back', value: 'Back' }
+            ],
+            pageSize: MENU_PAGE_SIZE
+        }]);
+
+        if (action === 'Back') {
+            return;
+        }
+
+        if (action === 'Branches') {
+            const branchNav = await limitCycleBranchesMenu(sysName, obj);
+            if (branchNav) return branchNav;
+            obj = Storage.loadObject(sysName, obj.name) as LimitCycleObject;
+            continue;
+        }
+
+        if (action === 'Inspect State') {
+            printDivider();
+            printField('State length', obj.state.length.toString());
+            printField('Origin', obj.origin?.type ?? 'unknown');
+            printBlank();
+            continue;
+        }
+
+        if (action === 'Rename Object') {
+            const newName = await promptRename(
+                'Object',
+                obj.name,
+                candidate => objectExists(sysName, candidate)
+            );
+
+            if (!newName) {
+                continue;
+            }
+
+            const oldName = obj.name;
+            obj.name = newName;
+            Storage.renameObject(sysName, oldName, newName);
+            Storage.saveObject(sysName, obj);
+            console.log(chalk.green(`Object renamed to ${newName}.`));
+            continue;
+        }
+
+        if (action === 'Delete Object') {
+            const targetName = obj.name;
+            const { confirm } = await inquirer.prompt({
+                type: 'confirm',
+                name: 'confirm',
+                message: `Are you sure you want to delete ${targetName}?`,
+                default: false
+            });
+
+            if (confirm) {
+                Storage.deleteObject(sysName, targetName);
+                console.log(chalk.green(`Object ${targetName} deleted.`));
+                return;
+            }
+            continue;
+        }
+    }
+}
+
+async function manageOrbit(
+    sysName: string,
+    obj: OrbitObject,
+    _nav?: NavigationRequest
+): Promise<NavigationRequest | void> {
     while (true) {
         printHeader(obj.name, 'orbit');
         printField('System', obj.systemName);
@@ -714,6 +1125,7 @@ async function manageOrbit(sysName: string, obj: OrbitObject) {
                 { name: 'Inspect Data', value: 'Inspect Data' },
                 { name: 'Extend Orbit', value: 'Extend Orbit' },
                 { name: 'Oseledets Solver', value: 'Oseledets Solver' },
+                { name: 'Create Limit Cycle Object (from this orbit)', value: 'Create Limit Cycle Object' },
                 new inquirer.Separator(),
                 { name: 'Rename Object', value: 'Rename Object' },
                 { name: 'Delete Object', value: 'Delete Object' },
@@ -728,24 +1140,21 @@ async function manageOrbit(sysName: string, obj: OrbitObject) {
         }
 
         if (action === 'Rename Object') {
-            const { newName } = await inquirer.prompt({
-                name: 'newName',
-                message: 'New Object Name:',
-                default: obj.name,
-                validate: isValidName
-            });
+            const newName = await promptRename(
+                'Object',
+                obj.name,
+                candidate => objectExists(sysName, candidate)
+            );
 
-            if (newName !== obj.name && objectExists(sysName, newName)) {
-                console.error(chalk.red(`Object "${newName}" already exists.`));
+            if (!newName) {
                 continue;
             }
 
-            if (newName !== obj.name) {
-                Storage.deleteObject(sysName, obj.name);
-                obj.name = newName;
-                Storage.saveObject(sysName, obj);
-                console.log(chalk.green(`Object renamed to ${newName}.`));
-            }
+            const oldName = obj.name;
+            obj.name = newName;
+            Storage.renameObject(sysName, oldName, newName);
+            Storage.saveObject(sysName, obj);
+            console.log(chalk.green(`Object renamed to ${newName}.`));
             continue;
         }
 
@@ -776,7 +1185,18 @@ async function manageOrbit(sysName: string, obj: OrbitObject) {
             continue;
         }
 
-
+        if (action === 'Create Limit Cycle Object') {
+            const newBranch = await initiateLCFromOrbit(sysName, obj, { autoInspect: false });
+            if (newBranch) {
+                return {
+                    kind: 'OPEN_BRANCH',
+                    objectName: newBranch.parentObject,
+                    branchName: newBranch.name,
+                    autoInspect: true
+                };
+            }
+            continue;
+        }
 
         if (action === 'Extend Orbit') {
             const sysConfig = Storage.loadSystem(obj.systemName);
@@ -1386,8 +1806,25 @@ function reshapeCovariantVectors(payload: CovariantLyapunovResponse): CovariantL
     };
 }
 
-async function manageEquilibrium(sysName: string, obj: EquilibriumObject) {
+async function manageEquilibrium(
+    sysName: string,
+    obj: EquilibriumObject,
+    nav?: NavigationRequest
+): Promise<NavigationRequest | void> {
+    let pendingNav = nav;
+
     while (true) {
+        if (pendingNav && pendingNav.kind === 'OPEN_BRANCH' && pendingNav.objectName === obj.name) {
+            const branchNav = await equilibriumBranchesMenu(sysName, obj, {
+                autoOpenBranchName: pendingNav.branchName,
+                autoInspect: pendingNav.autoInspect
+            });
+            if (branchNav) return branchNav;
+            obj = Storage.loadObject(sysName, obj.name) as EquilibriumObject;
+            pendingNav = undefined;
+            continue;
+        }
+
         printHeader(obj.name, 'equilibrium');
         printField('System', obj.systemName);
         if (obj.parameters) {
@@ -1404,6 +1841,7 @@ async function manageEquilibrium(sysName: string, obj: EquilibriumObject) {
             choices: [
                 { name: 'Inspect Data', value: 'Inspect Data' },
                 { name: 'Equilibrium Solver', value: 'Equilibrium Solver' },
+                { name: 'Branches', value: 'Branches' },
                 new inquirer.Separator(),
                 { name: 'Rename Object', value: 'Rename Object' },
                 { name: 'Delete Object', value: 'Delete Object' },
@@ -1418,24 +1856,21 @@ async function manageEquilibrium(sysName: string, obj: EquilibriumObject) {
         }
 
         if (action === 'Rename Object') {
-            const { newName } = await inquirer.prompt({
-                name: 'newName',
-                message: 'New Object Name:',
-                default: obj.name,
-                validate: isValidName
-            });
+            const newName = await promptRename(
+                'Object',
+                obj.name,
+                candidate => objectExists(sysName, candidate)
+            );
 
-            if (newName !== obj.name && objectExists(sysName, newName)) {
-                console.error(chalk.red(`Object "${newName}" already exists.`));
+            if (!newName) {
                 continue;
             }
 
-            if (newName !== obj.name) {
-                Storage.deleteObject(sysName, obj.name);
-                obj.name = newName;
-                Storage.saveObject(sysName, obj);
-                console.log(chalk.green(`Object renamed to ${newName}.`));
-            }
+            const oldName = obj.name;
+            obj.name = newName;
+            Storage.renameObject(sysName, oldName, newName);
+            Storage.saveObject(sysName, obj);
+            console.log(chalk.green(`Object renamed to ${newName}.`));
             continue;
         }
 
@@ -1453,6 +1888,13 @@ async function manageEquilibrium(sysName: string, obj: EquilibriumObject) {
                 console.log(chalk.green(`Object ${targetName} deleted.`));
                 return;
             }
+            continue;
+        }
+
+        if (action === 'Branches') {
+            const branchNav = await equilibriumBranchesMenu(sysName, obj);
+            if (branchNav) return branchNav;
+            obj = Storage.loadObject(sysName, obj.name) as EquilibriumObject;
             continue;
         }
 

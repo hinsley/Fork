@@ -9,6 +9,7 @@ import chalk from 'chalk';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
 import { ContinuationObject } from '../types';
+import { NavigationRequest } from '../navigation';
 import {
   ConfigEntry,
   MENU_PAGE_SIZE,
@@ -20,6 +21,7 @@ import {
 import { printSuccess, printError } from '../format';
 import { serializeBranchDataForWasm, normalizeBranchEigenvalues } from './serialization';
 import { inspectBranch } from './inspect';
+import { getBranchParams } from './utils';
 
 /**
  * Extends an existing continuation branch in either the forward or backward direction.
@@ -35,7 +37,10 @@ import { inspectBranch } from './inspect';
  * @param sysName - Name of the dynamical system
  * @param branch - The continuation branch object to extend
  */
-export async function extendBranch(sysName: string, branch: ContinuationObject) {
+export async function extendBranch(
+  sysName: string,
+  branch: ContinuationObject
+): Promise<NavigationRequest | void> {
   const sysConfig = Storage.loadSystem(sysName);
   const defaults = branch.settings || {};
 
@@ -116,7 +121,9 @@ export async function extendBranch(sysName: string, branch: ContinuationObject) 
   console.log(chalk.cyan(`Extending Branch ${directionForward ? 'Forward' : 'Backward'}...`));
 
   try {
-    const bridge = new WasmBridge(sysConfig);
+    const runConfig = { ...sysConfig };
+    runConfig.params = getBranchParams(sysName, branch, sysConfig);
+    const bridge = new WasmBridge(runConfig);
 
     // If indices are missing, fill them (migration)
     if (!branch.data.indices) {
@@ -164,12 +171,13 @@ export async function extendBranch(sysName: string, branch: ContinuationObject) 
     branch.data = normalizeBranchEigenvalues(updatedData);
     branch.settings = continuationSettings;
 
-    Storage.saveContinuation(sysName, branch);
+    Storage.saveBranch(sysName, branch.parentObject, branch);
     printSuccess(`Extension successful! Total points: ${branch.data.points.length}`);
 
-    await inspectBranch(sysName, branch);
+    return await inspectBranch(sysName, branch);
 
   } catch (e) {
     printError(`Extension Failed: ${e}`);
+    return;
   }
 }

@@ -9,7 +9,7 @@ import {
   SystemConfig
 } from '../types';
 
-const NAME_REGEX = /^[a-zA-Z0-9_]+$/;
+import { isValidName as isValidNameShared } from '../naming';
 
 /**
  * Validates a branch or object name.
@@ -19,11 +19,7 @@ const NAME_REGEX = /^[a-zA-Z0-9_]+$/;
  * @param name - The name to validate
  * @returns true if valid, or an error message string if invalid
  */
-export function isValidName(name: string): boolean | string {
-  if (!name || name.length === 0) return "Name cannot be empty.";
-  if (!NAME_REGEX.test(name)) return "Name must contain only alphanumeric characters and underscores (no spaces).";
-  return true;
-}
+export const isValidName = isValidNameShared;
 
 /**
  * Get the best available parameter values for a branch.
@@ -41,27 +37,15 @@ export function getBranchParams(
     return [...branch.params];
   }
 
-  // Try to get params from the source equilibrium object
-  // The startObject field contains the name of the equilibrium or parent branch
-  if (branch.startObject) {
-    try {
-      // First check if it's an equilibrium object
-      const eqObj = Storage.loadObject(sysName, branch.startObject);
-      if (eqObj && eqObj.type === 'equilibrium' && eqObj.parameters) {
-        if (eqObj.parameters.length === sysConfig.params.length) {
-          return [...eqObj.parameters];
-        }
-      }
-
-      // Check if it's a parent branch
-      const parentBranch = Storage.loadContinuation(sysName, branch.startObject);
-      if (parentBranch && parentBranch.type === 'continuation') {
-        // Recursively get params from parent
-        return getBranchParams(sysName, parentBranch, sysConfig);
-      }
-    } catch {
-      // Object doesn't exist or can't be loaded, fall through to default
+  // Try to get params from the parent object.
+  try {
+    const obj = Storage.loadObject(sysName, branch.parentObject) as any;
+    const params = obj?.parameters as number[] | undefined;
+    if (Array.isArray(params) && params.length === sysConfig.params.length) {
+      return [...params];
     }
+  } catch {
+    // Fall through to default.
   }
 
   // Last resort: use current system config

@@ -298,16 +298,34 @@ r² ≈ -μ / l₁
 
 ### Eigenvector-Based Initialization
 
-Fork uses the complex eigenvector q to construct an initial limit cycle guess. Let q = qᵣ + i·qᵢ be the eigenvector for eigenvalue iω. The initial profile is:
+Fork uses the complex eigenvector q to construct an initial limit cycle guess, following the approach in MatCont's `init_H_LC.m`.
+
+#### Step 1: Eigenvector Rotation
+
+In general systems, the real and imaginary parts of the Hopf eigenvector are **not orthogonal**. This causes problems with the phase condition (explained below). To fix this, Fork rotates the eigenvector $q \to q \cdot e^{i\phi}$ such that the resulting $Re(q)$ and $Im(q)$ are orthogonal:
 
 ```
-x(θ) = x₀ + A·[qᵣ·cos(2πθ) - qᵢ·sin(2πθ)]
+d = ||Re(q)||²
+s = ||Im(q)||²
+r = Re(q) · Im(q)
+φ = ½ atan2(2r, s - d)
+q ← q · exp(i·φ)
+```
+
+After rotation, $Re(q) \perp Im(q)$, and $Re(q)$ is normalized to unit length.
+
+#### Step 2: Initial Profile Construction
+
+The initial limit cycle profile is sampled at each mesh point:
+
+```
+x(θ) = x₀ + A·[Re(q)·cos(2πθ) - Im(q)·sin(2πθ)]
 ```
 
 for θ ∈ [0, 1], where:
 - **x₀** is the equilibrium at the Hopf point
 - **A** is the user-specified amplitude
-- **qᵣ, qᵢ** are real and imaginary parts of the eigenvector
+- **Re(q), Im(q)** are the rotated eigenvector components
 
 The initial period guess is:
 
@@ -315,12 +333,36 @@ The initial period guess is:
 T₀ = 2π / ω
 ```
 
+#### Step 3: Phase Condition Setup
+
+The phase condition pins the orbit's phase to avoid translational degeneracy. Fork sets:
+
+- **Phase anchor**: x₀ (the Hopf equilibrium)
+- **Phase direction**: Im(q) (the rotated imaginary part, normalized)
+
+This choice is critical. The initial guess at θ=0 is:
+```
+x(0) = x₀ + A·Re(q)
+```
+
+The phase condition requires:
+```
+(x(0) - x₀) · phase_direction = 0
+```
+
+Substituting:
+```
+A·Re(q) · Im(q) = 0  ✓ (satisfied because Re(q) ⊥ Im(q))
+```
+
+If the phase direction were set to Re(q) instead, the condition would force A=0, collapsing the guess to the equilibrium. This subtle bug caused incorrect continuation direction in earlier Fork versions.
+
 ### Choosing the Amplitude
 
 The amplitude parameter controls how far from the Hopf point the initial guess is placed:
 
-- **Too small** (< 0.01): The cycle is nearly degenerate; Newton may have trouble
-- **Too large** (> 1.0): Outside the basin of convergence
+- **Too small** (<0.01): The cycle is nearly degenerate; Newton may have trouble
+- **Too large** (>1.0): Outside the basin of convergence
 - **Sweet spot** (0.05–0.2): Usually works well
 
 For subcritical bifurcations (l₁ > 0), you may need to step in the negative parameter direction to find stable cycles.

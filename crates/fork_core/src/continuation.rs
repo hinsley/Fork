@@ -76,39 +76,40 @@ pub fn continue_with_problem<P: ContinuationProblem>(
         upoldp: None,
     };
     
-    // Compute initial tangent
+    // Compute initial tangent and orient it based on requested parameter direction.
     let mut prev_tangent = compute_tangent_from_problem(problem, &prev_aug)?;
+    let forward_sign = if forward { 1.0 } else { -1.0 };
+    
+    // When starting from a bifurcation (like Hopf), the tangent's parameter component
+    // may be near-zero due to the branch being nearly orthogonal to the parameter axis.
+    // For high-dimensional problems (like LC collocation), the normalized parameter component
+    // can be extremely small. We use a relative threshold and add a proportional bias.
+    let tangent_norm = prev_tangent.norm();
+    let relative_threshold = 0.01; // 1% of tangent norm
+    let param_component_threshold = relative_threshold * tangent_norm;
+    
+    if prev_tangent[0].abs() < param_component_threshold {
+        // Add a bias equal to the threshold value in the user's direction
+        prev_tangent[0] = param_component_threshold * forward_sign;
+        // Re-normalize
+        let norm = prev_tangent.norm();
+        if norm > 1e-12 {
+            prev_tangent = &prev_tangent / norm;
+        }
+    } else if prev_tangent[0] * forward_sign < 0.0 {
+        prev_tangent = -prev_tangent;
+    }
     
     // Set direction
-    let direction_sign = if forward { 1.0 } else { -1.0 };
+    let direction_sign = 1.0; // Direction is now encoded in the oriented tangent
     let mut step_size = settings.step_size;
     let mut current_index: i32 = 0;
     let mut consecutive_failures = 0;
     const MAX_CONSECUTIVE_FAILURES: usize = 20;
     
-    #[cfg(test)]
-    println!("Starting continuation: max_steps={}, step_size={}, min_step={}", 
-             settings.max_steps, settings.step_size, settings.min_step_size);
-    
-    #[cfg(test)]
-    {
-        // Debug tangent info
-        let tangent_p = prev_tangent[0];
-        let tangent_period = prev_tangent[dim]; // Period component
-        println!("Initial tangent: param_component={:.6}, period_component={:.6}, norm={:.6}", 
-                 tangent_p, tangent_period, prev_tangent.norm());
-    }
-    
-    for step in 0..settings.max_steps {
+    for _step in 0..settings.max_steps {
         // Predictor: predict along tangent
         let pred_aug = &prev_aug + &prev_tangent * (step_size * direction_sign);
-        
-        #[cfg(test)]
-        {
-            let pred_period = pred_aug[dim];
-            println!("Step {}: param_pred={:.6}, period_pred={:.6}, step_size={:.6}", 
-                     step, pred_aug[0], pred_period, step_size);
-        }
         
         // Corrector: solve using Newton-like iteration
         let corrected_opt = correct_with_problem(
@@ -121,17 +122,10 @@ pub fn continue_with_problem<P: ContinuationProblem>(
         )?;
         
         if let Some(corrected_aug) = corrected_opt {
-            #[cfg(test)]
-            println!("  Corrector converged: param={:.6}", corrected_aug[0]);
-            
             if !corrected_aug.iter().all(|v| v.is_finite()) {
-                #[cfg(test)]
-                println!("  Non-finite values in corrected_aug");
                 consecutive_failures += 1;
                 step_size *= 0.5;
                 if step_size < settings.min_step_size || consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                    #[cfg(test)]
-                    println!("  Breaking: step_size={:.2e}, failures={}", step_size, consecutive_failures);
                     break;
                 }
                 continue;
@@ -140,8 +134,6 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             // Compute new tangent
             let new_tangent = compute_tangent_from_problem(problem, &corrected_aug)?;
             if !new_tangent.iter().all(|v| v.is_finite()) {
-                #[cfg(test)]
-                println!("  Non-finite tangent");
                 consecutive_failures += 1;
                 step_size *= 0.5;
                 if step_size < settings.min_step_size || consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
@@ -174,29 +166,60 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             let prev_tests = &prev_diag.test_values;
             let new_tests = &diagnostics.test_values;
             
-            // Detect limit cycle bifurcations (check LC test functions)
-            let cycle_fold_crossed = prev_tests.cycle_fold * new_tests.cycle_fold <= 0.0;
-            let period_doubling_crossed = prev_tests.period_doubling * new_tests.period_doubling <= 0.0;
-            let neimark_sacker_crossed = prev_tests.neimark_sacker * new_tests.neimark_sacker <= 0.0;
+            // Detect limit cycle bifurcations
+            let cycle_fold_crossed = prev_tests.cycle_fold * new_tests.cycle_fold < 0.0;
+            let period_doubling_crossed = prev_tests.period_doubling * new_tests.period_doubling < 0.0;
+            let neimark_sacker_crossed = prev_tests.neimark_sacker * new_tests.neimark_sacker < 0.0;
             
-            // Prioritize: CycleFold > PeriodDoubling > NeimarkSacker
-            let bifurcation_type = if cycle_fold_crossed {
+            // Detect equilibrium bifurcations
+            let fold_crossed = prev_tests.fold * new_tests.fold < 0.0;
+            let hopf_crossed = prev_tests.hopf * new_tests.hopf < 0.0;
+            let neutral_saddle_crossed = prev_tests.neutral_saddle * new_tests.neutral_saddle < 0.0;
+
+            // Prioritize: Fold > Hopf > CycleFold > PeriodDoubling > NeimarkSacker
+            let bifurcation_type = if fold_crossed {
+                BifurcationType::Fold
+            } else if hopf_crossed {
+                BifurcationType::Hopf
+            } else if cycle_fold_crossed {
                 BifurcationType::CycleFold
             } else if period_doubling_crossed {
                 BifurcationType::PeriodDoubling
             } else if neimark_sacker_crossed {
                 BifurcationType::NeimarkSacker
+            } else if neutral_saddle_crossed {
+                BifurcationType::NeutralSaddle
             } else {
                 BifurcationType::None
             };
             
+            // Refine bifurcation point if detected
+            let (final_aug, final_diag) = if bifurcation_type != BifurcationType::None {
+                match refine_bifurcation_bisection(
+                    problem,
+                    &prev_aug,
+                    prev_tests,
+                    &corrected_aug,
+                    new_tests,
+                    bifurcation_type,
+                    &prev_tangent,
+                    settings.corrector_steps,
+                    settings.corrector_tolerance,
+                ) {
+                    Ok((refined_aug, refined_diag)) => (refined_aug, refined_diag),
+                    Err(_) => (corrected_aug.clone(), diagnostics.clone()),
+                }
+            } else {
+                (corrected_aug.clone(), diagnostics.clone())
+            };
+            
             // Create new point
-            current_index += direction_sign as i32;
+            current_index += forward_sign as i32;
             let new_point = ContinuationPoint {
-                state: corrected_aug.rows(1, dim).iter().cloned().collect(),
-                param_value: corrected_aug[0],
+                state: final_aug.rows(1, dim).iter().cloned().collect(),
+                param_value: final_aug[0],
                 stability: bifurcation_type,
-                eigenvalues: diagnostics.eigenvalues.clone(),
+                eigenvalues: final_diag.eigenvalues.clone(),
             };
             
             // Record bifurcation if detected
@@ -207,24 +230,17 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             branch.points.push(new_point);
             branch.indices.push(current_index);
             
-            #[cfg(test)]
-            println!("  Added point {}: param={:.6}", branch.points.len(), corrected_aug[0]);
-            
             // Adaptive step size - increase on success
             step_size = (step_size * 1.2).min(settings.max_step_size);
             
-            prev_aug = corrected_aug;
+            prev_aug = final_aug;
             prev_tangent = consistent_tangent;
-            prev_diag = diagnostics;
+            prev_diag = final_diag;
         } else {
             // Failed to converge, reduce step size
-            #[cfg(test)]
-            println!("  Corrector failed to converge");
             consecutive_failures += 1;
             step_size *= 0.5;
             if step_size < settings.min_step_size || consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                #[cfg(test)]
-                println!("  Breaking: step_size={:.2e}, failures={}", step_size, consecutive_failures);
                 break;
             }
         }
@@ -323,8 +339,9 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
             tangent = -tangent;
         }
     } else {
-        // Fall back to forward flag if only one point
-        if !is_append {
+        // Fall back to parameter direction if only one point
+        let forward_sign = if forward { 1.0 } else { -1.0 };
+        if tangent[0] * forward_sign < 0.0 {
             tangent = -tangent;
         }
     }
@@ -451,29 +468,36 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             let prev_tests = &prev_diag.test_values;
             let new_tests = &diag.test_values;
             
-            // Detect limit cycle bifurcations (check LC test functions)
+            // Detect limit cycle bifurcations
             let cycle_fold_crossed = prev_tests.cycle_fold * new_tests.cycle_fold < 0.0;
             let period_doubling_crossed = prev_tests.period_doubling * new_tests.period_doubling < 0.0;
             let neimark_sacker_crossed = prev_tests.neimark_sacker * new_tests.neimark_sacker < 0.0;
             
-            // Prioritize: CycleFold > PeriodDoubling > NeimarkSacker
-            let bifurcation_type = if cycle_fold_crossed {
+            // Detect equilibrium bifurcations
+            let fold_crossed = prev_tests.fold * new_tests.fold < 0.0;
+            let hopf_crossed = prev_tests.hopf * new_tests.hopf < 0.0;
+            let neutral_saddle_crossed = prev_tests.neutral_saddle * new_tests.neutral_saddle < 0.0;
+
+            // Prioritize: Fold > Hopf > CycleFold > PeriodDoubling > NeimarkSacker
+            let bifurcation_type = if fold_crossed {
+                BifurcationType::Fold
+            } else if hopf_crossed {
+                BifurcationType::Hopf
+            } else if cycle_fold_crossed {
                 BifurcationType::CycleFold
             } else if period_doubling_crossed {
                 BifurcationType::PeriodDoubling
             } else if neimark_sacker_crossed {
                 BifurcationType::NeimarkSacker
+            } else if neutral_saddle_crossed {
+                BifurcationType::NeutralSaddle
             } else {
                 BifurcationType::None
             };
             
-            // If bifurcation detected, refine its location via bisection
-            // NOTE: Newton refinement with finite differences for test function gradients
-            // could also be used here for faster convergence, but bisection is simpler
-            // and more robust for the high-dimensional LC collocation problems.
-            let (final_aug, final_diag, final_bif_type) = if bifurcation_type != BifurcationType::None {
-                // Refine using bisection between prev_aug and corrected_aug
-                match refine_lc_bifurcation_bisection(
+            // Refine bifurcation point if detected
+            let (final_aug, final_diag) = if bifurcation_type != BifurcationType::None {
+                match refine_bifurcation_bisection(
                     problem,
                     &prev_aug,
                     prev_tests,
@@ -484,39 +508,36 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
                     settings.corrector_steps,
                     settings.corrector_tolerance,
                 ) {
-                    Ok((refined_aug, refined_diag)) => (refined_aug, refined_diag, bifurcation_type),
-                    Err(_) => {
-                        // Refinement failed, use the unrefined point
-                        (corrected_aug.clone(), diag.clone(), bifurcation_type)
-                    }
+                    Ok((refined_aug, refined_diag)) => (refined_aug, refined_diag),
+                    Err(_) => (corrected_aug.clone(), diag.clone()),
                 }
             } else {
-                (corrected_aug.clone(), diag.clone(), BifurcationType::None)
+                (corrected_aug.clone(), diag.clone())
             };
             
             // Create new point with potentially refined state
-            current_index += 1;
             let new_pt = ContinuationPoint {
                 state: final_aug.rows(1, dim).iter().cloned().collect(),
                 param_value: final_aug[0],
-                stability: final_bif_type,
+                stability: bifurcation_type,
                 eigenvalues: final_diag.eigenvalues.clone(),
             };
             
             // Record bifurcation if detected
-            if final_bif_type != BifurcationType::None {
+            if bifurcation_type != BifurcationType::None {
                 branch.bifurcations.push(branch.points.len());
             }
             
             branch.points.push(new_pt);
-            branch.indices.push(current_index);
+            branch.indices.push(current_index + 1);
+            current_index += 1;
             
-            // Update problem state if needed (use original corrected_aug for continuation)
-            problem.update_after_step(&corrected_aug)?;
+            // Update problem state if needed
+            problem.update_after_step(&final_aug)?;
             
-            prev_aug = corrected_aug;
+            prev_aug = final_aug;
             prev_tangent = new_tangent;
-            prev_diag = diag;
+            prev_diag = final_diag;
             
             // Adaptive step size
             step_size = (step_size * 1.2).min(settings.max_step_size);
@@ -532,29 +553,8 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
     Ok(branch)
 }
 
-/// Refines a limit cycle bifurcation point using bisection.
-/// 
-/// This function bisects between `prev_aug` and `new_aug` to find the point where
-/// the specified test function crosses zero. At each bisection step, the interpolated
-/// point is corrected back onto the solution manifold using Newton's method.
-///
-/// # Arguments
-/// * `problem` - The continuation problem (provides residual, Jacobian, diagnostics)
-/// * `prev_aug` - Augmented state before the bifurcation (test function has one sign)
-/// * `prev_tests` - Test function values at prev_aug
-/// * `new_aug` - Augmented state after the bifurcation (test function has opposite sign)
-/// * `new_tests` - Test function values at new_aug
-/// * `bif_type` - The type of bifurcation being refined
-/// * `tangent` - Tangent direction for the corrector
-/// * `corrector_steps` - Max Newton corrector iterations
-/// * `tolerance` - Convergence tolerance
-///
-/// # Note
-/// Newton refinement (solving the augmented system [F=0, ψ=0] with test function gradient
-/// computed via finite differences) could provide faster (quadratic) convergence but requires
-/// dim+1 extra monodromy evaluations per iteration. Bisection is simpler and sufficient
-/// for most applications.
-fn refine_lc_bifurcation_bisection<P: ContinuationProblem>(
+/// Refines a bifurcation point using bisection.
+fn refine_bifurcation_bisection<P: ContinuationProblem>(
     problem: &mut P,
     prev_aug: &DVector<f64>,
     prev_tests: &problem::TestFunctionValues,
@@ -703,7 +703,7 @@ fn compute_tangent_from_problem<P: ContinuationProblem>(
 
 /// Corrects a predicted point using Moore-Penrose pseudo-arclength correction.
 ///
-/// This follows MATCONT's newtcorr style: solve the bordered system
+/// This uses a bordered pseudo-arclength corrector: solve the bordered system
 /// [J; v'] * delta = [F; 0], which minimizes the correction perpendicular to the tangent.
 /// Both state AND parameter are corrected.
 fn correct_with_problem<P: ContinuationProblem>(
@@ -717,28 +717,18 @@ fn correct_with_problem<P: ContinuationProblem>(
     let dim = problem.dimension();
     let mut current = prediction.clone();
     
-    #[cfg(test)]
-    println!("    Corrector: dim={}, max_iters={}, tol={:.2e}", dim, max_iters, tolerance);
-    
     // Use adaptive tangent for bordering - start with prev_tangent
     let mut border_tangent = prev_tangent.clone();
     
-    for iter in 0..max_iters {
+    for _iter in 0..max_iters {
         // Compute residual F(x)
         let mut residual = DVector::zeros(dim);
         problem.residual(&current, &mut residual)?;
         
         let res_norm = residual.norm();
         
-        #[cfg(test)]
-        if iter == 0 || (iter + 1) % 5 == 0 {
-            println!("    Iter {}: res_norm={:.6e}", iter, res_norm);
-        }
-        
-        // Check convergence: F(x) should be small
+        // Check convergence: F(x) should be small.
         if res_norm < tolerance {
-            #[cfg(test)]
-            println!("    Converged at iter {} with res_norm={:.6e}", iter, res_norm);
             return Ok(Some(current));
         }
         
@@ -767,15 +757,8 @@ fn correct_with_problem<P: ContinuationProblem>(
         let lu = bordered.lu();
         if let Some(delta) = lu.solve(&rhs) {
             let delta_norm = delta.norm();
-            
-            #[cfg(test)]
-            if iter == 0 {
-                println!("    Delta norm: {:.2e}", delta_norm);
-            }
-            
+
             if !delta_norm.is_finite() {
-                #[cfg(test)]
-                println!("    Delta norm non-finite at iter {}", iter);
                 return Ok(None);
             }
             
@@ -785,21 +768,11 @@ fn correct_with_problem<P: ContinuationProblem>(
             // Update ALL components including parameter (clone delta for later use)
             current += &(damping * &delta);
             
-            // Ensure period stays positive
-            let period_val = current[dim];
-            if period_val <= 0.1 {
-                #[cfg(test)]
-                println!("    Period went too low ({}), clamping", period_val);
-                current[dim] = 0.5;  // Reset to reasonable value
-            }
-            
             // Update tangent estimate for next iteration if delta is reasonable
             if delta_norm > 1e-10 && delta_norm < 1e5 {
                 border_tangent = delta.clone() / delta_norm;
             }
         } else {
-            #[cfg(test)]
-            println!("    LU solve failed at iter {}", iter);
             return Ok(None);
         }
     }
@@ -809,14 +782,9 @@ fn correct_with_problem<P: ContinuationProblem>(
     problem.residual(&current, &mut final_res)?;
     let final_norm = final_res.norm();
     
-    #[cfg(test)]
-    println!("    Final check: res_norm={:.6e}, tol*10={:.6e}", final_norm, tolerance * 10.0);
-    
     if final_norm < tolerance * 10.0 {
         Ok(Some(current))
     } else {
-        #[cfg(test)]
-        println!("    Did not converge: final_norm={:.6e} > {:.6e}", final_norm, tolerance * 10.0);
         Ok(None)
     }
 }
@@ -995,10 +963,6 @@ pub fn extend_branch(
                         current_tangent = refined_tangent;
                     }
                     Err(_err) => {
-                        #[cfg(test)]
-                        {
-                            println!("Fold refinement failed: {:?}", _err);
-                        }
                         new_pt.stability = BifurcationType::Fold;
                     }
                 }
@@ -1021,10 +985,6 @@ pub fn extend_branch(
                         current_tangent = refined_tangent;
                     }
                     Err(_err) => {
-                        #[cfg(test)]
-                        {
-                            println!("Hopf refinement failed: {:?}", _err);
-                        }
                         new_pt.stability = BifurcationType::Hopf;
                     }
                 }
@@ -1633,14 +1593,6 @@ mod tests {
         assert!(res.is_ok(), "Continuation failed: {:?}", res.err());
         let branch = res.unwrap();
 
-        println!("Generated {} points", branch.points.len());
-        for (i, pt) in branch.points.iter().enumerate() {
-            println!(
-                "Pt {}: a={:.4}, x={:.4}",
-                i, pt.param_value, pt.state[0]
-            );
-        }
-
         assert!(branch.points.len() > 1);
         assert!(branch.points[1].param_value > -1.0);
         assert!(branch.points[1].state[0] < 1.0);
@@ -1706,18 +1658,11 @@ mod tests {
         assert!(res.is_ok(), "Hopf NF continuation failed: {:?}", res.err());
         let branch = res.unwrap();
 
-        println!("Hopf NF: Generated {} points", branch.points.len());
-        
         // Check that we found a Hopf bifurcation
         let hopf_points: Vec<_> = branch.points.iter()
             .enumerate()
             .filter(|(_, pt)| pt.stability == BifurcationType::Hopf)
             .collect();
-        
-        println!("Found {} Hopf points", hopf_points.len());
-        for (i, pt) in &hopf_points {
-            println!("  Point {}: mu = {:.6}", i, pt.param_value);
-        }
 
         // We should find at least one Hopf bifurcation
         assert!(!hopf_points.is_empty(), "Should detect Hopf bifurcation");
