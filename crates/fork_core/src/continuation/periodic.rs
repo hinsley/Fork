@@ -3,6 +3,7 @@ use super::{
     ContinuationBranch, ContinuationPoint, ContinuationSettings,
 };
 use super::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
+#[allow(unused_imports)]
 use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
 use crate::equilibrium::{compute_jacobian, SystemKind};
 use crate::traits::DynamicalSystem;
@@ -73,7 +74,7 @@ pub struct LimitCycleGuess {
 }
 
 impl LimitCycleGuess {
-    pub fn to_aug(&self, dim: usize) -> DVector<f64> {
+    pub fn to_aug(&self, _dim: usize) -> DVector<f64> {
         let flat = flatten_collocation_state(&self.mesh_states, &self.stage_states, self.period);
         let mut aug = DVector::zeros(flat.len() + 1);
         aug[0] = self.param_value;
@@ -721,6 +722,7 @@ pub fn limit_cycle_setup_from_pd(
 
 /// Helper function to compute the monodromy matrix from the collocation Jacobian.
 /// This extracts M using the shooting-based method.
+#[allow(dead_code)]
 fn compute_monodromy_matrix(
     jac: &DMatrix<f64>,
     dim: usize,
@@ -797,7 +799,7 @@ fn compute_monodromy_matrix(
 }
 
 
-struct PeriodicOrbitCollocationProblem<'a> {
+pub struct PeriodicOrbitCollocationProblem<'a> {
     context: FlowContext<'a>,
     mesh_points: usize,
     degree: usize,
@@ -1508,6 +1510,7 @@ fn integrate_polynomial(coeffs: &[f64], upper: f64) -> f64 {
     sum
 }
 
+#[allow(dead_code)]
 fn compute_trapezoid_monodromy(
     context: &mut FlowContext<'_>,
     param: f64,
@@ -1544,6 +1547,7 @@ fn compute_trapezoid_monodromy(
     Ok(monodromy)
 }
 
+#[allow(dead_code)]
 fn cycle_tests(multipliers: &[Complex<f64>]) -> (f64, f64, f64, Vec<Complex<f64>>) {
     if multipliers.is_empty() {
         return (1.0, 1.0, 1.0, Vec::new());
