@@ -7,6 +7,8 @@ use fork_core::continuation::{
     CollocationConfig, LimitCycleSetup,
     continue_limit_cycle_collocation, extend_limit_cycle_collocation,
     limit_cycle_setup_from_hopf, limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd,
+    Codim1CurveType, Codim2BifurcationType, Codim1CurvePoint, Codim1CurveBranch,
+    FoldCurveProblem, HopfCurveProblem, continue_with_problem,
 };
 use fork_core::continuation::equilibrium::{
     continue_parameter as core_continuation, extend_branch as core_extend_branch,
@@ -549,6 +551,234 @@ impl WasmSystem {
         .map_err(|e| JsValue::from_str(&format!("Limit cycle continuation failed: {}", e)))?;
 
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    /// Continues a fold (saddle-node) bifurcation curve in two-parameter space.
+    ///
+    /// # Arguments
+    /// * `fold_state` - State vector at the fold bifurcation point
+    /// * `param1_name` - Name of first active parameter
+    /// * `param1_value` - Value of first parameter at fold point  
+    /// * `param2_name` - Name of second active parameter
+    /// * `param2_value` - Value of second parameter at fold point
+    /// * `settings_val` - Continuation settings (step size, max steps, etc.)
+    /// * `forward` - Direction of continuation
+    ///
+    /// # Returns
+    /// A `Codim1CurveBranch` containing the fold curve and detected codim-2 bifurcations
+    pub fn continue_fold_curve(
+        &mut self,
+        fold_state: Vec<f64>,
+        param1_name: &str,
+        param1_value: f64,
+        param2_name: &str,
+        param2_value: f64,
+        settings_val: JsValue,
+        forward: bool,
+    ) -> Result<JsValue, JsValue> {
+        let settings: ContinuationSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
+
+        let kind = match self.system_type {
+            SystemType::Flow => SystemKind::Flow,
+            SystemType::Map => SystemKind::Map,
+        };
+
+        let param1_index = *self.system.param_map.get(param1_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param1_name)))?;
+        let param2_index = *self.system.param_map.get(param2_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+
+        // Set parameters to fold point values
+        self.system.params[param1_index] = param1_value;
+        self.system.params[param2_index] = param2_value;
+
+        // Create fold curve problem
+        let mut problem = FoldCurveProblem::new(
+            &mut self.system,
+            kind,
+            &fold_state,
+            param1_index,
+            param2_index,
+        ).map_err(|e| JsValue::from_str(&format!("Failed to create fold problem: {}", e)))?;
+
+        // Build initial augmented state for PALC: [p1, p2, x1, ..., xn]
+        // The ContinuationPoint.state should contain [p2, x1..xn] so that
+        // when continue_with_problem prepends p1, we get [p1, p2, x1..xn]
+        let n = fold_state.len();
+        
+        // Build state as [p2, x1..xn]
+        let mut augmented_state = Vec::with_capacity(n + 1);
+        augmented_state.push(param2_value);  // p2
+        augmented_state.extend_from_slice(&fold_state);  // x1..xn
+
+        // Build initial point for PALC
+        // param_value = p1, state = [p2, x1..xn]
+        let initial_point = fork_core::continuation::ContinuationPoint {
+            state: augmented_state,
+            param_value: param1_value,
+            stability: fork_core::continuation::BifurcationType::Fold,
+            eigenvalues: vec![],
+        };
+
+        // Run continuation
+        let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
+            .map_err(|e| JsValue::from_str(&format!("Fold curve continuation failed: {}", e)))?;
+
+        // Convert to Codim1CurveBranch format
+        // The continuation stores augmented state as [p1, p2, x1, ..., xn]
+        // pt.param_value = p1, pt.state = [p2, x1, ..., xn]
+        let codim1_points: Vec<Codim1CurvePoint> = branch.points.iter().map(|pt| {
+            // pt.state layout: [p2, x1, ..., xn]
+            // Extract p2 (first element)
+            let p2 = if !pt.state.is_empty() { pt.state[0] } else { param2_value };
+            // Extract physical state (elements 1 to n)
+            let physical_state: Vec<f64> = if pt.state.len() >= n + 1 {
+                pt.state[1..(n + 1)].to_vec()
+            } else {
+                fold_state.clone()
+            };
+            
+            Codim1CurvePoint {
+                state: physical_state,
+                param1_value: pt.param_value,  // p1
+                param2_value: p2,              // p2 extracted from augmented state
+                codim2_type: Codim2BifurcationType::None,
+                auxiliary: None,
+                eigenvalues: pt.eigenvalues.clone(),
+            }
+        }).collect();
+
+        let codim1_branch = Codim1CurveBranch {
+            curve_type: Codim1CurveType::Fold,
+            param1_index,
+            param2_index,
+            points: codim1_points,
+            codim2_bifurcations: vec![],
+            indices: branch.indices.clone(),
+        };
+
+        to_value(&codim1_branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    /// Continues a Hopf bifurcation curve in two-parameter space.
+    ///
+    /// # Arguments
+    /// * `hopf_state` - State vector at the Hopf bifurcation point
+    /// * `hopf_omega` - Hopf frequency (imaginary part of critical eigenvalue)
+    /// * `param1_name` - Name of first active parameter
+    /// * `param1_value` - Value of first parameter at Hopf point
+    /// * `param2_name` - Name of second active parameter
+    /// * `param2_value` - Value of second parameter at Hopf point
+    /// * `settings_val` - Continuation settings
+    /// * `forward` - Direction of continuation
+    ///
+    /// # Returns
+    /// A `Codim1CurveBranch` containing the Hopf curve and detected codim-2 bifurcations
+    pub fn continue_hopf_curve(
+        &mut self,
+        hopf_state: Vec<f64>,
+        hopf_omega: f64,
+        param1_name: &str,
+        param1_value: f64,
+        param2_name: &str,
+        param2_value: f64,
+        settings_val: JsValue,
+        forward: bool,
+    ) -> Result<JsValue, JsValue> {
+        let settings: ContinuationSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
+
+        let kind = match self.system_type {
+            SystemType::Flow => SystemKind::Flow,
+            SystemType::Map => SystemKind::Map,
+        };
+
+        let param1_index = *self.system.param_map.get(param1_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param1_name)))?;
+        let param2_index = *self.system.param_map.get(param2_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+
+        // Set parameters to Hopf point values
+        self.system.params[param1_index] = param1_value;
+        self.system.params[param2_index] = param2_value;
+
+        // Create Hopf curve problem
+        let mut problem = HopfCurveProblem::new(
+            &mut self.system,
+            kind,
+            &hopf_state,
+            hopf_omega,
+            param1_index,
+            param2_index,
+        ).map_err(|e| JsValue::from_str(&format!("Failed to create Hopf problem: {}", e)))?;
+
+        // Build initial augmented state for PALC: [p1, p2, x1, ..., xn, κ]
+        // The ContinuationPoint.state should contain [p2, x1..xn, κ] so that
+        // when continue_with_problem prepends p1, we get [p1, p2, x1..xn, κ]
+        let n = hopf_state.len();
+        let kappa = hopf_omega * hopf_omega;
+        
+        // Build state as [p2, x1..xn, κ]
+        let mut augmented_state = Vec::with_capacity(n + 2);
+        augmented_state.push(param2_value);  // p2
+        augmented_state.extend_from_slice(&hopf_state);  // x1..xn
+        augmented_state.push(kappa);  // κ
+
+        // Build initial point for PALC
+        // param_value = p1, state = [p2, x1..xn, κ]
+        let initial_point = fork_core::continuation::ContinuationPoint {
+            state: augmented_state,
+            param_value: param1_value,
+            stability: fork_core::continuation::BifurcationType::Hopf,
+            eigenvalues: vec![],
+        };
+
+        // Run continuation
+        let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
+            .map_err(|e| JsValue::from_str(&format!("Hopf curve continuation failed: {}", e)))?;
+
+        // Convert to Codim1CurveBranch format
+        // The continuation stores augmented state as [p1, p2, x1, ..., xn, κ]
+        // pt.param_value = p1, pt.state = [p2, x1, ..., xn, κ]
+        let n = hopf_state.len();  // Physical state dimension
+        let codim1_points: Vec<Codim1CurvePoint> = branch.points.iter().map(|pt| {
+            // pt.state layout: [p2, x1, ..., xn, κ]
+            // Extract p2 (first element)
+            let p2 = if !pt.state.is_empty() { pt.state[0] } else { param2_value };
+            // Extract physical state (elements 1 to n)
+            let physical_state: Vec<f64> = if pt.state.len() >= n + 1 {
+                pt.state[1..(n + 1)].to_vec()
+            } else {
+                hopf_state.clone()
+            };
+            // Extract κ (last element)
+            let kappa = if pt.state.len() >= n + 2 {
+                pt.state[n + 1]
+            } else {
+                hopf_omega * hopf_omega
+            };
+            
+            Codim1CurvePoint {
+                state: physical_state,
+                param1_value: pt.param_value,  // p1
+                param2_value: p2,              // p2 extracted from augmented state
+                codim2_type: Codim2BifurcationType::None,
+                auxiliary: Some(kappa),        // κ extracted from augmented state
+                eigenvalues: pt.eigenvalues.clone(),
+            }
+        }).collect();
+
+        let codim1_branch = Codim1CurveBranch {
+            curve_type: Codim1CurveType::Hopf,
+            param1_index,
+            param2_index,
+            points: codim1_points,
+            codim2_bifurcations: vec![],
+            indices: branch.indices.clone(),
+        };
+
+        to_value(&codim1_branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 }
 

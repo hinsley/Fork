@@ -70,13 +70,17 @@ export interface ContinuationEigenvalue {
 export interface ContinuationPoint {
   state: number[];
   param_value: number;
+  param2_value?: number;  // Second parameter value for 2-param branches
   stability: "None" | "Fold" | "Hopf" | "NeutralSaddle" | "CycleFold" | "PeriodDoubling" | "NeimarkSacker" | string;
   eigenvalues?: ContinuationEigenvalue[];
+  auxiliary?: number;  // Extra data like κ for Hopf curves
 }
 
 export type BranchType =
   | { type: 'Equilibrium' }
-  | { type: 'LimitCycle'; ntst: number; ncol: number };
+  | { type: 'LimitCycle'; ntst: number; ncol: number }
+  | { type: 'FoldCurve'; param1_name: string; param2_name: string }
+  | { type: 'HopfCurve'; param1_name: string; param2_name: string };
 
 export interface ContinuationBranchData {
   points: ContinuationPoint[];
@@ -103,7 +107,7 @@ export interface ContinuationObject {
    * This is kept for provenance/debugging and should not be used for storage lookup.
    */
   startObject: string;
-  branchType: 'equilibrium' | 'limit_cycle';  // Human-readable branch type
+  branchType: 'equilibrium' | 'limit_cycle' | 'fold_curve' | 'hopf_curve';  // Human-readable branch type
   data: ContinuationBranchData;
   settings: any; // Store settings used
   timestamp: string;

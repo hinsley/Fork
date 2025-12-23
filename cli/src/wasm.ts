@@ -314,6 +314,73 @@ export class WasmBridge {
             forward
         ) as ContinuationBranchData;
     }
+
+    /**
+     * Continues a fold (saddle-node) bifurcation curve in two-parameter space.
+     * 
+     * @param foldState - State vector at the fold bifurcation point
+     * @param param1Name - Name of first active parameter
+     * @param param1Value - Value of first parameter at fold point
+     * @param param2Name - Name of second active parameter
+     * @param param2Value - Value of second parameter at fold point
+     * @param settings - Continuation settings
+     * @param forward - Direction of continuation
+     * @returns Codim-1 curve branch data
+     */
+    continueFoldCurve(
+        foldState: number[],
+        param1Name: string,
+        param1Value: number,
+        param2Name: string,
+        param2Value: number,
+        settings: any,
+        forward: boolean
+    ): any {
+        return this.instance.continue_fold_curve(
+            new Float64Array(foldState),
+            param1Name,
+            param1Value,
+            param2Name,
+            param2Value,
+            settings,
+            forward
+        );
+    }
+
+    /**
+     * Continues a Hopf bifurcation curve in two-parameter space.
+     * 
+     * @param hopfState - State vector at the Hopf bifurcation point
+     * @param hopfOmega - Hopf frequency (imaginary part of critical eigenvalue)
+     * @param param1Name - Name of first active parameter
+     * @param param1Value - Value of first parameter at Hopf point
+     * @param param2Name - Name of second active parameter
+     * @param param2Value - Value of second parameter at Hopf point
+     * @param settings - Continuation settings
+     * @param forward - Direction of continuation
+     * @returns Codim-1 curve branch data
+     */
+    continueHopfCurve(
+        hopfState: number[],
+        hopfOmega: number,
+        param1Name: string,
+        param1Value: number,
+        param2Name: string,
+        param2Value: number,
+        settings: any,
+        forward: boolean
+    ): any {
+        return this.instance.continue_hopf_curve(
+            new Float64Array(hopfState),
+            hopfOmega,
+            param1Name,
+            param1Value,
+            param2Name,
+            param2Value,
+            settings,
+            forward
+        );
+    }
 }
 
 function normalizeEigenvalues(raw: unknown): ContinuationEigenvalue[] {
