@@ -1,0 +1,628 @@
+/**
+ * Codim-1 Curve Continuation Module
+ * 
+ * Handles initiating two-parameter continuation of codim-1 bifurcation curves
+ * (Fold and Hopf curves) from detected bifurcation points.
+ */
+
+import inquirer from 'inquirer';
+import chalk from 'chalk';
+import { Storage } from '../storage';
+import { WasmBridge } from '../wasm';
+import { ContinuationObject, ContinuationPoint } from '../types';
+import {
+  ConfigEntry,
+  MENU_PAGE_SIZE,
+  formatUnset,
+  parseFloatOrDefault,
+  parseIntOrDefault,
+  runConfigMenu
+} from '../menu';
+import { printSuccess, printError, printInfo } from '../format';
+import { isValidName, getBranchParams } from './utils';
+
+/**
+ * Initiates fold curve continuation from a Fold bifurcation point.
+ * 
+ * Tracks the fold bifurcation in two-parameter space, detecting
+ * codim-2 bifurcations like Cusp, Bogdanov-Takens, and Zero-Hopf.
+ * 
+ * @param sysName - Name of the dynamical system
+ * @param branch - Source equilibrium branch containing the fold point
+ * @param foldPoint - The Fold bifurcation point (must have stability='Fold')
+ * @param foldPointIndex - Array index of the fold point
+ */
+export async function initiateFoldCurve(
+  sysName: string,
+  branch: ContinuationObject,
+  foldPoint: ContinuationPoint,
+  foldPointIndex: number
+): Promise<ContinuationObject | null> {
+  const sysConfig = Storage.loadSystem(sysName);
+  const paramNames = sysConfig.paramNames;
+
+  if (paramNames.length < 2) {
+    printError("Two-parameter continuation requires at least 2 parameters. Add another parameter first.");
+    return null;
+  }
+
+  // Param1 is the continuation parameter from the source branch
+  const param1Name = branch.parameterName;
+  const param1Value = foldPoint.param_value;
+
+  // Select param2 (default to first parameter that isn't param1)
+  let param2Name = paramNames.find(p => p !== param1Name) || paramNames[0];
+  const param2Idx = paramNames.indexOf(param2Name);
+  let param2Value = sysConfig.params[param2Idx];
+
+  // Configuration
+  let curveName = `fold_curve_${branch.name}`;
+  let stepSizeInput = '0.01';
+  let maxStepsInput = '100';
+  let minStepSizeInput = '1e-6';
+  let maxStepSizeInput = '0.1';
+  let directionForward = true;
+  let correctorStepsInput = '10';
+  let correctorToleranceInput = '1e-8';
+
+  const directionLabel = (forward: boolean) =>
+    forward ? 'Forward' : 'Backward';
+
+  const entries: ConfigEntry[] = [
+    {
+      id: 'param2',
+      label: 'Second parameter',
+      section: 'Two-Parameter Setup',
+      getDisplay: () => `${param2Name} = ${param2Value}`,
+      edit: async () => {
+        const choices = paramNames
+          .filter(p => p !== param1Name)
+          .map(p => {
+            const idx = paramNames.indexOf(p);
+            return { name: `${p} (current: ${sysConfig.params[idx]})`, value: p };
+          });
+        const { value } = await inquirer.prompt({
+          type: 'rawlist',
+          name: 'value',
+          message: 'Select second continuation parameter:',
+          choices,
+          default: param2Name,
+          pageSize: MENU_PAGE_SIZE
+        });
+        param2Name = value;
+        const idx = paramNames.indexOf(param2Name);
+        param2Value = sysConfig.params[idx];
+      }
+    },
+    {
+      id: 'curveName',
+      label: 'Curve name',
+      section: 'Output Settings',
+      getDisplay: () => curveName || '(required)',
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Name for the fold curve:',
+          default: curveName,
+          validate: (val: string) => isValidName(val)
+        });
+        curveName = value;
+      }
+    },
+    {
+      id: 'direction',
+      label: 'Direction',
+      section: 'Continuation Settings',
+      getDisplay: () => directionLabel(directionForward),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          type: 'rawlist',
+          name: 'value',
+          message: 'Direction:',
+          choices: [
+            { name: 'Forward', value: true },
+            { name: 'Backward', value: false }
+          ],
+          default: directionForward,
+          pageSize: MENU_PAGE_SIZE
+        });
+        directionForward = value;
+      }
+    },
+    {
+      id: 'stepSize',
+      label: 'Initial step size',
+      section: 'Continuation Settings',
+      getDisplay: () => formatUnset(stepSizeInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Initial Step Size:',
+          default: stepSizeInput
+        });
+        stepSizeInput = value;
+      }
+    },
+    {
+      id: 'maxSteps',
+      label: 'Max points',
+      section: 'Continuation Settings',
+      getDisplay: () => formatUnset(maxStepsInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Max Points:',
+          default: maxStepsInput
+        });
+        maxStepsInput = value;
+      }
+    },
+    {
+      id: 'correctorSteps',
+      label: 'Corrector steps',
+      section: 'Corrector Settings',
+      getDisplay: () => formatUnset(correctorStepsInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Corrector steps:',
+          default: correctorStepsInput
+        });
+        correctorStepsInput = value;
+      }
+    },
+    {
+      id: 'correctorTolerance',
+      label: 'Corrector tolerance',
+      section: 'Corrector Settings',
+      getDisplay: () => formatUnset(correctorToleranceInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Corrector tolerance:',
+          default: correctorToleranceInput
+        });
+        correctorToleranceInput = value;
+      }
+    }
+  ];
+
+  // Show info header
+  console.log('');
+  console.log(chalk.yellow('Fold Curve Continuation (Two-Parameter)'));
+  console.log(chalk.gray(`Tracking fold bifurcation in (${param1Name}, ${param2Name}) space`));
+  console.log(chalk.gray(`Starting point: ${param1Name}=${param1Value}`));
+  console.log('');
+
+  while (true) {
+    const result = await runConfigMenu('Configure Fold Curve Continuation', entries);
+    if (result === 'back') {
+      return null;
+    }
+
+    if (!curveName) {
+      printError('Please provide a curve name.');
+      continue;
+    }
+
+    break;
+  }
+
+  const continuationSettings = {
+    step_size: Math.max(parseFloatOrDefault(stepSizeInput, 0.01), 1e-9),
+    min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-6), 1e-12),
+    max_step_size: Math.max(parseFloatOrDefault(maxStepSizeInput, 0.1), 1e-9),
+    max_steps: Math.max(parseIntOrDefault(maxStepsInput, 100), 1),
+    corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
+    corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-8), Number.EPSILON),
+    step_tolerance: 1e-8
+  };
+
+  printInfo("Running Fold Curve Continuation...");
+
+  try {
+    // Build system config with the parameter values from the source branch
+    const runConfig = { ...sysConfig };
+    runConfig.params = getBranchParams(sysName, branch, sysConfig);
+
+    // Set param1 to the fold point value
+    const idx1 = paramNames.indexOf(param1Name);
+    if (idx1 >= 0) runConfig.params[idx1] = param1Value;
+
+    const bridge = new WasmBridge(runConfig);
+
+    // Call the WASM binding
+    const curveData = bridge.continueFoldCurve(
+      foldPoint.state,
+      param1Name,
+      param1Value,
+      param2Name,
+      param2Value,
+      continuationSettings,
+      directionForward
+    );
+
+    const numPoints = curveData?.points?.length ?? 0;
+    const numCodim2 = curveData?.codim2_bifurcations?.length ?? 0;
+
+    printSuccess(`Fold curve continuation complete! ${numPoints} points, ${numCodim2} codim-2 bifurcations detected.`);
+
+    if (numCodim2 > 0) {
+      console.log(chalk.yellow('\nDetected Codim-2 Bifurcations:'));
+      curveData.codim2_bifurcations.forEach((bif: any, i: number) => {
+        console.log(`  ${i + 1}. ${bif.type || 'Unknown'} at index ${bif.index ?? '?'}`);
+      });
+    }
+
+    // Convert WASM curve data to ContinuationBranchData format for storage
+    const branchData = {
+      points: curveData.points.map((pt: any) => ({
+        state: pt.state || foldPoint.state,
+        param_value: pt.param1_value,
+        param2_value: pt.param2_value,
+        stability: pt.codim2_type || 'None',
+        eigenvalues: (pt.eigenvalues || []).map((eig: any) => {
+          // Handle both array format [re, im] and object format {re, im}
+          if (Array.isArray(eig)) {
+            return { re: eig[0] ?? 0, im: eig[1] ?? 0 };
+          }
+          return eig;
+        })
+      })),
+      bifurcations: curveData.codim2_bifurcations?.map((b: any) => b.index) || [],
+      indices: curveData.points.map((_: any, i: number) => i),
+      branch_type: {
+        type: 'FoldCurve' as const,
+        param1_name: param1Name,
+        param2_name: param2Name
+      }
+    };
+
+    // Create the continuation branch object
+    const newBranch: ContinuationObject = {
+      type: 'continuation',
+      name: curveName,
+      systemName: sysName,
+      parameterName: `${param1Name}, ${param2Name}`,  // Two-parameter notation
+      parentObject: branch.parentObject,
+      startObject: branch.name,
+      branchType: 'fold_curve',
+      data: branchData,
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...runConfig.params]
+    };
+
+    // Save the branch
+    Storage.saveBranch(sysName, branch.parentObject, newBranch);
+    printSuccess(`Saved fold curve branch: ${curveName}`);
+
+    return newBranch;
+
+  } catch (e) {
+    printError(`Fold Curve Continuation Failed: ${e}`);
+    return null;
+  }
+}
+
+/**
+ * Initiates Hopf curve continuation from a Hopf bifurcation point.
+ * 
+ * Tracks the Hopf bifurcation in two-parameter space, detecting
+ * codim-2 bifurcations like Bogdanov-Takens, Zero-Hopf, Double-Hopf, 
+ * and Generalized Hopf (Bautin).
+ * 
+ * @param sysName - Name of the dynamical system
+ * @param branch - Source equilibrium branch containing the Hopf point
+ * @param hopfPoint - The Hopf bifurcation point (must have stability='Hopf')
+ * @param hopfPointIndex - Array index of the Hopf point
+ */
+export async function initiateHopfCurve(
+  sysName: string,
+  branch: ContinuationObject,
+  hopfPoint: ContinuationPoint,
+  hopfPointIndex: number
+): Promise<ContinuationObject | null> {
+  const sysConfig = Storage.loadSystem(sysName);
+  const paramNames = sysConfig.paramNames;
+
+  if (paramNames.length < 2) {
+    printError("Two-parameter continuation requires at least 2 parameters. Add another parameter first.");
+    return null;
+  }
+
+  // Extract Hopf frequency from eigenvalues
+  let hopfOmega = 1.0; // Default fallback
+  if (hopfPoint.eigenvalues && hopfPoint.eigenvalues.length > 0) {
+    // Find the eigenvalue pair with real part closest to zero and nonzero imaginary part
+    let bestImag = 0;
+    for (const eig of hopfPoint.eigenvalues) {
+      if (Math.abs(eig.im) > Math.abs(bestImag) && Math.abs(eig.re) < 0.1) {
+        bestImag = eig.im;
+      }
+    }
+    hopfOmega = Math.abs(bestImag) || 1.0;
+  }
+
+  // Param1 is the continuation parameter from the source branch
+  const param1Name = branch.parameterName;
+  const param1Value = hopfPoint.param_value;
+
+  // Select param2 (default to first parameter that isn't param1)
+  let param2Name = paramNames.find(p => p !== param1Name) || paramNames[0];
+  const param2Idx = paramNames.indexOf(param2Name);
+  let param2Value = sysConfig.params[param2Idx];
+
+  // Configuration
+  let curveName = `hopf_curve_${branch.name}`;
+  let stepSizeInput = '0.01';
+  let maxStepsInput = '100';
+  let minStepSizeInput = '1e-6';
+  let maxStepSizeInput = '0.1';
+  let directionForward = true;
+  let correctorStepsInput = '10';
+  let correctorToleranceInput = '1e-8';
+
+  const directionLabel = (forward: boolean) =>
+    forward ? 'Forward' : 'Backward';
+
+  const entries: ConfigEntry[] = [
+    {
+      id: 'param2',
+      label: 'Second parameter',
+      section: 'Two-Parameter Setup',
+      getDisplay: () => `${param2Name} = ${param2Value}`,
+      edit: async () => {
+        const choices = paramNames
+          .filter(p => p !== param1Name)
+          .map(p => {
+            const idx = paramNames.indexOf(p);
+            return { name: `${p} (current: ${sysConfig.params[idx]})`, value: p };
+          });
+        const { value } = await inquirer.prompt({
+          type: 'rawlist',
+          name: 'value',
+          message: 'Select second continuation parameter:',
+          choices,
+          default: param2Name,
+          pageSize: MENU_PAGE_SIZE
+        });
+        param2Name = value;
+        const idx = paramNames.indexOf(param2Name);
+        param2Value = sysConfig.params[idx];
+      }
+    },
+    {
+      id: 'hopfFreq',
+      label: 'Hopf frequency (ω)',
+      section: 'Two-Parameter Setup',
+      getDisplay: () => hopfOmega.toFixed(6),
+      edit: async () => {
+        printInfo(`Hopf frequency extracted from eigenvalues: ω = ${hopfOmega.toFixed(6)}`);
+        printInfo("This is automatically computed and typically should not be changed.");
+      }
+    },
+    {
+      id: 'curveName',
+      label: 'Curve name',
+      section: 'Output Settings',
+      getDisplay: () => curveName || '(required)',
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Name for the Hopf curve:',
+          default: curveName,
+          validate: (val: string) => isValidName(val)
+        });
+        curveName = value;
+      }
+    },
+    {
+      id: 'direction',
+      label: 'Direction',
+      section: 'Continuation Settings',
+      getDisplay: () => directionLabel(directionForward),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          type: 'rawlist',
+          name: 'value',
+          message: 'Direction:',
+          choices: [
+            { name: 'Forward', value: true },
+            { name: 'Backward', value: false }
+          ],
+          default: directionForward,
+          pageSize: MENU_PAGE_SIZE
+        });
+        directionForward = value;
+      }
+    },
+    {
+      id: 'stepSize',
+      label: 'Initial step size',
+      section: 'Continuation Settings',
+      getDisplay: () => formatUnset(stepSizeInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Initial Step Size:',
+          default: stepSizeInput
+        });
+        stepSizeInput = value;
+      }
+    },
+    {
+      id: 'maxSteps',
+      label: 'Max points',
+      section: 'Continuation Settings',
+      getDisplay: () => formatUnset(maxStepsInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Max Points:',
+          default: maxStepsInput
+        });
+        maxStepsInput = value;
+      }
+    },
+    {
+      id: 'correctorSteps',
+      label: 'Corrector steps',
+      section: 'Corrector Settings',
+      getDisplay: () => formatUnset(correctorStepsInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Corrector steps:',
+          default: correctorStepsInput
+        });
+        correctorStepsInput = value;
+      }
+    },
+    {
+      id: 'correctorTolerance',
+      label: 'Corrector tolerance',
+      section: 'Corrector Settings',
+      getDisplay: () => formatUnset(correctorToleranceInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Corrector tolerance:',
+          default: correctorToleranceInput
+        });
+        correctorToleranceInput = value;
+      }
+    }
+  ];
+
+  // Show info header
+  console.log('');
+  console.log(chalk.yellow('Hopf Curve Continuation (Two-Parameter)'));
+  console.log(chalk.gray(`Tracking Hopf bifurcation in (${param1Name}, ${param2Name}) space`));
+  console.log(chalk.gray(`Starting point: ${param1Name}=${param1Value}, ω=${hopfOmega.toFixed(4)}`));
+  console.log('');
+
+  while (true) {
+    const result = await runConfigMenu('Configure Hopf Curve Continuation', entries);
+    if (result === 'back') {
+      return null;
+    }
+
+    if (!curveName) {
+      printError('Please provide a curve name.');
+      continue;
+    }
+
+    break;
+  }
+
+  const continuationSettings = {
+    step_size: Math.max(parseFloatOrDefault(stepSizeInput, 0.01), 1e-9),
+    min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-6), 1e-12),
+    max_step_size: Math.max(parseFloatOrDefault(maxStepSizeInput, 0.1), 1e-9),
+    max_steps: Math.max(parseIntOrDefault(maxStepsInput, 100), 1),
+    corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
+    corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-8), Number.EPSILON),
+    step_tolerance: 1e-8
+  };
+
+  printInfo("Running Hopf Curve Continuation...");
+
+  try {
+    // Build system config with the parameter values from the source branch
+    const runConfig = { ...sysConfig };
+    runConfig.params = getBranchParams(sysName, branch, sysConfig);
+
+    // Set param1 to the Hopf point value
+    const idx1 = paramNames.indexOf(param1Name);
+    if (idx1 >= 0) runConfig.params[idx1] = param1Value;
+
+    const bridge = new WasmBridge(runConfig);
+
+    // Call the WASM binding
+    const curveData = bridge.continueHopfCurve(
+      hopfPoint.state,
+      hopfOmega,
+      param1Name,
+      param1Value,
+      param2Name,
+      param2Value,
+      continuationSettings,
+      directionForward
+    );
+
+    // For now, just log results since we don't have a viewer for 2D curves yet
+    const numPoints = curveData?.points?.length ?? 0;
+    const numCodim2 = curveData?.codim2_bifurcations?.length ?? 0;
+
+    printSuccess(`Hopf curve continuation complete! ${numPoints} points, ${numCodim2} codim-2 bifurcations detected.`);
+
+    if (numCodim2 > 0) {
+      console.log(chalk.yellow('\nDetected Codim-2 Bifurcations:'));
+      curveData.codim2_bifurcations.forEach((bif: any, i: number) => {
+        console.log(`  ${i + 1}. ${bif.type || 'Unknown'} at index ${bif.index ?? '?'}`);
+      });
+    }
+
+    // Debug: log first point's raw data
+    if (curveData.points && curveData.points.length > 0) {
+      const firstPt = curveData.points[0];
+      console.log(chalk.gray('\n[DEBUG] First point raw data:'));
+      console.log(chalk.gray(`  state: [${firstPt.state?.join(', ')}]`));
+      console.log(chalk.gray(`  param1_value: ${firstPt.param1_value}`));
+      console.log(chalk.gray(`  param2_value: ${firstPt.param2_value}`));
+      console.log(chalk.gray(`  eigenvalues: ${JSON.stringify(firstPt.eigenvalues)}`));
+    }
+
+    // Convert WASM curve data to ContinuationBranchData format for storage
+    // Note: eigenvalues come as [re, im] arrays from WASM, convert to {re, im} objects
+    const branchData = {
+      points: curveData.points.map((pt: any) => ({
+        state: pt.state || hopfPoint.state,
+        param_value: pt.param1_value,
+        param2_value: pt.param2_value,
+        stability: pt.codim2_type || 'None',
+        eigenvalues: (pt.eigenvalues || []).map((eig: any) => {
+          // Handle both array format [re, im] and object format {re, im}
+          if (Array.isArray(eig)) {
+            return { re: eig[0] ?? 0, im: eig[1] ?? 0 };
+          }
+          return eig;
+        }),
+        auxiliary: pt.auxiliary
+      })),
+      bifurcations: curveData.codim2_bifurcations?.map((b: any) => b.index) || [],
+      indices: curveData.points.map((_: any, i: number) => i),
+      branch_type: {
+        type: 'HopfCurve' as const,
+        param1_name: param1Name,
+        param2_name: param2Name
+      }
+    };
+
+    // Create the continuation branch object
+    const newBranch: ContinuationObject = {
+      type: 'continuation',
+      name: curveName,
+      systemName: sysName,
+      parameterName: `${param1Name}, ${param2Name}`,  // Two-parameter notation
+      parentObject: branch.parentObject,
+      startObject: branch.name,
+      branchType: 'hopf_curve',
+      data: branchData,
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...runConfig.params]
+    };
+
+    // Save the branch
+    Storage.saveBranch(sysName, branch.parentObject, newBranch);
+    printSuccess(`Saved Hopf curve branch: ${curveName}`);
+
+    return newBranch;
+
+  } catch (e) {
+    printError(`Hopf Curve Continuation Failed: ${e}`);
+    return null;
+  }
+}

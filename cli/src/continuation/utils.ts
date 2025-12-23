@@ -106,6 +106,26 @@ export function formatNumber(value: number): string {
 }
 
 /**
+ * Formats a number with full precision for detailed displays.
+ * 
+ * Uses more significant figures than formatNumber for when precision matters.
+ * 
+ * @param value - Number to format
+ * @returns Formatted string representation with high precision
+ */
+export function formatNumberFullPrecision(value: number): string {
+  if (!Number.isFinite(value)) {
+    return value.toString();
+  }
+  const absVal = Math.abs(value);
+  if ((absVal !== 0 && absVal < 1e-6) || absVal >= 1e6) {
+    return value.toExponential(10);
+  }
+  // Use toPrecision for consistent significant figures
+  return value.toPrecision(12).replace(/\.?0+$/, '');
+}
+
+/**
  * Formats a number safely, handling undefined/NaN values.
  * 
  * Returns 'NaN' for non-finite or undefined inputs.

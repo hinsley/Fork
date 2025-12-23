@@ -133,10 +133,10 @@ async function mainMenu() {
 
 async function systemContext(initialSysName: string) {
     let sysName = initialSysName;
-  const didPurge = Storage.purgeLegacyBranches(sysName);
-  if (didPurge) {
-      printInfo(`Legacy continuation branches were deleted for system "${sysName}".`);
-  }
+    const didPurge = Storage.purgeLegacyBranches(sysName);
+    if (didPurge) {
+        printInfo(`Legacy continuation branches were deleted for system "${sysName}".`);
+    }
 
     while (true) {
         const sys = Storage.loadSystem(sysName);
@@ -900,7 +900,7 @@ async function equilibriumBranchesMenu(
         const branches = branchNames
             .map(name => Storage.loadBranch(sysName, obj.name, name))
             .filter((b): b is ContinuationObject => (b as any)?.type === 'continuation')
-            .filter(b => b.branchType === 'equilibrium');
+            .filter(b => b.branchType === 'equilibrium' || b.branchType === 'fold_curve' || b.branchType === 'hopf_curve');
 
         const choices: Array<{ name: string; value: string } | inquirer.Separator> = [];
         choices.push({ name: 'Create New Branch', value: 'CREATE' });
