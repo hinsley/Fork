@@ -22,12 +22,14 @@ import {
   buildSortedArrayOrder,
   getBranchParams,
   formatNumber,
+  formatNumberFullPrecision,
   formatNumberSafe,
   formatArray,
   summarizeEigenvalues
 } from './utils';
 import { initiateLCFromHopf, initiateLCBranchFromPoint, initiateLCFromPD } from './initiate-lc';
 import { initiateEquilibriumBranchFromPoint } from './initiate-eq';
+import { initiateFoldCurve, initiateHopfCurve } from './initiate-codim1';
 
 type BranchDetailResult = 'SUMMARY' | 'EXIT' | NavigationRequest;
 const DETAIL_PAGE_SIZE = 10;
@@ -299,12 +301,27 @@ export function formatPointRow(
 ) {
   const pt = branch.data.points[arrayIdx];
   const logicalIdx = indices[arrayIdx];
-  const paramVal = formatNumber(pt.param_value);
   const descriptor = summarizeEigenvalues(pt, branch.branchType);
   const typeLabel = pt.stability && pt.stability !== 'None' ? ` [${pt.stability}]` : '';
 
+  // Format parameter display based on branch type
+  let paramDisplay: string;
+  if (branch.branchType === 'fold_curve' || branch.branchType === 'hopf_curve') {
+    // Two-parameter branch: show both p1 and p2
+    const p1Val = formatNumber(pt.param_value);
+    const p2Val = pt.param2_value !== undefined ? formatNumber(pt.param2_value) : '?';
+    const branchTypeData = branch.data.branch_type as { param1_name?: string; param2_name?: string } | undefined;
+    const p1Name = branchTypeData?.param1_name ?? 'p1';
+    const p2Name = branchTypeData?.param2_name ?? 'p2';
+    paramDisplay = `${p1Name}=${p1Val}, ${p2Name}=${p2Val}`;
+  } else {
+    // Single-parameter branch
+    const paramVal = formatNumber(pt.param_value);
+    paramDisplay = `${branch.parameterName}=${paramVal}`;
+  }
+
   const prefix = bifurcationSet.has(arrayIdx) ? '*' : ' ';
-  let label = `${prefix} Index ${logicalIdx} | ${branch.parameterName}=${paramVal} | ${descriptor}${typeLabel}`;
+  let label = `${prefix} Index ${logicalIdx} | ${paramDisplay} | ${descriptor}${typeLabel}`;
 
   if (arrayIdx === focusIdx) {
     label = chalk.cyan(label);
@@ -326,6 +343,11 @@ export function formatPointRow(
  * @param branch - The continuation branch to hydrate (mutated in place)
  */
 export async function hydrateEigenvalues(sysName: string, branch: ContinuationObject) {
+  // Skip hydration for codim-1 curves - they have two parameters and different eigenvalue semantics
+  if (branch.branchType === 'fold_curve' || branch.branchType === 'hopf_curve') {
+    return;
+  }
+
   const missingIndices = branch.data.points
     .map((pt, idx) =>
       !pt.eigenvalues || pt.eigenvalues.length === 0 || isNaN(pt.eigenvalues[0]?.re ?? NaN)
@@ -423,18 +445,41 @@ export async function showPointDetails(
     ? [...branch.params]
     : [...sysConfig.params];
 
-  // Override the continuation parameter with the point's value
-  const contParamIdx = paramNames.indexOf(branch.parameterName);
-  if (contParamIdx >= 0) {
-    currentParams[contParamIdx] = pt.param_value;
-  }
+  // Handle two-parameter branches (fold_curve, hopf_curve) specially
+  if (branchType === 'fold_curve' || branchType === 'hopf_curve') {
+    // Get param names from branch_type
+    const branchTypeData = branch.data.branch_type as { param1_name?: string; param2_name?: string } | undefined;
+    const p1Name = branchTypeData?.param1_name ?? 'p1';
+    const p2Name = branchTypeData?.param2_name ?? 'p2';
 
-  console.log(chalk.white('Parameters:'));
-  for (let i = 0; i < paramNames.length; i++) {
-    const isContParam = paramNames[i] === branch.parameterName;
-    const marker = isContParam ? ' ← continuation' : '';
-    const color = isContParam ? chalk.cyan : (x: string) => x;
-    console.log(color(`  ${paramNames[i]}: ${formatNumber(currentParams[i])}${marker}`));
+    // Update parameters from the point's values
+    const p1Idx = paramNames.indexOf(p1Name);
+    const p2Idx = paramNames.indexOf(p2Name);
+    if (p1Idx >= 0) currentParams[p1Idx] = pt.param_value;
+    if (p2Idx >= 0 && pt.param2_value !== undefined) currentParams[p2Idx] = pt.param2_value;
+
+    console.log(chalk.white('Parameters:'));
+    for (let i = 0; i < paramNames.length; i++) {
+      const isContParam = paramNames[i] === p1Name || paramNames[i] === p2Name;
+      const marker = isContParam ? ' ← continuation' : '';
+      const color = isContParam ? chalk.cyan : (x: string) => x;
+      console.log(color(`  ${paramNames[i]}: ${formatNumberFullPrecision(currentParams[i])}${marker}`));
+    }
+  } else {
+    // Standard single-parameter branch handling
+    // Override the continuation parameter with the point's value
+    const contParamIdx = paramNames.indexOf(branch.parameterName);
+    if (contParamIdx >= 0) {
+      currentParams[contParamIdx] = pt.param_value;
+    }
+
+    console.log(chalk.white('Parameters:'));
+    for (let i = 0; i < paramNames.length; i++) {
+      const isContParam = paramNames[i] === branch.parameterName;
+      const marker = isContParam ? ' ← continuation' : '';
+      const color = isContParam ? chalk.cyan : (x: string) => x;
+      console.log(color(`  ${paramNames[i]}: ${formatNumberFullPrecision(currentParams[i])}${marker}`));
+    }
   }
 
 
@@ -518,9 +563,15 @@ export async function showPointDetails(
     // For equilibrium branches, always offer to create a new equilibrium branch
     choices.push({ name: 'Create New Equilibrium Branch', value: 'NEW_EQ_BRANCH' });
 
-    // For Hopf points, also offer limit cycle continuation
+    // For Hopf points, also offer limit cycle continuation and Hopf curve continuation
     if (pt.stability === 'Hopf') {
       choices.push({ name: 'Initiate Limit Cycle Continuation', value: 'INITIATE_LC' });
+      choices.push({ name: 'Continue Hopf Curve (2-parameter)', value: 'CONTINUE_HOPF_CURVE' });
+    }
+
+    // For Fold points, offer fold curve continuation
+    if (pt.stability === 'Fold') {
+      choices.push({ name: 'Continue Fold Curve (2-parameter)', value: 'CONTINUE_FOLD_CURVE' });
     }
   } else if (branchType === 'limit_cycle') {
     // For limit cycle branches, offer to create a new limit cycle branch
@@ -587,6 +638,33 @@ export async function showPointDetails(
       branchName: newBranch.name,
       autoInspect: true,
     };
+  }
+
+  // Codim-1 curve continuation handlers
+  if (action === 'CONTINUE_FOLD_CURVE') {
+    const newBranch = await initiateFoldCurve(sysName, branch, pt, arrayIdx);
+    if (newBranch) {
+      return {
+        kind: 'OPEN_BRANCH' as const,
+        objectName: newBranch.parentObject,
+        branchName: newBranch.name,
+        autoInspect: true,
+      };
+    }
+    return 'BACK';
+  }
+
+  if (action === 'CONTINUE_HOPF_CURVE') {
+    const newBranch = await initiateHopfCurve(sysName, branch, pt, arrayIdx);
+    if (newBranch) {
+      return {
+        kind: 'OPEN_BRANCH' as const,
+        objectName: newBranch.parentObject,
+        branchName: newBranch.name,
+        autoInspect: true,
+      };
+    }
+    return 'BACK';
   }
 
   return 'BACK';

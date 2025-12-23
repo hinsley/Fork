@@ -16,6 +16,9 @@ pub mod types;
 #[path = "continuation/util.rs"]
 pub mod util;
 
+#[path = "continuation/codim1_curves/mod.rs"]
+pub mod codim1_curves;
+
 // Re-export types needed for external use
 pub use periodic::{
     CollocationConfig, LimitCycleGuess, LimitCycleSetup,
@@ -25,7 +28,9 @@ pub use periodic::{
 pub use problem::{PointDiagnostics, TestFunctionValues};
 pub use types::{
     BifurcationType, BranchType, ContinuationBranch, ContinuationPoint, ContinuationSettings,
+    Codim1CurveType, Codim2BifurcationType, Codim1CurvePoint, Codim1CurveBranch,
 };
+pub use codim1_curves::{Codim2TestFunctions, FoldCurveProblem, HopfCurveProblem};
 pub use util::{
     compute_nullspace_tangent, continuation_point_to_aug,
     compute_eigenvalues, hopf_test_function, neutral_saddle_test_function,
