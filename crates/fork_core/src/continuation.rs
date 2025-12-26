@@ -19,6 +19,9 @@ pub mod util;
 #[path = "continuation/codim1_curves/mod.rs"]
 pub mod codim1_curves;
 
+#[path = "continuation/lc_codim1_curves/mod.rs"]
+pub mod lc_codim1_curves;
+
 // Re-export types needed for external use
 pub use periodic::{
     CollocationConfig, LimitCycleGuess, LimitCycleSetup,
@@ -31,6 +34,7 @@ pub use types::{
     Codim1CurveType, Codim2BifurcationType, Codim1CurvePoint, Codim1CurveBranch,
 };
 pub use codim1_curves::{Codim2TestFunctions, FoldCurveProblem, HopfCurveProblem};
+pub use lc_codim1_curves::{LPCCurveProblem, PDCurveProblem, NSCurveProblem};
 pub use util::{
     compute_nullspace_tangent, continuation_point_to_aug,
     compute_eigenvalues, hopf_test_function, neutral_saddle_test_function,
@@ -43,7 +47,7 @@ use crate::traits::DynamicalSystem;
 use anyhow::{anyhow, bail, Result};
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex;
-use problem::ContinuationProblem;
+pub use problem::ContinuationProblem;  // DEBUG_PD_CURVE: Made public for debug
 
 // Generic continuation functions using ContinuationProblem trait
 
@@ -725,7 +729,7 @@ fn correct_with_problem<P: ContinuationProblem>(
     // Use adaptive tangent for bordering - start with prev_tangent
     let mut border_tangent = prev_tangent.clone();
     
-    for _iter in 0..max_iters {
+    for iter in 0..max_iters {
         // Compute residual F(x)
         let mut residual = DVector::zeros(dim);
         problem.residual(&current, &mut residual)?;

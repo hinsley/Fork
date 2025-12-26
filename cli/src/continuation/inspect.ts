@@ -29,7 +29,7 @@ import {
 } from './utils';
 import { initiateLCFromHopf, initiateLCBranchFromPoint, initiateLCFromPD } from './initiate-lc';
 import { initiateEquilibriumBranchFromPoint } from './initiate-eq';
-import { initiateFoldCurve, initiateHopfCurve } from './initiate-codim1';
+import { initiateFoldCurve, initiateHopfCurve, initiateLPCCurve, initiatePDCurve, initiateNSCurve } from './initiate-codim1';
 
 type BranchDetailResult = 'SUMMARY' | 'EXIT' | NavigationRequest;
 const DETAIL_PAGE_SIZE = 10;
@@ -483,7 +483,9 @@ export async function showPointDetails(
   }
 
 
-  if (branchType === 'limit_cycle') {
+  // All LC-based branches (limit_cycle plus codim1 LC curves) get enhanced LC display
+  const lcBasedBranches = ['limit_cycle', 'pd_curve', 'lpc_curve', 'ns_curve'];
+  if (lcBasedBranches.includes(branchType)) {
     // Enhanced LC display
     const dim = sysConfig.equations.length;
     const varNames = sysConfig.varNames;
@@ -493,7 +495,9 @@ export async function showPointDetails(
     let ntst = 20, ncol = 4;
     if (branchTypeData && typeof branchTypeData === 'object' && 'type' in branchTypeData) {
       const bt = branchTypeData as { type: string; ntst?: number; ncol?: number };
-      if (bt.type === 'LimitCycle' && bt.ntst && bt.ncol) {
+      // Handle LimitCycle and all codim1 LC curve types
+      const lcTypes = ['LimitCycle', 'PDCurve', 'LPCCurve', 'NSCurve'];
+      if (lcTypes.includes(bt.type) && bt.ntst && bt.ncol) {
         ntst = bt.ntst;
         ncol = bt.ncol;
       }
@@ -577,9 +581,20 @@ export async function showPointDetails(
     // For limit cycle branches, offer to create a new limit cycle branch
     choices.push({ name: 'Create New Limit Cycle Branch', value: 'NEW_LC_BRANCH' });
 
-    // For Period Doubling points, offer to branch to double period
+    // For Period Doubling points, offer to branch to double period or continue PD curve
     if (pt.stability === 'PeriodDoubling') {
       choices.push({ name: 'Branch to Period-Doubled Limit Cycle', value: 'BRANCH_PD' });
+      choices.push({ name: 'Continue PD Curve (2-parameter)', value: 'CONTINUE_PD_CURVE' });
+    }
+
+    // For Cycle Fold (LPC) points, offer LPC curve continuation
+    if (pt.stability === 'CycleFold') {
+      choices.push({ name: 'Continue LPC Curve (2-parameter)', value: 'CONTINUE_LPC_CURVE' });
+    }
+
+    // For Neimark-Sacker points, offer NS curve continuation
+    if (pt.stability === 'NeimarkSacker') {
+      choices.push({ name: 'Continue NS Curve (2-parameter)', value: 'CONTINUE_NS_CURVE' });
     }
   }
 
@@ -656,6 +671,46 @@ export async function showPointDetails(
 
   if (action === 'CONTINUE_HOPF_CURVE') {
     const newBranch = await initiateHopfCurve(sysName, branch, pt, arrayIdx);
+    if (newBranch) {
+      return {
+        kind: 'OPEN_BRANCH' as const,
+        objectName: newBranch.parentObject,
+        branchName: newBranch.name,
+        autoInspect: true,
+      };
+    }
+    return 'BACK';
+  }
+
+  // LC codim-1 curve continuation handlers
+  if (action === 'CONTINUE_LPC_CURVE') {
+    const newBranch = await initiateLPCCurve(sysName, branch, pt, arrayIdx);
+    if (newBranch) {
+      return {
+        kind: 'OPEN_BRANCH' as const,
+        objectName: newBranch.parentObject,
+        branchName: newBranch.name,
+        autoInspect: true,
+      };
+    }
+    return 'BACK';
+  }
+
+  if (action === 'CONTINUE_PD_CURVE') {
+    const newBranch = await initiatePDCurve(sysName, branch, pt, arrayIdx);
+    if (newBranch) {
+      return {
+        kind: 'OPEN_BRANCH' as const,
+        objectName: newBranch.parentObject,
+        branchName: newBranch.name,
+        autoInspect: true,
+      };
+    }
+    return 'BACK';
+  }
+
+  if (action === 'CONTINUE_NS_CURVE') {
+    const newBranch = await initiateNSCurve(sysName, branch, pt, arrayIdx);
     if (newBranch) {
       return {
         kind: 'OPEN_BRANCH' as const,

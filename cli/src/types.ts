@@ -80,7 +80,10 @@ export type BranchType =
   | { type: 'Equilibrium' }
   | { type: 'LimitCycle'; ntst: number; ncol: number }
   | { type: 'FoldCurve'; param1_name: string; param2_name: string }
-  | { type: 'HopfCurve'; param1_name: string; param2_name: string };
+  | { type: 'HopfCurve'; param1_name: string; param2_name: string }
+  | { type: 'LPCCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
+  | { type: 'PDCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
+  | { type: 'NSCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number };
 
 export interface ContinuationBranchData {
   points: ContinuationPoint[];
@@ -107,7 +110,7 @@ export interface ContinuationObject {
    * This is kept for provenance/debugging and should not be used for storage lookup.
    */
   startObject: string;
-  branchType: 'equilibrium' | 'limit_cycle' | 'fold_curve' | 'hopf_curve';  // Human-readable branch type
+  branchType: 'equilibrium' | 'limit_cycle' | 'fold_curve' | 'hopf_curve' | 'lpc_curve' | 'pd_curve' | 'ns_curve';
   data: ContinuationBranchData;
   settings: any; // Store settings used
   timestamp: string;

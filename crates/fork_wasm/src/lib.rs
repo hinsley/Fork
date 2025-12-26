@@ -8,7 +8,8 @@ use fork_core::continuation::{
     continue_limit_cycle_collocation, extend_limit_cycle_collocation,
     limit_cycle_setup_from_hopf, limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd,
     Codim1CurveType, Codim2BifurcationType, Codim1CurvePoint, Codim1CurveBranch,
-    FoldCurveProblem, HopfCurveProblem, continue_with_problem,
+    FoldCurveProblem, HopfCurveProblem, LPCCurveProblem, PDCurveProblem, NSCurveProblem,
+    continue_with_problem,
 };
 use fork_core::continuation::equilibrium::{
     continue_parameter as core_continuation, extend_branch as core_extend_branch,
@@ -771,6 +772,383 @@ impl WasmSystem {
 
         let codim1_branch = Codim1CurveBranch {
             curve_type: Codim1CurveType::Hopf,
+            param1_index,
+            param2_index,
+            points: codim1_points,
+            codim2_bifurcations: vec![],
+            indices: branch.indices.clone(),
+        };
+
+        to_value(&codim1_branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    /// Continues an LPC (Limit Point of Cycles) bifurcation curve in two-parameter space.
+    ///
+    /// # Arguments
+    /// * `lc_state` - Flattened LC collocation state at the LPC point
+    /// * `period` - Period at the LPC point
+    /// * `param1_name` - Name of first active parameter
+    /// * `param1_value` - Value of first parameter at LPC point
+    /// * `param2_name` - Name of second active parameter  
+    /// * `param2_value` - Value of second parameter at LPC point
+    /// * `ntst` - Number of mesh intervals in collocation
+    /// * `ncol` - Collocation degree
+    /// * `settings_val` - Continuation settings as JsValue
+    /// * `forward` - Direction of continuation
+    pub fn continue_lpc_curve(
+        &mut self,
+        lc_state: Vec<f64>,
+        period: f64,
+        param1_name: &str,
+        param1_value: f64,
+        param2_name: &str,
+        param2_value: f64,
+        ntst: usize,
+        ncol: usize,
+        settings_val: JsValue,
+        forward: bool,
+    ) -> Result<JsValue, JsValue> {
+        let settings: ContinuationSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
+
+        let param1_index = *self.system.param_map.get(param1_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param1_name)))?;
+        let param2_index = *self.system.param_map.get(param2_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+
+        // Set parameters
+        self.system.params[param1_index] = param1_value;
+        self.system.params[param2_index] = param2_value;
+
+        // Handle implicit periodicity: if lc_state has ntst mesh points instead of ntst+1,
+        // duplicate the first mesh point at the end (u_0 = u_ntst for periodic BC)
+        let dim = self.system.equations.len();
+        let expected_ncoords = ntst * ncol * dim + (ntst + 1) * dim;
+        let implicit_ncoords = ntst * ncol * dim + ntst * dim;  // Without u_ntst
+        
+        let full_lc_state = if lc_state.len() == implicit_ncoords {
+            // Need to add the last mesh point (copy of first mesh point)
+            let mut padded = lc_state.clone();
+            let stages_len = ntst * ncol * dim;
+            let u0: Vec<f64> = lc_state[stages_len..stages_len + dim].to_vec();
+            padded.extend(u0);  // Append u_ntst = u_0
+            padded
+        } else if lc_state.len() == expected_ncoords {
+            lc_state.clone()
+        } else {
+            return Err(JsValue::from_str(&format!(
+                "Invalid lc_state.len()={}, expected {} or {} (ntst={}, ncol={}, dim={})",
+                lc_state.len(), expected_ncoords, implicit_ncoords, ntst, ncol, dim
+            )));
+        };
+
+        // Create LPC curve problem
+        let mut problem = LPCCurveProblem::new(
+            &mut self.system,
+            full_lc_state.clone(),
+            period,
+            param1_index,
+            param2_index,
+            param1_value,
+            param2_value,
+            ntst,
+            ncol,
+        ).map_err(|e| JsValue::from_str(&format!("Failed to create LPC problem: {}", e)))?;
+
+        // Build initial augmented state: [lc_state, T, p2]
+        // When continue_with_problem prepends p1, we get [p1, lc_state, T, p2]
+        let mut augmented_state = Vec::with_capacity(full_lc_state.len() + 2);
+        augmented_state.extend_from_slice(&full_lc_state);
+        augmented_state.push(period);
+        augmented_state.push(param2_value);
+
+        let initial_point = fork_core::continuation::ContinuationPoint {
+            state: augmented_state,
+            param_value: param1_value,
+            stability: fork_core::continuation::BifurcationType::CycleFold,
+            eigenvalues: vec![],
+        };
+
+        let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
+            .map_err(|e| JsValue::from_str(&format!("LPC curve continuation failed: {}", e)))?;
+
+        // Convert to Codim1CurveBranch format
+        // State layout after prepend: [p1, lc_state, T, p2]
+        // pt.param_value = p1, pt.state = [lc_state, T, p2]
+        let n_lc = full_lc_state.len();
+        let codim1_points: Vec<Codim1CurvePoint> = branch.points.iter().map(|pt| {
+            // Extract p2 from end of state
+            let p2 = if pt.state.len() >= n_lc + 2 {
+                pt.state[n_lc + 1]
+            } else {
+                param2_value
+            };
+            // Extract physical LC state + T (everything except p2 at end)
+            let physical_state: Vec<f64> = if pt.state.len() >= n_lc + 1 {
+                pt.state[..(n_lc + 1)].to_vec() // lc_state + T
+            } else {
+                lc_state.clone()
+            };
+            
+            Codim1CurvePoint {
+                state: physical_state,
+                param1_value: pt.param_value,
+                param2_value: p2,
+                codim2_type: Codim2BifurcationType::None,
+                auxiliary: None,
+                eigenvalues: pt.eigenvalues.clone(),
+            }
+        }).collect();
+
+        let codim1_branch = Codim1CurveBranch {
+            curve_type: Codim1CurveType::LimitPointCycle,
+            param1_index,
+            param2_index,
+            points: codim1_points,
+            codim2_bifurcations: vec![],
+            indices: branch.indices.clone(),
+        };
+
+        to_value(&codim1_branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    /// Continues a PD (Period-Doubling) bifurcation curve in two-parameter space.
+    pub fn continue_pd_curve(
+        &mut self,
+        lc_state: Vec<f64>,
+        period: f64,
+        param1_name: &str,
+        param1_value: f64,
+        param2_name: &str,
+        param2_value: f64,
+        ntst: usize,
+        ncol: usize,
+        settings_val: JsValue,
+        forward: bool,
+    ) -> Result<JsValue, JsValue> {
+        let settings: ContinuationSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
+
+        let param1_index = *self.system.param_map.get(param1_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param1_name)))?;
+        let param2_index = *self.system.param_map.get(param2_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+
+        self.system.params[param1_index] = param1_value;
+        self.system.params[param2_index] = param2_value;
+
+        // Handle implicit periodicity: if lc_state has ntst mesh points instead of ntst+1,
+        // duplicate the first mesh point at the end (u_0 = u_ntst for periodic BC)
+        let dim = self.system.equations.len();
+        let expected_ncoords = ntst * ncol * dim + (ntst + 1) * dim;
+        let implicit_ncoords = ntst * ncol * dim + ntst * dim;  // Without u_ntst
+        
+        let full_lc_state = if lc_state.len() == implicit_ncoords {
+            // Need to add the last mesh point (copy of first mesh point)
+            // LC state uses MESH-FIRST layout: [mesh_0, mesh_1, ..., mesh_(ntst-1), stages...]
+            // First mesh point is at index 0..dim
+            let u0: Vec<f64> = lc_state[0..dim].to_vec();
+            // We need to insert u_ntst (=u_0) after all meshes but before stages
+            // Position to insert: after ntst mesh points = ntst * dim
+            let mesh_end = ntst * dim;
+            let mut padded = Vec::with_capacity(lc_state.len() + dim);
+            padded.extend_from_slice(&lc_state[0..mesh_end]);  // All meshes
+            padded.extend_from_slice(&u0);                     // Add u_ntst = u_0
+            padded.extend_from_slice(&lc_state[mesh_end..]);   // All stages
+            padded
+        } else if lc_state.len() == expected_ncoords {
+            lc_state.clone()
+        } else {
+            return Err(JsValue::from_str(&format!(
+                "Invalid lc_state.len()={}, expected {} or {} (ntst={}, ncol={}, dim={})",
+                lc_state.len(), expected_ncoords, implicit_ncoords, ntst, ncol, dim
+            )));
+        };
+
+        let mut problem = PDCurveProblem::new(
+            &mut self.system,
+            full_lc_state.clone(),
+            period,
+            param1_index,
+            param2_index,
+            param1_value,
+            param2_value,
+            ntst,
+            ncol,
+        ).map_err(|e| JsValue::from_str(&format!("Failed to create PD problem: {}", e)))?;
+
+        // Build initial augmented state: [lc_state, T, p2]
+        // When continue_with_problem prepends p1, we get [p1, lc_state, T, p2]
+        let mut augmented_state = Vec::with_capacity(full_lc_state.len() + 2);
+        augmented_state.extend_from_slice(&full_lc_state);
+        augmented_state.push(period);
+        augmented_state.push(param2_value);
+
+        // DEBUG_PD_CURVE: Compute initial residual breakdown BEFORE continuation
+        let initial_debug_logs = problem.debug_initial_residual(param1_value, param2_value, period, &full_lc_state);
+
+        let initial_point = fork_core::continuation::ContinuationPoint {
+            state: augmented_state,
+            param_value: param1_value,
+            stability: fork_core::continuation::BifurcationType::PeriodDoubling,
+            eigenvalues: vec![],
+        };
+
+        let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
+            .map_err(|e| JsValue::from_str(&format!("PD curve continuation failed: {}", e)))?;
+
+        // State layout after prepend: [p1, lc_state, T, p2]
+        let n_lc = lc_state.len();
+        let codim1_points: Vec<Codim1CurvePoint> = branch.points.iter().map(|pt| {
+            // Extract p2 from end of state
+            let p2 = if pt.state.len() >= n_lc + 2 {
+                pt.state[n_lc + 1]
+            } else {
+                param2_value
+            };
+            // Extract physical LC state + T (everything except p2 at end)
+            let physical_state: Vec<f64> = if pt.state.len() >= n_lc + 1 {
+                pt.state[..(n_lc + 1)].to_vec()
+            } else {
+                lc_state.clone()
+            };
+            
+            Codim1CurvePoint {
+                state: physical_state,
+                param1_value: pt.param_value,
+                param2_value: p2,
+                codim2_type: Codim2BifurcationType::None,
+                auxiliary: None,
+                eigenvalues: pt.eigenvalues.clone(),
+            }
+        }).collect();
+
+        let codim1_branch = Codim1CurveBranch {
+            curve_type: Codim1CurveType::PeriodDoubling,
+            param1_index,
+            param2_index,
+            points: codim1_points,
+            codim2_bifurcations: vec![],
+            indices: branch.indices.clone(),
+        };
+
+        to_value(&codim1_branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    /// Continues an NS (Neimark-Sacker) bifurcation curve in two-parameter space.
+    pub fn continue_ns_curve(
+        &mut self,
+        lc_state: Vec<f64>,
+        period: f64,
+        param1_name: &str,
+        param1_value: f64,
+        param2_name: &str,
+        param2_value: f64,
+        initial_k: f64,  // cos(θ) for the NS multiplier angle
+        ntst: usize,
+        ncol: usize,
+        settings_val: JsValue,
+        forward: bool,
+    ) -> Result<JsValue, JsValue> {
+        let settings: ContinuationSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
+
+        let param1_index = *self.system.param_map.get(param1_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param1_name)))?;
+        let param2_index = *self.system.param_map.get(param2_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+
+        self.system.params[param1_index] = param1_value;
+        self.system.params[param2_index] = param2_value;
+
+        // Handle implicit periodicity: if lc_state has ntst mesh points instead of ntst+1,
+        // duplicate the first mesh point at the end (u_0 = u_ntst for periodic BC)
+        let dim = self.system.equations.len();
+        let expected_ncoords = ntst * ncol * dim + (ntst + 1) * dim;
+        let implicit_ncoords = ntst * ncol * dim + ntst * dim;  // Without u_ntst
+        
+        let full_lc_state = if lc_state.len() == implicit_ncoords {
+            // Need to add the last mesh point (copy of first mesh point)
+            let mut padded = lc_state.clone();
+            let stages_len = ntst * ncol * dim;
+            let u0: Vec<f64> = lc_state[stages_len..stages_len + dim].to_vec();
+            padded.extend(u0);  // Append u_ntst = u_0
+            padded
+        } else if lc_state.len() == expected_ncoords {
+            lc_state.clone()
+        } else {
+            return Err(JsValue::from_str(&format!(
+                "Invalid lc_state.len()={}, expected {} or {} (ntst={}, ncol={}, dim={})",
+                lc_state.len(), expected_ncoords, implicit_ncoords, ntst, ncol, dim
+            )));
+        };
+
+        let mut problem = NSCurveProblem::new(
+            &mut self.system,
+            full_lc_state.clone(),
+            period,
+            param1_index,
+            param2_index,
+            param1_value,
+            param2_value,
+            initial_k,
+            ntst,
+            ncol,
+        ).map_err(|e| JsValue::from_str(&format!("Failed to create NS problem: {}", e)))?;
+
+        // Build initial augmented state: [lc_state, T, p2, k]
+        // When continue_with_problem prepends p1, we get [p1, lc_state, T, p2, k]
+        let mut augmented_state = Vec::with_capacity(full_lc_state.len() + 3);
+        augmented_state.extend_from_slice(&full_lc_state);
+        augmented_state.push(period);
+        augmented_state.push(param2_value);
+        augmented_state.push(initial_k);
+
+        let initial_point = fork_core::continuation::ContinuationPoint {
+            state: augmented_state,
+            param_value: param1_value,
+            stability: fork_core::continuation::BifurcationType::NeimarkSacker,
+            eigenvalues: vec![],
+        };
+
+        let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
+            .map_err(|e| JsValue::from_str(&format!("NS curve continuation failed: {}", e)))?;
+
+        // State layout after prepend: [p1, lc_state, T, p2, k]
+        // pt.param_value = p1, pt.state = [lc_state, T, p2, k]
+        let n_lc = full_lc_state.len();
+        let codim1_points: Vec<Codim1CurvePoint> = branch.points.iter().map(|pt| {
+            // Extract p2 from state[n_lc + 1]
+            let p2 = if pt.state.len() >= n_lc + 2 {
+                pt.state[n_lc + 1]
+            } else {
+                param2_value
+            };
+            // Extract k from state[n_lc + 2]
+            let k_value = if pt.state.len() >= n_lc + 3 {
+                pt.state[n_lc + 2]
+            } else {
+                initial_k
+            };
+            // Extract physical LC state + T (lc_state + T parts)
+            let physical_state: Vec<f64> = if pt.state.len() >= n_lc + 1 {
+                pt.state[..(n_lc + 1)].to_vec()
+            } else {
+                lc_state.clone()
+            };
+            
+            Codim1CurvePoint {
+                state: physical_state,
+                param1_value: pt.param_value,
+                param2_value: p2,
+                codim2_type: Codim2BifurcationType::None,
+                auxiliary: Some(k_value),  // Store k = cos(θ)
+                eigenvalues: pt.eigenvalues.clone(),
+            }
+        }).collect();
+
+        let codim1_branch = Codim1CurveBranch {
+            curve_type: Codim1CurveType::NeimarkSacker,
             param1_index,
             param2_index,
             points: codim1_points,

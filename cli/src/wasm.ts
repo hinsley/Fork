@@ -381,6 +381,95 @@ export class WasmBridge {
             forward
         );
     }
+
+    /**
+     * Continues an LPC (Limit Point of Cycles) curve in two-parameter space.
+     */
+    continueLPCCurve(
+        lcState: number[],
+        period: number,
+        param1Name: string,
+        param1Value: number,
+        param2Name: string,
+        param2Value: number,
+        ntst: number,
+        ncol: number,
+        settings: any,
+        forward: boolean
+    ): any {
+        return this.instance.continue_lpc_curve(
+            new Float64Array(lcState),
+            period,
+            param1Name,
+            param1Value,
+            param2Name,
+            param2Value,
+            ntst,
+            ncol,
+            settings,
+            forward
+        );
+    }
+
+    /**
+     * Continues a PD (Period-Doubling) curve in two-parameter space.
+     */
+    continuePDCurve(
+        lcState: number[],
+        period: number,
+        param1Name: string,
+        param1Value: number,
+        param2Name: string,
+        param2Value: number,
+        ntst: number,
+        ncol: number,
+        settings: any,
+        forward: boolean
+    ): any {
+        return this.instance.continue_pd_curve(
+            new Float64Array(lcState),
+            period,
+            param1Name,
+            param1Value,
+            param2Name,
+            param2Value,
+            ntst,
+            ncol,
+            settings,
+            forward
+        );
+    }
+
+    /**
+     * Continues an NS (Neimark-Sacker) curve in two-parameter space.
+     */
+    continueNSCurve(
+        lcState: number[],
+        period: number,
+        param1Name: string,
+        param1Value: number,
+        param2Name: string,
+        param2Value: number,
+        initialK: number,
+        ntst: number,
+        ncol: number,
+        settings: any,
+        forward: boolean
+    ): any {
+        return this.instance.continue_ns_curve(
+            new Float64Array(lcState),
+            period,
+            param1Name,
+            param1Value,
+            param2Name,
+            param2Value,
+            initialK,
+            ntst,
+            ncol,
+            settings,
+            forward
+        );
+    }
 }
 
 function normalizeEigenvalues(raw: unknown): ContinuationEigenvalue[] {
