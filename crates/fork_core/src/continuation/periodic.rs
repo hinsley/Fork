@@ -1186,7 +1186,7 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
 ///
 /// This approach correctly handles our implicit periodicity BVP where last continuity
 /// equation wraps to x_0.
-fn extract_multipliers_shooting(
+pub fn extract_multipliers_shooting(
     jac: &DMatrix<f64>,
     dim: usize,
     ntst: usize, 
@@ -1404,14 +1404,14 @@ fn flatten_collocation_state(
 }
 
 #[derive(Debug, Clone)]
-struct CollocationCoefficients {
-    nodes: Vec<f64>,
-    a: Vec<Vec<f64>>,
-    b: Vec<f64>,
+pub struct CollocationCoefficients {
+    pub nodes: Vec<f64>,
+    pub a: Vec<Vec<f64>>,
+    pub b: Vec<f64>,
 }
 
 impl CollocationCoefficients {
-    fn new(degree: usize) -> Result<Self> {
+    pub fn new(degree: usize) -> Result<Self> {
         if degree == 0 {
             bail!("Collocation degree must be at least 1");
         }
@@ -1431,7 +1431,7 @@ impl CollocationCoefficients {
     }
 }
 
-fn gauss_legendre_nodes(degree: usize) -> Result<Vec<f64>> {
+pub fn gauss_legendre_nodes(degree: usize) -> Result<Vec<f64>> {
     if degree == 0 {
         bail!("Collocation degree must be positive");
     }

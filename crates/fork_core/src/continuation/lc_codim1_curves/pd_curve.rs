@@ -48,6 +48,9 @@ pub struct PDCurveProblem<'a> {
     phase_ref: f64,
     /// Border vectors for antiperiodic singularity (for G computation only)
     borders: LCBorders,
+    /// Cached G value - computed ONCE at start of extended_jacobian, 
+    /// reused for all residual calls during numerical differentiation
+    cached_g: f64,
     /// Flag to track if G needs recomputing
     g_stale: bool,
     /// Work arrays for function evaluations
@@ -77,6 +80,7 @@ impl<'a> PDCurveProblem<'a> {
         let coeffs = CollocationCoefficients::new(ncol)?;
         
         let stage_count = ntst * ncol;
+        let ncoords = stage_count * dim + (ntst + 1) * dim;
         
         let work_f = vec![0.0; stage_count * dim];
         let work_j = vec![0.0; stage_count * dim * dim];
@@ -134,6 +138,7 @@ impl<'a> PDCurveProblem<'a> {
             upoldp,
             phase_ref,
             borders,
+            cached_g: 0.0,
             g_stale: true,  // Need to compute G on first extended_jacobian call
             work_f,
             work_j,
@@ -319,7 +324,6 @@ impl<'a> PDCurveProblem<'a> {
     /// - Rows 0 to ntst*ncol*dim-1: Collocation equations
     /// - Rows ntst*ncol*dim to ntst*ncol*dim+ntst*dim-1: Continuity equations
     /// - Last row: Phase condition
-    #[allow(dead_code)]
     fn build_periodic_jac(&mut self, aug: &DVector<f64>) -> Result<DMatrix<f64>> {
         let p1 = self.get_p1(aug);
         let p2 = self.get_p2(aug);
@@ -339,7 +343,7 @@ impl<'a> PDCurveProblem<'a> {
         // Column offsets for the new layout
         let mesh_col_start = 1;  // mesh starts at column 1
         let stage_col_start = mesh_col_start + mesh_dim;  // stages after mesh
-        let _period_col = n_vars - 1;  // T is last column
+        let period_col = n_vars - 1;  // T is last column
         
         // Evaluate all stage Jacobians
         for interval in 0..self.ntst {
@@ -736,7 +740,7 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
         Ok(jac)
     }
 
-    fn diagnostics(&mut self, _aug: &DVector<f64>) -> Result<PointDiagnostics> {
+    fn diagnostics(&mut self, aug: &DVector<f64>) -> Result<PointDiagnostics> {
         // TEMPORARY: Skip monodromy extraction to isolate error source
         // Just return dummy multipliers for now
         let multipliers = vec![
