@@ -31,7 +31,7 @@ pub use periodic::{
 pub use problem::{PointDiagnostics, TestFunctionValues};
 pub use types::{
     BifurcationType, BranchType, ContinuationBranch, ContinuationPoint, ContinuationSettings,
-    Codim1CurveType, Codim2BifurcationType, Codim1CurvePoint, Codim1CurveBranch,
+    Codim1CurveType, Codim2BifurcationType, Codim1CurvePoint, Codim1CurveBranch, StepResult,
 };
 pub use codim1_curves::{Codim2TestFunctions, FoldCurveProblem, HopfCurveProblem};
 pub use lc_codim1_curves::{LPCCurveProblem, PDCurveProblem, NSCurveProblem};
@@ -257,6 +257,332 @@ pub fn continue_with_problem<P: ContinuationProblem>(
     
     Ok(branch)
 }
+
+// ============================================================================
+// Stepping-Based Continuation API (for progress reporting)
+// ============================================================================
+
+const MAX_CONSECUTIVE_FAILURES: usize = 20;
+
+/// A runner that holds continuation state and allows stepped execution for progress reporting.
+/// 
+/// Use this when you need to report progress during continuation:
+/// ```ignore
+/// let mut runner = ContinuationRunner::new(problem, initial_point, settings, forward)?;
+/// while !runner.is_done() {
+///     runner.run_steps(5)?;
+///     println!("Progress: {}/{}", runner.current_step(), runner.max_steps());
+/// }
+/// let branch = runner.take_result();
+/// ```
+pub struct ContinuationRunner<P: ContinuationProblem> {
+    problem: P,
+    prev_aug: DVector<f64>,
+    prev_tangent: DVector<f64>,
+    prev_diag: PointDiagnostics,
+    step_size: f64,
+    current_index: i32,
+    consecutive_failures: usize,
+    current_step: usize,
+    max_steps: usize,
+    settings: ContinuationSettings,
+    branch: ContinuationBranch,
+    done: bool,
+    dim: usize,
+}
+
+impl<P: ContinuationProblem> ContinuationRunner<P> {
+    /// Create a new continuation runner initialized from a starting point.
+    pub fn new(
+        mut problem: P,
+        initial_point: ContinuationPoint,
+        settings: ContinuationSettings,
+        forward: bool,
+    ) -> Result<Self> {
+        let dim = problem.dimension();
+        
+        // Build initial augmented state [p, x...]
+        let mut prev_aug = DVector::zeros(dim + 1);
+        prev_aug[0] = initial_point.param_value;
+        for (i, &val) in initial_point.state.iter().enumerate() {
+            if i < dim {
+                prev_aug[i + 1] = val;
+            }
+        }
+        
+        // Initialize branch with starting point
+        let initial_diag = problem.diagnostics(&prev_aug)?;
+        let prev_diag = initial_diag.clone();
+        let branch = ContinuationBranch {
+            points: vec![ContinuationPoint {
+                state: initial_point.state.clone(),
+                param_value: initial_point.param_value,
+                stability: BifurcationType::None,
+                eigenvalues: initial_diag.eigenvalues,
+            }],
+            bifurcations: Vec::new(),
+            indices: vec![0],
+            branch_type: BranchType::default(),
+            upoldp: None,
+        };
+        
+        // Compute initial tangent and orient it based on requested parameter direction.
+        let mut prev_tangent = compute_tangent_from_problem(&mut problem, &prev_aug)?;
+        let forward_sign = if forward { 1.0 } else { -1.0 };
+        
+        let tangent_norm = prev_tangent.norm();
+        let relative_threshold = 0.01;
+        let param_component_threshold = relative_threshold * tangent_norm;
+        
+        if prev_tangent[0].abs() < param_component_threshold {
+            prev_tangent[0] = param_component_threshold * forward_sign;
+            let norm = prev_tangent.norm();
+            if norm > 1e-12 {
+                prev_tangent = &prev_tangent / norm;
+            }
+        } else if prev_tangent[0] * forward_sign < 0.0 {
+            prev_tangent = -prev_tangent;
+        }
+        
+        Ok(Self {
+            problem,
+            prev_aug,
+            prev_tangent,
+            prev_diag,
+            step_size: settings.step_size,
+            current_index: 0,
+            consecutive_failures: 0,
+            current_step: 0,
+            max_steps: settings.max_steps,
+            settings,
+            branch,
+            done: false,
+            dim,
+        })
+    }
+    
+    /// Run a batch of continuation steps, returning progress information.
+    pub fn run_steps(&mut self, batch_size: usize) -> Result<StepResult> {
+        if self.done {
+            return Ok(self.step_result());
+        }
+        
+        for _ in 0..batch_size {
+            if self.current_step >= self.max_steps {
+                self.done = true;
+                break;
+            }
+            
+            if !self.single_step()? {
+                // Early termination due to step size or failure limit
+                self.done = true;
+                break;
+            }
+            
+            self.current_step += 1;
+        }
+        
+        Ok(self.step_result())
+    }
+    
+    /// Execute a single continuation step. Returns false if should terminate.
+    fn single_step(&mut self) -> Result<bool> {
+        // Predictor: predict along tangent
+        let direction_sign = 1.0;
+        let pred_aug = &self.prev_aug + &self.prev_tangent * (self.step_size * direction_sign);
+        
+        // Corrector: solve using Newton-like iteration
+        let corrected_opt = correct_with_problem(
+            &mut self.problem,
+            &pred_aug,
+            &self.prev_aug,
+            &self.prev_tangent,
+            self.settings.corrector_steps,
+            self.settings.corrector_tolerance,
+        )?;
+        
+        if let Some(corrected_aug) = corrected_opt {
+            if !corrected_aug.iter().all(|v| v.is_finite()) {
+                self.consecutive_failures += 1;
+                self.step_size *= 0.5;
+                if self.step_size < self.settings.min_step_size 
+                    || self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES 
+                {
+                    return Ok(false);
+                }
+                return Ok(true); // Continue trying
+            }
+            
+            // Compute new tangent
+            let new_tangent = compute_tangent_from_problem(&mut self.problem, &corrected_aug)?;
+            if !new_tangent.iter().all(|v| v.is_finite()) {
+                self.consecutive_failures += 1;
+                self.step_size *= 0.5;
+                if self.step_size < self.settings.min_step_size 
+                    || self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES 
+                {
+                    return Ok(false);
+                }
+                return Ok(true);
+            }
+            
+            // Ensure tangent direction consistency
+            let dot_product: f64 = new_tangent.iter()
+                .zip(self.prev_tangent.iter())
+                .map(|(a, b)| a * b)
+                .sum();
+            let consistent_tangent = if dot_product < 0.0 {
+                -new_tangent
+            } else {
+                new_tangent
+            };
+            
+            // Reset failure counter on success
+            self.consecutive_failures = 0;
+            
+            // Update problem state after successful step
+            self.problem.update_after_step(&corrected_aug)?;
+            
+            // Compute diagnostics for the new point
+            let diagnostics = self.problem.diagnostics(&corrected_aug)?;
+            
+            // Bifurcation detection via test function sign changes
+            let prev_tests = &self.prev_diag.test_values;
+            let new_tests = &diagnostics.test_values;
+            
+            // Detect limit cycle bifurcations
+            let cycle_fold_crossed = prev_tests.cycle_fold * new_tests.cycle_fold < 0.0;
+            let period_doubling_crossed = prev_tests.period_doubling * new_tests.period_doubling < 0.0;
+            let neimark_sacker_crossed = prev_tests.neimark_sacker * new_tests.neimark_sacker < 0.0;
+            
+            // Detect equilibrium bifurcations
+            let fold_crossed = prev_tests.fold * new_tests.fold < 0.0;
+            let hopf_crossed = prev_tests.hopf * new_tests.hopf < 0.0;
+            let neutral_saddle_crossed = prev_tests.neutral_saddle * new_tests.neutral_saddle < 0.0;
+
+            let bifurcation_type = if fold_crossed {
+                BifurcationType::Fold
+            } else if hopf_crossed {
+                BifurcationType::Hopf
+            } else if cycle_fold_crossed {
+                BifurcationType::CycleFold
+            } else if period_doubling_crossed {
+                BifurcationType::PeriodDoubling
+            } else if neimark_sacker_crossed {
+                BifurcationType::NeimarkSacker
+            } else if neutral_saddle_crossed {
+                BifurcationType::NeutralSaddle
+            } else {
+                BifurcationType::None
+            };
+            
+            // Refine bifurcation point if detected
+            let (final_aug, final_diag) = if bifurcation_type != BifurcationType::None {
+                match refine_bifurcation_bisection(
+                    &mut self.problem,
+                    &self.prev_aug,
+                    prev_tests,
+                    &corrected_aug,
+                    new_tests,
+                    bifurcation_type,
+                    &self.prev_tangent,
+                    self.settings.corrector_steps,
+                    self.settings.corrector_tolerance,
+                ) {
+                    Ok((refined_aug, refined_diag)) => (refined_aug, refined_diag),
+                    Err(_) => (corrected_aug.clone(), diagnostics.clone()),
+                }
+            } else {
+                (corrected_aug.clone(), diagnostics.clone())
+            };
+            
+            // Determine forward direction based on tangent
+            let forward_sign = if self.prev_tangent[0] >= 0.0 { 1 } else { -1 };
+            self.current_index += forward_sign;
+            
+            let new_point = ContinuationPoint {
+                state: final_aug.rows(1, self.dim).iter().cloned().collect(),
+                param_value: final_aug[0],
+                stability: bifurcation_type,
+                eigenvalues: final_diag.eigenvalues.clone(),
+            };
+            
+            // Record bifurcation if detected
+            if bifurcation_type != BifurcationType::None {
+                self.branch.bifurcations.push(self.branch.points.len());
+            }
+            
+            self.branch.points.push(new_point);
+            self.branch.indices.push(self.current_index);
+            
+            // Adaptive step size - increase on success
+            self.step_size = (self.step_size * 1.2).min(self.settings.max_step_size);
+            
+            self.prev_aug = final_aug;
+            self.prev_tangent = consistent_tangent;
+            self.prev_diag = final_diag;
+        } else {
+            // Failed to converge, reduce step size
+            self.consecutive_failures += 1;
+            self.step_size *= 0.5;
+            if self.step_size < self.settings.min_step_size 
+                || self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES 
+            {
+                return Ok(false);
+            }
+        }
+        
+        Ok(true)
+    }
+    
+    /// Check if continuation is complete.
+    pub fn is_done(&self) -> bool {
+        self.done
+    }
+    
+    /// Get current step number.
+    pub fn current_step(&self) -> usize {
+        self.current_step
+    }
+    
+    /// Get max steps.
+    pub fn max_steps(&self) -> usize {
+        self.max_steps
+    }
+    
+    /// Get step result for progress reporting.
+    pub fn step_result(&self) -> StepResult {
+        StepResult::new(
+            self.done,
+            self.current_step,
+            self.max_steps,
+            self.branch.points.len(),
+            self.branch.bifurcations.len(),
+            self.prev_aug[0],
+        )
+    }
+    
+    /// Take the final branch result, consuming the runner.
+    pub fn take_result(self) -> ContinuationBranch {
+        self.branch
+    }
+    
+    /// Get a reference to the branch.
+    pub fn branch(&self) -> &ContinuationBranch {
+        &self.branch
+    }
+    
+    /// Set the branch type (used for limit cycle continuation).
+    pub fn set_branch_type(&mut self, branch_type: BranchType) {
+        self.branch.branch_type = branch_type;
+    }
+
+    /// Set the upoldp field (used for limit cycle continuation).
+    pub fn set_upoldp(&mut self, upoldp: Option<Vec<Vec<f64>>>) {
+        self.branch.upoldp = upoldp;
+    }
+}
+
 
 /// Extends an existing branch using pseudo-arclength continuation.
 /// Uses a secant predictor from the last two points to determine the continuation direction.

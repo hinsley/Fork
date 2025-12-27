@@ -17,7 +17,7 @@ import {
   parseIntOrDefault,
   runConfigMenu
 } from '../menu';
-import { printSuccess, printError, printInfo } from '../format';
+import { printSuccess, printError, printInfo, printProgressComplete } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
 import { isValidName, getBranchParams } from './utils';
 
@@ -261,7 +261,8 @@ export async function initiateEquilibriumBranchFromPoint(
     step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON)
   };
 
-  printInfo("Running Continuation...");
+  printInfo(`Computing continuation (max ${continuationSettings.max_steps} steps)...`);
+  process.stdout.write('  Computing...');
 
   try {
     // Build system config with the parameter values from the source branch
@@ -283,6 +284,8 @@ export async function initiateEquilibriumBranchFromPoint(
       continuationSettings,
       directionForward
     ));
+
+    printProgressComplete('Continuation');
 
     const newBranch: ContinuationObject = {
       type: 'continuation',
