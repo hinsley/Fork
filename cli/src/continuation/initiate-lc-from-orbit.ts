@@ -18,7 +18,7 @@ import {
   parseIntOrDefault,
   runConfigMenu
 } from '../menu';
-import { printSuccess, printError, printInfo } from '../format';
+import { printSuccess, printError, printInfo, printProgressComplete } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
 import { isValidName } from './utils';
 import { inspectBranch } from './inspect';
@@ -337,7 +337,8 @@ export async function initiateLCFromOrbit(
       tolerance
     );
 
-    console.log(chalk.cyan("Running limit cycle continuation..."));
+    console.log(chalk.cyan(`Running limit cycle continuation (max ${continuationSettings.max_steps} steps)...`));
+    process.stdout.write('  Computing...');
 
     // Run continuation
     const branchData = normalizeBranchEigenvalues(bridge.continueLimitCycle(
@@ -346,6 +347,8 @@ export async function initiateLCFromOrbit(
       continuationSettings,
       directionForward
     ));
+
+    printProgressComplete('LC Continuation');
 
     // Ensure branch_type is included with mesh parameters for plotting scripts.
     branchData.branch_type = branchData.branch_type ?? { type: 'LimitCycle', ntst, ncol };

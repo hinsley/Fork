@@ -27,6 +27,7 @@ import { normalizeBranchEigenvalues } from './serialization';
 import { isValidName } from './utils';
 import { inspectBranch } from './inspect';
 import { initiateLCFromOrbit } from './initiate-lc-from-orbit';
+import { printProgressComplete } from '../format';
 
 /**
  * Entry point for creating a new continuation branch.
@@ -287,7 +288,7 @@ export async function createEquilibriumBranchForObject(
     step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON),
   };
 
-  console.log(chalk.cyan("Running Continuation..."));
+  console.log(chalk.cyan(`Computing continuation (max ${continuationSettings.max_steps} steps)...`));
   try {
     // IMPORTANT: Restore parameters from the equilibrium object if available.
     const runConfig = { ...sysConfig };
@@ -296,12 +297,19 @@ export async function createEquilibriumBranchForObject(
     }
 
     const bridge = new WasmBridge(runConfig);
+
+    // Show computing indicator
+    process.stdout.write(chalk.dim('  Computing...'));
+
     const branchData = normalizeBranchEigenvalues(bridge.compute_continuation(
       eqObj.solution.state,
       selectedParamName,
       continuationSettings,
       directionForward
     ));
+
+    // Complete progress
+    printProgressComplete('Continuation');
 
     const branch: ContinuationObject = {
       type: 'continuation',
@@ -564,7 +572,7 @@ export async function createLimitCycleBranchForObject(
     step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON),
   };
 
-  console.log(chalk.cyan("Running Limit Cycle Continuation..."));
+  console.log(chalk.cyan(`Computing limit cycle continuation (max ${continuationSettings.max_steps} steps)...`));
   try {
     const runConfig = { ...sysConfig };
     if (lcObj.parameters && lcObj.parameters.length === sysConfig.params.length) {
@@ -599,12 +607,19 @@ export async function createLimitCycleBranchForObject(
     };
 
     const bridge = new WasmBridge(runConfig);
+
+    // Show computing indicator
+    process.stdout.write(chalk.dim('  Computing...'));
+
     const branchData = normalizeBranchEigenvalues(bridge.continueLimitCycle(
       lcSetup,
       selectedParamName,
       continuationSettings,
       directionForward
     ));
+
+    // Complete progress
+    printProgressComplete('LC Continuation');
 
     branchData.branch_type = branchData.branch_type ?? { type: 'LimitCycle', ntst: sourceNtst, ncol: sourceNcol };
 
@@ -976,7 +991,8 @@ async function createEquilibriumBranch(sysName: string) {
   const forward = directionForward;
 
   // 5. Run
-  console.log(chalk.cyan("Running Continuation..."));
+  console.log(chalk.cyan(`Computing continuation (max ${continuationSettings.max_steps} steps)...`));
+  process.stdout.write(chalk.dim('  Computing...'));
   try {
     // IMPORTANT: Restore parameters from the equilibrium object if available
     // This ensures we start from the state the equilibrium was found at.
@@ -992,6 +1008,8 @@ async function createEquilibriumBranch(sysName: string) {
       continuationSettings,
       forward
     ));
+
+    printProgressComplete('Continuation');
 
     const branch: ContinuationObject = {
       type: 'continuation',

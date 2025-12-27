@@ -18,7 +18,7 @@ import {
   parseIntOrDefault,
   runConfigMenu
 } from '../menu';
-import { printSuccess, printError, printInfo } from '../format';
+import { printSuccess, printError, printInfo, printProgressComplete } from '../format';
 import { isValidName, getBranchParams } from './utils';
 
 /**
@@ -218,7 +218,8 @@ export async function initiateFoldCurve(
     step_tolerance: 1e-8
   };
 
-  printInfo("Running Fold Curve Continuation...");
+  printInfo(`Running Fold Curve Continuation (max ${continuationSettings.max_steps} steps)...`);
+  process.stdout.write('  Computing...');
 
   try {
     // Build system config with the parameter values from the source branch
@@ -241,6 +242,8 @@ export async function initiateFoldCurve(
       continuationSettings,
       directionForward
     );
+
+    printProgressComplete('Fold Curve');
 
     const numPoints = curveData?.points?.length ?? 0;
     const numCodim2 = curveData?.codim2_bifurcations?.length ?? 0;
@@ -526,7 +529,8 @@ export async function initiateHopfCurve(
     step_tolerance: 1e-8
   };
 
-  printInfo("Running Hopf Curve Continuation...");
+  printInfo(`Running Hopf Curve Continuation (max ${continuationSettings.max_steps} steps)...`);
+  process.stdout.write('  Computing...');
 
   try {
     // Build system config with the parameter values from the source branch
@@ -550,6 +554,8 @@ export async function initiateHopfCurve(
       continuationSettings,
       directionForward
     );
+
+    printProgressComplete('Hopf Curve');
 
     // For now, just log results since we don't have a viewer for 2D curves yet
     const numPoints = curveData?.points?.length ?? 0;
@@ -824,7 +830,8 @@ export async function initiateLPCCurve(
     step_tolerance: 1e-8
   };
 
-  printInfo('Running LPC curve continuation...');
+  printInfo(`Running LPC curve continuation (max ${continuationSettings.max_steps} steps)...`);
+  process.stdout.write('  Computing...');
 
   try {
     const runConfig = { ...sysConfig };
@@ -849,6 +856,8 @@ export async function initiateLPCCurve(
       continuationSettings,
       directionForward
     );
+
+    printProgressComplete('LPC Curve');
 
     if (!curveData || !curveData.points || curveData.points.length === 0) {
       printError('LPC curve returned no points');
@@ -1117,7 +1126,8 @@ export async function initiatePDCurve(
     step_tolerance: 1e-8
   };
 
-  printInfo('Running PD curve continuation...');
+  printInfo(`Running PD curve continuation (max ${continuationSettings.max_steps} steps)...`);
+  process.stdout.write('  Computing...');
 
   try {
     const runConfig = { ...sysConfig };
@@ -1144,6 +1154,8 @@ export async function initiatePDCurve(
       continuationSettings,
       directionForward
     );
+
+    printProgressComplete('PD Curve');
 
     if (!curveData || !curveData.points || curveData.points.length === 0) {
       printError('PD curve returned no points');
@@ -1411,7 +1423,8 @@ export async function initiateNSCurve(
     step_tolerance: 1e-8
   };
 
-  printInfo('Running NS curve continuation...');
+  printInfo(`Running NS curve continuation (max ${continuationSettings.max_steps} steps)...`);
+  process.stdout.write('  Computing...');
 
   try {
     const runConfig = { ...sysConfig };
@@ -1437,6 +1450,8 @@ export async function initiateNSCurve(
       continuationSettings,
       directionForward
     );
+
+    printProgressComplete('NS Curve');
 
     if (!curveData || !curveData.points || curveData.points.length === 0) {
       printError('NS curve returned no points');
