@@ -18,7 +18,7 @@ import {
   parseIntOrDefault,
   runConfigMenu
 } from '../menu';
-import { printSuccess, printError } from '../format';
+import { printSuccess, printError, printProgressComplete } from '../format';
 import { serializeBranchDataForWasm, normalizeBranchEigenvalues } from './serialization';
 import { inspectBranch } from './inspect';
 import { getBranchParams } from './utils';
@@ -118,7 +118,8 @@ export async function extendBranch(
     step_tolerance: defaults.step_tolerance || 1e-6
   };
 
-  console.log(chalk.cyan(`Extending Branch ${directionForward ? 'Forward' : 'Backward'}...`));
+  console.log(chalk.cyan(`Extending branch ${directionForward ? 'forward' : 'backward'} (max ${continuationSettings.max_steps} points)...`));
+  process.stdout.write('  Computing...');
 
   try {
     const runConfig = { ...sysConfig };
@@ -167,6 +168,8 @@ export async function extendBranch(
       continuationSettings,
       directionForward
     );
+
+    printProgressComplete('Extension');
 
     branch.data = normalizeBranchEigenvalues(updatedData);
     branch.settings = continuationSettings;

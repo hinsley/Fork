@@ -164,3 +164,44 @@ pub struct Codim1CurveBranch {
     /// Arclength indices relative to start (0)
     pub indices: Vec<i32>,
 }
+
+// ============================================================================
+// Streaming Progress Types
+// ============================================================================
+
+/// Result of a stepping operation for progress reporting.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepResult {
+    /// Whether continuation is complete
+    pub done: bool,
+    /// Current step number
+    pub current_step: usize,
+    /// Maximum steps configured
+    pub max_steps: usize,
+    /// Number of points computed so far
+    pub points_computed: usize,
+    /// Number of bifurcations found so far
+    pub bifurcations_found: usize,
+    /// Current parameter value (for live display)
+    pub current_param: f64,
+}
+
+impl StepResult {
+    pub fn new(
+        done: bool,
+        current_step: usize,
+        max_steps: usize,
+        points_computed: usize,
+        bifurcations_found: usize,
+        current_param: f64,
+    ) -> Self {
+        Self {
+            done,
+            current_step,
+            max_steps,
+            points_computed,
+            bifurcations_found,
+            current_param,
+        }
+    }
+}
