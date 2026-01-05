@@ -2047,6 +2047,7 @@ async function executeEquilibriumSolver(
         );
 
         obj.solution = result;
+        obj.parameters = [...sysConfig.params];
         runRecord.success = true;
         runRecord.residual_norm = result.residual_norm;
         runRecord.iterations = result.iterations;
@@ -2085,6 +2086,18 @@ function renderEquilibriumData(obj: EquilibriumObject, sysConfig: SystemConfig) 
             const display = value !== undefined ? value.toPrecision(6) : 'n/a';
             console.log(`    ${name}: ${display}`);
         });
+
+        console.log(chalk.cyan('  Parameters (last solve):'));
+        if (obj.parameters && obj.parameters.length > 0) {
+            sysConfig.paramNames.forEach((name, idx) => {
+                const value = obj.parameters?.[idx];
+                const display = value !== undefined ? value.toPrecision(6) : 'n/a';
+                const label = name || `p${idx + 1}`;
+                console.log(`    ${label}: ${display}`);
+            });
+        } else {
+            console.log('    (not recorded)');
+        }
 
         console.log(chalk.cyan('  Residual & Iterations:'));
         console.log(`    Residual: ${obj.solution.residual_norm.toExponential(6)}`);
