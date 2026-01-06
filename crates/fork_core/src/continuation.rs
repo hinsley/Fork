@@ -1116,7 +1116,7 @@ fn correct_with_problem<P: ContinuationProblem>(
     // Use adaptive tangent for bordering - start with prev_tangent
     let mut border_tangent = prev_tangent.clone();
     
-    for iter in 0..max_iters {
+    for _iter in 0..max_iters {
         // Compute residual F(x)
         let mut residual = DVector::zeros(dim);
         problem.residual(&current, &mut residual)?;
