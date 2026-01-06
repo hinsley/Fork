@@ -4,10 +4,6 @@ import { AnalysisRunner, EquilibriumSolverRunner } from './wasm';
 
 const DEFAULT_PROGRESS_UPDATES = 50;
 
-/**
- * Choose a batch size that keeps progress updates bounded without
- * forcing excessive cross-language calls.
- */
 function computeBatchSize(maxSteps: number): number {
   if (!Number.isFinite(maxSteps) || maxSteps <= 0) {
     return 1;
@@ -15,9 +11,6 @@ function computeBatchSize(maxSteps: number): number {
   return Math.max(1, Math.ceil(maxSteps / DEFAULT_PROGRESS_UPDATES));
 }
 
-/**
- * Run an analysis-style stepped runner with progress output.
- */
 export function runAnalysisWithProgress<T>(
   runner: AnalysisRunner<T>,
   label: string
@@ -37,9 +30,6 @@ export function runAnalysisWithProgress<T>(
   return runner.get_result();
 }
 
-/**
- * Run a stepped equilibrium solver with progress output.
- */
 export function runEquilibriumSolveWithProgress(
   runner: EquilibriumSolverRunner,
   label: string

@@ -4,10 +4,6 @@ import { WasmBridge } from '../wasm';
 
 const DEFAULT_PROGRESS_UPDATES = 50;
 
-/**
- * Choose a batch size that keeps progress updates bounded without
- * forcing excessive cross-language calls.
- */
 function computeBatchSize(maxSteps: number): number {
   if (!Number.isFinite(maxSteps) || maxSteps <= 0) {
     return 1;
@@ -21,9 +17,6 @@ type ContinuationRunner<T> = {
   get_result(): T;
 };
 
-/**
- * Run a stepped continuation runner and render a progress bar.
- */
 function runContinuationRunnerWithProgress<T>(
   runner: ContinuationRunner<T>,
   label: string
@@ -43,9 +36,6 @@ function runContinuationRunnerWithProgress<T>(
   return runner.get_result();
 }
 
-/**
- * Continue equilibria with stepped progress updates.
- */
 export function runEquilibriumContinuationWithProgress(
   bridge: WasmBridge,
   equilibriumState: number[],
@@ -64,9 +54,6 @@ export function runEquilibriumContinuationWithProgress(
   return runContinuationRunnerWithProgress(runner, label);
 }
 
-/**
- * Continue limit cycles with stepped progress updates.
- */
 export function runLimitCycleContinuationWithProgress(
   bridge: WasmBridge,
   setup: any,
@@ -85,9 +72,6 @@ export function runLimitCycleContinuationWithProgress(
   return runContinuationRunnerWithProgress(runner, label);
 }
 
-/**
- * Extend an existing branch while reporting progress.
- */
 export function runContinuationExtensionWithProgress(
   bridge: WasmBridge,
   branchData: ContinuationBranchData,
@@ -106,9 +90,6 @@ export function runContinuationExtensionWithProgress(
   return runContinuationRunnerWithProgress(runner, label);
 }
 
-/**
- * Continue a fold curve with stepped progress updates.
- */
 export function runFoldCurveWithProgress(
   bridge: WasmBridge,
   foldState: number[],
@@ -133,9 +114,6 @@ export function runFoldCurveWithProgress(
   return runContinuationRunnerWithProgress(runner, label);
 }
 
-/**
- * Continue a Hopf curve with stepped progress updates.
- */
 export function runHopfCurveWithProgress(
   bridge: WasmBridge,
   hopfState: number[],
@@ -162,9 +140,6 @@ export function runHopfCurveWithProgress(
   return runContinuationRunnerWithProgress(runner, label);
 }
 
-/**
- * Continue an LPC curve with stepped progress updates.
- */
 export function runLPCCurveWithProgress(
   bridge: WasmBridge,
   lcState: number[],
@@ -195,9 +170,6 @@ export function runLPCCurveWithProgress(
   return runContinuationRunnerWithProgress(runner, label);
 }
 
-/**
- * Continue a PD curve with stepped progress updates.
- */
 export function runPDCurveWithProgress(
   bridge: WasmBridge,
   lcState: number[],
@@ -228,9 +200,6 @@ export function runPDCurveWithProgress(
   return runContinuationRunnerWithProgress(runner, label);
 }
 
-/**
- * Continue an NS curve with stepped progress updates.
- */
 export function runNSCurveWithProgress(
   bridge: WasmBridge,
   lcState: number[],

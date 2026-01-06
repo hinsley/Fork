@@ -30,6 +30,7 @@ import {
 import { initiateLCFromHopf, initiateLCBranchFromPoint, initiateLCFromPD } from './initiate-lc';
 import { initiateEquilibriumBranchFromPoint } from './initiate-eq';
 import { initiateFoldCurve, initiateHopfCurve, initiateLPCCurve, initiatePDCurve, initiateNSCurve } from './initiate-codim1';
+import { printProgress, printProgressComplete } from '../format';
 
 type BranchDetailResult = 'SUMMARY' | 'EXIT' | NavigationRequest;
 const DETAIL_PAGE_SIZE = 10;
@@ -360,17 +361,24 @@ export async function hydrateEigenvalues(sysName: string, branch: ContinuationOb
     return;
   }
 
-  console.log(chalk.yellow(`Hydrating eigenvalues for ${missingIndices.length} continuation points...`));
+  const total = missingIndices.length;
+  const updateInterval = Math.max(1, Math.floor(total / 100));
+  printProgress(0, total, 'Hydrating eigenvalues');
   const sysConfig = Storage.loadSystem(sysName);
   const runConfig = { ...sysConfig };
   runConfig.params = getBranchParams(sysName, branch, sysConfig);
   const bridge = new WasmBridge(runConfig);
 
-  missingIndices.forEach(idx => {
+  missingIndices.forEach((idx, position) => {
     const pt = branch.data.points[idx];
     pt.eigenvalues = bridge.computeEigenvalues(pt.state, branch.parameterName, pt.param_value);
+    const current = position + 1;
+    if (current % updateInterval === 0 || current === total) {
+      printProgress(current, total, 'Hydrating eigenvalues');
+    }
   });
 
+  printProgressComplete('Hydrating eigenvalues');
   Storage.saveBranch(sysName, branch.parentObject, branch);
 }
 

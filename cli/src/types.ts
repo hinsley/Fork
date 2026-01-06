@@ -155,3 +155,25 @@ export interface LimitCycleBranchResponse {
   branch: ContinuationBranchData;
   meta: LimitCycleMeta;
 }
+
+export interface ContinuationProgress {
+  done: boolean;
+  current_step: number;
+  max_steps: number;
+  points_computed: number;
+  bifurcations_found: number;
+  current_param: number;
+}
+
+export interface AnalysisProgress {
+  done: boolean;
+  current_step: number;
+  max_steps: number;
+}
+
+export interface EquilibriumSolveProgress {
+  done: boolean;
+  iterations: number;
+  max_steps: number;
+  residual_norm: number;
+}
