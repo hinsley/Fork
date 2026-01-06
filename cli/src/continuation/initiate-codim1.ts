@@ -18,8 +18,15 @@ import {
   parseIntOrDefault,
   runConfigMenu
 } from '../menu';
-import { printSuccess, printError, printInfo, printProgressComplete } from '../format';
+import { printSuccess, printError, printInfo } from '../format';
 import { isValidName, getBranchParams } from './utils';
+import {
+  runFoldCurveWithProgress,
+  runHopfCurveWithProgress,
+  runLPCCurveWithProgress,
+  runPDCurveWithProgress,
+  runNSCurveWithProgress
+} from './progress';
 
 /**
  * Initiates fold curve continuation from a Fold bifurcation point.
@@ -219,7 +226,6 @@ export async function initiateFoldCurve(
   };
 
   printInfo(`Running Fold Curve Continuation (max ${continuationSettings.max_steps} steps)...`);
-  process.stdout.write('  Computing...');
 
   try {
     // Build system config with the parameter values from the source branch
@@ -232,18 +238,17 @@ export async function initiateFoldCurve(
 
     const bridge = new WasmBridge(runConfig);
 
-    // Call the WASM binding
-    const curveData = bridge.continueFoldCurve(
+    const curveData = runFoldCurveWithProgress(
+      bridge,
       foldPoint.state,
       param1Name,
       param1Value,
       param2Name,
       param2Value,
       continuationSettings,
-      directionForward
+      directionForward,
+      'Fold Curve'
     );
-
-    printProgressComplete('Fold Curve');
 
     const numPoints = curveData?.points?.length ?? 0;
     const numCodim2 = curveData?.codim2_bifurcations?.length ?? 0;
@@ -530,7 +535,6 @@ export async function initiateHopfCurve(
   };
 
   printInfo(`Running Hopf Curve Continuation (max ${continuationSettings.max_steps} steps)...`);
-  process.stdout.write('  Computing...');
 
   try {
     // Build system config with the parameter values from the source branch
@@ -543,8 +547,8 @@ export async function initiateHopfCurve(
 
     const bridge = new WasmBridge(runConfig);
 
-    // Call the WASM binding
-    const curveData = bridge.continueHopfCurve(
+    const curveData = runHopfCurveWithProgress(
+      bridge,
       hopfPoint.state,
       hopfOmega,
       param1Name,
@@ -552,10 +556,9 @@ export async function initiateHopfCurve(
       param2Name,
       param2Value,
       continuationSettings,
-      directionForward
+      directionForward,
+      'Hopf Curve'
     );
-
-    printProgressComplete('Hopf Curve');
 
     // For now, just log results since we don't have a viewer for 2D curves yet
     const numPoints = curveData?.points?.length ?? 0;
@@ -831,7 +834,6 @@ export async function initiateLPCCurve(
   };
 
   printInfo(`Running LPC curve continuation (max ${continuationSettings.max_steps} steps)...`);
-  process.stdout.write('  Computing...');
 
   try {
     const runConfig = { ...sysConfig };
@@ -844,7 +846,8 @@ export async function initiateLPCCurve(
     const lcPeriod = lpcPoint.state[lpcPoint.state.length - 1];
     const lcCoords = lpcPoint.state.slice(0, -1);
 
-    const curveData = bridge.continueLPCCurve(
+    const curveData = runLPCCurveWithProgress(
+      bridge,
       lcCoords,
       lcPeriod,
       param1Name,
@@ -854,10 +857,9 @@ export async function initiateLPCCurve(
       ntst,
       ncol,
       continuationSettings,
-      directionForward
+      directionForward,
+      'LPC Curve'
     );
-
-    printProgressComplete('LPC Curve');
 
     if (!curveData || !curveData.points || curveData.points.length === 0) {
       printError('LPC curve returned no points');
@@ -1127,7 +1129,6 @@ export async function initiatePDCurve(
   };
 
   printInfo(`Running PD curve continuation (max ${continuationSettings.max_steps} steps)...`);
-  process.stdout.write('  Computing...');
 
   try {
     const runConfig = { ...sysConfig };
@@ -1142,7 +1143,8 @@ export async function initiatePDCurve(
     const lcPeriod = pdPoint.state[pdPoint.state.length - 1];
     const lcCoords = pdPoint.state.slice(0, -1);  // Just strip period at end
 
-    const curveData = bridge.continuePDCurve(
+    const curveData = runPDCurveWithProgress(
+      bridge,
       lcCoords,
       lcPeriod,
       param1Name,
@@ -1152,10 +1154,9 @@ export async function initiatePDCurve(
       ntst,
       ncol,
       continuationSettings,
-      directionForward
+      directionForward,
+      'PD Curve'
     );
-
-    printProgressComplete('PD Curve');
 
     if (!curveData || !curveData.points || curveData.points.length === 0) {
       printError('PD curve returned no points');
@@ -1424,7 +1425,6 @@ export async function initiateNSCurve(
   };
 
   printInfo(`Running NS curve continuation (max ${continuationSettings.max_steps} steps)...`);
-  process.stdout.write('  Computing...');
 
   try {
     const runConfig = { ...sysConfig };
@@ -1437,7 +1437,8 @@ export async function initiateNSCurve(
     const lcPeriod = nsPoint.state[nsPoint.state.length - 1];
     const lcCoords = nsPoint.state.slice(0, -1);
 
-    const curveData = bridge.continueNSCurve(
+    const curveData = runNSCurveWithProgress(
+      bridge,
       lcCoords,
       lcPeriod,
       param1Name,
@@ -1448,10 +1449,9 @@ export async function initiateNSCurve(
       ntst,
       ncol,
       continuationSettings,
-      directionForward
+      directionForward,
+      'NS Curve'
     );
-
-    printProgressComplete('NS Curve');
 
     if (!curveData || !curveData.points || curveData.points.length === 0) {
       printError('NS curve returned no points');
@@ -1508,4 +1508,3 @@ export async function initiateNSCurve(
     return null;
   }
 }
-

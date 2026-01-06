@@ -16,6 +16,7 @@ import {
     OrbitObject
 } from './types';
 import { WasmBridge, CovariantLyapunovResponse } from './wasm';
+import { runAnalysisWithProgress, runEquilibriumSolveWithProgress } from './progress';
 
 import { createEquilibriumBranchForObject, createLimitCycleBranchForObject } from './continuation/create';
 import { extendBranch } from './continuation/extend';
@@ -39,7 +40,9 @@ import {
     printError,
     printInfo,
     printDivider,
-    printBlank
+    printBlank,
+    printProgress,
+    printProgressComplete
 } from './format';
 
 function systemExists(name: string): boolean {
@@ -680,21 +683,19 @@ async function createOrbit(sysName: string): Promise<NavigationRequest | void> {
         let current_t = 0;
         data.push([current_t, ...ic]);
 
-        const spinner = ['|', '/', '-', '\\'];
-        process.stdout.write("Simulating... ");
-
         const updateInterval = isMap ? 10000 : 1000;
+        printProgress(0, steps, 'Simulating');
 
         for (let i = 0; i < steps; i++) {
             bridge.step(dt);
             current_t += dt;
             data.push([current_t, ...bridge.get_state()]);
 
-            if (i % updateInterval === 0) {
-                process.stdout.write(`\rSimulating... ${spinner[(i / updateInterval) % 4]} ${(i / steps * 100).toFixed(0)}%`);
+            if (i % updateInterval === 0 || i === steps - 1) {
+                printProgress(i + 1, steps, 'Simulating');
             }
         }
-        console.log(`\rSimulating... Done!   `);
+        printProgressComplete('Simulating');
 
         const orbit: OrbitObject = {
             type: 'orbit',
@@ -1431,14 +1432,15 @@ async function runLyapunovExponents(sysName: string, obj: OrbitObject) {
 
     try {
         const bridge = new WasmBridge(sysConfig);
-        console.log(chalk.yellow("Computing..."));
-        const exponents = bridge.computeLyapunovExponents(
+        console.log(chalk.yellow("Computing Lyapunov exponents..."));
+        const runner = bridge.createLyapunovRunner(
             startState,
             startTime,
             steps,
             dt,
             qrStride
         );
+        const exponents = runAnalysisWithProgress(runner, 'Lyapunov');
         obj.lyapunovExponents = exponents;
         Storage.saveObject(sysName, obj);
         console.log(chalk.green("Lyapunov exponents computed and stored."));
@@ -1664,15 +1666,16 @@ async function runCovariantLyapunovVectors(sysName: string, obj: OrbitObject) {
     try {
         const bridge = new WasmBridge(sysConfig);
         console.log(chalk.yellow("Computing covariant Lyapunov vectors..."));
-        const payload = bridge.computeCovariantLyapunovVectors(
+        const runner = bridge.createCovariantLyapunovRunner(
             startState,
             startTime,
-            windowSteps,
             dt,
             qrStride,
+            windowSteps,
             forwardSteps,
             backwardSteps
         );
+        const payload = runAnalysisWithProgress(runner, 'Covariant Lyapunov');
 
         if (!payload.checkpoints || payload.vectors.length === 0) {
             console.error(chalk.red("No covariant vectors returned by the solver."));
@@ -2040,11 +2043,12 @@ async function executeEquilibriumSolver(
     try {
         console.log(chalk.cyan("Running equilibrium solver..."));
         const bridge = new WasmBridge(sysConfig);
-        const result = bridge.solve_equilibrium(
+        const runner = bridge.createEquilibriumSolverRunner(
             solverParams.initialGuess,
             solverParams.maxSteps,
             solverParams.dampingFactor
         );
+        const result = runEquilibriumSolveWithProgress(runner, 'Equilibrium');
 
         obj.solution = result;
         obj.parameters = [...sysConfig.params];

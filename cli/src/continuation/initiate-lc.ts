@@ -18,9 +18,10 @@ import {
   parseIntOrDefault,
   runConfigMenu
 } from '../menu';
-import { printSuccess, printError, printInfo, printProgressComplete } from '../format';
+import { printSuccess, printError, printInfo } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
 import { isValidName, getBranchParams } from './utils';
+import { runLimitCycleContinuationWithProgress } from './progress';
 
 /**
  * Initiates limit cycle continuation from a Hopf bifurcation point.
@@ -300,17 +301,17 @@ export async function initiateLCFromHopf(
     );
 
     console.log(chalk.cyan(`Running limit cycle continuation (max ${continuationSettings.max_steps} steps)...`));
-    process.stdout.write('  Computing...');
 
-    // Run continuation
-    const branchData = normalizeBranchEigenvalues(bridge.continueLimitCycle(
-      guess,
-      branch.parameterName,
-      continuationSettings,
-      directionForward
-    ));
-
-    printProgressComplete('LC Continuation');
+    const branchData = normalizeBranchEigenvalues(
+      runLimitCycleContinuationWithProgress(
+        bridge,
+        guess,
+        branch.parameterName,
+        continuationSettings,
+        directionForward,
+        'LC Continuation'
+      )
+    );
 
     // Ensure branch_type is included with mesh parameters for plotting scripts.
     branchData.branch_type = branchData.branch_type ?? { type: 'LimitCycle', ntst, ncol };
@@ -591,7 +592,6 @@ export async function initiateLCBranchFromPoint(
   };
 
   printInfo(`Running LC continuation (max ${continuationSettings.max_steps} steps)...`);
-  process.stdout.write('  Computing...');
 
   try {
     // Build system config with the parameter values from the source branch
@@ -647,14 +647,16 @@ export async function initiateLCBranchFromPoint(
         : (meshStates[0] || []).map(() => 1.0)
     };
 
-    const branchData = normalizeBranchEigenvalues(bridge.continueLimitCycle(
-      lcSetup,
-      selectedParamName,
-      continuationSettings,
-      directionForward
-    ));
-
-    printProgressComplete('LC Continuation');
+    const branchData = normalizeBranchEigenvalues(
+      runLimitCycleContinuationWithProgress(
+        bridge,
+        lcSetup,
+        selectedParamName,
+        continuationSettings,
+        directionForward,
+        'LC Continuation'
+      )
+    );
 
     // Ensure branch_type is present for plotting and for branch extensions.
     branchData.branch_type = branchData.branch_type ?? { type: 'LimitCycle', ntst: sourceNtst, ncol: sourceNcol };
@@ -919,15 +921,16 @@ export async function initiateLCFromPD(
     );
 
     console.log(chalk.cyan(`Running limit cycle continuation for doubled period (max ${runConfig.settings.max_steps} steps)...`));
-    process.stdout.write('  Computing...');
-    const branchData = normalizeBranchEigenvalues(bridge.continueLimitCycle(
-      setup,
-      sourceBranch.parameterName,
-      runConfig.settings,
-      directionForward
-    ));
-
-    printProgressComplete('PD Continuation');
+    const branchData = normalizeBranchEigenvalues(
+      runLimitCycleContinuationWithProgress(
+        bridge,
+        setup,
+        sourceBranch.parameterName,
+        runConfig.settings,
+        directionForward,
+        'PD Continuation'
+      )
+    );
 
     // Ensure branch_type is included with mesh parameters for plotting scripts.
     if (!branchData.branch_type) {
