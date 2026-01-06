@@ -3107,6 +3107,7 @@ fn unit_upper_triangular(dim: usize) -> Vec<f64> {
     matrix
 }
 
+/// Progress payload for analysis-style runners (Lyapunov, CLV).
 #[derive(Serialize)]
 struct AnalysisProgress {
     done: bool,
@@ -3608,6 +3609,7 @@ impl WasmCovariantLyapunovRunner {
     }
 }
 
+/// Progress payload for the stepped equilibrium solver.
 #[derive(Serialize)]
 struct EquilibriumSolveProgress {
     done: bool,
