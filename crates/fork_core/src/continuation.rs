@@ -362,6 +362,9 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
     }
 
     /// Create a new continuation runner with a user-specified initial tangent.
+    ///
+    /// This is intended for branch extension where the tangent is derived from
+    /// the existing branch or a secant direction.
     pub fn new_with_tangent(
         mut problem: P,
         initial_point: ContinuationPoint,

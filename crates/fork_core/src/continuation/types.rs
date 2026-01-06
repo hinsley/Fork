@@ -170,11 +170,14 @@ pub struct Codim1CurveBranch {
 // ============================================================================
 
 /// Result of a stepping operation for progress reporting.
+///
+/// This is designed for streaming updates from long-running continuation
+/// loops without exposing internal solver state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StepResult {
     /// Whether continuation is complete
     pub done: bool,
-    /// Current step number
+    /// Current step number (0-based)
     pub current_step: usize,
     /// Maximum steps configured
     pub max_steps: usize,
