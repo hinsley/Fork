@@ -39,6 +39,40 @@ pub struct WasmSystem {
     system_type: SystemType,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clv_runner_does_not_finish_before_post_transient_window() {
+        let mut runner = WasmCovariantLyapunovRunner::new(
+            vec!["x".to_string()],
+            Vec::new(),
+            Vec::new(),
+            vec!["x".to_string()],
+            "discrete",
+            vec![1.0],
+            0.0,
+            1.0,
+            10,
+            10,
+            5,
+            0,
+        )
+        .expect("runner");
+
+        let state = runner.state.as_mut().expect("state");
+        let _ = advance_covariant_runner(state, 100).expect("advance");
+
+        let state = runner.state.as_ref().expect("state");
+        assert!(state.done, "runner should finish");
+        assert_eq!(
+            state.steps_done, state.total_steps,
+            "runner should integrate the full post-transient window"
+        );
+    }
+}
+
 enum SolverType {
     RK4(RK4<f64>),
     Tsit5(Tsit5<f64>),
@@ -3348,6 +3382,96 @@ struct CovariantRunnerState {
     done: bool,
 }
 
+fn advance_covariant_runner(
+    state: &mut CovariantRunnerState,
+    batch_size: usize,
+) -> Result<AnalysisProgress, JsValue> {
+    if state.done {
+        return Ok(AnalysisProgress {
+            done: true,
+            current_step: state.steps_done,
+            max_steps: state.total_steps,
+        });
+    }
+
+    let dim = state.tangent_system.dimension;
+    for _ in 0..batch_size {
+        if state.steps_done >= state.total_steps {
+            state.done = true;
+            break;
+        }
+
+        state.stepper.step(
+            &state.tangent_system,
+            &mut state.t,
+            &mut state.augmented_state,
+            state.dt,
+        );
+        state.steps_done += 1;
+        state.since_last_qr += 1;
+
+        if state.since_last_qr == state.qr_stride || state.steps_done == state.total_steps {
+            let block_steps = state.since_last_qr;
+            state.since_last_qr = 0;
+
+            let phi_slice = &mut state.augmented_state[dim..];
+            let (q_matrix, r_matrix) = thin_qr_positive(phi_slice, dim)
+                .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+            overwrite_slice_with_matrix(phi_slice, &q_matrix);
+
+            if state.steps_done <= state.forward_transient {
+                continue;
+            }
+            let post_transient_steps = state
+                .steps_done
+                .saturating_sub(state.forward_transient)
+                .min(block_steps);
+
+            let mut stored = false;
+            if state.window_accum < state.window_steps {
+                append_matrix_row_major(&mut state.q_history, &q_matrix);
+                append_matrix_row_major(&mut state.r_history, &r_matrix);
+                state.time_history.push(state.t);
+                state.window_accum = state
+                    .window_accum
+                    .saturating_add(post_transient_steps)
+                    .min(state.window_steps);
+                stored = true;
+            } else if state.backward_accum < state.backward_transient {
+                append_matrix_row_major(&mut state.r_history, &r_matrix);
+                state.backward_accum = state
+                    .backward_accum
+                    .saturating_add(post_transient_steps)
+                    .min(state.backward_transient);
+                stored = true;
+            }
+
+            if !stored && state.window_accum < state.window_steps {
+                return Err(JsValue::from_str(
+                    "Failed to store Gram-Schmidt data for the requested window.",
+                ));
+            }
+
+            if state.window_accum == state.window_steps
+                && state.backward_accum == state.backward_transient
+            {
+                state.done = true;
+                break;
+            }
+        }
+    }
+
+    if state.steps_done >= state.total_steps {
+        state.done = true;
+    }
+
+    Ok(AnalysisProgress {
+        done: state.done,
+        current_step: state.steps_done,
+        max_steps: state.total_steps,
+    })
+}
+
 #[wasm_bindgen]
 pub struct WasmCovariantLyapunovRunner {
     state: Option<CovariantRunnerState>,
@@ -3370,6 +3494,7 @@ impl WasmCovariantLyapunovRunner {
         forward_transient: u32,
         backward_transient: u32,
     ) -> Result<WasmCovariantLyapunovRunner, JsValue> {
+        #[cfg(target_arch = "wasm32")]
         console_error_panic_hook::set_once();
 
         if initial_state.is_empty() {
@@ -3447,90 +3572,7 @@ impl WasmCovariantLyapunovRunner {
             .state
             .as_mut()
             .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        if state.done {
-            let progress = AnalysisProgress {
-                done: true,
-                current_step: state.steps_done,
-                max_steps: state.total_steps,
-            };
-            return to_value(&progress)
-                .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)));
-        }
-
-        let dim = state.tangent_system.dimension;
-        for _ in 0..batch_size {
-            if state.steps_done >= state.total_steps {
-                state.done = true;
-                break;
-            }
-
-            state.stepper.step(
-                &state.tangent_system,
-                &mut state.t,
-                &mut state.augmented_state,
-                state.dt,
-            );
-            state.steps_done += 1;
-            state.since_last_qr += 1;
-
-            if state.since_last_qr == state.qr_stride || state.steps_done == state.total_steps {
-                let block_steps = state.since_last_qr;
-                state.since_last_qr = 0;
-
-                let phi_slice = &mut state.augmented_state[dim..];
-                let (q_matrix, r_matrix) = thin_qr_positive(phi_slice, dim)
-                    .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
-                overwrite_slice_with_matrix(phi_slice, &q_matrix);
-
-                if state.steps_done <= state.forward_transient {
-                    continue;
-                }
-
-                let mut stored = false;
-                if state.window_accum < state.window_steps {
-                    append_matrix_row_major(&mut state.q_history, &q_matrix);
-                    append_matrix_row_major(&mut state.r_history, &r_matrix);
-                    state.time_history.push(state.t);
-                    state.window_accum = state
-                        .window_accum
-                        .saturating_add(block_steps)
-                        .min(state.window_steps);
-                    stored = true;
-                } else if state.backward_accum < state.backward_transient {
-                    append_matrix_row_major(&mut state.r_history, &r_matrix);
-                    state.backward_accum = state
-                        .backward_accum
-                        .saturating_add(block_steps)
-                        .min(state.backward_transient);
-                    stored = true;
-                }
-
-                if !stored && state.window_accum < state.window_steps {
-                    return Err(JsValue::from_str(
-                        "Failed to store Gram-Schmidt data for the requested window.",
-                    ));
-                }
-
-                if state.window_accum == state.window_steps
-                    && state.backward_accum == state.backward_transient
-                {
-                    state.done = true;
-                    break;
-                }
-            }
-        }
-
-        if state.steps_done >= state.total_steps {
-            state.done = true;
-        }
-
-        let progress = AnalysisProgress {
-            done: state.done,
-            current_step: state.steps_done,
-            max_steps: state.total_steps,
-        };
-
+        let progress = advance_covariant_runner(state, batch_size as usize)?;
         to_value(&progress).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
