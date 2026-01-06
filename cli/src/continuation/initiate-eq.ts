@@ -17,9 +17,10 @@ import {
   parseIntOrDefault,
   runConfigMenu
 } from '../menu';
-import { printSuccess, printError, printInfo, printProgressComplete } from '../format';
+import { printSuccess, printError, printInfo } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
 import { isValidName, getBranchParams } from './utils';
+import { runEquilibriumContinuationWithProgress } from './progress';
 
 /**
  * Initiates a new equilibrium continuation branch from a point on an existing branch.
@@ -262,8 +263,6 @@ export async function initiateEquilibriumBranchFromPoint(
   };
 
   printInfo(`Computing continuation (max ${continuationSettings.max_steps} steps)...`);
-  process.stdout.write('  Computing...');
-
   try {
     // Build system config with the parameter values from the source branch
     const runConfig = { ...sysConfig };
@@ -278,14 +277,16 @@ export async function initiateEquilibriumBranchFromPoint(
     }
 
     const bridge = new WasmBridge(runConfig);
-    const branchData = normalizeBranchEigenvalues(bridge.compute_continuation(
-      point.state,
-      selectedParamName,
-      continuationSettings,
-      directionForward
-    ));
-
-    printProgressComplete('Continuation');
+    const branchData = normalizeBranchEigenvalues(
+      runEquilibriumContinuationWithProgress(
+        bridge,
+        point.state,
+        selectedParamName,
+        continuationSettings,
+        directionForward,
+        'Continuation'
+      )
+    );
 
     const newBranch: ContinuationObject = {
       type: 'continuation',

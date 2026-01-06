@@ -360,6 +360,67 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             dim,
         })
     }
+
+    /// Create a new continuation runner with a user-specified initial tangent.
+    pub fn new_with_tangent(
+        mut problem: P,
+        initial_point: ContinuationPoint,
+        mut initial_tangent: DVector<f64>,
+        settings: ContinuationSettings,
+    ) -> Result<Self> {
+        let dim = problem.dimension();
+
+        // Build initial augmented state [p, x...]
+        let mut prev_aug = DVector::zeros(dim + 1);
+        prev_aug[0] = initial_point.param_value;
+        for (i, &val) in initial_point.state.iter().enumerate() {
+            if i < dim {
+                prev_aug[i + 1] = val;
+            }
+        }
+
+        // Initialize branch with starting point
+        let initial_diag = problem.diagnostics(&prev_aug)?;
+        let prev_diag = initial_diag.clone();
+        let branch = ContinuationBranch {
+            points: vec![ContinuationPoint {
+                state: initial_point.state.clone(),
+                param_value: initial_point.param_value,
+                stability: BifurcationType::None,
+                eigenvalues: initial_diag.eigenvalues,
+            }],
+            bifurcations: Vec::new(),
+            indices: vec![0],
+            branch_type: BranchType::default(),
+            upoldp: None,
+        };
+
+        if initial_tangent.norm() < 1e-12 {
+            initial_tangent = compute_tangent_from_problem(&mut problem, &prev_aug)?;
+        }
+        let tangent_norm = initial_tangent.norm();
+        let prev_tangent = if tangent_norm > 1e-12 {
+            initial_tangent / tangent_norm
+        } else {
+            initial_tangent
+        };
+
+        Ok(Self {
+            problem,
+            prev_aug,
+            prev_tangent,
+            prev_diag,
+            step_size: settings.step_size,
+            current_index: 0,
+            consecutive_failures: 0,
+            current_step: 0,
+            max_steps: settings.max_steps,
+            settings,
+            branch,
+            done: false,
+            dim,
+        })
+    }
     
     /// Run a batch of continuation steps, returning progress information.
     pub fn run_steps(&mut self, batch_size: usize) -> Result<StepResult> {

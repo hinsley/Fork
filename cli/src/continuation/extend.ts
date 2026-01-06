@@ -18,10 +18,11 @@ import {
   parseIntOrDefault,
   runConfigMenu
 } from '../menu';
-import { printSuccess, printError, printProgressComplete } from '../format';
+import { printSuccess, printError } from '../format';
 import { serializeBranchDataForWasm, normalizeBranchEigenvalues } from './serialization';
 import { inspectBranch } from './inspect';
 import { getBranchParams } from './utils';
+import { runContinuationExtensionWithProgress } from './progress';
 
 /**
  * Extends an existing continuation branch in either the forward or backward direction.
@@ -119,8 +120,6 @@ export async function extendBranch(
   };
 
   console.log(chalk.cyan(`Extending branch ${directionForward ? 'forward' : 'backward'} (max ${continuationSettings.max_steps} points)...`));
-  process.stdout.write('  Computing...');
-
   try {
     const runConfig = { ...sysConfig };
     runConfig.params = getBranchParams(sysName, branch, sysConfig);
@@ -162,14 +161,14 @@ export async function extendBranch(
     }
 
 
-    const updatedData = bridge.extend_continuation(
+    const updatedData = runContinuationExtensionWithProgress(
+      bridge,
       branchDataToPass,
       branch.parameterName,
       continuationSettings,
-      directionForward
+      directionForward,
+      'Extension'
     );
-
-    printProgressComplete('Extension');
 
     branch.data = normalizeBranchEigenvalues(updatedData);
     branch.settings = continuationSettings;
