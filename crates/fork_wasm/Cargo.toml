@@ -17,5 +17,5 @@ serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.5"
 js-sys = "0.3"
 console_error_panic_hook = "0.1.7"
-nalgebra = "0.32"  # DEBUG_PD_CURVE: Added for debug residual computation
-
+nalgebra = "0.34"  # DEBUG_PD_CURVE: Added for debug residual computation
+anyhow = "1.0"
