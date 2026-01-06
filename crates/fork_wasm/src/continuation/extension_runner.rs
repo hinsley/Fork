@@ -1,0 +1,407 @@
+//! Continuation branch extension runner.
+
+use crate::system::build_system;
+use super::shared::{compute_tangent_from_problem, OwnedEquilibriumContinuationProblem};
+use fork_core::continuation::periodic::PeriodicOrbitCollocationProblem;
+use fork_core::continuation::{
+    BranchType, ContinuationBranch, ContinuationPoint, ContinuationProblem, ContinuationRunner,
+    ContinuationSettings,
+};
+use fork_core::equation_engine::EquationSystem;
+use fork_core::equilibrium::SystemKind;
+use fork_core::traits::DynamicalSystem;
+use nalgebra::DVector;
+use serde_wasm_bindgen::{from_value, to_value};
+use wasm_bindgen::prelude::*;
+
+
+struct ExtensionMergeContext {
+    branch: ContinuationBranch,
+    index_offset: i32,
+    sign: i32,
+}
+
+enum ExtensionRunnerKind {
+    Equilibrium {
+        runner: ContinuationRunner<OwnedEquilibriumContinuationProblem>,
+        merge: ExtensionMergeContext,
+    },
+    LimitCycle {
+        _system: Box<EquationSystem>,
+        runner: ContinuationRunner<PeriodicOrbitCollocationProblem<'static>>,
+        merge: ExtensionMergeContext,
+    },
+}
+
+#[wasm_bindgen]
+pub struct WasmContinuationExtensionRunner {
+    runner: Option<ExtensionRunnerKind>,
+}
+
+#[wasm_bindgen]
+impl WasmContinuationExtensionRunner {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        equations: Vec<String>,
+        params: Vec<f64>,
+        param_names: Vec<String>,
+        var_names: Vec<String>,
+        system_type: &str,
+        branch_val: JsValue,
+        parameter_name: &str,
+        settings_val: JsValue,
+        forward: bool,
+    ) -> Result<WasmContinuationExtensionRunner, JsValue> {
+        console_error_panic_hook::set_once();
+
+        let settings: ContinuationSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
+
+        let mut branch: ContinuationBranch = from_value(branch_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid branch data: {}", e)))?;
+
+        if branch.indices.is_empty() {
+            branch.indices = (0..branch.points.len() as i32).collect();
+        }
+
+        let (endpoint_idx, last_index, neighbor_idx, is_append) = if forward {
+            let max_idx_pos = branch
+                .indices
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, &idx)| idx)
+                .ok_or_else(|| JsValue::from_str("Branch has no indices"))?
+                .0;
+            let prev_idx_pos = if branch.points.len() > 1 {
+                branch
+                    .indices
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| *i != max_idx_pos)
+                    .max_by_key(|(_, &idx)| idx)
+                    .map(|(i, _)| i)
+            } else {
+                None
+            };
+            (max_idx_pos, branch.indices[max_idx_pos], prev_idx_pos, true)
+        } else {
+            let min_idx_pos = branch
+                .indices
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, &idx)| idx)
+                .ok_or_else(|| JsValue::from_str("Branch has no indices"))?
+                .0;
+            let next_idx_pos = if branch.points.len() > 1 {
+                branch
+                    .indices
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| *i != min_idx_pos)
+                    .min_by_key(|(_, &idx)| idx)
+                    .map(|(i, _)| i)
+            } else {
+                None
+            };
+            (min_idx_pos, branch.indices[min_idx_pos], next_idx_pos, false)
+        };
+
+        let sign = if is_append { 1 } else { -1 };
+        let mut merge = ExtensionMergeContext {
+            branch,
+            index_offset: last_index,
+            sign,
+        };
+        let endpoint = merge
+            .branch
+            .points
+            .get(endpoint_idx)
+            .cloned()
+            .ok_or_else(|| JsValue::from_str("Branch endpoint missing"))?;
+
+        let system = build_system(equations, params, &param_names, &var_names)?;
+        let param_index = *system
+            .param_map
+            .get(parameter_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
+
+        let runner_kind = match &merge.branch.branch_type {
+            BranchType::Equilibrium => {
+                let kind = match system_type {
+                    "map" => SystemKind::Map,
+                    _ => SystemKind::Flow,
+                };
+
+                let mut problem = OwnedEquilibriumContinuationProblem::new(system, kind, param_index);
+                let dim = problem.dimension();
+                if endpoint.state.len() != dim {
+                    return Err(JsValue::from_str(&format!(
+                        "Dimension mismatch: branch point state has length {}, problem expects {}",
+                        endpoint.state.len(),
+                        dim
+                    )));
+                }
+
+                let mut end_aug = DVector::zeros(dim + 1);
+                end_aug[0] = endpoint.param_value;
+                for (i, &v) in endpoint.state.iter().enumerate() {
+                    end_aug[i + 1] = v;
+                }
+
+                let secant_direction = if let Some(neighbor_pos) = neighbor_idx {
+                    let neighbor = &merge.branch.points[neighbor_pos];
+                    let mut neighbor_aug = DVector::zeros(dim + 1);
+                    neighbor_aug[0] = neighbor.param_value;
+                    for (i, &v) in neighbor.state.iter().enumerate() {
+                        neighbor_aug[i + 1] = v;
+                    }
+                    let secant = if is_append {
+                        &end_aug - &neighbor_aug
+                    } else {
+                        &neighbor_aug - &end_aug
+                    };
+                    if secant.norm() > 1e-12 {
+                        Some(secant.normalize())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let mut tangent = compute_tangent_from_problem(&mut problem, &end_aug)
+                    .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+
+                if let Some(secant) = secant_direction {
+                    if tangent.dot(&secant) < 0.0 {
+                        tangent = -tangent;
+                    }
+                } else {
+                    let forward_sign = if forward { 1.0 } else { -1.0 };
+                    if tangent[0] * forward_sign < 0.0 {
+                        tangent = -tangent;
+                    }
+                }
+
+                let initial_point = ContinuationPoint {
+                    state: endpoint.state.clone(),
+                    param_value: endpoint.param_value,
+                    stability: endpoint.stability.clone(),
+                    eigenvalues: endpoint.eigenvalues.clone(),
+                };
+
+                let mut runner = ContinuationRunner::new_with_tangent(
+                    problem,
+                    initial_point,
+                    tangent,
+                    settings,
+                )
+                .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+                runner.set_branch_type(merge.branch.branch_type.clone());
+                runner.set_upoldp(merge.branch.upoldp.clone());
+
+                ExtensionRunnerKind::Equilibrium { runner, merge }
+            }
+            BranchType::LimitCycle { ntst, ncol } => {
+                if merge.branch.upoldp.is_none() {
+                    if let Some(last_pt) = merge.branch.points.last() {
+                        let dim = system.equations.len();
+                        if last_pt.state.len() > dim {
+                            let x0 = &last_pt.state[0..dim];
+                            let period = *last_pt.state.last().unwrap_or(&1.0);
+                            let mut work = vec![0.0; dim];
+                            system.apply(0.0, x0, &mut work);
+                            let u0: Vec<f64> = work.iter().map(|&v| v * period).collect();
+                            merge.branch.upoldp = Some(vec![u0]);
+                        }
+                    }
+                }
+
+                let upoldp = merge
+                    .branch
+                    .upoldp
+                    .clone()
+                    .ok_or_else(|| JsValue::from_str("Limit cycle branch missing upoldp data"))?;
+
+                let phase_direction = if !upoldp.is_empty() && !upoldp[0].is_empty() {
+                    let dir_norm: f64 = upoldp[0].iter().map(|v| v * v).sum::<f64>().sqrt();
+                    if dir_norm > 1e-12 {
+                        upoldp[0].iter().map(|v| v / dir_norm).collect()
+                    } else {
+                        upoldp[0].clone()
+                    }
+                } else {
+                    vec![1.0]
+                };
+
+                let last_pt = merge
+                    .branch
+                    .points
+                    .last()
+                    .ok_or_else(|| JsValue::from_str("Branch has no points"))?;
+                let dim = system.equations.len();
+                let phase_anchor: Vec<f64> = last_pt.state.iter().take(dim).cloned().collect();
+
+                let mut boxed_system = Box::new(system);
+                let system_ptr: *mut EquationSystem = &mut *boxed_system;
+                let mut problem = PeriodicOrbitCollocationProblem::new(
+                    unsafe { &mut *system_ptr },
+                    param_index,
+                    *ntst,
+                    *ncol,
+                    phase_anchor,
+                    phase_direction,
+                )
+                .map_err(|e| JsValue::from_str(&format!("Failed to create LC problem: {}", e)))?;
+
+                let dim = problem.dimension();
+                if endpoint.state.len() != dim {
+                    return Err(JsValue::from_str(&format!(
+                        "Dimension mismatch: branch point state has length {}, problem expects {}",
+                        endpoint.state.len(),
+                        dim
+                    )));
+                }
+
+                let mut end_aug = DVector::zeros(dim + 1);
+                end_aug[0] = endpoint.param_value;
+                for (i, &v) in endpoint.state.iter().enumerate() {
+                    end_aug[i + 1] = v;
+                }
+
+                let secant_direction = if let Some(neighbor_pos) = neighbor_idx {
+                    let neighbor = &merge.branch.points[neighbor_pos];
+                    let mut neighbor_aug = DVector::zeros(dim + 1);
+                    neighbor_aug[0] = neighbor.param_value;
+                    for (i, &v) in neighbor.state.iter().enumerate() {
+                        neighbor_aug[i + 1] = v;
+                    }
+                    let secant = if is_append {
+                        &end_aug - &neighbor_aug
+                    } else {
+                        &neighbor_aug - &end_aug
+                    };
+                    if secant.norm() > 1e-12 {
+                        Some(secant.normalize())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let mut tangent = compute_tangent_from_problem(&mut problem, &end_aug)
+                    .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+
+                if let Some(secant) = secant_direction {
+                    if tangent.dot(&secant) < 0.0 {
+                        tangent = -tangent;
+                    }
+                } else {
+                    let forward_sign = if forward { 1.0 } else { -1.0 };
+                    if tangent[0] * forward_sign < 0.0 {
+                        tangent = -tangent;
+                    }
+                }
+
+                let initial_point = ContinuationPoint {
+                    state: endpoint.state.clone(),
+                    param_value: endpoint.param_value,
+                    stability: endpoint.stability.clone(),
+                    eigenvalues: endpoint.eigenvalues.clone(),
+                };
+
+                // SAFETY: The problem borrows the boxed system allocation, which lives
+                // for the lifetime of the runner.
+                let problem: PeriodicOrbitCollocationProblem<'static> =
+                    unsafe { std::mem::transmute(problem) };
+
+                let mut runner = ContinuationRunner::new_with_tangent(
+                    problem,
+                    initial_point,
+                    tangent,
+                    settings,
+                )
+                .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+                runner.set_branch_type(merge.branch.branch_type.clone());
+                runner.set_upoldp(merge.branch.upoldp.clone());
+
+                ExtensionRunnerKind::LimitCycle {
+                    _system: boxed_system,
+                    runner,
+                    merge,
+                }
+            }
+        };
+
+        Ok(WasmContinuationExtensionRunner {
+            runner: Some(runner_kind),
+        })
+    }
+
+    pub fn is_done(&self) -> bool {
+        match self.runner.as_ref() {
+            Some(ExtensionRunnerKind::Equilibrium { runner, .. }) => runner.is_done(),
+            Some(ExtensionRunnerKind::LimitCycle { runner, .. }) => runner.is_done(),
+            None => true,
+        }
+    }
+
+    pub fn run_steps(&mut self, batch_size: u32) -> Result<JsValue, JsValue> {
+        let result = match self.runner.as_mut() {
+            Some(ExtensionRunnerKind::Equilibrium { runner, .. }) => runner
+                .run_steps(batch_size as usize)
+                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+            Some(ExtensionRunnerKind::LimitCycle { runner, .. }) => runner
+                .run_steps(batch_size as usize)
+                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+            None => return Err(JsValue::from_str("Runner not initialized")),
+        };
+
+        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn get_progress(&self) -> Result<JsValue, JsValue> {
+        let result = match self.runner.as_ref() {
+            Some(ExtensionRunnerKind::Equilibrium { runner, .. }) => runner.step_result(),
+            Some(ExtensionRunnerKind::LimitCycle { runner, .. }) => runner.step_result(),
+            None => return Err(JsValue::from_str("Runner not initialized")),
+        };
+
+        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
+        let runner_kind = self
+            .runner
+            .take()
+            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
+
+        let (extension, merge) = match runner_kind {
+            ExtensionRunnerKind::Equilibrium { runner, merge } => (runner.take_result(), merge),
+            ExtensionRunnerKind::LimitCycle { runner, merge, .. } => (runner.take_result(), merge),
+        };
+
+        let mut branch = merge.branch;
+        let orig_count = branch.points.len();
+        let ExtensionMergeContext {
+            index_offset,
+            sign,
+            ..
+        } = merge;
+
+        for (i, pt) in extension.points.into_iter().enumerate().skip(1) {
+            branch.points.push(pt);
+            let idx = extension.indices.get(i).cloned().unwrap_or(i as i32);
+            branch.indices.push(index_offset + idx * sign);
+        }
+
+        for ext_bif_idx in extension.bifurcations {
+            if ext_bif_idx > 0 {
+                branch.bifurcations.push(orig_count + ext_bif_idx - 1);
+            }
+        }
+
+        to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+}

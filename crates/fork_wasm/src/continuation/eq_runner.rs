@@ -1,0 +1,119 @@
+//! Stepped equilibrium continuation runner.
+
+use super::shared::OwnedEquilibriumContinuationProblem;
+use fork_core::continuation::{ContinuationPoint, ContinuationRunner, ContinuationSettings};
+use fork_core::equation_engine::{parse, Compiler, EquationSystem};
+use fork_core::equilibrium::SystemKind;
+use serde_wasm_bindgen::{from_value, to_value};
+use wasm_bindgen::prelude::*;
+
+
+/// WASM-exported runner for stepped equilibrium continuation.
+/// Allows progress reporting by running batches of steps at a time.
+#[wasm_bindgen]
+pub struct WasmEquilibriumRunner {
+    runner: Option<ContinuationRunner<OwnedEquilibriumContinuationProblem>>,
+}
+
+#[wasm_bindgen]
+impl WasmEquilibriumRunner {
+    /// Create a new stepped equilibrium continuation runner.
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        equations: Vec<String>,
+        params: Vec<f64>,
+        param_names: Vec<String>,
+        var_names: Vec<String>,
+        system_type: &str,
+        equilibrium_state: Vec<f64>,
+        parameter_name: &str,
+        settings_val: JsValue,
+        forward: bool,
+    ) -> Result<WasmEquilibriumRunner, JsValue> {
+        console_error_panic_hook::set_once();
+
+        // Parse equations and create system
+        let compiler = Compiler::new(&var_names, &param_names);
+        let mut bytecodes = Vec::new();
+        for eq_str in equations {
+            let expr = parse(&eq_str).map_err(|e| JsValue::from_str(&e))?;
+            let code = compiler.compile(&expr);
+            bytecodes.push(code);
+        }
+
+        let mut system = EquationSystem::new(bytecodes, params);
+        system.set_maps(compiler.param_map, compiler.var_map);
+
+        let kind = match system_type {
+            "map" => SystemKind::Map,
+            _ => SystemKind::Flow,
+        };
+
+        let param_index = *system
+            .param_map
+            .get(parameter_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
+
+        let settings: ContinuationSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
+
+        let initial_point = ContinuationPoint {
+            state: equilibrium_state,
+            param_value: system.params[param_index],
+            stability: fork_core::continuation::BifurcationType::None,
+            eigenvalues: Vec::new(),
+        };
+
+        let problem = OwnedEquilibriumContinuationProblem::new(system, kind, param_index);
+
+        let runner = ContinuationRunner::new(problem, initial_point, settings, forward)
+            .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+
+        Ok(WasmEquilibriumRunner {
+            runner: Some(runner),
+        })
+    }
+
+    /// Check if the continuation is complete.
+    pub fn is_done(&self) -> bool {
+        self.runner.as_ref().map_or(true, |runner| runner.is_done())
+    }
+
+    /// Run a batch of continuation steps and return progress.
+    pub fn run_steps(&mut self, batch_size: u32) -> Result<JsValue, JsValue> {
+        let runner = self
+            .runner
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
+
+        let result = runner
+            .run_steps(batch_size as usize)
+            .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?;
+
+        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    /// Get progress information.
+    pub fn get_progress(&self) -> Result<JsValue, JsValue> {
+        let runner = self
+            .runner
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
+
+        let result = runner.step_result();
+
+        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    /// Get the final branch result.
+    pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
+        let runner = self
+            .runner
+            .take()
+            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
+
+        let branch = runner.take_result();
+
+        to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+}
