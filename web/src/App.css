@@ -91,7 +91,7 @@
 .toolbar__actions button,
 .objects-tree__toolbar button,
 .dialog button,
-.properties-section button,
+.inspector-section button,
 .branch-viewer__item,
 .empty-card button {
   border: 1px solid var(--panel-border);
@@ -106,7 +106,7 @@
 .toolbar__actions button:hover,
 .objects-tree__toolbar button:hover,
 .dialog button:hover,
-.properties-section button:hover,
+.inspector-section button:hover,
 .branch-viewer__item:hover,
 .empty-card button:hover {
   border-color: var(--accent);
@@ -309,25 +309,25 @@
   color: var(--text);
 }
 
-.properties-section {
+.inspector-section {
   display: grid;
   gap: 6px;
   margin-bottom: 10px;
 }
 
-.properties-section label {
+.inspector-section label {
   display: grid;
   gap: 4px;
   font-size: 0.75rem;
   color: var(--text-muted);
 }
 
-.properties-section input[type='text'],
-.properties-section input[type='number'],
-.properties-section input[type='color'],
-.properties-section input:not([type]),
-.properties-section select,
-.properties-section textarea {
+.inspector-section input[type='text'],
+.inspector-section input[type='number'],
+.inspector-section input[type='color'],
+.inspector-section input:not([type]),
+.inspector-section select,
+.inspector-section textarea {
   border: 1px solid var(--panel-border);
   border-radius: 3px;
   padding: 4px 6px;
@@ -335,12 +335,12 @@
   color: var(--text);
 }
 
-.properties-section textarea {
+.inspector-section textarea {
   min-height: 48px;
   resize: vertical;
 }
 
-.properties-group {
+.inspector-group {
   border: 1px solid var(--panel-border);
   border-radius: 0;
   padding: 6px;
@@ -348,21 +348,21 @@
   background: var(--panel);
 }
 
-.properties-group__summary {
+.inspector-group__summary {
   cursor: pointer;
   font-weight: 600;
   margin-bottom: 6px;
 }
 
-.properties-group > summary {
+.inspector-group > summary {
   list-style: none;
 }
 
-.properties-group > summary::-webkit-details-marker {
+.inspector-group > summary::-webkit-details-marker {
   display: none;
 }
 
-.properties-group__header {
+.inspector-group__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -370,24 +370,24 @@
   margin-bottom: 6px;
 }
 
-.properties-list {
+.inspector-list {
   display: grid;
   gap: 6px;
 }
 
-.properties-row {
+.inspector-row {
   display: grid;
   grid-template-columns: 1fr 1.8fr auto;
   gap: 6px;
   align-items: center;
 }
 
-.properties-row__stack {
+.inspector-row__stack {
   display: grid;
   gap: 6px;
 }
 
-.properties-row--param {
+.inspector-row--param {
   grid-template-columns: 1fr 1fr auto;
 }
 
@@ -403,7 +403,7 @@
   gap: 4px;
 }
 
-.properties-meta {
+.inspector-meta {
   display: flex;
   gap: 8px;
   font-size: 0.7rem;
