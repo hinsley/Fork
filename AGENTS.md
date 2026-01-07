@@ -6,7 +6,7 @@ Fork is a monorepo with a Rust/WASM core and a web/CLI interface.
 - `crates/fork_wasm`: WASM bindings consumed by the CLI and web.
 - `cli`: TypeScript Node.js CLI (interactive menus).
 - `web`: Vite + React frontend.
-- `docs/`: design/analysis notes; `scripts/`: utility scripts.
+- `docs/`: design/analysis notes; `docs/DECISIONS.md` is the design decision log; `scripts/`: utility scripts.
 
 ## Build, Test, and Development Commands
 - `cargo build`: build Rust workspace.
