@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 target
+web/.vite/
+web/test-results/
+web/playwright-report/
+crates/fork_wasm/pkg/
+crates/fork_wasm/pkg-web/
 
 # CLI data artifacts
 cli/data/
