@@ -2,11 +2,11 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createDemoSystem } from '../system/fixtures'
-import { PropertiesPanel } from './PropertiesPanel'
+import { InspectorDetailsPanel } from './InspectorDetailsPanel'
 import { useState } from 'react'
 import { renameNode, toggleNodeVisibility, updateNodeRender } from '../system/model'
 
-describe('PropertiesPanel', () => {
+describe('InspectorDetailsPanel', () => {
   it('binds name and render fields', async () => {
     const user = userEvent.setup()
     const { system, objectNodeId } = createDemoSystem()
@@ -24,7 +24,7 @@ describe('PropertiesPanel', () => {
     function Wrapper() {
       const [state, setState] = useState(system)
       return (
-        <PropertiesPanel
+        <InspectorDetailsPanel
           system={state}
           selectedNodeId={objectNodeId}
           view="selection"
@@ -56,15 +56,15 @@ describe('PropertiesPanel', () => {
 
     render(<Wrapper />)
 
-    const nameInput = screen.getByTestId('properties-name')
+    const nameInput = screen.getByTestId('inspector-name')
     await user.clear(nameInput)
     await user.type(nameInput, 'Orbit Q')
     expect(onRename).toHaveBeenLastCalledWith(objectNodeId, 'Orbit Q')
 
-    await user.click(screen.getByTestId('properties-visibility'))
+    await user.click(screen.getByTestId('inspector-visibility'))
     expect(onToggleVisibility).toHaveBeenCalledWith(objectNodeId)
 
-    const lineWidth = screen.getByTestId('properties-line-width')
+    const lineWidth = screen.getByTestId('inspector-line-width')
     await user.clear(lineWidth)
     await user.type(lineWidth, '3')
     expect(onUpdateRender).toHaveBeenLastCalledWith(objectNodeId, { lineWidth: 3 })
@@ -77,7 +77,7 @@ describe('PropertiesPanel', () => {
     const onValidateSystem = vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })
 
     render(
-      <PropertiesPanel
+      <InspectorDetailsPanel
         system={system}
         selectedNodeId={null}
         view="system"
@@ -112,7 +112,7 @@ describe('PropertiesPanel', () => {
     const onCreateLimitCycle = vi.fn().mockResolvedValue(undefined)
 
     render(
-      <PropertiesPanel
+      <InspectorDetailsPanel
         system={system}
         selectedNodeId={null}
         view="create"

@@ -23,7 +23,7 @@ Checklist for the Fork web UI buildout. Items checked are completed; unchecked a
 - [x] Systems treated as projects; create/open/save/export/import
 - [x] Objects tree with hierarchy, rename, reorder, visibility
 - [x] Non-state-space nodes supported (scene + bifurcation diagram viewports)
-- [ ] Properties panel bound to selection; render controls included (currently not showing selected item details)
+- [x] Inspector panel bound to selection; render controls included
 - [x] Branch viewer panel wired to state (read-only ok)
 
 ## D) Performance Engineering
@@ -33,8 +33,8 @@ Checklist for the Fork web UI buildout. Items checked are completed; unchecked a
 
 ## E) Testing (TDD-first)
 - [x] Unit tests (model, selection, visibility, job queue, cancellation)
-- [x] Component/integration tests (Objects tree, Properties, panel resize)
-- [x] E2E smoke test (create system → create object → properties update → viewport renders → branches view)
+- [x] Component/integration tests (Objects tree, Inspector, panel resize)
+- [x] E2E smoke test (create system → create object → inspector update → viewport renders → branches view)
 - [x] One-command test run (`npm test`)
 - [x] ForkCoreClient interface mockable + DI wired for tests
 - [x] Stable selectors via `data-testid`
@@ -47,7 +47,7 @@ Checklist for the Fork web UI buildout. Items checked are completed; unchecked a
 ## G) Minimal Vertical Slice (Must Run)
 - [x] System creation/opening persisted in OPFS
 - [x] Objects tree interactions (create/select/rename/toggle visibility)
-- [x] Properties panel bound to selection
+- [x] Inspector panel bound to selection
 - [x] Plotly viewport panel wired via ForkCoreClient
 - [x] Branch Viewer panel wired to state (read-only ok)
 - [x] Export/import full system bundle

@@ -24,7 +24,7 @@ const DEFAULT_LAYOUT: SystemLayout = {
   leftWidth: 280,
   rightWidth: 320,
   objectsOpen: true,
-  propertiesOpen: true,
+  inspectorOpen: true,
   branchViewerOpen: true,
 }
 
@@ -415,6 +415,7 @@ export function normalizeSystem(system: System): System {
   const next = structuredClone(system) as System & {
     scenes?: Scene[]
     bifurcationDiagrams?: BifurcationDiagram[]
+    ui?: SystemUiState & { layout?: Partial<SystemLayout> }
   }
 
   if (!next.scenes || next.scenes.length === 0) {

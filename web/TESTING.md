@@ -24,6 +24,6 @@
 
 ## Stable selectors
 - Key UI elements include `data-testid`:
-  - `objects-tree`, `properties-panel`, `branch-viewer-panel`, `plotly-viewport`
+  - `objects-tree`, `inspector-panel`, `branch-viewer-panel`, `plotly-viewport`
   - `create-orbit`, `create-equilibrium`, `system-name-input`, `create-system`
   - `splitter-left`, `splitter-right`
