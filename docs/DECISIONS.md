@@ -21,22 +21,6 @@ References:
 
 ---
 
-### 2026-01-08: Split system UI persistence from core data
-Context:
-The web UI now needs per-project layout/render state (viewport sizing/order, render styles, etc.)
-without rewriting large analysis payloads on every UI tweak.
-Decision:
-Persist core system data to `system.json` and UI state to `ui.json` in OPFS. Export/import uses a
-combined project bundle (`system` + `ui`) and merges on load, falling back to legacy bundles when
-`ui.json` is missing.
-Why:
-Keeps UI saves lightweight while ensuring exported systems recreate the same visual setup.
-Impact:
-Adds split serialization helpers and a `saveUi` path; UI edits debounce their own persistence.
-References:
-`web/src/system/serialization.ts`, `web/src/system/opfs.ts`, `web/src/state/appState.tsx`,
-`web/src/ui/ViewportPanel.tsx`
-
 ### 2025-01-08: Viewport nodes live in the object tree
 Context:
 The UI needs multiple viewports (state-space scenes + bifurcation diagrams) that can be reordered and configured.
@@ -53,7 +37,7 @@ Impact:
 Scene/diagram visibility toggles hide viewport tiles; viewport Plotly test IDs are now per-node.
 References:
 `web/src/project/model.ts`, `web/src/project/serialization.ts`, `web/src/ui/ViewportPanel.tsx`,
-`web/src/ui/InspectorDetailsPanel.tsx`
+`web/src/ui/PropertiesPanel.tsx`
 
 ### 2025-01-07: Lazy-load Plotly via adapter
 Context:
@@ -84,5 +68,4 @@ Type shims exist for
 the WASM module, Plotly, and OPFS iterator typings.
 References:
 `web/src/compute/worker/forkCoreWorker.ts`, `web/vite.config.ts`,
-`web/src/types/wasm.d.ts`, `web/src/types/plotly.d.ts`, `web/src/types/fileSystem.d.ts`,
-`web/src/ui/InspectorDetailsPanel.tsx`
+`web/src/types/wasm.d.ts`, `web/src/types/plotly.d.ts`, `web/src/types/fileSystem.d.ts`

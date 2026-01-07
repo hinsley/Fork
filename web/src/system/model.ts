@@ -9,7 +9,6 @@ import type {
   SystemConfig,
   TreeNode,
 } from './types'
-import { makeStableId as makeId, nowIso } from '../utils/determinism'
 
 const DEFAULT_SYSTEM: SystemConfig = {
   name: 'Untitled System',
@@ -25,14 +24,13 @@ const DEFAULT_LAYOUT: SystemLayout = {
   leftWidth: 280,
   rightWidth: 320,
   objectsOpen: true,
-  inspectorOpen: true,
+  propertiesOpen: true,
   branchViewerOpen: true,
 }
 
 const DEFAULT_UI: SystemUiState = {
   selectedNodeId: null,
   layout: DEFAULT_LAYOUT,
-  viewportHeights: {},
 }
 
 const DEFAULT_SCENE: Scene = {
@@ -47,13 +45,22 @@ const DEFAULT_SCENE: Scene = {
   display: 'all',
 }
 
-export const DEFAULT_RENDER = {
+const DEFAULT_RENDER = {
   color: '#e06c3f',
   lineWidth: 2,
   pointSize: 4,
 }
 
-// IDs and timestamps are routed through deterministic helpers for tests.
+function makeId(prefix: string) {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return `${prefix}_${crypto.randomUUID()}`
+  }
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function nowIso() {
+  return new Date().toISOString()
+}
 
 export function createSystem(args: { name: string; config?: SystemConfig }): System {
   const config = args.config ? { ...args.config } : { ...DEFAULT_SYSTEM, name: args.name }
@@ -114,23 +121,6 @@ export function addObject(system: System, obj: AnalysisObject): { system: System
   next.objects[node.id] = obj
   next.updatedAt = nowIso()
   return { system: next, nodeId: node.id }
-}
-
-/**
- * Update an existing analysis object without touching tree structure.
- */
-export function updateObject(
-  system: System,
-  nodeId: string,
-  update: Partial<AnalysisObject>
-): System {
-  const next = structuredClone(system)
-  const existing = next.objects[nodeId]
-  if (!existing) return system
-  const updated = { ...existing, ...update, type: existing.type } as AnalysisObject
-  next.objects[nodeId] = updated
-  next.updatedAt = nowIso()
-  return next
 }
 
 export function addBranch(
@@ -337,11 +327,6 @@ export function removeNode(system: System, nodeId: string): System {
   if (next.ui.selectedNodeId && removalSet.has(next.ui.selectedNodeId)) {
     next.ui.selectedNodeId = null
   }
-  Object.keys(next.ui.viewportHeights).forEach((id) => {
-    if (removalSet.has(id)) {
-      delete next.ui.viewportHeights[id]
-    }
-  })
 
   next.updatedAt = nowIso()
   return next
@@ -361,16 +346,6 @@ export function updateLayout(system: System, layout: Partial<SystemLayout>): Sys
   return next
 }
 
-export function updateViewportHeights(
-  system: System,
-  updates: Record<string, number>
-): System {
-  const next = structuredClone(system)
-  next.ui.viewportHeights = { ...next.ui.viewportHeights, ...updates }
-  next.updatedAt = nowIso()
-  return next
-}
-
 export function updateNodeRender(
   system: System,
   nodeId: string,
@@ -379,7 +354,7 @@ export function updateNodeRender(
   const next = structuredClone(system)
   const node = next.nodes[nodeId]
   if (!node) return system
-  node.render = { ...DEFAULT_RENDER, ...(node.render ?? {}), ...render }
+  node.render = { ...node.render, ...render }
   next.updatedAt = nowIso()
   return next
 }
@@ -440,7 +415,6 @@ export function normalizeSystem(system: System): System {
   const next = structuredClone(system) as System & {
     scenes?: Scene[]
     bifurcationDiagrams?: BifurcationDiagram[]
-    ui?: SystemUiState & { layout?: Partial<SystemLayout> }
   }
 
   if (!next.scenes || next.scenes.length === 0) {
@@ -486,73 +460,6 @@ export function normalizeSystem(system: System): System {
   next.bifurcationDiagrams.forEach((diagram) => {
     ensureRootNode(diagram.id, diagram.name, 'diagram', 'bifurcation')
   })
-
-  const objectNameToNodeId = new Map<string, string>()
-  Object.entries(next.objects).forEach(([id, obj]) => {
-    if (!next.nodes[id]) {
-      next.nodes[id] = createTreeNode({
-        id,
-        name: obj.name,
-        kind: 'object',
-        objectType: obj.type,
-        parentId: null,
-      })
-    }
-    const node = next.nodes[id]
-    node.name = obj.name
-    node.kind = 'object'
-    node.objectType = obj.type
-    node.parentId = node.parentId ?? null
-    if (!next.rootIds.includes(id)) {
-      next.rootIds.push(id)
-    }
-    objectNameToNodeId.set(obj.name, id)
-  })
-
-  Object.entries(next.branches).forEach(([id, branch]) => {
-    const parentId = objectNameToNodeId.get(branch.parentObject) ?? null
-    if (!next.nodes[id]) {
-      next.nodes[id] = createTreeNode({
-        id,
-        name: branch.name,
-        kind: 'branch',
-        objectType: 'continuation',
-        parentId,
-      })
-    }
-    const node = next.nodes[id]
-    node.name = branch.name
-    node.kind = 'branch'
-    node.objectType = 'continuation'
-    node.parentId = node.parentId ?? parentId
-
-    if (node.parentId) {
-      const parent = next.nodes[node.parentId]
-      if (parent && !parent.children.includes(id)) {
-        parent.children.push(id)
-      }
-    } else if (!next.rootIds.includes(id)) {
-      next.rootIds.push(id)
-    }
-  })
-
-  Object.values(next.nodes).forEach((node) => {
-    node.children = node.children ?? []
-    node.visibility = node.visibility ?? true
-    node.expanded = node.expanded ?? true
-    node.render = { ...DEFAULT_RENDER, ...(node.render ?? {}) }
-  })
-
-  const nextUi = next.ui ?? structuredClone(DEFAULT_UI)
-  nextUi.selectedNodeId = nextUi.selectedNodeId ?? null
-  nextUi.layout = { ...DEFAULT_LAYOUT, ...(nextUi.layout ?? {}) }
-  const viewportHeights = nextUi.viewportHeights ?? {}
-  nextUi.viewportHeights = Object.fromEntries(
-    Object.entries(viewportHeights).filter(
-      ([id, height]) => Boolean(next.nodes[id]) && Number.isFinite(height) && height > 0
-    )
-  )
-  next.ui = nextUi
 
   return next as System
 }

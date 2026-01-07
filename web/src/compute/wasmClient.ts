@@ -1,39 +1,20 @@
 import type {
-  ContinuationProgress,
-  EquilibriumContinuationRequest,
-  EquilibriumContinuationResult,
   ForkCoreClient,
-  SolveEquilibriumRequest,
-  SolveEquilibriumResult,
   SimulateOrbitRequest,
   SimulateOrbitResult,
   ValidateSystemRequest,
   ValidateSystemResult,
 } from './ForkCoreClient'
 import { JobQueue } from './jobQueue'
-import { makeStableId } from '../utils/determinism'
 
 type WorkerRequest =
   | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
-  | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
-  | { id: string; kind: 'runEquilibriumContinuation'; payload: EquilibriumContinuationRequest }
   | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
   | { id: string; kind: 'cancel' }
 
-type WorkerProgress = { id: string; kind: 'progress'; progress: ContinuationProgress }
-
 type WorkerResponse =
-  | {
-      id: string
-      ok: true
-      result:
-        | SimulateOrbitResult
-        | SolveEquilibriumResult
-        | ValidateSystemResult
-        | EquilibriumContinuationResult
-    }
+  | { id: string; ok: true; result: SimulateOrbitResult | ValidateSystemResult }
   | { id: string; ok: false; error: string; aborted?: boolean }
-  | WorkerProgress
 
 export class WasmForkCoreClient implements ForkCoreClient {
   private worker: Worker
@@ -41,15 +22,8 @@ export class WasmForkCoreClient implements ForkCoreClient {
   private pending = new Map<
     string,
     {
-      resolve: (
-        value:
-          | SimulateOrbitResult
-          | SolveEquilibriumResult
-          | ValidateSystemResult
-          | EquilibriumContinuationResult
-      ) => void
+      resolve: (value: SimulateOrbitResult | ValidateSystemResult) => void
       reject: (error: Error) => void
-      onProgress?: (progress: ContinuationProgress) => void
     }
   >()
 
@@ -60,12 +34,6 @@ export class WasmForkCoreClient implements ForkCoreClient {
     })
     this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       const message = event.data
-      if ('kind' in message && message.kind === 'progress') {
-        const entry = this.pending.get(message.id)
-        entry?.onProgress?.(message.progress)
-        return
-      }
-      if (!('ok' in message)) return
       const entry = this.pending.get(message.id)
       if (!entry) return
       this.pending.delete(message.id)
@@ -86,30 +54,6 @@ export class WasmForkCoreClient implements ForkCoreClient {
     const job = this.queue.enqueue(
       'simulateOrbit',
       (signal) => this.runWorker('simulateOrbit', request, signal),
-      opts
-    )
-    return await job.promise
-  }
-
-  async solveEquilibrium(
-    request: SolveEquilibriumRequest,
-    opts?: { signal?: AbortSignal }
-  ): Promise<SolveEquilibriumResult> {
-    const job = this.queue.enqueue(
-      'solveEquilibrium',
-      (signal) => this.runWorker('solveEquilibrium', request, signal),
-      opts
-    )
-    return await job.promise
-  }
-
-  async runEquilibriumContinuation(
-    request: EquilibriumContinuationRequest,
-    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
-  ): Promise<EquilibriumContinuationResult> {
-    const job = this.queue.enqueue(
-      'runEquilibriumContinuation',
-      (signal) => this.runWorker('runEquilibriumContinuation', request, signal, opts?.onProgress),
       opts
     )
     return await job.promise
@@ -137,53 +81,23 @@ export class WasmForkCoreClient implements ForkCoreClient {
     signal: AbortSignal
   ): Promise<SimulateOrbitResult>
   private runWorker(
-    kind: 'solveEquilibrium',
-    payload: SolveEquilibriumRequest,
-    signal: AbortSignal
-  ): Promise<SolveEquilibriumResult>
-  private runWorker(
-    kind: 'runEquilibriumContinuation',
-    payload: EquilibriumContinuationRequest,
-    signal: AbortSignal,
-    onProgress?: (progress: ContinuationProgress) => void
-  ): Promise<EquilibriumContinuationResult>
-  private runWorker(
     kind: 'validateSystem',
     payload: ValidateSystemRequest,
     signal: AbortSignal
   ): Promise<ValidateSystemResult>
   private runWorker(
-    kind: 'simulateOrbit' | 'solveEquilibrium' | 'runEquilibriumContinuation' | 'validateSystem',
-    payload:
-      | SimulateOrbitRequest
-      | SolveEquilibriumRequest
-      | EquilibriumContinuationRequest
-      | ValidateSystemRequest,
-    signal: AbortSignal,
-    onProgress?: (progress: ContinuationProgress) => void
-  ): Promise<
-    | SimulateOrbitResult
-    | SolveEquilibriumResult
-    | ValidateSystemResult
-    | EquilibriumContinuationResult
-  > {
-    const id = makeStableId('req')
+    kind: 'simulateOrbit' | 'validateSystem',
+    payload: SimulateOrbitRequest | ValidateSystemRequest,
+    signal: AbortSignal
+  ): Promise<SimulateOrbitResult | ValidateSystemResult> {
+    const id = `req_${Math.random().toString(36).slice(2, 10)}`
     const message: WorkerRequest =
       kind === 'simulateOrbit'
         ? { id, kind, payload: payload as SimulateOrbitRequest }
-        : kind === 'solveEquilibrium'
-          ? { id, kind, payload: payload as SolveEquilibriumRequest }
-          : kind === 'runEquilibriumContinuation'
-            ? { id, kind, payload: payload as EquilibriumContinuationRequest }
-            : { id, kind, payload: payload as ValidateSystemRequest }
+        : { id, kind, payload: payload as ValidateSystemRequest }
 
-    const promise = new Promise<
-      | SimulateOrbitResult
-      | SolveEquilibriumResult
-      | ValidateSystemResult
-      | EquilibriumContinuationResult
-    >((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, onProgress })
+    const promise = new Promise<SimulateOrbitResult | ValidateSystemResult>((resolve, reject) => {
+      this.pending.set(id, { resolve, reject })
     })
 
     if (signal.aborted) {

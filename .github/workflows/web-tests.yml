@@ -12,12 +12,6 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: jetli/wasm-pack-action@v0.4.0
-      - name: Build web WASM
-        run: wasm-pack build --target web --out-dir pkg-web
-        working-directory: crates/fork_wasm
       - uses: actions/setup-node@v4
         with:
           node-version: 20

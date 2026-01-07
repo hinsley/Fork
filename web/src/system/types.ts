@@ -67,16 +67,6 @@ export interface ContinuationEigenvalue {
   im: number
 }
 
-export interface ContinuationSettings {
-  step_size: number
-  min_step_size: number
-  max_step_size: number
-  max_steps: number
-  corrector_steps: number
-  corrector_tolerance: number
-  step_tolerance: number
-}
-
 export interface ContinuationPoint {
   state: number[]
   param_value: number
@@ -127,7 +117,7 @@ export interface ContinuationObject {
     | 'pd_curve'
     | 'ns_curve'
   data: ContinuationBranchData
-  settings: ContinuationSettings
+  settings: any
   timestamp: string
   params?: number[]
 }
@@ -209,14 +199,13 @@ export interface SystemLayout {
   leftWidth: number
   rightWidth: number
   objectsOpen: boolean
-  inspectorOpen: boolean
+  propertiesOpen: boolean
   branchViewerOpen: boolean
 }
 
 export interface SystemUiState {
   selectedNodeId: string | null
   layout: SystemLayout
-  viewportHeights: Record<string, number>
 }
 
 export interface System {
@@ -231,25 +220,6 @@ export interface System {
   bifurcationDiagrams: BifurcationDiagram[]
   ui: SystemUiState
   updatedAt: string
-}
-
-export interface SystemData {
-  id: string
-  name: string
-  config: SystemConfig
-  objects: Record<string, AnalysisObject>
-  branches: Record<string, ContinuationObject>
-  updatedAt: string
-}
-
-export interface SystemUiSnapshot {
-  systemId: string
-  updatedAt: string
-  nodes: Record<string, TreeNode>
-  rootIds: string[]
-  scenes: Scene[]
-  bifurcationDiagrams: BifurcationDiagram[]
-  ui: SystemUiState
 }
 
 export interface SystemSummary {

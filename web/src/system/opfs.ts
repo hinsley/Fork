@@ -1,19 +1,9 @@
-import type { System, SystemData, SystemSummary, SystemUiSnapshot } from './types'
+import type { System, SystemSummary } from './types'
 import type { SystemStore } from './store'
-import {
-  deserializeSystemData,
-  deserializeSystemUi,
-  mergeSystem,
-  serializeSystemData,
-  serializeSystemUi,
-  type LegacySystemBundle,
-  type SystemDataBundle,
-  type SystemUiBundle,
-} from './serialization'
+import { deserializeSystem, serializeSystem, type SystemBundle } from './serialization'
 
 const SYSTEMS_DIR = 'fork-systems'
 const SYSTEM_FILE = 'system.json'
-const UI_FILE = 'ui.json'
 
 async function getRootDirectory() {
   if (!('storage' in navigator) || !('getDirectory' in navigator.storage)) {
@@ -27,54 +17,17 @@ async function getSystemsDirectory(create = true) {
   return await root.getDirectoryHandle(SYSTEMS_DIR, { create })
 }
 
-async function readJsonFile<T>(
-  dir: FileSystemDirectoryHandle,
-  filename: string
-): Promise<T> {
-  const fileHandle = await dir.getFileHandle(filename)
+async function readSystemBundle(dir: FileSystemDirectoryHandle): Promise<SystemBundle> {
+  const fileHandle = await dir.getFileHandle(SYSTEM_FILE)
   const file = await fileHandle.getFile()
-  return JSON.parse(await file.text()) as T
+  return JSON.parse(await file.text()) as SystemBundle
 }
 
-async function writeJsonFile(
-  dir: FileSystemDirectoryHandle,
-  filename: string,
-  payload: unknown
-) {
-  const fileHandle = await dir.getFileHandle(filename, { create: true })
+async function writeSystemBundle(dir: FileSystemDirectoryHandle, bundle: SystemBundle) {
+  const fileHandle = await dir.getFileHandle(SYSTEM_FILE, { create: true })
   const writable = await fileHandle.createWritable()
-  await writable.write(JSON.stringify(payload, null, 2))
+  await writable.write(JSON.stringify(bundle, null, 2))
   await writable.close()
-}
-
-function latestIso(primary: string, secondary?: string) {
-  if (!secondary) return primary
-  return primary.localeCompare(secondary) >= 0 ? primary : secondary
-}
-
-async function readSystemData(
-  dir: FileSystemDirectoryHandle
-): Promise<{ data: SystemData; ui?: SystemUiSnapshot }> {
-  const bundle = await readJsonFile<SystemDataBundle | LegacySystemBundle>(dir, SYSTEM_FILE)
-  const result = deserializeSystemData(bundle)
-  return { data: result.data, ui: result.ui }
-}
-
-async function readSystemUi(dir: FileSystemDirectoryHandle): Promise<SystemUiSnapshot | null> {
-  try {
-    const bundle = await readJsonFile<SystemUiBundle>(dir, UI_FILE)
-    return deserializeSystemUi(bundle)
-  } catch {
-    return null
-  }
-}
-
-async function writeSystemData(dir: FileSystemDirectoryHandle, system: System) {
-  await writeJsonFile(dir, SYSTEM_FILE, serializeSystemData(system))
-}
-
-async function writeSystemUi(dir: FileSystemDirectoryHandle, system: System) {
-  await writeJsonFile(dir, UI_FILE, serializeSystemUi(system))
 }
 
 export class OpfsSystemStore implements SystemStore {
@@ -87,13 +40,12 @@ export class OpfsSystemStore implements SystemStore {
       if (entry.kind !== 'directory') continue
       const dirEntry = entry as FileSystemDirectoryHandle
       try {
-        const { data, ui: legacyUi } = await readSystemData(dirEntry)
-        const ui = (await readSystemUi(dirEntry)) ?? legacyUi
+        const bundle = await readSystemBundle(dirEntry)
         summaries.push({
-          id: data.id,
-          name: data.name,
-          updatedAt: latestIso(data.updatedAt, ui?.updatedAt),
-          type: data.config.type,
+          id: bundle.system.id,
+          name: bundle.system.name,
+          updatedAt: bundle.system.updatedAt,
+          type: bundle.system.config.type,
         })
       } catch {
         continue
@@ -105,22 +57,14 @@ export class OpfsSystemStore implements SystemStore {
   async load(id: string): Promise<System> {
     const systemsDir = await getSystemsDirectory()
     const systemDir = await systemsDir.getDirectoryHandle(id)
-    const { data, ui: legacyUi } = await readSystemData(systemDir)
-    const ui = (await readSystemUi(systemDir)) ?? legacyUi
-    return mergeSystem(data, ui ?? undefined)
+    const bundle = await readSystemBundle(systemDir)
+    return deserializeSystem(bundle)
   }
 
   async save(system: System): Promise<void> {
     const systemsDir = await getSystemsDirectory()
     const systemDir = await systemsDir.getDirectoryHandle(system.id, { create: true })
-    await writeSystemData(systemDir, system)
-    await writeSystemUi(systemDir, system)
-  }
-
-  async saveUi(system: System): Promise<void> {
-    const systemsDir = await getSystemsDirectory()
-    const systemDir = await systemsDir.getDirectoryHandle(system.id, { create: true })
-    await writeSystemUi(systemDir, system)
+    await writeSystemBundle(systemDir, serializeSystem(system))
   }
 
   async remove(id: string): Promise<void> {

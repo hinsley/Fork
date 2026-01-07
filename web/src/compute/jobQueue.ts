@@ -1,5 +1,3 @@
-import { makeStableId, nowPerfMs } from '../utils/determinism'
-
 export type JobTiming = {
   id: string
   label: string
@@ -19,16 +17,21 @@ export type JobHandle<T> = {
 
 type JobRunner<T> = (signal: AbortSignal) => Promise<T>
 
-type InternalJob = {
+type InternalJob<T> = {
   id: string
   label: string
   controller: AbortController
-  runner: JobRunner<unknown>
-  resolve: (value: unknown) => void
+  runner: JobRunner<T>
+  resolve: (value: T) => void
   reject: (error: Error) => void
 }
 
-// Timing uses deterministic helpers so tests can assert stable durations.
+function now() {
+  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+    return performance.now()
+  }
+  return Date.now()
+}
 
 function createAbortError(label: string) {
   const error = new Error(`Job "${label}" cancelled`)
@@ -37,7 +40,7 @@ function createAbortError(label: string) {
 }
 
 export class JobQueue {
-  private queue: InternalJob[] = []
+  private queue: InternalJob<any>[] = []
   private running = false
   private onTiming?: (timing: JobTiming) => void
   private scheduled = false
@@ -48,7 +51,7 @@ export class JobQueue {
 
   enqueue<T>(label: string, runner: JobRunner<T>, opts?: { signal?: AbortSignal }): JobHandle<T> {
     const controller = new AbortController()
-    const id = makeStableId('job')
+    const id = `job_${Math.random().toString(36).slice(2, 10)}`
 
     if (opts?.signal) {
       if (opts.signal.aborted) {
@@ -66,10 +69,7 @@ export class JobQueue {
       reject = rej
     })
 
-    const wrappedRunner: JobRunner<unknown> = (signal) => runner(signal)
-    const wrappedResolve = (value: unknown) => resolve(value as T)
-
-    this.queue.push({ id, label, controller, runner: wrappedRunner, resolve: wrappedResolve, reject })
+    this.queue.push({ id, label, controller, runner, resolve, reject })
     this.scheduleRun()
 
     return {
@@ -89,28 +89,28 @@ export class JobQueue {
       const job = this.queue.shift()
       if (!job) break
 
-      const startedAt = nowPerfMs()
+      const startedAt = now()
       if (job.controller.signal.aborted) {
         const error = createAbortError(job.label)
         job.reject(error)
-        this.emitTiming(job, startedAt, nowPerfMs(), 'cancelled')
+        this.emitTiming(job, startedAt, now(), 'cancelled')
         continue
       }
 
       try {
         const result = await job.runner(job.controller.signal)
         job.resolve(result)
-        this.emitTiming(job, startedAt, nowPerfMs(), 'completed')
+        this.emitTiming(job, startedAt, now(), 'completed')
       } catch (err) {
         if (job.controller.signal.aborted) {
           const error = createAbortError(job.label)
           job.reject(error)
-          this.emitTiming(job, startedAt, nowPerfMs(), 'cancelled')
+          this.emitTiming(job, startedAt, now(), 'cancelled')
           continue
         }
         const error = err instanceof Error ? err : new Error(String(err))
         job.reject(error)
-        this.emitTiming(job, startedAt, nowPerfMs(), 'failed')
+        this.emitTiming(job, startedAt, now(), 'failed')
       }
     }
 
@@ -131,12 +131,7 @@ export class JobQueue {
     }
   }
 
-  private emitTiming(
-    job: InternalJob,
-    startedAt: number,
-    finishedAt: number,
-    status: JobTiming['status']
-  ) {
+  private emitTiming(job: InternalJob<any>, startedAt: number, finishedAt: number, status: JobTiming['status']) {
     if (!this.onTiming) return
     this.onTiming({
       id: job.id,

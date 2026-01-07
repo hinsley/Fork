@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test'
 
-const port = Number(process.env.PLAYWRIGHT_PORT ?? 4173)
+const port = 4173
 
 export default defineConfig({
   testDir: './e2e',

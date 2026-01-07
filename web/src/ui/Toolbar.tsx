@@ -3,13 +3,6 @@ import { useEffect, useRef, useState } from 'react'
 type ToolbarProps = {
   systemName: string | null
   busy: boolean
-  progress?: {
-    label: string
-    currentStep: number
-    maxSteps: number
-    points: number
-    bifurcations: number
-  } | null
   onOpenSystems: () => void
   theme: 'light' | 'dark'
   onThemeChange: (theme: 'light' | 'dark') => void
@@ -18,7 +11,6 @@ type ToolbarProps = {
 export function Toolbar({
   systemName,
   busy,
-  progress,
   onOpenSystems,
   theme,
   onThemeChange,
@@ -92,36 +84,7 @@ export function Toolbar({
           ) : null}
         </div>
       </div>
-      <div className="toolbar__status">
-        {progress ? (
-          <div className="toolbar__progress">
-            <div className="toolbar__progress-header">
-              <span>{progress.label}</span>
-              <span>
-                {progress.currentStep} / {progress.maxSteps}
-              </span>
-            </div>
-            <div className="toolbar__progress-bar" role="progressbar">
-              <div
-                className="toolbar__progress-fill"
-                style={{
-                  width: `${
-                    progress.maxSteps > 0
-                      ? Math.min(100, (progress.currentStep / progress.maxSteps) * 100)
-                      : 0
-                  }%`,
-                }}
-              />
-            </div>
-            <div className="toolbar__progress-meta">
-              <span>{progress.points} pts</span>
-              <span>{progress.bifurcations} bifurcations</span>
-            </div>
-          </div>
-        ) : (
-          <span>{busy ? 'Computing…' : 'Ready'}</span>
-        )}
-      </div>
+      <div className="toolbar__status">{busy ? 'Computing…' : 'Ready'}</div>
     </header>
   )
 }
