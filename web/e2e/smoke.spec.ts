@@ -10,8 +10,8 @@ test('system to viewport smoke', async ({ page }) => {
   await page.getByTestId('create-orbit').click()
   await page.getByRole('button', { name: /Orbit 1/i }).click()
 
-  const propertiesName = page.getByTestId('properties-name')
-  await expect(propertiesName).toHaveValue(/Orbit 1/i)
+  const inspectorName = page.getByTestId('inspector-name')
+  await expect(inspectorName).toHaveValue(/Orbit 1/i)
 
   const viewport = page.locator('[data-testid^=\"plotly-viewport-\"]').first()
   await expect(viewport).toHaveAttribute('data-trace-count', /[1-9]/)

@@ -1,5 +1,5 @@
 import { BranchViewer } from './BranchViewer'
-import { PropertiesPanel } from './PropertiesPanel'
+import { InspectorDetailsPanel } from './InspectorDetailsPanel'
 import type { BifurcationDiagram, System, Scene, SystemConfig, TreeNode } from '../system/types'
 import type {
   EquilibriumCreateRequest,
@@ -82,7 +82,7 @@ export function InspectorPanel({
             onSelectBranch={onSelectBranch}
           />
         ) : (
-          <PropertiesPanel
+          <InspectorDetailsPanel
             system={system}
             selectedNodeId={selectedNodeId}
             view={view}

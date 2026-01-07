@@ -7,7 +7,7 @@ import type {
 } from '../state/appState'
 import { validateSystemConfig } from '../state/appState'
 
-type PropertiesPanelProps = {
+type InspectorDetailsPanelProps = {
   system: System
   selectedNodeId: string | null
   view: 'selection' | 'system' | 'create'
@@ -125,7 +125,7 @@ function isSystemEqual(a: SystemConfig, b: SystemConfig): boolean {
   )
 }
 
-export function PropertiesPanel({
+export function InspectorDetailsPanel({
   system,
   selectedNodeId,
   view,
@@ -139,7 +139,7 @@ export function PropertiesPanel({
   onCreateOrbit,
   onCreateEquilibrium,
   onCreateLimitCycle,
-}: PropertiesPanelProps) {
+}: InspectorDetailsPanelProps) {
   const node = selectedNodeId ? system.nodes[selectedNodeId] : null
   const object = selectedNodeId ? system.objects[selectedNodeId] : undefined
   const branch = selectedNodeId ? system.branches[selectedNodeId] : undefined
@@ -494,10 +494,10 @@ export function PropertiesPanel({
     systemDraft.type === 'map' ? `${varName}_{n+1}` : `d${varName}/dt`
 
   const renderSystemView = () => (
-    <div className="properties-panel" data-testid="properties-panel-body">
-      <div className="properties-group">
-        <div className="properties-group__summary">System</div>
-        <div className="properties-section">
+    <div className="inspector-panel" data-testid="inspector-panel-body">
+      <div className="inspector-group">
+        <div className="inspector-group__summary">System</div>
+        <div className="inspector-section">
           <label>
             System Name
             <input
@@ -555,8 +555,8 @@ export function PropertiesPanel({
           </label>
         </div>
 
-        <div className="properties-section">
-          <div className="properties-group__header">
+        <div className="inspector-section">
+          <div className="inspector-group__header">
             <h3>Variables + Equations</h3>
             <button
               onClick={() =>
@@ -574,9 +574,9 @@ export function PropertiesPanel({
           {showSystemErrors && systemValidation.errors.varNames ? (
             <div className="field-error">{systemValidation.errors.varNames}</div>
           ) : null}
-          <div className="properties-list">
+          <div className="inspector-list">
             {systemDraft.varNames.map((varName, index) => (
-              <div className="properties-row" key={`var-${index}`}>
+              <div className="inspector-row" key={`var-${index}`}>
                 <input
                   value={varName}
                   onChange={(event) =>
@@ -588,7 +588,7 @@ export function PropertiesPanel({
                   }
                   data-testid={`system-var-${index}`}
                 />
-                <div className="properties-row__stack">
+                <div className="inspector-row__stack">
                   <textarea
                     value={systemDraft.equations[index] ?? ''}
                     onChange={(event) =>
@@ -637,8 +637,8 @@ export function PropertiesPanel({
           ) : null}
         </div>
 
-        <div className="properties-section">
-          <div className="properties-group__header">
+        <div className="inspector-section">
+          <div className="inspector-group__header">
             <h3>Parameters</h3>
             <button
               onClick={() =>
@@ -656,9 +656,9 @@ export function PropertiesPanel({
           {showSystemErrors && systemValidation.errors.paramNames ? (
             <div className="field-error">{systemValidation.errors.paramNames}</div>
           ) : null}
-          <div className="properties-list">
+          <div className="inspector-list">
             {systemDraft.paramNames.map((paramName, index) => (
-              <div className="properties-row properties-row--param" key={`param-${index}`}>
+              <div className="inspector-row inspector-row--param" key={`param-${index}`}>
                 <input
                   value={paramName}
                   onChange={(event) =>
@@ -711,7 +711,7 @@ export function PropertiesPanel({
         {renderSystemErrors()}
         {wasmMessage ? <div className="field-error">{wasmMessage}</div> : null}
         {isValidating ? <div className="field-warning">Validating equations…</div> : null}
-        <div className="properties-section">
+        <div className="inspector-section">
           <button onClick={handleApplySystem} data-testid="system-apply">
             Apply System Changes
           </button>
@@ -721,15 +721,15 @@ export function PropertiesPanel({
   )
 
   const renderCreateView = () => (
-    <div className="properties-panel" data-testid="properties-panel-body">
-      <div className="properties-group">
-        <div className="properties-group__summary">Create Objects</div>
+    <div className="inspector-panel" data-testid="inspector-panel-body">
+      <div className="inspector-group">
+        <div className="inspector-group__summary">Create Objects</div>
         {creationDisabled ? (
           <div className="field-warning">
             Apply valid system changes before creating new objects.
           </div>
         ) : null}
-        <div className="properties-section">
+        <div className="inspector-section">
           <h3>Orbit</h3>
           <label>
             Name
@@ -742,7 +742,7 @@ export function PropertiesPanel({
               data-testid="create-orbit-name"
             />
           </label>
-          <div className="properties-list">
+          <div className="inspector-list">
             {systemDraft.varNames.map((varName, index) => (
               <label key={`orbit-ic-${index}`}>
                 Initial {varName}
@@ -799,7 +799,7 @@ export function PropertiesPanel({
           </button>
         </div>
 
-        <div className="properties-section">
+        <div className="inspector-section">
           <h3>Equilibrium</h3>
           <label>
             Name
@@ -812,7 +812,7 @@ export function PropertiesPanel({
               data-testid="create-equilibrium-name"
             />
           </label>
-          <div className="properties-list">
+          <div className="inspector-list">
             {systemDraft.varNames.map((varName, index) => (
               <label key={`eq-guess-${index}`}>
                 Initial {varName}
@@ -867,7 +867,7 @@ export function PropertiesPanel({
           </button>
         </div>
 
-        <div className="properties-section">
+        <div className="inspector-section">
           <h3>Limit Cycle</h3>
           {systemDraft.type === 'map' ? (
             <p className="empty-state">Limit cycles are only supported for flow systems.</p>
@@ -929,7 +929,7 @@ export function PropertiesPanel({
               data-testid="create-limit-cycle-period"
             />
           </label>
-          <div className="properties-list">
+          <div className="inspector-list">
             {systemDraft.varNames.map((varName, index) => (
               <label key={`lc-state-${index}`}>
                 State {varName}
@@ -1005,40 +1005,40 @@ export function PropertiesPanel({
   )
 
   const renderSelectionView = () => (
-    <div className="properties-panel" data-testid="properties-panel-body">
+    <div className="inspector-panel" data-testid="inspector-panel-body">
       {node ? (
-        <div className="properties-group">
-          <div className="properties-group__summary">Selection</div>
-          <div className="properties-section">
+        <div className="inspector-group">
+          <div className="inspector-group__summary">Selection</div>
+          <div className="inspector-section">
             <label>
               Name
               <input
                 value={node.name}
                 onChange={(event) => onRename(node.id, event.target.value)}
-                data-testid="properties-name"
+                data-testid="inspector-name"
               />
             </label>
-            <div className="properties-meta">
+            <div className="inspector-meta">
               <span>{node.objectType ?? node.kind}</span>
               {summary ? <span>{summary.detail}</span> : null}
             </div>
           </div>
 
-          <div className="properties-section">
-            <button onClick={() => onToggleVisibility(node.id)} data-testid="properties-visibility">
+          <div className="inspector-section">
+            <button onClick={() => onToggleVisibility(node.id)} data-testid="inspector-visibility">
               {node.visibility ? 'Visible' : 'Hidden'}
             </button>
           </div>
 
           {node.kind === 'object' || node.kind === 'branch' ? (
-            <div className="properties-section">
+            <div className="inspector-section">
               <label>
                 Color
                 <input
                   type="color"
                   value={node.render.color}
                   onChange={(event) => onUpdateRender(node.id, { color: event.target.value })}
-                  data-testid="properties-color"
+                  data-testid="inspector-color"
                 />
               </label>
               <label>
@@ -1051,7 +1051,7 @@ export function PropertiesPanel({
                   onChange={(event) =>
                     onUpdateRender(node.id, { lineWidth: Number(event.target.value) })
                   }
-                  data-testid="properties-line-width"
+                  data-testid="inspector-line-width"
                 />
               </label>
               <label>
@@ -1064,14 +1064,14 @@ export function PropertiesPanel({
                   onChange={(event) =>
                     onUpdateRender(node.id, { pointSize: Number(event.target.value) })
                   }
-                  data-testid="properties-point-size"
+                  data-testid="inspector-point-size"
                 />
               </label>
             </div>
           ) : null}
 
           {scene ? (
-            <div className="properties-section">
+            <div className="inspector-section">
               <h3>Scene</h3>
               <label>
                 Display
@@ -1092,7 +1092,7 @@ export function PropertiesPanel({
           ) : null}
 
           {diagram ? (
-            <div className="properties-section">
+            <div className="inspector-section">
               <h3>Bifurcation Diagram</h3>
               {branchEntries.length > 0 ? (
                 <label>
@@ -1166,7 +1166,7 @@ export function PropertiesPanel({
           ) : null}
 
           {branch ? (
-            <div className="properties-section">
+            <div className="inspector-section">
               <h3>Branch</h3>
               <p>{branch.branchType}</p>
               <p>{branch.data.points.length} points</p>
@@ -1174,7 +1174,7 @@ export function PropertiesPanel({
           ) : null}
         </div>
       ) : (
-        <p className="empty-state">Select a node to edit properties.</p>
+        <p className="empty-state">Select a node to inspect details.</p>
       )}
     </div>
   )
