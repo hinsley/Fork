@@ -56,6 +56,12 @@ function App() {
   }, [system?.id])
 
   useEffect(() => {
+    if (system?.ui.selectedNodeId) {
+      setInspectorView('selection')
+    }
+  }, [system?.ui.selectedNodeId])
+
+  useEffect(() => {
     document.documentElement.dataset.theme = theme
     if ('localStorage' in window && typeof window.localStorage.setItem === 'function') {
       window.localStorage.setItem('fork-theme', theme)
@@ -241,12 +247,12 @@ function App() {
           />
           <div className="workspace__right">
             <Panel
-              title="Properties"
-              open={system.ui.layout.propertiesOpen}
+              title="Inspector"
+              open={system.ui.layout.inspectorOpen}
               onToggle={() =>
-                actions.updateLayout({ propertiesOpen: !system.ui.layout.propertiesOpen })
+                actions.updateLayout({ inspectorOpen: !system.ui.layout.inspectorOpen })
               }
-              testId="properties-panel"
+              testId="inspector-panel"
             >
               <InspectorPanel
                 system={system}

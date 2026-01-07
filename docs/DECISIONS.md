@@ -37,7 +37,7 @@ Impact:
 Scene/diagram visibility toggles hide viewport tiles; viewport Plotly test IDs are now per-node.
 References:
 `web/src/project/model.ts`, `web/src/project/serialization.ts`, `web/src/ui/ViewportPanel.tsx`,
-`web/src/ui/PropertiesPanel.tsx`
+`web/src/ui/InspectorDetailsPanel.tsx`
 
 ### 2025-01-07: Lazy-load Plotly via adapter
 Context:
@@ -68,4 +68,5 @@ Type shims exist for
 the WASM module, Plotly, and OPFS iterator typings.
 References:
 `web/src/compute/worker/forkCoreWorker.ts`, `web/vite.config.ts`,
-`web/src/types/wasm.d.ts`, `web/src/types/plotly.d.ts`, `web/src/types/fileSystem.d.ts`
+`web/src/types/wasm.d.ts`, `web/src/types/plotly.d.ts`, `web/src/types/fileSystem.d.ts`,
+`web/src/ui/InspectorDetailsPanel.tsx`

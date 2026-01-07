@@ -199,7 +199,7 @@ export interface SystemLayout {
   leftWidth: number
   rightWidth: number
   objectsOpen: boolean
-  propertiesOpen: boolean
+  inspectorOpen: boolean
   branchViewerOpen: boolean
 }
 
