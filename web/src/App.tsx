@@ -1,34 +1,276 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import { useAppContext } from './state/appState'
+import { Panel } from './ui/Panel'
+import { ObjectsTree } from './ui/ObjectsTree'
+import { InspectorPanel } from './ui/InspectorPanel'
+import { ViewportPanel } from './ui/ViewportPanel'
+import { SystemDialog } from './ui/SystemDialog'
+import { Toolbar } from './ui/Toolbar'
+import { PerfOverlay } from './ui/PerfOverlay'
+
+const MIN_LEFT_WIDTH = 220
+const MIN_RIGHT_WIDTH = 240
+const MAX_PANEL_WIDTH = 520
+const SPLITTER_WIDTH = 2
+
+function nextObjectName(prefix: string, existing: string[]) {
+  let index = 1
+  let name = `${prefix} ${index}`
+  while (existing.includes(name)) {
+    index += 1
+    name = `${prefix} ${index}`
+  }
+  return name
+}
 
 function App() {
-  const [count, setCount] = useState(0)
+  const { state, actions } = useAppContext()
+  const { system, systems, busy, error } = state
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window === 'undefined') return 'dark'
+    const stored =
+      'localStorage' in window && typeof window.localStorage.getItem === 'function'
+        ? window.localStorage.getItem('fork-theme')
+        : null
+    return stored === 'light' ? 'light' : 'dark'
+  })
+  const [inspectorView, setInspectorView] = useState<'selection' | 'system' | 'create' | 'branches'>(
+    'selection'
+  )
+  const dragRef = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(
+    null
+  )
+
+  useEffect(() => {
+    void actions.refreshSystems()
+  }, [actions])
+
+  useEffect(() => {
+    if (!system) setDialogOpen(true)
+  }, [system])
+
+  useEffect(() => {
+    if (system) setInspectorView('selection')
+  }, [system?.id])
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    if ('localStorage' in window && typeof window.localStorage.setItem === 'function') {
+      window.localStorage.setItem('fork-theme', theme)
+    }
+  }, [theme])
+
+  const openSystemsDialog = () => setDialogOpen(true)
+
+  const createOrbit = async () => {
+    if (!system) return
+    const names = Object.values(system.objects).map((obj) => obj.name)
+    const name = nextObjectName('Orbit', names)
+    await actions.addOrbitObject({
+      name,
+      initialState: system.config.varNames.map(() => 0),
+      duration: system.config.type === 'map' ? 200 : 4,
+      dt: system.config.type === 'map' ? undefined : 0.02,
+    })
+  }
+
+  const createEquilibrium = async () => {
+    if (!system) return
+    const names = Object.values(system.objects).map((obj) => obj.name)
+    const name = nextObjectName('Equilibrium', names)
+    await actions.addEquilibriumObject({
+      name,
+      initialGuess: system.config.varNames.map(() => 0),
+      maxSteps: 25,
+      dampingFactor: 1,
+    })
+  }
+
+  const createScene = async () => {
+    if (!system) return
+    const names = system.scenes.map((scene) => scene.name)
+    const name = nextObjectName('Scene', names)
+    await actions.addScene(name)
+  }
+
+  const createBifurcation = async () => {
+    if (!system) return
+    const names = system.bifurcationDiagrams.map((diagram) => diagram.name)
+    const name = nextObjectName('Bifurcation', names)
+    await actions.addBifurcationDiagram(name)
+  }
+
+  const onPointerDown = (side: 'left' | 'right') => (event: React.PointerEvent) => {
+    if (!system) return
+    dragRef.current = {
+      side,
+      startX: event.clientX,
+      startWidth: side === 'left' ? system.ui.layout.leftWidth : system.ui.layout.rightWidth,
+    }
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      if (!system || !dragRef.current) return
+      const { startX, startWidth } = dragRef.current
+      const delta = moveEvent.clientX - startX
+      if (side === 'left') {
+        const next = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_LEFT_WIDTH, startWidth + delta))
+        actions.updateLayout({ leftWidth: next })
+      } else {
+        const next = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_RIGHT_WIDTH, startWidth - delta))
+        actions.updateLayout({ rightWidth: next })
+      }
+    }
+
+    const handleUp = () => {
+      dragRef.current = null
+      window.removeEventListener('pointermove', handleMove)
+      window.removeEventListener('pointerup', handleUp)
+    }
+
+    window.addEventListener('pointermove', handleMove)
+    window.addEventListener('pointerup', handleUp)
+  }
+
+  const gridTemplateColumns = useMemo(() => {
+    if (!system) return '1fr'
+    return `${system.ui.layout.leftWidth}px ${SPLITTER_WIDTH}px 1fr ${SPLITTER_WIDTH}px ${system.ui.layout.rightWidth}px`
+  }, [system])
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
+    <div className="app">
+      <Toolbar
+        systemName={system?.name ?? null}
+        busy={busy}
+        onOpenSystems={openSystemsDialog}
+        theme={theme}
+        onThemeChange={setTheme}
+      />
+
+      <SystemDialog
+        open={dialogOpen}
+        systems={systems}
+        onClose={() => setDialogOpen(false)}
+        onCreateSystem={async (name) => {
+          await actions.createSystem(name)
+          setDialogOpen(false)
+        }}
+        onOpenSystem={async (id) => {
+          await actions.openSystem(id)
+          setDialogOpen(false)
+        }}
+        onExportSystem={(id) => void actions.exportSystem(id)}
+        onDeleteSystem={(id) => void actions.deleteSystem(id)}
+        onImportSystem={async (file) => {
+          await actions.importSystem(file)
+          setDialogOpen(false)
+        }}
+      />
+
+      {error ? (
+        <div className="error-banner" role="alert">
+          <span>{error}</span>
+          <button onClick={actions.clearError}>Dismiss</button>
+        </div>
+      ) : null}
+
+      {!system ? (
+        <main className="empty-workspace">
+          <div className="empty-card">
+            <h1>Fork Web</h1>
+            <p>Create or open a system to start exploring.</p>
+            <button onClick={() => setDialogOpen(true)} data-testid="open-systems-empty">
+              Open Systems
+            </button>
+          </div>
+        </main>
+      ) : (
+        <main className="workspace" style={{ gridTemplateColumns }} data-testid="workspace">
+          <div className="workspace__left">
+            <Panel
+              title="Objects"
+              open={system.ui.layout.objectsOpen}
+              onToggle={() =>
+                actions.updateLayout({ objectsOpen: !system.ui.layout.objectsOpen })
+              }
+              testId="objects-panel"
+            >
+              <ObjectsTree
+                system={system}
+                selectedNodeId={system.ui.selectedNodeId}
+                onSelect={actions.selectNode}
+                onToggleVisibility={actions.toggleVisibility}
+                onRename={actions.renameNode}
+                onToggleExpanded={actions.toggleExpanded}
+                onMoveNode={actions.moveNode}
+                onCreateOrbit={createOrbit}
+                onCreateEquilibrium={createEquilibrium}
+                onCreateScene={createScene}
+                onCreateBifurcation={createBifurcation}
+                onDeleteNode={actions.deleteNode}
+              />
+            </Panel>
+          </div>
+          <div
+            className="splitter splitter--left"
+            onPointerDown={onPointerDown('left')}
+            data-testid="splitter-left"
+          />
+          <div className="workspace__center">
+            <Panel
+              title="Viewport"
+              open
+              onToggle={() => undefined}
+              testId="viewport-panel"
+              className="panel--viewport"
+              hideHeader
+            >
+              <ViewportPanel
+                system={system}
+                selectedNodeId={system.ui.selectedNodeId}
+                onSelectViewport={actions.selectNode}
+                onReorderViewport={actions.reorderNode}
+              />
+            </Panel>
+          </div>
+          <div
+            className="splitter splitter--right"
+            onPointerDown={onPointerDown('right')}
+            data-testid="splitter-right"
+          />
+          <div className="workspace__right">
+            <Panel
+              title="Properties"
+              open={system.ui.layout.propertiesOpen}
+              onToggle={() =>
+                actions.updateLayout({ propertiesOpen: !system.ui.layout.propertiesOpen })
+              }
+              testId="properties-panel"
+            >
+              <InspectorPanel
+                system={system}
+                selectedNodeId={system.ui.selectedNodeId}
+                view={inspectorView}
+                onViewChange={setInspectorView}
+                onRename={actions.renameNode}
+                onToggleVisibility={actions.toggleVisibility}
+                onUpdateRender={actions.updateRender}
+                onUpdateScene={actions.updateScene}
+                onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
+                onUpdateSystem={actions.updateSystem}
+                onValidateSystem={actions.validateSystem}
+                onCreateOrbit={actions.addOrbitObject}
+                onCreateEquilibrium={actions.addEquilibriumObject}
+                onCreateLimitCycle={actions.addLimitCycleObject}
+                onSelectBranch={actions.selectNode}
+              />
+            </Panel>
+          </div>
+        </main>
+      )}
+      {import.meta.env.DEV ? <PerfOverlay /> : null}
+    </div>
   )
 }
 
