@@ -6,6 +6,7 @@ import type {
   ValidateSystemResult,
 } from './ForkCoreClient'
 import { JobQueue } from './jobQueue'
+import { makeStableId } from '../utils/determinism'
 
 type WorkerRequest =
   | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
@@ -90,7 +91,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
     payload: SimulateOrbitRequest | ValidateSystemRequest,
     signal: AbortSignal
   ): Promise<SimulateOrbitResult | ValidateSystemResult> {
-    const id = `req_${Math.random().toString(36).slice(2, 10)}`
+    const id = makeStableId('req')
     const message: WorkerRequest =
       kind === 'simulateOrbit'
         ? { id, kind, payload: payload as SimulateOrbitRequest }

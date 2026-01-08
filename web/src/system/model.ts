@@ -9,6 +9,7 @@ import type {
   SystemConfig,
   TreeNode,
 } from './types'
+import { makeStableId as makeId, nowIso } from '../utils/determinism'
 
 const DEFAULT_SYSTEM: SystemConfig = {
   name: 'Untitled System',
@@ -51,16 +52,7 @@ export const DEFAULT_RENDER = {
   pointSize: 4,
 }
 
-function makeId(prefix: string) {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return `${prefix}_${crypto.randomUUID()}`
-  }
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`
-}
-
-function nowIso() {
-  return new Date().toISOString()
-}
+// IDs and timestamps are routed through deterministic helpers for tests.
 
 export function createSystem(args: { name: string; config?: SystemConfig }): System {
   const config = args.config ? { ...args.config } : { ...DEFAULT_SYSTEM, name: args.name }

@@ -56,6 +56,13 @@
   --shadow: none;
 }
 
+:root[data-deterministic='1'] * {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+
 * {
   box-sizing: border-box;
 }

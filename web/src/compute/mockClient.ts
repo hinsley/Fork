@@ -6,6 +6,7 @@ import type {
   ValidateSystemResult,
 } from './ForkCoreClient'
 import { JobQueue } from './jobQueue'
+import { isDeterministicMode } from '../utils/determinism'
 
 function delay(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -15,7 +16,7 @@ export class MockForkCoreClient implements ForkCoreClient {
   private queue: JobQueue
   private delayMs: number
 
-  constructor(delayMs = 5) {
+  constructor(delayMs = isDeterministicMode() ? 0 : 5) {
     this.queue = new JobQueue()
     this.delayMs = delayMs
   }
