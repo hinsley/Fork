@@ -9,6 +9,7 @@ type ViewportPanelProps = {
   onSelectViewport: (id: string) => void
   onSelectObject: (id: string) => void
   onReorderViewport: (nodeId: string, targetId: string) => void
+  onResizeViewport: (id: string, height: number) => void
 }
 
 type ViewportEntry = {
@@ -357,10 +358,11 @@ export function ViewportPanel({
   onSelectViewport,
   onSelectObject,
   onReorderViewport,
+  onResizeViewport,
 }: ViewportPanelProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
-  const [viewportHeights, setViewportHeights] = useState<Record<string, number>>({})
+  const viewportHeights = system.ui.viewportHeights
   const tileRefs = useRef(new Map<string, HTMLDivElement | null>())
   const resizeRef = useRef<{
     startY: number
@@ -406,7 +408,7 @@ export function ViewportPanel({
       const { startY, startHeight, id: targetId } = resizeRef.current
       const delta = moveEvent.clientY - startY
       const nextHeight = Math.max(MIN_VIEWPORT_HEIGHT, startHeight + delta)
-      setViewportHeights((prev) => ({ ...prev, [targetId]: nextHeight }))
+      onResizeViewport(targetId, nextHeight)
     }
 
     const handleUp = () => {
