@@ -1,4 +1,5 @@
 import { addBranch, addObject, createSystem } from './model'
+import { nowIso } from '../utils/determinism'
 import type { ContinuationObject, OrbitObject, System } from './types'
 
 export function createDemoSystem(): {
@@ -47,7 +48,7 @@ export function createDemoSystem(): {
       indices: [0],
     },
     settings: {},
-    timestamp: new Date().toISOString(),
+    timestamp: nowIso(),
     params: [],
   }
 
