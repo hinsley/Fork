@@ -1,6 +1,8 @@
 /// <reference lib="webworker" />
 
 import type {
+  SolveEquilibriumRequest,
+  SolveEquilibriumResult,
   SimulateOrbitRequest,
   SimulateOrbitResult,
   ValidateSystemRequest,
@@ -9,11 +11,16 @@ import type {
 
 type WorkerRequest =
   | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
+  | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
   | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
   | { id: string; kind: 'cancel' }
 
 type WorkerResponse =
-  | { id: string; ok: true; result: SimulateOrbitResult | ValidateSystemResult }
+  | {
+      id: string
+      ok: true
+      result: SimulateOrbitResult | SolveEquilibriumResult | ValidateSystemResult
+    }
   | { id: string; ok: false; error: string; aborted?: boolean }
 
 type WasmModule = {
@@ -30,6 +37,11 @@ type WasmModule = {
     set_t: (t: number) => void
     get_t: () => number
     step: (dt: number) => void
+    solve_equilibrium: (
+      initialGuess: number[],
+      maxSteps: number,
+      dampingFactor: number
+    ) => SolveEquilibriumResult
   }
   default?: (input?: RequestInfo | URL | Response | BufferSource | WebAssembly.Module) => Promise<void>
 }
@@ -86,6 +98,28 @@ async function runOrbit(request: SimulateOrbitRequest, signal: AbortSignal): Pro
     t_end: t,
     dt: request.dt,
   }
+}
+
+async function runSolveEquilibrium(
+  request: SolveEquilibriumRequest,
+  signal: AbortSignal
+): Promise<SolveEquilibriumResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+  abortIfNeeded(signal)
+  return system.solve_equilibrium(
+    request.initialGuess,
+    request.maxSteps,
+    request.dampingFactor
+  )
 }
 
 function abortIfNeeded(signal: AbortSignal) {
@@ -164,6 +198,13 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   try {
     if (message.kind === 'simulateOrbit') {
       const result = await runOrbit(message.payload, controller.signal)
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'solveEquilibrium') {
+      const result = await runSolveEquilibrium(message.payload, controller.signal)
       const response: WorkerResponse = { id: message.id, ok: true, result }
       ctx.postMessage(response)
       return

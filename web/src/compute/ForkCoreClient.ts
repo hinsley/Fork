@@ -1,4 +1,4 @@
-import type { SystemConfig } from '../system/types'
+import type { EquilibriumSolution, SystemConfig } from '../system/types'
 
 export type SimulateOrbitRequest = {
   system: SystemConfig
@@ -24,11 +24,24 @@ export type ValidateSystemResult = {
   message?: string
 }
 
+export type SolveEquilibriumRequest = {
+  system: SystemConfig
+  initialGuess: number[]
+  maxSteps: number
+  dampingFactor: number
+}
+
+export type SolveEquilibriumResult = EquilibriumSolution
+
 export interface ForkCoreClient {
   simulateOrbit(
     request: SimulateOrbitRequest,
     opts?: { signal?: AbortSignal }
   ): Promise<SimulateOrbitResult>
+  solveEquilibrium(
+    request: SolveEquilibriumRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<SolveEquilibriumResult>
   validateSystem(
     request: ValidateSystemRequest,
     opts?: { signal?: AbortSignal }
