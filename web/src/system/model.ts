@@ -32,6 +32,7 @@ const DEFAULT_LAYOUT: SystemLayout = {
 const DEFAULT_UI: SystemUiState = {
   selectedNodeId: null,
   layout: DEFAULT_LAYOUT,
+  viewportHeights: {},
 }
 
 const DEFAULT_SCENE: Scene = {
@@ -335,6 +336,11 @@ export function removeNode(system: System, nodeId: string): System {
   if (next.ui.selectedNodeId && removalSet.has(next.ui.selectedNodeId)) {
     next.ui.selectedNodeId = null
   }
+  Object.keys(next.ui.viewportHeights).forEach((id) => {
+    if (removalSet.has(id)) {
+      delete next.ui.viewportHeights[id]
+    }
+  })
 
   next.updatedAt = nowIso()
   return next
@@ -350,6 +356,16 @@ export function selectNode(system: System, nodeId: string | null): System {
 export function updateLayout(system: System, layout: Partial<SystemLayout>): System {
   const next = structuredClone(system)
   next.ui.layout = { ...next.ui.layout, ...layout }
+  next.updatedAt = nowIso()
+  return next
+}
+
+export function updateViewportHeights(
+  system: System,
+  updates: Record<string, number>
+): System {
+  const next = structuredClone(system)
+  next.ui.viewportHeights = { ...next.ui.viewportHeights, ...updates }
   next.updatedAt = nowIso()
   return next
 }
@@ -529,6 +545,12 @@ export function normalizeSystem(system: System): System {
   const nextUi = next.ui ?? structuredClone(DEFAULT_UI)
   nextUi.selectedNodeId = nextUi.selectedNodeId ?? null
   nextUi.layout = { ...DEFAULT_LAYOUT, ...(nextUi.layout ?? {}) }
+  const viewportHeights = nextUi.viewportHeights ?? {}
+  nextUi.viewportHeights = Object.fromEntries(
+    Object.entries(viewportHeights).filter(
+      ([id, height]) => Boolean(next.nodes[id]) && Number.isFinite(height) && height > 0
+    )
+  )
   next.ui = nextUi
 
   return next as System

@@ -265,6 +265,7 @@ function App() {
                 onSelectViewport={selectNode}
                 onSelectObject={selectNode}
                 onReorderViewport={actions.reorderNode}
+                onResizeViewport={actions.updateViewportHeight}
               />
             </Panel>
           </div>
