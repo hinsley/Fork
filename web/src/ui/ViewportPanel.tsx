@@ -7,6 +7,7 @@ type ViewportPanelProps = {
   system: System
   selectedNodeId: string | null
   onSelectViewport: (id: string) => void
+  onSelectObject: (id: string) => void
   onReorderViewport: (nodeId: string, targetId: string) => void
 }
 
@@ -14,6 +15,7 @@ type ViewportEntry = {
   node: TreeNode
   scene?: Scene
   diagram?: BifurcationDiagram
+  hidden?: boolean
 }
 
 type ViewportTileProps = {
@@ -25,13 +27,14 @@ type ViewportTileProps = {
   setDraggingId: (id: string | null) => void
   setDragOverId: (id: string | null) => void
   onSelectViewport: (id: string) => void
+  onSelectObject: (id: string) => void
   onReorderViewport: (nodeId: string, targetId: string) => void
   onResizeStart: (id: string, event: React.PointerEvent) => void
 }
 
 const MIN_VIEWPORT_HEIGHT = 200
 
-function collectOrbitIds(system: System): string[] {
+function collectVisibleObjectIds(system: System): string[] {
   const ids: string[] = []
   const stack = [...system.rootIds]
   while (stack.length > 0) {
@@ -44,7 +47,7 @@ function collectOrbitIds(system: System): string[] {
     }
     if (node.kind !== 'object' || !node.visibility) continue
     const object = system.objects[nodeId]
-    if (!object || object.type !== 'orbit') continue
+    if (!object) continue
     ids.push(nodeId)
   }
   return ids
@@ -56,22 +59,76 @@ function buildSceneTraces(
   selectedNodeId: string | null
 ): Data[] {
   const traces: Data[] = []
+  const manualSelection = scene.selectedNodeIds ?? []
   const candidateIds =
-    scene.display === 'selection' && selectedNodeId ? [selectedNodeId] : collectOrbitIds(system)
+    manualSelection.length > 0
+      ? manualSelection
+      : scene.display === 'selection' && selectedNodeId
+        ? [selectedNodeId]
+        : collectVisibleObjectIds(system)
 
   for (const nodeId of candidateIds) {
     const node = system.nodes[nodeId]
     if (!node || node.kind !== 'object' || !node.visibility) continue
     const object = system.objects[nodeId]
-    if (!object || object.type !== 'orbit') continue
+    if (!object) continue
+
+    if (object.type === 'equilibrium') {
+      if (!object.solution || object.solution.state.length === 0) continue
+      const state = object.solution.state
+      const dimension = state.length
+      const highlight = nodeId === selectedNodeId
+      const size = highlight ? node.render.pointSize + 2 : node.render.pointSize
+      if (dimension >= 3) {
+        traces.push({
+          type: 'scatter3d',
+          mode: 'markers',
+          name: object.name,
+          uid: nodeId,
+          x: [state[0]],
+          y: [state[1]],
+          z: [state[2]],
+          marker: {
+            color: node.render.color,
+            size,
+          },
+        })
+      } else {
+        const x = dimension >= 2 ? state[0] : 0
+        const y = dimension >= 2 ? state[1] : state[0]
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: object.name,
+          uid: nodeId,
+          x: [x],
+          y: [y],
+          marker: {
+            color: node.render.color,
+            size,
+          },
+        })
+      }
+      continue
+    }
+
+    if (object.type !== 'orbit') continue
 
     const rows = object.data
     if (rows.length === 0) continue
+    // Use the first three state components for 3D systems to match CLI state-space views.
     const dimension = rows[0].length - 1
     const x: number[] = []
     const y: number[] = []
+    const z: number[] = []
 
-    if (dimension >= 2) {
+    if (dimension >= 3) {
+      for (const row of rows) {
+        x.push(row[1])
+        y.push(row[2])
+        z.push(row[3])
+      }
+    } else if (dimension >= 2) {
       for (const row of rows) {
         x.push(row[1])
         y.push(row[2])
@@ -84,30 +141,81 @@ function buildSceneTraces(
     }
 
     const highlight = nodeId === selectedNodeId
-    traces.push({
-      type: 'scatter',
-      mode: 'lines',
-      name: object.name,
-      x,
-      y,
-      line: {
-        color: node.render.color,
-        width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
-      },
-    })
+    if (dimension >= 3) {
+      traces.push({
+        type: 'scatter3d',
+        mode: 'lines',
+        name: object.name,
+        uid: nodeId,
+        x,
+        y,
+        z,
+        line: {
+          color: node.render.color,
+          width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
+        },
+      })
+    } else {
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        name: object.name,
+        uid: nodeId,
+        x,
+        y,
+        line: {
+          color: node.render.color,
+          width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
+        },
+      })
+    }
   }
   return traces
 }
 
-function buildSceneLayout(): Partial<Layout> {
-  return {
+function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
+  const uirevision = scene.id
+  const base = {
     autosize: true,
     margin: { l: 40, r: 20, t: 20, b: 40 },
     paper_bgcolor: 'rgba(0,0,0,0)',
     plot_bgcolor: 'rgba(0,0,0,0)',
+    showlegend: false,
+    uirevision,
+  } satisfies Partial<Layout>
+
+  const varNames = system.config.varNames
+  if (varNames.length >= 3) {
+    return {
+      ...base,
+      scene: {
+        xaxis: {
+          title: { text: varNames[0] ?? 'x' },
+          zerolinecolor: 'rgba(120,120,120,0.3)',
+        },
+        yaxis: {
+          title: { text: varNames[1] ?? 'y' },
+          zerolinecolor: 'rgba(120,120,120,0.3)',
+        },
+        zaxis: {
+          title: { text: varNames[2] ?? 'z' },
+          zerolinecolor: 'rgba(120,120,120,0.3)',
+        },
+        uirevision,
+        camera: {
+          eye: { ...scene.camera.eye },
+          center: { ...scene.camera.center },
+          up: { ...scene.camera.up },
+        },
+        aspectmode: 'data',
+      },
+    }
+  }
+
+  return {
+    ...base,
     xaxis: { zerolinecolor: 'rgba(120,120,120,0.3)' },
     yaxis: { zerolinecolor: 'rgba(120,120,120,0.3)' },
-    showlegend: false,
   }
 }
 
@@ -148,6 +256,7 @@ function ViewportTile({
   setDraggingId,
   setDragOverId,
   onSelectViewport,
+  onSelectObject,
   onReorderViewport,
   onResizeStart,
 }: ViewportTileProps) {
@@ -162,20 +271,19 @@ function ViewportTile({
   }, [system, scene, selectedNodeId])
 
   const layout = useMemo(() => {
-    if (scene) return buildSceneLayout()
+    if (scene) return buildSceneLayout(system, scene)
     if (diagram) return buildDiagramLayout(diagram)
-    return buildSceneLayout()
-  }, [scene, diagram])
+    return buildSceneLayout(system, system.scenes[0])
+  }, [system, scene, diagram])
 
   const label = scene ? 'State Space' : 'Bifurcation'
 
   return (
     <section
-      className={`viewport-tile ${isSelected ? 'viewport-tile--selected' : ''} ${
-        isDropTarget ? 'viewport-tile--drop' : ''
-      }`}
+      className={`viewport-tile ${entry.hidden ? 'viewport-tile--hidden' : ''} ${
+        isSelected ? 'viewport-tile--selected' : ''
+      } ${isDropTarget ? 'viewport-tile--drop' : ''}`}
       data-testid={`viewport-tile-${node.id}`}
-      onClick={() => onSelectViewport(node.id)}
       onDragOver={(event) => {
         event.preventDefault()
         setDragOverId(node.id)
@@ -190,10 +298,23 @@ function ViewportTile({
         setDraggingId(null)
       }}
     >
-      <header className={`viewport-tile__header ${isDragging ? 'is-dragging' : ''}`}>
+      <header
+        className={`viewport-tile__header ${isDragging ? 'is-dragging' : ''}`}
+        onClick={() => onSelectViewport(node.id)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            onSelectViewport(node.id)
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        data-testid={`viewport-header-${node.id}`}
+      >
         <button
           className="viewport-tile__handle"
           draggable
+          onClick={(event) => event.stopPropagation()}
           onDragStart={(event) => {
             event.dataTransfer.effectAllowed = 'move'
             event.dataTransfer.setData('text/plain', node.id)
@@ -214,7 +335,12 @@ function ViewportTile({
         </div>
       </header>
       <div className="viewport-tile__body">
-        <PlotlyViewport data={data} layout={layout} testId={`plotly-viewport-${node.id}`} />
+        <PlotlyViewport
+          data={data}
+          layout={layout}
+          testId={`plotly-viewport-${node.id}`}
+          onPointClick={scene ? onSelectObject : undefined}
+        />
       </div>
       <div
         className="viewport-resize-handle"
@@ -229,6 +355,7 @@ export function ViewportPanel({
   system,
   selectedNodeId,
   onSelectViewport,
+  onSelectObject,
   onReorderViewport,
 }: ViewportPanelProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -243,20 +370,19 @@ export function ViewportPanel({
 
   const viewports = useMemo(() => {
     const entries: ViewportEntry[] = []
-    for (const nodeId of system.rootIds) {
-      const node = system.nodes[nodeId]
-      if (!node) continue
-      if (!node.visibility) continue
-      if (node.kind === 'scene') {
-        const scene = system.scenes.find((entry) => entry.id === nodeId)
-        if (!scene) continue
-        entries.push({ node, scene })
-      } else if (node.kind === 'diagram') {
-        const diagram = system.bifurcationDiagrams.find((entry) => entry.id === nodeId)
-        if (!diagram) continue
-        entries.push({ node, diagram })
-      }
+  for (const nodeId of system.rootIds) {
+    const node = system.nodes[nodeId]
+    if (!node) continue
+    if (node.kind === 'scene') {
+      const scene = system.scenes.find((entry) => entry.id === nodeId)
+      if (!scene) continue
+      entries.push({ node, scene, hidden: !node.visibility })
+    } else if (node.kind === 'diagram') {
+      const diagram = system.bifurcationDiagrams.find((entry) => entry.id === nodeId)
+      if (!diagram) continue
+      entries.push({ node, diagram, hidden: !node.visibility })
     }
+  }
     return entries
   }, [system])
 
@@ -324,6 +450,7 @@ export function ViewportPanel({
               setDraggingId={setDraggingId}
               setDragOverId={setDragOverId}
               onSelectViewport={onSelectViewport}
+              onSelectObject={onSelectObject}
               onReorderViewport={onReorderViewport}
               onResizeStart={startResize}
             />

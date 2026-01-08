@@ -50,10 +50,12 @@ export class ForkHarness {
   }
 
   async runOrbit() {
+    await this.page.getByTestId('orbit-run-toggle').click()
     await this.page.getByTestId('orbit-run-submit').click()
   }
 
   async solveEquilibrium() {
+    await this.page.getByTestId('equilibrium-solver-toggle').click()
     await this.page.getByTestId('equilibrium-solve-submit').click()
   }
 

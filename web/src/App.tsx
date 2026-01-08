@@ -263,6 +263,7 @@ function App() {
                 system={system}
                 selectedNodeId={system.ui.selectedNodeId}
                 onSelectViewport={selectNode}
+                onSelectObject={selectNode}
                 onReorderViewport={actions.reorderNode}
               />
             </Panel>
