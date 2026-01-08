@@ -9,13 +9,28 @@ import { createDemoSystem } from './system/fixtures'
 import { WasmForkCoreClient } from './compute/wasmClient'
 import { MockForkCoreClient } from './compute/mockClient'
 import { JobQueue } from './compute/jobQueue'
+import { enableDeterministicMode } from './utils/determinism'
 
 async function bootstrap() {
   const params = new URLSearchParams(window.location.search)
+  const deterministicFromUrl = params.has('test') || params.has('deterministic')
+  const deterministicFromEnv =
+    import.meta.env.VITE_DETERMINISTIC_TEST === '1' ||
+    import.meta.env.VITE_DETERMINISTIC_TEST === 'true'
+  const deterministic = deterministicFromUrl || deterministicFromEnv
   const fixture = params.get('fixture')
   const useMock = params.has('mock') || Boolean(fixture)
 
-  let store = new OpfsSystemStore()
+  if (deterministic) {
+    // Deterministic mode keeps tests repeatable by avoiding persisted state.
+    enableDeterministicMode()
+    document.documentElement.dataset.deterministic = '1'
+    if ('localStorage' in window && typeof window.localStorage.clear === 'function') {
+      window.localStorage.clear()
+    }
+  }
+
+  let store = deterministic ? new MemorySystemStore() : new OpfsSystemStore()
   if (fixture === 'demo') {
     const memory = new MemorySystemStore()
     const { system } = createDemoSystem()

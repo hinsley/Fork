@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 import { vi } from 'vitest'
+import { enableDeterministicMode } from '../utils/determinism'
 
 // Node's web storage warns without --localstorage-file; mock to keep tests deterministic.
 const memoryStorage = (() => {
@@ -30,6 +31,8 @@ Object.defineProperty(globalThis, 'localStorage', {
   value: memoryStorage,
   configurable: true,
 })
+
+enableDeterministicMode()
 
 vi.mock('../viewports/plotly/plotlyAdapter', () => ({
   renderPlot: vi.fn(() => Promise.resolve()),

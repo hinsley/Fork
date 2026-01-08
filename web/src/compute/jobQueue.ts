@@ -1,3 +1,5 @@
+import { makeStableId, nowPerfMs } from '../utils/determinism'
+
 export type JobTiming = {
   id: string
   label: string
@@ -26,12 +28,7 @@ type InternalJob<T> = {
   reject: (error: Error) => void
 }
 
-function now() {
-  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
-    return performance.now()
-  }
-  return Date.now()
-}
+// Timing uses deterministic helpers so tests can assert stable durations.
 
 function createAbortError(label: string) {
   const error = new Error(`Job "${label}" cancelled`)
@@ -51,7 +48,7 @@ export class JobQueue {
 
   enqueue<T>(label: string, runner: JobRunner<T>, opts?: { signal?: AbortSignal }): JobHandle<T> {
     const controller = new AbortController()
-    const id = `job_${Math.random().toString(36).slice(2, 10)}`
+    const id = makeStableId('job')
 
     if (opts?.signal) {
       if (opts.signal.aborted) {
@@ -89,28 +86,28 @@ export class JobQueue {
       const job = this.queue.shift()
       if (!job) break
 
-      const startedAt = now()
+      const startedAt = nowPerfMs()
       if (job.controller.signal.aborted) {
         const error = createAbortError(job.label)
         job.reject(error)
-        this.emitTiming(job, startedAt, now(), 'cancelled')
+        this.emitTiming(job, startedAt, nowPerfMs(), 'cancelled')
         continue
       }
 
       try {
         const result = await job.runner(job.controller.signal)
         job.resolve(result)
-        this.emitTiming(job, startedAt, now(), 'completed')
+        this.emitTiming(job, startedAt, nowPerfMs(), 'completed')
       } catch (err) {
         if (job.controller.signal.aborted) {
           const error = createAbortError(job.label)
           job.reject(error)
-          this.emitTiming(job, startedAt, now(), 'cancelled')
+          this.emitTiming(job, startedAt, nowPerfMs(), 'cancelled')
           continue
         }
         const error = err instanceof Error ? err : new Error(String(err))
         job.reject(error)
-        this.emitTiming(job, startedAt, now(), 'failed')
+        this.emitTiming(job, startedAt, nowPerfMs(), 'failed')
       }
     }
 

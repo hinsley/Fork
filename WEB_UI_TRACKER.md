@@ -41,7 +41,7 @@ Checklist for the Fork web UI buildout. Items checked are completed; unchecked a
 - [x] CI configured to run tests on regressions
 
 ## F) Optional External Agent Harness
-- [ ] Deterministic test mode + external browser-driving harness
+- [x] Deterministic test mode + external browser-driving harness
 - [ ] Headed Chrome instructions (Playwright headed / inspector)
 
 ## G) Minimal Vertical Slice (Must Run)
