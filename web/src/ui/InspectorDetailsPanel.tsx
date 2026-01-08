@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { BifurcationDiagram, System, Scene, SystemConfig, TreeNode } from '../system/types'
+import { DEFAULT_RENDER } from '../system/model'
 import type {
   EquilibriumCreateRequest,
   LimitCycleCreateRequest,
@@ -143,12 +144,49 @@ export function InspectorDetailsPanel({
   const node = selectedNodeId ? system.nodes[selectedNodeId] : null
   const object = selectedNodeId ? system.objects[selectedNodeId] : undefined
   const branch = selectedNodeId ? system.branches[selectedNodeId] : undefined
+  const selectionNode = useMemo(() => {
+    // Fall back to synthesized nodes so selection info renders even when legacy data
+    // lacks a matching tree node entry.
+    if (!selectedNodeId) return null
+    if (node) return node
+    if (object) {
+      return {
+        id: selectedNodeId,
+        name: object.name,
+        kind: 'object',
+        objectType: object.type,
+        parentId: null,
+        children: [],
+        visibility: true,
+        expanded: true,
+        render: { ...DEFAULT_RENDER },
+      } satisfies TreeNode
+    }
+    if (branch) {
+      return {
+        id: selectedNodeId,
+        name: branch.name,
+        kind: 'branch',
+        objectType: 'continuation',
+        parentId: null,
+        children: [],
+        visibility: true,
+        expanded: true,
+        render: { ...DEFAULT_RENDER },
+      } satisfies TreeNode
+    }
+    return null
+  }, [branch, node, object, selectedNodeId])
   const scene = selectedNodeId
     ? system.scenes.find((entry) => entry.id === selectedNodeId)
     : undefined
   const diagram = selectedNodeId
     ? system.bifurcationDiagrams.find((entry) => entry.id === selectedNodeId)
     : undefined
+  const nodeRender = selectionNode
+    ? { ...DEFAULT_RENDER, ...(selectionNode.render ?? {}) }
+    : DEFAULT_RENDER
+  const nodeVisibility = selectionNode?.visibility ?? true
   const orbitEntries = useMemo(
     () =>
       Object.entries(system.objects).filter(([, obj]) => obj.type === 'orbit'),
@@ -1006,38 +1044,43 @@ export function InspectorDetailsPanel({
 
   const renderSelectionView = () => (
     <div className="inspector-panel" data-testid="inspector-panel-body">
-      {node ? (
+      {selectionNode ? (
         <div className="inspector-group">
           <div className="inspector-group__summary">Selection</div>
           <div className="inspector-section">
             <label>
               Name
               <input
-                value={node.name}
-                onChange={(event) => onRename(node.id, event.target.value)}
+                value={selectionNode.name}
+                onChange={(event) => onRename(selectionNode.id, event.target.value)}
                 data-testid="inspector-name"
               />
             </label>
             <div className="inspector-meta">
-              <span>{node.objectType ?? node.kind}</span>
+              <span>{selectionNode.objectType ?? selectionNode.kind}</span>
               {summary ? <span>{summary.detail}</span> : null}
             </div>
           </div>
 
           <div className="inspector-section">
-            <button onClick={() => onToggleVisibility(node.id)} data-testid="inspector-visibility">
-              {node.visibility ? 'Visible' : 'Hidden'}
+            <button
+              onClick={() => onToggleVisibility(selectionNode.id)}
+              data-testid="inspector-visibility"
+            >
+              {nodeVisibility ? 'Visible' : 'Hidden'}
             </button>
           </div>
 
-          {node.kind === 'object' || node.kind === 'branch' ? (
+          {selectionNode.kind === 'object' || selectionNode.kind === 'branch' ? (
             <div className="inspector-section">
               <label>
                 Color
                 <input
                   type="color"
-                  value={node.render.color}
-                  onChange={(event) => onUpdateRender(node.id, { color: event.target.value })}
+                  value={nodeRender.color}
+                  onChange={(event) =>
+                    onUpdateRender(selectionNode.id, { color: event.target.value })
+                  }
                   data-testid="inspector-color"
                 />
               </label>
@@ -1047,9 +1090,9 @@ export function InspectorDetailsPanel({
                   type="number"
                   min={1}
                   max={8}
-                  value={node.render.lineWidth}
+                  value={nodeRender.lineWidth}
                   onChange={(event) =>
-                    onUpdateRender(node.id, { lineWidth: Number(event.target.value) })
+                    onUpdateRender(selectionNode.id, { lineWidth: Number(event.target.value) })
                   }
                   data-testid="inspector-line-width"
                 />
@@ -1060,9 +1103,9 @@ export function InspectorDetailsPanel({
                   type="number"
                   min={2}
                   max={12}
-                  value={node.render.pointSize}
+                  value={nodeRender.pointSize}
                   onChange={(event) =>
-                    onUpdateRender(node.id, { pointSize: Number(event.target.value) })
+                    onUpdateRender(selectionNode.id, { pointSize: Number(event.target.value) })
                   }
                   data-testid="inspector-point-size"
                 />
