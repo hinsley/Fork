@@ -1,5 +1,7 @@
 import type {
   ForkCoreClient,
+  SolveEquilibriumRequest,
+  SolveEquilibriumResult,
   SimulateOrbitRequest,
   SimulateOrbitResult,
   ValidateSystemRequest,
@@ -78,6 +80,33 @@ export class MockForkCoreClient implements ForkCoreClient {
           ok: !hasErrors,
           equationErrors,
           message: hasErrors ? 'Mock parse error.' : undefined,
+        }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async solveEquilibrium(
+    request: SolveEquilibriumRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<SolveEquilibriumResult> {
+    const job = this.queue.enqueue(
+      'solveEquilibrium',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        return {
+          state: request.initialGuess,
+          residual_norm: 0,
+          iterations: 1,
+          jacobian: [],
+          eigenpairs: [],
         }
       },
       opts
