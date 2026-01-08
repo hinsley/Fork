@@ -206,6 +206,7 @@ export interface SystemLayout {
 export interface SystemUiState {
   selectedNodeId: string | null
   layout: SystemLayout
+  viewportHeights: Record<string, number>
 }
 
 export interface System {
@@ -220,6 +221,25 @@ export interface System {
   bifurcationDiagrams: BifurcationDiagram[]
   ui: SystemUiState
   updatedAt: string
+}
+
+export interface SystemData {
+  id: string
+  name: string
+  config: SystemConfig
+  objects: Record<string, AnalysisObject>
+  branches: Record<string, ContinuationObject>
+  updatedAt: string
+}
+
+export interface SystemUiSnapshot {
+  systemId: string
+  updatedAt: string
+  nodes: Record<string, TreeNode>
+  rootIds: string[]
+  scenes: Scene[]
+  bifurcationDiagrams: BifurcationDiagram[]
+  ui: SystemUiState
 }
 
 export interface SystemSummary {

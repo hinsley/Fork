@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useReducer } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
 import type { ForkCoreClient, ValidateSystemResult } from '../compute/ForkCoreClient'
 import type { JobTiming } from '../compute/jobQueue'
 import { createSystem } from '../system/model'
@@ -28,6 +28,7 @@ import {
   toggleNodeVisibility,
   updateBifurcationDiagram,
   updateLayout,
+  updateViewportHeights,
   updateNodeRender,
   updateObject,
   updateScene,
@@ -216,6 +217,7 @@ type AppActions = {
   moveNode: (nodeId: string, direction: 'up' | 'down') => void
   reorderNode: (nodeId: string, targetId: string) => void
   updateLayout: (layout: Partial<System['ui']['layout']>) => void
+  updateViewportHeight: (nodeId: string, height: number) => void
   updateRender: (nodeId: string, render: Partial<TreeNode['render']>) => void
   updateScene: (sceneId: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
   updateBifurcationDiagram: (
@@ -259,6 +261,52 @@ export function AppProvider({
     system: initialSystem ?? initialState.system,
     systems: initialSystems ?? initialState.systems,
   })
+
+  const uiSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const systemSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const latestSystemRef = useRef<System | null>(null)
+
+  useEffect(() => {
+    latestSystemRef.current = state.system
+  }, [state.system])
+
+  const scheduleUiSave = useCallback(
+    (nextSystem: System) => {
+      latestSystemRef.current = nextSystem
+      if (uiSaveTimer.current) clearTimeout(uiSaveTimer.current)
+      uiSaveTimer.current = setTimeout(async () => {
+        uiSaveTimer.current = null
+        const latest = latestSystemRef.current
+        if (!latest) return
+        try {
+          await store.saveUi(latest)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          dispatch({ type: 'SET_ERROR', error: message })
+        }
+      }, 200)
+    },
+    [store]
+  )
+
+  const scheduleSystemSave = useCallback(
+    (nextSystem: System) => {
+      latestSystemRef.current = nextSystem
+      if (systemSaveTimer.current) clearTimeout(systemSaveTimer.current)
+      systemSaveTimer.current = setTimeout(async () => {
+        systemSaveTimer.current = null
+        const latest = latestSystemRef.current
+        if (!latest) return
+        try {
+          await store.save(latest)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          dispatch({ type: 'SET_ERROR', error: message })
+        }
+      }, 250)
+    },
+    [store]
+  )
 
   const refreshSystems = useCallback(async () => {
     try {
@@ -378,8 +426,9 @@ export function AppProvider({
       if (!state.system) return
       const system = renameNode(state.system, nodeId, name)
       dispatch({ type: 'SET_SYSTEM', system })
+      scheduleSystemSave(system)
     },
-    [state.system]
+    [scheduleSystemSave, state.system]
   )
 
   const toggleVisibilityAction = useCallback(
@@ -387,8 +436,9 @@ export function AppProvider({
       if (!state.system) return
       const system = toggleNodeVisibility(state.system, nodeId)
       dispatch({ type: 'SET_SYSTEM', system })
+      scheduleUiSave(system)
     },
-    [state.system]
+    [scheduleUiSave, state.system]
   )
 
   const toggleExpandedAction = useCallback(
@@ -396,8 +446,9 @@ export function AppProvider({
       if (!state.system) return
       const system = toggleNodeExpanded(state.system, nodeId)
       dispatch({ type: 'SET_SYSTEM', system })
+      scheduleUiSave(system)
     },
-    [state.system]
+    [scheduleUiSave, state.system]
   )
 
   const moveNodeAction = useCallback(
@@ -405,8 +456,9 @@ export function AppProvider({
       if (!state.system) return
       const system = moveNode(state.system, nodeId, direction)
       dispatch({ type: 'SET_SYSTEM', system })
+      scheduleUiSave(system)
     },
-    [state.system]
+    [scheduleUiSave, state.system]
   )
 
   const reorderNodeAction = useCallback(
@@ -414,8 +466,9 @@ export function AppProvider({
       if (!state.system) return
       const system = reorderNode(state.system, nodeId, targetId)
       dispatch({ type: 'SET_SYSTEM', system })
+      scheduleUiSave(system)
     },
-    [state.system]
+    [scheduleUiSave, state.system]
   )
 
   const updateLayoutAction = useCallback(
@@ -423,8 +476,19 @@ export function AppProvider({
       if (!state.system) return
       const system = updateLayout(state.system, layout)
       dispatch({ type: 'SET_SYSTEM', system })
+      scheduleUiSave(system)
     },
-    [state.system]
+    [scheduleUiSave, state.system]
+  )
+
+  const updateViewportHeightAction = useCallback(
+    (nodeId: string, height: number) => {
+      if (!state.system || !Number.isFinite(height)) return
+      const system = updateViewportHeights(state.system, { [nodeId]: height })
+      dispatch({ type: 'SET_SYSTEM', system })
+      scheduleUiSave(system)
+    },
+    [scheduleUiSave, state.system]
   )
 
   const updateRenderAction = useCallback(
@@ -432,8 +496,9 @@ export function AppProvider({
       if (!state.system) return
       const system = updateNodeRender(state.system, nodeId, render)
       dispatch({ type: 'SET_SYSTEM', system })
+      scheduleUiSave(system)
     },
-    [state.system]
+    [scheduleUiSave, state.system]
   )
 
   const updateSceneAction = useCallback(
@@ -441,8 +506,9 @@ export function AppProvider({
       if (!state.system) return
       const system = updateScene(state.system, sceneId, update)
       dispatch({ type: 'SET_SYSTEM', system })
+      scheduleUiSave(system)
     },
-    [state.system]
+    [scheduleUiSave, state.system]
   )
 
   const updateBifurcationDiagramAction = useCallback(
@@ -450,8 +516,9 @@ export function AppProvider({
       if (!state.system) return
       const system = updateBifurcationDiagram(state.system, diagramId, update)
       dispatch({ type: 'SET_SYSTEM', system })
+      scheduleUiSave(system)
     },
-    [state.system]
+    [scheduleUiSave, state.system]
   )
 
   const deleteNodeAction = useCallback(
@@ -789,7 +856,7 @@ export function AppProvider({
       try {
         const updated = addScene(state.system, name).system
         dispatch({ type: 'SET_SYSTEM', system: updated })
-        await store.save(updated)
+        await store.saveUi(updated)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         dispatch({ type: 'SET_ERROR', error: message })
@@ -807,7 +874,7 @@ export function AppProvider({
       try {
         const updated = addBifurcationDiagram(state.system, name).system
         dispatch({ type: 'SET_SYSTEM', system: updated })
-        await store.save(updated)
+        await store.saveUi(updated)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         dispatch({ type: 'SET_ERROR', error: message })
@@ -850,6 +917,7 @@ export function AppProvider({
       moveNode: moveNodeAction,
       reorderNode: reorderNodeAction,
       updateLayout: updateLayoutAction,
+      updateViewportHeight: updateViewportHeightAction,
       updateRender: updateRenderAction,
       updateScene: updateSceneAction,
       updateBifurcationDiagram: updateBifurcationDiagramAction,
@@ -886,6 +954,7 @@ export function AppProvider({
       moveNodeAction,
       reorderNodeAction,
       updateLayoutAction,
+      updateViewportHeightAction,
       updateRenderAction,
       updateSceneAction,
       updateBifurcationDiagramAction,
