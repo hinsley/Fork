@@ -1,17 +1,25 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { BifurcationDiagram, System, Scene, SystemConfig, TreeNode } from '../system/types'
+import type {
+  BifurcationDiagram,
+  EquilibriumObject,
+  OrbitObject,
+  Scene,
+  System,
+  SystemConfig,
+  TreeNode,
+} from '../system/types'
 import { DEFAULT_RENDER } from '../system/model'
 import type {
-  EquilibriumCreateRequest,
   LimitCycleCreateRequest,
-  OrbitCreateRequest,
+  EquilibriumSolveRequest,
+  OrbitRunRequest,
 } from '../state/appState'
 import { validateSystemConfig } from '../state/appState'
 
 type InspectorDetailsPanelProps = {
   system: System
   selectedNodeId: string | null
-  view: 'selection' | 'system' | 'create'
+  view: 'selection' | 'system'
   onRename: (id: string, name: string) => void
   onToggleVisibility: (id: string) => void
   onUpdateRender: (id: string, render: Partial<TreeNode['render']>) => void
@@ -26,8 +34,8 @@ type InspectorDetailsPanelProps = {
     equationErrors: Array<string | null>
     message?: string
   }>
-  onCreateOrbit: (request: OrbitCreateRequest) => Promise<void>
-  onCreateEquilibrium: (request: EquilibriumCreateRequest) => Promise<void>
+  onRunOrbit: (request: OrbitRunRequest) => Promise<void>
+  onSolveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   onCreateLimitCycle: (request: LimitCycleCreateRequest) => Promise<void>
 }
 
@@ -41,15 +49,13 @@ type SystemDraft = {
   equations: string[]
 }
 
-type OrbitDraft = {
-  name: string
+type OrbitRunDraft = {
   initialState: string[]
   duration: string
   dt: string
 }
 
-type EquilibriumDraft = {
-  name: string
+type EquilibriumSolveDraft = {
   initialGuess: string[]
   maxSteps: string
   dampingFactor: string
@@ -57,7 +63,6 @@ type EquilibriumDraft = {
 
 type LimitCycleDraft = {
   name: string
-  originOrbitId: string
   period: string
   state: string[]
   ntst: string
@@ -82,6 +87,57 @@ function adjustArray<T>(values: T[], targetLength: number, fill: () => T): T[] {
   if (values.length === targetLength) return values
   if (values.length > targetLength) return values.slice(0, targetLength)
   return [...values, ...Array.from({ length: targetLength - values.length }, fill)]
+}
+
+function makeOrbitRunDraft(system: SystemConfig, orbit?: OrbitObject): OrbitRunDraft {
+  const defaultDuration = system.type === 'map' ? 1000 : 100
+  const defaultDt = system.type === 'map' ? 1 : 0.01
+  const hasData = Boolean(orbit && orbit.data.length > 0)
+  const initialState = hasData
+    ? orbit!.data[0].slice(1).map((value) => value.toString())
+    : system.varNames.map(() => '0')
+  const duration = hasData ? orbit!.t_end - orbit!.t_start : defaultDuration
+  return {
+    initialState: adjustArray(initialState, system.varNames.length, () => '0'),
+    duration: (duration > 0 ? duration : defaultDuration).toString(),
+    dt: (orbit?.dt ?? defaultDt).toString(),
+  }
+}
+
+function makeEquilibriumSolveDraft(
+  system: SystemConfig,
+  equilibrium?: EquilibriumObject
+): EquilibriumSolveDraft {
+  const defaultGuess =
+    equilibrium?.lastSolverParams?.initialGuess ??
+    equilibrium?.solution?.state ??
+    system.varNames.map(() => 0)
+  const defaultMaxSteps = equilibrium?.lastSolverParams?.maxSteps ?? 25
+  const defaultDamping = equilibrium?.lastSolverParams?.dampingFactor ?? 1
+  return {
+    initialGuess: adjustArray(
+      defaultGuess.map((value) => value.toString()),
+      system.varNames.length,
+      () => '0'
+    ),
+    maxSteps: defaultMaxSteps.toString(),
+    dampingFactor: defaultDamping.toString(),
+  }
+}
+
+function makeLimitCycleDraft(system: SystemConfig, orbit?: OrbitObject): LimitCycleDraft {
+  const hasData = Boolean(orbit && orbit.data.length > 0)
+  const lastRow = hasData ? orbit!.data[orbit!.data.length - 1] : null
+  const state = lastRow ? lastRow.slice(1).map((value) => value.toString()) : []
+  const period = hasData ? orbit!.t_end - orbit!.t_start : 1
+  return {
+    name: '',
+    period: (period > 0 ? period : 1).toString(),
+    state: adjustArray(state, system.varNames.length, () => '0'),
+    ntst: '50',
+    ncol: '4',
+    parameterName: system.paramNames[0] ?? '',
+  }
 }
 
 function makeSystemDraft(system: SystemConfig): SystemDraft {
@@ -137,8 +193,8 @@ export function InspectorDetailsPanel({
   onUpdateBifurcationDiagram,
   onUpdateSystem,
   onValidateSystem,
-  onCreateOrbit,
-  onCreateEquilibrium,
+  onRunOrbit,
+  onSolveEquilibrium,
   onCreateLimitCycle,
 }: InspectorDetailsPanelProps) {
   const node = selectedNodeId ? system.nodes[selectedNodeId] : null
@@ -187,11 +243,6 @@ export function InspectorDetailsPanel({
     ? { ...DEFAULT_RENDER, ...(selectionNode.render ?? {}) }
     : DEFAULT_RENDER
   const nodeVisibility = selectionNode?.visibility ?? true
-  const orbitEntries = useMemo(
-    () =>
-      Object.entries(system.objects).filter(([, obj]) => obj.type === 'orbit'),
-    [system.objects]
-  )
   const branchEntries = useMemo(() => Object.entries(system.branches), [system.branches])
 
   const [systemDraft, setSystemDraft] = useState<SystemDraft>(() =>
@@ -202,31 +253,19 @@ export function InspectorDetailsPanel({
   const [wasmMessage, setWasmMessage] = useState<string | null>(null)
   const [isValidating, setIsValidating] = useState(false)
 
-  const [orbitDraft, setOrbitDraft] = useState<OrbitDraft>(() => ({
-    name: '',
-    initialState: system.config.varNames.map(() => '0'),
-    duration: system.config.type === 'map' ? '1000' : '100',
-    dt: '0.01',
-  }))
+  const [orbitDraft, setOrbitDraft] = useState<OrbitRunDraft>(() =>
+    makeOrbitRunDraft(system.config)
+  )
   const [orbitError, setOrbitError] = useState<string | null>(null)
 
-  const [equilibriumDraft, setEquilibriumDraft] = useState<EquilibriumDraft>(() => ({
-    name: '',
-    initialGuess: system.config.varNames.map(() => '0'),
-    maxSteps: '25',
-    dampingFactor: '1',
-  }))
+  const [equilibriumDraft, setEquilibriumDraft] = useState<EquilibriumSolveDraft>(() =>
+    makeEquilibriumSolveDraft(system.config)
+  )
   const [equilibriumError, setEquilibriumError] = useState<string | null>(null)
 
-  const [limitCycleDraft, setLimitCycleDraft] = useState<LimitCycleDraft>(() => ({
-    name: '',
-    originOrbitId: orbitEntries[0]?.[0] ?? '',
-    period: '1',
-    state: system.config.varNames.map(() => '0'),
-    ntst: '50',
-    ncol: '4',
-    parameterName: system.config.paramNames[0] ?? '',
-  }))
+  const [limitCycleDraft, setLimitCycleDraft] = useState<LimitCycleDraft>(() =>
+    makeLimitCycleDraft(system.config)
+  )
   const [limitCycleError, setLimitCycleError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -260,17 +299,6 @@ export function InspectorDetailsPanel({
   }, [systemDraft.type, systemDraft.solver])
 
   useEffect(() => {
-    if (orbitEntries.length === 0) return
-    setLimitCycleDraft((prev) => {
-      if (orbitEntries.some(([id]) => id === prev.originOrbitId)) {
-        return prev
-      }
-      const [firstId] = orbitEntries[0]
-      return { ...prev, originOrbitId: firstId }
-    })
-  }, [orbitEntries])
-
-  useEffect(() => {
     setLimitCycleDraft((prev) => {
       if (systemDraft.paramNames.length === 0) {
         if (!prev.parameterName) return prev
@@ -283,6 +311,23 @@ export function InspectorDetailsPanel({
     })
   }, [systemDraft.paramNames])
 
+  useEffect(() => {
+    if (!object) return
+    if (object.type === 'orbit') {
+      setOrbitDraft(makeOrbitRunDraft(system.config, object))
+      setLimitCycleDraft((prev) => ({
+        ...makeLimitCycleDraft(system.config, object),
+        name: prev.name,
+      }))
+      setOrbitError(null)
+      setLimitCycleError(null)
+    }
+    if (object.type === 'equilibrium') {
+      setEquilibriumDraft(makeEquilibriumSolveDraft(system.config, object))
+      setEquilibriumError(null)
+    }
+  }, [object?.type, selectedNodeId, system.config])
+
   const systemConfig = useMemo(() => buildSystemConfig(systemDraft), [systemDraft])
   const systemValidation = useMemo(() => validateSystemConfig(systemConfig), [systemConfig])
   const systemDirty = useMemo(
@@ -291,7 +336,7 @@ export function InspectorDetailsPanel({
   )
   const showSystemErrors = systemTouched || systemDirty
   const hasWasmErrors = wasmEquationErrors.some((entry) => entry)
-  const creationDisabled = systemDirty || !systemValidation.valid || hasWasmErrors
+  const runDisabled = systemDirty || !systemValidation.valid || hasWasmErrors
 
   useEffect(() => {
     if (!systemDirty && !systemTouched) {
@@ -366,14 +411,6 @@ export function InspectorDetailsPanel({
     return null
   }, [object, scene, diagram])
 
-  const orbitNameSuggestion = useMemo(() => {
-    const names = Object.values(system.objects).map((obj) => obj.name)
-    return nextName('Orbit', names)
-  }, [system.objects])
-  const equilibriumNameSuggestion = useMemo(() => {
-    const names = Object.values(system.objects).map((obj) => obj.name)
-    return nextName('Equilibrium', names)
-  }, [system.objects])
   const limitCycleNameSuggestion = useMemo(() => {
     const names = Object.values(system.objects).map((obj) => obj.name)
     return nextName('Limit Cycle', names)
@@ -400,15 +437,17 @@ export function InspectorDetailsPanel({
     await onUpdateSystem(systemConfig)
   }
 
-  const handleCreateOrbit = async () => {
-    if (creationDisabled) {
-      setOrbitError('Apply valid system settings before creating objects.')
+  const handleRunOrbit = async () => {
+    if (runDisabled) {
+      setOrbitError('Apply valid system settings before running orbits.')
       return
     }
-    const name = orbitDraft.name.trim() || orbitNameSuggestion
+    if (!object || object.type !== 'orbit' || !selectedNodeId) {
+      setOrbitError('Select an orbit to integrate.')
+      return
+    }
     const duration = parseNumber(orbitDraft.duration)
-    const dt =
-      systemDraft.type === 'map' ? 1 : parseNumber(orbitDraft.dt)
+    const dt = systemDraft.type === 'map' ? 1 : parseNumber(orbitDraft.dt)
     const initialState = orbitDraft.initialState.map((value) => parseNumber(value))
 
     if (duration === null || duration <= 0) {
@@ -425,22 +464,24 @@ export function InspectorDetailsPanel({
     }
 
     setOrbitError(null)
-    const request: OrbitCreateRequest = {
-      name,
+    const request: OrbitRunRequest = {
+      orbitId: selectedNodeId,
       initialState: initialState.map((value) => value ?? 0),
       duration,
       dt: systemDraft.type === 'map' ? undefined : dt,
     }
-    await onCreateOrbit(request)
-    setOrbitDraft((prev) => ({ ...prev, name: '' }))
+    await onRunOrbit(request)
   }
 
-  const handleCreateEquilibrium = async () => {
-    if (creationDisabled) {
-      setEquilibriumError('Apply valid system settings before creating objects.')
+  const handleSolveEquilibrium = async () => {
+    if (runDisabled) {
+      setEquilibriumError('Apply valid system settings before solving equilibria.')
       return
     }
-    const name = equilibriumDraft.name.trim() || equilibriumNameSuggestion
+    if (!object || object.type !== 'equilibrium' || !selectedNodeId) {
+      setEquilibriumError('Select an equilibrium to solve.')
+      return
+    }
     const maxSteps = parseNumber(equilibriumDraft.maxSteps)
     const dampingFactor = parseNumber(equilibriumDraft.dampingFactor)
     const initialGuess = equilibriumDraft.initialGuess.map((value) => parseNumber(value))
@@ -459,23 +500,26 @@ export function InspectorDetailsPanel({
     }
 
     setEquilibriumError(null)
-    const request: EquilibriumCreateRequest = {
-      name,
+    const request: EquilibriumSolveRequest = {
+      equilibriumId: selectedNodeId,
       initialGuess: initialGuess.map((value) => value ?? 0),
       maxSteps,
       dampingFactor,
     }
-    await onCreateEquilibrium(request)
-    setEquilibriumDraft((prev) => ({ ...prev, name: '' }))
+    await onSolveEquilibrium(request)
   }
 
   const handleCreateLimitCycle = async () => {
-    if (creationDisabled) {
+    if (runDisabled) {
       setLimitCycleError('Apply valid system settings before creating objects.')
       return
     }
     if (systemDraft.type === 'map') {
       setLimitCycleError('Limit cycles require a flow system.')
+      return
+    }
+    if (!object || object.type !== 'orbit' || !selectedNodeId) {
+      setLimitCycleError('Select an orbit to initialize from.')
       return
     }
     const name = limitCycleDraft.name.trim() || limitCycleNameSuggestion
@@ -484,10 +528,6 @@ export function InspectorDetailsPanel({
     const ncol = parseNumber(limitCycleDraft.ncol)
     const state = limitCycleDraft.state.map((value) => parseNumber(value))
 
-    if (!limitCycleDraft.originOrbitId) {
-      setLimitCycleError('Select an orbit to initialize from.')
-      return
-    }
     if (period === null || period <= 0) {
       setLimitCycleError('Period must be a positive number.')
       return
@@ -508,7 +548,7 @@ export function InspectorDetailsPanel({
     setLimitCycleError(null)
     const request: LimitCycleCreateRequest = {
       name,
-      originOrbitId: limitCycleDraft.originOrbitId,
+      originOrbitId: selectedNodeId,
       period,
       state: state.map((value) => value ?? 0),
       ntst,
@@ -758,290 +798,6 @@ export function InspectorDetailsPanel({
     </div>
   )
 
-  const renderCreateView = () => (
-    <div className="inspector-panel" data-testid="inspector-panel-body">
-      <div className="inspector-group">
-        <div className="inspector-group__summary">Create Objects</div>
-        {creationDisabled ? (
-          <div className="field-warning">
-            Apply valid system changes before creating new objects.
-          </div>
-        ) : null}
-        <div className="inspector-section">
-          <h3>Orbit</h3>
-          <label>
-            Name
-            <input
-              value={orbitDraft.name}
-              onChange={(event) =>
-                setOrbitDraft((prev) => ({ ...prev, name: event.target.value }))
-              }
-              placeholder={orbitNameSuggestion}
-              data-testid="create-orbit-name"
-            />
-          </label>
-          <div className="inspector-list">
-            {systemDraft.varNames.map((varName, index) => (
-              <label key={`orbit-ic-${index}`}>
-                Initial {varName}
-                <input
-                  type="number"
-                  value={orbitDraft.initialState[index] ?? '0'}
-                  onChange={(event) =>
-                    setOrbitDraft((prev) => {
-                      const next = adjustArray(
-                        prev.initialState,
-                        systemDraft.varNames.length,
-                        () => '0'
-                      )
-                      next[index] = event.target.value
-                      return { ...prev, initialState: next }
-                    })
-                  }
-                  data-testid={`create-orbit-ic-${index}`}
-                />
-              </label>
-            ))}
-          </div>
-          <label>
-            {systemDraft.type === 'map' ? 'Iterations' : 'Duration'}
-            <input
-              type="number"
-              value={orbitDraft.duration}
-              onChange={(event) =>
-                setOrbitDraft((prev) => ({ ...prev, duration: event.target.value }))
-              }
-              data-testid="create-orbit-duration"
-            />
-          </label>
-          {systemDraft.type === 'flow' ? (
-            <label>
-              Step size (dt)
-              <input
-                type="number"
-                value={orbitDraft.dt}
-                onChange={(event) =>
-                  setOrbitDraft((prev) => ({ ...prev, dt: event.target.value }))
-                }
-                data-testid="create-orbit-dt"
-              />
-            </label>
-          ) : null}
-          {orbitError ? <div className="field-error">{orbitError}</div> : null}
-          <button
-            onClick={handleCreateOrbit}
-            disabled={creationDisabled}
-            data-testid="create-orbit-submit"
-          >
-            Create Orbit
-          </button>
-        </div>
-
-        <div className="inspector-section">
-          <h3>Equilibrium</h3>
-          <label>
-            Name
-            <input
-              value={equilibriumDraft.name}
-              onChange={(event) =>
-                setEquilibriumDraft((prev) => ({ ...prev, name: event.target.value }))
-              }
-              placeholder={equilibriumNameSuggestion}
-              data-testid="create-equilibrium-name"
-            />
-          </label>
-          <div className="inspector-list">
-            {systemDraft.varNames.map((varName, index) => (
-              <label key={`eq-guess-${index}`}>
-                Initial {varName}
-                <input
-                  type="number"
-                  value={equilibriumDraft.initialGuess[index] ?? '0'}
-                  onChange={(event) =>
-                    setEquilibriumDraft((prev) => {
-                      const next = adjustArray(
-                        prev.initialGuess,
-                        systemDraft.varNames.length,
-                        () => '0'
-                      )
-                      next[index] = event.target.value
-                      return { ...prev, initialGuess: next }
-                    })
-                  }
-                  data-testid={`create-equilibrium-guess-${index}`}
-                />
-              </label>
-            ))}
-          </div>
-          <label>
-            Max steps
-            <input
-              type="number"
-              value={equilibriumDraft.maxSteps}
-              onChange={(event) =>
-                setEquilibriumDraft((prev) => ({ ...prev, maxSteps: event.target.value }))
-              }
-              data-testid="create-equilibrium-steps"
-            />
-          </label>
-          <label>
-            Damping
-            <input
-              type="number"
-              value={equilibriumDraft.dampingFactor}
-              onChange={(event) =>
-                setEquilibriumDraft((prev) => ({ ...prev, dampingFactor: event.target.value }))
-              }
-              data-testid="create-equilibrium-damping"
-            />
-          </label>
-          {equilibriumError ? <div className="field-error">{equilibriumError}</div> : null}
-          <button
-            onClick={handleCreateEquilibrium}
-            disabled={creationDisabled}
-            data-testid="create-equilibrium-submit"
-          >
-            Create Equilibrium
-          </button>
-        </div>
-
-        <div className="inspector-section">
-          <h3>Limit Cycle</h3>
-          {systemDraft.type === 'map' ? (
-            <p className="empty-state">Limit cycles are only supported for flow systems.</p>
-          ) : null}
-          <label>
-            Name
-            <input
-              value={limitCycleDraft.name}
-              onChange={(event) =>
-                setLimitCycleDraft((prev) => ({ ...prev, name: event.target.value }))
-              }
-              placeholder={limitCycleNameSuggestion}
-              data-testid="create-limit-cycle-name"
-            />
-          </label>
-          <label>
-            Source orbit
-            <select
-              value={limitCycleDraft.originOrbitId}
-              onChange={(event) => {
-                const orbitId = event.target.value
-                const orbit = system.objects[orbitId]
-                const lastPoint =
-                  orbit && orbit.type === 'orbit' ? orbit.data[orbit.data.length - 1] : undefined
-                const seedState = lastPoint
-                  ? lastPoint.slice(1).map((value) => value.toString())
-                  : systemDraft.varNames.map(() => '0')
-                const seedPeriod =
-                  orbit && orbit.type === 'orbit' ? orbit.t_end - orbit.t_start : 1
-                setLimitCycleDraft((prev) => ({
-                  ...prev,
-                  originOrbitId: orbitId,
-                  state: adjustArray(seedState, systemDraft.varNames.length, () => '0'),
-                  period: Number.isFinite(seedPeriod) ? seedPeriod.toString() : prev.period,
-                }))
-              }}
-              disabled={orbitEntries.length === 0}
-              data-testid="create-limit-cycle-orbit"
-            >
-              {orbitEntries.length === 0 ? (
-                <option value="">No orbits available</option>
-              ) : (
-                orbitEntries.map(([id, obj]) => (
-                  <option key={id} value={id}>
-                    {obj.name}
-                  </option>
-                ))
-              )}
-            </select>
-          </label>
-          <label>
-            Period
-            <input
-              type="number"
-              value={limitCycleDraft.period}
-              onChange={(event) =>
-                setLimitCycleDraft((prev) => ({ ...prev, period: event.target.value }))
-              }
-              data-testid="create-limit-cycle-period"
-            />
-          </label>
-          <div className="inspector-list">
-            {systemDraft.varNames.map((varName, index) => (
-              <label key={`lc-state-${index}`}>
-                State {varName}
-                <input
-                  type="number"
-                  value={limitCycleDraft.state[index] ?? '0'}
-                  onChange={(event) =>
-                    setLimitCycleDraft((prev) => {
-                      const next = adjustArray(prev.state, systemDraft.varNames.length, () => '0')
-                      next[index] = event.target.value
-                      return { ...prev, state: next }
-                    })
-                  }
-                  data-testid={`create-limit-cycle-state-${index}`}
-                />
-              </label>
-            ))}
-          </div>
-          <label>
-            NTST
-            <input
-              type="number"
-              value={limitCycleDraft.ntst}
-              onChange={(event) =>
-                setLimitCycleDraft((prev) => ({ ...prev, ntst: event.target.value }))
-              }
-              data-testid="create-limit-cycle-ntst"
-            />
-          </label>
-          <label>
-            NCOL
-            <input
-              type="number"
-              value={limitCycleDraft.ncol}
-              onChange={(event) =>
-                setLimitCycleDraft((prev) => ({ ...prev, ncol: event.target.value }))
-              }
-              data-testid="create-limit-cycle-ncol"
-            />
-          </label>
-          {systemDraft.paramNames.length > 0 ? (
-            <label>
-              Continuation parameter
-              <select
-                value={limitCycleDraft.parameterName}
-                onChange={(event) =>
-                  setLimitCycleDraft((prev) => ({
-                    ...prev,
-                    parameterName: event.target.value,
-                  }))
-                }
-                data-testid="create-limit-cycle-parameter"
-              >
-                {systemDraft.paramNames.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {limitCycleError ? <div className="field-error">{limitCycleError}</div> : null}
-          <button
-            onClick={handleCreateLimitCycle}
-            disabled={orbitEntries.length === 0 || creationDisabled}
-            data-testid="create-limit-cycle-submit"
-          >
-            Create Limit Cycle
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-
   const renderSelectionView = () => (
     <div className="inspector-panel" data-testid="inspector-panel-body">
       {selectionNode ? (
@@ -1110,6 +866,244 @@ export function InspectorDetailsPanel({
                   data-testid="inspector-point-size"
                 />
               </label>
+            </div>
+          ) : null}
+
+          {object?.type === 'orbit' ? (
+            <>
+              <div className="inspector-section">
+                <h3>Orbit Simulation</h3>
+                {runDisabled ? (
+                  <div className="field-warning">
+                    Apply valid system changes before running orbits.
+                  </div>
+                ) : null}
+                <div className="inspector-list">
+                  {systemDraft.varNames.map((varName, index) => (
+                    <label key={`orbit-ic-${index}`}>
+                      Initial {varName}
+                      <input
+                        type="number"
+                        value={orbitDraft.initialState[index] ?? '0'}
+                        onChange={(event) =>
+                          setOrbitDraft((prev) => {
+                            const next = adjustArray(
+                              prev.initialState,
+                              systemDraft.varNames.length,
+                              () => '0'
+                            )
+                            next[index] = event.target.value
+                            return { ...prev, initialState: next }
+                          })
+                        }
+                        data-testid={`orbit-run-ic-${index}`}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <label>
+                  {systemDraft.type === 'map' ? 'Iterations' : 'Duration'}
+                  <input
+                    type="number"
+                    value={orbitDraft.duration}
+                    onChange={(event) =>
+                      setOrbitDraft((prev) => ({ ...prev, duration: event.target.value }))
+                    }
+                    data-testid="orbit-run-duration"
+                  />
+                </label>
+                {systemDraft.type === 'flow' ? (
+                  <label>
+                    Step size (dt)
+                    <input
+                      type="number"
+                      value={orbitDraft.dt}
+                      onChange={(event) =>
+                        setOrbitDraft((prev) => ({ ...prev, dt: event.target.value }))
+                      }
+                      data-testid="orbit-run-dt"
+                    />
+                  </label>
+                ) : null}
+                {orbitError ? <div className="field-error">{orbitError}</div> : null}
+                <button
+                  onClick={handleRunOrbit}
+                  disabled={runDisabled}
+                  data-testid="orbit-run-submit"
+                >
+                  Run Orbit
+                </button>
+              </div>
+
+              <div className="inspector-section">
+                <h3>Limit Cycle</h3>
+                {systemDraft.type === 'map' ? (
+                  <p className="empty-state">Limit cycles are only supported for flow systems.</p>
+                ) : null}
+                <label>
+                  Name
+                  <input
+                    value={limitCycleDraft.name}
+                    onChange={(event) =>
+                      setLimitCycleDraft((prev) => ({ ...prev, name: event.target.value }))
+                    }
+                    placeholder={limitCycleNameSuggestion}
+                    data-testid="limit-cycle-name"
+                  />
+                </label>
+                <label>
+                  Period
+                  <input
+                    type="number"
+                    value={limitCycleDraft.period}
+                    onChange={(event) =>
+                      setLimitCycleDraft((prev) => ({ ...prev, period: event.target.value }))
+                    }
+                    data-testid="limit-cycle-period"
+                  />
+                </label>
+                <div className="inspector-list">
+                  {systemDraft.varNames.map((varName, index) => (
+                    <label key={`lc-state-${index}`}>
+                      State {varName}
+                      <input
+                        type="number"
+                        value={limitCycleDraft.state[index] ?? '0'}
+                        onChange={(event) =>
+                          setLimitCycleDraft((prev) => {
+                            const next = adjustArray(
+                              prev.state,
+                              systemDraft.varNames.length,
+                              () => '0'
+                            )
+                            next[index] = event.target.value
+                            return { ...prev, state: next }
+                          })
+                        }
+                        data-testid={`limit-cycle-state-${index}`}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <label>
+                  NTST
+                  <input
+                    type="number"
+                    value={limitCycleDraft.ntst}
+                    onChange={(event) =>
+                      setLimitCycleDraft((prev) => ({ ...prev, ntst: event.target.value }))
+                    }
+                    data-testid="limit-cycle-ntst"
+                  />
+                </label>
+                <label>
+                  NCOL
+                  <input
+                    type="number"
+                    value={limitCycleDraft.ncol}
+                    onChange={(event) =>
+                      setLimitCycleDraft((prev) => ({ ...prev, ncol: event.target.value }))
+                    }
+                    data-testid="limit-cycle-ncol"
+                  />
+                </label>
+                {systemDraft.paramNames.length > 0 ? (
+                  <label>
+                    Continuation parameter
+                    <select
+                      value={limitCycleDraft.parameterName}
+                      onChange={(event) =>
+                        setLimitCycleDraft((prev) => ({
+                          ...prev,
+                          parameterName: event.target.value,
+                        }))
+                      }
+                      data-testid="limit-cycle-parameter"
+                    >
+                      {systemDraft.paramNames.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                {limitCycleError ? <div className="field-error">{limitCycleError}</div> : null}
+                <button
+                  onClick={handleCreateLimitCycle}
+                  disabled={runDisabled}
+                  data-testid="limit-cycle-submit"
+                >
+                  Create Limit Cycle
+                </button>
+              </div>
+            </>
+          ) : null}
+
+          {object?.type === 'equilibrium' ? (
+            <div className="inspector-section">
+              <h3>Equilibrium Solver</h3>
+              {runDisabled ? (
+                <div className="field-warning">
+                  Apply valid system changes before solving equilibria.
+                </div>
+              ) : null}
+              <div className="inspector-list">
+                {systemDraft.varNames.map((varName, index) => (
+                  <label key={`eq-guess-${index}`}>
+                    Initial {varName}
+                    <input
+                      type="number"
+                      value={equilibriumDraft.initialGuess[index] ?? '0'}
+                      onChange={(event) =>
+                        setEquilibriumDraft((prev) => {
+                          const next = adjustArray(
+                            prev.initialGuess,
+                            systemDraft.varNames.length,
+                            () => '0'
+                          )
+                          next[index] = event.target.value
+                          return { ...prev, initialGuess: next }
+                        })
+                      }
+                      data-testid={`equilibrium-solve-guess-${index}`}
+                    />
+                  </label>
+                ))}
+              </div>
+              <label>
+                Max steps
+                <input
+                  type="number"
+                  value={equilibriumDraft.maxSteps}
+                  onChange={(event) =>
+                    setEquilibriumDraft((prev) => ({ ...prev, maxSteps: event.target.value }))
+                  }
+                  data-testid="equilibrium-solve-steps"
+                />
+              </label>
+              <label>
+                Damping
+                <input
+                  type="number"
+                  value={equilibriumDraft.dampingFactor}
+                  onChange={(event) =>
+                    setEquilibriumDraft((prev) => ({
+                      ...prev,
+                      dampingFactor: event.target.value,
+                    }))
+                  }
+                  data-testid="equilibrium-solve-damping"
+                />
+              </label>
+              {equilibriumError ? <div className="field-error">{equilibriumError}</div> : null}
+              <button
+                onClick={handleSolveEquilibrium}
+                disabled={runDisabled}
+                data-testid="equilibrium-solve-submit"
+              >
+                Solve Equilibrium
+              </button>
             </div>
           ) : null}
 
@@ -1223,6 +1217,5 @@ export function InspectorDetailsPanel({
   )
 
   if (view === 'system') return renderSystemView()
-  if (view === 'create') return renderCreateView()
   return renderSelectionView()
 }

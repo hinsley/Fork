@@ -2,12 +2,12 @@ import { BranchViewer } from './BranchViewer'
 import { InspectorDetailsPanel } from './InspectorDetailsPanel'
 import type { BifurcationDiagram, System, Scene, SystemConfig, TreeNode } from '../system/types'
 import type {
-  EquilibriumCreateRequest,
+  EquilibriumSolveRequest,
   LimitCycleCreateRequest,
-  OrbitCreateRequest,
+  OrbitRunRequest,
 } from '../state/appState'
 
-export type InspectorView = 'selection' | 'system' | 'create' | 'branches'
+export type InspectorView = 'selection' | 'system' | 'branches'
 
 type InspectorPanelProps = {
   system: System
@@ -28,8 +28,8 @@ type InspectorPanelProps = {
     equationErrors: Array<string | null>
     message?: string
   }>
-  onCreateOrbit: (request: OrbitCreateRequest) => Promise<void>
-  onCreateEquilibrium: (request: EquilibriumCreateRequest) => Promise<void>
+  onRunOrbit: (request: OrbitRunRequest) => Promise<void>
+  onSolveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   onCreateLimitCycle: (request: LimitCycleCreateRequest) => Promise<void>
   onSelectBranch: (id: string) => void
 }
@@ -37,7 +37,6 @@ type InspectorPanelProps = {
 const VIEWS: Array<{ id: InspectorView; label: string }> = [
   { id: 'selection', label: 'Selection' },
   { id: 'system', label: 'System Settings' },
-  { id: 'create', label: 'Create' },
   { id: 'branches', label: 'Branches' },
 ]
 
@@ -53,8 +52,8 @@ export function InspectorPanel({
   onUpdateBifurcationDiagram,
   onUpdateSystem,
   onValidateSystem,
-  onCreateOrbit,
-  onCreateEquilibrium,
+  onRunOrbit,
+  onSolveEquilibrium,
   onCreateLimitCycle,
   onSelectBranch,
 }: InspectorPanelProps) {
@@ -93,8 +92,8 @@ export function InspectorPanel({
             onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
             onUpdateSystem={onUpdateSystem}
             onValidateSystem={onValidateSystem}
-            onCreateOrbit={onCreateOrbit}
-            onCreateEquilibrium={onCreateEquilibrium}
+            onRunOrbit={onRunOrbit}
+            onSolveEquilibrium={onSolveEquilibrium}
             onCreateLimitCycle={onCreateLimitCycle}
           />
         )}

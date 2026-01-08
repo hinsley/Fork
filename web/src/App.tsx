@@ -37,7 +37,7 @@ function App() {
         : null
     return stored === 'light' ? 'light' : 'dark'
   })
-  const [inspectorView, setInspectorView] = useState<'selection' | 'system' | 'create' | 'branches'>(
+  const [inspectorView, setInspectorView] = useState<'selection' | 'system' | 'branches'>(
     'selection'
   )
   const dragRef = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(
@@ -106,24 +106,14 @@ function App() {
     if (!system) return
     const names = Object.values(system.objects).map((obj) => obj.name)
     const name = nextObjectName('Orbit', names)
-    await actions.addOrbitObject({
-      name,
-      initialState: system.config.varNames.map(() => 0),
-      duration: system.config.type === 'map' ? 200 : 4,
-      dt: system.config.type === 'map' ? undefined : 0.02,
-    })
+    await actions.createOrbitObject(name)
   }
 
   const createEquilibrium = async () => {
     if (!system) return
     const names = Object.values(system.objects).map((obj) => obj.name)
     const name = nextObjectName('Equilibrium', names)
-    await actions.addEquilibriumObject({
-      name,
-      initialGuess: system.config.varNames.map(() => 0),
-      maxSteps: 25,
-      dampingFactor: 1,
-    })
+    await actions.createEquilibriumObject(name)
   }
 
   const createScene = async () => {
@@ -303,9 +293,9 @@ function App() {
                 onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
                 onUpdateSystem={actions.updateSystem}
                 onValidateSystem={actions.validateSystem}
-                onCreateOrbit={actions.addOrbitObject}
-                onCreateEquilibrium={actions.addEquilibriumObject}
-                onCreateLimitCycle={actions.addLimitCycleObject}
+                onRunOrbit={actions.runOrbit}
+                onSolveEquilibrium={actions.solveEquilibrium}
+                onCreateLimitCycle={actions.createLimitCycleObject}
                 onSelectBranch={selectNode}
               />
             </Panel>

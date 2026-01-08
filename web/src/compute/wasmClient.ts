@@ -1,5 +1,7 @@
 import type {
   ForkCoreClient,
+  SolveEquilibriumRequest,
+  SolveEquilibriumResult,
   SimulateOrbitRequest,
   SimulateOrbitResult,
   ValidateSystemRequest,
@@ -10,11 +12,16 @@ import { makeStableId } from '../utils/determinism'
 
 type WorkerRequest =
   | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
+  | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
   | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
   | { id: string; kind: 'cancel' }
 
 type WorkerResponse =
-  | { id: string; ok: true; result: SimulateOrbitResult | ValidateSystemResult }
+  | {
+      id: string
+      ok: true
+      result: SimulateOrbitResult | SolveEquilibriumResult | ValidateSystemResult
+    }
   | { id: string; ok: false; error: string; aborted?: boolean }
 
 export class WasmForkCoreClient implements ForkCoreClient {
@@ -23,7 +30,9 @@ export class WasmForkCoreClient implements ForkCoreClient {
   private pending = new Map<
     string,
     {
-      resolve: (value: SimulateOrbitResult | ValidateSystemResult) => void
+      resolve: (
+        value: SimulateOrbitResult | SolveEquilibriumResult | ValidateSystemResult
+      ) => void
       reject: (error: Error) => void
     }
   >()
@@ -60,6 +69,18 @@ export class WasmForkCoreClient implements ForkCoreClient {
     return await job.promise
   }
 
+  async solveEquilibrium(
+    request: SolveEquilibriumRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<SolveEquilibriumResult> {
+    const job = this.queue.enqueue(
+      'solveEquilibrium',
+      (signal) => this.runWorker('solveEquilibrium', request, signal),
+      opts
+    )
+    return await job.promise
+  }
+
   async validateSystem(
     request: ValidateSystemRequest,
     opts?: { signal?: AbortSignal }
@@ -82,22 +103,31 @@ export class WasmForkCoreClient implements ForkCoreClient {
     signal: AbortSignal
   ): Promise<SimulateOrbitResult>
   private runWorker(
+    kind: 'solveEquilibrium',
+    payload: SolveEquilibriumRequest,
+    signal: AbortSignal
+  ): Promise<SolveEquilibriumResult>
+  private runWorker(
     kind: 'validateSystem',
     payload: ValidateSystemRequest,
     signal: AbortSignal
   ): Promise<ValidateSystemResult>
   private runWorker(
-    kind: 'simulateOrbit' | 'validateSystem',
-    payload: SimulateOrbitRequest | ValidateSystemRequest,
+    kind: 'simulateOrbit' | 'solveEquilibrium' | 'validateSystem',
+    payload: SimulateOrbitRequest | SolveEquilibriumRequest | ValidateSystemRequest,
     signal: AbortSignal
-  ): Promise<SimulateOrbitResult | ValidateSystemResult> {
+  ): Promise<SimulateOrbitResult | SolveEquilibriumResult | ValidateSystemResult> {
     const id = makeStableId('req')
     const message: WorkerRequest =
       kind === 'simulateOrbit'
         ? { id, kind, payload: payload as SimulateOrbitRequest }
-        : { id, kind, payload: payload as ValidateSystemRequest }
+        : kind === 'solveEquilibrium'
+          ? { id, kind, payload: payload as SolveEquilibriumRequest }
+          : { id, kind, payload: payload as ValidateSystemRequest }
 
-    const promise = new Promise<SimulateOrbitResult | ValidateSystemResult>((resolve, reject) => {
+    const promise = new Promise<
+      SimulateOrbitResult | SolveEquilibriumResult | ValidateSystemResult
+    >((resolve, reject) => {
       this.pending.set(id, { resolve, reject })
     })
 
