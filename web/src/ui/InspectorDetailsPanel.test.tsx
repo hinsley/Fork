@@ -130,6 +130,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
+    await user.click(screen.getByTestId('orbit-run-toggle'))
     await user.clear(screen.getByTestId('orbit-run-duration'))
     await user.type(screen.getByTestId('orbit-run-duration'), '10')
     await user.clear(screen.getByTestId('orbit-run-dt'))
@@ -148,6 +149,7 @@ describe('InspectorDetailsPanel', () => {
       dt: 0.5,
     })
 
+    await user.click(screen.getByTestId('limit-cycle-toggle'))
     await user.clear(screen.getByTestId('limit-cycle-name'))
     await user.type(screen.getByTestId('limit-cycle-name'), 'LC Q')
     await user.clear(screen.getByTestId('limit-cycle-period'))
@@ -205,6 +207,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
+    await user.click(screen.getByTestId('equilibrium-solver-toggle'))
     await user.clear(screen.getByTestId('equilibrium-solve-steps'))
     await user.type(screen.getByTestId('equilibrium-solve-steps'), '10')
     await user.clear(screen.getByTestId('equilibrium-solve-damping'))
