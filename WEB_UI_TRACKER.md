@@ -38,7 +38,7 @@ Checklist for the Fork web UI buildout. Items checked are completed; unchecked a
 - [x] One-command test run (`npm test`)
 - [x] ForkCoreClient interface mockable + DI wired for tests
 - [x] Stable selectors via `data-testid`
-- [ ] CI configured to run tests on regressions
+- [x] CI configured to run tests on regressions
 
 ## F) Optional External Agent Harness
 - [ ] Deterministic test mode + external browser-driving harness
