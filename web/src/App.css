@@ -461,6 +461,19 @@
   color: var(--text-muted);
 }
 
+.inspector-plot {
+  border: 1px solid var(--panel-border);
+  background: var(--input-bg);
+  border-radius: 6px;
+  height: 240px;
+  min-height: 240px;
+  padding: 4px;
+}
+
+.inspector-plot .plotly-viewport {
+  min-height: 0;
+}
+
 .scene-object-selected {
   display: grid;
   gap: 6px;

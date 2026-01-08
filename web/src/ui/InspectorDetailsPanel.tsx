@@ -11,6 +11,7 @@ import type {
   TreeNode,
 } from '../system/types'
 import { DEFAULT_RENDER } from '../system/model'
+import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
 import type {
   LimitCycleCreateRequest,
   EquilibriumSolveRequest,
@@ -489,6 +490,115 @@ export function InspectorDetailsPanel({
   const showSystemErrors = systemTouched || systemDirty
   const hasWasmErrors = wasmEquationErrors.some((entry) => entry)
   const runDisabled = systemDirty || !systemValidation.valid || hasWasmErrors
+  const equilibriumEigenPlot = useMemo(() => {
+    const eigenpairs = equilibrium?.solution?.eigenpairs
+    if (!eigenpairs || eigenpairs.length === 0) return null
+    const x = eigenpairs.map((pair) => pair.value.re)
+    const y = eigenpairs.map((pair) => pair.value.im)
+    const finiteX = x.filter((value) => Number.isFinite(value))
+    const finiteY = y.filter((value) => Number.isFinite(value))
+    const safeX = finiteX.length > 0 ? finiteX : [0]
+    const safeY = finiteY.length > 0 ? finiteY : [0]
+    const minX = Math.min(...safeX, 0)
+    const maxX = Math.max(...safeX, 0)
+    const minY = Math.min(...safeY, 0)
+    const maxY = Math.max(...safeY, 0)
+    const spanX = maxX - minX
+    const spanY = maxY - minY
+    const span = Math.max(spanX, spanY) || 1
+    const padding = span * 0.15
+    const halfSpan = span / 2 + padding
+    const centerX = (minX + maxX) / 2
+    const centerY = (minY + maxY) / 2
+    const rangeX: [number, number] = [centerX - halfSpan, centerX + halfSpan]
+    const rangeY: [number, number] = [centerY - halfSpan, centerY + halfSpan]
+    return {
+      data: [
+        {
+          x,
+          y,
+          mode: 'markers',
+          type: 'scatter',
+          name: 'Eigenvalues',
+          marker: {
+            color: 'var(--accent)',
+            size: 8,
+            line: { color: 'var(--panel-border)', width: 1 },
+          },
+          hovertemplate: 'Re %{x:.4f}<br>Im %{y:.4f}<extra></extra>',
+        },
+      ],
+      layout: {
+        autosize: true,
+        margin: { l: 36, r: 16, t: 8, b: 32 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        showlegend: false,
+        xaxis: {
+          title: { text: 'Real part', font: { size: 11, color: 'var(--text)' } },
+          zerolinecolor: 'rgba(120,120,120,0.3)',
+          gridcolor: 'rgba(120,120,120,0.15)',
+          tickfont: { size: 10, color: 'var(--text-muted)' },
+          range: rangeX,
+        },
+        yaxis: {
+          title: { text: 'Imaginary part', font: { size: 11, color: 'var(--text)' } },
+          zerolinecolor: 'rgba(120,120,120,0.3)',
+          gridcolor: 'rgba(120,120,120,0.15)',
+          tickfont: { size: 10, color: 'var(--text-muted)' },
+          scaleanchor: 'x',
+          scaleratio: 1,
+          range: rangeY,
+        },
+        shapes: [
+          {
+            type: 'line',
+            x0: 0,
+            x1: 0,
+            y0: rangeY[0],
+            y1: rangeY[1],
+            line: { color: 'var(--panel-muted)', width: 1 },
+          },
+          {
+            type: 'line',
+            x0: rangeX[0],
+            x1: rangeX[1],
+            y0: 0,
+            y1: 0,
+            line: { color: 'var(--panel-muted)', width: 1 },
+          },
+        ],
+        annotations: [
+          {
+            x: rangeX[1],
+            y: 0,
+            xref: 'x',
+            yref: 'y',
+            text: 'Re',
+            showarrow: false,
+            xanchor: 'right',
+            yanchor: 'bottom',
+            xshift: -6,
+            yshift: 6,
+            font: { size: 10, color: 'var(--text-muted)' },
+          },
+          {
+            x: 0,
+            y: rangeY[1],
+            xref: 'x',
+            yref: 'y',
+            text: 'Im',
+            showarrow: false,
+            xanchor: 'left',
+            yanchor: 'top',
+            xshift: 6,
+            yshift: -6,
+            font: { size: 10, color: 'var(--text-muted)' },
+          },
+        ],
+      },
+    }
+  }, [equilibrium?.solution?.eigenpairs])
 
   useEffect(() => {
     if (!systemDirty && !systemTouched) {
@@ -1427,6 +1537,16 @@ export function InspectorDetailsPanel({
                   <h4 className="inspector-subheading">Eigenpairs</h4>
                   {equilibrium.solution && equilibrium.solution.eigenpairs.length > 0 ? (
                     <div className="inspector-list">
+                      {/* Mirror the legacy UI by plotting eigenvalues in the complex plane. */}
+                      {equilibriumEigenPlot ? (
+                        <div className="inspector-plot">
+                          <PlotlyViewport
+                            data={equilibriumEigenPlot.data}
+                            layout={equilibriumEigenPlot.layout}
+                            testId="equilibrium-eigenvalue-plot"
+                          />
+                        </div>
+                      ) : null}
                       {equilibrium.solution.eigenpairs.map((pair, index) => (
                         <div className="inspector-subsection" key={`eq-eigen-${index}`}>
                           <div className="inspector-subheading">
