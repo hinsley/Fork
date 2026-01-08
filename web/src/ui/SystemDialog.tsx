@@ -5,6 +5,7 @@ type SystemDialogProps = {
   open: boolean
   systems: SystemSummary[]
   onOpenSystem: (id: string) => void
+  onEditSystem: (id: string) => void
   onExportSystem: (id: string) => void
   onCreateSystem: (name: string) => void
   onDeleteSystem: (id: string) => void
@@ -16,6 +17,7 @@ export function SystemDialog({
   open,
   systems,
   onOpenSystem,
+  onEditSystem,
   onExportSystem,
   onCreateSystem,
   onDeleteSystem,
@@ -64,6 +66,12 @@ export function SystemDialog({
                   </div>
                   <span>{new Date(system.updatedAt).toLocaleString()}</span>
                   <div className="dialog__list-actions">
+                    <button
+                      onClick={() => onEditSystem(system.id)}
+                      data-testid={`edit-system-${system.id}`}
+                    >
+                      Edit
+                    </button>
                     <button onClick={() => onExportSystem(system.id)}>Export</button>
                     <button onClick={() => onDeleteSystem(system.id)}>Delete</button>
                   </div>

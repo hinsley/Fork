@@ -45,7 +45,7 @@ const DEFAULT_SCENE: Scene = {
   display: 'all',
 }
 
-const DEFAULT_RENDER = {
+export const DEFAULT_RENDER = {
   color: '#e06c3f',
   lineWidth: 2,
   pointSize: 4,
@@ -354,7 +354,7 @@ export function updateNodeRender(
   const next = structuredClone(system)
   const node = next.nodes[nodeId]
   if (!node) return system
-  node.render = { ...node.render, ...render }
+  node.render = { ...DEFAULT_RENDER, ...(node.render ?? {}), ...render }
   next.updatedAt = nowIso()
   return next
 }
@@ -461,6 +461,67 @@ export function normalizeSystem(system: System): System {
   next.bifurcationDiagrams.forEach((diagram) => {
     ensureRootNode(diagram.id, diagram.name, 'diagram', 'bifurcation')
   })
+
+  const objectNameToNodeId = new Map<string, string>()
+  Object.entries(next.objects).forEach(([id, obj]) => {
+    if (!next.nodes[id]) {
+      next.nodes[id] = createTreeNode({
+        id,
+        name: obj.name,
+        kind: 'object',
+        objectType: obj.type,
+        parentId: null,
+      })
+    }
+    const node = next.nodes[id]
+    node.name = obj.name
+    node.kind = 'object'
+    node.objectType = obj.type
+    node.parentId = node.parentId ?? null
+    if (!next.rootIds.includes(id)) {
+      next.rootIds.push(id)
+    }
+    objectNameToNodeId.set(obj.name, id)
+  })
+
+  Object.entries(next.branches).forEach(([id, branch]) => {
+    const parentId = objectNameToNodeId.get(branch.parentObject) ?? null
+    if (!next.nodes[id]) {
+      next.nodes[id] = createTreeNode({
+        id,
+        name: branch.name,
+        kind: 'branch',
+        objectType: 'continuation',
+        parentId,
+      })
+    }
+    const node = next.nodes[id]
+    node.name = branch.name
+    node.kind = 'branch'
+    node.objectType = 'continuation'
+    node.parentId = node.parentId ?? parentId
+
+    if (node.parentId) {
+      const parent = next.nodes[node.parentId]
+      if (parent && !parent.children.includes(id)) {
+        parent.children.push(id)
+      }
+    } else if (!next.rootIds.includes(id)) {
+      next.rootIds.push(id)
+    }
+  })
+
+  Object.values(next.nodes).forEach((node) => {
+    node.children = node.children ?? []
+    node.visibility = node.visibility ?? true
+    node.expanded = node.expanded ?? true
+    node.render = { ...DEFAULT_RENDER, ...(node.render ?? {}) }
+  })
+
+  const nextUi = next.ui ?? structuredClone(DEFAULT_UI)
+  nextUi.selectedNodeId = nextUi.selectedNodeId ?? null
+  nextUi.layout = { ...DEFAULT_LAYOUT, ...(nextUi.layout ?? {}) }
+  next.ui = nextUi
 
   return next as System
 }
