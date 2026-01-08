@@ -29,6 +29,7 @@ import {
   updateBifurcationDiagram,
   updateLayout,
   updateNodeRender,
+  updateObject,
   updateScene,
   updateSystem,
 } from '../system/model'
@@ -50,15 +51,15 @@ export type SystemValidation = {
   warnings: string[]
 }
 
-export type OrbitCreateRequest = {
-  name: string
+export type OrbitRunRequest = {
+  orbitId: string
   initialState: number[]
   duration: number
   dt?: number
 }
 
-export type EquilibriumCreateRequest = {
-  name: string
+export type EquilibriumSolveRequest = {
+  equilibriumId: string
   initialGuess: number[]
   maxSteps: number
   dampingFactor: number
@@ -222,9 +223,11 @@ type AppActions = {
     update: Partial<Omit<BifurcationDiagram, 'id' | 'name'>>
   ) => void
   deleteNode: (nodeId: string) => Promise<void>
-  addOrbitObject: (request: OrbitCreateRequest) => Promise<void>
-  addEquilibriumObject: (request: EquilibriumCreateRequest) => Promise<void>
-  addLimitCycleObject: (request: LimitCycleCreateRequest) => Promise<void>
+  createOrbitObject: (name: string) => Promise<string | null>
+  createEquilibriumObject: (name: string) => Promise<string | null>
+  runOrbit: (request: OrbitRunRequest) => Promise<void>
+  solveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
+  createLimitCycleObject: (request: LimitCycleCreateRequest) => Promise<void>
   addScene: (name: string) => Promise<void>
   addBifurcationDiagram: (name: string) => Promise<void>
   importSystem: (file: File) => Promise<void>
@@ -469,8 +472,56 @@ export function AppProvider({
     [state.system, store]
   )
 
-  const addOrbitObject = useCallback(
-    async (request: OrbitCreateRequest) => {
+  const createOrbitObject = useCallback(
+    async (name: string) => {
+      if (!state.system) return null
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        // Create the orbit shell first; simulation runs later from the selection inspector.
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        const trimmedName = name.trim()
+        if (!trimmedName) {
+          throw new Error('Orbit name is required.')
+        }
+        const existingNames = Object.values(state.system.objects).map((obj) => obj.name)
+        if (existingNames.includes(trimmedName)) {
+          throw new Error(`Object "${trimmedName}" already exists.`)
+        }
+
+        const dt = system.type === 'map' ? 1 : 0.01
+        const obj: OrbitObject = {
+          type: 'orbit',
+          name: trimmedName,
+          systemName: system.name,
+          data: [],
+          t_start: 0,
+          t_end: 0,
+          dt,
+          parameters: [...system.params],
+        }
+
+        const result = addObject(state.system, obj)
+        const selected = selectNode(result.system, result.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+        return result.nodeId
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+        return null
+      } finally {
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [state.system, store]
+  )
+
+  const runOrbit = useCallback(
+    async (request: OrbitRunRequest) => {
       if (!state.system) return
       dispatch({ type: 'SET_BUSY', busy: true })
       try {
@@ -479,13 +530,9 @@ export function AppProvider({
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
         }
-        const trimmedName = request.name.trim()
-        if (!trimmedName) {
-          throw new Error('Orbit name is required.')
-        }
-        const existingNames = Object.values(state.system.objects).map((obj) => obj.name)
-        if (existingNames.includes(trimmedName)) {
-          throw new Error(`Object "${trimmedName}" already exists.`)
+        const orbit = state.system.objects[request.orbitId]
+        if (!orbit || orbit.type !== 'orbit') {
+          throw new Error('Select a valid orbit to integrate.')
         }
         if (request.initialState.length !== system.varNames.length) {
           throw new Error('Initial state dimension mismatch.')
@@ -494,7 +541,7 @@ export function AppProvider({
           throw new Error('Initial state values must be numeric.')
         }
 
-        const dt = system.type === 'map' ? 1 : request.dt ?? 0.01
+        const dt = system.type === 'map' ? 1 : request.dt ?? orbit.dt ?? 0.01
         if (!Number.isFinite(dt) || dt <= 0) {
           throw new Error('Step size must be a positive number.')
         }
@@ -513,18 +560,13 @@ export function AppProvider({
           dt,
         })
 
-        const obj: OrbitObject = {
-          type: 'orbit',
-          name: trimmedName,
-          systemName: system.name,
+        const updated = updateObject(state.system, request.orbitId, {
           data: result.data,
           t_start: result.t_start,
           t_end: result.t_end,
           dt: result.dt,
           parameters: [...system.params],
-        }
-
-        const updated = addObject(state.system, obj).system
+        })
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.save(updated)
       } catch (err) {
@@ -537,23 +579,75 @@ export function AppProvider({
     [client, state.system, store]
   )
 
-  const addEquilibriumObject = useCallback(
-    async (request: EquilibriumCreateRequest) => {
-      if (!state.system) return
+  const createEquilibriumObject = useCallback(
+    async (name: string) => {
+      if (!state.system) return null
       dispatch({ type: 'SET_BUSY', busy: true })
       try {
+        // Create the equilibrium shell first; solving runs later from the selection inspector.
         const system = state.system.config
         const validation = validateSystemConfig(system)
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
         }
-        const trimmedName = request.name.trim()
+        const trimmedName = name.trim()
         if (!trimmedName) {
           throw new Error('Equilibrium name is required.')
         }
         const existingNames = Object.values(state.system.objects).map((obj) => obj.name)
         if (existingNames.includes(trimmedName)) {
           throw new Error(`Object "${trimmedName}" already exists.`)
+        }
+
+        const solverParams: EquilibriumSolverParams = {
+          initialGuess: system.varNames.map(() => 0),
+          maxSteps: 25,
+          dampingFactor: 1,
+        }
+
+        const obj: EquilibriumObject = {
+          type: 'equilibrium',
+          name: trimmedName,
+          systemName: system.name,
+          parameters: [...system.params],
+          lastSolverParams: solverParams,
+        }
+        const result = addObject(state.system, obj)
+        const selected = selectNode(result.system, result.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+        return result.nodeId
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+        return null
+      } finally {
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [state.system, store]
+  )
+
+  const solveEquilibrium = useCallback(
+    async (request: EquilibriumSolveRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      const system = state.system.config
+      const runSummary = {
+        timestamp: new Date().toISOString(),
+        success: false,
+        residual_norm: undefined as number | undefined,
+        iterations: undefined as number | undefined,
+      }
+
+      try {
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        const equilibrium = state.system.objects[request.equilibriumId]
+        if (!equilibrium || equilibrium.type !== 'equilibrium') {
+          throw new Error('Select a valid equilibrium to solve.')
         }
         if (request.initialGuess.length !== system.varNames.length) {
           throw new Error('Initial guess dimension mismatch.')
@@ -574,27 +668,46 @@ export function AppProvider({
           dampingFactor: request.dampingFactor,
         }
 
-        const obj: EquilibriumObject = {
-          type: 'equilibrium',
-          name: trimmedName,
-          systemName: system.name,
+        const result = await client.solveEquilibrium({
+          system,
+          initialGuess: solverParams.initialGuess,
+          maxSteps: solverParams.maxSteps,
+          dampingFactor: solverParams.dampingFactor,
+        })
+
+        runSummary.success = true
+        runSummary.residual_norm = result.residual_norm
+        runSummary.iterations = result.iterations
+
+        const updated = updateObject(state.system, request.equilibriumId, {
+          solution: result,
           parameters: [...system.params],
           lastSolverParams: solverParams,
-        }
-        const updated = addObject(state.system, obj).system
+          lastRun: runSummary,
+        })
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.save(updated)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         dispatch({ type: 'SET_ERROR', error: message })
+        const updated = updateObject(state.system, request.equilibriumId, {
+          lastRun: runSummary,
+          lastSolverParams: {
+            initialGuess: request.initialGuess,
+            maxSteps: request.maxSteps,
+            dampingFactor: request.dampingFactor,
+          },
+        })
+        dispatch({ type: 'SET_SYSTEM', system: updated })
+        await store.save(updated)
       } finally {
         dispatch({ type: 'SET_BUSY', busy: false })
       }
     },
-    [state.system, store]
+    [client, state.system, store]
   )
 
-  const addLimitCycleObject = useCallback(
+  const createLimitCycleObject = useCallback(
     async (request: LimitCycleCreateRequest) => {
       if (!state.system) return
       dispatch({ type: 'SET_BUSY', busy: true })
@@ -741,18 +854,22 @@ export function AppProvider({
       updateScene: updateSceneAction,
       updateBifurcationDiagram: updateBifurcationDiagramAction,
       deleteNode: deleteNodeAction,
-      addOrbitObject,
-      addEquilibriumObject,
-      addLimitCycleObject,
+      createOrbitObject,
+      createEquilibriumObject,
+      runOrbit,
+      solveEquilibrium,
+      createLimitCycleObject,
       addScene: addSceneAction,
       addBifurcationDiagram: addBifurcationDiagramAction,
       importSystem,
       clearError: () => dispatch({ type: 'SET_ERROR', error: null }),
     }),
     [
-      addEquilibriumObject,
-      addLimitCycleObject,
-      addOrbitObject,
+      createEquilibriumObject,
+      createLimitCycleObject,
+      createOrbitObject,
+      runOrbit,
+      solveEquilibrium,
       addBifurcationDiagramAction,
       createSystemAction,
       deleteSystem,

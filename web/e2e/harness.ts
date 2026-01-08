@@ -36,6 +36,7 @@ export class ForkHarness {
   async createSystem(name: string) {
     await this.page.getByTestId('system-name-input').fill(name)
     await this.page.getByTestId('create-system').click()
+    await this.page.getByTestId('workspace').waitFor()
   }
 
   async createOrbit() {
@@ -46,6 +47,14 @@ export class ForkHarness {
   async createEquilibrium() {
     await this.page.getByTestId('create-object-button').click()
     await this.page.getByTestId('create-equilibrium').click()
+  }
+
+  async runOrbit() {
+    await this.page.getByTestId('orbit-run-submit').click()
+  }
+
+  async solveEquilibrium() {
+    await this.page.getByTestId('equilibrium-solve-submit').click()
   }
 
   async selectTreeNode(label: string) {

@@ -9,6 +9,7 @@ test('system to viewport smoke', async ({ page }) => {
 
   await harness.createOrbit()
   await harness.selectTreeNode('Orbit 1')
+  await harness.runOrbit()
 
   const inspectorName = harness.inspectorName()
   await expect(inspectorName).toHaveValue(/Orbit 1/i)
@@ -23,6 +24,8 @@ test('system to viewport smoke', async ({ page }) => {
   await harness.createEquilibrium()
   await harness.selectTreeNode('Equilibrium 1')
   await expect(inspectorName).toHaveValue(/Equilibrium 1/i)
+  await harness.solveEquilibrium()
+  await expect(page.getByText(/^Solved$/)).toBeVisible()
 
   await page.getByTestId('inspector-tab-system').click()
   const systemNameInput = harness.systemNameInput()

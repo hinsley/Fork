@@ -115,6 +115,22 @@ export function addObject(system: System, obj: AnalysisObject): { system: System
   return { system: next, nodeId: node.id }
 }
 
+/**
+ * Update an existing analysis object without touching tree structure.
+ */
+export function updateObject(
+  system: System,
+  nodeId: string,
+  update: Partial<AnalysisObject>
+): System {
+  const next = structuredClone(system)
+  const existing = next.objects[nodeId]
+  if (!existing) return system
+  next.objects[nodeId] = { ...existing, ...update }
+  next.updatedAt = nowIso()
+  return next
+}
+
 export function addBranch(
   system: System,
   branch: ContinuationObject,
