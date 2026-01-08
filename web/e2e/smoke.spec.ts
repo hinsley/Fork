@@ -1,16 +1,16 @@
 import { expect, test } from '@playwright/test'
+import { createHarness } from './harness'
 
 test('system to viewport smoke', async ({ page }) => {
-  await page.goto('/?mock=1')
+  const harness = createHarness(page)
+  await harness.goto({ deterministic: true, mock: true })
 
-  await page.getByTestId('system-name-input').fill('Smoke System')
-  await page.getByTestId('create-system').click()
+  await harness.createSystem('Smoke System')
 
-  await page.getByTestId('create-object-button').click()
-  await page.getByTestId('create-orbit').click()
-  await page.getByRole('button', { name: /Orbit 1/i }).click()
+  await harness.createOrbit()
+  await harness.selectTreeNode('Orbit 1')
 
-  const inspectorName = page.getByTestId('inspector-name')
+  const inspectorName = harness.inspectorName()
   await expect(inspectorName).toHaveValue(/Orbit 1/i)
 
   const viewport = page.locator('[data-testid^=\"plotly-viewport-\"]').first()
@@ -20,13 +20,12 @@ test('system to viewport smoke', async ({ page }) => {
   const branchPanel = page.getByTestId('branch-viewer-panel')
   await expect(branchPanel).toBeVisible()
 
-  await page.getByTestId('create-object-button').click()
-  await page.getByTestId('create-equilibrium').click()
-  await page.getByRole('button', { name: /Equilibrium 1/i }).click()
+  await harness.createEquilibrium()
+  await harness.selectTreeNode('Equilibrium 1')
   await expect(inspectorName).toHaveValue(/Equilibrium 1/i)
 
   await page.getByTestId('inspector-tab-system').click()
-  const systemNameInput = page.getByTestId('system-name')
+  const systemNameInput = harness.systemNameInput()
   await expect(systemNameInput).toHaveValue(/Smoke System/i)
 
   await page.getByTestId('open-systems').click()

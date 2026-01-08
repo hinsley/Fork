@@ -8,6 +8,7 @@ import { ViewportPanel } from './ui/ViewportPanel'
 import { SystemDialog } from './ui/SystemDialog'
 import { Toolbar } from './ui/Toolbar'
 import { PerfOverlay } from './ui/PerfOverlay'
+import { isDeterministicMode } from './utils/determinism'
 
 const MIN_LEFT_WIDTH = 220
 const MIN_RIGHT_WIDTH = 240
@@ -29,7 +30,7 @@ function App() {
   const { system, systems, busy, error } = state
   const [dialogOpen, setDialogOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    if (typeof window === 'undefined') return 'dark'
+    if (typeof window === 'undefined' || isDeterministicMode()) return 'dark'
     const stored =
       'localStorage' in window && typeof window.localStorage.getItem === 'function'
         ? window.localStorage.getItem('fork-theme')
@@ -64,7 +65,11 @@ function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
-    if ('localStorage' in window && typeof window.localStorage.setItem === 'function') {
+    if (
+      !isDeterministicMode() &&
+      'localStorage' in window &&
+      typeof window.localStorage.setItem === 'function'
+    ) {
       window.localStorage.setItem('fork-theme', theme)
     }
   }, [theme])
