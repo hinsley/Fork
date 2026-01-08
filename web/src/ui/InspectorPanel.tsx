@@ -36,7 +36,7 @@ type InspectorPanelProps = {
 
 const VIEWS: Array<{ id: InspectorView; label: string }> = [
   { id: 'selection', label: 'Selection' },
-  { id: 'system', label: 'System' },
+  { id: 'system', label: 'System Settings' },
   { id: 'create', label: 'Create' },
   { id: 'branches', label: 'Branches' },
 ]
