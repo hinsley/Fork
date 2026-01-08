@@ -105,6 +105,7 @@ export function ObjectsTree({
         <div
           className="tree-node__row"
           style={{ paddingLeft: `${depth * 14}px` }}
+          onClick={() => onSelect(nodeId)}
           onContextMenu={(event) => {
             event.preventDefault()
             onSelect(nodeId)
@@ -135,7 +136,10 @@ export function ObjectsTree({
           </button>
           <button
             className="tree-node__label"
-            onClick={() => onSelect(nodeId)}
+            onClick={(event) => {
+              event.stopPropagation()
+              onSelect(nodeId)
+            }}
             data-testid={`object-tree-node-${nodeId}`}
           >
             {isEditing ? (

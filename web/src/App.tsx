@@ -52,7 +52,8 @@ function App() {
   }, [system])
 
   useEffect(() => {
-    if (system) setInspectorView('selection')
+    if (!system) return
+    setInspectorView((prev) => (prev === 'system' ? prev : 'selection'))
   }, [system?.id])
 
   useEffect(() => {
@@ -68,7 +69,33 @@ function App() {
     }
   }, [theme])
 
+  useEffect(() => {
+    if (!system) return
+    if (inspectorView === 'system' && !system.ui.layout.inspectorOpen) {
+      actions.updateLayout({ inspectorOpen: true })
+    }
+  }, [actions, inspectorView, system, system?.ui.layout.inspectorOpen])
+
+  useEffect(() => {
+    if (!system) return
+    if (system.ui.selectedNodeId && !system.ui.layout.inspectorOpen) {
+      actions.updateLayout({ inspectorOpen: true })
+    }
+  }, [actions, system, system?.ui.layout.inspectorOpen, system?.ui.selectedNodeId])
+
   const openSystemsDialog = () => setDialogOpen(true)
+  const openSystemEditor = () => {
+    setInspectorView('system')
+  }
+
+  const selectNode = (nodeId: string) => {
+    actions.selectNode(nodeId)
+    if (system && !system.ui.layout.inspectorOpen) {
+      actions.updateLayout({ inspectorOpen: true })
+    }
+    // Force the inspector to show selection details even if the selection didn't change.
+    setInspectorView('selection')
+  }
 
   const createOrbit = async () => {
     if (!system) return
@@ -166,6 +193,11 @@ function App() {
           await actions.openSystem(id)
           setDialogOpen(false)
         }}
+        onEditSystem={async (id) => {
+          await actions.openSystem(id)
+          setDialogOpen(false)
+          openSystemEditor()
+        }}
         onExportSystem={(id) => void actions.exportSystem(id)}
         onDeleteSystem={(id) => void actions.deleteSystem(id)}
         onImportSystem={async (file) => {
@@ -205,7 +237,7 @@ function App() {
               <ObjectsTree
                 system={system}
                 selectedNodeId={system.ui.selectedNodeId}
-                onSelect={actions.selectNode}
+                onSelect={selectNode}
                 onToggleVisibility={actions.toggleVisibility}
                 onRename={actions.renameNode}
                 onToggleExpanded={actions.toggleExpanded}
@@ -235,7 +267,7 @@ function App() {
               <ViewportPanel
                 system={system}
                 selectedNodeId={system.ui.selectedNodeId}
-                onSelectViewport={actions.selectNode}
+                onSelectViewport={selectNode}
                 onReorderViewport={actions.reorderNode}
               />
             </Panel>
@@ -269,7 +301,7 @@ function App() {
                 onCreateOrbit={actions.addOrbitObject}
                 onCreateEquilibrium={actions.addEquilibriumObject}
                 onCreateLimitCycle={actions.addLimitCycleObject}
-                onSelectBranch={actions.selectNode}
+                onSelectBranch={selectNode}
               />
             </Panel>
           </div>
