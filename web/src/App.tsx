@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { useAppContext } from './state/appState'
+import { useAppContext } from './state/appContext'
 import { Panel } from './ui/Panel'
 import { ObjectsTree } from './ui/ObjectsTree'
 import { InspectorPanel } from './ui/InspectorPanel'
@@ -29,6 +29,7 @@ function App() {
   const { state, actions } = useAppContext()
   const { system, systems, busy, error, continuationProgress } = state
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [dialogDismissed, setDialogDismissed] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined' || isDeterministicMode()) return 'dark'
     const stored =
@@ -46,20 +47,7 @@ function App() {
     void actions.refreshSystems()
   }, [actions])
 
-  useEffect(() => {
-    if (!system) setDialogOpen(true)
-  }, [system])
-
-  useEffect(() => {
-    if (!system) return
-    setInspectorView((prev) => (prev === 'system' ? prev : 'selection'))
-  }, [system?.id])
-
-  useEffect(() => {
-    if (system?.ui.selectedNodeId) {
-      setInspectorView('selection')
-    }
-  }, [system?.ui.selectedNodeId])
+  const isSystemDialogOpen = dialogOpen || (!system && !dialogDismissed)
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -86,7 +74,20 @@ function App() {
     }
   }, [actions, system, system?.ui.layout.inspectorOpen, system?.ui.selectedNodeId])
 
-  const openSystemsDialog = () => setDialogOpen(true)
+  const openSystemsDialog = () => {
+    setDialogDismissed(false)
+    setDialogOpen(true)
+  }
+  const closeSystemsDialog = () => {
+    setDialogOpen(false)
+    if (!system) {
+      setDialogDismissed(true)
+    }
+  }
+  const finishSystemsDialog = () => {
+    setDialogOpen(false)
+    setDialogDismissed(false)
+  }
   const openSystemEditor = () => {
     setInspectorView('system')
   }
@@ -186,27 +187,30 @@ function App() {
       />
 
       <SystemDialog
-        open={dialogOpen}
+        open={isSystemDialogOpen}
         systems={systems}
-        onClose={() => setDialogOpen(false)}
+        onClose={closeSystemsDialog}
         onCreateSystem={async (name) => {
           await actions.createSystem(name)
-          setDialogOpen(false)
+          finishSystemsDialog()
+          setInspectorView('selection')
         }}
         onOpenSystem={async (id) => {
           await actions.openSystem(id)
-          setDialogOpen(false)
+          finishSystemsDialog()
+          setInspectorView('selection')
         }}
         onEditSystem={async (id) => {
           await actions.openSystem(id)
-          setDialogOpen(false)
+          finishSystemsDialog()
           openSystemEditor()
         }}
         onExportSystem={(id) => void actions.exportSystem(id)}
         onDeleteSystem={(id) => void actions.deleteSystem(id)}
         onImportSystem={async (file) => {
           await actions.importSystem(file)
-          setDialogOpen(false)
+          finishSystemsDialog()
+          setInspectorView('selection')
         }}
       />
 

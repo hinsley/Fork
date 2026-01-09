@@ -65,6 +65,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
         entry?.onProgress?.(message.progress)
         return
       }
+      if (!('ok' in message)) return
       const entry = this.pending.get(message.id)
       if (!entry) return
       this.pending.delete(message.id)
