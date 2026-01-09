@@ -118,6 +118,35 @@
   color: var(--text-muted);
 }
 
+.toolbar__progress {
+  display: grid;
+  gap: 4px;
+  min-width: 180px;
+}
+
+.toolbar__progress-header,
+.toolbar__progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.toolbar__progress-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(120, 120, 120, 0.2);
+  overflow: hidden;
+}
+
+.toolbar__progress-fill {
+  height: 100%;
+  background: var(--accent);
+  width: 0%;
+  transition: width 0.15s ease;
+}
+
 .error-banner {
   background: #fce7dd;
   color: #702c16;

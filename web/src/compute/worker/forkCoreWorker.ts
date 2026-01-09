@@ -1,6 +1,9 @@
 /// <reference lib="webworker" />
 
 import type {
+  ContinuationProgress,
+  EquilibriumContinuationRequest,
+  EquilibriumContinuationResult,
   SolveEquilibriumRequest,
   SolveEquilibriumResult,
   SimulateOrbitRequest,
@@ -12,16 +15,24 @@ import type {
 type WorkerRequest =
   | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
   | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
+  | { id: string; kind: 'runEquilibriumContinuation'; payload: EquilibriumContinuationRequest }
   | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
   | { id: string; kind: 'cancel' }
+
+type WorkerProgress = { id: string; kind: 'progress'; progress: ContinuationProgress }
 
 type WorkerResponse =
   | {
       id: string
       ok: true
-      result: SimulateOrbitResult | SolveEquilibriumResult | ValidateSystemResult
+      result:
+        | SimulateOrbitResult
+        | SolveEquilibriumResult
+        | ValidateSystemResult
+        | EquilibriumContinuationResult
     }
   | { id: string; ok: false; error: string; aborted?: boolean }
+  | WorkerProgress
 
 type WasmModule = {
   WasmSystem: new (
@@ -42,6 +53,21 @@ type WasmModule = {
       maxSteps: number,
       dampingFactor: number
     ) => SolveEquilibriumResult
+  }
+  WasmEquilibriumRunner: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    systemType: string,
+    equilibriumState: Float64Array,
+    parameterName: string,
+    settings: Record<string, number>,
+    forward: boolean
+  ) => {
+    run_steps: (batchSize: number) => ContinuationProgress
+    get_progress: () => ContinuationProgress
+    get_result: () => EquilibriumContinuationResult
   }
   default?: (input?: RequestInfo | URL | Response | BufferSource | WebAssembly.Module) => Promise<void>
 }
@@ -120,6 +146,45 @@ async function runSolveEquilibrium(
     request.maxSteps,
     request.dampingFactor
   )
+}
+
+const DEFAULT_PROGRESS_UPDATES = 50
+
+function computeBatchSize(maxSteps: number): number {
+  if (!Number.isFinite(maxSteps) || maxSteps <= 0) return 1
+  return Math.max(1, Math.ceil(maxSteps / DEFAULT_PROGRESS_UPDATES))
+}
+
+async function runEquilibriumContinuation(
+  request: EquilibriumContinuationRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<EquilibriumContinuationResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const runner = new wasm.WasmEquilibriumRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.type,
+    new Float64Array(request.equilibriumState),
+    request.parameterName,
+    request.settings,
+    request.forward
+  )
+
+  let progress = runner.get_progress()
+  onProgress(progress)
+
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+
+  return runner.get_result()
 }
 
 function abortIfNeeded(signal: AbortSignal) {
@@ -205,6 +270,24 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     if (message.kind === 'solveEquilibrium') {
       const result = await runSolveEquilibrium(message.payload, controller.signal)
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runEquilibriumContinuation') {
+      const result = await runEquilibriumContinuation(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
       const response: WorkerResponse = { id: message.id, ok: true, result }
       ctx.postMessage(response)
       return

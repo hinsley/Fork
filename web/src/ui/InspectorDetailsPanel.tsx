@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type {
   BifurcationDiagram,
   ComplexValue,
+  ContinuationObject,
+  ContinuationPoint,
   EquilibriumObject,
   LimitCycleOrigin,
   OrbitObject,
@@ -13,11 +15,19 @@ import type {
 import { DEFAULT_RENDER } from '../system/model'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
 import type {
+  BranchContinuationRequest,
+  EquilibriumContinuationRequest,
   LimitCycleCreateRequest,
   EquilibriumSolveRequest,
   OrbitRunRequest,
 } from '../state/appState'
 import { validateSystemConfig } from '../state/appState'
+import {
+  buildSortedArrayOrder,
+  ensureBranchIndices,
+  getBranchParams,
+  normalizeEigenvalueArray,
+} from '../system/continuation'
 
 type InspectorDetailsPanelProps = {
   system: System
@@ -40,6 +50,8 @@ type InspectorDetailsPanelProps = {
   onRunOrbit: (request: OrbitRunRequest) => Promise<void>
   onSolveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   onCreateLimitCycle: (request: LimitCycleCreateRequest) => Promise<void>
+  onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
+  onCreateBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
 }
 
 type SystemDraft = {
@@ -71,6 +83,19 @@ type LimitCycleDraft = {
   ntst: string
   ncol: string
   parameterName: string
+}
+
+type ContinuationDraft = {
+  name: string
+  parameterName: string
+  stepSize: string
+  maxSteps: string
+  minStepSize: string
+  maxStepSize: string
+  correctorSteps: string
+  correctorTolerance: string
+  stepTolerance: string
+  forward: boolean
 }
 
 const FLOW_SOLVERS = ['rk4', 'tsit5']
@@ -159,6 +184,26 @@ function formatComplexValue(value: ComplexValue): string {
   const imag = formatFixed(Math.abs(value.im), 4)
   const sign = value.im >= 0 ? '+' : '-'
   return `${real} ${sign} ${imag}i`
+}
+
+function formatNumberSafe(value: number | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'NaN'
+  return formatNumber(value)
+}
+
+function formatBranchType(branch: ContinuationObject): string {
+  return branch.branchType.replace('_', ' ')
+}
+
+function summarizeEigenvalues(point: ContinuationPoint, branchType?: string): string {
+  const eigenvalues = normalizeEigenvalueArray(point.eigenvalues)
+  const label = branchType === 'limit_cycle' ? 'Multipliers' : 'Eigenvalues'
+  if (eigenvalues.length === 0) return `${label}: []`
+  const formatted = eigenvalues
+    .slice(0, 3)
+    .map((ev) => `${formatNumberSafe(ev.re)}+${formatNumberSafe(ev.im)}i`)
+  const suffix = eigenvalues.length > 3 ? ' …' : ''
+  return `${label}: ${formatted.join(', ')}${suffix}`
 }
 
 // Keep preview snippets small so the inspector stays responsive for large orbits.
@@ -269,6 +314,21 @@ function makeLimitCycleDraft(system: SystemConfig, orbit?: OrbitObject): LimitCy
   }
 }
 
+function makeContinuationDraft(system: SystemConfig): ContinuationDraft {
+  return {
+    name: '',
+    parameterName: system.paramNames[0] ?? '',
+    stepSize: '0.01',
+    maxSteps: '100',
+    minStepSize: '1e-5',
+    maxStepSize: '0.1',
+    correctorSteps: '4',
+    correctorTolerance: '1e-6',
+    stepTolerance: '1e-6',
+    forward: true,
+  }
+}
+
 function makeSystemDraft(system: SystemConfig): SystemDraft {
   return {
     name: system.name,
@@ -285,6 +345,55 @@ function parseNumber(value: string): number | null {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return null
   return parsed
+}
+
+function parseInteger(value: string): number | null {
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return null
+  return parsed
+}
+
+function buildContinuationSettings(draft: ContinuationDraft) {
+  const stepSize = parseNumber(draft.stepSize)
+  const maxSteps = parseInteger(draft.maxSteps)
+  const minStep = parseNumber(draft.minStepSize)
+  const maxStep = parseNumber(draft.maxStepSize)
+  const correctorSteps = parseInteger(draft.correctorSteps)
+  const correctorTolerance = parseNumber(draft.correctorTolerance)
+  const stepTolerance = parseNumber(draft.stepTolerance)
+
+  if (
+    stepSize === null ||
+    maxSteps === null ||
+    minStep === null ||
+    maxStep === null ||
+    correctorSteps === null ||
+    correctorTolerance === null ||
+    stepTolerance === null
+  ) {
+    return { settings: null, error: 'Continuation settings must be numeric.' }
+  }
+
+  if (stepSize <= 0 || minStep <= 0 || maxStep <= 0) {
+    return { settings: null, error: 'Step sizes must be positive numbers.' }
+  }
+
+  if (maxSteps <= 0 || correctorSteps <= 0) {
+    return { settings: null, error: 'Step counts must be positive integers.' }
+  }
+
+  return {
+    settings: {
+      step_size: Math.max(stepSize, 1e-9),
+      min_step_size: Math.max(minStep, 1e-12),
+      max_step_size: Math.max(maxStep, 1e-9),
+      max_steps: Math.max(Math.trunc(maxSteps), 1),
+      corrector_steps: Math.max(Math.trunc(correctorSteps), 1),
+      corrector_tolerance: Math.max(correctorTolerance, Number.EPSILON),
+      step_tolerance: Math.max(stepTolerance, Number.EPSILON),
+    },
+    error: null,
+  }
 }
 
 function buildSystemConfig(draft: SystemDraft): SystemConfig {
@@ -325,6 +434,8 @@ export function InspectorDetailsPanel({
   onRunOrbit,
   onSolveEquilibrium,
   onCreateLimitCycle,
+  onCreateEquilibriumBranch,
+  onCreateBranchFromPoint,
 }: InspectorDetailsPanelProps) {
   const node = selectedNodeId ? system.nodes[selectedNodeId] : null
   const object = selectedNodeId ? system.objects[selectedNodeId] : undefined
@@ -390,6 +501,19 @@ export function InspectorDetailsPanel({
       })
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [system.nodes, system.objects])
+  const branchIndices = useMemo(() => {
+    if (!branch) return []
+    return ensureBranchIndices(branch.data)
+  }, [branch])
+  const branchSortedOrder = useMemo(() => {
+    if (branchIndices.length === 0) return []
+    return buildSortedArrayOrder(branchIndices)
+  }, [branchIndices])
+  const [branchPointIndex, setBranchPointIndex] = useState<number | null>(null)
+  const selectedBranchPoint = useMemo(() => {
+    if (!branch || branchPointIndex === null) return null
+    return branch.data.points[branchPointIndex] ?? null
+  }, [branch, branchPointIndex])
 
   const [systemDraft, setSystemDraft] = useState<SystemDraft>(() =>
     makeSystemDraft(system.config)
@@ -409,10 +533,20 @@ export function InspectorDetailsPanel({
   )
   const [equilibriumError, setEquilibriumError] = useState<string | null>(null)
 
+  const [continuationDraft, setContinuationDraft] = useState<ContinuationDraft>(() =>
+    makeContinuationDraft(system.config)
+  )
+  const [continuationError, setContinuationError] = useState<string | null>(null)
+
   const [limitCycleDraft, setLimitCycleDraft] = useState<LimitCycleDraft>(() =>
     makeLimitCycleDraft(system.config)
   )
   const [limitCycleError, setLimitCycleError] = useState<string | null>(null)
+  const [branchContinuationDraft, setBranchContinuationDraft] =
+    useState<ContinuationDraft>(() => makeContinuationDraft(system.config))
+  const [branchContinuationError, setBranchContinuationError] = useState<string | null>(null)
+  const [branchPointInput, setBranchPointInput] = useState('')
+  const [branchPointError, setBranchPointError] = useState<string | null>(null)
   const [sceneSearch, setSceneSearch] = useState('')
 
   useEffect(() => {
@@ -459,6 +593,29 @@ export function InspectorDetailsPanel({
   }, [systemDraft.paramNames])
 
   useEffect(() => {
+    setContinuationDraft((prev) => {
+      if (systemDraft.paramNames.length === 0) {
+        if (!prev.parameterName) return prev
+        return { ...prev, parameterName: '' }
+      }
+      if (systemDraft.paramNames.includes(prev.parameterName)) {
+        return prev
+      }
+      return { ...prev, parameterName: systemDraft.paramNames[0] ?? '' }
+    })
+    setBranchContinuationDraft((prev) => {
+      if (systemDraft.paramNames.length === 0) {
+        if (!prev.parameterName) return prev
+        return { ...prev, parameterName: '' }
+      }
+      if (systemDraft.paramNames.includes(prev.parameterName)) {
+        return prev
+      }
+      return { ...prev, parameterName: systemDraft.paramNames[0] ?? '' }
+    })
+  }, [systemDraft.paramNames])
+
+  useEffect(() => {
     if (!object) return
     if (object.type === 'orbit') {
       setOrbitDraft(makeOrbitRunDraft(system.config, object))
@@ -472,6 +629,11 @@ export function InspectorDetailsPanel({
     if (object.type === 'equilibrium') {
       setEquilibriumDraft(makeEquilibriumSolveDraft(system.config, object))
       setEquilibriumError(null)
+      setContinuationDraft((prev) => ({
+        ...makeContinuationDraft(system.config),
+        name: prev.name,
+      }))
+      setContinuationError(null)
     }
   }, [object?.type, selectedNodeId, system.config])
 
@@ -480,6 +642,56 @@ export function InspectorDetailsPanel({
       setSceneSearch('')
     }
   }, [scene?.id])
+
+  useEffect(() => {
+    if (!equilibrium) return
+    setContinuationDraft((prev) => {
+      const paramName = systemDraft.paramNames.includes(prev.parameterName)
+        ? prev.parameterName
+        : systemDraft.paramNames[0] ?? ''
+      const suggestedName = paramName ? `${equilibrium.name}_${paramName}` : equilibrium.name
+      const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
+      return { ...prev, parameterName: paramName, name: nextName }
+    })
+  }, [equilibrium?.name, systemDraft.paramNames])
+
+  useEffect(() => {
+    if (!branch) return
+    const fallbackParam =
+      systemDraft.paramNames.find((name) => name !== branch.parameterName) ??
+      systemDraft.paramNames[0] ??
+      ''
+    setBranchContinuationDraft((prev) => {
+      const paramName = systemDraft.paramNames.includes(prev.parameterName)
+        ? prev.parameterName
+        : fallbackParam
+      const suggestedName = paramName ? `${branch.name}_${paramName}` : branch.name
+      const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
+      return { ...prev, parameterName: paramName, name: nextName }
+    })
+    setBranchContinuationError(null)
+    setBranchPointError(null)
+  }, [branch?.name, branch?.parameterName, systemDraft.paramNames])
+
+  useEffect(() => {
+    if (!branch) {
+      setBranchPointIndex(null)
+      setBranchPointInput('')
+      return
+    }
+    if (branchSortedOrder.length === 0) {
+      setBranchPointIndex(null)
+      setBranchPointInput('')
+      return
+    }
+    const initialIndex = branchSortedOrder[0]
+    setBranchPointIndex(initialIndex)
+    const logicalIndex = branchIndices[initialIndex]
+    setBranchPointInput(
+      typeof logicalIndex === 'number' ? logicalIndex.toString() : ''
+    )
+    setBranchPointError(null)
+  }, [branch?.name, branchIndices, branchSortedOrder])
 
   const systemConfig = useMemo(() => buildSystemConfig(systemDraft), [systemDraft])
   const systemValidation = useMemo(() => validateSystemConfig(systemConfig), [systemConfig])
@@ -638,6 +850,13 @@ export function InspectorDetailsPanel({
       return null
     }
 
+    if (branch) {
+      return {
+        label: 'Branch',
+        detail: `${formatBranchType(branch)} · ${branch.data.points.length} points`,
+      }
+    }
+
     if (scene) {
       return {
         label: 'Scene',
@@ -653,7 +872,7 @@ export function InspectorDetailsPanel({
     }
 
     return null
-  }, [object, scene, diagram])
+  }, [branch, diagram, object, scene])
 
   const limitCycleNameSuggestion = useMemo(() => {
     const names = Object.values(system.objects).map((obj) => obj.name)
@@ -678,6 +897,21 @@ export function InspectorDetailsPanel({
       .map((id) => byId.get(id))
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
   }, [objectEntries, scene, sceneSelectedIds])
+  const branchParams = useMemo(() => {
+    if (!branch) return []
+    return getBranchParams(system, branch)
+  }, [branch, system])
+  const continuationParamIndex = branch
+    ? systemDraft.paramNames.indexOf(branch.parameterName)
+    : -1
+  const branchBifurcations = useMemo(
+    () => (branch ? branch.data.bifurcations ?? [] : []),
+    [branch]
+  )
+  const branchStartIndex = branchSortedOrder[0]
+  const branchEndIndex = branchSortedOrder[branchSortedOrder.length - 1]
+  const branchStartPoint = branchStartIndex !== undefined ? branch?.data.points[branchStartIndex] : null
+  const branchEndPoint = branchEndIndex !== undefined ? branch?.data.points[branchEndIndex] : null
 
   const handleApplySystem = async () => {
     setSystemTouched(true)
@@ -770,6 +1004,129 @@ export function InspectorDetailsPanel({
       dampingFactor,
     }
     await onSolveEquilibrium(request)
+  }
+
+  const handleCreateEquilibriumBranch = async () => {
+    if (runDisabled) {
+      setContinuationError('Apply valid system settings before continuing.')
+      return
+    }
+    if (!equilibrium || !selectedNodeId) {
+      setContinuationError('Select an equilibrium to continue.')
+      return
+    }
+    if (!equilibrium.solution) {
+      setContinuationError('Solve the equilibrium before continuing.')
+      return
+    }
+    if (systemDraft.paramNames.length === 0) {
+      setContinuationError('Add a parameter before continuing.')
+      return
+    }
+    if (!continuationDraft.parameterName) {
+      setContinuationError('Select a continuation parameter.')
+      return
+    }
+
+    const suggestedName = continuationDraft.parameterName
+      ? `${equilibrium.name}_${continuationDraft.parameterName}`
+      : equilibrium.name
+    const name = continuationDraft.name.trim() || suggestedName
+    if (!name.trim()) {
+      setContinuationError('Branch name is required.')
+      return
+    }
+
+    const { settings, error } = buildContinuationSettings(continuationDraft)
+    if (!settings) {
+      setContinuationError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setContinuationError(null)
+    await onCreateEquilibriumBranch({
+      equilibriumId: selectedNodeId,
+      name,
+      parameterName: continuationDraft.parameterName,
+      settings,
+      forward: continuationDraft.forward,
+    })
+  }
+
+  const setBranchPoint = (arrayIndex: number) => {
+    setBranchPointIndex(arrayIndex)
+    const logicalIndex = branchIndices[arrayIndex]
+    setBranchPointInput(
+      typeof logicalIndex === 'number' ? logicalIndex.toString() : ''
+    )
+    setBranchPointError(null)
+  }
+
+  const handleJumpToBranchPoint = () => {
+    if (!branch) return
+    const target = parseInteger(branchPointInput)
+    if (target === null) {
+      setBranchPointError('Enter a valid integer index.')
+      return
+    }
+    const arrayIndex = branchIndices.findIndex((value) => value === target)
+    if (arrayIndex < 0) {
+      setBranchPointError('Index not found in this branch.')
+      return
+    }
+    setBranchPoint(arrayIndex)
+  }
+
+  const handleCreateBranchFromPoint = async () => {
+    if (runDisabled) {
+      setBranchContinuationError('Apply valid system settings before continuing.')
+      return
+    }
+    if (!branch || !selectedNodeId) {
+      setBranchContinuationError('Select a branch to continue.')
+      return
+    }
+    if (branch.branchType !== 'equilibrium') {
+      setBranchContinuationError('Continuation is only available for equilibrium branches.')
+      return
+    }
+    if (!selectedBranchPoint || branchPointIndex === null) {
+      setBranchContinuationError('Select a branch point to continue from.')
+      return
+    }
+    if (systemDraft.paramNames.length === 0) {
+      setBranchContinuationError('Add a parameter before continuing.')
+      return
+    }
+    if (!branchContinuationDraft.parameterName) {
+      setBranchContinuationError('Select a continuation parameter.')
+      return
+    }
+
+    const suggestedName = branchContinuationDraft.parameterName
+      ? `${branch.name}_${branchContinuationDraft.parameterName}`
+      : branch.name
+    const name = branchContinuationDraft.name.trim() || suggestedName
+    if (!name.trim()) {
+      setBranchContinuationError('Branch name is required.')
+      return
+    }
+
+    const { settings, error } = buildContinuationSettings(branchContinuationDraft)
+    if (!settings) {
+      setBranchContinuationError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setBranchContinuationError(null)
+    await onCreateBranchFromPoint({
+      branchId: selectedNodeId,
+      pointIndex: branchPointIndex,
+      name,
+      parameterName: branchContinuationDraft.parameterName,
+      settings,
+      forward: branchContinuationDraft.forward,
+    })
   }
 
   const handleCreateLimitCycle = async () => {
@@ -1688,6 +2045,187 @@ export function InspectorDetailsPanel({
                   </button>
                 </div>
               </InspectorDisclosure>
+
+              <InspectorDisclosure
+                key={`${selectionKey}-equilibrium-continuation`}
+                title="Equilibrium Continuation"
+                testId="equilibrium-continuation-toggle"
+                defaultOpen={false}
+              >
+                <div className="inspector-section">
+                  {runDisabled ? (
+                    <div className="field-warning">
+                      Apply valid system changes before continuing.
+                    </div>
+                  ) : null}
+                  {systemDraft.paramNames.length === 0 ? (
+                    <p className="empty-state">Add parameters to enable continuation.</p>
+                  ) : null}
+                  {!equilibrium.solution ? (
+                    <p className="empty-state">Solve the equilibrium to continue it.</p>
+                  ) : (
+                    <>
+                      <label>
+                        Branch name
+                        <input
+                          value={continuationDraft.name}
+                          onChange={(event) =>
+                            setContinuationDraft((prev) => ({
+                              ...prev,
+                              name: event.target.value,
+                            }))
+                          }
+                          placeholder={`${equilibrium.name}_${continuationDraft.parameterName}`}
+                          data-testid="equilibrium-branch-name"
+                        />
+                      </label>
+                      <label>
+                        Continuation parameter
+                        <select
+                          value={continuationDraft.parameterName}
+                          onChange={(event) =>
+                            setContinuationDraft((prev) => ({
+                              ...prev,
+                              parameterName: event.target.value,
+                            }))
+                          }
+                          data-testid="equilibrium-branch-parameter"
+                        >
+                          {systemDraft.paramNames.map((name) => (
+                            <option key={name} value={name}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Direction
+                        <select
+                          value={continuationDraft.forward ? 'forward' : 'backward'}
+                          onChange={(event) =>
+                            setContinuationDraft((prev) => ({
+                              ...prev,
+                              forward: event.target.value === 'forward',
+                            }))
+                          }
+                          data-testid="equilibrium-branch-direction"
+                        >
+                          <option value="forward">Forward (Increasing Param)</option>
+                          <option value="backward">Backward (Decreasing Param)</option>
+                        </select>
+                      </label>
+                      <label>
+                        Initial step size
+                        <input
+                          type="number"
+                          value={continuationDraft.stepSize}
+                          onChange={(event) =>
+                            setContinuationDraft((prev) => ({
+                              ...prev,
+                              stepSize: event.target.value,
+                            }))
+                          }
+                          data-testid="equilibrium-branch-step-size"
+                        />
+                      </label>
+                      <label>
+                        Max points
+                        <input
+                          type="number"
+                          value={continuationDraft.maxSteps}
+                          onChange={(event) =>
+                            setContinuationDraft((prev) => ({
+                              ...prev,
+                              maxSteps: event.target.value,
+                            }))
+                          }
+                          data-testid="equilibrium-branch-max-steps"
+                        />
+                      </label>
+                      <label>
+                        Min step size
+                        <input
+                          type="number"
+                          value={continuationDraft.minStepSize}
+                          onChange={(event) =>
+                            setContinuationDraft((prev) => ({
+                              ...prev,
+                              minStepSize: event.target.value,
+                            }))
+                          }
+                          data-testid="equilibrium-branch-min-step"
+                        />
+                      </label>
+                      <label>
+                        Max step size
+                        <input
+                          type="number"
+                          value={continuationDraft.maxStepSize}
+                          onChange={(event) =>
+                            setContinuationDraft((prev) => ({
+                              ...prev,
+                              maxStepSize: event.target.value,
+                            }))
+                          }
+                          data-testid="equilibrium-branch-max-step"
+                        />
+                      </label>
+                      <label>
+                        Corrector steps
+                        <input
+                          type="number"
+                          value={continuationDraft.correctorSteps}
+                          onChange={(event) =>
+                            setContinuationDraft((prev) => ({
+                              ...prev,
+                              correctorSteps: event.target.value,
+                            }))
+                          }
+                          data-testid="equilibrium-branch-corrector-steps"
+                        />
+                      </label>
+                      <label>
+                        Corrector tolerance
+                        <input
+                          type="number"
+                          value={continuationDraft.correctorTolerance}
+                          onChange={(event) =>
+                            setContinuationDraft((prev) => ({
+                              ...prev,
+                              correctorTolerance: event.target.value,
+                            }))
+                          }
+                          data-testid="equilibrium-branch-corrector-tolerance"
+                        />
+                      </label>
+                      <label>
+                        Step tolerance
+                        <input
+                          type="number"
+                          value={continuationDraft.stepTolerance}
+                          onChange={(event) =>
+                            setContinuationDraft((prev) => ({
+                              ...prev,
+                              stepTolerance: event.target.value,
+                            }))
+                          }
+                          data-testid="equilibrium-branch-step-tolerance"
+                        />
+                      </label>
+                      {continuationError ? (
+                        <div className="field-error">{continuationError}</div>
+                      ) : null}
+                      <button
+                        onClick={handleCreateEquilibriumBranch}
+                        disabled={runDisabled}
+                        data-testid="equilibrium-branch-submit"
+                      >
+                        Create Branch
+                      </button>
+                    </>
+                  )}
+                </div>
+              </InspectorDisclosure>
             </>
           ) : null}
 
@@ -1935,11 +2473,461 @@ export function InspectorDetailsPanel({
           ) : null}
 
             {branch ? (
-              <div className="inspector-section">
-                <h3>Branch</h3>
-                <p>{branch.branchType}</p>
-                <p>{branch.data.points.length} points</p>
-              </div>
+              <>
+                <InspectorDisclosure
+                  key={`${selectionKey}-branch-summary`}
+                  title="Branch Summary"
+                  testId="branch-summary-toggle"
+                  defaultOpen
+                >
+                  <div className="inspector-section">
+                    <InspectorMetrics
+                      rows={[
+                        { label: 'Type', value: formatBranchType(branch) },
+                        { label: 'Parent', value: branch.parentObject },
+                        { label: 'Start', value: branch.startObject },
+                        { label: 'Continuation param', value: branch.parameterName },
+                        { label: 'Points', value: branch.data.points.length },
+                        { label: 'Bifurcations', value: branchBifurcations.length },
+                        ...(branchStartPoint
+                          ? [
+                              {
+                                label: 'Start param value',
+                                value: formatNumber(branchStartPoint.param_value, 6),
+                              },
+                            ]
+                          : []),
+                        ...(branchEndPoint
+                          ? [
+                              {
+                                label: 'End param value',
+                                value: formatNumber(branchEndPoint.param_value, 6),
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
+                  </div>
+                  {branch.settings && typeof branch.settings === 'object' ? (
+                    <div className="inspector-section">
+                      <h4 className="inspector-subheading">Continuation settings</h4>
+                      <InspectorMetrics
+                        rows={[
+                          {
+                            label: 'Step size',
+                            value: formatNumber(
+                              (branch.settings as { step_size?: number }).step_size ??
+                                Number.NaN,
+                              6
+                            ),
+                          },
+                          {
+                            label: 'Min step',
+                            value: formatNumber(
+                              (branch.settings as { min_step_size?: number }).min_step_size ??
+                                Number.NaN,
+                              6
+                            ),
+                          },
+                          {
+                            label: 'Max step',
+                            value: formatNumber(
+                              (branch.settings as { max_step_size?: number }).max_step_size ??
+                                Number.NaN,
+                              6
+                            ),
+                          },
+                          {
+                            label: 'Max points',
+                            value:
+                              (branch.settings as { max_steps?: number }).max_steps ??
+                              Number.NaN,
+                          },
+                          {
+                            label: 'Corrector steps',
+                            value:
+                              (branch.settings as { corrector_steps?: number })
+                                .corrector_steps ?? Number.NaN,
+                          },
+                          {
+                            label: 'Corrector tol',
+                            value: formatScientific(
+                              (branch.settings as { corrector_tolerance?: number })
+                                .corrector_tolerance ?? Number.NaN,
+                              4
+                            ),
+                          },
+                          {
+                            label: 'Step tol',
+                            value: formatScientific(
+                              (branch.settings as { step_tolerance?: number }).step_tolerance ??
+                                Number.NaN,
+                              4
+                            ),
+                          },
+                        ]}
+                      />
+                    </div>
+                  ) : null}
+                </InspectorDisclosure>
+
+                <InspectorDisclosure
+                  key={`${selectionKey}-branch-points`}
+                  title="Branch Points"
+                  testId="branch-points-toggle"
+                  defaultOpen={false}
+                >
+                  <div className="inspector-section">
+                    {branch.data.points.length === 0 ? (
+                      <p className="empty-state">No branch points stored yet.</p>
+                    ) : (
+                      <>
+                        <div className="inspector-row">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (branchPointIndex === null) return
+                              const sortedIndex = branchSortedOrder.indexOf(branchPointIndex)
+                              if (sortedIndex <= 0) return
+                              setBranchPoint(branchSortedOrder[sortedIndex - 1])
+                            }}
+                            disabled={
+                              branchPointIndex === null ||
+                              branchSortedOrder.indexOf(branchPointIndex) <= 0
+                            }
+                            data-testid="branch-point-prev"
+                          >
+                            Previous
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (branchPointIndex === null) return
+                              const sortedIndex = branchSortedOrder.indexOf(branchPointIndex)
+                              if (sortedIndex < 0 || sortedIndex >= branchSortedOrder.length - 1)
+                                return
+                              setBranchPoint(branchSortedOrder[sortedIndex + 1])
+                            }}
+                            disabled={
+                              branchPointIndex === null ||
+                              branchSortedOrder.indexOf(branchPointIndex) >=
+                                branchSortedOrder.length - 1
+                            }
+                            data-testid="branch-point-next"
+                          >
+                            Next
+                          </button>
+                        </div>
+
+                        <label>
+                          Logical index
+                          <div className="inspector-row">
+                            <input
+                              type="number"
+                              value={branchPointInput}
+                              onChange={(event) => setBranchPointInput(event.target.value)}
+                              data-testid="branch-point-input"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleJumpToBranchPoint}
+                              data-testid="branch-point-jump"
+                            >
+                              Jump
+                            </button>
+                          </div>
+                        </label>
+                        {branchPointError ? (
+                          <div className="field-error">{branchPointError}</div>
+                        ) : null}
+
+                        {branchPointIndex !== null ? (
+                          <div className="inspector-data">
+                            <div>
+                              Selected point: logical {branchIndices[branchPointIndex]} (array{' '}
+                              {branchPointIndex})
+                            </div>
+                            {selectedBranchPoint ? (
+                              <>
+                                <div>Stability: {selectedBranchPoint.stability}</div>
+                                <div>
+                                  {summarizeEigenvalues(selectedBranchPoint, branch.branchType)}
+                                </div>
+                              </>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {branchBifurcations.length > 0 ? (
+                          <div className="inspector-section">
+                            <h4 className="inspector-subheading">Bifurcations</h4>
+                            <div className="inspector-list">
+                              {branchBifurcations.map((idx) => {
+                                const logical = branchIndices[idx]
+                                const label = Number.isFinite(logical)
+                                  ? `Index ${logical}`
+                                  : `Index ${idx}`
+                                return (
+                                  <button
+                                    type="button"
+                                    key={`bif-${idx}`}
+                                    onClick={() => setBranchPoint(idx)}
+                                    data-testid={`branch-bifurcation-${idx}`}
+                                  >
+                                    {label}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                </InspectorDisclosure>
+
+                <InspectorDisclosure
+                  key={`${selectionKey}-branch-point-details`}
+                  title="Point Details"
+                  testId="branch-point-details-toggle"
+                  defaultOpen
+                >
+                  <div className="inspector-section">
+                    {selectedBranchPoint ? (
+                      <>
+                        <InspectorMetrics
+                          rows={[
+                            { label: 'Stability', value: selectedBranchPoint.stability },
+                          ]}
+                        />
+                        <h4 className="inspector-subheading">Parameters</h4>
+                        <InspectorMetrics
+                          rows={systemDraft.paramNames.map((name, index) => {
+                            const value =
+                              index === continuationParamIndex
+                                ? selectedBranchPoint.param_value
+                                : branchParams[index]
+                            return {
+                              label: name || `p${index + 1}`,
+                              value: formatNumber(value ?? Number.NaN, 6),
+                            }
+                          })}
+                        />
+                        <h4 className="inspector-subheading">State</h4>
+                        <InspectorMetrics
+                          rows={systemDraft.varNames.map((name, index) => ({
+                            label: name || `x${index + 1}`,
+                            value: formatNumber(
+                              selectedBranchPoint.state[index] ?? Number.NaN,
+                              6
+                            ),
+                          }))}
+                        />
+                        <h4 className="inspector-subheading">Eigenvalues</h4>
+                        {normalizeEigenvalueArray(selectedBranchPoint.eigenvalues).length > 0 ? (
+                          <InspectorMetrics
+                            rows={normalizeEigenvalueArray(selectedBranchPoint.eigenvalues).map(
+                              (ev, index) => ({
+                                label: `λ${index + 1}`,
+                                value: `${formatNumberSafe(ev.re)} + ${formatNumberSafe(ev.im)}i`,
+                              })
+                            )}
+                          />
+                        ) : (
+                          <p className="empty-state">No eigenvalues stored for this point.</p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="empty-state">Select a point to inspect.</p>
+                    )}
+                  </div>
+                </InspectorDisclosure>
+
+                <InspectorDisclosure
+                  key={`${selectionKey}-branch-continue`}
+                  title="Continue From Point"
+                  testId="branch-continue-toggle"
+                  defaultOpen={false}
+                >
+                  <div className="inspector-section">
+                    {branch.branchType !== 'equilibrium' ? (
+                      <p className="empty-state">
+                        Continuation from points is only available for equilibrium branches.
+                      </p>
+                    ) : null}
+                    {runDisabled ? (
+                      <div className="field-warning">
+                        Apply valid system changes before continuing.
+                      </div>
+                    ) : null}
+                    {systemDraft.paramNames.length === 0 ? (
+                      <p className="empty-state">Add parameters to enable continuation.</p>
+                    ) : null}
+                    <label>
+                      Branch name
+                      <input
+                        value={branchContinuationDraft.name}
+                        onChange={(event) =>
+                          setBranchContinuationDraft((prev) => ({
+                            ...prev,
+                            name: event.target.value,
+                          }))
+                        }
+                        placeholder={`${branch.name}_${branchContinuationDraft.parameterName}`}
+                        data-testid="branch-from-point-name"
+                      />
+                    </label>
+                    <label>
+                      Continuation parameter
+                      <select
+                        value={branchContinuationDraft.parameterName}
+                        onChange={(event) =>
+                          setBranchContinuationDraft((prev) => ({
+                            ...prev,
+                            parameterName: event.target.value,
+                          }))
+                        }
+                        data-testid="branch-from-point-parameter"
+                      >
+                        {systemDraft.paramNames.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                            {name === branch.parameterName ? ' (current)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Direction
+                      <select
+                        value={branchContinuationDraft.forward ? 'forward' : 'backward'}
+                        onChange={(event) =>
+                          setBranchContinuationDraft((prev) => ({
+                            ...prev,
+                            forward: event.target.value === 'forward',
+                          }))
+                        }
+                        data-testid="branch-from-point-direction"
+                      >
+                        <option value="forward">Forward (Increasing Param)</option>
+                        <option value="backward">Backward (Decreasing Param)</option>
+                      </select>
+                    </label>
+                    <label>
+                      Initial step size
+                      <input
+                        type="number"
+                        value={branchContinuationDraft.stepSize}
+                        onChange={(event) =>
+                          setBranchContinuationDraft((prev) => ({
+                            ...prev,
+                            stepSize: event.target.value,
+                          }))
+                        }
+                        data-testid="branch-from-point-step-size"
+                      />
+                    </label>
+                    <label>
+                      Max points
+                      <input
+                        type="number"
+                        value={branchContinuationDraft.maxSteps}
+                        onChange={(event) =>
+                          setBranchContinuationDraft((prev) => ({
+                            ...prev,
+                            maxSteps: event.target.value,
+                          }))
+                        }
+                        data-testid="branch-from-point-max-steps"
+                      />
+                    </label>
+                    <label>
+                      Min step size
+                      <input
+                        type="number"
+                        value={branchContinuationDraft.minStepSize}
+                        onChange={(event) =>
+                          setBranchContinuationDraft((prev) => ({
+                            ...prev,
+                            minStepSize: event.target.value,
+                          }))
+                        }
+                        data-testid="branch-from-point-min-step"
+                      />
+                    </label>
+                    <label>
+                      Max step size
+                      <input
+                        type="number"
+                        value={branchContinuationDraft.maxStepSize}
+                        onChange={(event) =>
+                          setBranchContinuationDraft((prev) => ({
+                            ...prev,
+                            maxStepSize: event.target.value,
+                          }))
+                        }
+                        data-testid="branch-from-point-max-step"
+                      />
+                    </label>
+                    <label>
+                      Corrector steps
+                      <input
+                        type="number"
+                        value={branchContinuationDraft.correctorSteps}
+                        onChange={(event) =>
+                          setBranchContinuationDraft((prev) => ({
+                            ...prev,
+                            correctorSteps: event.target.value,
+                          }))
+                        }
+                        data-testid="branch-from-point-corrector-steps"
+                      />
+                    </label>
+                    <label>
+                      Corrector tolerance
+                      <input
+                        type="number"
+                        value={branchContinuationDraft.correctorTolerance}
+                        onChange={(event) =>
+                          setBranchContinuationDraft((prev) => ({
+                            ...prev,
+                            correctorTolerance: event.target.value,
+                          }))
+                        }
+                        data-testid="branch-from-point-corrector-tolerance"
+                      />
+                    </label>
+                    <label>
+                      Step tolerance
+                      <input
+                        type="number"
+                        value={branchContinuationDraft.stepTolerance}
+                        onChange={(event) =>
+                          setBranchContinuationDraft((prev) => ({
+                            ...prev,
+                            stepTolerance: event.target.value,
+                          }))
+                        }
+                        data-testid="branch-from-point-step-tolerance"
+                      />
+                    </label>
+                    {branchContinuationError ? (
+                      <div className="field-error">{branchContinuationError}</div>
+                    ) : null}
+                    <button
+                      onClick={handleCreateBranchFromPoint}
+                      disabled={
+                        runDisabled ||
+                        !selectedBranchPoint ||
+                        branch.branchType !== 'equilibrium'
+                      }
+                      data-testid="branch-from-point-submit"
+                    >
+                      Create Branch
+                    </button>
+                  </div>
+                </InspectorDisclosure>
+              </>
             ) : null}
           </div>
         ) : (
