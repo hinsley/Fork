@@ -91,15 +91,13 @@ function App() {
     setDialogDismissed(false)
   }
 
-  const selectNode = (nodeId: string | null) => {
+  const selectNode = (nodeId: string) => {
     actions.selectNode(nodeId)
-    if (nodeId && system && !system.ui.layout.inspectorOpen) {
+    if (system && !system.ui.layout.inspectorOpen) {
       actions.updateLayout({ inspectorOpen: true })
     }
-    if (nodeId) {
-      // Force the inspector to show selection details even if the selection didn't change.
-      setInspectorView('selection')
-    }
+    // Force the inspector to show selection details even if the selection didn't change.
+    setInspectorView('selection')
   }
 
   const createOrbit = async () => {
