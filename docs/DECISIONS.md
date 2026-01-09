@@ -21,6 +21,21 @@ References:
 
 ---
 
+### 2026-01-09: Commit web WASM package for hosted builds
+Context:
+Vercel builds the web app without a Rust toolchain, so `pkg-web` is missing and Vite cannot resolve
+`@fork-wasm` during the build.
+Decision:
+Track `crates/fork_wasm/pkg-web` in git and generate it locally with
+`wasm-pack build --target web --out-dir pkg-web` when core bindings change.
+Why:
+Keeps hosted builds working without requiring Rust/wasm-pack in the deploy environment.
+Impact:
+Repo now includes the web WASM artifacts; regenerate and commit after core/wasm updates.
+References:
+`.gitignore`, `crates/fork_wasm/pkg-web`, `web/vite.config.ts`,
+`web/src/compute/worker/forkCoreWorker.ts`
+
 ### 2026-01-09: Enforce CLI-safe names across the UI
 Context:
 Web object/branch defaults historically used spaces, while the CLI requires names to be
