@@ -4,12 +4,41 @@ import './index.css'
 import App from './App'
 import { AppProvider } from './state/appState'
 import { OpfsSystemStore } from './system/opfs'
-import { MemorySystemStore } from './system/store'
+import { MemorySystemStore, type SystemStore } from './system/store'
 import { createDemoSystem } from './system/fixtures'
+import { createDefaultSystems } from './system/defaultSystems'
 import { WasmForkCoreClient } from './compute/wasmClient'
 import { MockForkCoreClient } from './compute/mockClient'
 import { JobQueue } from './compute/jobQueue'
 import { enableDeterministicMode } from './utils/determinism'
+
+const DEFAULT_SYSTEMS_SEEDED_KEY = 'fork-default-systems-seeded'
+
+function hasSeededDefaultSystems(): boolean {
+  if (typeof window === 'undefined') return false
+  if (!('localStorage' in window)) return false
+  if (typeof window.localStorage.getItem !== 'function') return false
+  return window.localStorage.getItem(DEFAULT_SYSTEMS_SEEDED_KEY) === '1'
+}
+
+function markDefaultSystemsSeeded() {
+  if (typeof window === 'undefined') return
+  if (!('localStorage' in window)) return
+  if (typeof window.localStorage.setItem !== 'function') return
+  window.localStorage.setItem(DEFAULT_SYSTEMS_SEEDED_KEY, '1')
+}
+
+async function seedDefaultSystems(store: SystemStore) {
+  if (hasSeededDefaultSystems()) return
+  const existing = await store.list()
+  if (existing.length === 0) {
+    const defaults = createDefaultSystems()
+    for (const system of defaults) {
+      await store.save(system)
+    }
+  }
+  markDefaultSystemsSeeded()
+}
 
 async function bootstrap() {
   const params = new URLSearchParams(window.location.search)
@@ -36,6 +65,9 @@ async function bootstrap() {
     const { system } = createDemoSystem()
     await memory.save(system)
     store = memory
+  }
+  if (!fixture) {
+    await seedDefaultSystems(store)
   }
 
   const queue = new JobQueue((timing) => {

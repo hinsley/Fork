@@ -58,24 +58,16 @@ export const DEFAULT_RENDER = {
 
 export function createSystem(args: { name: string; config?: SystemConfig }): System {
   const config = args.config ? { ...args.config } : { ...DEFAULT_SYSTEM, name: args.name }
-  const scene = structuredClone(DEFAULT_SCENE)
-  const sceneNode = createTreeNode({
-    id: scene.id,
-    name: scene.name,
-    kind: 'scene',
-    objectType: 'scene',
-    parentId: null,
-  })
 
   return {
     id: makeId('system'),
     name: args.name,
     config,
-    nodes: { [sceneNode.id]: sceneNode },
-    rootIds: [sceneNode.id],
+    nodes: {},
+    rootIds: [],
     objects: {},
     branches: {},
-    scenes: [scene],
+    scenes: [],
     bifurcationDiagrams: [],
     ui: structuredClone(DEFAULT_UI),
     updatedAt: nowIso(),
@@ -444,15 +436,14 @@ export function normalizeSystem(system: System): System {
     ui?: SystemUiState & { layout?: Partial<SystemLayout> }
   }
 
-  if (!next.scenes || next.scenes.length === 0) {
+  if (!next.scenes) {
     next.scenes = [structuredClone(DEFAULT_SCENE)]
-  } else {
-    next.scenes = next.scenes.map((scene) => ({
-      ...scene,
-      selectedNodeIds: scene.selectedNodeIds ?? [],
-      display: scene.display ?? 'all',
-    }))
   }
+  next.scenes = next.scenes.map((scene) => ({
+    ...scene,
+    selectedNodeIds: scene.selectedNodeIds ?? [],
+    display: scene.display ?? 'all',
+  }))
 
   if (!next.bifurcationDiagrams) {
     next.bifurcationDiagrams = []

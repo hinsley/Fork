@@ -39,6 +39,12 @@ export class ForkHarness {
     await this.page.getByTestId('workspace').waitFor()
   }
 
+  async createScene() {
+    await this.page.getByTestId('viewport-insert-empty').click()
+    await this.page.getByTestId('viewport-create-scene').click()
+    await this.page.getByTestId('viewport-workspace').waitFor()
+  }
+
   async createOrbit() {
     await this.page.getByTestId('create-object-button').click()
     await this.page.getByTestId('create-orbit').click()

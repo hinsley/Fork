@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   addObject,
+  addScene,
   createSystem,
   updateLayout,
   updateNodeRender,
@@ -19,18 +20,19 @@ import type { OrbitObject } from './types'
 describe('system serialization', () => {
   it('round-trips UI state in the project bundle', () => {
     const base = createSystem({ name: 'Demo' })
+    const { system: withScene, nodeId: sceneId } = addScene(base, 'Scene 1')
     const orbit: OrbitObject = {
       type: 'orbit',
       name: 'Orbit A',
-      systemName: base.config.name,
+      systemName: withScene.config.name,
       data: [[0, 0, 1]],
       t_start: 0,
       t_end: 0,
       dt: 0.1,
     }
-    const { system: withObject, nodeId } = addObject(base, orbit)
+    const { system: withObject, nodeId } = addObject(withScene, orbit)
     const withLayout = updateLayout(withObject, { leftWidth: 360 })
-    const viewportId = withLayout.rootIds[0]
+    const viewportId = sceneId
     const withHeights = updateViewportHeights(withLayout, { [viewportId]: 320 })
     const withRender = updateNodeRender(withHeights, nodeId, {
       color: '#ff0000',
@@ -49,8 +51,9 @@ describe('system serialization', () => {
 
   it('merges UI and data bundles back into a system', () => {
     const base = createSystem({ name: 'Split' })
-    const withLayout = updateLayout(base, { rightWidth: 400 })
-    const viewportId = withLayout.rootIds[0]
+    const { system: withScene, nodeId: sceneId } = addScene(base, 'Scene 1')
+    const withLayout = updateLayout(withScene, { rightWidth: 400 })
+    const viewportId = sceneId
     const withHeights = updateViewportHeights(withLayout, { [viewportId]: 280 })
 
     const dataBundle = serializeSystemData(withHeights)
@@ -68,7 +71,7 @@ describe('system serialization', () => {
     const { data, ui } = deserializeSystemData(legacy)
 
     expect(data.id).toBe(system.id)
-    expect(ui?.rootIds.length).toBeGreaterThan(0)
+    expect(ui?.rootIds.length).toBe(0)
     expect(ui?.ui.layout.leftWidth).toBe(system.ui.layout.leftWidth)
   })
 })

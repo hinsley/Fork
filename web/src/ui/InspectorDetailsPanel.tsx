@@ -182,7 +182,7 @@ function InspectorMetrics({ rows }: { rows: InspectorMetricRow[] }) {
 
 function InspectorDisclosure({
   title,
-  defaultOpen = true,
+  defaultOpen = false,
   children,
   testId,
 }: {
@@ -1762,7 +1762,6 @@ export function InspectorDetailsPanel({
                 key={`${selectionKey}-orbit-data`}
                 title="Orbit Data"
                 testId="orbit-data-toggle"
-                defaultOpen
               >
                 <div className="inspector-section">
                   <h4 className="inspector-subheading">Summary</h4>
@@ -2216,7 +2215,6 @@ export function InspectorDetailsPanel({
                 key={`${selectionKey}-equilibrium-data`}
                 title="Equilibrium Data"
                 testId="equilibrium-data-toggle"
-                defaultOpen
               >
                 <div className="inspector-section">
                   <h4 className="inspector-subheading">Summary</h4>
@@ -2633,7 +2631,6 @@ export function InspectorDetailsPanel({
               key={`${selectionKey}-limit-cycle-data`}
               title="Limit Cycle Data"
               testId="limit-cycle-data-toggle"
-              defaultOpen
             >
               <div className="inspector-section">
                 <h4 className="inspector-subheading">Summary</h4>
@@ -2940,7 +2937,6 @@ export function InspectorDetailsPanel({
                   key={`${selectionKey}-branch-summary`}
                   title="Branch Summary"
                   testId="branch-summary-toggle"
-                  defaultOpen
                 >
                   <div className="inspector-section">
                     <InspectorMetrics
@@ -3152,7 +3148,6 @@ export function InspectorDetailsPanel({
                   key={`${selectionKey}-branch-point-details`}
                   title="Point Details"
                   testId="branch-point-details-toggle"
-                  defaultOpen
                 >
                   <div className="inspector-section">
                     {selectedBranchPoint ? (

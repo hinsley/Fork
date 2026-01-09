@@ -6,6 +6,7 @@ test('system to viewport smoke', async ({ page }) => {
   await harness.goto({ deterministic: true, mock: true })
 
   await harness.createSystem('Smoke System')
+  await harness.createScene()
 
   await harness.createOrbit()
   await harness.selectTreeNode('Orbit_1')
