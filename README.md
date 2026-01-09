@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="web/public/favicon.svg" alt="Fork logo" width="200" />
+</p>
+
 # Fork
 Fork is a browser-based numerical bifurcation continuation software application, supporting the analysis of smooth finite-dimensional maps and systems of ordinary differential equations.
 The goal is to support all popular mobile and desktop devices.
