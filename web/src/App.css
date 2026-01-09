@@ -256,18 +256,10 @@
   flex-wrap: wrap;
 }
 
-.objects-tree {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
 .objects-tree__list {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  flex: 1;
 }
 
 .context-menu {

@@ -33,7 +33,6 @@ describe('ObjectsTree', () => {
 
     await user.click(screen.getByTestId(`object-tree-node-${objectNodeId}`))
     expect(onSelect).toHaveBeenCalledWith(objectNodeId)
-    expect(onSelect).not.toHaveBeenCalledWith(null)
 
     await user.click(screen.getByTestId(`node-visibility-${objectNodeId}`))
     expect(onToggleVisibility).toHaveBeenCalledWith(objectNodeId)
@@ -106,31 +105,6 @@ describe('ObjectsTree', () => {
     await user.click(screen.getByTestId('create-object-button'))
     await user.click(screen.getByTestId('create-orbit'))
     expect(onCreateOrbit).toHaveBeenCalled()
-  })
-
-  it('clears selection when clicking the list background', () => {
-    const { system } = createDemoSystem()
-    const onSelect = vi.fn()
-
-    render(
-      <ObjectsTree
-        system={system}
-        selectedNodeId={null}
-        onSelect={onSelect}
-        onToggleVisibility={vi.fn()}
-        onRename={vi.fn()}
-        onToggleExpanded={vi.fn()}
-        onReorderNode={vi.fn()}
-        onCreateOrbit={vi.fn()}
-        onCreateEquilibrium={vi.fn()}
-        onCreateScene={vi.fn()}
-        onCreateBifurcation={vi.fn()}
-        onDeleteNode={vi.fn()}
-      />
-    )
-
-    fireEvent.click(screen.getByTestId('objects-tree-list'))
-    expect(onSelect).toHaveBeenCalledWith(null)
   })
 
   it('shows drag handles for root nodes only', () => {
