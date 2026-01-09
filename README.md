@@ -9,8 +9,11 @@ People who have supported Fork on Patreon are listed below.
 ### Current Supporters
 
 - Christopher Hitzel
-- Jacob Price
 - Julien Brenneck
+
+### Past Supporters
+
+- Jacob Price
 
 ## Bifurcations by codimension
 A checkmark denotes that support for the bifurcation type has been implemented.
