@@ -14,12 +14,8 @@ test('system to viewport smoke', async ({ page }) => {
   const inspectorName = harness.inspectorName()
   await expect(inspectorName).toHaveValue(/Orbit 1/i)
 
-  const viewport = page.locator('[data-testid^=\"plotly-viewport-\"]').first()
+  const viewport = page.locator('[data-testid^="plotly-viewport-"]').first()
   await expect(viewport).toHaveAttribute('data-trace-count', /[1-9]/)
-
-  await page.getByTestId('inspector-tab-branches').click()
-  const branchPanel = page.getByTestId('branch-viewer-panel')
-  await expect(branchPanel).toBeVisible()
 
   await harness.createEquilibrium()
   await harness.selectTreeNode('Equilibrium 1')

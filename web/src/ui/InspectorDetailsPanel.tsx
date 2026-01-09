@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import type { Data, Layout } from 'plotly.js'
 import type {
   BifurcationDiagram,
   ComplexValue,
@@ -21,7 +22,7 @@ import type {
   EquilibriumSolveRequest,
   OrbitRunRequest,
 } from '../state/appState'
-import { validateSystemConfig } from '../state/appState'
+import { validateSystemConfig } from '../state/systemValidation'
 import {
   buildSortedArrayOrder,
   ensureBranchIndices,
@@ -724,74 +725,73 @@ export function InspectorDetailsPanel({
     const centerY = (minY + maxY) / 2
     const rangeX: [number, number] = [centerX - halfSpan, centerX + halfSpan]
     const rangeY: [number, number] = [centerY - halfSpan, centerY + halfSpan]
-    return {
-      data: [
+    const data: Data[] = [
+      {
+        x,
+        y,
+        mode: 'markers',
+        type: 'scatter',
+        name: 'Eigenvalues',
+        marker: {
+          color: 'var(--accent)',
+          size: 8,
+          line: { color: 'var(--panel-border)', width: 1 },
+        },
+        hovertemplate: 'Re %{x:.4f}<br>Im %{y:.4f}<extra></extra>',
+      },
+    ]
+    const layout: Partial<Layout> = {
+      autosize: true,
+      margin: { l: 36, r: 16, t: 8, b: 32 },
+      paper_bgcolor: 'rgba(0,0,0,0)',
+      plot_bgcolor: 'rgba(0,0,0,0)',
+      showlegend: false,
+      xaxis: {
+        title: { text: 'Real part', font: { size: 11, color: 'var(--text)' } },
+        zerolinecolor: 'rgba(120,120,120,0.3)',
+        gridcolor: 'rgba(120,120,120,0.15)',
+        tickfont: { size: 10, color: 'var(--text-muted)' },
+        range: rangeX,
+      },
+      yaxis: {
+        title: { text: 'Imaginary part', font: { size: 11, color: 'var(--text)' } },
+        zerolinecolor: 'rgba(120,120,120,0.3)',
+        gridcolor: 'rgba(120,120,120,0.15)',
+        tickfont: { size: 10, color: 'var(--text-muted)' },
+        scaleanchor: 'x',
+        scaleratio: 1,
+        range: rangeY,
+      },
+      annotations: [
         {
-          x,
-          y,
-          mode: 'markers',
-          type: 'scatter',
-          name: 'Eigenvalues',
-          marker: {
-            color: 'var(--accent)',
-            size: 8,
-            line: { color: 'var(--panel-border)', width: 1 },
-          },
-          hovertemplate: 'Re %{x:.4f}<br>Im %{y:.4f}<extra></extra>',
+          x: rangeX[1],
+          y: 0,
+          xref: 'x',
+          yref: 'y',
+          text: 'Re',
+          showarrow: false,
+          xanchor: 'right',
+          yanchor: 'bottom',
+          xshift: -6,
+          yshift: 6,
+          font: { size: 10, color: 'var(--text-muted)' },
+        },
+        {
+          x: 0,
+          y: rangeY[1],
+          xref: 'x',
+          yref: 'y',
+          text: 'Im',
+          showarrow: false,
+          xanchor: 'left',
+          yanchor: 'top',
+          xshift: 6,
+          yshift: -6,
+          font: { size: 10, color: 'var(--text-muted)' },
         },
       ],
-      layout: {
-        autosize: true,
-        margin: { l: 36, r: 16, t: 8, b: 32 },
-        paper_bgcolor: 'rgba(0,0,0,0)',
-        plot_bgcolor: 'rgba(0,0,0,0)',
-        showlegend: false,
-        xaxis: {
-          title: { text: 'Real part', font: { size: 11, color: 'var(--text)' } },
-          zerolinecolor: 'rgba(120,120,120,0.3)',
-          gridcolor: 'rgba(120,120,120,0.15)',
-          tickfont: { size: 10, color: 'var(--text-muted)' },
-          range: rangeX,
-        },
-        yaxis: {
-          title: { text: 'Imaginary part', font: { size: 11, color: 'var(--text)' } },
-          zerolinecolor: 'rgba(120,120,120,0.3)',
-          gridcolor: 'rgba(120,120,120,0.15)',
-          tickfont: { size: 10, color: 'var(--text-muted)' },
-          scaleanchor: 'x',
-          scaleratio: 1,
-          range: rangeY,
-        },
-        annotations: [
-          {
-            x: rangeX[1],
-            y: 0,
-            xref: 'x',
-            yref: 'y',
-            text: 'Re',
-            showarrow: false,
-            xanchor: 'right',
-            yanchor: 'bottom',
-            xshift: -6,
-            yshift: 6,
-            font: { size: 10, color: 'var(--text-muted)' },
-          },
-          {
-            x: 0,
-            y: rangeY[1],
-            xref: 'x',
-            yref: 'y',
-            text: 'Im',
-            showarrow: false,
-            xanchor: 'left',
-            yanchor: 'top',
-            xshift: 6,
-            yshift: -6,
-            font: { size: 10, color: 'var(--text-muted)' },
-          },
-        ],
-      },
     }
+    return { data, layout }
   }, [equilibrium?.solution?.eigenpairs])
 
   useEffect(() => {
