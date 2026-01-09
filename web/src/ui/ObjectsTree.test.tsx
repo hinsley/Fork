@@ -12,7 +12,7 @@ describe('ObjectsTree', () => {
     const onToggleVisibility = vi.fn()
     const onRename = vi.fn()
     const onToggleExpanded = vi.fn()
-    const onMoveNode = vi.fn()
+    const onReorderNode = vi.fn()
 
     render(
       <ObjectsTree
@@ -22,7 +22,7 @@ describe('ObjectsTree', () => {
         onToggleVisibility={onToggleVisibility}
         onRename={onRename}
         onToggleExpanded={onToggleExpanded}
-        onMoveNode={onMoveNode}
+        onReorderNode={onReorderNode}
         onCreateOrbit={vi.fn()}
         onCreateEquilibrium={vi.fn()}
         onCreateScene={vi.fn()}
@@ -58,7 +58,7 @@ describe('ObjectsTree', () => {
         onToggleVisibility={vi.fn()}
         onRename={vi.fn()}
         onToggleExpanded={vi.fn()}
-        onMoveNode={vi.fn()}
+        onReorderNode={vi.fn()}
         onCreateOrbit={vi.fn()}
         onCreateEquilibrium={vi.fn()}
         onCreateScene={vi.fn()}
@@ -90,7 +90,7 @@ describe('ObjectsTree', () => {
         onToggleVisibility={vi.fn()}
         onRename={vi.fn()}
         onToggleExpanded={vi.fn()}
-        onMoveNode={vi.fn()}
+        onReorderNode={vi.fn()}
         onCreateOrbit={onCreateOrbit}
         onCreateEquilibrium={vi.fn()}
         onCreateScene={vi.fn()}
@@ -105,5 +105,29 @@ describe('ObjectsTree', () => {
     await user.click(screen.getByTestId('create-object-button'))
     await user.click(screen.getByTestId('create-orbit'))
     expect(onCreateOrbit).toHaveBeenCalled()
+  })
+
+  it('shows drag handles for root nodes only', () => {
+    const { system, objectNodeId, branchNodeId } = createDemoSystem()
+
+    render(
+      <ObjectsTree
+        system={system}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={vi.fn()}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onCreateScene={vi.fn()}
+        onCreateBifurcation={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    expect(screen.getByTestId(`node-drag-${objectNodeId}`)).toBeInTheDocument()
+    expect(screen.queryByTestId(`node-drag-${branchNodeId}`)).toBeNull()
   })
 })

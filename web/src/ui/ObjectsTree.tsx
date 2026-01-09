@@ -8,7 +8,7 @@ type ObjectsTreeProps = {
   onToggleVisibility: (id: string) => void
   onRename: (id: string, name: string) => void
   onToggleExpanded: (id: string) => void
-  onMoveNode: (id: string, direction: 'up' | 'down') => void
+  onReorderNode: (nodeId: string, targetId: string) => void
   onCreateOrbit: () => void
   onCreateEquilibrium: () => void
   onCreateScene: () => void
@@ -33,7 +33,7 @@ export function ObjectsTree({
   onToggleVisibility,
   onRename,
   onToggleExpanded,
-  onMoveNode,
+  onReorderNode,
   onCreateOrbit,
   onCreateEquilibrium,
   onCreateScene,
@@ -42,6 +42,8 @@ export function ObjectsTree({
 }: ObjectsTreeProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draftName, setDraftName] = useState('')
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [nodeContextMenu, setNodeContextMenu] = useState<{
     id: string
     x: number
@@ -99,11 +101,16 @@ export function ObjectsTree({
     const isSelected = nodeId === selectedNodeId
     const hasChildren = node.children.length > 0
     const isEditing = editingId === nodeId
+    const isRoot = node.parentId === null
+    const isDragging = draggingId === nodeId
+    const isDropTarget = isRoot && dragOverId === nodeId && draggingId !== node.id
 
     return (
       <div key={nodeId} className={`tree-node ${isSelected ? 'tree-node--selected' : ''}`}>
         <div
-          className="tree-node__row"
+          className={`tree-node__row${isDragging ? ' tree-node__row--dragging' : ''}${
+            isDropTarget ? ' tree-node__row--drop' : ''
+          }`}
           style={{ paddingLeft: `${depth * 14}px` }}
           onClick={() => onSelect(nodeId)}
           onContextMenu={(event) => {
@@ -111,6 +118,25 @@ export function ObjectsTree({
             onSelect(nodeId)
             setCreateMenu(null)
             setNodeContextMenu({ id: nodeId, x: event.clientX, y: event.clientY })
+          }}
+          onDragOver={(event) => {
+            if (!isRoot) return
+            const sourceId = draggingId || event.dataTransfer.getData('text/plain')
+            const sourceNode = sourceId ? system.nodes[sourceId] : null
+            if (!sourceId || !sourceNode || sourceNode.parentId !== null) return
+            event.preventDefault()
+            setDragOverId(nodeId)
+          }}
+          onDrop={(event) => {
+            if (!isRoot) return
+            event.preventDefault()
+            const sourceId = event.dataTransfer.getData('text/plain') || draggingId
+            const sourceNode = sourceId ? system.nodes[sourceId] : null
+            if (sourceId && sourceNode?.parentId === null && sourceId !== nodeId) {
+              onReorderNode(sourceId, nodeId)
+            }
+            setDragOverId(null)
+            setDraggingId(null)
           }}
           data-testid={`object-tree-row-${nodeId}`}
         >
@@ -157,24 +183,26 @@ export function ObjectsTree({
               getNodeLabel(node)
             )}
           </button>
-          <div className="tree-node__actions">
+          {isRoot ? (
             <button
-              className="tree-node__action"
-              onClick={() => onMoveNode(nodeId, 'up')}
-              aria-label="Move up"
-              data-testid={`node-move-up-${nodeId}`}
+              className="tree-node__handle"
+              draggable
+              onClick={(event) => event.stopPropagation()}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = 'move'
+                event.dataTransfer.setData('text/plain', nodeId)
+                setDraggingId(nodeId)
+              }}
+              onDragEnd={() => {
+                setDraggingId(null)
+                setDragOverId(null)
+              }}
+              aria-label={`Drag ${node.name}`}
+              data-testid={`node-drag-${nodeId}`}
             >
-              ↑
+              ::
             </button>
-            <button
-              className="tree-node__action"
-              onClick={() => onMoveNode(nodeId, 'down')}
-              aria-label="Move down"
-              data-testid={`node-move-down-${nodeId}`}
-            >
-              ↓
-            </button>
-          </div>
+          ) : null}
         </div>
         {hasChildren && node.expanded ? (
           <div className="tree-node__children">
