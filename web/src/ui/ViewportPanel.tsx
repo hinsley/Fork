@@ -380,10 +380,10 @@ function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
 }
 
 function buildDiagramLayout(diagram: BifurcationDiagram): Partial<Layout> {
-  const hasBranch = Boolean(diagram.branchId)
-  const message = hasBranch
+  const hasBranches = diagram.selectedBranchIds.length > 0
+  const message = hasBranches
     ? 'Bifurcation diagram placeholder. Awaiting design.'
-    : 'Select a branch to configure this diagram.'
+    : 'Select branches to configure this diagram.'
 
   return {
     autosize: true,
