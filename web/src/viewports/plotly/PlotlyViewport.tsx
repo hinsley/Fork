@@ -13,9 +13,15 @@ type PlotlyClickEvent = {
 type PlotlyRelayoutEvent = Record<string, unknown>
 
 type PlotlyEventTarget = HTMLDivElement & {
-  on?: (event: string, handler: (event: any) => void) => void
-  removeListener?: (event: string, handler: (event: any) => void) => void
-  removeAllListeners?: (event: string) => void
+  on?: {
+    (event: 'plotly_click', handler: (event: PlotlyClickEvent) => void): void
+    (event: 'plotly_relayout', handler: (event: PlotlyRelayoutEvent) => void): void
+  }
+  removeListener?: {
+    (event: 'plotly_click', handler: (event: PlotlyClickEvent) => void): void
+    (event: 'plotly_relayout', handler: (event: PlotlyRelayoutEvent) => void): void
+  }
+  removeAllListeners?: (event: 'plotly_click' | 'plotly_relayout') => void
 }
 
 function bindPlotlyClick(

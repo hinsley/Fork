@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { Data, Layout } from 'plotly.js'
 import type { BifurcationDiagram, System, Scene, TreeNode } from '../system/types'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
@@ -424,27 +424,38 @@ function ViewportTile({
   const isSelected = node.id === selectedNodeId
   const isDragging = draggingId === node.id
   const isDropTarget = dragOverId === node.id && draggingId !== node.id
-  const [timeSeriesRange, setTimeSeriesRange] = useState<[number, number] | null>(null)
-  const [plotHeight, setPlotHeight] = useState<number | null>(null)
-
-  useEffect(() => {
-    setTimeSeriesRange(null)
-    setPlotHeight(null)
-  }, [scene?.id])
+  const [timeSeriesState, setTimeSeriesState] = useState<{
+    sceneId: string | null
+    range: [number, number] | null
+    height: number | null
+  }>(() => ({
+    sceneId: scene?.id ?? null,
+    range: null,
+    height: null,
+  }))
+  const activeSceneId = scene?.id ?? null
+  const timeSeriesRange =
+    timeSeriesState.sceneId === activeSceneId ? timeSeriesState.range : null
+  const plotHeight =
+    timeSeriesState.sceneId === activeSceneId ? timeSeriesState.height : null
 
   const handleRelayout = useCallback(
     (event: PlotlyRelayoutEvent) => {
       if (!scene || system.config.varNames.length !== 1) return
       const nextRange = readAxisRange(event, 'yaxis')
       if (nextRange === undefined) return
-      setTimeSeriesRange((prev) => {
-        if (nextRange === null) {
-          return prev === null ? prev : null
+      const sceneId = scene.id
+      setTimeSeriesState((prev) => {
+        if (prev.sceneId !== sceneId) {
+          return { sceneId, range: nextRange ?? null, height: null }
         }
-        if (prev && prev[0] === nextRange[0] && prev[1] === nextRange[1]) {
+        if (nextRange === null) {
+          return prev.range === null ? prev : { ...prev, range: null }
+        }
+        if (prev.range && prev.range[0] === nextRange[0] && prev.range[1] === nextRange[1]) {
           return prev
         }
-        return nextRange
+        return { ...prev, range: nextRange }
       })
     },
     [scene, system.config.varNames.length]
@@ -454,7 +465,16 @@ function ViewportTile({
     (size: { width: number; height: number }) => {
       if (!scene || system.config.varNames.length !== 1) return
       const height = size.height
-      setPlotHeight((prev) => (prev === height ? prev : height))
+      const sceneId = scene.id
+      setTimeSeriesState((prev) => {
+        if (prev.sceneId !== sceneId) {
+          return { sceneId, range: null, height }
+        }
+        if (prev.height === height) {
+          return prev
+        }
+        return { ...prev, height }
+      })
     },
     [scene, system.config.varNames.length]
   )

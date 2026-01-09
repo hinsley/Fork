@@ -475,7 +475,10 @@ export function normalizeSystem(system: System): System {
         : legacy.branchId
           ? [legacy.branchId]
           : []
-      const { branchId: _branchId, xParam: _xParam, yParam: _yParam, ...rest } = legacy
+      const rest = { ...legacy }
+      delete rest.branchId
+      delete rest.xParam
+      delete rest.yParam
       return {
         ...rest,
         xAxis,
