@@ -60,6 +60,7 @@ function buildSceneTraces(
   selectedNodeId: string | null
 ): Data[] {
   const traces: Data[] = []
+  const isTimeSeries = system.config.varNames.length === 1
   const manualSelection = scene.selectedNodeIds ?? []
   const candidateIds =
     manualSelection.length > 0
@@ -67,6 +68,24 @@ function buildSceneTraces(
       : scene.display === 'selection' && selectedNodeId
         ? [selectedNodeId]
         : collectVisibleObjectIds(system)
+  let timeRange: [number, number] | null = null
+  if (isTimeSeries) {
+    let minT = Number.POSITIVE_INFINITY
+    let maxT = Number.NEGATIVE_INFINITY
+    for (const nodeId of candidateIds) {
+      const node = system.nodes[nodeId]
+      if (!node || node.kind !== 'object' || !node.visibility) continue
+      const object = system.objects[nodeId]
+      if (!object || object.type !== 'orbit' || object.data.length === 0) continue
+      const start = Math.min(object.t_start, object.t_end)
+      const end = Math.max(object.t_start, object.t_end)
+      minT = Math.min(minT, start)
+      maxT = Math.max(maxT, end)
+    }
+    if (Number.isFinite(minT) && Number.isFinite(maxT)) {
+      timeRange = [minT, maxT]
+    }
+  }
 
   for (const nodeId of candidateIds) {
     const node = system.nodes[nodeId]
@@ -94,16 +113,52 @@ function buildSceneTraces(
             size,
           },
         })
-      } else {
-        const x = dimension >= 2 ? state[0] : 0
-        const y = dimension >= 2 ? state[1] : state[0]
+      } else if (dimension >= 2) {
         traces.push({
           type: 'scatter',
           mode: 'markers',
           name: object.name,
           uid: nodeId,
-          x: [x],
-          y: [y],
+          x: [state[0]],
+          y: [state[1]],
+          marker: {
+            color: node.render.color,
+            size,
+          },
+        })
+      } else if (isTimeSeries && timeRange && timeRange[0] !== timeRange[1]) {
+        const [start, end] = timeRange
+        const sampleCount = 32
+        const step = (end - start) / (sampleCount - 1)
+        const xs = Array.from({ length: sampleCount }, (_, index) => start + step * index)
+        const ys = xs.map(() => state[0])
+        traces.push({
+          type: 'scatter',
+          mode: 'lines+markers',
+          name: object.name,
+          uid: nodeId,
+          x: xs,
+          y: ys,
+          line: {
+            color: node.render.color,
+            dash: 'dot',
+            width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
+          },
+          marker: {
+            size: 10,
+            color: 'rgba(0,0,0,0)',
+            line: { width: 0 },
+          },
+        })
+      } else {
+        const time = timeRange ? timeRange[0] : 0
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: object.name,
+          uid: nodeId,
+          x: [time],
+          y: [state[0]],
           marker: {
             color: node.render.color,
             size,
@@ -208,6 +263,20 @@ function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
           up: { ...scene.camera.up },
         },
         aspectmode: 'data',
+      },
+    }
+  }
+
+  if (varNames.length === 1) {
+    return {
+      ...base,
+      xaxis: {
+        title: { text: 't' },
+        zerolinecolor: 'rgba(120,120,120,0.3)',
+      },
+      yaxis: {
+        title: { text: varNames[0] ?? 'x' },
+        zerolinecolor: 'rgba(120,120,120,0.3)',
       },
     }
   }
