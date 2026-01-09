@@ -127,7 +127,7 @@ export interface ContinuationObject {
     | 'pd_curve'
     | 'ns_curve'
   data: ContinuationBranchData
-  settings: any
+  settings: ContinuationSettings
   timestamp: string
   params?: number[]
 }

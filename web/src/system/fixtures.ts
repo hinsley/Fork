@@ -1,6 +1,6 @@
 import { addBranch, addObject, createSystem } from './model'
 import { nowIso } from '../utils/determinism'
-import type { ContinuationObject, OrbitObject, System } from './types'
+import type { ContinuationObject, ContinuationSettings, OrbitObject, System } from './types'
 
 export function createDemoSystem(): {
   system: System
@@ -8,6 +8,15 @@ export function createDemoSystem(): {
   branchNodeId: string
 } {
   let system = createSystem({ name: 'Demo System' })
+  const defaultSettings: ContinuationSettings = {
+    step_size: 0.01,
+    min_step_size: 1e-5,
+    max_step_size: 0.1,
+    max_steps: 100,
+    corrector_steps: 4,
+    corrector_tolerance: 1e-6,
+    step_tolerance: 1e-6,
+  }
 
   const orbit: OrbitObject = {
     type: 'orbit',
@@ -47,7 +56,7 @@ export function createDemoSystem(): {
       bifurcations: [],
       indices: [0],
     },
-    settings: {},
+    settings: defaultSettings,
     timestamp: nowIso(),
     params: [],
   }
