@@ -306,6 +306,8 @@ function App() {
                 onUpdateSystem={actions.updateSystem}
                 onValidateSystem={actions.validateSystem}
                 onRunOrbit={actions.runOrbit}
+                onComputeLyapunovExponents={actions.computeLyapunovExponents}
+                onComputeCovariantLyapunovVectors={actions.computeCovariantLyapunovVectors}
                 onSolveEquilibrium={actions.solveEquilibrium}
                 onCreateLimitCycle={actions.createLimitCycleObject}
                 onCreateEquilibriumBranch={actions.createEquilibriumBranch}

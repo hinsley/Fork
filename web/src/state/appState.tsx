@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import type {
   ContinuationProgress,
+  CovariantLyapunovRequest as CoreCovariantLyapunovRequest,
+  CovariantLyapunovResponse,
   ForkCoreClient,
+  LyapunovExponentsRequest as CoreLyapunovExponentsRequest,
   ValidateSystemResult,
 } from '../compute/ForkCoreClient'
 import type { JobTiming } from '../compute/jobQueue'
@@ -11,6 +14,7 @@ import type {
   ContinuationObject,
   ContinuationPoint,
   ContinuationSettings,
+  CovariantLyapunovData,
   EquilibriumObject,
   EquilibriumSolverParams,
   LimitCycleObject,
@@ -89,6 +93,43 @@ function getNodeLabel(node: TreeNode | undefined): string {
   return 'Item'
 }
 
+function reshapeCovariantVectors(
+  payload: CovariantLyapunovResponse
+): CovariantLyapunovData {
+  const { dimension, checkpoints, vectors, times } = payload
+  if (dimension <= 0) {
+    throw new Error('Invalid dimension for covariant Lyapunov vectors.')
+  }
+  if (checkpoints <= 0) {
+    throw new Error('No checkpoints returned for covariant Lyapunov vectors.')
+  }
+  const expected = dimension * dimension * checkpoints
+  if (vectors.length < expected) {
+    throw new Error('Covariant Lyapunov payload is incomplete.')
+  }
+
+  const shaped: number[][][] = []
+  for (let step = 0; step < checkpoints; step += 1) {
+    const base = step * dimension * dimension
+    const stepVectors: number[][] = []
+    for (let vecIdx = 0; vecIdx < dimension; vecIdx += 1) {
+      const vec: number[] = []
+      for (let component = 0; component < dimension; component += 1) {
+        const index = base + component * dimension + vecIdx
+        vec.push(vectors[index])
+      }
+      stepVectors.push(vec)
+    }
+    shaped.push(stepVectors)
+  }
+
+  return {
+    dim: dimension,
+    times: times.slice(0, checkpoints),
+    vectors: shaped,
+  }
+}
+
 export type ContinuationProgressState = {
   label: string
   progress: ContinuationProgress
@@ -99,6 +140,20 @@ export type OrbitRunRequest = {
   initialState: number[]
   duration: number
   dt?: number
+}
+
+export type OrbitLyapunovRequest = {
+  orbitId: string
+  transient: number
+  qrStride: number
+}
+
+export type OrbitCovariantLyapunovRequest = {
+  orbitId: string
+  transient: number
+  forward: number
+  backward: number
+  qrStride: number
 }
 
 export type EquilibriumSolveRequest = {
@@ -211,6 +266,8 @@ type AppActions = {
   createOrbitObject: (name: string) => Promise<string | null>
   createEquilibriumObject: (name: string) => Promise<string | null>
   runOrbit: (request: OrbitRunRequest) => Promise<void>
+  computeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
+  computeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
   solveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   createEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   createBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
@@ -624,6 +681,202 @@ export function AppProvider({
           t_end: result.t_end,
           dt: result.dt,
           parameters: [...system.params],
+        })
+        dispatch({ type: 'SET_SYSTEM', system: updated })
+        await store.save(updated)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const computeLyapunovExponents = useCallback(
+    async (request: OrbitLyapunovRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        const orbit = state.system.objects[request.orbitId]
+        if (!orbit || orbit.type !== 'orbit') {
+          throw new Error('Select a valid orbit to analyze.')
+        }
+        if (!orbit.data || orbit.data.length < 2) {
+          throw new Error('Run an orbit before computing Lyapunov exponents.')
+        }
+
+        const duration = orbit.t_end - orbit.t_start
+        if (!Number.isFinite(duration) || duration <= 0) {
+          throw new Error('Orbit has no duration to analyze.')
+        }
+
+        const dt = orbit.dt || (system.type === 'map' ? 1 : 0.01)
+        if (!Number.isFinite(dt) || dt <= 0) {
+          throw new Error('Invalid step size detected for this orbit.')
+        }
+
+        if (!Number.isFinite(request.transient) || request.transient < 0) {
+          throw new Error('Transient time must be non-negative.')
+        }
+        if (!Number.isFinite(request.qrStride) || request.qrStride <= 0) {
+          throw new Error('QR stride must be a positive integer.')
+        }
+
+        const transient = Math.min(Math.max(request.transient, 0), duration)
+        const targetTime = orbit.t_start + transient
+
+        let startIndex = orbit.data.length - 1
+        for (let i = 0; i < orbit.data.length; i += 1) {
+          if (orbit.data[i][0] >= targetTime) {
+            startIndex = i
+            break
+          }
+        }
+
+        if (startIndex >= orbit.data.length - 1) {
+          throw new Error('Transient leaves no data to analyze.')
+        }
+
+        const steps = orbit.data.length - startIndex - 1
+        const qrStride = Math.max(Math.trunc(request.qrStride), 1)
+        const startState = orbit.data[startIndex].slice(1)
+        const startTime = orbit.data[startIndex][0]
+
+        const payload: CoreLyapunovExponentsRequest = {
+          system,
+          startState,
+          startTime,
+          steps,
+          dt,
+          qrStride,
+        }
+        const exponents = await client.computeLyapunovExponents(payload)
+        const updated = updateObject(state.system, request.orbitId, {
+          lyapunovExponents: exponents,
+        })
+        dispatch({ type: 'SET_SYSTEM', system: updated })
+        await store.save(updated)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const computeCovariantLyapunovVectors = useCallback(
+    async (request: OrbitCovariantLyapunovRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        const orbit = state.system.objects[request.orbitId]
+        if (!orbit || orbit.type !== 'orbit') {
+          throw new Error('Select a valid orbit to analyze.')
+        }
+        if (!orbit.data || orbit.data.length < 2) {
+          throw new Error('Run an orbit before computing covariant vectors.')
+        }
+
+        const duration = orbit.t_end - orbit.t_start
+        if (!Number.isFinite(duration) || duration <= 0) {
+          throw new Error('Orbit has no duration to analyze.')
+        }
+
+        const dt = orbit.dt || (system.type === 'map' ? 1 : 0.01)
+        if (!Number.isFinite(dt) || dt <= 0) {
+          throw new Error('Invalid step size detected for this orbit.')
+        }
+
+        if (!Number.isFinite(request.transient) || request.transient < 0) {
+          throw new Error('Transient time must be non-negative.')
+        }
+        if (!Number.isFinite(request.forward) || request.forward < 0) {
+          throw new Error('Forward transient must be non-negative.')
+        }
+        if (!Number.isFinite(request.backward) || request.backward < 0) {
+          throw new Error('Backward transient must be non-negative.')
+        }
+        if (!Number.isFinite(request.qrStride) || request.qrStride <= 0) {
+          throw new Error('QR stride must be a positive integer.')
+        }
+
+        const transient = Math.min(Math.max(request.transient, 0), duration)
+        const totalAvailable = duration - transient
+        if (totalAvailable <= 0) {
+          throw new Error('Transient leaves no data to analyze.')
+        }
+
+        const forwardTime = Math.max(Math.min(request.forward, totalAvailable - dt), 0)
+        const backwardTime = Math.max(request.backward, 0)
+        const qrStride = Math.max(Math.trunc(request.qrStride), 1)
+
+        if (transient + forwardTime + backwardTime >= duration) {
+          throw new Error('Transient windows exceed the trajectory duration.')
+        }
+
+        const targetTime = orbit.t_start + transient
+        let startIndex = orbit.data.length - 1
+        for (let i = 0; i < orbit.data.length; i += 1) {
+          if (orbit.data[i][0] >= targetTime) {
+            startIndex = i
+            break
+          }
+        }
+        if (startIndex >= orbit.data.length - 1) {
+          throw new Error('Transient leaves no data to analyze.')
+        }
+
+        const stepsAvailable = orbit.data.length - startIndex - 1
+        if (stepsAvailable <= 0) {
+          throw new Error('Not enough samples beyond the transient point.')
+        }
+
+        const forwardSteps = Math.min(
+          Math.max(Math.floor(forwardTime / dt), 0),
+          Math.max(stepsAvailable - 1, 0)
+        )
+        if (forwardSteps >= stepsAvailable) {
+          throw new Error('Forward transient exceeds available samples.')
+        }
+
+        const windowSteps = Math.max(stepsAvailable - forwardSteps, 0)
+        if (windowSteps === 0) {
+          throw new Error('No samples remain for the analysis window.')
+        }
+
+        const backwardSteps = Math.max(Math.floor(backwardTime / dt), 0)
+        const startState = orbit.data[startIndex].slice(1)
+        const startTime = orbit.data[startIndex][0]
+
+        const payload: CoreCovariantLyapunovRequest = {
+          system,
+          startState,
+          startTime,
+          windowSteps,
+          dt,
+          qrStride,
+          forwardTransient: forwardSteps,
+          backwardTransient: backwardSteps,
+        }
+
+        const response = await client.computeCovariantLyapunovVectors(payload)
+        const covariantVectors = reshapeCovariantVectors(response)
+        const updated = updateObject(state.system, request.orbitId, {
+          covariantVectors,
         })
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.save(updated)
@@ -1131,6 +1384,8 @@ export function AppProvider({
       createOrbitObject,
       createEquilibriumObject,
       runOrbit,
+      computeLyapunovExponents,
+      computeCovariantLyapunovVectors,
       solveEquilibrium,
       createEquilibriumBranch,
       createBranchFromPoint,
@@ -1145,6 +1400,8 @@ export function AppProvider({
       createLimitCycleObject,
       createOrbitObject,
       runOrbit,
+      computeLyapunovExponents,
+      computeCovariantLyapunovVectors,
       solveEquilibrium,
       createEquilibriumBranch,
       createBranchFromPoint,

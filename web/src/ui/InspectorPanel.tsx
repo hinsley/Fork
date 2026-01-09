@@ -5,6 +5,8 @@ import type {
   EquilibriumContinuationRequest,
   EquilibriumSolveRequest,
   LimitCycleCreateRequest,
+  OrbitCovariantLyapunovRequest,
+  OrbitLyapunovRequest,
   OrbitRunRequest,
 } from '../state/appState'
 
@@ -30,6 +32,8 @@ type InspectorPanelProps = {
     message?: string
   }>
   onRunOrbit: (request: OrbitRunRequest) => Promise<void>
+  onComputeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
+  onComputeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
   onSolveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   onCreateLimitCycle: (request: LimitCycleCreateRequest) => Promise<void>
   onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
@@ -54,6 +58,8 @@ export function InspectorPanel({
   onUpdateSystem,
   onValidateSystem,
   onRunOrbit,
+  onComputeLyapunovExponents,
+  onComputeCovariantLyapunovVectors,
   onSolveEquilibrium,
   onCreateLimitCycle,
   onCreateEquilibriumBranch,
@@ -88,6 +94,8 @@ export function InspectorPanel({
           onUpdateSystem={onUpdateSystem}
           onValidateSystem={onValidateSystem}
           onRunOrbit={onRunOrbit}
+          onComputeLyapunovExponents={onComputeLyapunovExponents}
+          onComputeCovariantLyapunovVectors={onComputeCovariantLyapunovVectors}
           onSolveEquilibrium={onSolveEquilibrium}
           onCreateLimitCycle={onCreateLimitCycle}
           onCreateEquilibriumBranch={onCreateEquilibriumBranch}
