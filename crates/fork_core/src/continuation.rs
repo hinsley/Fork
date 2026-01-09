@@ -282,6 +282,7 @@ pub struct ContinuationRunner<P: ContinuationProblem> {
     prev_diag: PointDiagnostics,
     step_size: f64,
     current_index: i32,
+    index_step: i32,
     consecutive_failures: usize,
     current_step: usize,
     max_steps: usize,
@@ -344,6 +345,8 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             prev_tangent = -prev_tangent;
         }
         
+        let index_step = if forward { 1 } else { -1 };
+
         Ok(Self {
             problem,
             prev_aug,
@@ -351,6 +354,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             prev_diag,
             step_size: settings.step_size,
             current_index: 0,
+            index_step,
             consecutive_failures: 0,
             current_step: 0,
             max_steps: settings.max_steps,
@@ -415,6 +419,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             prev_diag,
             step_size: settings.step_size,
             current_index: 0,
+            index_step: 1,
             consecutive_failures: 0,
             current_step: 0,
             max_steps: settings.max_steps,
@@ -560,9 +565,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
                 (corrected_aug.clone(), diagnostics.clone())
             };
             
-            // Determine forward direction based on tangent
-            let forward_sign = if self.prev_tangent[0] >= 0.0 { 1 } else { -1 };
-            self.current_index += forward_sign;
+            self.current_index += self.index_step;
             
             let new_point = ContinuationPoint {
                 state: final_aug.rows(1, self.dim).iter().cloned().collect(),
@@ -1952,6 +1955,7 @@ fn solve_palc(
 mod tests {
     use super::*;
     use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
+    use nalgebra::{DMatrix, DVector};
 
     #[test]
     fn test_palc_simple_fold() {
@@ -2073,5 +2077,64 @@ mod tests {
             "Hopf should be near mu=0, found at mu={:.6}",
             hopf_param
         );
+    }
+
+    #[derive(Default)]
+    struct ZeroResidualProblem;
+
+    impl ContinuationProblem for ZeroResidualProblem {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn residual(&mut self, _aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
+            out[0] = 0.0;
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, _aug_state: &DVector<f64>) -> Result<DMatrix<f64>> {
+            Ok(DMatrix::from_row_slice(1, 2, &[0.0, 1.0]))
+        }
+
+        fn diagnostics(&mut self, _aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
+            Ok(PointDiagnostics {
+                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+                eigenvalues: Vec::new(),
+            })
+        }
+    }
+
+    #[test]
+    fn test_runner_indices_ignore_tangent_sign_flips() {
+        let settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-5,
+            max_step_size: 0.2,
+            max_steps: 5,
+            corrector_steps: 2,
+            corrector_tolerance: 1e-6,
+            step_tolerance: 1e-6,
+        };
+
+        let initial_point = ContinuationPoint {
+            state: vec![0.0],
+            param_value: 0.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+        };
+
+        let mut runner = ContinuationRunner::new(
+            ZeroResidualProblem::default(),
+            initial_point,
+            settings,
+            true,
+        )
+        .expect("runner init");
+
+        assert!(runner.single_step().expect("first step"));
+        runner.prev_tangent[0] = -runner.prev_tangent[0];
+        assert!(runner.single_step().expect("second step"));
+
+        assert_eq!(runner.branch.indices, vec![0, 1, 2]);
     }
 }
