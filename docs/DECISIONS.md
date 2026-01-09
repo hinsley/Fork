@@ -21,6 +21,21 @@ References:
 
 ---
 
+### 2026-01-09: Enforce CLI-safe names across the UI
+Context:
+Web object/branch defaults historically used spaces, while the CLI requires names to be
+alphanumeric with underscores only for storage and command parity.
+Decision:
+Treat object/branch/system names as CLI-safe identifiers (`[a-zA-Z0-9_]`) everywhere.
+Web defaults now sanitize spaces to underscores and UI validation blocks invalid names.
+Why:
+Prevents CLI/web mismatch and avoids invalid filenames when persisting objects and branches.
+Impact:
+Creation/rename flows in the web UI now reject non-CLI-safe names and suggest underscore defaults.
+References:
+`cli/src/naming.ts`, `web/src/utils/naming.ts`, `web/src/state/appState.tsx`,
+`web/src/ui/InspectorDetailsPanel.tsx`, `web/src/App.tsx`
+
 ### 2026-01-08: Split system UI persistence from core data
 Context:
 The web UI now needs per-project layout/render state (viewport sizing/order, render styles, etc.)
