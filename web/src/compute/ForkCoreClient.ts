@@ -1,4 +1,18 @@
-import type { EquilibriumSolution, SystemConfig } from '../system/types'
+import type {
+  ContinuationBranchData,
+  ContinuationSettings,
+  EquilibriumSolution,
+  SystemConfig,
+} from '../system/types'
+
+export type ContinuationProgress = {
+  done: boolean
+  current_step: number
+  max_steps: number
+  points_computed: number
+  bifurcations_found: number
+  current_param: number
+}
 
 export type SimulateOrbitRequest = {
   system: SystemConfig
@@ -33,6 +47,16 @@ export type SolveEquilibriumRequest = {
 
 export type SolveEquilibriumResult = EquilibriumSolution
 
+export type EquilibriumContinuationRequest = {
+  system: SystemConfig
+  equilibriumState: number[]
+  parameterName: string
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type EquilibriumContinuationResult = ContinuationBranchData
+
 export interface ForkCoreClient {
   simulateOrbit(
     request: SimulateOrbitRequest,
@@ -42,6 +66,10 @@ export interface ForkCoreClient {
     request: SolveEquilibriumRequest,
     opts?: { signal?: AbortSignal }
   ): Promise<SolveEquilibriumResult>
+  runEquilibriumContinuation(
+    request: EquilibriumContinuationRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<EquilibriumContinuationResult>
   validateSystem(
     request: ValidateSystemRequest,
     opts?: { signal?: AbortSignal }

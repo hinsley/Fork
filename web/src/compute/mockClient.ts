@@ -1,4 +1,7 @@
 import type {
+  ContinuationProgress,
+  EquilibriumContinuationRequest,
+  EquilibriumContinuationResult,
   ForkCoreClient,
   SolveEquilibriumRequest,
   SolveEquilibriumResult,
@@ -107,6 +110,53 @@ export class MockForkCoreClient implements ForkCoreClient {
           iterations: 1,
           jacobian: [],
           eigenpairs: [],
+        }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runEquilibriumContinuation(
+    request: EquilibriumContinuationRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<EquilibriumContinuationResult> {
+    const job = this.queue.enqueue(
+      'runEquilibriumContinuation',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const progress: ContinuationProgress = {
+          done: false,
+          current_step: 0,
+          max_steps: request.settings.max_steps,
+          points_computed: 0,
+          bifurcations_found: 0,
+          current_param: request.system.params[0] ?? 0,
+        }
+        opts?.onProgress?.(progress)
+
+        progress.done = true
+        progress.current_step = request.settings.max_steps
+        progress.points_computed = 3
+        opts?.onProgress?.({ ...progress })
+
+        return {
+          points: [
+            {
+              state: request.equilibriumState,
+              param_value: request.system.params[0] ?? 0,
+              stability: 'None',
+              eigenvalues: [],
+            },
+          ],
+          bifurcations: [],
+          indices: [0],
         }
       },
       opts

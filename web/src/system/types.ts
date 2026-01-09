@@ -67,6 +67,16 @@ export interface ContinuationEigenvalue {
   im: number
 }
 
+export interface ContinuationSettings {
+  step_size: number
+  min_step_size: number
+  max_step_size: number
+  max_steps: number
+  corrector_steps: number
+  corrector_tolerance: number
+  step_tolerance: number
+}
+
 export interface ContinuationPoint {
   state: number[]
   param_value: number

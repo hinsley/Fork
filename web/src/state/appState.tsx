@@ -1,9 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
-import type { ForkCoreClient, ValidateSystemResult } from '../compute/ForkCoreClient'
+import type {
+  ContinuationProgress,
+  ForkCoreClient,
+  ValidateSystemResult,
+} from '../compute/ForkCoreClient'
 import type { JobTiming } from '../compute/jobQueue'
 import { createSystem } from '../system/model'
 import type {
   BifurcationDiagram,
+  ContinuationObject,
+  ContinuationPoint,
+  ContinuationSettings,
   EquilibriumObject,
   EquilibriumSolverParams,
   LimitCycleObject,
@@ -17,6 +24,7 @@ import type {
 import type { SystemStore } from '../system/store'
 import {
   addBifurcationDiagram,
+  addBranch,
   addObject,
   addScene,
   moveNode,
@@ -34,10 +42,30 @@ import {
   updateScene,
   updateSystem,
 } from '../system/model'
+import { getBranchParams, normalizeBranchEigenvalues } from '../system/continuation'
 import { downloadSystem, readSystemFile } from '../system/importExport'
 
 const CLI_SAFE_NAME = /^[a-zA-Z0-9_]+$/
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*$/
+
+function findObjectIdByName(system: System, name: string): string | null {
+  const match = Object.entries(system.objects).find(([, obj]) => obj.name === name)
+  return match ? match[0] : null
+}
+
+function branchNameExists(system: System, parentName: string, name: string): boolean {
+  return Object.values(system.branches).some(
+    (branch) => branch.parentObject === parentName && branch.name === name
+  )
+}
+
+function validateBranchName(name: string): string | null {
+  if (!name.trim()) return 'Branch name is required.'
+  if (!CLI_SAFE_NAME.test(name)) {
+    return 'Branch names must be alphanumeric with underscores only.'
+  }
+  return null
+}
 
 export type SystemValidation = {
   valid: boolean
@@ -52,6 +80,11 @@ export type SystemValidation = {
   warnings: string[]
 }
 
+export type ContinuationProgressState = {
+  label: string
+  progress: ContinuationProgress
+}
+
 export type OrbitRunRequest = {
   orbitId: string
   initialState: number[]
@@ -64,6 +97,23 @@ export type EquilibriumSolveRequest = {
   initialGuess: number[]
   maxSteps: number
   dampingFactor: number
+}
+
+export type EquilibriumContinuationRequest = {
+  equilibriumId: string
+  name: string
+  parameterName: string
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type BranchContinuationRequest = {
+  branchId: string
+  pointIndex: number
+  name: string
+  parameterName: string
+  settings: ContinuationSettings
+  forward: boolean
 }
 
 export type LimitCycleCreateRequest = {
@@ -164,6 +214,7 @@ type AppState = {
   busy: boolean
   error: string | null
   timings: JobTiming[]
+  continuationProgress: ContinuationProgressState | null
 }
 
 type AppAction =
@@ -172,6 +223,7 @@ type AppAction =
   | { type: 'SET_BUSY'; busy: boolean }
   | { type: 'SET_ERROR'; error: string | null }
   | { type: 'ADD_TIMING'; timing: JobTiming }
+  | { type: 'SET_CONTINUATION_PROGRESS'; progress: ContinuationProgressState | null }
 
 const initialState: AppState = {
   system: null,
@@ -179,6 +231,7 @@ const initialState: AppState = {
   busy: false,
   error: null,
   timings: [],
+  continuationProgress: null,
 }
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -193,6 +246,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, error: action.error }
     case 'ADD_TIMING':
       return { ...state, timings: [action.timing, ...state.timings].slice(0, 100) }
+    case 'SET_CONTINUATION_PROGRESS':
+      return { ...state, continuationProgress: action.progress }
     default:
       return state
   }
@@ -229,6 +284,8 @@ type AppActions = {
   createEquilibriumObject: (name: string) => Promise<string | null>
   runOrbit: (request: OrbitRunRequest) => Promise<void>
   solveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
+  createEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
+  createBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
   createLimitCycleObject: (request: LimitCycleCreateRequest) => Promise<void>
   addScene: (name: string) => Promise<void>
   addBifurcationDiagram: (name: string) => Promise<void>
@@ -774,6 +831,201 @@ export function AppProvider({
     [client, state.system, store]
   )
 
+  const createEquilibriumBranch = useCallback(
+    async (request: EquilibriumContinuationRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (system.paramNames.length === 0) {
+          throw new Error('System has no parameters to continue.')
+        }
+        const equilibrium = state.system.objects[request.equilibriumId]
+        if (!equilibrium || equilibrium.type !== 'equilibrium') {
+          throw new Error('Select a valid equilibrium to continue.')
+        }
+        if (!equilibrium.solution) {
+          throw new Error('Solve the equilibrium before continuing.')
+        }
+
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        if (branchNameExists(state.system, equilibrium.name, name)) {
+          throw new Error(`Branch "${name}" already exists.`)
+        }
+        if (!system.paramNames.includes(request.parameterName)) {
+          throw new Error('Select a valid continuation parameter.')
+        }
+
+        const runConfig: SystemConfig = { ...system }
+        if (
+          equilibrium.parameters &&
+          equilibrium.parameters.length === system.params.length
+        ) {
+          runConfig.params = [...equilibrium.parameters]
+        }
+
+        const branchData = await client.runEquilibriumContinuation(
+          {
+            system: runConfig,
+            equilibriumState: equilibrium.solution.state,
+            parameterName: request.parameterName,
+            settings: request.settings,
+            forward: request.forward,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Equilibrium continuation', progress },
+              }),
+          }
+        )
+
+        const normalized = normalizeBranchEigenvalues(branchData)
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name,
+          systemName: system.name,
+          parameterName: request.parameterName,
+          parentObject: equilibrium.name,
+          startObject: equilibrium.name,
+          branchType: 'equilibrium',
+          data: normalized,
+          settings: request.settings,
+          timestamp: new Date().toISOString(),
+          params: [...runConfig.params],
+        }
+
+        const parentNodeId = findObjectIdByName(state.system, equilibrium.name)
+        if (!parentNodeId) {
+          throw new Error('Unable to locate the parent equilibrium in the tree.')
+        }
+
+        const created = addBranch(state.system, branch, parentNodeId)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const createBranchFromPoint = useCallback(
+    async (request: BranchContinuationRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (system.paramNames.length === 0) {
+          throw new Error('System has no parameters to continue.')
+        }
+
+        const sourceBranch = state.system.branches[request.branchId]
+        if (!sourceBranch) {
+          throw new Error('Select a valid branch to continue.')
+        }
+        if (sourceBranch.branchType !== 'equilibrium') {
+          throw new Error('Branch continuation is only available for equilibrium branches.')
+        }
+
+        const point: ContinuationPoint | undefined =
+          sourceBranch.data.points[request.pointIndex]
+        if (!point) {
+          throw new Error('Select a valid branch point.')
+        }
+
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+          throw new Error(`Branch "${name}" already exists.`)
+        }
+        if (!system.paramNames.includes(request.parameterName)) {
+          throw new Error('Select a valid continuation parameter.')
+        }
+
+        const runConfig: SystemConfig = { ...system }
+        runConfig.params = getBranchParams(state.system, sourceBranch)
+
+        const sourceParamIdx = system.paramNames.indexOf(sourceBranch.parameterName)
+        if (sourceParamIdx >= 0) {
+          runConfig.params[sourceParamIdx] = point.param_value
+        }
+
+        const branchData = await client.runEquilibriumContinuation(
+          {
+            system: runConfig,
+            equilibriumState: point.state,
+            parameterName: request.parameterName,
+            settings: request.settings,
+            forward: request.forward,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Equilibrium continuation', progress },
+              }),
+          }
+        )
+
+        const normalized = normalizeBranchEigenvalues(branchData)
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name,
+          systemName: system.name,
+          parameterName: request.parameterName,
+          parentObject: sourceBranch.parentObject,
+          startObject: sourceBranch.name,
+          branchType: 'equilibrium',
+          data: normalized,
+          settings: request.settings,
+          timestamp: new Date().toISOString(),
+          params: [...runConfig.params],
+        }
+
+        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        if (!parentNodeId) {
+          throw new Error('Unable to locate the parent equilibrium in the tree.')
+        }
+
+        const created = addBranch(state.system, branch, parentNodeId)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
   const createLimitCycleObject = useCallback(
     async (request: LimitCycleCreateRequest) => {
       if (!state.system) return
@@ -926,6 +1178,8 @@ export function AppProvider({
       createEquilibriumObject,
       runOrbit,
       solveEquilibrium,
+      createEquilibriumBranch,
+      createBranchFromPoint,
       createLimitCycleObject,
       addScene: addSceneAction,
       addBifurcationDiagram: addBifurcationDiagramAction,
@@ -938,6 +1192,8 @@ export function AppProvider({
       createOrbitObject,
       runOrbit,
       solveEquilibrium,
+      createEquilibriumBranch,
+      createBranchFromPoint,
       addBifurcationDiagramAction,
       createSystemAction,
       deleteSystem,
