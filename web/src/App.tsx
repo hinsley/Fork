@@ -274,6 +274,8 @@ function App() {
                 onToggleViewport={actions.toggleExpanded}
                 onCreateScene={createScene}
                 onCreateBifurcation={createBifurcation}
+                onRenameViewport={actions.renameNode}
+                onDeleteViewport={actions.deleteNode}
               />
             </Panel>
           </div>

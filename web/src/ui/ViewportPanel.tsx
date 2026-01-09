@@ -22,6 +22,8 @@ type ViewportPanelProps = {
   onToggleViewport: (id: string) => void
   onCreateScene: (targetId?: string | null) => void
   onCreateBifurcation: (targetId?: string | null) => void
+  onRenameViewport: (id: string, name: string) => void
+  onDeleteViewport: (id: string) => void
 }
 
 type ViewportEntry = {
@@ -43,6 +45,12 @@ type ViewportTileProps = {
   onReorderViewport: (nodeId: string, targetId: string) => void
   onResizeStart: (id: string, event: React.PointerEvent) => void
   onToggleViewport: (id: string) => void
+  onContextMenu: (event: React.MouseEvent, nodeId: string) => void
+  isEditing: boolean
+  draftName: string
+  onDraftNameChange: (value: string) => void
+  onCommitRename: () => void
+  onCancelRename: () => void
 }
 
 type PlotlyRelayoutEvent = Record<string, unknown>
@@ -643,6 +651,12 @@ function ViewportTile({
   onReorderViewport,
   onResizeStart,
   onToggleViewport,
+  onContextMenu,
+  isEditing,
+  draftName,
+  onDraftNameChange,
+  onCommitRename,
+  onCancelRename,
 }: ViewportTileProps) {
   const { node, scene, diagram } = entry
   const isSelected = node.id === selectedNodeId
@@ -751,6 +765,7 @@ function ViewportTile({
       <header
         className={`viewport-tile__header ${isDragging ? 'is-dragging' : ''}`}
         onClick={() => onSelectViewport(node.id)}
+        onContextMenu={(event) => onContextMenu(event, node.id)}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
@@ -790,10 +805,26 @@ function ViewportTile({
         >
           ::
         </button>
-        <div className="viewport-tile__title">
-          <span>{node.name}</span>
-          <span className="viewport-tile__meta">{label}</span>
-        </div>
+        {isEditing ? (
+          <input
+            className="viewport-tile__rename"
+            value={draftName}
+            autoFocus
+            onChange={(event) => onDraftNameChange(event.target.value)}
+            onClick={(event) => event.stopPropagation()}
+            onBlur={onCommitRename}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') onCommitRename()
+              if (event.key === 'Escape') onCancelRename()
+            }}
+            data-testid={`viewport-rename-input-${node.id}`}
+          />
+        ) : (
+          <div className="viewport-tile__title">
+            <span>{node.name}</span>
+            <span className="viewport-tile__meta">{label}</span>
+          </div>
+        )}
       </header>
       {isCollapsed ? null : (
         <>
@@ -828,13 +859,22 @@ export function ViewportPanel({
   onToggleViewport,
   onCreateScene,
   onCreateBifurcation,
+  onRenameViewport,
+  onDeleteViewport,
 }: ViewportPanelProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draftName, setDraftName] = useState('')
   const [createMenu, setCreateMenu] = useState<{
     x: number
     y: number
     targetId: string | null
+  } | null>(null)
+  const [nodeContextMenu, setNodeContextMenu] = useState<{
+    id: string
+    x: number
+    y: number
   } | null>(null)
   const viewportHeights = system.ui.viewportHeights
   const tileRefs = useRef(new Map<string, HTMLDivElement | null>())
@@ -863,12 +903,22 @@ export function ViewportPanel({
   }, [system])
 
   useEffect(() => {
-    if (!createMenu) return
-    const handlePointerDown = () => setCreateMenu(null)
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setCreateMenu(null)
+    if (!createMenu && !nodeContextMenu) return
+    const handlePointerDown = () => {
+      setCreateMenu(null)
+      setNodeContextMenu(null)
     }
-    const handleBlur = () => setCreateMenu(null)
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setCreateMenu(null)
+        setNodeContextMenu(null)
+        setEditingId(null)
+      }
+    }
+    const handleBlur = () => {
+      setCreateMenu(null)
+      setNodeContextMenu(null)
+    }
     window.addEventListener('pointerdown', handlePointerDown)
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('blur', handleBlur)
@@ -877,12 +927,38 @@ export function ViewportPanel({
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('blur', handleBlur)
     }
-  }, [createMenu])
+  }, [createMenu, nodeContextMenu])
 
   const openCreateMenu = (event: React.MouseEvent, targetId: string | null) => {
     event.preventDefault()
     event.stopPropagation()
+    setNodeContextMenu(null)
     setCreateMenu({ x: event.clientX, y: event.clientY, targetId })
+  }
+
+  const openNodeMenu = (event: React.MouseEvent, nodeId: string) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onSelectViewport(nodeId)
+    setCreateMenu(null)
+    setNodeContextMenu({ id: nodeId, x: event.clientX, y: event.clientY })
+  }
+
+  const startRename = (node: TreeNode) => {
+    setEditingId(node.id)
+    setDraftName(node.name)
+  }
+
+  const commitRename = (node: TreeNode) => {
+    const trimmed = draftName.trim()
+    if (trimmed && trimmed !== node.name) {
+      onRenameViewport(node.id, trimmed)
+    }
+    setEditingId(null)
+  }
+
+  const cancelRename = () => {
+    setEditingId(null)
   }
 
   const startResize = (id: string, event: React.PointerEvent) => {
@@ -942,6 +1018,7 @@ export function ViewportPanel({
         const height = viewportHeights[entry.node.id]
         const isCollapsed = !entry.node.expanded
         const targetId = viewports[index + 1]?.node.id ?? null
+        const isEditing = editingId === entry.node.id
 
         return (
           <Fragment key={entry.node.id}>
@@ -965,6 +1042,12 @@ export function ViewportPanel({
                 onReorderViewport={onReorderViewport}
                 onResizeStart={startResize}
                 onToggleViewport={onToggleViewport}
+                onContextMenu={openNodeMenu}
+                isEditing={isEditing}
+                draftName={isEditing ? draftName : entry.node.name}
+                onDraftNameChange={(value) => setDraftName(value)}
+                onCommitRename={() => commitRename(entry.node)}
+                onCancelRename={cancelRename}
               />
             </div>
             <div className="viewport-insert" data-testid={`viewport-insert-${entry.node.id}`}>
@@ -1005,6 +1088,36 @@ export function ViewportPanel({
             data-testid="viewport-create-bifurcation"
           >
             Bifurcation Diagram
+          </button>
+        </div>
+      ) : null}
+      {nodeContextMenu ? (
+        <div
+          className="context-menu"
+          style={{ left: nodeContextMenu.x, top: nodeContextMenu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+          data-testid="viewport-context-menu"
+        >
+          <button
+            className="context-menu__item"
+            onClick={() => {
+              const node = system.nodes[nodeContextMenu.id]
+              if (node) startRename(node)
+              setNodeContextMenu(null)
+            }}
+            data-testid="viewport-context-rename"
+          >
+            Rename
+          </button>
+          <button
+            className="context-menu__item"
+            onClick={() => {
+              onDeleteViewport(nodeContextMenu.id)
+              setNodeContextMenu(null)
+            }}
+            data-testid="viewport-context-delete"
+          >
+            Delete
           </button>
         </div>
       ) : null}
