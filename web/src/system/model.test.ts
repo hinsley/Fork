@@ -119,6 +119,7 @@ describe('system model', () => {
 
     const { system: withObject, nodeId } = addObject(system, orbit)
     const updated = updateSystem(withObject, { ...withObject.config, name: 'Renamed' })
+    expect(updated.name).toBe('Renamed')
     expect(updated.config.name).toBe('Renamed')
     expect(updated.objects[nodeId].systemName).toBe('Renamed')
   })
