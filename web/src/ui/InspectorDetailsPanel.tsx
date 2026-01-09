@@ -17,7 +17,7 @@ import type {
 } from '../system/types'
 import { DEFAULT_RENDER } from '../system/model'
 import {
-  DEFAULT_CLV_RENDER,
+  defaultClvIndices,
   parseClvIndicesText,
   resolveClvColors,
   resolveClvRender,
@@ -2007,7 +2007,7 @@ export function InspectorDetailsPanel({
                     <input
                       type="text"
                       value={clvIndexDraft}
-                      placeholder={DEFAULT_CLV_RENDER.vectorIndices.join(', ')}
+                      placeholder={defaultClvIndices(clvDim).join(', ')}
                       onChange={(event) => handleClvIndicesChange(event.target.value)}
                       onBlur={commitClvIndices}
                       onKeyDown={(event) => {

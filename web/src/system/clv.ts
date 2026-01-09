@@ -22,6 +22,13 @@ export const DEFAULT_CLV_RENDER: ClvRenderStyle = {
   colors: [CLV_COLOR_PALETTE[0]],
 }
 
+export function defaultClvIndices(dim?: number): number[] {
+  if (typeof dim === 'number' && Number.isFinite(dim) && dim > 0) {
+    return Array.from({ length: Math.trunc(dim) }, (_, index) => index)
+  }
+  return DEFAULT_CLV_RENDER.vectorIndices
+}
+
 function defaultClvColor(index: number): string {
   const paletteIndex = index % CLV_COLOR_PALETTE.length
   return CLV_COLOR_PALETTE[paletteIndex]
@@ -87,13 +94,12 @@ export function resolveClvRender(
   dim?: number
 ): ClvRenderStyle {
   const hasIndices = Array.isArray(render?.vectorIndices)
-  const indices = normalizeClvIndices(
-    hasIndices ? render?.vectorIndices ?? [] : DEFAULT_CLV_RENDER.vectorIndices,
-    dim
-  )
+  const fallbackIndices = defaultClvIndices(dim)
+  const rawIndices = hasIndices ? render?.vectorIndices ?? [] : fallbackIndices
+  const indices = normalizeClvIndices(rawIndices, dim)
   const colors = resolveClvColors(
     indices,
-    hasIndices ? render?.vectorIndices ?? [] : DEFAULT_CLV_RENDER.vectorIndices,
+    hasIndices ? render?.vectorIndices ?? [] : fallbackIndices,
     render?.colors ?? DEFAULT_CLV_RENDER.colors
   )
 
