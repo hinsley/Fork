@@ -167,10 +167,20 @@ export interface CovariantLyapunovData {
 
 export type NodeKind = 'object' | 'branch' | 'scene' | 'diagram' | 'camera'
 
+export interface ClvRenderStyle {
+  enabled: boolean
+  stride: number
+  lengthScale: number
+  thickness: number
+  vectorIndices: number[]
+  colors: string[]
+}
+
 export interface RenderStyle {
   color: string
   lineWidth: number
   pointSize: number
+  clv?: ClvRenderStyle
 }
 
 export interface TreeNode {

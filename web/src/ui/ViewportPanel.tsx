@@ -3,13 +3,16 @@ import type { Data, Layout } from 'plotly.js'
 import type {
   BifurcationAxis,
   BifurcationDiagram,
+  ClvRenderStyle,
   ContinuationObject,
   ContinuationPoint,
+  OrbitObject,
   System,
   Scene,
   TreeNode,
 } from '../system/types'
 import { buildSortedArrayOrder, ensureBranchIndices, getBranchParams } from '../system/continuation'
+import { resolveClvRender } from '../system/clv'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
 
 type ViewportPanelProps = {
@@ -61,6 +64,171 @@ type TimeSeriesViewportMeta = {
 }
 
 const MIN_VIEWPORT_HEIGHT = 200
+const CLV_HEAD_RATIO = 0.25
+
+function interpolateOrbitState(
+  times: number[],
+  states: Array<[number, number, number]>,
+  t: number
+): [number, number, number] {
+  if (times.length === 0) return [0, 0, 0]
+  if (t <= times[0]) return states[0]
+  const lastIndex = times.length - 1
+  if (t >= times[lastIndex]) return states[lastIndex]
+
+  let low = 0
+  let high = lastIndex
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2)
+    if (times[mid] < t) {
+      low = mid + 1
+    } else {
+      high = mid
+    }
+  }
+
+  const idx = Math.max(1, low)
+  const t0 = times[idx - 1]
+  const t1 = times[idx]
+  const weight = t1 === t0 ? 0 : (t - t0) / (t1 - t0)
+  const [x0, y0, z0] = states[idx - 1]
+  const [x1, y1, z1] = states[idx]
+  return [
+    x0 + (x1 - x0) * weight,
+    y0 + (y1 - y0) * weight,
+    z0 + (z1 - z0) * weight,
+  ]
+}
+
+function buildClvTraces(orbit: OrbitObject, clv: ClvRenderStyle): Data[] {
+  const covariant = orbit.covariantVectors
+  if (!covariant || covariant.vectors.length === 0) return []
+  if (covariant.dim < 3 || orbit.data.length === 0) return []
+  if (clv.vectorIndices.length === 0) return []
+
+  const orbitTimes: number[] = []
+  const orbitStates: Array<[number, number, number]> = []
+  let minX = Number.POSITIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let minZ = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  let maxZ = Number.NEGATIVE_INFINITY
+
+  for (const row of orbit.data) {
+    if (row.length < 4) continue
+    const x = row[1]
+    const y = row[2]
+    const z = row[3]
+    orbitTimes.push(row[0])
+    orbitStates.push([x, y, z])
+    minX = Math.min(minX, x)
+    minY = Math.min(minY, y)
+    minZ = Math.min(minZ, z)
+    maxX = Math.max(maxX, x)
+    maxY = Math.max(maxY, y)
+    maxZ = Math.max(maxZ, z)
+  }
+
+  if (orbitTimes.length === 0) return []
+  const dx = maxX - minX
+  const dy = maxY - minY
+  const dz = maxZ - minZ
+  const diag = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
+  const length = clv.lengthScale * diag
+  if (!Number.isFinite(length) || length <= 0) return []
+
+  const headLength = length * CLV_HEAD_RATIO
+  const shaftLength = Math.max(0, length - headLength)
+  const stride = Math.max(1, Math.floor(clv.stride))
+  const stepCount = Math.min(covariant.times.length, covariant.vectors.length)
+  const traces: Data[] = []
+
+  clv.vectorIndices.forEach((vectorIndex, colorIndex) => {
+    const lineX: Array<number | null> = []
+    const lineY: Array<number | null> = []
+    const lineZ: Array<number | null> = []
+    const headX: number[] = []
+    const headY: number[] = []
+    const headZ: number[] = []
+    const headU: number[] = []
+    const headV: number[] = []
+    const headW: number[] = []
+    const color = clv.colors[colorIndex] ?? '#1f77b4'
+
+    for (let idx = 0; idx < stepCount; idx += stride) {
+      const vectorsAtStep = covariant.vectors[idx]
+      if (!vectorsAtStep || !vectorsAtStep[vectorIndex]) continue
+      const vec = vectorsAtStep[vectorIndex]
+      const vx = vec[0]
+      const vy = vec[1]
+      const vz = vec[2]
+      const norm = Math.sqrt(vx * vx + vy * vy + vz * vz)
+      if (!Number.isFinite(norm) || norm === 0) continue
+
+      const base = interpolateOrbitState(orbitTimes, orbitStates, covariant.times[idx])
+      const ux = vx / norm
+      const uy = vy / norm
+      const uz = vz / norm
+      const shaftX = base[0] + ux * shaftLength
+      const shaftY = base[1] + uy * shaftLength
+      const shaftZ = base[2] + uz * shaftLength
+
+      lineX.push(base[0], shaftX, null)
+      lineY.push(base[1], shaftY, null)
+      lineZ.push(base[2], shaftZ, null)
+
+      const headBaseX = shaftX
+      const headBaseY = shaftY
+      const headBaseZ = shaftZ
+      headX.push(headBaseX)
+      headY.push(headBaseY)
+      headZ.push(headBaseZ)
+      headU.push(ux)
+      headV.push(uy)
+      headW.push(uz)
+    }
+
+    if (lineX.length > 0) {
+      traces.push({
+        type: 'scatter3d',
+        mode: 'lines',
+        x: lineX,
+        y: lineY,
+        z: lineZ,
+        line: {
+          color,
+          width: clv.thickness,
+        },
+        showlegend: false,
+        hoverinfo: 'skip',
+      })
+    }
+
+    if (headX.length > 0) {
+      traces.push({
+        type: 'cone',
+        x: headX,
+        y: headY,
+        z: headZ,
+        u: headU,
+        v: headV,
+        w: headW,
+        anchor: 'tail',
+        sizemode: 'absolute',
+        sizeref: headLength,
+        colorscale: [
+          [0, color],
+          [1, color],
+        ],
+        showscale: false,
+        hoverinfo: 'skip',
+      } as Data)
+    }
+  })
+
+  return traces
+}
 
 function readAxisRange(
   event: PlotlyRelayoutEvent,
@@ -335,6 +503,13 @@ function buildSceneTraces(
           width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
         },
       })
+    }
+
+    if (dimension >= 3 && system.config.varNames.length >= 3) {
+      const clvRender = resolveClvRender(node.render?.clv, object.covariantVectors?.dim)
+      if (clvRender.enabled) {
+        traces.push(...buildClvTraces(object, clvRender))
+      }
     }
   }
 

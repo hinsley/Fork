@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Data, Layout } from 'plotly.js'
 import type {
   BifurcationAxis,
   BifurcationDiagram,
+  ClvRenderStyle,
   ComplexValue,
   ContinuationObject,
   ContinuationPoint,
@@ -15,6 +16,12 @@ import type {
   TreeNode,
 } from '../system/types'
 import { DEFAULT_RENDER } from '../system/model'
+import {
+  DEFAULT_CLV_RENDER,
+  parseClvIndicesText,
+  resolveClvColors,
+  resolveClvRender,
+} from '../system/clv'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
 import type {
   BranchContinuationRequest,
@@ -555,6 +562,9 @@ export function InspectorDetailsPanel({
   const nodeRender = selectionNode
     ? { ...DEFAULT_RENDER, ...(selectionNode.render ?? {}) }
     : DEFAULT_RENDER
+  const clvDim = orbit?.covariantVectors?.dim
+  const clvRender = resolveClvRender(selectionNode?.render?.clv, clvDim)
+  const clvIndexText = clvRender.vectorIndices.join(', ')
   const nodeVisibility = selectionNode?.visibility ?? true
   const showVisibilityToggle =
     selectionNode?.kind === 'object' || selectionNode?.kind === 'branch'
@@ -627,6 +637,7 @@ export function InspectorDetailsPanel({
     makeCovariantLyapunovDraft()
   )
   const [covariantError, setCovariantError] = useState<string | null>(null)
+  const [clvIndexDraft, setClvIndexDraft] = useState(() => clvIndexText)
 
   const [equilibriumDraft, setEquilibriumDraft] = useState<EquilibriumSolveDraft>(() =>
     makeEquilibriumSolveDraft(system.config)
@@ -746,6 +757,10 @@ export function InspectorDetailsPanel({
       setContinuationError(null)
     }
   }, [object?.type, selectedNodeId, system.config])
+
+  useEffect(() => {
+    setClvIndexDraft(clvIndexText)
+  }, [selectionKey, clvIndexText])
 
   useEffect(() => {
     if (!sceneId) return
@@ -1677,11 +1692,38 @@ export function InspectorDetailsPanel({
     </div>
   )
 
+  const updateClvRender = useCallback(
+    (update: Partial<ClvRenderStyle>) => {
+      if (!selectionNode) return
+      const merged = resolveClvRender({ ...clvRender, ...update }, clvDim)
+      onUpdateRender(selectionNode.id, { clv: merged })
+    },
+    [clvDim, clvRender, onUpdateRender, selectionNode]
+  )
+
+  const handleClvIndicesChange = (value: string) => {
+    setClvIndexDraft(value)
+  }
+
+  const commitClvIndices = () => {
+    const indices = parseClvIndicesText(clvIndexDraft, clvDim)
+    const colors = resolveClvColors(indices, clvRender.vectorIndices, clvRender.colors)
+    updateClvRender({ vectorIndices: indices, colors })
+    setClvIndexDraft(indices.join(', '))
+  }
+
   const renderSelectionView = () => {
     const lyapunovDimension =
       orbit?.lyapunovExponents && orbit.lyapunovExponents.length > 0
         ? kaplanYorkeDimension(orbit.lyapunovExponents)
         : null
+    const clvHasData = Boolean(
+      orbit?.covariantVectors && orbit.covariantVectors.vectors.length > 0
+    )
+    const clvPlotDim =
+      orbit?.covariantVectors?.dim ??
+      (orbit?.data?.[0] ? orbit.data[0].length - 1 : system.config.varNames.length)
+    const clvNeeds3d = clvPlotDim < 3
 
     return (
       <div className="inspector-panel" data-testid="inspector-panel-body">
@@ -1894,6 +1936,112 @@ export function InspectorDetailsPanel({
                     </>
                   ) : (
                     <p className="empty-state">Covariant Lyapunov vectors not computed yet.</p>
+                  )}
+                </div>
+              </InspectorDisclosure>
+
+              <InspectorDisclosure
+                key={`${selectionKey}-clv-plot`}
+                title="CLV Plotting"
+                testId="clv-plot-toggle"
+                defaultOpen={false}
+              >
+                <div className="inspector-section">
+                  {!clvHasData ? (
+                    <p className="empty-state">Covariant vectors not computed yet.</p>
+                  ) : null}
+                  {clvNeeds3d ? (
+                    <div className="field-warning">
+                      CLV plotting requires at least three state variables.
+                    </div>
+                  ) : null}
+                  <label>
+                    Show CLV vectors
+                    <input
+                      type="checkbox"
+                      checked={clvRender.enabled}
+                      onChange={(event) => updateClvRender({ enabled: event.target.checked })}
+                      data-testid="clv-plot-enabled"
+                    />
+                  </label>
+                  <label>
+                    Stride (plot every Nth checkpoint)
+                    <input
+                      type="number"
+                      min={1}
+                      value={clvRender.stride}
+                      onChange={(event) =>
+                        updateClvRender({ stride: Number(event.target.value) })
+                      }
+                      data-testid="clv-plot-stride"
+                    />
+                  </label>
+                  <label>
+                    Arrow length (fraction of orbit size)
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={clvRender.lengthScale}
+                      onChange={(event) =>
+                        updateClvRender({ lengthScale: Number(event.target.value) })
+                      }
+                      data-testid="clv-plot-length"
+                    />
+                  </label>
+                  <label>
+                    Arrow thickness (px)
+                    <input
+                      type="number"
+                      min={0.5}
+                      step={0.5}
+                      value={clvRender.thickness}
+                      onChange={(event) =>
+                        updateClvRender({ thickness: Number(event.target.value) })
+                      }
+                      data-testid="clv-plot-thickness"
+                    />
+                  </label>
+                  <label>
+                    Vector indices (comma-separated, zero-based)
+                    <input
+                      type="text"
+                      value={clvIndexDraft}
+                      placeholder={DEFAULT_CLV_RENDER.vectorIndices.join(', ')}
+                      onChange={(event) => handleClvIndicesChange(event.target.value)}
+                      onBlur={commitClvIndices}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          commitClvIndices()
+                        }
+                      }}
+                      data-testid="clv-plot-indices"
+                    />
+                  </label>
+                </div>
+                <div className="inspector-section">
+                  <h4 className="inspector-subheading">Vector colors</h4>
+                  {clvRender.vectorIndices.length > 0 ? (
+                    <div className="inspector-list">
+                      {clvRender.vectorIndices.map((index, idx) => (
+                        <label key={`clv-color-${index}`}>
+                          CLV {index + 1}
+                          <input
+                            type="color"
+                            value={clvRender.colors[idx]}
+                            onChange={(event) => {
+                              const colors = clvRender.colors.map((color, colorIndex) =>
+                                colorIndex === idx ? event.target.value : color
+                              )
+                              updateClvRender({ colors })
+                            }}
+                            data-testid={`clv-plot-color-${index}`}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="empty-state">Select vector indices to plot.</p>
                   )}
                 </div>
               </InspectorDisclosure>
