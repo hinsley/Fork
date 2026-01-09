@@ -62,7 +62,6 @@ export function SystemDialog({
                       {system.type === 'map' ? 'Map' : 'Flow'}
                     </span>
                   </div>
-                  <span>{new Date(system.updatedAt).toLocaleString()}</span>
                   <div className="dialog__list-actions">
                     <button onClick={() => onExportSystem(system.id)}>Export</button>
                     <button onClick={() => onDeleteSystem(system.id)}>Delete</button>
