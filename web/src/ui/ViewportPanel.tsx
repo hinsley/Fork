@@ -1,6 +1,15 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import type { Data, Layout } from 'plotly.js'
-import type { BifurcationDiagram, System, Scene, TreeNode } from '../system/types'
+import type {
+  BifurcationAxis,
+  BifurcationDiagram,
+  ContinuationObject,
+  ContinuationPoint,
+  System,
+  Scene,
+  TreeNode,
+} from '../system/types'
+import { buildSortedArrayOrder, ensureBranchIndices, getBranchParams } from '../system/continuation'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
 
 type ViewportPanelProps = {
@@ -86,6 +95,58 @@ function collectVisibleObjectIds(system: System): string[] {
     ids.push(nodeId)
   }
   return ids
+}
+
+type DiagramTraceState = {
+  traces: Data[]
+  hasAxes: boolean
+  hasBranches: boolean
+  hasData: boolean
+  xTitle: string
+  yTitle: string
+}
+
+function axisTitle(axis: BifurcationAxis | null): string {
+  return axis?.name ?? ''
+}
+
+function resolveAxisValue(
+  system: System,
+  branch: ContinuationObject,
+  point: ContinuationPoint,
+  axis: BifurcationAxis,
+  branchParams: number[]
+): number | null {
+  if (axis.kind === 'state') {
+    const index = system.config.varNames.indexOf(axis.name)
+    if (index < 0) return null
+    const value = point.state[index]
+    return Number.isFinite(value) ? value : null
+  }
+
+  const paramIndex = system.config.paramNames.indexOf(axis.name)
+  if (paramIndex < 0) return null
+
+  const branchType = branch.data.branch_type
+  if (branchType && 'param1_name' in branchType && 'param2_name' in branchType) {
+    if (axis.name === branchType.param1_name) {
+      return Number.isFinite(point.param_value) ? point.param_value : null
+    }
+    if (axis.name === branchType.param2_name) {
+      if (Number.isFinite(point.param2_value)) {
+        return point.param2_value ?? null
+      }
+      const fallback = branchParams[paramIndex]
+      return Number.isFinite(fallback) ? fallback : null
+    }
+  }
+
+  if (axis.name === branch.parameterName) {
+    return Number.isFinite(point.param_value) ? point.param_value : null
+  }
+
+  const fallback = branchParams[paramIndex]
+  return Number.isFinite(fallback) ? fallback : null
 }
 
 function buildSceneTraces(
@@ -320,6 +381,135 @@ function buildSceneTraces(
   return traces
 }
 
+function buildDiagramTraces(
+  system: System,
+  diagram: BifurcationDiagram,
+  selectedNodeId: string | null
+): DiagramTraceState {
+  const traces: Data[] = []
+  const xAxis = diagram.xAxis
+  const yAxis = diagram.yAxis
+  const hasAxes = Boolean(xAxis && yAxis)
+  const hasBranches = diagram.selectedBranchIds.length > 0
+  const xTitle = axisTitle(xAxis)
+  const yTitle = axisTitle(yAxis)
+
+  if (!xAxis || !yAxis) {
+    return { traces, hasAxes, hasBranches, hasData: false, xTitle, yTitle }
+  }
+
+  let hasData = false
+  for (const branchId of diagram.selectedBranchIds) {
+    const branch = system.branches[branchId]
+    const node = system.nodes[branchId]
+    if (!branch || !node || !node.visibility) continue
+    if (!branch.data.points || branch.data.points.length === 0) continue
+
+    const order = buildSortedArrayOrder(ensureBranchIndices(branch.data))
+    const branchParams = getBranchParams(system, branch)
+    const x: number[] = []
+    const y: number[] = []
+
+    for (const idx of order) {
+      const point = branch.data.points[idx]
+      if (!point) continue
+      const xValue = resolveAxisValue(system, branch, point, xAxis, branchParams)
+      const yValue = resolveAxisValue(system, branch, point, yAxis, branchParams)
+      if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) continue
+      x.push(xValue as number)
+      y.push(yValue as number)
+    }
+
+    if (x.length === 0 || y.length === 0) continue
+    hasData = true
+
+    const highlight = branchId === selectedNodeId
+    const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
+    const markerSize = highlight ? node.render.pointSize + 2 : node.render.pointSize
+
+    traces.push({
+      type: 'scatter',
+      mode: 'lines',
+      name: branch.name,
+      uid: branchId,
+      x,
+      y,
+      line: {
+        color: node.render.color,
+        width: lineWidth,
+      },
+    })
+
+    traces.push({
+      type: 'scatter',
+      mode: 'markers',
+      name: `${branch.name} start`,
+      uid: branchId,
+      x: [x[0]],
+      y: [y[0]],
+      marker: {
+        color: node.render.color,
+        size: markerSize,
+        symbol: 'triangle-up',
+      },
+      showlegend: false,
+      hovertemplate: 'Start<extra></extra>',
+    })
+
+    traces.push({
+      type: 'scatter',
+      mode: 'markers',
+      name: `${branch.name} end`,
+      uid: branchId,
+      x: [x[x.length - 1]],
+      y: [y[y.length - 1]],
+      marker: {
+        color: node.render.color,
+        size: markerSize,
+        symbol: 'triangle-down',
+      },
+      showlegend: false,
+      hovertemplate: 'End<extra></extra>',
+    })
+
+    if (branch.data.bifurcations && branch.data.bifurcations.length > 0) {
+      const bx: number[] = []
+      const by: number[] = []
+      const labels: string[] = []
+      for (const bifIndex of branch.data.bifurcations) {
+        const point = branch.data.points[bifIndex]
+        if (!point) continue
+        const xValue = resolveAxisValue(system, branch, point, xAxis, branchParams)
+        const yValue = resolveAxisValue(system, branch, point, yAxis, branchParams)
+        if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) continue
+        bx.push(xValue as number)
+        by.push(yValue as number)
+        labels.push(point.stability && point.stability !== 'None' ? point.stability : 'Bifurcation')
+      }
+      if (bx.length > 0) {
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: `${branch.name} bifurcations`,
+          uid: branchId,
+          x: bx,
+          y: by,
+          marker: {
+            color: node.render.color,
+            size: markerSize + 2,
+            symbol: 'diamond',
+          },
+          text: labels,
+          showlegend: false,
+          hovertemplate: '%{text}<extra></extra>',
+        })
+      }
+    }
+  }
+
+  return { traces, hasAxes, hasBranches, hasData, xTitle, yTitle }
+}
+
 function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
   const uirevision = scene.id
   const base = {
@@ -379,31 +569,61 @@ function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
   }
 }
 
-function buildDiagramLayout(diagram: BifurcationDiagram): Partial<Layout> {
-  const hasBranches = diagram.selectedBranchIds.length > 0
-  const message = hasBranches
-    ? 'Bifurcation diagram placeholder. Awaiting design.'
-    : 'Select branches to configure this diagram.'
+function buildDiagramLayout(
+  diagram: BifurcationDiagram,
+  traceState: DiagramTraceState | null
+): Partial<Layout> {
+  const hasAxes = traceState?.hasAxes ?? false
+  const hasBranches = traceState?.hasBranches ?? false
+  const hasData = traceState?.hasData ?? false
+  const xTitle = traceState?.xTitle ?? ''
+  const yTitle = traceState?.yTitle ?? ''
+  let message: string | null = null
+
+  if (!hasAxes) {
+    message = 'Select axes to configure this diagram.'
+  } else if (!hasBranches) {
+    message = 'Select branches to configure this diagram.'
+  } else if (!hasData) {
+    message = 'No bifurcation data available for the selected axes.'
+  }
 
   return {
     autosize: true,
-    margin: { l: 30, r: 20, t: 20, b: 30 },
+    margin: { l: 40, r: 20, t: 20, b: 40 },
     paper_bgcolor: 'rgba(0,0,0,0)',
     plot_bgcolor: 'rgba(0,0,0,0)',
-    xaxis: { visible: false },
-    yaxis: { visible: false },
-    showlegend: false,
-    annotations: [
-      {
-        text: message,
-        x: 0.5,
-        y: 0.5,
-        xref: 'paper',
-        yref: 'paper',
-        showarrow: false,
-        font: { color: '#9aa3b2', size: 12 },
-      },
-    ],
+    showlegend: hasData,
+    uirevision: diagram.id,
+    xaxis: hasAxes
+      ? {
+          title: { text: xTitle },
+          zerolinecolor: 'rgba(120,120,120,0.3)',
+          gridcolor: 'rgba(120,120,120,0.15)',
+          automargin: true,
+        }
+      : { visible: false },
+    yaxis: hasAxes
+      ? {
+          title: { text: yTitle },
+          zerolinecolor: 'rgba(120,120,120,0.3)',
+          gridcolor: 'rgba(120,120,120,0.15)',
+          automargin: true,
+        }
+      : { visible: false },
+    annotations: message
+      ? [
+          {
+            text: message,
+            x: 0.5,
+            y: 0.5,
+            xref: 'paper',
+            yref: 'paper',
+            showarrow: false,
+            font: { color: '#9aa3b2', size: 12 },
+          },
+        ]
+      : [],
   }
 }
 
@@ -484,16 +704,22 @@ function ViewportTile({
     return { yRange: timeSeriesRange, height: plotHeight }
   }, [plotHeight, scene, system.config.varNames.length, timeSeriesRange])
 
+  const diagramTraceState = useMemo(() => {
+    if (!diagram) return null
+    return buildDiagramTraces(system, diagram, selectedNodeId)
+  }, [diagram, selectedNodeId, system])
+
   const data = useMemo(() => {
     if (scene) return buildSceneTraces(system, scene, selectedNodeId, timeSeriesMeta)
+    if (diagram) return diagramTraceState?.traces ?? []
     return []
-  }, [system, scene, selectedNodeId, timeSeriesMeta])
+  }, [diagram, diagramTraceState, scene, selectedNodeId, system, timeSeriesMeta])
 
   const layout = useMemo(() => {
     if (scene) return buildSceneLayout(system, scene)
-    if (diagram) return buildDiagramLayout(diagram)
+    if (diagram) return buildDiagramLayout(diagram, diagramTraceState)
     return buildSceneLayout(system, system.scenes[0])
-  }, [system, scene, diagram])
+  }, [system, scene, diagram, diagramTraceState])
 
   const label = scene ? 'State Space' : 'Bifurcation Diagram'
 
@@ -558,7 +784,7 @@ function ViewportTile({
           data={data}
           layout={layout}
           testId={`plotly-viewport-${node.id}`}
-          onPointClick={scene ? onSelectObject : undefined}
+          onPointClick={scene || diagram ? onSelectObject : undefined}
           onRelayout={scene ? handleRelayout : undefined}
           onResize={scene ? handleResize : undefined}
         />
