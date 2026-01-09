@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { MouseEvent } from 'react'
 import type { System, TreeNode } from '../system/types'
 
 type ObjectsTreeProps = {
   system: System
   selectedNodeId: string | null
-  onSelect: (id: string) => void
+  onSelect: (id: string | null) => void
   onToggleVisibility: (id: string) => void
   onRename: (id: string, name: string) => void
   onToggleExpanded: (id: string) => void
@@ -93,6 +94,13 @@ export function ObjectsTree({
       onRename(node.id, trimmed)
     }
     setEditingId(null)
+  }
+
+  const handleListClick = (event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null
+    if (!target) return
+    if (target.closest('.tree-node__row')) return
+    onSelect(null)
   }
 
   const renderNode = (nodeId: string, depth: number) => {
@@ -226,7 +234,11 @@ export function ObjectsTree({
           Create Object
         </button>
       </div>
-      <div className="objects-tree__list">
+      <div
+        className="objects-tree__list"
+        onClick={handleListClick}
+        data-testid="objects-tree-list"
+      >
         {rootNodes.length === 0 ? <p className="empty-state">No objects yet.</p> : null}
         {rootNodes.map((nodeId) => renderNode(nodeId, 0))}
       </div>
