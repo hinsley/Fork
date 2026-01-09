@@ -215,7 +215,8 @@ function buildClvTraces(orbit: OrbitObject, clv: ClvRenderStyle): Data[] {
         v: headV,
         w: headW,
         anchor: 'tail',
-        sizemode: 'absolute',
+        // Use raw sizing to avoid per-trace scaling differences between CLVs.
+        sizemode: 'raw',
         sizeref: headLength,
         colorscale: [
           [0, color],
