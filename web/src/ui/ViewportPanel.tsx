@@ -994,21 +994,54 @@ export function ViewportPanel({
     window.addEventListener('pointerup', handleUp)
   }
 
+  const createMenuNode = createMenu ? (
+    <div
+      className="context-menu"
+      style={{ left: createMenu.x, top: createMenu.y }}
+      onPointerDown={(event) => event.stopPropagation()}
+      data-testid="viewport-create-menu"
+    >
+      <button
+        className="context-menu__item"
+        onClick={() => {
+          onCreateScene(createMenu.targetId)
+          setCreateMenu(null)
+        }}
+        data-testid="viewport-create-scene"
+      >
+        State Space Scene
+      </button>
+      <button
+        className="context-menu__item"
+        onClick={() => {
+          onCreateBifurcation(createMenu.targetId)
+          setCreateMenu(null)
+        }}
+        data-testid="viewport-create-bifurcation"
+      >
+        Bifurcation Diagram
+      </button>
+    </div>
+  ) : null
+
   if (viewports.length === 0) {
     return (
-      <div className="empty-state viewport-empty">
-        <p>No viewports yet.</p>
-        <div className="viewport-insert viewport-insert--empty">
-          <button
-            className="viewport-insert__button"
-            onClick={(event) => openCreateMenu(event, null)}
-            aria-label="Add viewport"
-            data-testid="viewport-insert-empty"
-          >
-            +
-          </button>
+      <>
+        <div className="empty-state viewport-empty">
+          <p>No viewports yet.</p>
+          <div className="viewport-insert viewport-insert--empty">
+            <button
+              className="viewport-insert__button"
+              onClick={(event) => openCreateMenu(event, null)}
+              aria-label="Add viewport"
+              data-testid="viewport-insert-empty"
+            >
+              +
+            </button>
+          </div>
         </div>
-      </div>
+        {createMenuNode}
+      </>
     )
   }
 
@@ -1062,35 +1095,7 @@ export function ViewportPanel({
           </Fragment>
         )
       })}
-      {createMenu ? (
-        <div
-          className="context-menu"
-          style={{ left: createMenu.x, top: createMenu.y }}
-          onPointerDown={(event) => event.stopPropagation()}
-          data-testid="viewport-create-menu"
-        >
-          <button
-            className="context-menu__item"
-            onClick={() => {
-              onCreateScene(createMenu.targetId)
-              setCreateMenu(null)
-            }}
-            data-testid="viewport-create-scene"
-          >
-            State Space Scene
-          </button>
-          <button
-            className="context-menu__item"
-            onClick={() => {
-              onCreateBifurcation(createMenu.targetId)
-              setCreateMenu(null)
-            }}
-            data-testid="viewport-create-bifurcation"
-          >
-            Bifurcation Diagram
-          </button>
-        </div>
-      ) : null}
+      {createMenuNode}
       {nodeContextMenu ? (
         <div
           className="context-menu"
