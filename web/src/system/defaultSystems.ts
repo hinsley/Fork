@@ -63,7 +63,7 @@ const DEFAULT_SYSTEM_SPECS: DefaultSystemSpec[] = [
     type: 'flow',
   },
   {
-    name: 'Logistic',
+    name: 'LogisticMap',
     equations: ['r * x * (1 - x)'],
     params: [3.9],
     paramNames: ['r'],
@@ -72,7 +72,7 @@ const DEFAULT_SYSTEM_SPECS: DefaultSystemSpec[] = [
     type: 'map',
   },
   {
-    name: 'Tent',
+    name: 'TentMap',
     equations: ['mu * (0.5 - (((x - 0.5) ^ 2) ^ 0.5))'],
     params: [2],
     paramNames: ['mu'],
