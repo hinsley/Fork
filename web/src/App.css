@@ -727,6 +727,16 @@
   gap: 2px;
 }
 
+.viewport-tile__rename {
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  width: 100%;
+  max-width: 220px;
+}
+
 .viewport-empty {
   display: grid;
   gap: 10px;
