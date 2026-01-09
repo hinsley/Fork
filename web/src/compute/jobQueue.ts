@@ -19,12 +19,12 @@ export type JobHandle<T> = {
 
 type JobRunner<T> = (signal: AbortSignal) => Promise<T>
 
-type InternalJob<T> = {
+type InternalJob = {
   id: string
   label: string
   controller: AbortController
-  runner: JobRunner<T>
-  resolve: (value: T) => void
+  runner: JobRunner<unknown>
+  resolve: (value: unknown) => void
   reject: (error: Error) => void
 }
 
@@ -37,7 +37,7 @@ function createAbortError(label: string) {
 }
 
 export class JobQueue {
-  private queue: InternalJob<any>[] = []
+  private queue: InternalJob[] = []
   private running = false
   private onTiming?: (timing: JobTiming) => void
   private scheduled = false
@@ -66,7 +66,10 @@ export class JobQueue {
       reject = rej
     })
 
-    this.queue.push({ id, label, controller, runner, resolve, reject })
+    const wrappedRunner: JobRunner<unknown> = (signal) => runner(signal)
+    const wrappedResolve = (value: unknown) => resolve(value as T)
+
+    this.queue.push({ id, label, controller, runner: wrappedRunner, resolve: wrappedResolve, reject })
     this.scheduleRun()
 
     return {
@@ -128,7 +131,12 @@ export class JobQueue {
     }
   }
 
-  private emitTiming(job: InternalJob<any>, startedAt: number, finishedAt: number, status: JobTiming['status']) {
+  private emitTiming(
+    job: InternalJob,
+    startedAt: number,
+    finishedAt: number,
+    status: JobTiming['status']
+  ) {
     if (!this.onTiming) return
     this.onTiming({
       id: job.id,

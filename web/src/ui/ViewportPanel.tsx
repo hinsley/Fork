@@ -202,7 +202,6 @@ function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
           title: { text: varNames[2] ?? 'z' },
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
-        uirevision,
         camera: {
           eye: { ...scene.camera.eye },
           center: { ...scene.camera.center },

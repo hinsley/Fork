@@ -127,7 +127,8 @@ export function updateObject(
   const next = structuredClone(system)
   const existing = next.objects[nodeId]
   if (!existing) return system
-  next.objects[nodeId] = { ...existing, ...update }
+  const updated = { ...existing, ...update, type: existing.type } as AnalysisObject
+  next.objects[nodeId] = updated
   next.updatedAt = nowIso()
   return next
 }

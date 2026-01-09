@@ -162,6 +162,7 @@ async function runEquilibriumContinuation(
 ): Promise<EquilibriumContinuationResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
+  const settings: Record<string, number> = { ...request.settings }
   const runner = new wasm.WasmEquilibriumRunner(
     request.system.equations,
     new Float64Array(request.system.params),
@@ -170,7 +171,7 @@ async function runEquilibriumContinuation(
     request.system.type,
     new Float64Array(request.equilibriumState),
     request.parameterName,
-    request.settings,
+    settings,
     request.forward
   )
 

@@ -79,20 +79,23 @@ export function PlotlyViewport({
     const node = containerRef.current
     if (!node) return
     const controller = new AbortController()
-    setError(null)
-    setLoading(!isPlotlyLoaded())
-    void renderPlot(node, data, layout, { signal: controller.signal })
-      .then(() => {
+    const runRender = async () => {
+      if (controller.signal.aborted) return
+      setError(null)
+      setLoading(!isPlotlyLoaded())
+      try {
+        await renderPlot(node, data, layout, { signal: controller.signal })
         if (controller.signal.aborted) return
         setLoading(false)
         bindPlotlyClick(node, onPointClickRef, clickHandlerRef)
-      })
-      .catch((err) => {
+      } catch (err) {
         if (controller.signal.aborted) return
         const message = err instanceof Error ? err.message : String(err)
         setError(message)
         setLoading(false)
-      })
+      }
+    }
+    void runRender()
     return () => {
       controller.abort()
     }
