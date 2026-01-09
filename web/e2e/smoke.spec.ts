@@ -29,5 +29,6 @@ test('system to viewport smoke', async ({ page }) => {
 
   await page.getByTestId('open-systems').click()
   await page.getByRole('button', { name: 'Smoke System', exact: true }).click()
+  await page.getByTestId('inspector-tab-system').click()
   await expect(systemNameInput).toHaveValue(/Smoke System/i)
 })

@@ -15,7 +15,7 @@
 - Unit + component only: `npm run test:unit`
 - E2E only: `npm run test:e2e`
 - E2E headed: `npm run test:e2e:headed`
-- If port 4173 is busy, set `PLAYWRIGHT_PORT=####` to override.
+- If port 4173 is busy, Playwright will auto-pick a free port. Set `PLAYWRIGHT_PORT=####` to force a specific port.
 
 ## WASM mocking strategy
 - All compute goes through the `ForkCoreClient` interface (`web/src/compute/ForkCoreClient.ts`).

@@ -8,10 +8,10 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run && playwright test",
+    "test": "vitest run && npm run test:e2e",
     "test:unit": "vitest run",
-    "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e": "node ./scripts/playwright-runner.mjs",
+    "test:e2e:headed": "node ./scripts/playwright-runner.mjs --headed"
   },
   "dependencies": {
     "plotly.js-dist-min": "^2.32.0",
