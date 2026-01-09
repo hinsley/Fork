@@ -1,4 +1,4 @@
-# Fork Web Architecture (v0)
+# Fork Architecture (v0)
 
 This document captures the initial web UI architecture for Fork, based on the
 existing CLI surface area and the Rust/WASM core.
