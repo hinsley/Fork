@@ -14,7 +14,7 @@ const morrisLecarTauW =
 
 const DEFAULT_SYSTEM_SPECS: DefaultSystemSpec[] = [
   {
-    name: 'Lorenz flow',
+    name: 'Lorenz',
     equations: ['sigma * (y - x)', 'x * (rho - z) - y', 'x * y - beta * z'],
     params: [10, 28, 2.6666666667],
     paramNames: ['sigma', 'rho', 'beta'],
@@ -23,7 +23,7 @@ const DEFAULT_SYSTEM_SPECS: DefaultSystemSpec[] = [
     type: 'flow',
   },
   {
-    name: 'Henon map',
+    name: 'Henon',
     equations: ['1 - a * x^2 + y', 'b * x'],
     params: [1.4, 0.3],
     paramNames: ['a', 'b'],
@@ -32,7 +32,7 @@ const DEFAULT_SYSTEM_SPECS: DefaultSystemSpec[] = [
     type: 'map',
   },
   {
-    name: 'Rossler flow',
+    name: 'Rossler',
     equations: ['-y - z', 'x + a * y', 'b + z * (x - c)'],
     params: [0.2, 0.2, 5.7],
     paramNames: ['a', 'b', 'c'],
@@ -41,7 +41,7 @@ const DEFAULT_SYSTEM_SPECS: DefaultSystemSpec[] = [
     type: 'flow',
   },
   {
-    name: 'Thomas flow',
+    name: 'Thomas',
     equations: ['sin(y) - b * x', 'sin(z) - b * y', 'sin(x) - b * z'],
     params: [0.208186],
     paramNames: ['b'],
@@ -50,7 +50,7 @@ const DEFAULT_SYSTEM_SPECS: DefaultSystemSpec[] = [
     type: 'flow',
   },
   {
-    name: 'Langford flow',
+    name: 'Langford',
     equations: [
       '(z - b) * x - d * y',
       'd * x + (z - b) * y',
@@ -63,7 +63,7 @@ const DEFAULT_SYSTEM_SPECS: DefaultSystemSpec[] = [
     type: 'flow',
   },
   {
-    name: 'Logistic map',
+    name: 'Logistic',
     equations: ['r * x * (1 - x)'],
     params: [3.9],
     paramNames: ['r'],
@@ -72,7 +72,7 @@ const DEFAULT_SYSTEM_SPECS: DefaultSystemSpec[] = [
     type: 'map',
   },
   {
-    name: 'Tent map',
+    name: 'Tent',
     equations: ['mu * (0.5 - (((x - 0.5) ^ 2) ^ 0.5))'],
     params: [2],
     paramNames: ['mu'],
@@ -81,7 +81,7 @@ const DEFAULT_SYSTEM_SPECS: DefaultSystemSpec[] = [
     type: 'map',
   },
   {
-    name: 'FitzHugh-Nagumo flow',
+    name: 'FitzHughNagumo',
     equations: ['v - (v^3) / 3 - w + I', '(v + a - b * w) / tau'],
     params: [0.7, 0.8, 12.5, 0.5],
     paramNames: ['a', 'b', 'tau', 'I'],
@@ -90,7 +90,7 @@ const DEFAULT_SYSTEM_SPECS: DefaultSystemSpec[] = [
     type: 'flow',
   },
   {
-    name: 'Hindmarsh-Rose flow',
+    name: 'HindmarshRose',
     equations: [
       'y - a * x^3 + b * x^2 - z + I',
       'c - d * x^2 - y',
@@ -103,7 +103,7 @@ const DEFAULT_SYSTEM_SPECS: DefaultSystemSpec[] = [
     type: 'flow',
   },
   {
-    name: 'Morris-Lecar flow',
+    name: 'MorrisLecar',
     equations: [
       `(I - g_L * (V - V_L) - g_Ca * (${morrisLecarMInf}) * (V - V_Ca) - g_K * w * (V - V_K)) / C`,
       `(${morrisLecarWInf} - w) / (${morrisLecarTauW})`,
@@ -128,7 +128,7 @@ const DEFAULT_SYSTEM_SPECS: DefaultSystemSpec[] = [
     type: 'flow',
   },
   {
-    name: 'Lorenz 84 flow',
+    name: 'Lorenz84',
     equations: [
       '-a * x - y^2 - z^2 + a * F',
       'x * y - b * x * z - y + G',
