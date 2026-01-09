@@ -218,7 +218,7 @@ function App() {
       {!system ? (
         <main className="empty-workspace">
           <div className="empty-card">
-            <h1>Fork Web</h1>
+            <h1>Fork</h1>
             <p>Create or open a system to start exploring.</p>
             <button onClick={() => setDialogOpen(true)} data-testid="open-systems-empty">
               Open Systems

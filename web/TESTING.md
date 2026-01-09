@@ -1,4 +1,4 @@
-# Fork Web Testing
+# Fork Testing
 
 ## One-command run
 - `npm test` (runs unit + component + E2E)
