@@ -4,6 +4,9 @@ import type {
   ContinuationProgress,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
+  CovariantLyapunovRequest,
+  CovariantLyapunovResponse,
+  LyapunovExponentsRequest,
   SolveEquilibriumRequest,
   SolveEquilibriumResult,
   SimulateOrbitRequest,
@@ -14,6 +17,8 @@ import type {
 
 type WorkerRequest =
   | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
+  | { id: string; kind: 'computeLyapunovExponents'; payload: LyapunovExponentsRequest }
+  | { id: string; kind: 'computeCovariantLyapunovVectors'; payload: CovariantLyapunovRequest }
   | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
   | { id: string; kind: 'runEquilibriumContinuation'; payload: EquilibriumContinuationRequest }
   | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
@@ -27,6 +32,8 @@ type WorkerResponse =
       ok: true
       result:
         | SimulateOrbitResult
+        | number[]
+        | CovariantLyapunovResponse
         | SolveEquilibriumResult
         | ValidateSystemResult
         | EquilibriumContinuationResult
@@ -53,6 +60,22 @@ type WasmModule = {
       maxSteps: number,
       dampingFactor: number
     ) => SolveEquilibriumResult
+    compute_lyapunov_exponents: (
+      startState: Float64Array,
+      startTime: number,
+      steps: number,
+      dt: number,
+      qrStride: number
+    ) => Float64Array
+    compute_covariant_lyapunov_vectors: (
+      startState: Float64Array,
+      startTime: number,
+      windowSteps: number,
+      dt: number,
+      qrStride: number,
+      forwardTransient: number,
+      backwardTransient: number
+    ) => CovariantLyapunovResponse
   }
   WasmEquilibriumRunner: new (
     equations: string[],
@@ -124,6 +147,57 @@ async function runOrbit(request: SimulateOrbitRequest, signal: AbortSignal): Pro
     t_end: t,
     dt: request.dt,
   }
+}
+
+async function runLyapunovExponents(
+  request: LyapunovExponentsRequest,
+  signal: AbortSignal
+): Promise<number[]> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+  abortIfNeeded(signal)
+  const result = system.compute_lyapunov_exponents(
+    new Float64Array(request.startState),
+    request.startTime,
+    request.steps,
+    request.dt,
+    request.qrStride
+  )
+  return Array.from(result)
+}
+
+async function runCovariantLyapunovVectors(
+  request: CovariantLyapunovRequest,
+  signal: AbortSignal
+): Promise<CovariantLyapunovResponse> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+  abortIfNeeded(signal)
+  return system.compute_covariant_lyapunov_vectors(
+    new Float64Array(request.startState),
+    request.startTime,
+    request.windowSteps,
+    request.dt,
+    request.qrStride,
+    request.forwardTransient,
+    request.backwardTransient
+  )
 }
 
 async function runSolveEquilibrium(
@@ -264,6 +338,20 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   try {
     if (message.kind === 'simulateOrbit') {
       const result = await runOrbit(message.payload, controller.signal)
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'computeLyapunovExponents') {
+      const result = await runLyapunovExponents(message.payload, controller.signal)
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'computeCovariantLyapunovVectors') {
+      const result = await runCovariantLyapunovVectors(message.payload, controller.signal)
       const response: WorkerResponse = { id: message.id, ok: true, result }
       ctx.postMessage(response)
       return

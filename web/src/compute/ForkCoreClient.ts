@@ -28,6 +28,33 @@ export type SimulateOrbitResult = {
   dt: number
 }
 
+export type LyapunovExponentsRequest = {
+  system: SystemConfig
+  startState: number[]
+  startTime: number
+  steps: number
+  dt: number
+  qrStride: number
+}
+
+export type CovariantLyapunovRequest = {
+  system: SystemConfig
+  startState: number[]
+  startTime: number
+  windowSteps: number
+  dt: number
+  qrStride: number
+  forwardTransient: number
+  backwardTransient: number
+}
+
+export type CovariantLyapunovResponse = {
+  dimension: number
+  checkpoints: number
+  times: number[]
+  vectors: number[]
+}
+
 export type ValidateSystemRequest = {
   system: SystemConfig
 }
@@ -62,6 +89,14 @@ export interface ForkCoreClient {
     request: SimulateOrbitRequest,
     opts?: { signal?: AbortSignal }
   ): Promise<SimulateOrbitResult>
+  computeLyapunovExponents(
+    request: LyapunovExponentsRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<number[]>
+  computeCovariantLyapunovVectors(
+    request: CovariantLyapunovRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<CovariantLyapunovResponse>
   solveEquilibrium(
     request: SolveEquilibriumRequest,
     opts?: { signal?: AbortSignal }

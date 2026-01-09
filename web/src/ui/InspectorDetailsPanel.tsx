@@ -21,6 +21,8 @@ import type {
   EquilibriumContinuationRequest,
   LimitCycleCreateRequest,
   EquilibriumSolveRequest,
+  OrbitCovariantLyapunovRequest,
+  OrbitLyapunovRequest,
   OrbitRunRequest,
 } from '../state/appState'
 import { validateSystemConfig } from '../state/systemValidation'
@@ -51,6 +53,8 @@ type InspectorDetailsPanelProps = {
     message?: string
   }>
   onRunOrbit: (request: OrbitRunRequest) => Promise<void>
+  onComputeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
+  onComputeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
   onSolveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   onCreateLimitCycle: (request: LimitCycleCreateRequest) => Promise<void>
   onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
@@ -71,6 +75,18 @@ type OrbitRunDraft = {
   initialState: string[]
   duration: string
   dt: string
+}
+
+type LyapunovDraft = {
+  transient: string
+  qrStride: string
+}
+
+type CovariantLyapunovDraft = {
+  transient: string
+  forward: string
+  backward: string
+  qrStride: string
 }
 
 type EquilibriumSolveDraft = {
@@ -307,6 +323,22 @@ function makeOrbitRunDraft(system: SystemConfig, orbit?: OrbitObject): OrbitRunD
   }
 }
 
+function makeLyapunovDraft(): LyapunovDraft {
+  return {
+    transient: '0',
+    qrStride: '1',
+  }
+}
+
+function makeCovariantLyapunovDraft(): CovariantLyapunovDraft {
+  return {
+    transient: '0',
+    forward: '0',
+    backward: '0',
+    qrStride: '1',
+  }
+}
+
 function makeEquilibriumSolveDraft(
   system: SystemConfig,
   equilibrium?: EquilibriumObject
@@ -461,6 +493,8 @@ export function InspectorDetailsPanel({
   onUpdateSystem,
   onValidateSystem,
   onRunOrbit,
+  onComputeLyapunovExponents,
+  onComputeCovariantLyapunovVectors,
   onSolveEquilibrium,
   onCreateLimitCycle,
   onCreateEquilibriumBranch,
@@ -585,6 +619,14 @@ export function InspectorDetailsPanel({
     makeOrbitRunDraft(system.config)
   )
   const [orbitError, setOrbitError] = useState<string | null>(null)
+  const [lyapunovDraft, setLyapunovDraft] = useState<LyapunovDraft>(() =>
+    makeLyapunovDraft()
+  )
+  const [lyapunovError, setLyapunovError] = useState<string | null>(null)
+  const [covariantDraft, setCovariantDraft] = useState<CovariantLyapunovDraft>(() =>
+    makeCovariantLyapunovDraft()
+  )
+  const [covariantError, setCovariantError] = useState<string | null>(null)
 
   const [equilibriumDraft, setEquilibriumDraft] = useState<EquilibriumSolveDraft>(() =>
     makeEquilibriumSolveDraft(system.config)
@@ -683,11 +725,15 @@ export function InspectorDetailsPanel({
     if (!current) return
     if (current.type === 'orbit') {
       setOrbitDraft(makeOrbitRunDraft(system.config, current))
+      setLyapunovDraft(makeLyapunovDraft())
+      setCovariantDraft(makeCovariantLyapunovDraft())
       setLimitCycleDraft((prev) => ({
         ...makeLimitCycleDraft(system.config, current),
         name: prev.name,
       }))
       setOrbitError(null)
+      setLyapunovError(null)
+      setCovariantError(null)
       setLimitCycleError(null)
     }
     if (current.type === 'equilibrium') {
@@ -1064,6 +1110,109 @@ export function InspectorDetailsPanel({
       dt: systemDraft.type === 'map' ? undefined : dt,
     }
     await onRunOrbit(request)
+  }
+
+  const handleComputeLyapunov = async () => {
+    if (runDisabled) {
+      setLyapunovError('Apply valid system settings before computing Lyapunov exponents.')
+      return
+    }
+    if (!orbit || !selectedNodeId) {
+      setLyapunovError('Select an orbit to analyze.')
+      return
+    }
+    if (!orbit.data || orbit.data.length < 2) {
+      setLyapunovError('Run an orbit before computing Lyapunov exponents.')
+      return
+    }
+
+    const duration = orbit.t_end - orbit.t_start
+    if (!Number.isFinite(duration) || duration <= 0) {
+      setLyapunovError('Orbit has no duration to analyze.')
+      return
+    }
+
+    const transient = parseNumber(lyapunovDraft.transient)
+    const qrStride = parseInteger(lyapunovDraft.qrStride)
+    if (transient === null || transient < 0) {
+      setLyapunovError('Transient time must be a non-negative number.')
+      return
+    }
+    if (qrStride === null || qrStride <= 0) {
+      setLyapunovError('QR stride must be a positive integer.')
+      return
+    }
+
+    if (transient >= duration) {
+      setLyapunovError('Transient leaves no data to analyze.')
+      return
+    }
+
+    setLyapunovError(null)
+    const request: OrbitLyapunovRequest = {
+      orbitId: selectedNodeId,
+      transient,
+      qrStride,
+    }
+    await onComputeLyapunovExponents(request)
+  }
+
+  const handleComputeCovariant = async () => {
+    if (runDisabled) {
+      setCovariantError('Apply valid system settings before computing covariant vectors.')
+      return
+    }
+    if (!orbit || !selectedNodeId) {
+      setCovariantError('Select an orbit to analyze.')
+      return
+    }
+    if (!orbit.data || orbit.data.length < 2) {
+      setCovariantError('Run an orbit before computing covariant vectors.')
+      return
+    }
+
+    const duration = orbit.t_end - orbit.t_start
+    if (!Number.isFinite(duration) || duration <= 0) {
+      setCovariantError('Orbit has no duration to analyze.')
+      return
+    }
+
+    const transient = parseNumber(covariantDraft.transient)
+    const forward = parseNumber(covariantDraft.forward)
+    const backward = parseNumber(covariantDraft.backward)
+    const qrStride = parseInteger(covariantDraft.qrStride)
+
+    if (transient === null || transient < 0) {
+      setCovariantError('Transient time must be a non-negative number.')
+      return
+    }
+    if (forward === null || forward < 0) {
+      setCovariantError('Forward transient must be a non-negative number.')
+      return
+    }
+    if (backward === null || backward < 0) {
+      setCovariantError('Backward transient must be a non-negative number.')
+      return
+    }
+    if (qrStride === null || qrStride <= 0) {
+      setCovariantError('QR stride must be a positive integer.')
+      return
+    }
+
+    if (transient + forward + backward >= duration) {
+      setCovariantError('Transient windows exceed the orbit duration.')
+      return
+    }
+
+    setCovariantError(null)
+    const request: OrbitCovariantLyapunovRequest = {
+      orbitId: selectedNodeId,
+      transient,
+      forward,
+      backward,
+      qrStride,
+    }
+    await onComputeCovariantLyapunovVectors(request)
   }
 
   const handleSolveEquilibrium = async () => {
@@ -1629,6 +1778,14 @@ export function InspectorDetailsPanel({
                             : 'n/a',
                       },
                       { label: 'Step size (dt)', value: formatFixed(orbit.dt, 4) },
+                      ...(lyapunovDimension !== null
+                        ? [
+                            {
+                              label: 'Lyapunov dimension',
+                              value: formatNumber(lyapunovDimension, 6),
+                            },
+                          ]
+                        : []),
                     ]}
                   />
                 </div>
@@ -1739,6 +1896,136 @@ export function InspectorDetailsPanel({
                   ) : (
                     <p className="empty-state">Covariant Lyapunov vectors not computed yet.</p>
                   )}
+                </div>
+              </InspectorDisclosure>
+
+              <InspectorDisclosure
+                key={`${selectionKey}-oseledets`}
+                title="Oseledets Solver"
+                testId="oseledets-toggle"
+                defaultOpen={false}
+              >
+                <div className="inspector-section">
+                  {runDisabled ? (
+                    <div className="field-warning">
+                      Apply valid system changes before computing Lyapunov data.
+                    </div>
+                  ) : null}
+                  {!orbit.data || orbit.data.length < 2 ? (
+                    <p className="empty-state">Run an orbit to enable Lyapunov analysis.</p>
+                  ) : null}
+                  <h4 className="inspector-subheading">Lyapunov exponents</h4>
+                  <label>
+                    {systemDraft.type === 'map'
+                      ? 'Transient iterations to discard'
+                      : 'Transient time to discard'}
+                    <input
+                      type="number"
+                      value={lyapunovDraft.transient}
+                      onChange={(event) =>
+                        setLyapunovDraft((prev) => ({
+                          ...prev,
+                          transient: event.target.value,
+                        }))
+                      }
+                      data-testid="lyapunov-transient"
+                    />
+                  </label>
+                  <label>
+                    Steps between QR decompositions
+                    <input
+                      type="number"
+                      value={lyapunovDraft.qrStride}
+                      onChange={(event) =>
+                        setLyapunovDraft((prev) => ({
+                          ...prev,
+                          qrStride: event.target.value,
+                        }))
+                      }
+                      data-testid="lyapunov-qr"
+                    />
+                  </label>
+                  {lyapunovError ? <div className="field-error">{lyapunovError}</div> : null}
+                  <button
+                    onClick={handleComputeLyapunov}
+                    disabled={runDisabled}
+                    data-testid="lyapunov-submit"
+                  >
+                    Compute Lyapunov Exponents
+                  </button>
+                </div>
+                <div className="inspector-section">
+                  <h4 className="inspector-subheading">Covariant Lyapunov vectors</h4>
+                  <label>
+                    {systemDraft.type === 'map'
+                      ? 'Transient iterations to discard'
+                      : 'Transient time to discard'}
+                    <input
+                      type="number"
+                      value={covariantDraft.transient}
+                      onChange={(event) =>
+                        setCovariantDraft((prev) => ({
+                          ...prev,
+                          transient: event.target.value,
+                        }))
+                      }
+                      data-testid="clv-transient"
+                    />
+                  </label>
+                  <label>
+                    {systemDraft.type === 'map'
+                      ? 'Forward transient (pre-window steps)'
+                      : 'Forward transient (pre-window)'}
+                    <input
+                      type="number"
+                      value={covariantDraft.forward}
+                      onChange={(event) =>
+                        setCovariantDraft((prev) => ({
+                          ...prev,
+                          forward: event.target.value,
+                        }))
+                      }
+                      data-testid="clv-forward"
+                    />
+                  </label>
+                  <label>
+                    {systemDraft.type === 'map'
+                      ? 'Backward transient (post-window steps)'
+                      : 'Backward transient (post-window)'}
+                    <input
+                      type="number"
+                      value={covariantDraft.backward}
+                      onChange={(event) =>
+                        setCovariantDraft((prev) => ({
+                          ...prev,
+                          backward: event.target.value,
+                        }))
+                      }
+                      data-testid="clv-backward"
+                    />
+                  </label>
+                  <label>
+                    Steps between QR decompositions
+                    <input
+                      type="number"
+                      value={covariantDraft.qrStride}
+                      onChange={(event) =>
+                        setCovariantDraft((prev) => ({
+                          ...prev,
+                          qrStride: event.target.value,
+                        }))
+                      }
+                      data-testid="clv-qr"
+                    />
+                  </label>
+                  {covariantError ? <div className="field-error">{covariantError}</div> : null}
+                  <button
+                    onClick={handleComputeCovariant}
+                    disabled={runDisabled}
+                    data-testid="clv-submit"
+                  >
+                    Compute Covariant Vectors
+                  </button>
                 </div>
               </InspectorDisclosure>
 

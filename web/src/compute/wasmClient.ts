@@ -1,8 +1,11 @@
 import type {
   ContinuationProgress,
+  CovariantLyapunovRequest,
+  CovariantLyapunovResponse,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
   ForkCoreClient,
+  LyapunovExponentsRequest,
   SolveEquilibriumRequest,
   SolveEquilibriumResult,
   SimulateOrbitRequest,
@@ -15,6 +18,8 @@ import { makeStableId } from '../utils/determinism'
 
 type WorkerRequest =
   | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
+  | { id: string; kind: 'computeLyapunovExponents'; payload: LyapunovExponentsRequest }
+  | { id: string; kind: 'computeCovariantLyapunovVectors'; payload: CovariantLyapunovRequest }
   | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
   | { id: string; kind: 'runEquilibriumContinuation'; payload: EquilibriumContinuationRequest }
   | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
@@ -28,6 +33,8 @@ type WorkerResponse =
       ok: true
       result:
         | SimulateOrbitResult
+        | number[]
+        | CovariantLyapunovResponse
         | SolveEquilibriumResult
         | ValidateSystemResult
         | EquilibriumContinuationResult
@@ -44,6 +51,8 @@ export class WasmForkCoreClient implements ForkCoreClient {
       resolve: (
         value:
           | SimulateOrbitResult
+          | number[]
+          | CovariantLyapunovResponse
           | SolveEquilibriumResult
           | ValidateSystemResult
           | EquilibriumContinuationResult
@@ -86,6 +95,30 @@ export class WasmForkCoreClient implements ForkCoreClient {
     const job = this.queue.enqueue(
       'simulateOrbit',
       (signal) => this.runWorker('simulateOrbit', request, signal),
+      opts
+    )
+    return await job.promise
+  }
+
+  async computeLyapunovExponents(
+    request: LyapunovExponentsRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<number[]> {
+    const job = this.queue.enqueue(
+      'computeLyapunovExponents',
+      (signal) => this.runWorker('computeLyapunovExponents', request, signal),
+      opts
+    )
+    return await job.promise
+  }
+
+  async computeCovariantLyapunovVectors(
+    request: CovariantLyapunovRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<CovariantLyapunovResponse> {
+    const job = this.queue.enqueue(
+      'computeCovariantLyapunovVectors',
+      (signal) => this.runWorker('computeCovariantLyapunovVectors', request, signal),
       opts
     )
     return await job.promise
@@ -137,6 +170,16 @@ export class WasmForkCoreClient implements ForkCoreClient {
     signal: AbortSignal
   ): Promise<SimulateOrbitResult>
   private runWorker(
+    kind: 'computeLyapunovExponents',
+    payload: LyapunovExponentsRequest,
+    signal: AbortSignal
+  ): Promise<number[]>
+  private runWorker(
+    kind: 'computeCovariantLyapunovVectors',
+    payload: CovariantLyapunovRequest,
+    signal: AbortSignal
+  ): Promise<CovariantLyapunovResponse>
+  private runWorker(
     kind: 'solveEquilibrium',
     payload: SolveEquilibriumRequest,
     signal: AbortSignal
@@ -153,9 +196,17 @@ export class WasmForkCoreClient implements ForkCoreClient {
     signal: AbortSignal
   ): Promise<ValidateSystemResult>
   private runWorker(
-    kind: 'simulateOrbit' | 'solveEquilibrium' | 'runEquilibriumContinuation' | 'validateSystem',
+    kind:
+      | 'simulateOrbit'
+      | 'computeLyapunovExponents'
+      | 'computeCovariantLyapunovVectors'
+      | 'solveEquilibrium'
+      | 'runEquilibriumContinuation'
+      | 'validateSystem',
     payload:
       | SimulateOrbitRequest
+      | LyapunovExponentsRequest
+      | CovariantLyapunovRequest
       | SolveEquilibriumRequest
       | EquilibriumContinuationRequest
       | ValidateSystemRequest,
@@ -163,6 +214,8 @@ export class WasmForkCoreClient implements ForkCoreClient {
     onProgress?: (progress: ContinuationProgress) => void
   ): Promise<
     | SimulateOrbitResult
+    | number[]
+    | CovariantLyapunovResponse
     | SolveEquilibriumResult
     | ValidateSystemResult
     | EquilibriumContinuationResult
@@ -171,6 +224,10 @@ export class WasmForkCoreClient implements ForkCoreClient {
     const message: WorkerRequest =
       kind === 'simulateOrbit'
         ? { id, kind, payload: payload as SimulateOrbitRequest }
+        : kind === 'computeLyapunovExponents'
+          ? { id, kind, payload: payload as LyapunovExponentsRequest }
+          : kind === 'computeCovariantLyapunovVectors'
+            ? { id, kind, payload: payload as CovariantLyapunovRequest }
         : kind === 'solveEquilibrium'
           ? { id, kind, payload: payload as SolveEquilibriumRequest }
           : kind === 'runEquilibriumContinuation'
@@ -179,6 +236,8 @@ export class WasmForkCoreClient implements ForkCoreClient {
 
     const promise = new Promise<
       | SimulateOrbitResult
+      | number[]
+      | CovariantLyapunovResponse
       | SolveEquilibriumResult
       | ValidateSystemResult
       | EquilibriumContinuationResult

@@ -1,8 +1,11 @@
 import type {
   ContinuationProgress,
+  CovariantLyapunovRequest,
+  CovariantLyapunovResponse,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
   ForkCoreClient,
+  LyapunovExponentsRequest,
   SolveEquilibriumRequest,
   SolveEquilibriumResult,
   SimulateOrbitRequest,
@@ -84,6 +87,61 @@ export class MockForkCoreClient implements ForkCoreClient {
           equationErrors,
           message: hasErrors ? 'Mock parse error.' : undefined,
         }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async computeLyapunovExponents(
+    request: LyapunovExponentsRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<number[]> {
+    const job = this.queue.enqueue(
+      'computeLyapunovExponents',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const dim = request.system.varNames.length
+        return Array.from({ length: dim }, (_, index) => -0.05 * (index + 1))
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async computeCovariantLyapunovVectors(
+    request: CovariantLyapunovRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<CovariantLyapunovResponse> {
+    const job = this.queue.enqueue(
+      'computeCovariantLyapunovVectors',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const dimension = request.system.varNames.length
+        const checkpoints = Math.max(1, Math.min(5, request.windowSteps))
+        const times = Array.from({ length: checkpoints }, (_, index) =>
+          request.startTime + request.dt * index
+        )
+        const vectors = Array.from({ length: dimension * dimension * checkpoints }, () => 0)
+        for (let step = 0; step < checkpoints; step += 1) {
+          for (let vec = 0; vec < dimension; vec += 1) {
+            const base = step * dimension * dimension + vec * dimension + vec
+            vectors[base] = 1
+          }
+        }
+        return { dimension, checkpoints, times, vectors }
       },
       opts
     )
