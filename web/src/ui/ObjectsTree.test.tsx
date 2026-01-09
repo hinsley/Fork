@@ -25,8 +25,6 @@ describe('ObjectsTree', () => {
         onReorderNode={onReorderNode}
         onCreateOrbit={vi.fn()}
         onCreateEquilibrium={vi.fn()}
-        onCreateScene={vi.fn()}
-        onCreateBifurcation={vi.fn()}
         onDeleteNode={vi.fn()}
       />
     )
@@ -61,8 +59,6 @@ describe('ObjectsTree', () => {
         onReorderNode={vi.fn()}
         onCreateOrbit={vi.fn()}
         onCreateEquilibrium={vi.fn()}
-        onCreateScene={vi.fn()}
-        onCreateBifurcation={vi.fn()}
         onDeleteNode={onDeleteNode}
       />
     )
@@ -93,8 +89,6 @@ describe('ObjectsTree', () => {
         onReorderNode={vi.fn()}
         onCreateOrbit={onCreateOrbit}
         onCreateEquilibrium={vi.fn()}
-        onCreateScene={vi.fn()}
-        onCreateBifurcation={vi.fn()}
         onDeleteNode={vi.fn()}
       />
     )
@@ -121,8 +115,6 @@ describe('ObjectsTree', () => {
         onReorderNode={vi.fn()}
         onCreateOrbit={vi.fn()}
         onCreateEquilibrium={vi.fn()}
-        onCreateScene={vi.fn()}
-        onCreateBifurcation={vi.fn()}
         onDeleteNode={vi.fn()}
       />
     )

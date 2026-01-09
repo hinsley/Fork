@@ -114,18 +114,18 @@ function App() {
     await actions.createEquilibriumObject(name)
   }
 
-  const createScene = async () => {
+  const createScene = async (targetId?: string | null) => {
     if (!system) return
     const names = system.scenes.map((scene) => scene.name)
     const name = nextObjectName('Scene', names)
-    await actions.addScene(name)
+    await actions.addScene(name, targetId)
   }
 
-  const createBifurcation = async () => {
+  const createBifurcation = async (targetId?: string | null) => {
     if (!system) return
     const names = system.bifurcationDiagrams.map((diagram) => diagram.name)
     const name = nextObjectName('Bifurcation', names)
-    await actions.addBifurcationDiagram(name)
+    await actions.addBifurcationDiagram(name, targetId)
   }
 
   const onPointerDown = (side: 'left' | 'right') => (event: React.PointerEvent) => {
@@ -246,8 +246,6 @@ function App() {
                 onReorderNode={actions.reorderNode}
                 onCreateOrbit={createOrbit}
                 onCreateEquilibrium={createEquilibrium}
-                onCreateScene={createScene}
-                onCreateBifurcation={createBifurcation}
                 onDeleteNode={actions.deleteNode}
               />
             </Panel>
@@ -273,6 +271,9 @@ function App() {
                 onSelectObject={selectNode}
                 onReorderViewport={actions.reorderNode}
                 onResizeViewport={actions.updateViewportHeight}
+                onToggleViewport={actions.toggleExpanded}
+                onCreateScene={createScene}
+                onCreateBifurcation={createBifurcation}
               />
             </Panel>
           </div>
