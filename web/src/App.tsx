@@ -88,9 +88,6 @@ function App() {
     setDialogOpen(false)
     setDialogDismissed(false)
   }
-  const openSystemEditor = () => {
-    setInspectorView('system')
-  }
 
   const selectNode = (nodeId: string) => {
     actions.selectNode(nodeId)
@@ -199,11 +196,6 @@ function App() {
           await actions.openSystem(id)
           finishSystemsDialog()
           setInspectorView('selection')
-        }}
-        onEditSystem={async (id) => {
-          await actions.openSystem(id)
-          finishSystemsDialog()
-          openSystemEditor()
         }}
         onExportSystem={(id) => void actions.exportSystem(id)}
         onDeleteSystem={(id) => void actions.deleteSystem(id)}
