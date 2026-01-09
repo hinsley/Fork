@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Data, Layout } from 'plotly.js'
 import type { BifurcationDiagram, System, Scene, TreeNode } from '../system/types'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
@@ -33,7 +33,41 @@ type ViewportTileProps = {
   onResizeStart: (id: string, event: React.PointerEvent) => void
 }
 
+type PlotlyRelayoutEvent = Record<string, unknown>
+
+type TimeSeriesViewportMeta = {
+  yRange?: [number, number] | null
+  height?: number | null
+}
+
 const MIN_VIEWPORT_HEIGHT = 200
+
+function readAxisRange(
+  event: PlotlyRelayoutEvent,
+  axis: 'xaxis' | 'yaxis'
+): [number, number] | null | undefined {
+  const autorangeKey = `${axis}.autorange`
+  if (event[autorangeKey] === true) {
+    return null
+  }
+  const rangeKey = `${axis}.range`
+  const rangeValue = event[rangeKey]
+  if (Array.isArray(rangeValue) && rangeValue.length === 2) {
+    const start = Number(rangeValue[0])
+    const end = Number(rangeValue[1])
+    if (Number.isFinite(start) && Number.isFinite(end)) {
+      return [start, end]
+    }
+  }
+  const startKey = `${axis}.range[0]`
+  const endKey = `${axis}.range[1]`
+  const start = event[startKey]
+  const end = event[endKey]
+  if (typeof start === 'number' && typeof end === 'number') {
+    return [start, end]
+  }
+  return undefined
+}
 
 function collectVisibleObjectIds(system: System): string[] {
   const ids: string[] = []
@@ -57,7 +91,8 @@ function collectVisibleObjectIds(system: System): string[] {
 function buildSceneTraces(
   system: System,
   scene: Scene,
-  selectedNodeId: string | null
+  selectedNodeId: string | null,
+  timeSeriesMeta?: TimeSeriesViewportMeta | null
 ): Data[] {
   const traces: Data[] = []
   const isTimeSeries = system.config.varNames.length === 1
@@ -69,6 +104,18 @@ function buildSceneTraces(
         ? [selectedNodeId]
         : collectVisibleObjectIds(system)
   let timeRange: [number, number] | null = null
+  const pendingEquilibria: Array<{
+    nodeId: string
+    name: string
+    value: number
+    color: string
+    lineWidth: number
+    highlight: boolean
+  }> = []
+  let minY = Number.POSITIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  let minEquilibrium = Number.POSITIVE_INFINITY
+  let maxEquilibrium = Number.NEGATIVE_INFINITY
   if (isTimeSeries) {
     let minT = Number.POSITIVE_INFINITY
     let maxT = Number.NEGATIVE_INFINITY
@@ -127,29 +174,16 @@ function buildSceneTraces(
           },
         })
       } else if (isTimeSeries && timeRange && timeRange[0] !== timeRange[1]) {
-        const [start, end] = timeRange
-        const sampleCount = 32
-        const step = (end - start) / (sampleCount - 1)
-        const xs = Array.from({ length: sampleCount }, (_, index) => start + step * index)
-        const ys = xs.map(() => state[0])
-        traces.push({
-          type: 'scatter',
-          mode: 'lines+markers',
+        pendingEquilibria.push({
+          nodeId,
           name: object.name,
-          uid: nodeId,
-          x: xs,
-          y: ys,
-          line: {
-            color: node.render.color,
-            dash: 'dot',
-            width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
-          },
-          marker: {
-            size: 10,
-            color: 'rgba(0,0,0,0)',
-            line: { width: 0 },
-          },
+          value: state[0],
+          color: node.render.color,
+          lineWidth: node.render.lineWidth,
+          highlight,
         })
+        minEquilibrium = Math.min(minEquilibrium, state[0])
+        maxEquilibrium = Math.max(maxEquilibrium, state[0])
       } else {
         const time = timeRange ? timeRange[0] : 0
         traces.push({
@@ -191,8 +225,13 @@ function buildSceneTraces(
       }
     } else {
       for (const row of rows) {
+        const value = row[1]
         x.push(row[0])
-        y.push(row[1])
+        y.push(value)
+        if (isTimeSeries) {
+          minY = Math.min(minY, value)
+          maxY = Math.max(maxY, value)
+        }
       }
     }
 
@@ -223,6 +262,58 @@ function buildSceneTraces(
           color: node.render.color,
           width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
         },
+      })
+    }
+  }
+
+  if (isTimeSeries && timeRange && timeRange[0] !== timeRange[1] && pendingEquilibria.length > 0) {
+    const axisRange = timeSeriesMeta?.yRange
+    const rangeFromAxis =
+      axisRange && Number.isFinite(axisRange[0]) && Number.isFinite(axisRange[1])
+        ? axisRange[1] - axisRange[0]
+        : null
+    const rangeFromOrbits =
+      Number.isFinite(minY) && Number.isFinite(maxY) && maxY !== minY ? maxY - minY : null
+    const rangeFromEquilibria =
+      Number.isFinite(minEquilibrium) &&
+      Number.isFinite(maxEquilibrium) &&
+      maxEquilibrium !== minEquilibrium
+        ? maxEquilibrium - minEquilibrium
+        : null
+    const rangeY = rangeFromAxis ?? rangeFromOrbits ?? rangeFromEquilibria ?? 1
+    const plotHeight = timeSeriesMeta?.height ?? MIN_VIEWPORT_HEIGHT
+    const dataPerPixel = rangeY / Math.max(plotHeight, 1)
+    const [start, end] = timeRange
+
+    for (const entry of pendingEquilibria) {
+      const width = entry.highlight ? entry.lineWidth + 1 : entry.lineWidth
+      const band = (width * 0.75) * dataPerPixel
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        name: entry.name,
+        uid: entry.nodeId,
+        x: [start, end],
+        y: [entry.value, entry.value],
+        line: {
+          color: entry.color,
+          dash: 'dot',
+          width,
+        },
+      })
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        name: entry.name,
+        uid: entry.nodeId,
+        x: [start, end, end, start],
+        y: [entry.value - band, entry.value - band, entry.value + band, entry.value + band],
+        fill: 'toself',
+        hoveron: 'fills',
+        fillcolor: 'rgba(0,0,0,0.002)',
+        line: { width: 0 },
+        hovertemplate: '<extra></extra>',
+        showlegend: false,
       })
     }
   }
@@ -333,11 +424,50 @@ function ViewportTile({
   const isSelected = node.id === selectedNodeId
   const isDragging = draggingId === node.id
   const isDropTarget = dragOverId === node.id && draggingId !== node.id
+  const [timeSeriesRange, setTimeSeriesRange] = useState<[number, number] | null>(null)
+  const [plotHeight, setPlotHeight] = useState<number | null>(null)
+
+  useEffect(() => {
+    setTimeSeriesRange(null)
+    setPlotHeight(null)
+  }, [scene?.id])
+
+  const handleRelayout = useCallback(
+    (event: PlotlyRelayoutEvent) => {
+      if (!scene || system.config.varNames.length !== 1) return
+      const nextRange = readAxisRange(event, 'yaxis')
+      if (nextRange === undefined) return
+      setTimeSeriesRange((prev) => {
+        if (nextRange === null) {
+          return prev === null ? prev : null
+        }
+        if (prev && prev[0] === nextRange[0] && prev[1] === nextRange[1]) {
+          return prev
+        }
+        return nextRange
+      })
+    },
+    [scene, system.config.varNames.length]
+  )
+
+  const handleResize = useCallback(
+    (size: { width: number; height: number }) => {
+      if (!scene || system.config.varNames.length !== 1) return
+      const height = size.height
+      setPlotHeight((prev) => (prev === height ? prev : height))
+    },
+    [scene, system.config.varNames.length]
+  )
+
+  const timeSeriesMeta = useMemo(() => {
+    if (!scene || system.config.varNames.length !== 1) return null
+    return { yRange: timeSeriesRange, height: plotHeight }
+  }, [plotHeight, scene, system.config.varNames.length, timeSeriesRange])
 
   const data = useMemo(() => {
-    if (scene) return buildSceneTraces(system, scene, selectedNodeId)
+    if (scene) return buildSceneTraces(system, scene, selectedNodeId, timeSeriesMeta)
     return []
-  }, [system, scene, selectedNodeId])
+  }, [system, scene, selectedNodeId, timeSeriesMeta])
 
   const layout = useMemo(() => {
     if (scene) return buildSceneLayout(system, scene)
@@ -345,7 +475,7 @@ function ViewportTile({
     return buildSceneLayout(system, system.scenes[0])
   }, [system, scene, diagram])
 
-  const label = scene ? 'State Space' : 'Bifurcation'
+  const label = scene ? 'State Space' : 'Bifurcation Diagram'
 
   return (
     <section
@@ -409,6 +539,8 @@ function ViewportTile({
           layout={layout}
           testId={`plotly-viewport-${node.id}`}
           onPointClick={scene ? onSelectObject : undefined}
+          onRelayout={scene ? handleRelayout : undefined}
+          onResize={scene ? handleResize : undefined}
         />
       </div>
       <div
