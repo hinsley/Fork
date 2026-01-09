@@ -27,7 +27,7 @@ function nextObjectName(prefix: string, existing: string[]) {
 
 function App() {
   const { state, actions } = useAppContext()
-  const { system, systems, busy, error } = state
+  const { system, systems, busy, error, continuationProgress } = state
   const [dialogOpen, setDialogOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined' || isDeterministicMode()) return 'dark'
@@ -37,9 +37,7 @@ function App() {
         : null
     return stored === 'light' ? 'light' : 'dark'
   })
-  const [inspectorView, setInspectorView] = useState<'selection' | 'system' | 'branches'>(
-    'selection'
-  )
+  const [inspectorView, setInspectorView] = useState<'selection' | 'system'>('selection')
   const dragRef = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(
     null
   )
@@ -171,6 +169,17 @@ function App() {
       <Toolbar
         systemName={system?.name ?? null}
         busy={busy}
+        progress={
+          continuationProgress
+            ? {
+                label: continuationProgress.label,
+                currentStep: continuationProgress.progress.current_step,
+                maxSteps: continuationProgress.progress.max_steps,
+                points: continuationProgress.progress.points_computed,
+                bifurcations: continuationProgress.progress.bifurcations_found,
+              }
+            : null
+        }
         onOpenSystems={openSystemsDialog}
         theme={theme}
         onThemeChange={setTheme}
@@ -298,7 +307,8 @@ function App() {
                 onRunOrbit={actions.runOrbit}
                 onSolveEquilibrium={actions.solveEquilibrium}
                 onCreateLimitCycle={actions.createLimitCycleObject}
-                onSelectBranch={selectNode}
+                onCreateEquilibriumBranch={actions.createEquilibriumBranch}
+                onCreateBranchFromPoint={actions.createBranchFromPoint}
               />
             </Panel>
           </div>

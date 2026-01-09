@@ -21,6 +21,8 @@ describe('InspectorDetailsPanel', () => {
     const onRunOrbit = vi.fn().mockResolvedValue(undefined)
     const onSolveEquilibrium = vi.fn().mockResolvedValue(undefined)
     const onCreateLimitCycle = vi.fn().mockResolvedValue(undefined)
+    const onCreateEquilibriumBranch = vi.fn().mockResolvedValue(undefined)
+    const onCreateBranchFromPoint = vi.fn().mockResolvedValue(undefined)
 
     function Wrapper() {
       const [state, setState] = useState(system)
@@ -51,6 +53,8 @@ describe('InspectorDetailsPanel', () => {
           onRunOrbit={onRunOrbit}
           onSolveEquilibrium={onSolveEquilibrium}
           onCreateLimitCycle={onCreateLimitCycle}
+          onCreateEquilibriumBranch={onCreateEquilibriumBranch}
+          onCreateBranchFromPoint={onCreateBranchFromPoint}
         />
       )
     }
@@ -92,6 +96,8 @@ describe('InspectorDetailsPanel', () => {
         onRunOrbit={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -127,6 +133,8 @@ describe('InspectorDetailsPanel', () => {
         onRunOrbit={onRunOrbit}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycle={onCreateLimitCycle}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -204,6 +212,8 @@ describe('InspectorDetailsPanel', () => {
         onRunOrbit={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={onSolveEquilibrium}
         onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
       />
     )
 

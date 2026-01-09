@@ -1,13 +1,14 @@
-import { BranchViewer } from './BranchViewer'
 import { InspectorDetailsPanel } from './InspectorDetailsPanel'
 import type { BifurcationDiagram, System, Scene, SystemConfig, TreeNode } from '../system/types'
 import type {
+  BranchContinuationRequest,
+  EquilibriumContinuationRequest,
   EquilibriumSolveRequest,
   LimitCycleCreateRequest,
   OrbitRunRequest,
 } from '../state/appState'
 
-export type InspectorView = 'selection' | 'system' | 'branches'
+export type InspectorView = 'selection' | 'system'
 
 type InspectorPanelProps = {
   system: System
@@ -31,13 +32,13 @@ type InspectorPanelProps = {
   onRunOrbit: (request: OrbitRunRequest) => Promise<void>
   onSolveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   onCreateLimitCycle: (request: LimitCycleCreateRequest) => Promise<void>
-  onSelectBranch: (id: string) => void
+  onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
+  onCreateBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
 }
 
 const VIEWS: Array<{ id: InspectorView; label: string }> = [
   { id: 'selection', label: 'Selection' },
   { id: 'system', label: 'System Settings' },
-  { id: 'branches', label: 'Branches' },
 ]
 
 export function InspectorPanel({
@@ -55,7 +56,8 @@ export function InspectorPanel({
   onRunOrbit,
   onSolveEquilibrium,
   onCreateLimitCycle,
-  onSelectBranch,
+  onCreateEquilibriumBranch,
+  onCreateBranchFromPoint,
 }: InspectorPanelProps) {
   return (
     <div className="inspector">
@@ -74,29 +76,23 @@ export function InspectorPanel({
         ))}
       </div>
       <div className="inspector__content">
-        {view === 'branches' ? (
-          <BranchViewer
-            system={system}
-            selectedNodeId={selectedNodeId}
-            onSelectBranch={onSelectBranch}
-          />
-        ) : (
-          <InspectorDetailsPanel
-            system={system}
-            selectedNodeId={selectedNodeId}
-            view={view}
-            onRename={onRename}
-            onToggleVisibility={onToggleVisibility}
-            onUpdateRender={onUpdateRender}
-            onUpdateScene={onUpdateScene}
-            onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
-            onUpdateSystem={onUpdateSystem}
-            onValidateSystem={onValidateSystem}
-            onRunOrbit={onRunOrbit}
-            onSolveEquilibrium={onSolveEquilibrium}
-            onCreateLimitCycle={onCreateLimitCycle}
-          />
-        )}
+        <InspectorDetailsPanel
+          system={system}
+          selectedNodeId={selectedNodeId}
+          view={view}
+          onRename={onRename}
+          onToggleVisibility={onToggleVisibility}
+          onUpdateRender={onUpdateRender}
+          onUpdateScene={onUpdateScene}
+          onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
+          onUpdateSystem={onUpdateSystem}
+          onValidateSystem={onValidateSystem}
+          onRunOrbit={onRunOrbit}
+          onSolveEquilibrium={onSolveEquilibrium}
+          onCreateLimitCycle={onCreateLimitCycle}
+          onCreateEquilibriumBranch={onCreateEquilibriumBranch}
+          onCreateBranchFromPoint={onCreateBranchFromPoint}
+        />
       </div>
     </div>
   )
