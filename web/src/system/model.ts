@@ -413,6 +413,7 @@ export function updateBifurcationDiagram(
 export function updateSystem(system: System, config: SystemConfig): System {
   const next = structuredClone(system)
   const previousName = next.config.name
+  next.name = config.name
   next.config = {
     name: config.name,
     equations: [...config.equations],
