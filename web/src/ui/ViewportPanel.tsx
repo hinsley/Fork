@@ -287,7 +287,7 @@ function buildSceneTraces(
 
     for (const entry of pendingEquilibria) {
       const width = entry.highlight ? entry.lineWidth + 1 : entry.lineWidth
-      const band = (width * 0.75) * dataPerPixel
+      const band = (width * 2) * dataPerPixel
       traces.push({
         type: 'scatter',
         mode: 'lines',
