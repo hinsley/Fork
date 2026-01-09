@@ -311,6 +311,15 @@
   color: var(--text);
 }
 
+.tree-node__row--dragging {
+  opacity: 0.6;
+}
+
+.tree-node__row--drop {
+  border-color: var(--accent);
+  background: rgba(77, 163, 255, 0.12);
+}
+
 .tree-node__expand,
 .tree-node__visibility {
   background: none;
@@ -324,18 +333,18 @@
   width: 14px;
 }
 
-.tree-node__actions {
-  display: flex;
-  gap: 2px;
-}
-
-.tree-node__action {
+.tree-node__handle {
   border: 1px solid var(--panel-border);
   background: var(--button-bg);
   border-radius: 3px;
   padding: 1px 4px;
   font-size: 0.7rem;
   color: var(--text);
+  cursor: grab;
+}
+
+.tree-node__handle:active {
+  cursor: grabbing;
 }
 
 .inspector-section {

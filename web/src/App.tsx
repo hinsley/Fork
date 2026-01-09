@@ -243,7 +243,7 @@ function App() {
                 onToggleVisibility={actions.toggleVisibility}
                 onRename={actions.renameNode}
                 onToggleExpanded={actions.toggleExpanded}
-                onMoveNode={actions.moveNode}
+                onReorderNode={actions.reorderNode}
                 onCreateOrbit={createOrbit}
                 onCreateEquilibrium={createEquilibrium}
                 onCreateScene={createScene}
