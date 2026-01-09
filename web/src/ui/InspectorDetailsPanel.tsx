@@ -30,6 +30,7 @@ import {
   getBranchParams,
   normalizeEigenvalueArray,
 } from '../system/continuation'
+import { isCliSafeName, toCliSafeName } from '../utils/naming'
 
 type InspectorDetailsPanelProps = {
   system: System
@@ -112,11 +113,12 @@ const FLOW_SOLVERS = ['rk4', 'tsit5']
 const MAP_SOLVERS = ['discrete']
 
 function nextName(prefix: string, existing: string[]) {
+  const base = toCliSafeName(prefix)
   let index = 1
-  let name = `${prefix} ${index}`
+  let name = `${base}_${index}`
   while (existing.includes(name)) {
     index += 1
-    name = `${prefix} ${index}`
+    name = `${base}_${index}`
   }
   return name
 }
@@ -708,7 +710,10 @@ export function InspectorDetailsPanel({
       const paramName = systemDraft.paramNames.includes(prev.parameterName)
         ? prev.parameterName
         : systemDraft.paramNames[0] ?? ''
-      const suggestedName = paramName ? `${equilibriumName}_${paramName}` : equilibriumName
+      const safeEquilibriumName = toCliSafeName(equilibriumName)
+      const suggestedName = paramName
+        ? `${safeEquilibriumName}_${paramName}`
+        : safeEquilibriumName
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, parameterName: paramName, name: nextName }
     })
@@ -724,7 +729,8 @@ export function InspectorDetailsPanel({
       const paramName = systemDraft.paramNames.includes(prev.parameterName)
         ? prev.parameterName
         : fallbackParam
-      const suggestedName = paramName ? `${branchName}_${paramName}` : branchName
+      const safeBranchName = toCliSafeName(branchName)
+      const suggestedName = paramName ? `${safeBranchName}_${paramName}` : safeBranchName
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, parameterName: paramName, name: nextName }
     })
@@ -1116,12 +1122,17 @@ export function InspectorDetailsPanel({
       return
     }
 
+    const safeEquilibriumName = toCliSafeName(equilibrium.name)
     const suggestedName = continuationDraft.parameterName
-      ? `${equilibrium.name}_${continuationDraft.parameterName}`
-      : equilibrium.name
+      ? `${safeEquilibriumName}_${continuationDraft.parameterName}`
+      : safeEquilibriumName
     const name = continuationDraft.name.trim() || suggestedName
     if (!name.trim()) {
       setContinuationError('Branch name is required.')
+      return
+    }
+    if (!isCliSafeName(name)) {
+      setContinuationError('Branch names must be alphanumeric with underscores only.')
       return
     }
 
@@ -1191,12 +1202,17 @@ export function InspectorDetailsPanel({
       return
     }
 
+    const safeBranchName = toCliSafeName(branch.name)
     const suggestedName = branchContinuationDraft.parameterName
-      ? `${branch.name}_${branchContinuationDraft.parameterName}`
-      : branch.name
+      ? `${safeBranchName}_${branchContinuationDraft.parameterName}`
+      : safeBranchName
     const name = branchContinuationDraft.name.trim() || suggestedName
     if (!name.trim()) {
       setBranchContinuationError('Branch name is required.')
+      return
+    }
+    if (!isCliSafeName(name)) {
+      setBranchContinuationError('Branch names must be alphanumeric with underscores only.')
       return
     }
 
@@ -1231,6 +1247,10 @@ export function InspectorDetailsPanel({
       return
     }
     const name = limitCycleDraft.name.trim() || limitCycleNameSuggestion
+    if (!isCliSafeName(name)) {
+      setLimitCycleError('Limit cycle names must be alphanumeric with underscores only.')
+      return
+    }
     const period = parseNumber(limitCycleDraft.period)
     const ntst = parseNumber(limitCycleDraft.ntst)
     const ncol = parseNumber(limitCycleDraft.ncol)
@@ -2924,7 +2944,7 @@ export function InspectorDetailsPanel({
                             name: event.target.value,
                           }))
                         }
-                        placeholder={`${branch.name}_${branchContinuationDraft.parameterName}`}
+                        placeholder={`${toCliSafeName(branch.name)}_${branchContinuationDraft.parameterName}`}
                         data-testid="branch-from-point-name"
                       />
                     </label>

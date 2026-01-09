@@ -9,6 +9,7 @@ import { SystemDialog } from './ui/SystemDialog'
 import { Toolbar } from './ui/Toolbar'
 import { PerfOverlay } from './ui/PerfOverlay'
 import { isDeterministicMode } from './utils/determinism'
+import { toCliSafeName } from './utils/naming'
 
 const MIN_LEFT_WIDTH = 220
 const MIN_RIGHT_WIDTH = 240
@@ -16,11 +17,12 @@ const MAX_PANEL_WIDTH = 520
 const SPLITTER_WIDTH = 2
 
 function nextObjectName(prefix: string, existing: string[]) {
+  const base = toCliSafeName(prefix)
   let index = 1
-  let name = `${prefix} ${index}`
+  let name = `${base}_${index}`
   while (existing.includes(name)) {
     index += 1
-    name = `${prefix} ${index}`
+    name = `${base}_${index}`
   }
   return name
 }
