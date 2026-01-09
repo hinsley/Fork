@@ -34,7 +34,18 @@ export function normalizeBranchEigenvalues(data: ContinuationBranchData): Contin
 
 export function ensureBranchIndices(data: ContinuationBranchData): number[] {
   if (data.indices && data.indices.length === data.points.length) {
-    return data.indices
+    const seen = new Set<number>()
+    let valid = true
+    for (const value of data.indices) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || seen.has(value)) {
+        valid = false
+        break
+      }
+      seen.add(value)
+    }
+    if (valid) {
+      return data.indices
+    }
   }
   return data.points.map((_, index) => index)
 }
