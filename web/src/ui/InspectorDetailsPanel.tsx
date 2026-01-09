@@ -550,24 +550,6 @@ export function InspectorDetailsPanel({
           scaleratio: 1,
           range: rangeY,
         },
-        shapes: [
-          {
-            type: 'line',
-            x0: 0,
-            x1: 0,
-            y0: rangeY[0],
-            y1: rangeY[1],
-            line: { color: 'var(--panel-muted)', width: 1 },
-          },
-          {
-            type: 'line',
-            x0: rangeX[0],
-            x1: rangeX[1],
-            y0: 0,
-            y1: 0,
-            line: { color: 'var(--panel-muted)', width: 1 },
-          },
-        ],
         annotations: [
           {
             x: rangeX[1],
