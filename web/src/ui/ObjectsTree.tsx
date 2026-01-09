@@ -11,8 +11,6 @@ type ObjectsTreeProps = {
   onReorderNode: (nodeId: string, targetId: string) => void
   onCreateOrbit: () => void
   onCreateEquilibrium: () => void
-  onCreateScene: () => void
-  onCreateBifurcation: () => void
   onDeleteNode: (id: string) => void
 }
 
@@ -36,8 +34,6 @@ export function ObjectsTree({
   onReorderNode,
   onCreateOrbit,
   onCreateEquilibrium,
-  onCreateScene,
-  onCreateBifurcation,
   onDeleteNode,
 }: ObjectsTreeProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -54,7 +50,10 @@ export function ObjectsTree({
     y: number
   } | null>(null)
 
-  const rootNodes = useMemo(() => system.rootIds, [system.rootIds])
+  const rootNodes = useMemo(
+    () => system.rootIds.filter((id) => system.nodes[id]?.kind === 'object'),
+    [system.nodes, system.rootIds]
+  )
 
   const startRename = (node: TreeNode) => {
     setEditingId(node.id)
@@ -256,26 +255,6 @@ export function ObjectsTree({
             data-testid="create-equilibrium"
           >
             Equilibrium
-          </button>
-          <button
-            className="context-menu__item"
-            onClick={() => {
-              onCreateScene()
-              setCreateMenu(null)
-            }}
-            data-testid="create-scene"
-          >
-            State Space Scene
-          </button>
-          <button
-            className="context-menu__item"
-            onClick={() => {
-              onCreateBifurcation()
-              setCreateMenu(null)
-            }}
-            data-testid="create-bifurcation"
-          >
-            Bifurcation Diagram
           </button>
         </div>
       ) : null}

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Data, Layout } from 'plotly.js'
 import type {
   BifurcationAxis,
@@ -19,13 +19,15 @@ type ViewportPanelProps = {
   onSelectObject: (id: string) => void
   onReorderViewport: (nodeId: string, targetId: string) => void
   onResizeViewport: (id: string, height: number) => void
+  onToggleViewport: (id: string) => void
+  onCreateScene: (targetId?: string | null) => void
+  onCreateBifurcation: (targetId?: string | null) => void
 }
 
 type ViewportEntry = {
   node: TreeNode
   scene?: Scene
   diagram?: BifurcationDiagram
-  hidden?: boolean
 }
 
 type ViewportTileProps = {
@@ -40,6 +42,7 @@ type ViewportTileProps = {
   onSelectObject: (id: string) => void
   onReorderViewport: (nodeId: string, targetId: string) => void
   onResizeStart: (id: string, event: React.PointerEvent) => void
+  onToggleViewport: (id: string) => void
 }
 
 type PlotlyRelayoutEvent = Record<string, unknown>
@@ -639,11 +642,13 @@ function ViewportTile({
   onSelectObject,
   onReorderViewport,
   onResizeStart,
+  onToggleViewport,
 }: ViewportTileProps) {
   const { node, scene, diagram } = entry
   const isSelected = node.id === selectedNodeId
   const isDragging = draggingId === node.id
   const isDropTarget = dragOverId === node.id && draggingId !== node.id
+  const isCollapsed = !node.expanded
   const [timeSeriesState, setTimeSeriesState] = useState<{
     sceneId: string | null
     range: [number, number] | null
@@ -725,7 +730,7 @@ function ViewportTile({
 
   return (
     <section
-      className={`viewport-tile ${entry.hidden ? 'viewport-tile--hidden' : ''} ${
+      className={`viewport-tile ${isCollapsed ? 'viewport-tile--collapsed' : ''} ${
         isSelected ? 'viewport-tile--selected' : ''
       } ${isDropTarget ? 'viewport-tile--drop' : ''}`}
       data-testid={`viewport-tile-${node.id}`}
@@ -757,6 +762,17 @@ function ViewportTile({
         data-testid={`viewport-header-${node.id}`}
       >
         <button
+          className="viewport-tile__toggle"
+          onClick={(event) => {
+            event.stopPropagation()
+            onToggleViewport(node.id)
+          }}
+          aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${node.name} viewport`}
+          data-testid={`viewport-toggle-${node.id}`}
+        >
+          {isCollapsed ? '▸' : '▾'}
+        </button>
+        <button
           className="viewport-tile__handle"
           draggable
           onClick={(event) => event.stopPropagation()}
@@ -779,21 +795,25 @@ function ViewportTile({
           <span className="viewport-tile__meta">{label}</span>
         </div>
       </header>
-      <div className="viewport-tile__body">
-        <PlotlyViewport
-          data={data}
-          layout={layout}
-          testId={`plotly-viewport-${node.id}`}
-          onPointClick={scene || diagram ? onSelectObject : undefined}
-          onRelayout={scene ? handleRelayout : undefined}
-          onResize={scene ? handleResize : undefined}
-        />
-      </div>
-      <div
-        className="viewport-resize-handle"
-        onPointerDown={(event) => onResizeStart(node.id, event)}
-        data-testid={`viewport-resize-${node.id}`}
-      />
+      {isCollapsed ? null : (
+        <>
+          <div className="viewport-tile__body">
+            <PlotlyViewport
+              data={data}
+              layout={layout}
+              testId={`plotly-viewport-${node.id}`}
+              onPointClick={scene || diagram ? onSelectObject : undefined}
+              onRelayout={scene ? handleRelayout : undefined}
+              onResize={scene ? handleResize : undefined}
+            />
+          </div>
+          <div
+            className="viewport-resize-handle"
+            onPointerDown={(event) => onResizeStart(node.id, event)}
+            data-testid={`viewport-resize-${node.id}`}
+          />
+        </>
+      )}
     </section>
   )
 }
@@ -805,9 +825,17 @@ export function ViewportPanel({
   onSelectObject,
   onReorderViewport,
   onResizeViewport,
+  onToggleViewport,
+  onCreateScene,
+  onCreateBifurcation,
 }: ViewportPanelProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const [createMenu, setCreateMenu] = useState<{
+    x: number
+    y: number
+    targetId: string | null
+  } | null>(null)
   const viewportHeights = system.ui.viewportHeights
   const tileRefs = useRef(new Map<string, HTMLDivElement | null>())
   const resizeRef = useRef<{
@@ -818,21 +846,44 @@ export function ViewportPanel({
 
   const viewports = useMemo(() => {
     const entries: ViewportEntry[] = []
-  for (const nodeId of system.rootIds) {
-    const node = system.nodes[nodeId]
-    if (!node) continue
-    if (node.kind === 'scene') {
-      const scene = system.scenes.find((entry) => entry.id === nodeId)
-      if (!scene) continue
-      entries.push({ node, scene, hidden: !node.visibility })
-    } else if (node.kind === 'diagram') {
-      const diagram = system.bifurcationDiagrams.find((entry) => entry.id === nodeId)
-      if (!diagram) continue
-      entries.push({ node, diagram, hidden: !node.visibility })
+    for (const nodeId of system.rootIds) {
+      const node = system.nodes[nodeId]
+      if (!node) continue
+      if (node.kind === 'scene') {
+        const scene = system.scenes.find((entry) => entry.id === nodeId)
+        if (!scene) continue
+        entries.push({ node, scene })
+      } else if (node.kind === 'diagram') {
+        const diagram = system.bifurcationDiagrams.find((entry) => entry.id === nodeId)
+        if (!diagram) continue
+        entries.push({ node, diagram })
+      }
     }
-  }
     return entries
   }, [system])
+
+  useEffect(() => {
+    if (!createMenu) return
+    const handlePointerDown = () => setCreateMenu(null)
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCreateMenu(null)
+    }
+    const handleBlur = () => setCreateMenu(null)
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('blur', handleBlur)
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('blur', handleBlur)
+    }
+  }, [createMenu])
+
+  const openCreateMenu = (event: React.MouseEvent, targetId: string | null) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setCreateMenu({ x: event.clientX, y: event.clientY, targetId })
+  }
 
   const startResize = (id: string, event: React.PointerEvent) => {
     const node = tileRefs.current.get(id)
@@ -869,42 +920,94 @@ export function ViewportPanel({
 
   if (viewports.length === 0) {
     return (
-      <p className="empty-state">
-        No visible viewports. Toggle visibility or create a new one.
-      </p>
+      <div className="empty-state viewport-empty">
+        <p>No viewports yet.</p>
+        <div className="viewport-insert viewport-insert--empty">
+          <button
+            className="viewport-insert__button"
+            onClick={(event) => openCreateMenu(event, null)}
+            aria-label="Add viewport"
+            data-testid="viewport-insert-empty"
+          >
+            +
+          </button>
+        </div>
+      </div>
     )
   }
 
   return (
     <div className="viewport-workspace" data-testid="viewport-workspace">
-      {viewports.map((entry) => {
+      {viewports.map((entry, index) => {
         const height = viewportHeights[entry.node.id]
+        const isCollapsed = !entry.node.expanded
+        const targetId = viewports[index + 1]?.node.id ?? null
 
         return (
-          <div
-            key={entry.node.id}
-            className="viewport-item"
-            ref={(node) => {
-              tileRefs.current.set(entry.node.id, node)
-            }}
-            style={height ? { height } : undefined}
-          >
-            <ViewportTile
-              system={system}
-              entry={entry}
-              selectedNodeId={selectedNodeId}
-              draggingId={draggingId}
-              dragOverId={dragOverId}
-              setDraggingId={setDraggingId}
-              setDragOverId={setDragOverId}
-              onSelectViewport={onSelectViewport}
-              onSelectObject={onSelectObject}
-              onReorderViewport={onReorderViewport}
-              onResizeStart={startResize}
-            />
-          </div>
+          <Fragment key={entry.node.id}>
+            <div
+              className={`viewport-item${isCollapsed ? ' viewport-item--collapsed' : ''}`}
+              ref={(node) => {
+                tileRefs.current.set(entry.node.id, node)
+              }}
+              style={!isCollapsed && height ? { height } : undefined}
+            >
+              <ViewportTile
+                system={system}
+                entry={entry}
+                selectedNodeId={selectedNodeId}
+                draggingId={draggingId}
+                dragOverId={dragOverId}
+                setDraggingId={setDraggingId}
+                setDragOverId={setDragOverId}
+                onSelectViewport={onSelectViewport}
+                onSelectObject={onSelectObject}
+                onReorderViewport={onReorderViewport}
+                onResizeStart={startResize}
+                onToggleViewport={onToggleViewport}
+              />
+            </div>
+            <div className="viewport-insert" data-testid={`viewport-insert-${entry.node.id}`}>
+              <button
+                className="viewport-insert__button"
+                onClick={(event) => openCreateMenu(event, targetId)}
+                aria-label="Add viewport"
+              >
+                +
+              </button>
+            </div>
+          </Fragment>
         )
       })}
+      {createMenu ? (
+        <div
+          className="context-menu"
+          style={{ left: createMenu.x, top: createMenu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+          data-testid="viewport-create-menu"
+        >
+          <button
+            className="context-menu__item"
+            onClick={() => {
+              onCreateScene(createMenu.targetId)
+              setCreateMenu(null)
+            }}
+            data-testid="viewport-create-scene"
+          >
+            State Space Scene
+          </button>
+          <button
+            className="context-menu__item"
+            onClick={() => {
+              onCreateBifurcation(createMenu.targetId)
+              setCreateMenu(null)
+            }}
+            data-testid="viewport-create-bifurcation"
+          >
+            Bifurcation Diagram
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }

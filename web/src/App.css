@@ -652,7 +652,7 @@
 .viewport-workspace {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
   height: 100%;
   min-height: 0;
 }
@@ -664,6 +664,10 @@
   flex: 0 0 auto;
 }
 
+.viewport-item--collapsed {
+  min-height: 0;
+}
+
 .viewport-tile {
   display: flex;
   flex-direction: column;
@@ -672,10 +676,6 @@
   min-height: 0;
   height: 100%;
   position: relative;
-}
-
-.viewport-tile--hidden {
-  display: none;
 }
 
 .viewport-tile--selected {
@@ -699,6 +699,15 @@
   opacity: 0.85;
 }
 
+.viewport-tile__toggle {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0 2px;
+  font-size: 0.9rem;
+}
+
 .viewport-tile__handle {
   border: none;
   background: none;
@@ -716,6 +725,56 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.viewport-empty {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+}
+
+.viewport-insert {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 24px;
+}
+
+.viewport-insert::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 1px;
+  background: var(--panel-border);
+}
+
+.viewport-insert__button {
+  position: relative;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: opacity 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.viewport-insert:hover .viewport-insert__button,
+.viewport-insert:focus-within .viewport-insert__button {
+  opacity: 1;
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.viewport-insert--empty .viewport-insert__button {
+  opacity: 1;
 }
 
 .viewport-tile__meta {

@@ -522,6 +522,8 @@ export function InspectorDetailsPanel({
     ? { ...DEFAULT_RENDER, ...(selectionNode.render ?? {}) }
     : DEFAULT_RENDER
   const nodeVisibility = selectionNode?.visibility ?? true
+  const showVisibilityToggle =
+    selectionNode?.kind === 'object' || selectionNode?.kind === 'branch'
   const branchEntries = useMemo<BranchEntry[]>(() => {
     return Object.entries(system.branches)
       .map(([id, entry]) => ({
@@ -1552,14 +1554,16 @@ export function InspectorDetailsPanel({
               </div>
             </div>
 
-          <div className="inspector-section">
-            <button
-              onClick={() => onToggleVisibility(selectionNode.id)}
-              data-testid="inspector-visibility"
-            >
-              {nodeVisibility ? 'Visible' : 'Hidden'}
-            </button>
-          </div>
+          {showVisibilityToggle ? (
+            <div className="inspector-section">
+              <button
+                onClick={() => onToggleVisibility(selectionNode.id)}
+                data-testid="inspector-visibility"
+              >
+                {nodeVisibility ? 'Visible' : 'Hidden'}
+              </button>
+            </div>
+          ) : null}
 
           {selectionNode.kind === 'object' || selectionNode.kind === 'branch' ? (
             <div className="inspector-section">

@@ -215,8 +215,8 @@ type AppActions = {
   createEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   createBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
   createLimitCycleObject: (request: LimitCycleCreateRequest) => Promise<void>
-  addScene: (name: string) => Promise<void>
-  addBifurcationDiagram: (name: string) => Promise<void>
+  addScene: (name: string, targetId?: string | null) => Promise<void>
+  addBifurcationDiagram: (name: string, targetId?: string | null) => Promise<void>
   importSystem: (file: File) => Promise<void>
   clearError: () => void
 }
@@ -1038,7 +1038,7 @@ export function AppProvider({
   )
 
   const addSceneAction = useCallback(
-    async (name: string) => {
+    async (name: string, targetId?: string | null) => {
       if (!state.system) return
       dispatch({ type: 'SET_BUSY', busy: true })
       try {
@@ -1047,7 +1047,11 @@ export function AppProvider({
         if (nameError) {
           throw new Error(nameError)
         }
-        const updated = addScene(state.system, trimmedName).system
+        const created = addScene(state.system, trimmedName)
+        const updated =
+          targetId && targetId !== created.nodeId
+            ? reorderNode(created.system, created.nodeId, targetId)
+            : created.system
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.saveUi(updated)
       } catch (err) {
@@ -1061,7 +1065,7 @@ export function AppProvider({
   )
 
   const addBifurcationDiagramAction = useCallback(
-    async (name: string) => {
+    async (name: string, targetId?: string | null) => {
       if (!state.system) return
       dispatch({ type: 'SET_BUSY', busy: true })
       try {
@@ -1070,7 +1074,11 @@ export function AppProvider({
         if (nameError) {
           throw new Error(nameError)
         }
-        const updated = addBifurcationDiagram(state.system, trimmedName).system
+        const created = addBifurcationDiagram(state.system, trimmedName)
+        const updated =
+          targetId && targetId !== created.nodeId
+            ? reorderNode(created.system, created.nodeId, targetId)
+            : created.system
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.saveUi(updated)
       } catch (err) {
