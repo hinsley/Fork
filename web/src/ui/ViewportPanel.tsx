@@ -138,8 +138,9 @@ function buildClvTraces(orbit: OrbitObject, clv: ClvRenderStyle): Data[] {
   const length = clv.lengthScale * diag
   if (!Number.isFinite(length) || length <= 0) return []
 
-  const headLength = length * CLV_HEAD_RATIO
+  const headLength = length * CLV_HEAD_RATIO * clv.headScale
   const shaftLength = Math.max(0, length - headLength)
+  const showHeads = headLength > 0
   const stride = Math.max(1, Math.floor(clv.stride))
   const stepCount = Math.min(covariant.times.length, covariant.vectors.length)
   const traces: Data[] = []
@@ -181,12 +182,14 @@ function buildClvTraces(orbit: OrbitObject, clv: ClvRenderStyle): Data[] {
       const headBaseX = shaftX
       const headBaseY = shaftY
       const headBaseZ = shaftZ
-      headX.push(headBaseX)
-      headY.push(headBaseY)
-      headZ.push(headBaseZ)
-      headU.push(ux)
-      headV.push(uy)
-      headW.push(uz)
+      if (showHeads) {
+        headX.push(headBaseX)
+        headY.push(headBaseY)
+        headZ.push(headBaseZ)
+        headU.push(ux)
+        headV.push(uy)
+        headW.push(uz)
+      }
     }
 
     if (lineX.length > 0) {
@@ -205,7 +208,7 @@ function buildClvTraces(orbit: OrbitObject, clv: ClvRenderStyle): Data[] {
       })
     }
 
-    if (headX.length > 0) {
+    if (showHeads && headX.length > 0) {
       traces.push({
         type: 'cone',
         x: headX,

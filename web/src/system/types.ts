@@ -171,6 +171,7 @@ export interface ClvRenderStyle {
   enabled: boolean
   stride: number
   lengthScale: number
+  headScale: number
   thickness: number
   vectorIndices: number[]
   colors: string[]

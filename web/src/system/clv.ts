@@ -17,6 +17,7 @@ export const DEFAULT_CLV_RENDER: ClvRenderStyle = {
   enabled: false,
   stride: 10,
   lengthScale: 0.15,
+  headScale: 1,
   thickness: 2,
   vectorIndices: [0],
   colors: [CLV_COLOR_PALETTE[0]],
@@ -44,6 +45,13 @@ function normalizeStride(value: number | undefined): number {
 function normalizeLength(value: number | undefined): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return DEFAULT_CLV_RENDER.lengthScale
+  }
+  return Math.max(0, value)
+}
+
+function normalizeHeadScale(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_CLV_RENDER.headScale
   }
   return Math.max(0, value)
 }
@@ -107,6 +115,7 @@ export function resolveClvRender(
     enabled: Boolean(render?.enabled ?? DEFAULT_CLV_RENDER.enabled),
     stride: normalizeStride(render?.stride ?? DEFAULT_CLV_RENDER.stride),
     lengthScale: normalizeLength(render?.lengthScale ?? DEFAULT_CLV_RENDER.lengthScale),
+    headScale: normalizeHeadScale(render?.headScale ?? DEFAULT_CLV_RENDER.headScale),
     thickness: normalizeThickness(render?.thickness ?? DEFAULT_CLV_RENDER.thickness),
     vectorIndices: indices,
     colors,

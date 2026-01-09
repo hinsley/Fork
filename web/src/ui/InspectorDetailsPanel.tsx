@@ -1990,6 +1990,19 @@ export function InspectorDetailsPanel({
                     />
                   </label>
                   <label>
+                    Arrowhead scale
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      value={clvRender.headScale}
+                      onChange={(event) =>
+                        updateClvRender({ headScale: Number(event.target.value) })
+                      }
+                      data-testid="clv-plot-head-scale"
+                    />
+                  </label>
+                  <label>
                     Arrow thickness (px)
                     <input
                       type="number"
