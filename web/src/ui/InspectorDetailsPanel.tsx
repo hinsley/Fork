@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Data, Layout } from 'plotly.js'
 import type {
   BifurcationDiagram,
@@ -445,6 +445,7 @@ export function InspectorDetailsPanel({
   const equilibrium = object?.type === 'equilibrium' ? object : null
   const limitCycle = object?.type === 'limit_cycle' ? object : null
   const selectionKey = selectedNodeId ?? 'none'
+  const objectRef = useRef<typeof object>(object)
   const selectionNode = useMemo(() => {
     // Fall back to synthesized nodes so selection info renders even when legacy data
     // lacks a matching tree node entry.
@@ -484,6 +485,11 @@ export function InspectorDetailsPanel({
   const diagram = selectedNodeId
     ? system.bifurcationDiagrams.find((entry) => entry.id === selectedNodeId)
     : undefined
+  const sceneId = scene?.id ?? null
+  const equilibriumName = equilibrium?.name ?? ''
+  const branchName = branch?.name ?? ''
+  const branchParameterName = branch?.parameterName ?? ''
+  const hasBranch = Boolean(branch)
   const nodeRender = selectionNode
     ? { ...DEFAULT_RENDER, ...(selectionNode.render ?? {}) }
     : DEFAULT_RENDER
@@ -555,7 +561,11 @@ export function InspectorDetailsPanel({
     setSystemTouched(false)
     setWasmEquationErrors([])
     setWasmMessage(null)
-  }, [system.id])
+  }, [system.config, system.id])
+
+  useEffect(() => {
+    objectRef.current = object
+  }, [object])
 
   useEffect(() => {
     setOrbitDraft((prev) => ({
@@ -617,18 +627,19 @@ export function InspectorDetailsPanel({
   }, [systemDraft.paramNames])
 
   useEffect(() => {
-    if (!object) return
-    if (object.type === 'orbit') {
-      setOrbitDraft(makeOrbitRunDraft(system.config, object))
+    const current = objectRef.current
+    if (!current) return
+    if (current.type === 'orbit') {
+      setOrbitDraft(makeOrbitRunDraft(system.config, current))
       setLimitCycleDraft((prev) => ({
-        ...makeLimitCycleDraft(system.config, object),
+        ...makeLimitCycleDraft(system.config, current),
         name: prev.name,
       }))
       setOrbitError(null)
       setLimitCycleError(null)
     }
-    if (object.type === 'equilibrium') {
-      setEquilibriumDraft(makeEquilibriumSolveDraft(system.config, object))
+    if (current.type === 'equilibrium') {
+      setEquilibriumDraft(makeEquilibriumSolveDraft(system.config, current))
       setEquilibriumError(null)
       setContinuationDraft((prev) => ({
         ...makeContinuationDraft(system.config),
@@ -639,43 +650,42 @@ export function InspectorDetailsPanel({
   }, [object?.type, selectedNodeId, system.config])
 
   useEffect(() => {
-    if (scene) {
-      setSceneSearch('')
-    }
-  }, [scene?.id])
+    if (!sceneId) return
+    setSceneSearch('')
+  }, [sceneId])
 
   useEffect(() => {
-    if (!equilibrium) return
+    if (!equilibriumName) return
     setContinuationDraft((prev) => {
       const paramName = systemDraft.paramNames.includes(prev.parameterName)
         ? prev.parameterName
         : systemDraft.paramNames[0] ?? ''
-      const suggestedName = paramName ? `${equilibrium.name}_${paramName}` : equilibrium.name
+      const suggestedName = paramName ? `${equilibriumName}_${paramName}` : equilibriumName
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, parameterName: paramName, name: nextName }
     })
-  }, [equilibrium?.name, systemDraft.paramNames])
+  }, [equilibriumName, systemDraft.paramNames])
 
   useEffect(() => {
-    if (!branch) return
+    if (!branchName) return
     const fallbackParam =
-      systemDraft.paramNames.find((name) => name !== branch.parameterName) ??
+      systemDraft.paramNames.find((name) => name !== branchParameterName) ??
       systemDraft.paramNames[0] ??
       ''
     setBranchContinuationDraft((prev) => {
       const paramName = systemDraft.paramNames.includes(prev.parameterName)
         ? prev.parameterName
         : fallbackParam
-      const suggestedName = paramName ? `${branch.name}_${paramName}` : branch.name
+      const suggestedName = paramName ? `${branchName}_${paramName}` : branchName
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, parameterName: paramName, name: nextName }
     })
     setBranchContinuationError(null)
     setBranchPointError(null)
-  }, [branch?.name, branch?.parameterName, systemDraft.paramNames])
+  }, [branchName, branchParameterName, systemDraft.paramNames])
 
   useEffect(() => {
-    if (!branch) {
+    if (!hasBranch) {
       setBranchPointIndex(null)
       setBranchPointInput('')
       return
@@ -692,7 +702,7 @@ export function InspectorDetailsPanel({
       typeof logicalIndex === 'number' ? logicalIndex.toString() : ''
     )
     setBranchPointError(null)
-  }, [branch?.name, branchIndices, branchSortedOrder])
+  }, [branchName, branchIndices, branchSortedOrder, hasBranch])
 
   const systemConfig = useMemo(() => buildSystemConfig(systemDraft), [systemDraft])
   const systemValidation = useMemo(() => validateSystemConfig(systemConfig), [systemConfig])
@@ -879,7 +889,10 @@ export function InspectorDetailsPanel({
     return nextName('Limit Cycle', names)
   }, [system.objects])
 
-  const sceneSelectedIds = scene?.selectedNodeIds ?? []
+  const sceneSelectedIds = useMemo(
+    () => scene?.selectedNodeIds ?? [],
+    [scene?.selectedNodeIds]
+  )
   const sceneSelectedSet = useMemo(() => new Set(sceneSelectedIds), [sceneSelectedIds])
   const sceneFilteredObjects = useMemo(() => {
     const query = sceneSearch.trim().toLowerCase()
