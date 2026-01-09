@@ -10,9 +10,11 @@ type PlotlyClickEvent = {
   }>
 }
 
+type PlotlyRelayoutEvent = Record<string, unknown>
+
 type PlotlyEventTarget = HTMLDivElement & {
-  on?: (event: string, handler: (event: PlotlyClickEvent) => void) => void
-  removeListener?: (event: string, handler: (event: PlotlyClickEvent) => void) => void
+  on?: (event: string, handler: (event: any) => void) => void
+  removeListener?: (event: string, handler: (event: any) => void) => void
   removeAllListeners?: (event: string) => void
 }
 
@@ -50,26 +52,72 @@ function clearPlotlyClick(
   clickHandlerRef.current = null
 }
 
+function bindPlotlyRelayout(
+  node: HTMLDivElement,
+  onRelayoutRef: MutableRefObject<((event: PlotlyRelayoutEvent) => void) | undefined>,
+  relayoutHandlerRef: MutableRefObject<((event: PlotlyRelayoutEvent) => void) | null>
+) {
+  const target = node as PlotlyEventTarget
+  if (!target.on) return
+  clearPlotlyRelayout(node, relayoutHandlerRef)
+  if (!onRelayoutRef.current) return
+
+  const handler = (event: PlotlyRelayoutEvent) => {
+    onRelayoutRef.current?.(event)
+  }
+  relayoutHandlerRef.current = handler
+  target.on('plotly_relayout', handler)
+}
+
+function clearPlotlyRelayout(
+  node: HTMLDivElement,
+  relayoutHandlerRef: MutableRefObject<((event: PlotlyRelayoutEvent) => void) | null>
+) {
+  const target = node as PlotlyEventTarget
+  if (!target.on) return
+  if (target.removeAllListeners) {
+    target.removeAllListeners('plotly_relayout')
+  } else if (target.removeListener && relayoutHandlerRef.current) {
+    target.removeListener('plotly_relayout', relayoutHandlerRef.current)
+  }
+  relayoutHandlerRef.current = null
+}
+
 export function PlotlyViewport({
   data,
   layout,
   testId = 'plotly-viewport',
   onPointClick,
+  onRelayout,
+  onResize,
 }: {
   data: Data[]
   layout: Partial<Layout>
   testId?: string
   onPointClick?: (nodeId: string) => void
+  onRelayout?: (event: PlotlyRelayoutEvent) => void
+  onResize?: (size: { width: number; height: number }) => void
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [loading, setLoading] = useState(!isPlotlyLoaded())
   const [error, setError] = useState<string | null>(null)
   const onPointClickRef = useRef(onPointClick)
+  const onRelayoutRef = useRef(onRelayout)
+  const onResizeRef = useRef(onResize)
   const clickHandlerRef = useRef<((event: PlotlyClickEvent) => void) | null>(null)
+  const relayoutHandlerRef = useRef<((event: PlotlyRelayoutEvent) => void) | null>(null)
 
   useEffect(() => {
     onPointClickRef.current = onPointClick
   }, [onPointClick])
+
+  useEffect(() => {
+    onRelayoutRef.current = onRelayout
+  }, [onRelayout])
+
+  useEffect(() => {
+    onResizeRef.current = onResize
+  }, [onResize])
 
   useEffect(() => {
     preloadPlotly()
@@ -88,6 +136,7 @@ export function PlotlyViewport({
         if (controller.signal.aborted) return
         setLoading(false)
         bindPlotlyClick(node, onPointClickRef, clickHandlerRef)
+        bindPlotlyRelayout(node, onRelayoutRef, relayoutHandlerRef)
       } catch (err) {
         if (controller.signal.aborted) return
         const message = err instanceof Error ? err.message : String(err)
@@ -109,6 +158,10 @@ export function PlotlyViewport({
       if (frame) cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
         void resizePlot(node)
+        if (onResizeRef.current) {
+          const rect = node.getBoundingClientRect()
+          onResizeRef.current({ width: rect.width, height: rect.height })
+        }
       })
     })
     observer.observe(node)
@@ -123,6 +176,7 @@ export function PlotlyViewport({
     if (!node) return
     return () => {
       clearPlotlyClick(node, clickHandlerRef)
+      clearPlotlyRelayout(node, relayoutHandlerRef)
       purgePlot(node)
     }
   }, [])
