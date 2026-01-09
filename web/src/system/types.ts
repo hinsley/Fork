@@ -200,9 +200,16 @@ export interface Scene {
 export interface BifurcationDiagram {
   id: string
   name: string
-  branchId: string | null
-  xParam: string | null
-  yParam: string | null
+  selectedBranchIds: string[]
+  xAxis: BifurcationAxis | null
+  yAxis: BifurcationAxis | null
+}
+
+export type BifurcationAxisKind = 'parameter' | 'state'
+
+export interface BifurcationAxis {
+  kind: BifurcationAxisKind
+  name: string
 }
 
 export interface SystemLayout {

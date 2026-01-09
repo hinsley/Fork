@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Data, Layout } from 'plotly.js'
 import type {
+  BifurcationAxis,
   BifurcationDiagram,
   ComplexValue,
   ContinuationObject,
@@ -99,6 +100,14 @@ type ContinuationDraft = {
   forward: boolean
 }
 
+type BranchEntry = {
+  id: string
+  name: string
+  type: string
+  points: number
+  visible: boolean
+}
+
 const FLOW_SOLVERS = ['rk4', 'tsit5']
 const MAP_SOLVERS = ['discrete']
 
@@ -116,6 +125,23 @@ function adjustArray<T>(values: T[], targetLength: number, fill: () => T): T[] {
   if (values.length === targetLength) return values
   if (values.length > targetLength) return values.slice(0, targetLength)
   return [...values, ...Array.from({ length: targetLength - values.length }, fill)]
+}
+
+function formatAxisValue(axis: BifurcationAxis | null): string {
+  return axis ? `${axis.kind}:${axis.name}` : ''
+}
+
+function parseAxisValue(value: string): BifurcationAxis | null {
+  if (!value) return null
+  const [kind, ...rest] = value.split(':')
+  if (kind !== 'parameter' && kind !== 'state') return null
+  const name = rest.join(':')
+  if (!name) return null
+  return { kind, name }
+}
+
+function formatAxisLabel(kind: BifurcationAxis['kind'], name: string): string {
+  return `${kind === 'parameter' ? 'Parameter' : 'State space variable'}: ${name}`
 }
 
 type InspectorMetricRow = {
@@ -494,7 +520,17 @@ export function InspectorDetailsPanel({
     ? { ...DEFAULT_RENDER, ...(selectionNode.render ?? {}) }
     : DEFAULT_RENDER
   const nodeVisibility = selectionNode?.visibility ?? true
-  const branchEntries = useMemo(() => Object.entries(system.branches), [system.branches])
+  const branchEntries = useMemo<BranchEntry[]>(() => {
+    return Object.entries(system.branches)
+      .map(([id, entry]) => ({
+        id,
+        name: entry.name,
+        type: formatBranchType(entry),
+        points: entry.data.points.length,
+        visible: system.nodes[id]?.visibility ?? true,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [system.branches, system.nodes])
   const objectEntries = useMemo(() => {
     return Object.entries(system.objects)
       .map(([id, obj]) => {
@@ -508,6 +544,17 @@ export function InspectorDetailsPanel({
       })
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [system.nodes, system.objects])
+  const axisOptions = useMemo(() => {
+    const paramOptions = system.config.paramNames.map((name) => ({
+      value: formatAxisValue({ kind: 'parameter', name }),
+      label: formatAxisLabel('parameter', name),
+    }))
+    const stateOptions = system.config.varNames.map((name) => ({
+      value: formatAxisValue({ kind: 'state', name }),
+      label: formatAxisLabel('state', name),
+    }))
+    return [...paramOptions, ...stateOptions]
+  }, [system.config.paramNames, system.config.varNames])
   const branchIndices = useMemo(() => {
     if (!branch) return []
     return ensureBranchIndices(branch.data)
@@ -555,6 +602,7 @@ export function InspectorDetailsPanel({
   const [branchPointInput, setBranchPointInput] = useState('')
   const [branchPointError, setBranchPointError] = useState<string | null>(null)
   const [sceneSearch, setSceneSearch] = useState('')
+  const [diagramSearch, setDiagramSearch] = useState('')
 
   useEffect(() => {
     setSystemDraft(makeSystemDraft(system.config))
@@ -875,9 +923,12 @@ export function InspectorDetailsPanel({
     }
 
     if (diagram) {
+      const branchCount = diagram.selectedBranchIds.length
       return {
         label: 'Bifurcation',
-        detail: diagram.branchId ? 'Branch linked' : 'No branch linked',
+        detail: branchCount
+          ? `${branchCount} branch${branchCount === 1 ? '' : 'es'} enabled`
+          : 'No branches enabled',
       }
     }
 
@@ -910,6 +961,30 @@ export function InspectorDetailsPanel({
       .map((id) => byId.get(id))
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
   }, [objectEntries, scene, sceneSelectedIds])
+  const diagramSelectedIds = useMemo(
+    () => diagram?.selectedBranchIds ?? [],
+    [diagram?.selectedBranchIds]
+  )
+  const diagramSelectedSet = useMemo(
+    () => new Set(diagramSelectedIds),
+    [diagramSelectedIds]
+  )
+  const diagramFilteredBranches = useMemo(() => {
+    const query = diagramSearch.trim().toLowerCase()
+    if (!query) return branchEntries
+    return branchEntries.filter((entry) => {
+      const name = entry.name.toLowerCase()
+      const type = entry.type.toLowerCase()
+      return name.includes(query) || type.includes(query)
+    })
+  }, [branchEntries, diagramSearch])
+  const diagramSelectedEntries = useMemo(() => {
+    if (!diagram) return []
+    const byId = new Map(branchEntries.map((entry) => [entry.id, entry]))
+    return diagramSelectedIds
+      .map((id) => byId.get(id))
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+  }, [branchEntries, diagram, diagramSelectedIds])
   const branchParams = useMemo(() => {
     if (!branch) return []
     return getBranchParams(system, branch)
@@ -2414,73 +2489,136 @@ export function InspectorDetailsPanel({
           {diagram ? (
             <div className="inspector-section">
               <h3>Bifurcation Diagram</h3>
-              {branchEntries.length > 0 ? (
-                <label>
-                  Branch
-                  <select
-                    value={diagram.branchId ?? ''}
-                    onChange={(event) =>
-                      onUpdateBifurcationDiagram(diagram.id, {
-                        branchId: event.target.value ? event.target.value : null,
-                      })
-                    }
-                    data-testid="diagram-branch"
-                  >
-                    <option value="">Unassigned</option>
-                    {branchEntries.map(([id, entry]) => (
-                      <option key={id} value={id}>
-                        {entry.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : (
-                <p className="empty-state">No branches available yet.</p>
-              )}
-
-              {system.config.paramNames.length > 0 ? (
+              {axisOptions.length > 0 ? (
                 <>
                   <label>
-                    X Parameter
+                    Abscissa
                     <select
-                      value={diagram.xParam ?? ''}
+                      value={formatAxisValue(diagram.xAxis)}
                       onChange={(event) =>
                         onUpdateBifurcationDiagram(diagram.id, {
-                          xParam: event.target.value ? event.target.value : null,
+                          xAxis: parseAxisValue(event.target.value),
                         })
                       }
                       data-testid="diagram-x-param"
                     >
                       <option value="">Unassigned</option>
-                      {system.config.paramNames.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
+                      {axisOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
                         </option>
                       ))}
                     </select>
                   </label>
                   <label>
-                    Y Parameter
+                    Ordinate
                     <select
-                      value={diagram.yParam ?? ''}
+                      value={formatAxisValue(diagram.yAxis)}
                       onChange={(event) =>
                         onUpdateBifurcationDiagram(diagram.id, {
-                          yParam: event.target.value ? event.target.value : null,
+                          yAxis: parseAxisValue(event.target.value),
                         })
                       }
                       data-testid="diagram-y-param"
                     >
-                      <option value="">None</option>
-                      {system.config.paramNames.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
+                      <option value="">Unassigned</option>
+                      {axisOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
                         </option>
                       ))}
                     </select>
                   </label>
                 </>
               ) : (
-                <p className="empty-state">Add parameters to configure axes.</p>
+                <p className="empty-state">
+                  Add parameters or state space variables to configure axes.
+                </p>
+              )}
+              {branchEntries.length > 0 ? (
+                <div className="inspector-subsection">
+                  <h4 className="inspector-subheading">Displayed branches</h4>
+                  <label>
+                    Search branches
+                    <input
+                      value={diagramSearch}
+                      onChange={(event) => setDiagramSearch(event.target.value)}
+                      placeholder="Type to filter…"
+                      data-testid="diagram-branch-search"
+                    />
+                  </label>
+                  {diagramSelectedEntries.length > 0 ? (
+                    <div className="scene-object-selected">
+                      {diagramSelectedEntries.map((entry) => (
+                        <div
+                          className="scene-object-selected__row"
+                          key={`diagram-sel-${entry.id}`}
+                        >
+                          <div className="scene-object-selected__info">
+                            <span>{entry.name}</span>
+                            <span className="scene-object-selected__meta">
+                              {entry.type} · {entry.points} points
+                              {entry.visible ? '' : ' · hidden'}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className="scene-object-selected__remove"
+                            onClick={() => {
+                              const next = diagramSelectedIds.filter((id) => id !== entry.id)
+                              onUpdateBifurcationDiagram(diagram.id, {
+                                selectedBranchIds: next,
+                              })
+                            }}
+                            aria-label={`Remove ${entry.name} from diagram`}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="empty-state">
+                      No branches selected yet. Use the list below to add branches to this
+                      diagram.
+                    </p>
+                  )}
+                  {diagramFilteredBranches.length > 0 ? (
+                    <div className="scene-object-list">
+                      {diagramFilteredBranches.map((entry) => {
+                        const checked = diagramSelectedSet.has(entry.id)
+                        return (
+                          <label
+                            key={`diagram-entry-${entry.id}`}
+                            className="scene-object-row"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                const next = checked
+                                  ? diagramSelectedIds.filter((id) => id !== entry.id)
+                                  : [...diagramSelectedIds, entry.id]
+                                onUpdateBifurcationDiagram(diagram.id, {
+                                  selectedBranchIds: next,
+                                })
+                              }}
+                            />
+                            <span className="scene-object-row__name">{entry.name}</span>
+                            <span className="scene-object-row__meta">
+                              {entry.type} · {entry.points} points
+                              {entry.visible ? '' : ' · hidden'}
+                            </span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <p className="empty-state">No branches match this search.</p>
+                  )}
+                </div>
+              ) : (
+                <p className="empty-state">No branches available yet.</p>
               )}
             </div>
           ) : null}

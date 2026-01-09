@@ -1,5 +1,6 @@
 import type {
   AnalysisObject,
+  BifurcationAxis,
   BifurcationDiagram,
   ContinuationObject,
   System,
@@ -197,9 +198,9 @@ export function addBifurcationDiagram(
   next.bifurcationDiagrams.push({
     id: diagramId,
     name,
-    branchId: null,
-    xParam: null,
-    yParam: null,
+    selectedBranchIds: [],
+    xAxis: null,
+    yAxis: null,
   })
   next.updatedAt = nowIso()
   return { system: next, nodeId: node.id }
@@ -328,11 +329,10 @@ export function removeNode(system: System, nodeId: string): System {
     selectedNodeIds: scene.selectedNodeIds.filter((id) => !removalSet.has(id)),
   }))
 
-  next.bifurcationDiagrams = next.bifurcationDiagrams.map((diagram) =>
-    diagram.branchId && removalSet.has(diagram.branchId)
-      ? { ...diagram, branchId: null }
-      : diagram
-  )
+  next.bifurcationDiagrams = next.bifurcationDiagrams.map((diagram) => ({
+    ...diagram,
+    selectedBranchIds: diagram.selectedBranchIds.filter((id) => !removalSet.has(id)),
+  }))
 
   if (next.ui.selectedNodeId && removalSet.has(next.ui.selectedNodeId)) {
     next.ui.selectedNodeId = null
@@ -456,6 +456,33 @@ export function normalizeSystem(system: System): System {
 
   if (!next.bifurcationDiagrams) {
     next.bifurcationDiagrams = []
+  } else {
+    next.bifurcationDiagrams = next.bifurcationDiagrams.map((diagram) => {
+      const legacy = diagram as BifurcationDiagram & {
+        branchId?: string | null
+        selectedBranchIds?: string[]
+        xParam?: string | null
+        yParam?: string | null
+        xAxis?: BifurcationAxis | null
+        yAxis?: BifurcationAxis | null
+      }
+      const xAxis =
+        legacy.xAxis ?? (legacy.xParam ? { kind: 'parameter', name: legacy.xParam } : null)
+      const yAxis =
+        legacy.yAxis ?? (legacy.yParam ? { kind: 'parameter', name: legacy.yParam } : null)
+      const selectedBranchIds = Array.isArray(legacy.selectedBranchIds)
+        ? legacy.selectedBranchIds
+        : legacy.branchId
+          ? [legacy.branchId]
+          : []
+      const { branchId: _branchId, xParam: _xParam, yParam: _yParam, ...rest } = legacy
+      return {
+        ...rest,
+        xAxis,
+        yAxis,
+        selectedBranchIds,
+      }
+    })
   }
 
   const ensureRootNode = (
