@@ -159,7 +159,7 @@ describe('InspectorDetailsPanel', () => {
 
     await user.click(screen.getByTestId('limit-cycle-toggle'))
     await user.clear(screen.getByTestId('limit-cycle-name'))
-    await user.type(screen.getByTestId('limit-cycle-name'), 'LC Q')
+    await user.type(screen.getByTestId('limit-cycle-name'), 'LC_Q')
     await user.clear(screen.getByTestId('limit-cycle-period'))
     await user.type(screen.getByTestId('limit-cycle-period'), '6')
     await user.clear(screen.getByTestId('limit-cycle-state-0'))
@@ -170,7 +170,7 @@ describe('InspectorDetailsPanel', () => {
     await user.click(screen.getByTestId('limit-cycle-submit'))
 
     expect(onCreateLimitCycle).toHaveBeenCalledWith({
-      name: 'LC Q',
+      name: 'LC_Q',
       originOrbitId: objectNodeId,
       period: 6,
       state: [0.1, 0.2],

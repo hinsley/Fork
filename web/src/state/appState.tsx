@@ -46,8 +46,7 @@ import { getBranchParams, normalizeBranchEigenvalues } from '../system/continuat
 import { downloadSystem, readSystemFile } from '../system/importExport'
 import { AppContext } from './appContext'
 import { validateSystemConfig } from './systemValidation'
-
-const CLI_SAFE_NAME = /^[a-zA-Z0-9_]+$/
+import { isCliSafeName } from '../utils/naming'
 
 function findObjectIdByName(system: System, name: string): string | null {
   const match = Object.entries(system.objects).find(([, obj]) => obj.name === name)
@@ -62,10 +61,32 @@ function branchNameExists(system: System, parentName: string, name: string): boo
 
 function validateBranchName(name: string): string | null {
   if (!name.trim()) return 'Branch name is required.'
-  if (!CLI_SAFE_NAME.test(name)) {
+  if (!isCliSafeName(name)) {
     return 'Branch names must be alphanumeric with underscores only.'
   }
   return null
+}
+
+function validateObjectName(name: string, label: string): string | null {
+  if (!name.trim()) return `${label} name is required.`
+  if (!isCliSafeName(name)) {
+    return `${label} names must be alphanumeric with underscores only.`
+  }
+  return null
+}
+
+function getNodeLabel(node: TreeNode | undefined): string {
+  if (!node) return 'Item'
+  if (node.kind === 'branch') return 'Branch'
+  if (node.kind === 'scene') return 'Scene'
+  if (node.kind === 'diagram') return 'Bifurcation diagram'
+  if (node.kind === 'object') {
+    if (node.objectType === 'orbit') return 'Orbit'
+    if (node.objectType === 'equilibrium') return 'Equilibrium'
+    if (node.objectType === 'limit_cycle') return 'Limit cycle'
+    return 'Object'
+  }
+  return 'Item'
 }
 
 export type ContinuationProgressState = {
@@ -386,7 +407,14 @@ export function AppProvider({
   const renameNodeAction = useCallback(
     (nodeId: string, name: string) => {
       if (!state.system) return
-      const system = renameNode(state.system, nodeId, name)
+      const trimmedName = name.trim()
+      const node = state.system.nodes[nodeId]
+      const nameError = validateObjectName(trimmedName, getNodeLabel(node))
+      if (nameError) {
+        dispatch({ type: 'SET_ERROR', error: nameError })
+        return
+      }
+      const system = renameNode(state.system, nodeId, trimmedName)
       dispatch({ type: 'SET_SYSTEM', system })
       scheduleSystemSave(system)
     },
@@ -513,8 +541,9 @@ export function AppProvider({
           throw new Error('System settings are invalid.')
         }
         const trimmedName = name.trim()
-        if (!trimmedName) {
-          throw new Error('Orbit name is required.')
+        const nameError = validateObjectName(trimmedName, 'Orbit')
+        if (nameError) {
+          throw new Error(nameError)
         }
         const existingNames = Object.values(state.system.objects).map((obj) => obj.name)
         if (existingNames.includes(trimmedName)) {
@@ -620,8 +649,9 @@ export function AppProvider({
           throw new Error('System settings are invalid.')
         }
         const trimmedName = name.trim()
-        if (!trimmedName) {
-          throw new Error('Equilibrium name is required.')
+        const nameError = validateObjectName(trimmedName, 'Equilibrium')
+        if (nameError) {
+          throw new Error(nameError)
         }
         const existingNames = Object.values(state.system.objects).map((obj) => obj.name)
         if (existingNames.includes(trimmedName)) {
@@ -945,8 +975,9 @@ export function AppProvider({
           throw new Error('Limit cycles require a flow system.')
         }
         const trimmedName = request.name.trim()
-        if (!trimmedName) {
-          throw new Error('Limit cycle name is required.')
+        const nameError = validateObjectName(trimmedName, 'Limit cycle')
+        if (nameError) {
+          throw new Error(nameError)
         }
         const existingNames = Object.values(state.system.objects).map((obj) => obj.name)
         if (existingNames.includes(trimmedName)) {
@@ -1011,7 +1042,12 @@ export function AppProvider({
       if (!state.system) return
       dispatch({ type: 'SET_BUSY', busy: true })
       try {
-        const updated = addScene(state.system, name).system
+        const trimmedName = name.trim()
+        const nameError = validateObjectName(trimmedName, 'Scene')
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        const updated = addScene(state.system, trimmedName).system
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.saveUi(updated)
       } catch (err) {
@@ -1029,7 +1065,12 @@ export function AppProvider({
       if (!state.system) return
       dispatch({ type: 'SET_BUSY', busy: true })
       try {
-        const updated = addBifurcationDiagram(state.system, name).system
+        const trimmedName = name.trim()
+        const nameError = validateObjectName(trimmedName, 'Bifurcation diagram')
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        const updated = addBifurcationDiagram(state.system, trimmedName).system
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.saveUi(updated)
       } catch (err) {

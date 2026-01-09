@@ -38,7 +38,7 @@ const DEFAULT_UI: SystemUiState = {
 
 const DEFAULT_SCENE: Scene = {
   id: 'scene-main',
-  name: 'Main Scene',
+  name: 'Main_Scene',
   camera: {
     eye: { x: 1.6, y: 1.4, z: 0.8 },
     center: { x: 0, y: 0, z: 0 },
