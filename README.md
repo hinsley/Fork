@@ -45,8 +45,5 @@ I will have to study some more theory of numerical bifurcation analysis in maps 
 ## Rendering
 Fork uses [MathBox](https://github.com/unconed/mathbox) and [Plotly](https://plotly.com/javascript/) to render trajectories, bifurcation diagrams, and other visualizations.
 
-## Naming
-Object, branch, and system names must be alphanumeric with underscores only (`[a-zA-Z0-9_]`). Spaces and other punctuation are not allowed. This keeps the CLI and web UI aligned and ensures names are safe for on-disk storage.
-
 # Building
 Install `yarn` and run `yarn add vite` followed by `yarn vite`.
