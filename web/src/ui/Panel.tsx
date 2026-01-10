@@ -9,6 +9,7 @@ export function Panel({
   testId,
   className,
   hideHeader = false,
+  showToggle = true,
 }: {
   title: string
   open: boolean
@@ -18,6 +19,7 @@ export function Panel({
   testId?: string
   className?: string
   hideHeader?: boolean
+  showToggle?: boolean
 }) {
   return (
     <section
@@ -26,14 +28,16 @@ export function Panel({
     >
       {hideHeader ? null : (
         <header className="panel__header">
-          <button
-            className="panel__toggle"
-            onClick={onToggle}
-            aria-expanded={open}
-            aria-label={`${open ? 'Collapse' : 'Expand'} ${title}`}
-          >
-            {open ? '▾' : '▸'}
-          </button>
+          {showToggle ? (
+            <button
+              className="panel__toggle"
+              onClick={onToggle}
+              aria-expanded={open}
+              aria-label={`${open ? 'Collapse' : 'Expand'} ${title}`}
+            >
+              {open ? '▾' : '▸'}
+            </button>
+          ) : null}
           <h2 className="panel__title">{title}</h2>
           <div className="panel__actions">{actions}</div>
         </header>

@@ -247,11 +247,10 @@ function App() {
           <div className="workspace__left">
             <Panel
               title="Objects"
-              open={system.ui.layout.objectsOpen}
-              onToggle={() =>
-                actions.updateLayout({ objectsOpen: !system.ui.layout.objectsOpen })
-              }
+              open
+              onToggle={() => undefined}
               testId="objects-panel"
+              showToggle={false}
             >
               <ObjectsTree
                 system={system}
@@ -304,11 +303,10 @@ function App() {
           <div className="workspace__right">
             <Panel
               title="Inspector"
-              open={system.ui.layout.inspectorOpen}
-              onToggle={() =>
-                actions.updateLayout({ inspectorOpen: !system.ui.layout.inspectorOpen })
-              }
+              open
+              onToggle={() => undefined}
               testId="inspector-panel"
+              showToggle={false}
               actions={
                 <button onClick={openSystemSettings} data-testid="open-system-settings">
                   System Settings
