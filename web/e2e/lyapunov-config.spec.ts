@@ -8,7 +8,6 @@ test('lyapunov inputs persist after compute', async ({ page }) => {
   await harness.createSystem('Lyapunov Drafts')
   await harness.createOrbit()
   await harness.selectTreeNode('Orbit_1')
-  await page.getByTestId('inspector-tab-selection').click()
   await harness.runOrbit()
 
   await expect(page.getByText('No orbit samples stored yet.')).toHaveCount(0)
