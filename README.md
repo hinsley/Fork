@@ -11,14 +11,6 @@
 Fork is a numerical bifurcation continuation software application with both a web UI and a Node.js CLI, supporting the analysis of smooth finite-dimensional maps and systems of ordinary differential equations.
 The goal is to support all popular mobile and desktop devices.
 
-## Repository layout
-Fork is a 3-part monorepo: a Rust core, a Node.js CLI, and a web UI. The core is the numerical engine, while the CLI and web app provide different user interfaces on top of the same algorithms.
-
-- `crates/fork_core`: Pure Rust numerical engine. It owns the continuation algorithms, equation parsing, integration, linear algebra/solvers, and stability computations. The core is UI-agnostic and is designed to be deterministic, testable, and reusable across frontends.
-- `crates/fork_wasm`: WebAssembly bindings that wrap the core for JavaScript consumers. This is how the CLI and web UI call into the same continuation logic.
-- `cli`: Interactive Node.js CLI built on the WASM bindings. It exposes the core algorithms in a text-based workflow.
-- `web`: Vite + React web UI that consumes the WASM bindings and renders results in the browser.
-
 ## Supporters
 Fork is developed in my spare time and incentivized both by my personal use of the software and by [Patreon support](https://www.patreon.com/ForkDynamics).
 People who have supported Fork on Patreon are listed below.
@@ -31,6 +23,14 @@ People who have supported Fork on Patreon are listed below.
 ### Past Supporters
 
 - Jacob Price
+
+## Repository layout
+Fork is a 3-part monorepo: a Rust core, a Node.js CLI, and a web UI. The core is the numerical engine, while the CLI and web app provide different user interfaces on top of the same algorithms.
+
+- `crates/fork_core`: Pure Rust numerical engine. It owns the continuation algorithms, equation parsing, integration, linear algebra/solvers, and stability computations. The core is UI-agnostic and is designed to be deterministic, testable, and reusable across frontends.
+- `crates/fork_wasm`: WebAssembly bindings that wrap the core for JavaScript consumers. This is how the CLI and web UI call into the same continuation logic.
+- `cli`: Interactive Node.js CLI built on the WASM bindings. It exposes the core algorithms in a text-based workflow.
+- `web`: Vite + React web UI that consumes the WASM bindings and renders results in the browser.
 
 ## Bifurcations by codimension
 A checkmark denotes that support for the bifurcation type has been implemented.
