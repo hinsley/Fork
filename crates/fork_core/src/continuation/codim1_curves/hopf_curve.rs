@@ -769,7 +769,54 @@ fn compute_bialternate_matrix(jac: &DMatrix<f64>) -> DMatrix<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::equation_engine::{Bytecode, OpCode};
+    use crate::continuation::{
+        continue_parameter, continue_with_problem, BifurcationType, ContinuationPoint,
+        ContinuationSettings,
+    };
+    use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
+    use crate::equilibrium::{compute_jacobian, SystemKind};
+    use nalgebra::DMatrix;
+
+    fn extract_hopf_omega(point: &ContinuationPoint) -> f64 {
+        if point.eigenvalues.is_empty() {
+            return 1.0;
+        }
+
+        let mut max_abs_im: f64 = 0.0;
+        for eig in &point.eigenvalues {
+            if !eig.re.is_finite() || !eig.im.is_finite() {
+                continue;
+            }
+            max_abs_im = max_abs_im.max(eig.im.abs());
+        }
+        if max_abs_im <= 0.0 {
+            return 1.0;
+        }
+
+        let min_imag = max_abs_im * 1e-3;
+        let mut best_re: f64 = f64::INFINITY;
+        let mut best_im: f64 = 0.0;
+        for eig in &point.eigenvalues {
+            if !eig.re.is_finite() || !eig.im.is_finite() {
+                continue;
+            }
+            let abs_im = eig.im.abs();
+            if abs_im < min_imag {
+                continue;
+            }
+            let abs_re = eig.re.abs();
+            if abs_re < best_re || (abs_re == best_re && abs_im > best_im.abs()) {
+                best_re = abs_re;
+                best_im = eig.im;
+            }
+        }
+
+        if best_im == 0.0 {
+            best_im = max_abs_im;
+        }
+
+        best_im.abs()
+    }
 
     #[test]
     fn test_hopf_curve_dimension() {
@@ -828,5 +875,131 @@ mod tests {
         let (idx1, idx2) = select_hopf_indices_from_jres(&jres).expect("index selection");
         assert_eq!(idx1, (0, 0));
         assert_eq!(idx2, (1, 0));
+    }
+
+    #[test]
+    fn test_detect_hopf_then_continue_curve() {
+        // Two-parameter Hopf normal form with mu = p1 + p2.
+        // Hopf curve is p1 + p2 = 0.
+        let mut ops0 = Vec::new();
+        ops0.push(OpCode::LoadParam(0));
+        ops0.push(OpCode::LoadParam(1));
+        ops0.push(OpCode::Add);
+        ops0.push(OpCode::LoadVar(0));
+        ops0.push(OpCode::Mul);
+        ops0.push(OpCode::LoadVar(1));
+        ops0.push(OpCode::Sub);
+
+        let mut ops1 = Vec::new();
+        ops1.push(OpCode::LoadVar(0));
+        ops1.push(OpCode::LoadParam(0));
+        ops1.push(OpCode::LoadParam(1));
+        ops1.push(OpCode::Add);
+        ops1.push(OpCode::LoadVar(1));
+        ops1.push(OpCode::Mul);
+        ops1.push(OpCode::Add);
+
+        let equations = vec![Bytecode { ops: ops0 }, Bytecode { ops: ops1 }];
+        let p2_value = 0.25;
+        let params = vec![-0.5, p2_value]; // p1 start, p2 fixed
+        let mut system = EquationSystem::new(equations, params);
+
+        let settings = ContinuationSettings {
+            step_size: 0.05,
+            min_step_size: 1e-6,
+            max_step_size: 0.2,
+            max_steps: 40,
+            corrector_steps: 5,
+            corrector_tolerance: 1e-8,
+            step_tolerance: 1e-8,
+        };
+
+        let branch = continue_parameter(
+            &mut system,
+            SystemKind::Flow,
+            &[0.0, 0.0],
+            0,
+            settings,
+            true,
+        )
+        .expect("Equilibrium continuation should succeed");
+
+        let hopf_point = branch
+            .points
+            .iter()
+            .find(|pt| pt.stability == BifurcationType::Hopf)
+            .cloned()
+            .expect("Should detect a Hopf point");
+
+        assert!(
+            (hopf_point.param_value + p2_value).abs() < 0.1,
+            "Hopf should be near p1 = -p2"
+        );
+
+        let hopf_omega = extract_hopf_omega(&hopf_point);
+
+        system.params[0] = hopf_point.param_value;
+        system.params[1] = p2_value;
+
+        let jac = compute_jacobian(&mut system, SystemKind::Flow, &hopf_point.state)
+            .expect("Jacobian should compute");
+        let n = hopf_point.state.len();
+        let jac_mat = DMatrix::from_row_slice(n, n, &jac);
+        let kappa_seed = estimate_hopf_kappa_from_jacobian(&jac_mat)
+            .unwrap_or(hopf_omega * hopf_omega);
+        let kappa = if kappa_seed.is_finite() && kappa_seed > 0.0 {
+            kappa_seed
+        } else {
+            hopf_omega * hopf_omega
+        };
+
+        let mut problem = HopfCurveProblem::new(
+            &mut system,
+            SystemKind::Flow,
+            &hopf_point.state,
+            hopf_omega,
+            0,
+            1,
+        )
+        .expect("Hopf curve problem should initialize");
+
+        let mut augmented_state = Vec::with_capacity(hopf_point.state.len() + 2);
+        augmented_state.push(p2_value);
+        augmented_state.extend_from_slice(&hopf_point.state);
+        augmented_state.push(kappa);
+
+        let initial_point = ContinuationPoint {
+            state: augmented_state,
+            param_value: hopf_point.param_value,
+            stability: BifurcationType::Hopf,
+            eigenvalues: hopf_point.eigenvalues.clone(),
+        };
+
+        let curve_settings = ContinuationSettings {
+            step_size: 0.02,
+            min_step_size: 1e-6,
+            max_step_size: 0.1,
+            max_steps: 20,
+            corrector_steps: 5,
+            corrector_tolerance: 1e-8,
+            step_tolerance: 1e-8,
+        };
+
+        let curve = continue_with_problem(&mut problem, initial_point, curve_settings, true)
+            .expect("Hopf curve continuation should succeed");
+
+        assert!(
+            curve.points.len() > 1,
+            "Hopf curve continuation should generate multiple points"
+        );
+
+        let first = &curve.points[0];
+        let last = curve.points.last().expect("Hopf curve has points");
+        let p1_delta = (last.param_value - first.param_value).abs();
+        let p2_delta = (last.state[0] - first.state[0]).abs();
+        assert!(
+            p1_delta > 1e-6 || p2_delta > 1e-6,
+            "Hopf curve continuation did not advance in parameter space"
+        );
     }
 }
