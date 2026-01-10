@@ -654,6 +654,18 @@ function isSystemEqual(a: SystemConfig, b: SystemConfig): boolean {
   )
 }
 
+function buildSystemConfigKey(config: SystemConfig): string {
+  return JSON.stringify([
+    config.name,
+    config.type,
+    config.solver,
+    config.equations,
+    config.params,
+    config.paramNames,
+    config.varNames,
+  ])
+}
+
 export function InspectorDetailsPanel({
   system,
   selectedNodeId,
@@ -779,6 +791,8 @@ export function InspectorDetailsPanel({
     if (branchIndices.length === 0) return []
     return buildSortedArrayOrder(branchIndices)
   }, [branchIndices])
+  const systemConfigKey = useMemo(() => buildSystemConfigKey(system.config), [system.config])
+  const stableSystemConfigRef = useRef(system.config)
   const [branchPointIndex, setBranchPointIndex] = useState<number | null>(null)
   const selectedBranchPoint = useMemo(() => {
     if (!branch || branchPointIndex === null) return null
@@ -847,6 +861,10 @@ export function InspectorDetailsPanel({
   useEffect(() => {
     objectRef.current = object
   }, [object])
+
+  useEffect(() => {
+    stableSystemConfigRef.current = system.config
+  }, [system.config])
 
   useEffect(() => {
     setOrbitDraft((prev) => ({
@@ -930,12 +948,13 @@ export function InspectorDetailsPanel({
   useEffect(() => {
     const current = objectRef.current
     if (!current) return
+    const stableSystemConfig = stableSystemConfigRef.current
     if (current.type === 'orbit') {
-      setOrbitDraft(makeOrbitRunDraft(system.config, current))
+      setOrbitDraft(makeOrbitRunDraft(stableSystemConfig, current))
       setLyapunovDraft(makeLyapunovDraft())
       setCovariantDraft(makeCovariantLyapunovDraft())
       setLimitCycleDraft((prev) => ({
-        ...makeLimitCycleDraft(system.config, current),
+        ...makeLimitCycleDraft(stableSystemConfig, current),
         name: prev.name,
       }))
       setOrbitError(null)
@@ -944,15 +963,15 @@ export function InspectorDetailsPanel({
       setLimitCycleError(null)
     }
     if (current.type === 'equilibrium') {
-      setEquilibriumDraft(makeEquilibriumSolveDraft(system.config, current))
+      setEquilibriumDraft(makeEquilibriumSolveDraft(stableSystemConfig, current))
       setEquilibriumError(null)
       setContinuationDraft((prev) => ({
-        ...makeContinuationDraft(system.config),
+        ...makeContinuationDraft(stableSystemConfig),
         name: prev.name,
       }))
       setContinuationError(null)
     }
-  }, [object?.type, selectedNodeId, system.config])
+  }, [object?.type, selectedNodeId, systemConfigKey])
 
   useEffect(() => {
     setClvIndexDraft(clvIndexText)
