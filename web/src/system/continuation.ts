@@ -92,3 +92,45 @@ export function getBranchParams(system: System, branch: ContinuationObject): num
   }
   return [...system.config.params]
 }
+
+const BIFURCATION_TYPE_LABELS: Record<string, string> = {
+  Fold: 'Fold',
+  Hopf: 'Hopf',
+  NeutralSaddle: 'Neutral Saddle',
+  CycleFold: 'Cycle Fold',
+  PeriodDoubling: 'Period Doubling',
+  NeimarkSacker: 'Neimark-Sacker',
+  Cusp: 'Cusp',
+  BogdanovTakens: 'Bogdanov-Takens',
+  ZeroHopf: 'Zero-Hopf',
+  DoubleHopf: 'Double-Hopf',
+  GeneralizedHopf: 'Generalized Hopf',
+  CuspOfCycles: 'Cusp of Cycles',
+  FoldFlip: 'Fold-Flip',
+  FoldNeimarkSacker: 'Fold-Neimark-Sacker',
+  FlipNeimarkSacker: 'Flip-Neimark-Sacker',
+  DoubleNeimarkSacker: 'Double Neimark-Sacker',
+  GeneralizedPeriodDoubling: 'Generalized Period Doubling',
+  Chenciner: 'Chenciner',
+  Resonance1_1: 'Resonance 1:1',
+  Resonance1_2: 'Resonance 1:2',
+  Resonance1_3: 'Resonance 1:3',
+  Resonance1_4: 'Resonance 1:4',
+}
+
+export function formatBifurcationType(value?: ContinuationPoint['stability']): string {
+  if (!value || value === 'None') return 'Unknown'
+  const mapped = BIFURCATION_TYPE_LABELS[value]
+  if (mapped) return mapped
+  const formatted = value
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .trim()
+  return formatted.length > 0 ? formatted : 'Unknown'
+}
+
+export function formatBifurcationLabel(index: number, value?: ContinuationPoint['stability']): string {
+  const indexLabel = Number.isFinite(index) ? `Index ${index}` : 'Index ?'
+  const typeLabel = formatBifurcationType(value)
+  return `${indexLabel} - ${typeLabel}`
+}

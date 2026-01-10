@@ -11,7 +11,12 @@ import type {
   Scene,
   TreeNode,
 } from '../system/types'
-import { buildSortedArrayOrder, ensureBranchIndices, getBranchParams } from '../system/continuation'
+import {
+  buildSortedArrayOrder,
+  ensureBranchIndices,
+  formatBifurcationLabel,
+  getBranchParams,
+} from '../system/continuation'
 import { resolveClvRender } from '../system/clv'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
@@ -596,7 +601,8 @@ function buildDiagramTraces(
     if (!branch || !node || !node.visibility) continue
     if (!branch.data.points || branch.data.points.length === 0) continue
 
-    const order = buildSortedArrayOrder(ensureBranchIndices(branch.data))
+    const indices = ensureBranchIndices(branch.data)
+    const order = buildSortedArrayOrder(indices)
     const branchParams = getBranchParams(system, branch)
     const x: number[] = []
     const y: number[] = []
@@ -675,7 +681,9 @@ function buildDiagramTraces(
         if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) continue
         bx.push(xValue as number)
         by.push(yValue as number)
-        labels.push(point.stability && point.stability !== 'None' ? point.stability : 'Bifurcation')
+        const logicalIndex = indices[bifIndex]
+        const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : bifIndex
+        labels.push(formatBifurcationLabel(displayIndex, point.stability))
       }
       if (bx.length > 0) {
         traces.push({

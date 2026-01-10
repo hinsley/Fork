@@ -39,6 +39,7 @@ import {
   buildSortedArrayOrder,
   extractHopfOmega,
   ensureBranchIndices,
+  formatBifurcationLabel,
   getBranchParams,
   normalizeEigenvalueArray,
 } from '../system/continuation'
@@ -3583,9 +3584,12 @@ export function InspectorDetailsPanel({
                             <div className="inspector-list">
                               {branchBifurcations.map((idx) => {
                                 const logical = branchIndices[idx]
-                                const label = Number.isFinite(logical)
-                                  ? `Index ${logical}`
-                                  : `Index ${idx}`
+                                const point = branch?.data.points[idx]
+                                const displayIndex = Number.isFinite(logical) ? logical : idx
+                                const label = formatBifurcationLabel(
+                                  displayIndex,
+                                  point?.stability
+                                )
                                 return (
                                   <button
                                     type="button"
