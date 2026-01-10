@@ -1,6 +1,8 @@
 import type {
   Codim1CurveBranch,
   ContinuationProgress,
+  ContinuationExtensionRequest,
+  ContinuationExtensionResult,
   CovariantLyapunovRequest,
   CovariantLyapunovResponse,
   EquilibriumContinuationRequest,
@@ -25,6 +27,7 @@ type WorkerRequest =
   | { id: string; kind: 'computeCovariantLyapunovVectors'; payload: CovariantLyapunovRequest }
   | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
   | { id: string; kind: 'runEquilibriumContinuation'; payload: EquilibriumContinuationRequest }
+  | { id: string; kind: 'runContinuationExtension'; payload: ContinuationExtensionRequest }
   | { id: string; kind: 'runFoldCurveContinuation'; payload: FoldCurveContinuationRequest }
   | { id: string; kind: 'runHopfCurveContinuation'; payload: HopfCurveContinuationRequest }
   | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
@@ -43,6 +46,7 @@ type WorkerResponse =
         | SolveEquilibriumResult
         | ValidateSystemResult
         | EquilibriumContinuationResult
+        | ContinuationExtensionResult
         | Codim1CurveBranch
     }
   | { id: string; ok: false; error: string; aborted?: boolean }
@@ -62,6 +66,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
           | SolveEquilibriumResult
           | ValidateSystemResult
           | EquilibriumContinuationResult
+          | ContinuationExtensionResult
           | Codim1CurveBranch
       ) => void
       reject: (error: Error) => void
@@ -155,6 +160,18 @@ export class WasmForkCoreClient implements ForkCoreClient {
     return await job.promise
   }
 
+  async runContinuationExtension(
+    request: ContinuationExtensionRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<ContinuationExtensionResult> {
+    const job = this.queue.enqueue(
+      'runContinuationExtension',
+      (signal) => this.runWorker('runContinuationExtension', request, signal, opts?.onProgress),
+      opts
+    )
+    return await job.promise
+  }
+
   async runFoldCurveContinuation(
     request: FoldCurveContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
@@ -224,6 +241,12 @@ export class WasmForkCoreClient implements ForkCoreClient {
     onProgress?: (progress: ContinuationProgress) => void
   ): Promise<EquilibriumContinuationResult>
   private runWorker(
+    kind: 'runContinuationExtension',
+    payload: ContinuationExtensionRequest,
+    signal: AbortSignal,
+    onProgress?: (progress: ContinuationProgress) => void
+  ): Promise<ContinuationExtensionResult>
+  private runWorker(
     kind: 'runFoldCurveContinuation',
     payload: FoldCurveContinuationRequest,
     signal: AbortSignal,
@@ -247,6 +270,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | 'computeCovariantLyapunovVectors'
       | 'solveEquilibrium'
       | 'runEquilibriumContinuation'
+      | 'runContinuationExtension'
       | 'runFoldCurveContinuation'
       | 'runHopfCurveContinuation'
       | 'validateSystem',
@@ -256,6 +280,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | CovariantLyapunovRequest
       | SolveEquilibriumRequest
       | EquilibriumContinuationRequest
+      | ContinuationExtensionRequest
       | FoldCurveContinuationRequest
       | HopfCurveContinuationRequest
       | ValidateSystemRequest,
@@ -268,6 +293,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
     | SolveEquilibriumResult
     | ValidateSystemResult
     | EquilibriumContinuationResult
+    | ContinuationExtensionResult
     | Codim1CurveBranch
   > {
     const id = makeStableId('req')
@@ -282,11 +308,13 @@ export class WasmForkCoreClient implements ForkCoreClient {
           ? { id, kind, payload: payload as SolveEquilibriumRequest }
           : kind === 'runEquilibriumContinuation'
             ? { id, kind, payload: payload as EquilibriumContinuationRequest }
-            : kind === 'runFoldCurveContinuation'
-              ? { id, kind, payload: payload as FoldCurveContinuationRequest }
-              : kind === 'runHopfCurveContinuation'
-                ? { id, kind, payload: payload as HopfCurveContinuationRequest }
-                : { id, kind, payload: payload as ValidateSystemRequest }
+            : kind === 'runContinuationExtension'
+              ? { id, kind, payload: payload as ContinuationExtensionRequest }
+              : kind === 'runFoldCurveContinuation'
+                ? { id, kind, payload: payload as FoldCurveContinuationRequest }
+                : kind === 'runHopfCurveContinuation'
+                  ? { id, kind, payload: payload as HopfCurveContinuationRequest }
+                  : { id, kind, payload: payload as ValidateSystemRequest }
 
     const promise = new Promise<
       | SimulateOrbitResult
@@ -295,6 +323,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | SolveEquilibriumResult
       | ValidateSystemResult
       | EquilibriumContinuationResult
+      | ContinuationExtensionResult
       | Codim1CurveBranch
     >((resolve, reject) => {
       this.pending.set(id, { resolve, reject, onProgress })

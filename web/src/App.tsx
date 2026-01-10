@@ -220,6 +220,7 @@ function App() {
         onCreateLimitCycle={actions.createLimitCycleObject}
         onCreateEquilibriumBranch={actions.createEquilibriumBranch}
         onCreateBranchFromPoint={actions.createBranchFromPoint}
+        onExtendBranch={actions.extendBranch}
         onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
         onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
       />
@@ -331,6 +332,7 @@ function App() {
                 onCreateLimitCycle={actions.createLimitCycleObject}
                 onCreateEquilibriumBranch={actions.createEquilibriumBranch}
                 onCreateBranchFromPoint={actions.createBranchFromPoint}
+                onExtendBranch={actions.extendBranch}
                 onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
                 onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
               />

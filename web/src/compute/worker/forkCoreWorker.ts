@@ -3,6 +3,8 @@
 import type {
   Codim1CurveBranch,
   ContinuationProgress,
+  ContinuationExtensionRequest,
+  ContinuationExtensionResult,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
   CovariantLyapunovRequest,
@@ -24,6 +26,7 @@ type WorkerRequest =
   | { id: string; kind: 'computeCovariantLyapunovVectors'; payload: CovariantLyapunovRequest }
   | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
   | { id: string; kind: 'runEquilibriumContinuation'; payload: EquilibriumContinuationRequest }
+  | { id: string; kind: 'runContinuationExtension'; payload: ContinuationExtensionRequest }
   | { id: string; kind: 'runFoldCurveContinuation'; payload: FoldCurveContinuationRequest }
   | { id: string; kind: 'runHopfCurveContinuation'; payload: HopfCurveContinuationRequest }
   | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
@@ -42,6 +45,7 @@ type WorkerResponse =
         | SolveEquilibriumResult
         | ValidateSystemResult
         | EquilibriumContinuationResult
+        | ContinuationExtensionResult
         | Codim1CurveBranch
     }
   | { id: string; ok: false; error: string; aborted?: boolean }
@@ -134,6 +138,21 @@ type WasmModule = {
     run_steps: (batchSize: number) => ContinuationProgress
     get_progress: () => ContinuationProgress
     get_result: () => Codim1CurveBranch
+  }
+  WasmContinuationExtensionRunner: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    systemType: string,
+    branchData: ContinuationExtensionRequest['branchData'],
+    parameterName: string,
+    settings: Record<string, number>,
+    forward: boolean
+  ) => {
+    run_steps: (batchSize: number) => ContinuationProgress
+    get_progress: () => ContinuationProgress
+    get_result: () => ContinuationExtensionResult
   }
   default?: (input?: RequestInfo | URL | Response | BufferSource | WebAssembly.Module) => Promise<void>
 }
@@ -287,6 +306,39 @@ async function runEquilibriumContinuation(
     request.system.varNames,
     request.system.type,
     new Float64Array(request.equilibriumState),
+    request.parameterName,
+    settings,
+    request.forward
+  )
+
+  let progress = runner.get_progress()
+  onProgress(progress)
+
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+
+  return runner.get_result()
+}
+
+async function runContinuationExtension(
+  request: ContinuationExtensionRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<ContinuationExtensionResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const settings: Record<string, number> = { ...request.settings }
+  const runner = new wasm.WasmContinuationExtensionRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.type,
+    request.branchData,
     request.parameterName,
     settings,
     request.forward
@@ -482,6 +534,24 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     if (message.kind === 'runEquilibriumContinuation') {
       const result = await runEquilibriumContinuation(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runContinuationExtension') {
+      const result = await runContinuationExtension(
         message.payload,
         controller.signal,
         (progress) => {

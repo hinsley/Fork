@@ -1,6 +1,7 @@
 import type {
   ContinuationBranchData,
   ContinuationSettings,
+  ContinuationPoint,
   EquilibriumSolution,
   SystemConfig,
 } from '../system/types'
@@ -84,6 +85,24 @@ export type EquilibriumContinuationRequest = {
 
 export type EquilibriumContinuationResult = ContinuationBranchData
 
+export type ContinuationBranchDataWire = Omit<ContinuationBranchData, 'points'> & {
+  points: Array<
+    Omit<ContinuationPoint, 'eigenvalues'> & {
+      eigenvalues: Array<[number, number] | { re?: number; im?: number }>
+    }
+  >
+}
+
+export type ContinuationExtensionRequest = {
+  system: SystemConfig
+  branchData: ContinuationBranchData | ContinuationBranchDataWire
+  parameterName: string
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type ContinuationExtensionResult = ContinuationBranchData
+
 export type Codim1CurvePoint = {
   state: number[]
   param1_value: number
@@ -146,6 +165,10 @@ export interface ForkCoreClient {
     request: EquilibriumContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<EquilibriumContinuationResult>
+  runContinuationExtension(
+    request: ContinuationExtensionRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<ContinuationExtensionResult>
   runFoldCurveContinuation(
     request: FoldCurveContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }

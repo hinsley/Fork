@@ -43,6 +43,7 @@ import {
   updateViewportHeights,
   updateNodeRender,
   updateObject,
+  updateBranch,
   updateScene,
   updateSystem,
 } from '../system/model'
@@ -51,6 +52,7 @@ import {
   getBranchParams,
   normalizeEigenvalueArray,
   normalizeBranchEigenvalues,
+  serializeBranchDataForWasm,
 } from '../system/continuation'
 import { downloadSystem, readSystemFile } from '../system/importExport'
 import { AppContext } from './appContext'
@@ -185,6 +187,12 @@ export type BranchContinuationRequest = {
   forward: boolean
 }
 
+export type BranchExtensionRequest = {
+  branchId: string
+  settings: ContinuationSettings
+  forward: boolean
+}
+
 export type FoldCurveContinuationRequest = {
   branchId: string
   pointIndex: number
@@ -294,6 +302,7 @@ type AppActions = {
   solveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   createEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   createBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
+  extendBranch: (request: BranchExtensionRequest) => Promise<void>
   createFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   createHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
   createLimitCycleObject: (request: LimitCycleCreateRequest) => Promise<void>
@@ -1239,6 +1248,76 @@ export function AppProvider({
     [client, state.system, store]
   )
 
+  const extendBranch = useCallback(
+    async (request: BranchExtensionRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+
+        const sourceBranch = state.system.branches[request.branchId]
+        if (!sourceBranch) {
+          throw new Error('Select a valid branch to extend.')
+        }
+        if (
+          sourceBranch.branchType !== 'equilibrium' &&
+          sourceBranch.branchType !== 'limit_cycle'
+        ) {
+          throw new Error('Branch extension is only available for equilibrium or limit cycle branches.')
+        }
+        if (!sourceBranch.data.points.length) {
+          throw new Error('Branch has no points to extend.')
+        }
+
+        const runConfig: SystemConfig = { ...system }
+        runConfig.params = getBranchParams(state.system, sourceBranch)
+
+        const branchData = serializeBranchDataForWasm(sourceBranch)
+
+        const updatedData = await client.runContinuationExtension(
+          {
+            system: runConfig,
+            branchData,
+            parameterName: sourceBranch.parameterName,
+            settings: request.settings,
+            forward: request.forward,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Extension', progress },
+              }),
+          }
+        )
+
+        const normalized = normalizeBranchEigenvalues(updatedData)
+        const updatedBranch: ContinuationObject = {
+          ...sourceBranch,
+          data: normalized,
+          settings: request.settings,
+        }
+
+        const updated = updateBranch(state.system, request.branchId, updatedBranch)
+        const selected = selectNode(updated, request.branchId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
   const createFoldCurveFromPoint = useCallback(
     async (request: FoldCurveContinuationRequest) => {
       if (!state.system) return
@@ -1705,6 +1784,7 @@ export function AppProvider({
       solveEquilibrium,
       createEquilibriumBranch,
       createBranchFromPoint,
+      extendBranch,
       createFoldCurveFromPoint,
       createHopfCurveFromPoint,
       createLimitCycleObject,
@@ -1723,6 +1803,7 @@ export function AppProvider({
       solveEquilibrium,
       createEquilibriumBranch,
       createBranchFromPoint,
+      extendBranch,
       createFoldCurveFromPoint,
       createHopfCurveFromPoint,
       addBifurcationDiagramAction,

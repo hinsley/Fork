@@ -2,6 +2,7 @@ import { InspectorDetailsPanel } from './InspectorDetailsPanel'
 import type { BifurcationDiagram, Scene, System, SystemConfig, TreeNode } from '../system/types'
 import type {
   BranchContinuationRequest,
+  BranchExtensionRequest,
   EquilibriumContinuationRequest,
   EquilibriumSolveRequest,
   FoldCurveContinuationRequest,
@@ -36,6 +37,7 @@ type InspectorPanelProps = {
   onCreateLimitCycle: (request: LimitCycleCreateRequest) => Promise<void>
   onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   onCreateBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
+  onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
 }
@@ -57,6 +59,7 @@ export function InspectorPanel({
   onCreateLimitCycle,
   onCreateEquilibriumBranch,
   onCreateBranchFromPoint,
+  onExtendBranch,
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
 }: InspectorPanelProps) {
@@ -81,6 +84,7 @@ export function InspectorPanel({
           onCreateLimitCycle={onCreateLimitCycle}
           onCreateEquilibriumBranch={onCreateEquilibriumBranch}
           onCreateBranchFromPoint={onCreateBranchFromPoint}
+          onExtendBranch={onExtendBranch}
           onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
           onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
         />

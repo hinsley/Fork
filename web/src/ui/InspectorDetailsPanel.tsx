@@ -25,6 +25,7 @@ import {
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
 import type {
   BranchContinuationRequest,
+  BranchExtensionRequest,
   EquilibriumContinuationRequest,
   LimitCycleCreateRequest,
   EquilibriumSolveRequest,
@@ -70,6 +71,7 @@ type InspectorDetailsPanelProps = {
   onCreateLimitCycle: (request: LimitCycleCreateRequest) => Promise<void>
   onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   onCreateBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
+  onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
 }
@@ -506,6 +508,25 @@ function makeContinuationDraft(system: SystemConfig): ContinuationDraft {
   }
 }
 
+function makeBranchExtensionDraft(
+  system: SystemConfig,
+  branch?: ContinuationObject | null
+): ContinuationDraft {
+  const base = makeContinuationDraft(system)
+  const defaults = branch?.settings
+  return {
+    ...base,
+    stepSize: defaults?.step_size?.toString() ?? base.stepSize,
+    maxSteps: '50',
+    minStepSize: defaults?.min_step_size?.toString() ?? base.minStepSize,
+    maxStepSize: defaults?.max_step_size?.toString() ?? base.maxStepSize,
+    correctorSteps: defaults?.corrector_steps?.toString() ?? base.correctorSteps,
+    correctorTolerance: defaults?.corrector_tolerance?.toString() ?? base.correctorTolerance,
+    stepTolerance: defaults?.step_tolerance?.toString() ?? base.stepTolerance,
+    forward: true,
+  }
+}
+
 function makeCodim1CurveDraft(system: SystemConfig): Codim1CurveDraft {
   return {
     name: '',
@@ -685,6 +706,7 @@ export function InspectorDetailsPanel({
   onCreateLimitCycle,
   onCreateEquilibriumBranch,
   onCreateBranchFromPoint,
+  onExtendBranch,
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
 }: InspectorDetailsPanelProps) {
@@ -739,6 +761,8 @@ export function InspectorDetailsPanel({
   const equilibriumName = equilibrium?.name ?? ''
   const branchName = branch?.name ?? ''
   const branchParameterName = branch?.parameterName ?? ''
+  const canExtendBranch =
+    branch?.branchType === 'equilibrium' || branch?.branchType === 'limit_cycle'
   const hasBranch = Boolean(branch)
   const nodeRender = selectionNode
     ? { ...DEFAULT_RENDER, ...(selectionNode.render ?? {}) }
@@ -847,6 +871,10 @@ export function InspectorDetailsPanel({
   const [branchContinuationDraft, setBranchContinuationDraft] =
     useState<ContinuationDraft>(() => makeContinuationDraft(system.config))
   const [branchContinuationError, setBranchContinuationError] = useState<string | null>(null)
+  const [branchExtensionDraft, setBranchExtensionDraft] = useState<ContinuationDraft>(() =>
+    makeBranchExtensionDraft(system.config)
+  )
+  const [branchExtensionError, setBranchExtensionError] = useState<string | null>(null)
   const [branchPointInput, setBranchPointInput] = useState('')
   const [branchPointError, setBranchPointError] = useState<string | null>(null)
   const [sceneSearch, setSceneSearch] = useState('')
@@ -1035,11 +1063,13 @@ export function InspectorDetailsPanel({
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, param2Name, name: nextName }
     })
+    setBranchExtensionDraft(makeBranchExtensionDraft(stableSystemConfigRef.current, branch))
     setBranchContinuationError(null)
+    setBranchExtensionError(null)
     setBranchPointError(null)
     setFoldCurveError(null)
     setHopfCurveError(null)
-  }, [branchName, branchParameterName, systemDraft.paramNames])
+  }, [branch, branchName, branchParameterName, systemDraft.paramNames])
 
   useEffect(() => {
     if (!hasBranch) {
@@ -1571,6 +1601,34 @@ export function InspectorDetailsPanel({
       parameterName: branchContinuationDraft.parameterName,
       settings,
       forward: branchContinuationDraft.forward,
+    })
+  }
+
+  const handleExtendBranch = async () => {
+    if (runDisabled) {
+      setBranchExtensionError('Apply valid system settings before extending.')
+      return
+    }
+    if (!branch || !selectedNodeId) {
+      setBranchExtensionError('Select a branch to extend.')
+      return
+    }
+    if (branch.branchType !== 'equilibrium' && branch.branchType !== 'limit_cycle') {
+      setBranchExtensionError('Branch extension is only available for equilibrium or limit cycle branches.')
+      return
+    }
+
+    const { settings, error } = buildContinuationSettings(branchExtensionDraft)
+    if (!settings) {
+      setBranchExtensionError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setBranchExtensionError(null)
+    await onExtendBranch({
+      branchId: selectedNodeId,
+      settings,
+      forward: branchExtensionDraft.forward,
     })
   }
 
@@ -3678,6 +3736,158 @@ export function InspectorDetailsPanel({
                     ) : (
                       <p className="empty-state">Select a point to inspect.</p>
                     )}
+                  </div>
+                </InspectorDisclosure>
+
+                <InspectorDisclosure
+                  key={`${selectionKey}-branch-extend`}
+                  title="Extend Branch"
+                  testId="branch-extend-toggle"
+                  defaultOpen={false}
+                >
+                  <div className="inspector-section">
+                    {!canExtendBranch ? (
+                      <p className="empty-state">
+                        Branch extension is only available for equilibrium or limit cycle branches.
+                      </p>
+                    ) : null}
+                    {runDisabled ? (
+                      <div className="field-warning">
+                        Apply valid system changes before extending.
+                      </div>
+                    ) : null}
+                    <label>
+                      Direction
+                      <select
+                        value={branchExtensionDraft.forward ? 'forward' : 'backward'}
+                        onChange={(event) =>
+                          setBranchExtensionDraft((prev) => ({
+                            ...prev,
+                            forward: event.target.value === 'forward',
+                          }))
+                        }
+                        disabled={!canExtendBranch}
+                        data-testid="branch-extend-direction"
+                      >
+                        <option value="forward">Forward (Append)</option>
+                        <option value="backward">Backward (Prepend)</option>
+                      </select>
+                    </label>
+                    <label>
+                      Max points to add
+                      <input
+                        type="number"
+                        value={branchExtensionDraft.maxSteps}
+                        onChange={(event) =>
+                          setBranchExtensionDraft((prev) => ({
+                            ...prev,
+                            maxSteps: event.target.value,
+                          }))
+                        }
+                        disabled={!canExtendBranch}
+                        data-testid="branch-extend-max-steps"
+                      />
+                    </label>
+                    <label>
+                      Step size
+                      <input
+                        type="number"
+                        value={branchExtensionDraft.stepSize}
+                        onChange={(event) =>
+                          setBranchExtensionDraft((prev) => ({
+                            ...prev,
+                            stepSize: event.target.value,
+                          }))
+                        }
+                        disabled={!canExtendBranch}
+                        data-testid="branch-extend-step-size"
+                      />
+                    </label>
+                    <label>
+                      Min step size
+                      <input
+                        type="number"
+                        value={branchExtensionDraft.minStepSize}
+                        onChange={(event) =>
+                          setBranchExtensionDraft((prev) => ({
+                            ...prev,
+                            minStepSize: event.target.value,
+                          }))
+                        }
+                        disabled={!canExtendBranch}
+                        data-testid="branch-extend-min-step"
+                      />
+                    </label>
+                    <label>
+                      Max step size
+                      <input
+                        type="number"
+                        value={branchExtensionDraft.maxStepSize}
+                        onChange={(event) =>
+                          setBranchExtensionDraft((prev) => ({
+                            ...prev,
+                            maxStepSize: event.target.value,
+                          }))
+                        }
+                        disabled={!canExtendBranch}
+                        data-testid="branch-extend-max-step"
+                      />
+                    </label>
+                    <label>
+                      Corrector steps
+                      <input
+                        type="number"
+                        value={branchExtensionDraft.correctorSteps}
+                        onChange={(event) =>
+                          setBranchExtensionDraft((prev) => ({
+                            ...prev,
+                            correctorSteps: event.target.value,
+                          }))
+                        }
+                        disabled={!canExtendBranch}
+                        data-testid="branch-extend-corrector-steps"
+                      />
+                    </label>
+                    <label>
+                      Corrector tolerance
+                      <input
+                        type="number"
+                        value={branchExtensionDraft.correctorTolerance}
+                        onChange={(event) =>
+                          setBranchExtensionDraft((prev) => ({
+                            ...prev,
+                            correctorTolerance: event.target.value,
+                          }))
+                        }
+                        disabled={!canExtendBranch}
+                        data-testid="branch-extend-corrector-tolerance"
+                      />
+                    </label>
+                    <label>
+                      Step tolerance
+                      <input
+                        type="number"
+                        value={branchExtensionDraft.stepTolerance}
+                        onChange={(event) =>
+                          setBranchExtensionDraft((prev) => ({
+                            ...prev,
+                            stepTolerance: event.target.value,
+                          }))
+                        }
+                        disabled={!canExtendBranch}
+                        data-testid="branch-extend-step-tolerance"
+                      />
+                    </label>
+                    {branchExtensionError ? (
+                      <div className="field-error">{branchExtensionError}</div>
+                    ) : null}
+                    <button
+                      onClick={handleExtendBranch}
+                      disabled={runDisabled || !canExtendBranch}
+                      data-testid="branch-extend-submit"
+                    >
+                      Extend Branch
+                    </button>
                   </div>
                 </InspectorDisclosure>
 

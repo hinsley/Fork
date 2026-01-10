@@ -8,6 +8,14 @@ import type {
 
 type EigenvalueWire = [number, number]
 
+type ContinuationPointWire = Omit<ContinuationPoint, 'eigenvalues'> & {
+  eigenvalues: EigenvalueWire[]
+}
+
+export type ContinuationBranchDataWire = Omit<ContinuationBranchData, 'points'> & {
+  points: ContinuationPointWire[]
+}
+
 export function normalizeEigenvalueArray(raw: unknown): ContinuationEigenvalue[] {
   if (!raw || !Array.isArray(raw)) return []
   return raw.map((value) => {
@@ -62,6 +70,78 @@ export function normalizeBranchEigenvalues(data: ContinuationBranchData): Contin
       ...point,
       eigenvalues: normalizeEigenvalueArray(point.eigenvalues),
     })),
+  }
+}
+
+function serializeEigenvalueArray(raw: ContinuationPoint['eigenvalues'] | undefined): EigenvalueWire[] {
+  if (!raw || !Array.isArray(raw)) return []
+  return raw.map((value) => {
+    if (Array.isArray(value)) {
+      const tuple = value as EigenvalueWire
+      return [tuple[0] ?? 0, tuple[1] ?? 0]
+    }
+    const entry = value as { re?: number; im?: number }
+    return [entry?.re ?? 0, entry?.im ?? 0]
+  })
+}
+
+function normalizeLimitCycleBranchType(
+  branchType: ContinuationBranchData['branch_type'] | undefined
+): ContinuationBranchData['branch_type'] {
+  const fallback = { type: 'LimitCycle', ntst: 20, ncol: 4 } as const
+  if (!branchType) return fallback
+
+  const branchTypeValue = branchType as unknown
+  if (typeof branchTypeValue === 'string') {
+    return fallback
+  }
+
+  if ('type' in branchType) {
+    if (branchType.type === 'LimitCycle') {
+      return {
+        type: 'LimitCycle',
+        ntst: branchType.ntst ?? fallback.ntst,
+        ncol: branchType.ncol ?? fallback.ncol,
+      }
+    }
+    return fallback
+  }
+
+  const legacy = branchType as { LimitCycle?: { ntst?: number; ncol?: number } }
+  if (legacy.LimitCycle) {
+    return {
+      type: 'LimitCycle',
+      ntst: legacy.LimitCycle.ntst ?? fallback.ntst,
+      ncol: legacy.LimitCycle.ncol ?? fallback.ncol,
+    }
+  }
+
+  return fallback
+}
+
+export function serializeBranchDataForWasm(
+  branch: ContinuationObject
+): ContinuationBranchDataWire {
+  const data = branch.data
+  const indices =
+    data.indices && data.indices.length === data.points.length
+      ? data.indices
+      : data.points.map((_, index) => index)
+  const points = data.points.map((point) => ({
+    ...point,
+    eigenvalues: serializeEigenvalueArray(point.eigenvalues),
+  }))
+
+  let branchType = data.branch_type
+  if (branch.branchType === 'limit_cycle') {
+    branchType = normalizeLimitCycleBranchType(data.branch_type)
+  }
+
+  return {
+    ...data,
+    indices,
+    branch_type: branchType,
+    points,
   }
 }
 

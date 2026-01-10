@@ -1,6 +1,8 @@
 import type {
   Codim1CurveBranch,
   ContinuationProgress,
+  ContinuationExtensionRequest,
+  ContinuationExtensionResult,
   CovariantLyapunovRequest,
   CovariantLyapunovResponse,
   EquilibriumContinuationRequest,
@@ -219,6 +221,42 @@ export class MockForkCoreClient implements ForkCoreClient {
           bifurcations: [],
           indices: [0],
         }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runContinuationExtension(
+    request: ContinuationExtensionRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<ContinuationExtensionResult> {
+    const job = this.queue.enqueue(
+      'runContinuationExtension',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const progress: ContinuationProgress = {
+          done: false,
+          current_step: 0,
+          max_steps: request.settings.max_steps,
+          points_computed: request.branchData.points.length,
+          bifurcations_found: request.branchData.bifurcations.length,
+          current_param: request.branchData.points[0]?.param_value ?? 0,
+        }
+        opts?.onProgress?.(progress)
+
+        progress.done = true
+        progress.current_step = request.settings.max_steps
+        progress.points_computed = request.branchData.points.length
+        opts?.onProgress?.({ ...progress })
+
+        return request.branchData
       },
       opts
     )

@@ -2,6 +2,7 @@ import { InspectorDetailsPanel } from './InspectorDetailsPanel'
 import type { BifurcationDiagram, Scene, System, SystemConfig, TreeNode } from '../system/types'
 import type {
   BranchContinuationRequest,
+  BranchExtensionRequest,
   EquilibriumContinuationRequest,
   EquilibriumSolveRequest,
   FoldCurveContinuationRequest,
@@ -38,6 +39,7 @@ type SystemSettingsDialogProps = {
   onCreateLimitCycle: (request: LimitCycleCreateRequest) => Promise<void>
   onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   onCreateBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
+  onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
 }
@@ -61,6 +63,7 @@ export function SystemSettingsDialog({
   onCreateLimitCycle,
   onCreateEquilibriumBranch,
   onCreateBranchFromPoint,
+  onExtendBranch,
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
 }: SystemSettingsDialogProps) {
@@ -104,6 +107,7 @@ export function SystemSettingsDialog({
             onCreateLimitCycle={onCreateLimitCycle}
             onCreateEquilibriumBranch={onCreateEquilibriumBranch}
             onCreateBranchFromPoint={onCreateBranchFromPoint}
+            onExtendBranch={onExtendBranch}
             onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
             onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
           />

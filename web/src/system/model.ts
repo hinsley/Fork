@@ -126,6 +126,18 @@ export function updateObject(
   return next
 }
 
+export function updateBranch(
+  system: System,
+  nodeId: string,
+  branch: ContinuationObject
+): System {
+  const next = structuredClone(system)
+  if (!next.branches[nodeId]) return system
+  next.branches[nodeId] = branch
+  next.updatedAt = nowIso()
+  return next
+}
+
 export function addBranch(
   system: System,
   branch: ContinuationObject,
