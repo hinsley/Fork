@@ -4,6 +4,8 @@ import type {
   BranchContinuationRequest,
   EquilibriumContinuationRequest,
   EquilibriumSolveRequest,
+  FoldCurveContinuationRequest,
+  HopfCurveContinuationRequest,
   LimitCycleCreateRequest,
   OrbitCovariantLyapunovRequest,
   OrbitLyapunovRequest,
@@ -38,6 +40,8 @@ type InspectorPanelProps = {
   onCreateLimitCycle: (request: LimitCycleCreateRequest) => Promise<void>
   onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   onCreateBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
+  onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
+  onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
 }
 
 const VIEWS: Array<{ id: InspectorView; label: string }> = [
@@ -64,6 +68,8 @@ export function InspectorPanel({
   onCreateLimitCycle,
   onCreateEquilibriumBranch,
   onCreateBranchFromPoint,
+  onCreateFoldCurveFromPoint,
+  onCreateHopfCurveFromPoint,
 }: InspectorPanelProps) {
   return (
     <div className="inspector">
@@ -100,6 +106,8 @@ export function InspectorPanel({
           onCreateLimitCycle={onCreateLimitCycle}
           onCreateEquilibriumBranch={onCreateEquilibriumBranch}
           onCreateBranchFromPoint={onCreateBranchFromPoint}
+          onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
+          onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
         />
       </div>
     </div>

@@ -13,8 +13,10 @@ use fork_core::continuation::{
     FoldCurveProblem, HopfCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
     CollocationConfig,
 };
-use fork_core::equilibrium::SystemKind;
+use fork_core::continuation::codim1_curves::estimate_hopf_kappa_from_jacobian;
+use fork_core::equilibrium::{compute_jacobian, SystemKind};
 use fork_core::traits::DynamicalSystem;
+use nalgebra::DMatrix;
 use serde::Serialize;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
@@ -487,6 +489,19 @@ impl WasmSystem {
         self.system.params[param1_index] = param1_value;
         self.system.params[param2_index] = param2_value;
 
+        let n = hopf_state.len();
+        let jac = compute_jacobian(&self.system, kind, &hopf_state)
+            .map_err(|e| JsValue::from_str(&format!("Failed to compute Jacobian: {}", e)))?;
+        let jac_mat = DMatrix::from_row_slice(n, n, &jac);
+        let kappa_seed = estimate_hopf_kappa_from_jacobian(&jac_mat)
+            .unwrap_or(hopf_omega * hopf_omega);
+        let kappa = if kappa_seed.is_finite() && kappa_seed > 0.0 {
+            kappa_seed
+        } else {
+            hopf_omega * hopf_omega
+        };
+        let kappa_default = kappa;
+
         // Create Hopf curve problem
         let mut problem = HopfCurveProblem::new(
             &mut self.system,
@@ -501,8 +516,6 @@ impl WasmSystem {
         // Build initial augmented state for PALC: [p1, p2, x1, ..., xn, κ]
         // The ContinuationPoint.state should contain [p2, x1..xn, κ] so that
         // when continue_with_problem prepends p1, we get [p1, p2, x1..xn, κ]
-        let n = hopf_state.len();
-        let kappa = hopf_omega * hopf_omega;
 
         // Build state as [p2, x1..xn, κ]
         let mut augmented_state = Vec::with_capacity(n + 2);
@@ -544,7 +557,7 @@ impl WasmSystem {
                 let kappa = if pt.state.len() >= n + 2 {
                     pt.state[n + 1]
                 } else {
-                    hopf_omega * hopf_omega
+                    kappa_default
                 };
 
                 Codim1CurvePoint {

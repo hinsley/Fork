@@ -1,11 +1,14 @@
 /// <reference lib="webworker" />
 
 import type {
+  Codim1CurveBranch,
   ContinuationProgress,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
   CovariantLyapunovRequest,
   CovariantLyapunovResponse,
+  FoldCurveContinuationRequest,
+  HopfCurveContinuationRequest,
   LyapunovExponentsRequest,
   SolveEquilibriumRequest,
   SolveEquilibriumResult,
@@ -21,6 +24,8 @@ type WorkerRequest =
   | { id: string; kind: 'computeCovariantLyapunovVectors'; payload: CovariantLyapunovRequest }
   | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
   | { id: string; kind: 'runEquilibriumContinuation'; payload: EquilibriumContinuationRequest }
+  | { id: string; kind: 'runFoldCurveContinuation'; payload: FoldCurveContinuationRequest }
+  | { id: string; kind: 'runHopfCurveContinuation'; payload: HopfCurveContinuationRequest }
   | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
   | { id: string; kind: 'cancel' }
 
@@ -37,6 +42,7 @@ type WorkerResponse =
         | SolveEquilibriumResult
         | ValidateSystemResult
         | EquilibriumContinuationResult
+        | Codim1CurveBranch
     }
   | { id: string; ok: false; error: string; aborted?: boolean }
   | WorkerProgress
@@ -91,6 +97,43 @@ type WasmModule = {
     run_steps: (batchSize: number) => ContinuationProgress
     get_progress: () => ContinuationProgress
     get_result: () => EquilibriumContinuationResult
+  }
+  WasmFoldCurveRunner: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    systemType: string,
+    foldState: Float64Array,
+    param1Name: string,
+    param1Value: number,
+    param2Name: string,
+    param2Value: number,
+    settings: Record<string, number>,
+    forward: boolean
+  ) => {
+    run_steps: (batchSize: number) => ContinuationProgress
+    get_progress: () => ContinuationProgress
+    get_result: () => Codim1CurveBranch
+  }
+  WasmHopfCurveRunner: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    systemType: string,
+    hopfState: Float64Array,
+    hopfOmega: number,
+    param1Name: string,
+    param1Value: number,
+    param2Name: string,
+    param2Value: number,
+    settings: Record<string, number>,
+    forward: boolean
+  ) => {
+    run_steps: (batchSize: number) => ContinuationProgress
+    get_progress: () => ContinuationProgress
+    get_result: () => Codim1CurveBranch
   }
   default?: (input?: RequestInfo | URL | Response | BufferSource | WebAssembly.Module) => Promise<void>
 }
@@ -262,6 +305,79 @@ async function runEquilibriumContinuation(
   return runner.get_result()
 }
 
+async function runFoldCurveContinuation(
+  request: FoldCurveContinuationRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<Codim1CurveBranch> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const settings: Record<string, number> = { ...request.settings }
+  const runner = new wasm.WasmFoldCurveRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.type,
+    new Float64Array(request.foldState),
+    request.param1Name,
+    request.param1Value,
+    request.param2Name,
+    request.param2Value,
+    settings,
+    request.forward
+  )
+
+  let progress = runner.get_progress()
+  onProgress(progress)
+
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+
+  return runner.get_result()
+}
+
+async function runHopfCurveContinuation(
+  request: HopfCurveContinuationRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<Codim1CurveBranch> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const settings: Record<string, number> = { ...request.settings }
+  const runner = new wasm.WasmHopfCurveRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.type,
+    new Float64Array(request.hopfState),
+    request.hopfOmega,
+    request.param1Name,
+    request.param1Value,
+    request.param2Name,
+    request.param2Value,
+    settings,
+    request.forward
+  )
+
+  let progress = runner.get_progress()
+  onProgress(progress)
+
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+
+  return runner.get_result()
+}
+
 function abortIfNeeded(signal: AbortSignal) {
   if (signal.aborted) {
     const error = new Error('cancelled')
@@ -366,6 +482,42 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     if (message.kind === 'runEquilibriumContinuation') {
       const result = await runEquilibriumContinuation(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runFoldCurveContinuation') {
+      const result = await runFoldCurveContinuation(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runHopfCurveContinuation') {
+      const result = await runHopfCurveContinuation(
         message.payload,
         controller.signal,
         (progress) => {

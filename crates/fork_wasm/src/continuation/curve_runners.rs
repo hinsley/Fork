@@ -1,13 +1,15 @@
 //! Codimension-1 curve continuation runners.
 
 use crate::system::build_system;
+use fork_core::continuation::codim1_curves::estimate_hopf_kappa_from_jacobian;
 use fork_core::continuation::{
     Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType, Codim2BifurcationType,
     ContinuationPoint, ContinuationRunner, ContinuationSettings,
     FoldCurveProblem, HopfCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
 };
 use fork_core::equation_engine::EquationSystem;
-use fork_core::equilibrium::SystemKind;
+use fork_core::equilibrium::{compute_jacobian, SystemKind};
+use nalgebra::DMatrix;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 
@@ -186,7 +188,7 @@ pub struct WasmHopfCurveRunner {
     param1_index: usize,
     param2_index: usize,
     hopf_state: Vec<f64>,
-    hopf_omega: f64,
+    hopf_kappa: f64,
     param2_value: f64,
 }
 
@@ -231,6 +233,18 @@ impl WasmHopfCurveRunner {
         system.params[param1_index] = param1_value;
         system.params[param2_index] = param2_value;
 
+        let n = hopf_state.len();
+        let jac = compute_jacobian(&system, kind, &hopf_state)
+            .map_err(|e| JsValue::from_str(&format!("Failed to compute Jacobian: {}", e)))?;
+        let jac_mat = DMatrix::from_row_slice(n, n, &jac);
+        let kappa_seed = estimate_hopf_kappa_from_jacobian(&jac_mat)
+            .unwrap_or(hopf_omega * hopf_omega);
+        let hopf_kappa = if kappa_seed.is_finite() && kappa_seed > 0.0 {
+            kappa_seed
+        } else {
+            hopf_omega * hopf_omega
+        };
+
         let mut boxed_system = Box::new(system);
         let system_ptr: *mut EquationSystem = &mut *boxed_system;
         let problem = HopfCurveProblem::new(
@@ -247,12 +261,10 @@ impl WasmHopfCurveRunner {
         // for the lifetime of the runner.
         let problem: HopfCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
 
-        let n = hopf_state.len();
-        let kappa = hopf_omega * hopf_omega;
         let mut augmented_state = Vec::with_capacity(n + 2);
         augmented_state.push(param2_value);
         augmented_state.extend_from_slice(&hopf_state);
-        augmented_state.push(kappa);
+        augmented_state.push(hopf_kappa);
 
         let initial_point = ContinuationPoint {
             state: augmented_state,
@@ -270,7 +282,7 @@ impl WasmHopfCurveRunner {
             param1_index,
             param2_index,
             hopf_state,
-            hopf_omega,
+            hopf_kappa,
             param2_value,
         })
     }
@@ -311,7 +323,7 @@ impl WasmHopfCurveRunner {
 
         let branch = runner.take_result();
         let n = self.hopf_state.len();
-        let kappa_default = self.hopf_omega * self.hopf_omega;
+        let kappa_default = self.hopf_kappa;
 
         let codim1_points: Vec<Codim1CurvePoint> = branch
             .points

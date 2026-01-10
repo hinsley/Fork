@@ -84,6 +84,47 @@ export type EquilibriumContinuationRequest = {
 
 export type EquilibriumContinuationResult = ContinuationBranchData
 
+export type Codim1CurvePoint = {
+  state: number[]
+  param1_value: number
+  param2_value: number
+  codim2_type?: string
+  eigenvalues?: Array<[number, number] | { re?: number; im?: number }>
+  auxiliary?: number | null
+}
+
+export type Codim1CurveBranch = {
+  curve_type?: string
+  param1_index?: number
+  param2_index?: number
+  points: Codim1CurvePoint[]
+  codim2_bifurcations?: Array<{ index: number; type?: string }>
+  indices?: number[]
+}
+
+export type FoldCurveContinuationRequest = {
+  system: SystemConfig
+  foldState: number[]
+  param1Name: string
+  param1Value: number
+  param2Name: string
+  param2Value: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type HopfCurveContinuationRequest = {
+  system: SystemConfig
+  hopfState: number[]
+  hopfOmega: number
+  param1Name: string
+  param1Value: number
+  param2Name: string
+  param2Value: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
 export interface ForkCoreClient {
   simulateOrbit(
     request: SimulateOrbitRequest,
@@ -105,6 +146,14 @@ export interface ForkCoreClient {
     request: EquilibriumContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<EquilibriumContinuationResult>
+  runFoldCurveContinuation(
+    request: FoldCurveContinuationRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<Codim1CurveBranch>
+  runHopfCurveContinuation(
+    request: HopfCurveContinuationRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<Codim1CurveBranch>
   validateSystem(
     request: ValidateSystemRequest,
     opts?: { signal?: AbortSignal }

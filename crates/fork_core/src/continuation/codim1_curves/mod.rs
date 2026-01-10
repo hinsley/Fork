@@ -7,7 +7,7 @@ mod fold_curve;
 mod hopf_curve;
 
 pub use fold_curve::FoldCurveProblem;
-pub use hopf_curve::HopfCurveProblem;
+pub use hopf_curve::{estimate_hopf_kappa_from_jacobian, HopfCurveProblem};
 
 use super::types::Codim2BifurcationType;
 use anyhow::Result;

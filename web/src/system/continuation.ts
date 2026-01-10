@@ -2,6 +2,7 @@ import type {
   ContinuationBranchData,
   ContinuationEigenvalue,
   ContinuationObject,
+  ContinuationPoint,
   System,
 } from './types'
 
@@ -20,6 +21,38 @@ export function normalizeEigenvalueArray(raw: unknown): ContinuationEigenvalue[]
       im: typeof entry?.im === 'number' ? entry.im : Number(entry?.im ?? 0),
     }
   })
+}
+
+export function extractHopfOmega(point: ContinuationPoint): number {
+  const eigenvalues = normalizeEigenvalueArray(point.eigenvalues)
+  if (eigenvalues.length === 0) return 1.0
+
+  let maxAbsIm = 0
+  for (const eig of eigenvalues) {
+    if (!Number.isFinite(eig.re) || !Number.isFinite(eig.im)) continue
+    maxAbsIm = Math.max(maxAbsIm, Math.abs(eig.im))
+  }
+  if (maxAbsIm <= 0) return 1.0
+
+  const minImag = maxAbsIm * 1e-3
+  let bestRe = Number.POSITIVE_INFINITY
+  let bestIm = 0
+  for (const eig of eigenvalues) {
+    if (!Number.isFinite(eig.re) || !Number.isFinite(eig.im)) continue
+    const absRe = Math.abs(eig.re)
+    const absIm = Math.abs(eig.im)
+    if (absIm < minImag) continue
+    if (absRe < bestRe || (absRe === bestRe && absIm > Math.abs(bestIm))) {
+      bestRe = absRe
+      bestIm = eig.im
+    }
+  }
+
+  if (bestIm === 0) {
+    bestIm = maxAbsIm
+  }
+
+  return Math.abs(bestIm) || 1.0
 }
 
 export function normalizeBranchEigenvalues(data: ContinuationBranchData): ContinuationBranchData {

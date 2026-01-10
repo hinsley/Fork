@@ -308,11 +308,13 @@ function App() {
                 onRunOrbit={actions.runOrbit}
                 onComputeLyapunovExponents={actions.computeLyapunovExponents}
                 onComputeCovariantLyapunovVectors={actions.computeCovariantLyapunovVectors}
-                onSolveEquilibrium={actions.solveEquilibrium}
-                onCreateLimitCycle={actions.createLimitCycleObject}
-                onCreateEquilibriumBranch={actions.createEquilibriumBranch}
-                onCreateBranchFromPoint={actions.createBranchFromPoint}
-              />
+              onSolveEquilibrium={actions.solveEquilibrium}
+              onCreateLimitCycle={actions.createLimitCycleObject}
+              onCreateEquilibriumBranch={actions.createEquilibriumBranch}
+              onCreateBranchFromPoint={actions.createBranchFromPoint}
+              onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
+              onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
+            />
             </Panel>
           </div>
         </main>

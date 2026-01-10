@@ -46,7 +46,12 @@ import {
   updateScene,
   updateSystem,
 } from '../system/model'
-import { getBranchParams, normalizeBranchEigenvalues } from '../system/continuation'
+import {
+  extractHopfOmega,
+  getBranchParams,
+  normalizeEigenvalueArray,
+  normalizeBranchEigenvalues,
+} from '../system/continuation'
 import { downloadSystem, readSystemFile } from '../system/importExport'
 import { AppContext } from './appContext'
 import { validateSystemConfig } from './systemValidation'
@@ -180,6 +185,24 @@ export type BranchContinuationRequest = {
   forward: boolean
 }
 
+export type FoldCurveContinuationRequest = {
+  branchId: string
+  pointIndex: number
+  name: string
+  param2Name: string
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type HopfCurveContinuationRequest = {
+  branchId: string
+  pointIndex: number
+  name: string
+  param2Name: string
+  settings: ContinuationSettings
+  forward: boolean
+}
+
 export type LimitCycleCreateRequest = {
   name: string
   originOrbitId: string
@@ -271,6 +294,8 @@ type AppActions = {
   solveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   createEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   createBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
+  createFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
+  createHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
   createLimitCycleObject: (request: LimitCycleCreateRequest) => Promise<void>
   addScene: (name: string, targetId?: string | null) => Promise<void>
   addBifurcationDiagram: (name: string, targetId?: string | null) => Promise<void>
@@ -1214,6 +1239,297 @@ export function AppProvider({
     [client, state.system, store]
   )
 
+  const createFoldCurveFromPoint = useCallback(
+    async (request: FoldCurveContinuationRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (system.paramNames.length < 2) {
+          throw new Error('Two-parameter continuation requires at least 2 parameters.')
+        }
+
+        const sourceBranch = state.system.branches[request.branchId]
+        if (!sourceBranch) {
+          throw new Error('Select a valid branch to continue.')
+        }
+        if (sourceBranch.branchType !== 'equilibrium') {
+          throw new Error('Fold curve continuation is only available for equilibrium branches.')
+        }
+
+        const point: ContinuationPoint | undefined =
+          sourceBranch.data.points[request.pointIndex]
+        if (!point) {
+          throw new Error('Select a valid branch point.')
+        }
+        if (point.stability !== 'Fold') {
+          throw new Error('Selected point is not a Fold bifurcation.')
+        }
+
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+          throw new Error(`Branch "${name}" already exists.`)
+        }
+
+        const param1Name = sourceBranch.parameterName
+        if (!system.paramNames.includes(param1Name)) {
+          throw new Error('Source continuation parameter is not defined in this system.')
+        }
+
+        const param2Name = request.param2Name
+        if (!system.paramNames.includes(param2Name)) {
+          throw new Error('Select a valid second continuation parameter.')
+        }
+        if (param2Name === param1Name) {
+          throw new Error('Second parameter must be different from the continuation parameter.')
+        }
+
+        const runConfig: SystemConfig = { ...system }
+        runConfig.params = getBranchParams(state.system, sourceBranch)
+
+        const param1Idx = system.paramNames.indexOf(param1Name)
+        if (param1Idx >= 0) {
+          runConfig.params[param1Idx] = point.param_value
+        }
+
+        const param2Idx = system.paramNames.indexOf(param2Name)
+        if (param2Idx < 0) {
+          throw new Error('Select a valid second continuation parameter.')
+        }
+        const param2Value = runConfig.params[param2Idx]
+
+        const curveData = await client.runFoldCurveContinuation(
+          {
+            system: runConfig,
+            foldState: point.state,
+            param1Name,
+            param1Value: point.param_value,
+            param2Name,
+            param2Value,
+            settings: request.settings,
+            forward: request.forward,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Fold Curve', progress },
+              }),
+          }
+        )
+        if (curveData.points.length <= 1) {
+          throw new Error(
+            'Fold curve continuation stopped at the seed point. Try a smaller step size or adjust parameters.'
+          )
+        }
+
+        const branchData = normalizeBranchEigenvalues({
+          points: curveData.points.map((pt) => ({
+            state: pt.state || point.state,
+            param_value: pt.param1_value,
+            param2_value: pt.param2_value,
+            stability: pt.codim2_type || 'None',
+            eigenvalues: normalizeEigenvalueArray(pt.eigenvalues),
+          })),
+          bifurcations: curveData.codim2_bifurcations?.map((b) => b.index) || [],
+          indices: curveData.points.map((_, i) => i),
+          branch_type: {
+            type: 'FoldCurve' as const,
+            param1_name: param1Name,
+            param2_name: param2Name,
+          },
+        })
+
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name,
+          systemName: system.name,
+          parameterName: `${param1Name}, ${param2Name}`,
+          parentObject: sourceBranch.parentObject,
+          startObject: sourceBranch.name,
+          branchType: 'fold_curve',
+          data: branchData,
+          settings: request.settings,
+          timestamp: new Date().toISOString(),
+          params: [...runConfig.params],
+        }
+
+        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        if (!parentNodeId) {
+          throw new Error('Unable to locate the parent equilibrium in the tree.')
+        }
+
+        const created = addBranch(state.system, branch, parentNodeId)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const createHopfCurveFromPoint = useCallback(
+    async (request: HopfCurveContinuationRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (system.paramNames.length < 2) {
+          throw new Error('Two-parameter continuation requires at least 2 parameters.')
+        }
+
+        const sourceBranch = state.system.branches[request.branchId]
+        if (!sourceBranch) {
+          throw new Error('Select a valid branch to continue.')
+        }
+        if (sourceBranch.branchType !== 'equilibrium') {
+          throw new Error('Hopf curve continuation is only available for equilibrium branches.')
+        }
+
+        const point: ContinuationPoint | undefined =
+          sourceBranch.data.points[request.pointIndex]
+        if (!point) {
+          throw new Error('Select a valid branch point.')
+        }
+        if (point.stability !== 'Hopf') {
+          throw new Error('Selected point is not a Hopf bifurcation.')
+        }
+
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+          throw new Error(`Branch "${name}" already exists.`)
+        }
+
+        const param1Name = sourceBranch.parameterName
+        if (!system.paramNames.includes(param1Name)) {
+          throw new Error('Source continuation parameter is not defined in this system.')
+        }
+
+        const param2Name = request.param2Name
+        if (!system.paramNames.includes(param2Name)) {
+          throw new Error('Select a valid second continuation parameter.')
+        }
+        if (param2Name === param1Name) {
+          throw new Error('Second parameter must be different from the continuation parameter.')
+        }
+
+        const runConfig: SystemConfig = { ...system }
+        runConfig.params = getBranchParams(state.system, sourceBranch)
+
+        const param1Idx = system.paramNames.indexOf(param1Name)
+        if (param1Idx >= 0) {
+          runConfig.params[param1Idx] = point.param_value
+        }
+
+        const param2Idx = system.paramNames.indexOf(param2Name)
+        if (param2Idx < 0) {
+          throw new Error('Select a valid second continuation parameter.')
+        }
+        const param2Value = runConfig.params[param2Idx]
+        const hopfOmega = extractHopfOmega(point)
+
+        const curveData = await client.runHopfCurveContinuation(
+          {
+            system: runConfig,
+            hopfState: point.state,
+            hopfOmega,
+            param1Name,
+            param1Value: point.param_value,
+            param2Name,
+            param2Value,
+            settings: request.settings,
+            forward: request.forward,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Hopf Curve', progress },
+              }),
+          }
+        )
+        if (curveData.points.length <= 1) {
+          throw new Error(
+            'Hopf curve continuation stopped at the seed point. Try a smaller step size or adjust parameters.'
+          )
+        }
+
+        const branchData = normalizeBranchEigenvalues({
+          points: curveData.points.map((pt) => ({
+            state: pt.state || point.state,
+            param_value: pt.param1_value,
+            param2_value: pt.param2_value,
+            stability: pt.codim2_type || 'None',
+            eigenvalues: normalizeEigenvalueArray(pt.eigenvalues),
+            auxiliary: pt.auxiliary ?? undefined,
+          })),
+          bifurcations: curveData.codim2_bifurcations?.map((b) => b.index) || [],
+          indices: curveData.points.map((_, i) => i),
+          branch_type: {
+            type: 'HopfCurve' as const,
+            param1_name: param1Name,
+            param2_name: param2Name,
+          },
+        })
+
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name,
+          systemName: system.name,
+          parameterName: `${param1Name}, ${param2Name}`,
+          parentObject: sourceBranch.parentObject,
+          startObject: sourceBranch.name,
+          branchType: 'hopf_curve',
+          data: branchData,
+          settings: request.settings,
+          timestamp: new Date().toISOString(),
+          params: [...runConfig.params],
+        }
+
+        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        if (!parentNodeId) {
+          throw new Error('Unable to locate the parent equilibrium in the tree.')
+        }
+
+        const created = addBranch(state.system, branch, parentNodeId)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
   const createLimitCycleObject = useCallback(
     async (request: LimitCycleCreateRequest) => {
       if (!state.system) return
@@ -1389,6 +1705,8 @@ export function AppProvider({
       solveEquilibrium,
       createEquilibriumBranch,
       createBranchFromPoint,
+      createFoldCurveFromPoint,
+      createHopfCurveFromPoint,
       createLimitCycleObject,
       addScene: addSceneAction,
       addBifurcationDiagram: addBifurcationDiagramAction,
@@ -1405,6 +1723,8 @@ export function AppProvider({
       solveEquilibrium,
       createEquilibriumBranch,
       createBranchFromPoint,
+      createFoldCurveFromPoint,
+      createHopfCurveFromPoint,
       addBifurcationDiagramAction,
       createSystemAction,
       deleteSystem,

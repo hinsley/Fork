@@ -23,6 +23,8 @@ describe('InspectorDetailsPanel', () => {
     const onCreateLimitCycle = vi.fn().mockResolvedValue(undefined)
     const onCreateEquilibriumBranch = vi.fn().mockResolvedValue(undefined)
     const onCreateBranchFromPoint = vi.fn().mockResolvedValue(undefined)
+    const onCreateFoldCurveFromPoint = vi.fn().mockResolvedValue(undefined)
+    const onCreateHopfCurveFromPoint = vi.fn().mockResolvedValue(undefined)
 
     function Wrapper() {
       const [state, setState] = useState(system)
@@ -57,6 +59,8 @@ describe('InspectorDetailsPanel', () => {
           onCreateLimitCycle={onCreateLimitCycle}
           onCreateEquilibriumBranch={onCreateEquilibriumBranch}
           onCreateBranchFromPoint={onCreateBranchFromPoint}
+          onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
+          onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
         />
       )
     }
@@ -102,6 +106,8 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -141,6 +147,8 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycle={onCreateLimitCycle}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -222,6 +230,8 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
       />
     )
 

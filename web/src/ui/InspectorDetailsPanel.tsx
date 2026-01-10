@@ -28,6 +28,8 @@ import type {
   EquilibriumContinuationRequest,
   LimitCycleCreateRequest,
   EquilibriumSolveRequest,
+  FoldCurveContinuationRequest,
+  HopfCurveContinuationRequest,
   OrbitCovariantLyapunovRequest,
   OrbitLyapunovRequest,
   OrbitRunRequest,
@@ -35,6 +37,7 @@ import type {
 import { validateSystemConfig } from '../state/systemValidation'
 import {
   buildSortedArrayOrder,
+  extractHopfOmega,
   ensureBranchIndices,
   getBranchParams,
   normalizeEigenvalueArray,
@@ -66,6 +69,8 @@ type InspectorDetailsPanelProps = {
   onCreateLimitCycle: (request: LimitCycleCreateRequest) => Promise<void>
   onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   onCreateBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
+  onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
+  onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
 }
 
 type SystemDraft = {
@@ -114,6 +119,19 @@ type LimitCycleDraft = {
 type ContinuationDraft = {
   name: string
   parameterName: string
+  stepSize: string
+  maxSteps: string
+  minStepSize: string
+  maxStepSize: string
+  correctorSteps: string
+  correctorTolerance: string
+  stepTolerance: string
+  forward: boolean
+}
+
+type Codim1CurveDraft = {
+  name: string
+  param2Name: string
   stepSize: string
   maxSteps: string
   minStepSize: string
@@ -397,6 +415,21 @@ function makeContinuationDraft(system: SystemConfig): ContinuationDraft {
   }
 }
 
+function makeCodim1CurveDraft(system: SystemConfig): Codim1CurveDraft {
+  return {
+    name: '',
+    param2Name: system.paramNames[0] ?? '',
+    stepSize: '0.01',
+    maxSteps: '100',
+    minStepSize: '1e-6',
+    maxStepSize: '0.1',
+    correctorSteps: '10',
+    correctorTolerance: '1e-8',
+    stepTolerance: '1e-8',
+    forward: true,
+  }
+}
+
 function makeSystemDraft(system: SystemConfig): SystemDraft {
   return {
     name: system.name,
@@ -422,6 +455,49 @@ function parseInteger(value: string): number | null {
 }
 
 function buildContinuationSettings(draft: ContinuationDraft) {
+  const stepSize = parseNumber(draft.stepSize)
+  const maxSteps = parseInteger(draft.maxSteps)
+  const minStep = parseNumber(draft.minStepSize)
+  const maxStep = parseNumber(draft.maxStepSize)
+  const correctorSteps = parseInteger(draft.correctorSteps)
+  const correctorTolerance = parseNumber(draft.correctorTolerance)
+  const stepTolerance = parseNumber(draft.stepTolerance)
+
+  if (
+    stepSize === null ||
+    maxSteps === null ||
+    minStep === null ||
+    maxStep === null ||
+    correctorSteps === null ||
+    correctorTolerance === null ||
+    stepTolerance === null
+  ) {
+    return { settings: null, error: 'Continuation settings must be numeric.' }
+  }
+
+  if (stepSize <= 0 || minStep <= 0 || maxStep <= 0) {
+    return { settings: null, error: 'Step sizes must be positive numbers.' }
+  }
+
+  if (maxSteps <= 0 || correctorSteps <= 0) {
+    return { settings: null, error: 'Step counts must be positive integers.' }
+  }
+
+  return {
+    settings: {
+      step_size: Math.max(stepSize, 1e-9),
+      min_step_size: Math.max(minStep, 1e-12),
+      max_step_size: Math.max(maxStep, 1e-9),
+      max_steps: Math.max(Math.trunc(maxSteps), 1),
+      corrector_steps: Math.max(Math.trunc(correctorSteps), 1),
+      corrector_tolerance: Math.max(correctorTolerance, Number.EPSILON),
+      step_tolerance: Math.max(stepTolerance, Number.EPSILON),
+    },
+    error: null,
+  }
+}
+
+function buildCodim1ContinuationSettings(draft: Codim1CurveDraft) {
   const stepSize = parseNumber(draft.stepSize)
   const maxSteps = parseInteger(draft.maxSteps)
   const minStep = parseNumber(draft.minStepSize)
@@ -506,6 +582,8 @@ export function InspectorDetailsPanel({
   onCreateLimitCycle,
   onCreateEquilibriumBranch,
   onCreateBranchFromPoint,
+  onCreateFoldCurveFromPoint,
+  onCreateHopfCurveFromPoint,
 }: InspectorDetailsPanelProps) {
   const node = selectedNodeId ? system.nodes[selectedNodeId] : null
   const object = selectedNodeId ? system.objects[selectedNodeId] : undefined
@@ -653,6 +731,14 @@ export function InspectorDetailsPanel({
     makeLimitCycleDraft(system.config)
   )
   const [limitCycleError, setLimitCycleError] = useState<string | null>(null)
+  const [foldCurveDraft, setFoldCurveDraft] = useState<Codim1CurveDraft>(() =>
+    makeCodim1CurveDraft(system.config)
+  )
+  const [foldCurveError, setFoldCurveError] = useState<string | null>(null)
+  const [hopfCurveDraft, setHopfCurveDraft] = useState<Codim1CurveDraft>(() =>
+    makeCodim1CurveDraft(system.config)
+  )
+  const [hopfCurveError, setHopfCurveError] = useState<string | null>(null)
   const [branchContinuationDraft, setBranchContinuationDraft] =
     useState<ContinuationDraft>(() => makeContinuationDraft(system.config))
   const [branchContinuationError, setBranchContinuationError] = useState<string | null>(null)
@@ -729,6 +815,26 @@ export function InspectorDetailsPanel({
       }
       return { ...prev, parameterName: systemDraft.paramNames[0] ?? '' }
     })
+    setFoldCurveDraft((prev) => {
+      if (systemDraft.paramNames.length === 0) {
+        if (!prev.param2Name) return prev
+        return { ...prev, param2Name: '' }
+      }
+      if (systemDraft.paramNames.includes(prev.param2Name)) {
+        return prev
+      }
+      return { ...prev, param2Name: systemDraft.paramNames[0] ?? '' }
+    })
+    setHopfCurveDraft((prev) => {
+      if (systemDraft.paramNames.length === 0) {
+        if (!prev.param2Name) return prev
+        return { ...prev, param2Name: '' }
+      }
+      if (systemDraft.paramNames.includes(prev.param2Name)) {
+        return prev
+      }
+      return { ...prev, param2Name: systemDraft.paramNames[0] ?? '' }
+    })
   }, [systemDraft.paramNames])
 
   useEffect(() => {
@@ -797,8 +903,32 @@ export function InspectorDetailsPanel({
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, parameterName: paramName, name: nextName }
     })
+    setFoldCurveDraft((prev) => {
+      const param2Name =
+        systemDraft.paramNames.includes(prev.param2Name) &&
+        prev.param2Name !== branchParameterName
+          ? prev.param2Name
+          : fallbackParam
+      const safeBranchName = toCliSafeName(branchName)
+      const suggestedName = `fold_curve_${safeBranchName}`
+      const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
+      return { ...prev, param2Name, name: nextName }
+    })
+    setHopfCurveDraft((prev) => {
+      const param2Name =
+        systemDraft.paramNames.includes(prev.param2Name) &&
+        prev.param2Name !== branchParameterName
+          ? prev.param2Name
+          : fallbackParam
+      const safeBranchName = toCliSafeName(branchName)
+      const suggestedName = `hopf_curve_${safeBranchName}`
+      const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
+      return { ...prev, param2Name, name: nextName }
+    })
     setBranchContinuationError(null)
     setBranchPointError(null)
+    setFoldCurveError(null)
+    setHopfCurveError(null)
   }, [branchName, branchParameterName, systemDraft.paramNames])
 
   useEffect(() => {
@@ -1061,14 +1191,29 @@ export function InspectorDetailsPanel({
   const continuationParamIndex = branch
     ? systemDraft.paramNames.indexOf(branch.parameterName)
     : -1
+  const codim1ParamNames = useMemo(() => {
+    if (!branch?.data.branch_type) return null
+    const branchType = branch.data.branch_type
+    if ('param1_name' in branchType && 'param2_name' in branchType) {
+      return {
+        param1: branchType.param1_name,
+        param2: branchType.param2_name,
+      }
+    }
+    return null
+  }, [branch])
   const branchBifurcations = useMemo(
     () => (branch ? branch.data.bifurcations ?? [] : []),
     [branch]
   )
+  const codim1ParamOptions = useMemo(() => {
+    return systemDraft.paramNames.filter((name) => name !== branchParameterName)
+  }, [systemDraft.paramNames, branchParameterName])
   const branchStartIndex = branchSortedOrder[0]
   const branchEndIndex = branchSortedOrder[branchSortedOrder.length - 1]
   const branchStartPoint = branchStartIndex !== undefined ? branch?.data.points[branchStartIndex] : null
   const branchEndPoint = branchEndIndex !== undefined ? branch?.data.points[branchEndIndex] : null
+  const hopfOmega = selectedBranchPoint ? extractHopfOmega(selectedBranchPoint) : null
 
   const handleApplySystem = async () => {
     setSystemTouched(true)
@@ -1396,6 +1541,132 @@ export function InspectorDetailsPanel({
       parameterName: branchContinuationDraft.parameterName,
       settings,
       forward: branchContinuationDraft.forward,
+    })
+  }
+
+  const handleCreateFoldCurve = async () => {
+    if (runDisabled) {
+      setFoldCurveError('Apply valid system settings before continuing.')
+      return
+    }
+    if (!branch || !selectedNodeId) {
+      setFoldCurveError('Select a branch to continue.')
+      return
+    }
+    if (branch.branchType !== 'equilibrium') {
+      setFoldCurveError('Fold curve continuation is only available for equilibrium branches.')
+      return
+    }
+    if (!selectedBranchPoint || branchPointIndex === null) {
+      setFoldCurveError('Select a branch point to continue from.')
+      return
+    }
+    if (selectedBranchPoint.stability !== 'Fold') {
+      setFoldCurveError('Select a Fold bifurcation point to continue.')
+      return
+    }
+    if (systemDraft.paramNames.length < 2) {
+      setFoldCurveError('Add another parameter before continuing.')
+      return
+    }
+    if (!foldCurveDraft.param2Name) {
+      setFoldCurveError('Select a second continuation parameter.')
+      return
+    }
+    if (foldCurveDraft.param2Name === branchParameterName) {
+      setFoldCurveError('Second parameter must be different from the continuation parameter.')
+      return
+    }
+
+    const safeBranchName = toCliSafeName(branch.name)
+    const suggestedName = `fold_curve_${safeBranchName}`
+    const name = foldCurveDraft.name.trim() || suggestedName
+    if (!name.trim()) {
+      setFoldCurveError('Curve name is required.')
+      return
+    }
+    if (!isCliSafeName(name)) {
+      setFoldCurveError('Curve names must be alphanumeric with underscores only.')
+      return
+    }
+
+    const { settings, error } = buildCodim1ContinuationSettings(foldCurveDraft)
+    if (!settings) {
+      setFoldCurveError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setFoldCurveError(null)
+    await onCreateFoldCurveFromPoint({
+      branchId: selectedNodeId,
+      pointIndex: branchPointIndex,
+      name,
+      param2Name: foldCurveDraft.param2Name,
+      settings,
+      forward: foldCurveDraft.forward,
+    })
+  }
+
+  const handleCreateHopfCurve = async () => {
+    if (runDisabled) {
+      setHopfCurveError('Apply valid system settings before continuing.')
+      return
+    }
+    if (!branch || !selectedNodeId) {
+      setHopfCurveError('Select a branch to continue.')
+      return
+    }
+    if (branch.branchType !== 'equilibrium') {
+      setHopfCurveError('Hopf curve continuation is only available for equilibrium branches.')
+      return
+    }
+    if (!selectedBranchPoint || branchPointIndex === null) {
+      setHopfCurveError('Select a branch point to continue from.')
+      return
+    }
+    if (selectedBranchPoint.stability !== 'Hopf') {
+      setHopfCurveError('Select a Hopf bifurcation point to continue.')
+      return
+    }
+    if (systemDraft.paramNames.length < 2) {
+      setHopfCurveError('Add another parameter before continuing.')
+      return
+    }
+    if (!hopfCurveDraft.param2Name) {
+      setHopfCurveError('Select a second continuation parameter.')
+      return
+    }
+    if (hopfCurveDraft.param2Name === branchParameterName) {
+      setHopfCurveError('Second parameter must be different from the continuation parameter.')
+      return
+    }
+
+    const safeBranchName = toCliSafeName(branch.name)
+    const suggestedName = `hopf_curve_${safeBranchName}`
+    const name = hopfCurveDraft.name.trim() || suggestedName
+    if (!name.trim()) {
+      setHopfCurveError('Curve name is required.')
+      return
+    }
+    if (!isCliSafeName(name)) {
+      setHopfCurveError('Curve names must be alphanumeric with underscores only.')
+      return
+    }
+
+    const { settings, error } = buildCodim1ContinuationSettings(hopfCurveDraft)
+    if (!settings) {
+      setHopfCurveError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setHopfCurveError(null)
+    await onCreateHopfCurveFromPoint({
+      branchId: selectedNodeId,
+      pointIndex: branchPointIndex,
+      name,
+      param2Name: hopfCurveDraft.param2Name,
+      settings,
+      forward: hopfCurveDraft.forward,
     })
   }
 
@@ -3321,10 +3592,17 @@ export function InspectorDetailsPanel({
                         <h4 className="inspector-subheading">Parameters</h4>
                         <InspectorMetrics
                           rows={systemDraft.paramNames.map((name, index) => {
-                            const value =
-                              index === continuationParamIndex
-                                ? selectedBranchPoint.param_value
-                                : branchParams[index]
+                            let value = branchParams[index]
+                            if (codim1ParamNames) {
+                              if (name === codim1ParamNames.param1) {
+                                value = selectedBranchPoint.param_value
+                              } else if (name === codim1ParamNames.param2) {
+                                value =
+                                  selectedBranchPoint.param2_value ?? branchParams[index]
+                              }
+                            } else if (index === continuationParamIndex) {
+                              value = selectedBranchPoint.param_value
+                            }
                             return {
                               label: name || `p${index + 1}`,
                               value: formatNumber(value ?? Number.NaN, 6),
@@ -3543,6 +3821,404 @@ export function InspectorDetailsPanel({
                     >
                       Create Branch
                     </button>
+                  </div>
+                </InspectorDisclosure>
+
+                <InspectorDisclosure
+                  key={`${selectionKey}-codim1-curves`}
+                  title="Codim-1 Curve Continuations"
+                  testId="codim1-curve-toggle"
+                  defaultOpen={false}
+                >
+                  <div className="inspector-section">
+                    {branch.branchType !== 'equilibrium' ? (
+                      <p className="empty-state">
+                        Codim-1 curve continuation is only available for equilibrium branches.
+                      </p>
+                    ) : null}
+                    {runDisabled ? (
+                      <div className="field-warning">
+                        Apply valid system changes before continuing.
+                      </div>
+                    ) : null}
+                    {systemDraft.paramNames.length < 2 ? (
+                      <p className="empty-state">
+                        Add a second parameter to enable codim-1 continuation.
+                      </p>
+                    ) : null}
+                    {!selectedBranchPoint ? (
+                      <p className="empty-state">Select a branch point to continue.</p>
+                    ) : selectedBranchPoint.stability === 'Fold' ? (
+                      <>
+                        <h4 className="inspector-subheading">Fold curve</h4>
+                        <label>
+                          Curve name
+                          <input
+                            value={foldCurveDraft.name}
+                            onChange={(event) =>
+                              setFoldCurveDraft((prev) => ({
+                                ...prev,
+                                name: event.target.value,
+                              }))
+                            }
+                            placeholder={`fold_curve_${toCliSafeName(branch.name)}`}
+                            data-testid="fold-curve-name"
+                          />
+                        </label>
+                        <label>
+                          Second parameter
+                          <select
+                            value={foldCurveDraft.param2Name}
+                            onChange={(event) =>
+                              setFoldCurveDraft((prev) => ({
+                                ...prev,
+                                param2Name: event.target.value,
+                              }))
+                            }
+                            disabled={codim1ParamOptions.length === 0}
+                            data-testid="fold-curve-param2"
+                          >
+                            {codim1ParamOptions.map((name) => {
+                              const idx = systemDraft.paramNames.indexOf(name)
+                              const branchValue =
+                                branchParams.length === systemDraft.paramNames.length
+                                  ? branchParams[idx]
+                                  : undefined
+                              const fallbackValue = parseNumber(systemDraft.params[idx] ?? '')
+                              const value = branchValue ?? fallbackValue
+                              const label = `${name} (current: ${formatNumber(
+                                value ?? Number.NaN,
+                                6
+                              )})`
+                              return (
+                                <option key={name} value={name}>
+                                  {label}
+                                </option>
+                              )
+                            })}
+                          </select>
+                        </label>
+                        <label>
+                          Direction
+                          <select
+                            value={foldCurveDraft.forward ? 'forward' : 'backward'}
+                            onChange={(event) =>
+                              setFoldCurveDraft((prev) => ({
+                                ...prev,
+                                forward: event.target.value === 'forward',
+                              }))
+                            }
+                            data-testid="fold-curve-direction"
+                          >
+                            <option value="forward">Forward</option>
+                            <option value="backward">Backward</option>
+                          </select>
+                        </label>
+                        <label>
+                          Initial step size
+                          <input
+                            type="number"
+                            value={foldCurveDraft.stepSize}
+                            onChange={(event) =>
+                              setFoldCurveDraft((prev) => ({
+                                ...prev,
+                                stepSize: event.target.value,
+                              }))
+                            }
+                            data-testid="fold-curve-step-size"
+                          />
+                        </label>
+                        <label>
+                          Min step size
+                          <input
+                            type="number"
+                            value={foldCurveDraft.minStepSize}
+                            onChange={(event) =>
+                              setFoldCurveDraft((prev) => ({
+                                ...prev,
+                                minStepSize: event.target.value,
+                              }))
+                            }
+                            data-testid="fold-curve-min-step-size"
+                          />
+                        </label>
+                        <label>
+                          Max step size
+                          <input
+                            type="number"
+                            value={foldCurveDraft.maxStepSize}
+                            onChange={(event) =>
+                              setFoldCurveDraft((prev) => ({
+                                ...prev,
+                                maxStepSize: event.target.value,
+                              }))
+                            }
+                            data-testid="fold-curve-max-step-size"
+                          />
+                        </label>
+                        <label>
+                          Max points
+                          <input
+                            type="number"
+                            value={foldCurveDraft.maxSteps}
+                            onChange={(event) =>
+                              setFoldCurveDraft((prev) => ({
+                                ...prev,
+                                maxSteps: event.target.value,
+                              }))
+                            }
+                            data-testid="fold-curve-max-steps"
+                          />
+                        </label>
+                        <label>
+                          Corrector steps
+                          <input
+                            type="number"
+                            value={foldCurveDraft.correctorSteps}
+                            onChange={(event) =>
+                              setFoldCurveDraft((prev) => ({
+                                ...prev,
+                                correctorSteps: event.target.value,
+                              }))
+                            }
+                            data-testid="fold-curve-corrector-steps"
+                          />
+                        </label>
+                        <label>
+                          Corrector tolerance
+                          <input
+                            type="number"
+                            value={foldCurveDraft.correctorTolerance}
+                            onChange={(event) =>
+                              setFoldCurveDraft((prev) => ({
+                                ...prev,
+                                correctorTolerance: event.target.value,
+                              }))
+                            }
+                            data-testid="fold-curve-corrector-tolerance"
+                          />
+                        </label>
+                        <label>
+                          Step tolerance
+                          <input
+                            type="number"
+                            value={foldCurveDraft.stepTolerance}
+                            onChange={(event) =>
+                              setFoldCurveDraft((prev) => ({
+                                ...prev,
+                                stepTolerance: event.target.value,
+                              }))
+                            }
+                            data-testid="fold-curve-step-tolerance"
+                          />
+                        </label>
+                        {foldCurveError ? (
+                          <div className="field-error">{foldCurveError}</div>
+                        ) : null}
+                        <button
+                          onClick={handleCreateFoldCurve}
+                          disabled={
+                            runDisabled ||
+                            !selectedBranchPoint ||
+                            branch.branchType !== 'equilibrium'
+                          }
+                          data-testid="fold-curve-submit"
+                        >
+                          Continue Fold Curve
+                        </button>
+                      </>
+                    ) : selectedBranchPoint.stability === 'Hopf' ? (
+                      <>
+                        <h4 className="inspector-subheading">Hopf curve</h4>
+                        <label>
+                          Curve name
+                          <input
+                            value={hopfCurveDraft.name}
+                            onChange={(event) =>
+                              setHopfCurveDraft((prev) => ({
+                                ...prev,
+                                name: event.target.value,
+                              }))
+                            }
+                            placeholder={`hopf_curve_${toCliSafeName(branch.name)}`}
+                            data-testid="hopf-curve-name"
+                          />
+                        </label>
+                        <label>
+                          Second parameter
+                          <select
+                            value={hopfCurveDraft.param2Name}
+                            onChange={(event) =>
+                              setHopfCurveDraft((prev) => ({
+                                ...prev,
+                                param2Name: event.target.value,
+                              }))
+                            }
+                            disabled={codim1ParamOptions.length === 0}
+                            data-testid="hopf-curve-param2"
+                          >
+                            {codim1ParamOptions.map((name) => {
+                              const idx = systemDraft.paramNames.indexOf(name)
+                              const branchValue =
+                                branchParams.length === systemDraft.paramNames.length
+                                  ? branchParams[idx]
+                                  : undefined
+                              const fallbackValue = parseNumber(systemDraft.params[idx] ?? '')
+                              const value = branchValue ?? fallbackValue
+                              const label = `${name} (current: ${formatNumber(
+                                value ?? Number.NaN,
+                                6
+                              )})`
+                              return (
+                                <option key={name} value={name}>
+                                  {label}
+                                </option>
+                              )
+                            })}
+                          </select>
+                        </label>
+                        <label>
+                          Hopf frequency (ω)
+                          <input
+                            value={formatNumber(hopfOmega ?? Number.NaN, 6)}
+                            disabled
+                            data-testid="hopf-curve-omega"
+                          />
+                        </label>
+                        <label>
+                          Direction
+                          <select
+                            value={hopfCurveDraft.forward ? 'forward' : 'backward'}
+                            onChange={(event) =>
+                              setHopfCurveDraft((prev) => ({
+                                ...prev,
+                                forward: event.target.value === 'forward',
+                              }))
+                            }
+                            data-testid="hopf-curve-direction"
+                          >
+                            <option value="forward">Forward</option>
+                            <option value="backward">Backward</option>
+                          </select>
+                        </label>
+                        <label>
+                          Initial step size
+                          <input
+                            type="number"
+                            value={hopfCurveDraft.stepSize}
+                            onChange={(event) =>
+                              setHopfCurveDraft((prev) => ({
+                                ...prev,
+                                stepSize: event.target.value,
+                              }))
+                            }
+                            data-testid="hopf-curve-step-size"
+                          />
+                        </label>
+                        <label>
+                          Min step size
+                          <input
+                            type="number"
+                            value={hopfCurveDraft.minStepSize}
+                            onChange={(event) =>
+                              setHopfCurveDraft((prev) => ({
+                                ...prev,
+                                minStepSize: event.target.value,
+                              }))
+                            }
+                            data-testid="hopf-curve-min-step-size"
+                          />
+                        </label>
+                        <label>
+                          Max step size
+                          <input
+                            type="number"
+                            value={hopfCurveDraft.maxStepSize}
+                            onChange={(event) =>
+                              setHopfCurveDraft((prev) => ({
+                                ...prev,
+                                maxStepSize: event.target.value,
+                              }))
+                            }
+                            data-testid="hopf-curve-max-step-size"
+                          />
+                        </label>
+                        <label>
+                          Max points
+                          <input
+                            type="number"
+                            value={hopfCurveDraft.maxSteps}
+                            onChange={(event) =>
+                              setHopfCurveDraft((prev) => ({
+                                ...prev,
+                                maxSteps: event.target.value,
+                              }))
+                            }
+                            data-testid="hopf-curve-max-steps"
+                          />
+                        </label>
+                        <label>
+                          Corrector steps
+                          <input
+                            type="number"
+                            value={hopfCurveDraft.correctorSteps}
+                            onChange={(event) =>
+                              setHopfCurveDraft((prev) => ({
+                                ...prev,
+                                correctorSteps: event.target.value,
+                              }))
+                            }
+                            data-testid="hopf-curve-corrector-steps"
+                          />
+                        </label>
+                        <label>
+                          Corrector tolerance
+                          <input
+                            type="number"
+                            value={hopfCurveDraft.correctorTolerance}
+                            onChange={(event) =>
+                              setHopfCurveDraft((prev) => ({
+                                ...prev,
+                                correctorTolerance: event.target.value,
+                              }))
+                            }
+                            data-testid="hopf-curve-corrector-tolerance"
+                          />
+                        </label>
+                        <label>
+                          Step tolerance
+                          <input
+                            type="number"
+                            value={hopfCurveDraft.stepTolerance}
+                            onChange={(event) =>
+                              setHopfCurveDraft((prev) => ({
+                                ...prev,
+                                stepTolerance: event.target.value,
+                              }))
+                            }
+                            data-testid="hopf-curve-step-tolerance"
+                          />
+                        </label>
+                        {hopfCurveError ? (
+                          <div className="field-error">{hopfCurveError}</div>
+                        ) : null}
+                        <button
+                          onClick={handleCreateHopfCurve}
+                          disabled={
+                            runDisabled ||
+                            !selectedBranchPoint ||
+                            branch.branchType !== 'equilibrium'
+                          }
+                          data-testid="hopf-curve-submit"
+                        >
+                          Continue Hopf Curve
+                        </button>
+                      </>
+                    ) : (
+                      <p className="empty-state">
+                        Select a Fold or Hopf point to continue a codim-1 curve.
+                      </p>
+                    )}
                   </div>
                 </InspectorDisclosure>
               </>

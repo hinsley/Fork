@@ -1,10 +1,13 @@
 import type {
+  Codim1CurveBranch,
   ContinuationProgress,
   CovariantLyapunovRequest,
   CovariantLyapunovResponse,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
+  FoldCurveContinuationRequest,
   ForkCoreClient,
+  HopfCurveContinuationRequest,
   LyapunovExponentsRequest,
   SolveEquilibriumRequest,
   SolveEquilibriumResult,
@@ -214,6 +217,103 @@ export class MockForkCoreClient implements ForkCoreClient {
             },
           ],
           bifurcations: [],
+          indices: [0],
+        }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runFoldCurveContinuation(
+    request: FoldCurveContinuationRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<Codim1CurveBranch> {
+    const job = this.queue.enqueue(
+      'runFoldCurveContinuation',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const progress: ContinuationProgress = {
+          done: false,
+          current_step: 0,
+          max_steps: request.settings.max_steps,
+          points_computed: 0,
+          bifurcations_found: 0,
+          current_param: request.param1Value,
+        }
+        opts?.onProgress?.(progress)
+
+        progress.done = true
+        progress.current_step = request.settings.max_steps
+        progress.points_computed = 3
+        opts?.onProgress?.({ ...progress })
+
+        return {
+          points: [
+            {
+              state: request.foldState,
+              param1_value: request.param1Value,
+              param2_value: request.param2Value,
+              codim2_type: 'None',
+              eigenvalues: [],
+            },
+          ],
+          codim2_bifurcations: [],
+          indices: [0],
+        }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runHopfCurveContinuation(
+    request: HopfCurveContinuationRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<Codim1CurveBranch> {
+    const job = this.queue.enqueue(
+      'runHopfCurveContinuation',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const progress: ContinuationProgress = {
+          done: false,
+          current_step: 0,
+          max_steps: request.settings.max_steps,
+          points_computed: 0,
+          bifurcations_found: 0,
+          current_param: request.param1Value,
+        }
+        opts?.onProgress?.(progress)
+
+        progress.done = true
+        progress.current_step = request.settings.max_steps
+        progress.points_computed = 3
+        opts?.onProgress?.({ ...progress })
+
+        return {
+          points: [
+            {
+              state: request.hopfState,
+              param1_value: request.param1Value,
+              param2_value: request.param2Value,
+              codim2_type: 'None',
+              eigenvalues: [],
+              auxiliary: request.hopfOmega * request.hopfOmega,
+            },
+          ],
+          codim2_bifurcations: [],
           indices: [0],
         }
       },

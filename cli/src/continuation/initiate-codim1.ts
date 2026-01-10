@@ -28,6 +28,54 @@ import {
   runNSCurveWithProgress
 } from './progress';
 
+type EigenvalueWire = [number, number];
+
+function normalizeEigenvalues(raw: ContinuationPoint['eigenvalues'] | undefined): Array<{ re: number; im: number }> {
+  if (!raw || !Array.isArray(raw)) return [];
+  return raw.map((entry: any) => {
+    if (Array.isArray(entry)) {
+      const tuple = entry as EigenvalueWire;
+      return { re: tuple[0] ?? 0, im: tuple[1] ?? 0 };
+    }
+    return {
+      re: typeof entry?.re === 'number' ? entry.re : Number(entry?.re ?? 0),
+      im: typeof entry?.im === 'number' ? entry.im : Number(entry?.im ?? 0),
+    };
+  });
+}
+
+function extractHopfOmega(point: ContinuationPoint): number {
+  const eigenvalues = normalizeEigenvalues(point.eigenvalues);
+  if (eigenvalues.length === 0) return 1.0;
+
+  let maxAbsIm = 0;
+  for (const eig of eigenvalues) {
+    if (!Number.isFinite(eig.re) || !Number.isFinite(eig.im)) continue;
+    maxAbsIm = Math.max(maxAbsIm, Math.abs(eig.im));
+  }
+  if (maxAbsIm <= 0) return 1.0;
+
+  const minImag = maxAbsIm * 1e-3;
+  let bestRe = Number.POSITIVE_INFINITY;
+  let bestIm = 0;
+  for (const eig of eigenvalues) {
+    if (!Number.isFinite(eig.re) || !Number.isFinite(eig.im)) continue;
+    const absIm = Math.abs(eig.im);
+    if (absIm < minImag) continue;
+    const absRe = Math.abs(eig.re);
+    if (absRe < bestRe || (absRe === bestRe && absIm > Math.abs(bestIm))) {
+      bestRe = absRe;
+      bestIm = eig.im;
+    }
+  }
+
+  if (bestIm === 0) {
+    bestIm = maxAbsIm;
+  }
+
+  return Math.abs(bestIm) || 1.0;
+}
+
 /**
  * Initiates fold curve continuation from a Fold bifurcation point.
  * 
@@ -53,6 +101,8 @@ export async function initiateFoldCurve(
     return null;
   }
 
+  const branchParams = getBranchParams(sysName, branch, sysConfig);
+
   // Param1 is the continuation parameter from the source branch
   const param1Name = branch.parameterName;
   const param1Value = foldPoint.param_value;
@@ -60,7 +110,7 @@ export async function initiateFoldCurve(
   // Select param2 (default to first parameter that isn't param1)
   let param2Name = paramNames.find(p => p !== param1Name) || paramNames[0];
   const param2Idx = paramNames.indexOf(param2Name);
-  let param2Value = sysConfig.params[param2Idx];
+  let param2Value = branchParams[param2Idx];
 
   // Configuration
   let curveName = `fold_curve_${branch.name}`;
@@ -86,7 +136,7 @@ export async function initiateFoldCurve(
           .filter(p => p !== param1Name)
           .map(p => {
             const idx = paramNames.indexOf(p);
-            return { name: `${p} (current: ${sysConfig.params[idx]})`, value: p };
+            return { name: `${p} (current: ${branchParams[idx]})`, value: p };
           });
         const { value } = await inquirer.prompt({
           type: 'rawlist',
@@ -98,7 +148,7 @@ export async function initiateFoldCurve(
         });
         param2Name = value;
         const idx = paramNames.indexOf(param2Name);
-        param2Value = sysConfig.params[idx];
+        param2Value = branchParams[idx];
       }
     },
     {
@@ -230,7 +280,7 @@ export async function initiateFoldCurve(
   try {
     // Build system config with the parameter values from the source branch
     const runConfig = { ...sysConfig };
-    runConfig.params = getBranchParams(sysName, branch, sysConfig);
+    runConfig.params = [...branchParams];
 
     // Set param1 to the fold point value
     const idx1 = paramNames.indexOf(param1Name);
@@ -339,18 +389,10 @@ export async function initiateHopfCurve(
     return null;
   }
 
+  const branchParams = getBranchParams(sysName, branch, sysConfig);
+
   // Extract Hopf frequency from eigenvalues
-  let hopfOmega = 1.0; // Default fallback
-  if (hopfPoint.eigenvalues && hopfPoint.eigenvalues.length > 0) {
-    // Find the eigenvalue pair with real part closest to zero and nonzero imaginary part
-    let bestImag = 0;
-    for (const eig of hopfPoint.eigenvalues) {
-      if (Math.abs(eig.im) > Math.abs(bestImag) && Math.abs(eig.re) < 0.1) {
-        bestImag = eig.im;
-      }
-    }
-    hopfOmega = Math.abs(bestImag) || 1.0;
-  }
+  const hopfOmega = extractHopfOmega(hopfPoint);
 
   // Param1 is the continuation parameter from the source branch
   const param1Name = branch.parameterName;
@@ -359,7 +401,7 @@ export async function initiateHopfCurve(
   // Select param2 (default to first parameter that isn't param1)
   let param2Name = paramNames.find(p => p !== param1Name) || paramNames[0];
   const param2Idx = paramNames.indexOf(param2Name);
-  let param2Value = sysConfig.params[param2Idx];
+  let param2Value = branchParams[param2Idx];
 
   // Configuration
   let curveName = `hopf_curve_${branch.name}`;
@@ -385,7 +427,7 @@ export async function initiateHopfCurve(
           .filter(p => p !== param1Name)
           .map(p => {
             const idx = paramNames.indexOf(p);
-            return { name: `${p} (current: ${sysConfig.params[idx]})`, value: p };
+            return { name: `${p} (current: ${branchParams[idx]})`, value: p };
           });
         const { value } = await inquirer.prompt({
           type: 'rawlist',
@@ -397,7 +439,7 @@ export async function initiateHopfCurve(
         });
         param2Name = value;
         const idx = paramNames.indexOf(param2Name);
-        param2Value = sysConfig.params[idx];
+        param2Value = branchParams[idx];
       }
     },
     {
@@ -539,7 +581,7 @@ export async function initiateHopfCurve(
   try {
     // Build system config with the parameter values from the source branch
     const runConfig = { ...sysConfig };
-    runConfig.params = getBranchParams(sysName, branch, sysConfig);
+    runConfig.params = [...branchParams];
 
     // Set param1 to the Hopf point value
     const idx1 = paramNames.indexOf(param1Name);
@@ -653,6 +695,8 @@ export async function initiateLPCCurve(
     return null;
   }
 
+  const branchParams = getBranchParams(sysName, branch, sysConfig);
+
   // Extract ntst/ncol from branch type
   const bt = branch.branchType;
   if (bt !== 'limit_cycle' || !branch.data?.branch_type) {
@@ -668,7 +712,7 @@ export async function initiateLPCCurve(
   const param1Value = lpcPoint.param_value;
   let param2Name = paramNames.find(p => p !== param1Name) || paramNames[0];
   let param2Idx = paramNames.indexOf(param2Name);
-  let param2Value = sysConfig.params[param2Idx];
+  let param2Value = branchParams[param2Idx];
 
   // Configuration variables
   let curveName = `lpc_curve_${branch.name}`;
@@ -694,7 +738,7 @@ export async function initiateLPCCurve(
           .filter(p => p !== param1Name)
           .map(p => {
             const idx = paramNames.indexOf(p);
-            return { name: `${p} (current: ${sysConfig.params[idx]})`, value: p };
+            return { name: `${p} (current: ${branchParams[idx]})`, value: p };
           });
         const { value } = await inquirer.prompt({
           type: 'rawlist',
@@ -706,7 +750,7 @@ export async function initiateLPCCurve(
         });
         param2Name = value;
         param2Idx = paramNames.indexOf(param2Name);
-        param2Value = sysConfig.params[param2Idx];
+        param2Value = branchParams[param2Idx];
       }
     },
     {
@@ -837,7 +881,7 @@ export async function initiateLPCCurve(
 
   try {
     const runConfig = { ...sysConfig };
-    runConfig.params = getBranchParams(sysName, branch, sysConfig);
+    runConfig.params = [...branchParams];
     runConfig.params[paramNames.indexOf(param1Name)] = param1Value;
 
     const bridge = new WasmBridge(runConfig);
@@ -905,7 +949,7 @@ export async function initiateLPCCurve(
       data: branchData,
       settings: continuationSettings,
       timestamp: new Date().toISOString(),
-      params: [...sysConfig.params]
+      params: [...runConfig.params]
     };
 
     Storage.saveBranch(sysName, branch.parentObject, newBranch);
@@ -935,6 +979,8 @@ export async function initiatePDCurve(
     return null;
   }
 
+  const branchParams = getBranchParams(sysName, branch, sysConfig);
+
   const bt = branch.branchType;
   if (bt !== 'limit_cycle' || !branch.data?.branch_type) {
     printError("PD curve requires a limit cycle branch");
@@ -948,7 +994,7 @@ export async function initiatePDCurve(
   const param1Value = pdPoint.param_value;
   let param2Name = paramNames.find(p => p !== param1Name) || paramNames[0];
   let param2Idx = paramNames.indexOf(param2Name);
-  let param2Value = sysConfig.params[param2Idx];
+  let param2Value = branchParams[param2Idx];
 
   // Configuration variables
   let curveName = `pd_curve_${branch.name}`;
@@ -974,7 +1020,7 @@ export async function initiatePDCurve(
           .filter(p => p !== param1Name)
           .map(p => {
             const idx = paramNames.indexOf(p);
-            return { name: `${p} (current: ${sysConfig.params[idx]})`, value: p };
+            return { name: `${p} (current: ${branchParams[idx]})`, value: p };
           });
         const { value } = await inquirer.prompt({
           type: 'rawlist',
@@ -986,7 +1032,7 @@ export async function initiatePDCurve(
         });
         param2Name = value;
         param2Idx = paramNames.indexOf(param2Name);
-        param2Value = sysConfig.params[param2Idx];
+        param2Value = branchParams[param2Idx];
       }
     },
     {
@@ -1132,7 +1178,7 @@ export async function initiatePDCurve(
 
   try {
     const runConfig = { ...sysConfig };
-    runConfig.params = getBranchParams(sysName, branch, sysConfig);
+    runConfig.params = [...branchParams];
     runConfig.params[paramNames.indexOf(param1Name)] = param1Value;
 
     const bridge = new WasmBridge(runConfig);
@@ -1201,7 +1247,7 @@ export async function initiatePDCurve(
       data: branchData,
       settings: continuationSettings,
       timestamp: new Date().toISOString(),
-      params: [...sysConfig.params]
+      params: [...runConfig.params]
     };
 
     Storage.saveBranch(sysName, branch.parentObject, newBranch);  // Save under LC object
@@ -1231,6 +1277,8 @@ export async function initiateNSCurve(
     return null;
   }
 
+  const branchParams = getBranchParams(sysName, branch, sysConfig);
+
   const bt = branch.branchType;
   if (bt !== 'limit_cycle' || !branch.data?.branch_type) {
     printError("NS curve requires a limit cycle branch");
@@ -1244,7 +1292,7 @@ export async function initiateNSCurve(
   const param1Value = nsPoint.param_value;
   let param2Name = paramNames.find(p => p !== param1Name) || paramNames[0];
   let param2Idx = paramNames.indexOf(param2Name);
-  let param2Value = sysConfig.params[param2Idx];
+  let param2Value = branchParams[param2Idx];
 
   // Configuration variables
   let curveName = `ns_curve_${branch.name}`;
@@ -1284,7 +1332,7 @@ export async function initiateNSCurve(
           .filter(p => p !== param1Name)
           .map(p => {
             const idx = paramNames.indexOf(p);
-            return { name: `${p} (current: ${sysConfig.params[idx]})`, value: p };
+            return { name: `${p} (current: ${branchParams[idx]})`, value: p };
           });
         const { value } = await inquirer.prompt({
           type: 'rawlist',
@@ -1296,7 +1344,7 @@ export async function initiateNSCurve(
         });
         param2Name = value;
         param2Idx = paramNames.indexOf(param2Name);
-        param2Value = sysConfig.params[param2Idx];
+        param2Value = branchParams[param2Idx];
       }
     },
     {
@@ -1428,7 +1476,7 @@ export async function initiateNSCurve(
 
   try {
     const runConfig = { ...sysConfig };
-    runConfig.params = getBranchParams(sysName, branch, sysConfig);
+    runConfig.params = [...branchParams];
     runConfig.params[paramNames.indexOf(param1Name)] = param1Value;
 
     const bridge = new WasmBridge(runConfig);
@@ -1496,7 +1544,7 @@ export async function initiateNSCurve(
       data: branchData,
       settings: continuationSettings,
       timestamp: new Date().toISOString(),
-      params: [...sysConfig.params]
+      params: [...runConfig.params]
     };
 
     Storage.saveBranch(sysName, branch.parentObject, newBranch);
