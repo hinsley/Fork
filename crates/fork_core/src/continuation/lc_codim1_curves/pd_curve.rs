@@ -235,15 +235,15 @@ impl<'a> PDCurveProblem<'a> {
         aug[0]
     }
 
-    fn get_p2(&self, aug: &DVector<f64>) -> f64 {
+    fn get_p2(&self, aug: &DVector<f64>) -> Result<f64> {
         let idx = self.param2_idx();
         if idx >= aug.len() {
-            panic!(
-                "Index out of bounds in get_p2: param2_idx={} but aug.len()={}. ncoords={}, period_idx={}, ntst={}, ncol={}, dim={}",
+            bail!(
+                "PD curve param2 index out of bounds: param2_idx={} but aug.len()={}. ncoords={}, period_idx={}, ntst={}, ncol={}, dim={}",
                 idx, aug.len(), self.ncoords(), self.period_index(), self.ntst, self.ncol, self.dim
             );
         }
-        aug[idx]
+        Ok(aug[idx])
     }
 
     fn get_period(&self, aug: &DVector<f64>) -> f64 {
@@ -322,7 +322,7 @@ impl<'a> PDCurveProblem<'a> {
     #[allow(dead_code)]
     fn build_periodic_jac(&mut self, aug: &DVector<f64>) -> Result<DMatrix<f64>> {
         let p1 = self.get_p1(aug);
-        let p2 = self.get_p2(aug);
+        let p2 = self.get_p2(aug)?;
         let period = self.get_period(aug);
         let h = period / self.ntst as f64;
         let aug_slice = aug.as_slice();
@@ -444,7 +444,7 @@ impl<'a> PDCurveProblem<'a> {
     /// instead of u(0) - u(T) = 0 (the antiperiodic condition).
     fn build_antiperiodic_jac(&mut self, aug: &DVector<f64>) -> Result<DMatrix<f64>> {
         let p1 = self.get_p1(aug);
-        let p2 = self.get_p2(aug);
+        let p2 = self.get_p2(aug)?;
         let period = self.get_period(aug);
         let h = period / self.ntst as f64;
         let aug_slice = aug.as_slice();
@@ -587,7 +587,7 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
         }
         
         let p1 = self.get_p1(aug);
-        let p2 = self.get_p2(aug);
+        let p2 = self.get_p2(aug)?;
         let period = self.get_period(aug);
         
         if period <= 0.0 {
@@ -780,5 +780,31 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
 
 #[cfg(test)]
 mod tests {
-    // Tests would go here
+    use super::PDCurveProblem;
+    use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
+    use nalgebra::DVector;
+
+    #[test]
+    fn get_p2_returns_error_on_bounds_mismatch() {
+        let bytecode = Bytecode { ops: vec![OpCode::LoadVar(0)] };
+        let mut system = EquationSystem::new(vec![bytecode], vec![0.0, 0.0]);
+        let lc_state = vec![0.0];
+
+        let problem = PDCurveProblem::new(
+            &mut system,
+            lc_state,
+            1.0,
+            0,
+            1,
+            0.0,
+            0.0,
+            1,
+            1,
+        )
+        .expect("failed to build PD curve problem");
+
+        let aug = DVector::zeros(problem.param2_idx());
+        let err = problem.get_p2(&aug).unwrap_err();
+        assert!(err.to_string().contains("out of bounds"));
+    }
 }
