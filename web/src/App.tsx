@@ -31,7 +31,6 @@ function App() {
   const { state, actions } = useAppContext()
   const { system, systems, busy, error, continuationProgress } = state
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [dialogDismissed, setDialogDismissed] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined') return 'light'
     if (isDeterministicMode()) return 'light'
@@ -78,18 +77,13 @@ function App() {
   }, [actions, system, system?.ui.layout.inspectorOpen, system?.ui.selectedNodeId])
 
   const openSystemsDialog = () => {
-    setDialogDismissed(false)
     setDialogOpen(true)
   }
   const closeSystemsDialog = () => {
     setDialogOpen(false)
-    if (!system) {
-      setDialogDismissed(true)
-    }
   }
   const finishSystemsDialog = () => {
     setDialogOpen(false)
-    setDialogDismissed(false)
   }
 
   const selectNode = (nodeId: string) => {
