@@ -276,6 +276,96 @@ function summarizeEigenvalues(point: ContinuationPoint, branchType?: string): st
   return `${label}: ${formatted.join(', ')}${suffix}`
 }
 
+function buildEigenvaluePlot(eigenvalues?: ComplexValue[] | null) {
+  if (!eigenvalues || eigenvalues.length === 0) return null
+  const x = eigenvalues.map((value) => value.re)
+  const y = eigenvalues.map((value) => value.im)
+  const finiteX = x.filter((value) => Number.isFinite(value))
+  const finiteY = y.filter((value) => Number.isFinite(value))
+  const safeX = finiteX.length > 0 ? finiteX : [0]
+  const safeY = finiteY.length > 0 ? finiteY : [0]
+  const minX = Math.min(...safeX, 0)
+  const maxX = Math.max(...safeX, 0)
+  const minY = Math.min(...safeY, 0)
+  const maxY = Math.max(...safeY, 0)
+  const spanX = maxX - minX
+  const spanY = maxY - minY
+  const span = Math.max(spanX, spanY) || 1
+  const padding = span * 0.15
+  const halfSpan = span / 2 + padding
+  const centerX = (minX + maxX) / 2
+  const centerY = (minY + maxY) / 2
+  const rangeX: [number, number] = [centerX - halfSpan, centerX + halfSpan]
+  const rangeY: [number, number] = [centerY - halfSpan, centerY + halfSpan]
+  const data: Data[] = [
+    {
+      x,
+      y,
+      mode: 'markers',
+      type: 'scatter',
+      name: 'Eigenvalues',
+      marker: {
+        color: 'var(--accent)',
+        size: 8,
+        line: { color: 'var(--panel-border)', width: 1 },
+      },
+      hovertemplate: 'Re %{x:.4f}<br>Im %{y:.4f}<extra></extra>',
+    },
+  ]
+  const layout: Partial<Layout> = {
+    autosize: true,
+    margin: { l: 36, r: 16, t: 8, b: 32 },
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    showlegend: false,
+    xaxis: {
+      title: { text: 'Real part', font: { size: 11, color: 'var(--text)' } },
+      zerolinecolor: 'rgba(120,120,120,0.3)',
+      gridcolor: 'rgba(120,120,120,0.15)',
+      tickfont: { size: 10, color: 'var(--text-muted)' },
+      range: rangeX,
+    },
+    yaxis: {
+      title: { text: 'Imaginary part', font: { size: 11, color: 'var(--text)' } },
+      zerolinecolor: 'rgba(120,120,120,0.3)',
+      gridcolor: 'rgba(120,120,120,0.15)',
+      tickfont: { size: 10, color: 'var(--text-muted)' },
+      scaleanchor: 'x',
+      scaleratio: 1,
+      range: rangeY,
+    },
+    annotations: [
+      {
+        x: rangeX[1],
+        y: 0,
+        xref: 'x',
+        yref: 'y',
+        text: 'Re',
+        showarrow: false,
+        xanchor: 'right',
+        yanchor: 'bottom',
+        xshift: -6,
+        yshift: 6,
+        font: { size: 10, color: 'var(--text-muted)' },
+      },
+      {
+        x: 0,
+        y: rangeY[1],
+        xref: 'x',
+        yref: 'y',
+        text: 'Im',
+        showarrow: false,
+        xanchor: 'left',
+        yanchor: 'top',
+        xshift: 6,
+        yshift: -6,
+        font: { size: 10, color: 'var(--text-muted)' },
+      },
+    ],
+  }
+  return { data, layout }
+}
+
 // Keep preview snippets small so the inspector stays responsive for large orbits.
 function buildOrbitPreview(data: number[][], headCount = 3, tailCount = 3) {
   if (data.length === 0) return null
@@ -963,92 +1053,7 @@ export function InspectorDetailsPanel({
   const equilibriumEigenPlot = useMemo(() => {
     const eigenpairs = equilibrium?.solution?.eigenpairs
     if (!eigenpairs || eigenpairs.length === 0) return null
-    const x = eigenpairs.map((pair) => pair.value.re)
-    const y = eigenpairs.map((pair) => pair.value.im)
-    const finiteX = x.filter((value) => Number.isFinite(value))
-    const finiteY = y.filter((value) => Number.isFinite(value))
-    const safeX = finiteX.length > 0 ? finiteX : [0]
-    const safeY = finiteY.length > 0 ? finiteY : [0]
-    const minX = Math.min(...safeX, 0)
-    const maxX = Math.max(...safeX, 0)
-    const minY = Math.min(...safeY, 0)
-    const maxY = Math.max(...safeY, 0)
-    const spanX = maxX - minX
-    const spanY = maxY - minY
-    const span = Math.max(spanX, spanY) || 1
-    const padding = span * 0.15
-    const halfSpan = span / 2 + padding
-    const centerX = (minX + maxX) / 2
-    const centerY = (minY + maxY) / 2
-    const rangeX: [number, number] = [centerX - halfSpan, centerX + halfSpan]
-    const rangeY: [number, number] = [centerY - halfSpan, centerY + halfSpan]
-    const data: Data[] = [
-      {
-        x,
-        y,
-        mode: 'markers',
-        type: 'scatter',
-        name: 'Eigenvalues',
-        marker: {
-          color: 'var(--accent)',
-          size: 8,
-          line: { color: 'var(--panel-border)', width: 1 },
-        },
-        hovertemplate: 'Re %{x:.4f}<br>Im %{y:.4f}<extra></extra>',
-      },
-    ]
-    const layout: Partial<Layout> = {
-      autosize: true,
-      margin: { l: 36, r: 16, t: 8, b: 32 },
-      paper_bgcolor: 'rgba(0,0,0,0)',
-      plot_bgcolor: 'rgba(0,0,0,0)',
-      showlegend: false,
-      xaxis: {
-        title: { text: 'Real part', font: { size: 11, color: 'var(--text)' } },
-        zerolinecolor: 'rgba(120,120,120,0.3)',
-        gridcolor: 'rgba(120,120,120,0.15)',
-        tickfont: { size: 10, color: 'var(--text-muted)' },
-        range: rangeX,
-      },
-      yaxis: {
-        title: { text: 'Imaginary part', font: { size: 11, color: 'var(--text)' } },
-        zerolinecolor: 'rgba(120,120,120,0.3)',
-        gridcolor: 'rgba(120,120,120,0.15)',
-        tickfont: { size: 10, color: 'var(--text-muted)' },
-        scaleanchor: 'x',
-        scaleratio: 1,
-        range: rangeY,
-      },
-      annotations: [
-        {
-          x: rangeX[1],
-          y: 0,
-          xref: 'x',
-          yref: 'y',
-          text: 'Re',
-          showarrow: false,
-          xanchor: 'right',
-          yanchor: 'bottom',
-          xshift: -6,
-          yshift: 6,
-          font: { size: 10, color: 'var(--text-muted)' },
-        },
-        {
-          x: 0,
-          y: rangeY[1],
-          xref: 'x',
-          yref: 'y',
-          text: 'Im',
-          showarrow: false,
-          xanchor: 'left',
-          yanchor: 'top',
-          xshift: 6,
-          yshift: -6,
-          font: { size: 10, color: 'var(--text-muted)' },
-        },
-      ],
-    }
-    return { data, layout }
+    return buildEigenvaluePlot(eigenpairs.map((pair) => pair.value))
   }, [equilibrium?.solution?.eigenpairs])
 
   useEffect(() => {
@@ -1214,6 +1219,11 @@ export function InspectorDetailsPanel({
   const branchStartPoint = branchStartIndex !== undefined ? branch?.data.points[branchStartIndex] : null
   const branchEndPoint = branchEndIndex !== undefined ? branch?.data.points[branchEndIndex] : null
   const hopfOmega = selectedBranchPoint ? extractHopfOmega(selectedBranchPoint) : null
+  const branchEigenvalues = selectedBranchPoint
+    ? normalizeEigenvalueArray(selectedBranchPoint.eigenvalues)
+    : []
+  const branchEigenPlot =
+    branch?.branchType === 'equilibrium' ? buildEigenvaluePlot(branchEigenvalues) : null
 
   const handleApplySystem = async () => {
     setSystemTouched(true)
@@ -3620,15 +3630,24 @@ export function InspectorDetailsPanel({
                           }))}
                         />
                         <h4 className="inspector-subheading">Eigenvalues</h4>
-                        {normalizeEigenvalueArray(selectedBranchPoint.eigenvalues).length > 0 ? (
-                          <InspectorMetrics
-                            rows={normalizeEigenvalueArray(selectedBranchPoint.eigenvalues).map(
-                              (ev, index) => ({
+                        {branchEigenvalues.length > 0 ? (
+                          <div className="inspector-list">
+                            {branchEigenPlot ? (
+                              <div className="inspector-plot">
+                                <PlotlyViewport
+                                  data={branchEigenPlot.data}
+                                  layout={branchEigenPlot.layout}
+                                  testId="branch-eigenvalue-plot"
+                                />
+                              </div>
+                            ) : null}
+                            <InspectorMetrics
+                              rows={branchEigenvalues.map((ev, index) => ({
                                 label: `λ${index + 1}`,
                                 value: `${formatNumberSafe(ev.re)} + ${formatNumberSafe(ev.im)}i`,
-                              })
-                            )}
-                          />
+                              }))}
+                            />
+                          </div>
                         ) : (
                           <p className="empty-state">No eigenvalues stored for this point.</p>
                         )}
