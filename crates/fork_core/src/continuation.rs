@@ -662,6 +662,10 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
     if branch.points.is_empty() {
         bail!("Cannot extend empty branch");
     }
+
+    if branch.indices.len() != branch.points.len() {
+        branch.indices = (0..branch.points.len() as i32).collect();
+    }
     
     // Get the endpoint to continue from based on forward/backward
     // forward=true means append to the end (max index), forward=false means prepend (min index)
@@ -2136,5 +2140,46 @@ mod tests {
         assert!(runner.single_step().expect("second step"));
 
         assert_eq!(runner.branch.indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_extend_branch_with_problem_normalizes_missing_indices() {
+        let settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-6,
+            max_step_size: 0.2,
+            max_steps: 1,
+            corrector_steps: 2,
+            corrector_tolerance: 1e-6,
+            step_tolerance: 1e-6,
+        };
+
+        let mut problem = ZeroResidualProblem::default();
+        let branch = ContinuationBranch {
+            points: vec![
+                ContinuationPoint {
+                    state: vec![0.0],
+                    param_value: 0.0,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                },
+                ContinuationPoint {
+                    state: vec![0.0],
+                    param_value: 0.2,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                },
+            ],
+            bifurcations: Vec::new(),
+            indices: Vec::new(),
+            branch_type: BranchType::default(),
+            upoldp: None,
+        };
+
+        let extended = extend_branch_with_problem(&mut problem, branch, settings, true)
+            .expect("extend branch with missing indices");
+
+        assert_eq!(extended.points.len(), 3);
+        assert_eq!(extended.indices, vec![0, 1, 2]);
     }
 }
