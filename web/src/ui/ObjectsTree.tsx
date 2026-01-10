@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { System, TreeNode } from '../system/types'
+import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
 
 type ObjectsTreeProps = {
   system: System
@@ -279,8 +280,13 @@ export function ObjectsTree({
           <button
             className="context-menu__item"
             onClick={() => {
-              onDeleteNode(nodeContextMenu.id)
+              const nodeId = nodeContextMenu.id
+              const node = system.nodes[nodeId]
               setNodeContextMenu(null)
+              if (!node) return
+              if (confirmDelete({ name: node.name, kind: getDeleteKindLabel(node) })) {
+                onDeleteNode(nodeId)
+              }
             }}
             data-testid="object-context-delete"
           >
