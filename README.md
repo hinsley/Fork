@@ -21,7 +21,6 @@ People who have supported Fork on Patreon are listed below.
 
 ## Bifurcations by codimension
 A checkmark denotes that support for the bifurcation type has been implemented.
-I will have to study some more theory of numerical bifurcation analysis in maps before putting together a to-do list there.
 
 ### Maps
 - Codimension 0
