@@ -8,6 +8,16 @@ import type {
 
 type EigenvalueWire = [number, number]
 
+type EigenvalueInput = ContinuationEigenvalue | EigenvalueWire | { re?: number; im?: number }
+
+type ContinuationPointInput = Omit<ContinuationPoint, 'eigenvalues'> & {
+  eigenvalues?: EigenvalueInput[]
+}
+
+type ContinuationBranchDataInput = Omit<ContinuationBranchData, 'points'> & {
+  points: ContinuationPointInput[]
+}
+
 type ContinuationPointWire = Omit<ContinuationPoint, 'eigenvalues'> & {
   eigenvalues: EigenvalueWire[]
 }
@@ -63,7 +73,9 @@ export function extractHopfOmega(point: ContinuationPoint): number {
   return Math.abs(bestIm) || 1.0
 }
 
-export function normalizeBranchEigenvalues(data: ContinuationBranchData): ContinuationBranchData {
+export function normalizeBranchEigenvalues(
+  data: ContinuationBranchDataInput
+): ContinuationBranchData {
   return {
     ...data,
     points: data.points.map((point) => ({
@@ -73,15 +85,13 @@ export function normalizeBranchEigenvalues(data: ContinuationBranchData): Contin
   }
 }
 
-function serializeEigenvalueArray(raw: ContinuationPoint['eigenvalues'] | undefined): EigenvalueWire[] {
+function serializeEigenvalueArray(raw: EigenvalueInput[] | undefined): EigenvalueWire[] {
   if (!raw || !Array.isArray(raw)) return []
   return raw.map((value) => {
     if (Array.isArray(value)) {
-      const tuple = value as EigenvalueWire
-      return [tuple[0] ?? 0, tuple[1] ?? 0]
+      return [value[0] ?? 0, value[1] ?? 0]
     }
-    const entry = value as { re?: number; im?: number }
-    return [entry?.re ?? 0, entry?.im ?? 0]
+    return [value?.re ?? 0, value?.im ?? 0]
   })
 }
 

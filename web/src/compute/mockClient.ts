@@ -19,6 +19,7 @@ import type {
   ValidateSystemResult,
 } from './ForkCoreClient'
 import { JobQueue } from './jobQueue'
+import { normalizeBranchEigenvalues } from '../system/continuation'
 import { isDeterministicMode } from '../utils/determinism'
 
 function delay(ms: number) {
@@ -256,7 +257,7 @@ export class MockForkCoreClient implements ForkCoreClient {
         progress.points_computed = request.branchData.points.length
         opts?.onProgress?.({ ...progress })
 
-        return request.branchData
+        return normalizeBranchEigenvalues(request.branchData)
       },
       opts
     )
