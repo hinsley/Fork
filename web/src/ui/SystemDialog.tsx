@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { SystemSummary } from '../system/types'
+import { confirmDelete } from './confirmDelete'
 
 type SystemDialogProps = {
   open: boolean
@@ -64,7 +65,15 @@ export function SystemDialog({
                   </div>
                   <div className="dialog__list-actions">
                     <button onClick={() => onExportSystem(system.id)}>Export</button>
-                    <button onClick={() => onDeleteSystem(system.id)}>Delete</button>
+                    <button
+                      onClick={() => {
+                        if (confirmDelete({ name: system.name, kind: 'System' })) {
+                          onDeleteSystem(system.id)
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
               ))}

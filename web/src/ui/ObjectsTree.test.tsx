@@ -47,6 +47,7 @@ describe('ObjectsTree', () => {
     const user = userEvent.setup()
     const { system, objectNodeId } = createDemoSystem()
     const onDeleteNode = vi.fn()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
 
     render(
       <ObjectsTree
@@ -70,7 +71,9 @@ describe('ObjectsTree', () => {
     expect(menu).toBeInTheDocument()
 
     await user.click(screen.getByTestId('object-context-delete'))
+    expect(confirmSpy).toHaveBeenCalled()
     expect(onDeleteNode).toHaveBeenCalledWith(objectNodeId)
+    confirmSpy.mockRestore()
   })
 
   it('opens the create menu and triggers a create action', async () => {

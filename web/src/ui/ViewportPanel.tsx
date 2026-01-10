@@ -14,6 +14,7 @@ import type {
 import { buildSortedArrayOrder, ensureBranchIndices, getBranchParams } from '../system/continuation'
 import { resolveClvRender } from '../system/clv'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
+import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
 
 type ViewportPanelProps = {
   system: System
@@ -1296,8 +1297,13 @@ export function ViewportPanel({
           <button
             className="context-menu__item"
             onClick={() => {
-              onDeleteViewport(nodeContextMenu.id)
+              const nodeId = nodeContextMenu.id
+              const node = system.nodes[nodeId]
               setNodeContextMenu(null)
+              if (!node) return
+              if (confirmDelete({ name: node.name, kind: getDeleteKindLabel(node) })) {
+                onDeleteViewport(nodeId)
+              }
             }}
             data-testid="viewport-context-delete"
           >
