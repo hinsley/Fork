@@ -1,9 +1,14 @@
 <p align="center">
   <img src="web/public/favicon.svg" alt="Fork logo" width="200" />
 </p>
+<p align="center">
+  <a href="https://codecov.io/gh/hinsley/Fork">
+    <img src="https://codecov.io/gh/hinsley/Fork/graph/badge.svg?token=YLTHXLLC0J" alt="codecov" />
+  </a>
+</p>
 
 # Fork
-Fork is a browser-based numerical bifurcation continuation software application, supporting the analysis of smooth finite-dimensional maps and systems of ordinary differential equations.
+Fork is a numerical bifurcation continuation software application with both a web UI and a Node.js CLI, supporting the analysis of smooth finite-dimensional maps and systems of ordinary differential equations.
 The goal is to support all popular mobile and desktop devices.
 
 ## Supporters
@@ -57,9 +62,24 @@ A checkmark denotes that support for the bifurcation type has been implemented.
 Fork uses [Plotly](https://plotly.com/javascript/) to render trajectories, bifurcation diagrams, and other visualizations.
 
 # Building
+Fork ships as a Rust/WASM core, a Node.js CLI, and a web UI. The CLI and web app each have their own dependency setup.
+
 Build the Rust core with:
 ```bash
 cargo build
+```
+
+Build the WASM bindings for the CLI with:
+```bash
+cd crates/fork_wasm
+wasm-pack build --target nodejs
+```
+
+Run the CLI with:
+```bash
+cd cli
+npm install
+npm start
 ```
 
 Run the web UI locally with:
