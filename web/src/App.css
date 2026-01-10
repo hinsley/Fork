@@ -352,6 +352,13 @@
   margin-bottom: 10px;
 }
 
+.inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
 .inspector-subheading {
   font-size: 0.75rem;
   font-weight: 600;

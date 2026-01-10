@@ -1246,6 +1246,14 @@ export function InspectorDetailsPanel({
     await onUpdateSystem(systemConfig)
   }
 
+  const handleDiscardSystem = () => {
+    setSystemDraft(makeSystemDraft(system.config))
+    setSystemTouched(false)
+    setWasmEquationErrors([])
+    setWasmMessage(null)
+    setIsValidating(false)
+  }
+
   const handleRunOrbit = async () => {
     if (runDisabled) {
       setOrbitError('Apply valid system settings before running orbits.')
@@ -1964,11 +1972,21 @@ export function InspectorDetailsPanel({
         {renderSystemErrors()}
         {wasmMessage ? <div className="field-error">{wasmMessage}</div> : null}
         {isValidating ? <div className="field-warning">Validating equations…</div> : null}
-        <div className="inspector-section">
-          <button onClick={handleApplySystem} data-testid="system-apply">
-            Apply System Changes
-          </button>
-        </div>
+        {systemDirty ? (
+          <div className="inspector-section">
+            <div className="field-warning" data-testid="system-unapplied-indicator">
+              Unapplied changes.
+            </div>
+            <div className="inspector-actions">
+              <button onClick={handleApplySystem} data-testid="system-apply">
+                Apply System Changes
+              </button>
+              <button onClick={handleDiscardSystem} data-testid="system-discard">
+                Discard Changes
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   )
