@@ -24,13 +24,15 @@ People who have supported Fork on Patreon are listed below.
 
 - Jacob Price
 
-## Repository layout
-Fork is a 3-part monorepo: a Rust core, a Node.js CLI, and a web UI. The core is the numerical engine, while the CLI and web app provide different user interfaces on top of the same algorithms.
+## Monorepo structure
+Fork is a 4-part monorepo: a Rust core, WASM bindings, a Node.js CLI, and a web UI. The core is the numerical engine, while the CLI and web app provide different user interfaces on top of the same algorithms.
 
-- `crates/fork_core`: Pure Rust numerical engine. It owns the continuation algorithms, equation parsing, integration, linear algebra/solvers, and stability computations. The core is UI-agnostic and is designed to be deterministic, testable, and reusable across frontends.
-- `crates/fork_wasm`: WebAssembly bindings that wrap the core for JavaScript consumers. This is how the CLI and web UI call into the same continuation logic.
+- `crates/fork_core`: Pure Rust numerical engine. It includes a small equation language: user-provided expressions are parsed into an AST, compiled into stack-based bytecode, and executed by a tiny VM against `f64` values or dual numbers for automatic differentiation. This feeds Newton solvers, continuation, stability, and collocation routines. The core is UI-agnostic and designed to be deterministic, testable, and reusable across frontends.
+- `crates/fork_wasm`: WebAssembly bindings that wrap the core for JavaScript consumers. This lets the CLI and web UI share the exact same numerical engine and results.
 - `cli`: Interactive Node.js CLI built on the WASM bindings. It exposes the core algorithms in a text-based workflow.
 - `web`: Vite + React web UI that consumes the WASM bindings and renders results in the browser.
+
+Rust and WebAssembly were chosen so the performance-critical numerical kernels and automatic differentiation live in one place, and the browser and CLI run identical continuation logic without a separate JavaScript reimplementation.
 
 ## Bifurcations by codimension
 A checkmark denotes that support for the bifurcation type has been implemented.
