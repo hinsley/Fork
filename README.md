@@ -31,14 +31,14 @@ I will have to study some more theory of numerical bifurcation analysis in maps 
 ### ODE systems
 - Codimension 0
     - [X] Equilibrium
-    - [ ] Periodic Orbit
+    - [X] Periodic Orbit
 - Codimension 1
-    - [ ] Andronov-Hopf
+    - [X] Andronov-Hopf
     - [ ] Homoclinic to Saddle-Equilibrium
     - [ ] Homoclinic to Saddle-Focus
     - [ ] Homoclinic to Saddle-Periodic-Orbit
-    - [ ] Saddle-Node
-    - [ ] Saddle-Node of Periodic Orbits
+    - [X] Saddle-Node (Fold)
+    - [X] Saddle-Node of Periodic Orbits
 - Codimension 2
     - [ ] Bautin Point / Generalized Andronov-Hopf
     - [ ] Bogdanov-Takens
