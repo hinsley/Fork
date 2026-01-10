@@ -20,6 +20,16 @@ export class ForkHarness {
     this.page = page
   }
 
+  private async openSystemsDialog() {
+    if ((await this.page.getByRole('dialog').count()) > 0) return
+    const openButton =
+      (await this.page.getByTestId('open-systems').count()) > 0
+        ? this.page.getByTestId('open-systems')
+        : this.page.getByTestId('open-systems-empty')
+    await openButton.click()
+    await this.page.getByRole('dialog').waitFor()
+  }
+
   async goto(options: HarnessLaunchOptions = {}) {
     const params = new URLSearchParams()
     const deterministic = options.deterministic ?? true
@@ -34,20 +44,14 @@ export class ForkHarness {
   }
 
   async createSystem(name: string) {
+    await this.openSystemsDialog()
     await this.page.getByTestId('system-name-input').fill(name)
     await this.page.getByTestId('create-system').click()
     await this.page.getByTestId('workspace').waitFor()
   }
 
   async openSystem(name: string) {
-    if ((await this.page.getByRole('dialog').count()) === 0) {
-      const openButton =
-        (await this.page.getByTestId('open-systems').count()) > 0
-          ? this.page.getByTestId('open-systems')
-          : this.page.getByTestId('open-systems-empty')
-      await openButton.click()
-    }
-
+    await this.openSystemsDialog()
     await this.page.getByRole('dialog').getByRole('button', { name, exact: true }).click()
     await this.page.getByTestId('workspace').waitFor()
   }
