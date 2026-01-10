@@ -33,12 +33,13 @@ function App() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogDismissed, setDialogDismissed] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    if (typeof window === 'undefined' || isDeterministicMode()) return 'dark'
+    if (typeof window === 'undefined') return 'light'
+    if (isDeterministicMode()) return 'light'
     const stored =
       'localStorage' in window && typeof window.localStorage.getItem === 'function'
         ? window.localStorage.getItem('fork-theme')
         : null
-    return stored === 'light' ? 'light' : 'dark'
+    return stored === 'dark' ? 'dark' : 'light'
   })
   const [inspectorView, setInspectorView] = useState<'selection' | 'system'>('selection')
   const dragRef = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(
@@ -49,7 +50,7 @@ function App() {
     void actions.refreshSystems()
   }, [actions])
 
-  const isSystemDialogOpen = dialogOpen || (!system && !dialogDismissed)
+  const isSystemDialogOpen = dialogOpen
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
