@@ -49,6 +49,11 @@ const VIEWS: Array<{ id: InspectorView; label: string }> = [
   { id: 'system', label: 'System Settings' },
 ]
 
+const INSPECTOR_TAB_TEST_IDS: Record<InspectorView, string> = {
+  selection: 'close-system-settings',
+  system: 'open-system-settings',
+}
+
 export function InspectorPanel({
   system,
   selectedNodeId,
@@ -81,7 +86,7 @@ export function InspectorPanel({
             onClick={() => onViewChange(entry.id)}
             role="tab"
             aria-selected={view === entry.id}
-            data-testid={`inspector-tab-${entry.id}`}
+            data-testid={INSPECTOR_TAB_TEST_IDS[entry.id]}
           >
             {entry.label}
           </button>
