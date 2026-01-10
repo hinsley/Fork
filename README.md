@@ -25,7 +25,7 @@ I will have to study some more theory of numerical bifurcation analysis in maps 
 
 ### Maps
 - Codimension 0
-    - [X] Fixed Point (Equilibrium)
+    - [X] Equilibrium (Fixed Point)
     - [ ] Periodic Orbit
 - Codimension 1
     - [X] Saddle-Node (Fold)
