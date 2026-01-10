@@ -39,6 +39,19 @@ export class ForkHarness {
     await this.page.getByTestId('workspace').waitFor()
   }
 
+  async openSystem(name: string) {
+    if ((await this.page.getByRole('dialog').count()) === 0) {
+      const openButton =
+        (await this.page.getByTestId('open-systems').count()) > 0
+          ? this.page.getByTestId('open-systems')
+          : this.page.getByTestId('open-systems-empty')
+      await openButton.click()
+    }
+
+    await this.page.getByRole('dialog').getByRole('button', { name, exact: true }).click()
+    await this.page.getByTestId('workspace').waitFor()
+  }
+
   async createScene() {
     await this.page.getByTestId('viewport-insert-empty').click()
     await this.page.getByTestId('viewport-create-scene').click()
