@@ -70,11 +70,7 @@ function App() {
     }
   }, [actions, system, system?.ui.layout.inspectorOpen, system?.ui.selectedNodeId])
 
-  useEffect(() => {
-    if (!system) {
-      setSystemSettingsOpen(false)
-    }
-  }, [system])
+  const isSystemSettingsOpen = systemSettingsOpen && Boolean(system)
 
   const openSystemsDialog = () => {
     setDialogOpen(true)
@@ -206,7 +202,7 @@ function App() {
         }}
       />
       <SystemSettingsDialog
-        open={systemSettingsOpen}
+        open={isSystemSettingsOpen}
         system={system}
         selectedNodeId={system?.ui.selectedNodeId ?? null}
         onClose={closeSystemSettings}
