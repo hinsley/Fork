@@ -8,7 +8,7 @@ test('rossler hopf curve continuation', async ({ page }) => {
   await harness.goto({ deterministic: true, mock: false })
   await harness.openSystem('Rossler')
 
-  await page.getByTestId('open-system-settings').click()
+  await page.getByTestId('inspector-tab-system').click()
   await page.getByTestId('system-param-value-1').fill('0.4')
   await page.getByTestId('system-param-value-2').fill('1.4')
   await page.getByTestId('system-apply').click()
@@ -16,7 +16,7 @@ test('rossler hopf curve continuation', async ({ page }) => {
   await expect(page.getByTestId('system-errors')).toHaveCount(0)
   await expect(page.locator('[data-testid^="system-eq-error-"]')).toHaveCount(0)
 
-  await page.getByTestId('close-system-settings').click()
+  await page.getByTestId('inspector-tab-selection').click()
 
   await harness.createEquilibrium()
   await expect(

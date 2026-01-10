@@ -9,7 +9,7 @@ test('continue hopf curve from detected hopf point', async ({ page }) => {
 
   await harness.createSystem('Hopf E2E')
 
-  await page.getByTestId('open-system-settings').click()
+  await page.getByTestId('inspector-tab-system').click()
   await page.getByTestId('system-add-parameter').click()
   await page.getByTestId('system-add-parameter').click()
 
@@ -26,7 +26,7 @@ test('continue hopf curve from detected hopf point', async ({ page }) => {
   await expect(page.getByTestId('system-errors')).toHaveCount(0)
   await expect(page.locator('[data-testid^="system-eq-error-"]')).toHaveCount(0)
 
-  await page.getByTestId('close-system-settings').click()
+  await page.getByTestId('inspector-tab-selection').click()
 
   await harness.createEquilibrium()
   await expect(
