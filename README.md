@@ -54,7 +54,23 @@ A checkmark denotes that support for the bifurcation type has been implemented.
     - [ ] Shilnikov-Hopf
 
 ## Rendering
-Fork uses [MathBox](https://github.com/unconed/mathbox) and [Plotly](https://plotly.com/javascript/) to render trajectories, bifurcation diagrams, and other visualizations.
+Fork uses [Plotly](https://plotly.com/javascript/) to render trajectories, bifurcation diagrams, and other visualizations.
 
 # Building
-Install `yarn` and run `yarn add vite` followed by `yarn vite`.
+Build the Rust core with:
+```bash
+cargo build
+```
+
+Run the web UI locally with:
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Create a production build of the web UI with:
+```bash
+cd web
+npm run build
+```
