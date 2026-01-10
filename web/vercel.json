@@ -1,0 +1,6 @@
+{
+  "framework": "vite",
+  "installCommand": "curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal && $HOME/.cargo/bin/rustup target add wasm32-unknown-unknown && $HOME/.cargo/bin/cargo install wasm-pack && npm install",
+  "buildCommand": "export PATH=\"$HOME/.cargo/bin:$PATH\" && cd ../crates/fork_wasm && wasm-pack build --target web --out-dir pkg-web && cd ../web && npm run build",
+  "outputDirectory": "dist"
+}

@@ -92,7 +92,7 @@ npm install
 npm start
 ```
 
-The web UI uses the committed `crates/fork_wasm/pkg-web` artifacts, so you do not need `wasm-pack` just to run the web app. If you change the core/WASM bindings, regenerate the web bundle with:
+Build the WASM bindings for the web UI with:
 ```bash
 cd crates/fork_wasm
 wasm-pack build --target web --out-dir pkg-web
@@ -110,3 +110,5 @@ Create a production build of the web UI with:
 cd web
 npm run build
 ```
+
+Deploy builds (including Vercel) need the Rust toolchain and `wasm-pack` to generate `pkg-web`. See `web/vercel.json` for the hosted build configuration.

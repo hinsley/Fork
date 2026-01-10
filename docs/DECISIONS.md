@@ -21,6 +21,20 @@ References:
 
 ---
 
+### 2026-01-10: Build web WASM during deploy
+Context:
+Committing `pkg-web` kept hosted builds simple but added binary churn to the repo.
+Decision:
+Stop tracking `crates/fork_wasm/pkg-web` and generate it during web builds with
+`wasm-pack build --target web --out-dir pkg-web`. Vercel installs Rust + wasm-pack
+and runs this step before `npm run build`.
+Why:
+Keeps the repo lean and avoids committing generated WASM artifacts.
+Impact:
+Local web setup and CI must have Rust + wasm-pack; `pkg-web` is generated on demand.
+References:
+`.gitignore`, `README.md`, `web/vercel.json`, `web/ARCHITECTURE.md`
+
 ### 2026-01-09: Commit web WASM package for hosted builds
 Context:
 Vercel builds the web app without a Rust toolchain, so `pkg-web` is missing and Vite cannot resolve
