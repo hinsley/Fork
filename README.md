@@ -25,8 +25,16 @@ I will have to study some more theory of numerical bifurcation analysis in maps 
 
 ### Maps
 - Codimension 0
+    - [X] Fixed Point (Equilibrium)
+    - [ ] Periodic Orbit
 - Codimension 1
+    - [X] Saddle-Node (Fold)
+    - [ ] Period-Doubling (Flip)
+    - [ ] Neimark-Sacker
 - Codimension 2
+    - [ ] Cusp
+    - [ ] Bogdanov-Takens
+    - [ ] Chenciner
 
 ### ODE systems
 - Codimension 0
@@ -38,7 +46,7 @@ I will have to study some more theory of numerical bifurcation analysis in maps 
     - [ ] Homoclinic to Saddle-Focus
     - [ ] Homoclinic to Saddle-Periodic-Orbit
     - [X] Saddle-Node (Fold)
-    - [X] Saddle-Node of Periodic Orbits
+    - [X] Saddle-Node of Periodic Orbits (LPC: Limit Point of Cycles)
 - Codimension 2
     - [ ] Bautin Point / Generalized Andronov-Hopf
     - [ ] Bogdanov-Takens
