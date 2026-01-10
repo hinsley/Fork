@@ -21,6 +21,8 @@
 - All compute goes through the `ForkCoreClient` interface (`web/src/compute/ForkCoreClient.ts`).
 - Tests inject `MockForkCoreClient` to avoid real WASM.
 - E2E tests use `?mock=1` to force mock compute in the browser.
+- The Hopf curve E2E test uses real WASM (no `mock=1`) and requires an up-to-date
+  `crates/fork_wasm/pkg-web` build.
 - Deterministic test mode: `?test=1` (or `?deterministic=1`, or `VITE_DETERMINISTIC_TEST=1`) disables
   persistence, clears `localStorage`, freezes IDs/time, and disables animations for stable UI assertions.
 - Optional deterministic fixture: `?fixture=demo` loads a canned system for external agents.

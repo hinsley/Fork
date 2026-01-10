@@ -47,11 +47,13 @@ export class ForkHarness {
 
   async createOrbit() {
     await this.page.getByTestId('create-object-button').click()
+    await this.page.getByTestId('create-object-menu').waitFor()
     await this.page.getByTestId('create-orbit').click()
   }
 
   async createEquilibrium() {
     await this.page.getByTestId('create-object-button').click()
+    await this.page.getByTestId('create-object-menu').waitFor()
     await this.page.getByTestId('create-equilibrium').click()
   }
 
@@ -66,7 +68,12 @@ export class ForkHarness {
   }
 
   async selectTreeNode(label: string) {
-    await this.page.getByRole('button', { name: new RegExp(escapeRegex(label), 'i') }).click()
+    const pattern = new RegExp(`^${escapeRegex(label)}`, 'i')
+    await this.page
+      .locator('[data-testid^="object-tree-node-"]')
+      .filter({ hasText: pattern })
+      .first()
+      .click()
   }
 
   inspectorName(): Locator {
