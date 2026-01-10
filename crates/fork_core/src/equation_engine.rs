@@ -220,7 +220,7 @@ impl Compiler {
 
 /// Parses a string expression into an AST.
 pub fn parse(input: &str) -> Result<Expr, String> {
-    let tokens = tokenize(input);
+    let tokens = tokenize(input)?;
     let mut parser = Parser { tokens, pos: 0 };
     parser.parse_expression()
 }
@@ -238,7 +238,7 @@ enum Token {
     RParen,
 }
 
-fn tokenize(input: &str) -> Vec<Token> {
+fn tokenize(input: &str) -> Result<Vec<Token>, String> {
     let mut tokens = Vec::new();
     let mut chars = input.chars().peekable();
 
@@ -255,7 +255,10 @@ fn tokenize(input: &str) -> Vec<Token> {
                     break;
                 }
             }
-            tokens.push(Token::Number(num_str.parse().unwrap_or(0.0)));
+            let value = num_str
+                .parse::<f64>()
+                .map_err(|_| format!("Invalid number '{}'", num_str))?;
+            tokens.push(Token::Number(value));
         } else if c.is_alphabetic() {
             let mut ident = String::new();
             while let Some(&d) = chars.peek() {
@@ -276,12 +279,12 @@ fn tokenize(input: &str) -> Vec<Token> {
                 '^' => tokens.push(Token::Caret),
                 '(' => tokens.push(Token::LParen),
                 ')' => tokens.push(Token::RParen),
-                _ => {} // Ignore unknown
+                _ => return Err(format!("Invalid token '{}'", c)),
             }
             chars.next();
         }
     }
-    tokens
+    Ok(tokens)
 }
 
 struct Parser {
@@ -408,6 +411,22 @@ impl Parser {
             }
             _ => Err("Unexpected token".to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse;
+
+    #[test]
+    fn parse_rejects_invalid_token() {
+        assert!(parse("1 + $").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_invalid_number() {
+        assert!(parse("1..2").is_err());
+        assert!(parse(".").is_err());
     }
 }
 
