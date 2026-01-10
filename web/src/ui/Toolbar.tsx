@@ -52,6 +52,14 @@ export function Toolbar({
         <button onClick={onOpenSystems} data-testid="open-systems">
           Systems
         </button>
+        <button
+          onClick={() => {
+            window.open('https://patreon.com/ForkDynamics', '_blank', 'noopener,noreferrer')
+          }}
+          data-testid="open-patreon"
+        >
+          Patreon
+        </button>
         <div className="toolbar__settings" ref={settingsRef}>
           <button
             onClick={() => setSettingsOpen((open) => !open)}
