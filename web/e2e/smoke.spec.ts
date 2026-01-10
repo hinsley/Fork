@@ -24,12 +24,14 @@ test('system to viewport smoke', async ({ page }) => {
   await harness.solveEquilibrium()
   await expect(page.getByText(/^Solved$/)).toBeVisible()
 
-  await page.getByTestId('inspector-tab-system').click()
+  await page.getByTestId('open-system-settings').click()
   const systemNameInput = harness.systemNameInput()
   await expect(systemNameInput).toHaveValue(/Smoke System/i)
+  await page.getByTestId('close-system-settings').click()
 
   await page.getByTestId('open-systems').click()
   await page.getByRole('button', { name: 'Smoke System', exact: true }).click()
-  await page.getByTestId('inspector-tab-system').click()
+  await page.getByTestId('open-system-settings').click()
   await expect(systemNameInput).toHaveValue(/Smoke System/i)
+  await page.getByTestId('close-system-settings').click()
 })

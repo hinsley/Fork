@@ -90,6 +90,7 @@
 
 .toolbar__actions button,
 .objects-tree__toolbar button,
+.panel__actions button,
 .dialog button,
 .inspector-section button,
 .branch-viewer__item,
@@ -105,6 +106,7 @@
 
 .toolbar__actions button:hover,
 .objects-tree__toolbar button:hover,
+.panel__actions button:hover,
 .dialog button:hover,
 .inspector-section button:hover,
 .branch-viewer__item:hover,
@@ -236,6 +238,12 @@
   font-size: 0.85rem;
   margin: 0;
   flex: 1;
+}
+
+.panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .panel__body {
@@ -872,34 +880,6 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  gap: 6px;
-}
-
-.inspector__menu {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--panel-border);
-  padding-bottom: 4px;
-}
-
-.inspector__tab {
-  border: 1px solid var(--panel-border);
-  background: var(--button-bg);
-  color: var(--text);
-  padding: 3px 8px;
-  border-radius: 3px;
-  cursor: pointer;
-  font-size: 0.75rem;
-}
-
-.inspector__tab.is-active {
-  border-color: var(--accent);
-  background: rgba(77, 163, 255, 0.18);
-  color: var(--text);
-}
-
-:root[data-theme='light'] .inspector__tab.is-active {
-  background: rgba(47, 127, 210, 0.15);
 }
 
 .inspector__content {
@@ -949,6 +929,11 @@
   box-shadow: none;
 }
 
+.dialog--system-settings {
+  width: min(920px, 95vw);
+  max-height: 90vh;
+}
+
 .dialog__header {
   display: flex;
   justify-content: space-between;
@@ -958,6 +943,10 @@
 
 .dialog__section {
   margin-bottom: 12px;
+}
+
+.dialog__section--flush {
+  margin-bottom: 0;
 }
 
 .dialog__row {

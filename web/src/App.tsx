@@ -6,6 +6,7 @@ import { ObjectsTree } from './ui/ObjectsTree'
 import { InspectorPanel } from './ui/InspectorPanel'
 import { ViewportPanel } from './ui/ViewportPanel'
 import { SystemDialog } from './ui/SystemDialog'
+import { SystemSettingsDialog } from './ui/SystemSettingsDialog'
 import { Toolbar } from './ui/Toolbar'
 import { PerfOverlay } from './ui/PerfOverlay'
 import { isDeterministicMode } from './utils/determinism'
@@ -31,6 +32,7 @@ function App() {
   const { state, actions } = useAppContext()
   const { system, systems, busy, error, continuationProgress } = state
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [systemSettingsOpen, setSystemSettingsOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined') return 'light'
     if (isDeterministicMode()) return 'light'
@@ -40,7 +42,6 @@ function App() {
         : null
     return stored === 'dark' ? 'dark' : 'light'
   })
-  const [inspectorView, setInspectorView] = useState<'selection' | 'system'>('selection')
   const dragRef = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(
     null
   )
@@ -64,17 +65,16 @@ function App() {
 
   useEffect(() => {
     if (!system) return
-    if (inspectorView === 'system' && !system.ui.layout.inspectorOpen) {
-      actions.updateLayout({ inspectorOpen: true })
-    }
-  }, [actions, inspectorView, system, system?.ui.layout.inspectorOpen])
-
-  useEffect(() => {
-    if (!system) return
     if (system.ui.selectedNodeId && !system.ui.layout.inspectorOpen) {
       actions.updateLayout({ inspectorOpen: true })
     }
   }, [actions, system, system?.ui.layout.inspectorOpen, system?.ui.selectedNodeId])
+
+  useEffect(() => {
+    if (!system) {
+      setSystemSettingsOpen(false)
+    }
+  }, [system])
 
   const openSystemsDialog = () => {
     setDialogOpen(true)
@@ -86,13 +86,19 @@ function App() {
     setDialogOpen(false)
   }
 
+  const openSystemSettings = () => {
+    setSystemSettingsOpen(true)
+  }
+
+  const closeSystemSettings = () => {
+    setSystemSettingsOpen(false)
+  }
+
   const selectNode = (nodeId: string) => {
     actions.selectNode(nodeId)
     if (system && !system.ui.layout.inspectorOpen) {
       actions.updateLayout({ inspectorOpen: true })
     }
-    // Force the inspector to show selection details even if the selection didn't change.
-    setInspectorView('selection')
   }
 
   const createOrbit = async () => {
@@ -187,20 +193,39 @@ function App() {
         onCreateSystem={async (name) => {
           await actions.createSystem(name)
           finishSystemsDialog()
-          setInspectorView('selection')
         }}
         onOpenSystem={async (id) => {
           await actions.openSystem(id)
           finishSystemsDialog()
-          setInspectorView('selection')
         }}
         onExportSystem={(id) => void actions.exportSystem(id)}
         onDeleteSystem={(id) => void actions.deleteSystem(id)}
         onImportSystem={async (file) => {
           await actions.importSystem(file)
           finishSystemsDialog()
-          setInspectorView('selection')
         }}
+      />
+      <SystemSettingsDialog
+        open={systemSettingsOpen}
+        system={system}
+        selectedNodeId={system?.ui.selectedNodeId ?? null}
+        onClose={closeSystemSettings}
+        onRename={actions.renameNode}
+        onToggleVisibility={actions.toggleVisibility}
+        onUpdateRender={actions.updateRender}
+        onUpdateScene={actions.updateScene}
+        onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
+        onUpdateSystem={actions.updateSystem}
+        onValidateSystem={actions.validateSystem}
+        onRunOrbit={actions.runOrbit}
+        onComputeLyapunovExponents={actions.computeLyapunovExponents}
+        onComputeCovariantLyapunovVectors={actions.computeCovariantLyapunovVectors}
+        onSolveEquilibrium={actions.solveEquilibrium}
+        onCreateLimitCycle={actions.createLimitCycleObject}
+        onCreateEquilibriumBranch={actions.createEquilibriumBranch}
+        onCreateBranchFromPoint={actions.createBranchFromPoint}
+        onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
+        onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
       />
 
       {error ? (
@@ -287,12 +312,15 @@ function App() {
                 actions.updateLayout({ inspectorOpen: !system.ui.layout.inspectorOpen })
               }
               testId="inspector-panel"
+              actions={
+                <button onClick={openSystemSettings} data-testid="open-system-settings">
+                  System Settings
+                </button>
+              }
             >
               <InspectorPanel
                 system={system}
                 selectedNodeId={system.ui.selectedNodeId}
-                view={inspectorView}
-                onViewChange={setInspectorView}
                 onRename={actions.renameNode}
                 onToggleVisibility={actions.toggleVisibility}
                 onUpdateRender={actions.updateRender}
@@ -303,13 +331,13 @@ function App() {
                 onRunOrbit={actions.runOrbit}
                 onComputeLyapunovExponents={actions.computeLyapunovExponents}
                 onComputeCovariantLyapunovVectors={actions.computeCovariantLyapunovVectors}
-              onSolveEquilibrium={actions.solveEquilibrium}
-              onCreateLimitCycle={actions.createLimitCycleObject}
-              onCreateEquilibriumBranch={actions.createEquilibriumBranch}
-              onCreateBranchFromPoint={actions.createBranchFromPoint}
-              onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
-              onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
-            />
+                onSolveEquilibrium={actions.solveEquilibrium}
+                onCreateLimitCycle={actions.createLimitCycleObject}
+                onCreateEquilibriumBranch={actions.createEquilibriumBranch}
+                onCreateBranchFromPoint={actions.createBranchFromPoint}
+                onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
+                onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
+              />
             </Panel>
           </div>
         </main>

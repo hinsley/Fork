@@ -12,9 +12,11 @@ import type {
   OrbitRunRequest,
 } from '../state/appState'
 
-type InspectorPanelProps = {
-  system: System
+type SystemSettingsDialogProps = {
+  open: boolean
+  system: System | null
   selectedNodeId: string | null
+  onClose: () => void
   onRename: (id: string, name: string) => void
   onToggleVisibility: (id: string) => void
   onUpdateRender: (id: string, render: Partial<TreeNode['render']>) => void
@@ -40,9 +42,11 @@ type InspectorPanelProps = {
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
 }
 
-export function InspectorPanel({
+export function SystemSettingsDialog({
+  open,
   system,
   selectedNodeId,
+  onClose,
   onRename,
   onToggleVisibility,
   onUpdateRender,
@@ -59,31 +63,51 @@ export function InspectorPanel({
   onCreateBranchFromPoint,
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
-}: InspectorPanelProps) {
+}: SystemSettingsDialogProps) {
+  if (!open || !system) return null
+
   return (
-    <div className="inspector">
-      <div className="inspector__content">
-        <InspectorDetailsPanel
-          system={system}
-          selectedNodeId={selectedNodeId}
-          view="selection"
-          onRename={onRename}
-          onToggleVisibility={onToggleVisibility}
-          onUpdateRender={onUpdateRender}
-          onUpdateScene={onUpdateScene}
-          onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
-          onUpdateSystem={onUpdateSystem}
-          onValidateSystem={onValidateSystem}
-          onRunOrbit={onRunOrbit}
-          onComputeLyapunovExponents={onComputeLyapunovExponents}
-          onComputeCovariantLyapunovVectors={onComputeCovariantLyapunovVectors}
-          onSolveEquilibrium={onSolveEquilibrium}
-          onCreateLimitCycle={onCreateLimitCycle}
-          onCreateEquilibriumBranch={onCreateEquilibriumBranch}
-          onCreateBranchFromPoint={onCreateBranchFromPoint}
-          onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
-          onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
-        />
+    <div
+      className="dialog-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="system-settings-title"
+      data-testid="system-settings-dialog"
+    >
+      <div className="dialog dialog--system-settings">
+        <header className="dialog__header">
+          <h2 id="system-settings-title">System Settings</h2>
+          <button
+            onClick={onClose}
+            aria-label="Close system settings"
+            data-testid="close-system-settings"
+          >
+            ✕
+          </button>
+        </header>
+        <div className="dialog__section dialog__section--flush">
+          <InspectorDetailsPanel
+            system={system}
+            selectedNodeId={selectedNodeId}
+            view="system"
+            onRename={onRename}
+            onToggleVisibility={onToggleVisibility}
+            onUpdateRender={onUpdateRender}
+            onUpdateScene={onUpdateScene}
+            onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
+            onUpdateSystem={onUpdateSystem}
+            onValidateSystem={onValidateSystem}
+            onRunOrbit={onRunOrbit}
+            onComputeLyapunovExponents={onComputeLyapunovExponents}
+            onComputeCovariantLyapunovVectors={onComputeCovariantLyapunovVectors}
+            onSolveEquilibrium={onSolveEquilibrium}
+            onCreateLimitCycle={onCreateLimitCycle}
+            onCreateEquilibriumBranch={onCreateEquilibriumBranch}
+            onCreateBranchFromPoint={onCreateBranchFromPoint}
+            onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
+            onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
+          />
+        </div>
       </div>
     </div>
   )
