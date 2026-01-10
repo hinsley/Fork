@@ -36,8 +36,10 @@ impl WasmEquilibriumRunner {
         let compiler = Compiler::new(&var_names, &param_names);
         let mut bytecodes = Vec::new();
         for eq_str in equations {
-            let expr = parse(&eq_str).map_err(|e| JsValue::from_str(&e))?;
-            let code = compiler.compile(&expr);
+            let expr = parse(&eq_str).map_err(|e| JsValue::from_str(&e.to_string()))?;
+            let code = compiler
+                .compile(&expr)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
             bytecodes.push(code);
         }
 

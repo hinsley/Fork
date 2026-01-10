@@ -4,6 +4,7 @@ use crate::{
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
+use thiserror::Error;
 
 /// OpCodes for the Stack-based Virtual Machine.
 /// The VM operates on a stack of `Scalar` values (f64 or Dual).
@@ -48,6 +49,32 @@ impl Bytecode {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum EquationError {
+    #[error("unknown variable or parameter: {0}")]
+    UnknownSymbol(String),
+    #[error("unknown binary operator: {0}")]
+    UnknownBinaryOperator(char),
+    #[error("unknown unary operator: {0}")]
+    UnknownUnaryOperator(char),
+    #[error("unknown function: {0}")]
+    UnknownFunction(String),
+    #[error("parse error: {0}")]
+    Parse(String),
+    #[error("bytecode stack underflow for {0:?}")]
+    StackUnderflow(OpCode),
+    #[error("bytecode missing result value")]
+    MissingResult,
+    #[error("variable index out of bounds: {0}")]
+    VarIndexOutOfBounds(usize),
+    #[error("parameter index out of bounds: {0}")]
+    ParamIndexOutOfBounds(usize),
+    #[error("scalar conversion failed")]
+    ScalarConversion,
+}
+
+pub type EquationResult<T> = Result<T, EquationError>;
+
 /// Stack-based Virtual Machine for evaluating equations.
 ///
 /// The VM is stateless; `execute` takes all necessary context:
@@ -59,6 +86,10 @@ impl Bytecode {
 /// Returns the result of the evaluation (the value left on the stack).
 pub struct VM;
 
+fn pop_stack<T: Scalar>(stack: &mut Vec<T>, op: OpCode) -> EquationResult<T> {
+    stack.pop().ok_or(EquationError::StackUnderflow(op))
+}
+
 impl VM {
     /// Executes the bytecode.
     ///
@@ -69,66 +100,73 @@ impl VM {
         vars: &[T],
         params: &[T],
         stack: &mut Vec<T>,
-    ) -> T {
+    ) -> EquationResult<T> {
         stack.clear();
 
-        for op in &bytecode.ops {
+        for &op in &bytecode.ops {
             match op {
                 OpCode::LoadConst(val) => {
-                    stack.push(T::from_f64(*val).unwrap());
+                    let value = T::from_f64(val).ok_or(EquationError::ScalarConversion)?;
+                    stack.push(value);
                 }
                 OpCode::LoadVar(idx) => {
-                    stack.push(vars[*idx]);
+                    let value = *vars
+                        .get(idx)
+                        .ok_or(EquationError::VarIndexOutOfBounds(idx))?;
+                    stack.push(value);
                 }
                 OpCode::LoadParam(idx) => {
-                    stack.push(params[*idx]);
+                    let value = *params
+                        .get(idx)
+                        .ok_or(EquationError::ParamIndexOutOfBounds(idx))?;
+                    stack.push(value);
                 }
                 OpCode::Add => {
-                    let b = stack.pop().unwrap();
-                    let a = stack.pop().unwrap();
+                    let b = pop_stack(stack, op)?;
+                    let a = pop_stack(stack, op)?;
                     stack.push(a + b);
                 }
                 OpCode::Sub => {
-                    let b = stack.pop().unwrap();
-                    let a = stack.pop().unwrap();
+                    let b = pop_stack(stack, op)?;
+                    let a = pop_stack(stack, op)?;
                     stack.push(a - b);
                 }
                 OpCode::Mul => {
-                    let b = stack.pop().unwrap();
-                    let a = stack.pop().unwrap();
+                    let b = pop_stack(stack, op)?;
+                    let a = pop_stack(stack, op)?;
                     stack.push(a * b);
                 }
                 OpCode::Div => {
-                    let b = stack.pop().unwrap();
-                    let a = stack.pop().unwrap();
+                    let b = pop_stack(stack, op)?;
+                    let a = pop_stack(stack, op)?;
                     stack.push(a / b);
                 }
                 OpCode::Pow => {
-                    let b = stack.pop().unwrap();
-                    let a = stack.pop().unwrap();
+                    let b = pop_stack(stack, op)?;
+                    let a = pop_stack(stack, op)?;
                     stack.push(a.powf(b));
                 }
                 OpCode::Sin => {
-                    let a = stack.pop().unwrap();
+                    let a = pop_stack(stack, op)?;
                     stack.push(a.sin());
                 }
                 OpCode::Cos => {
-                    let a = stack.pop().unwrap();
+                    let a = pop_stack(stack, op)?;
                     stack.push(a.cos());
                 }
                 OpCode::Exp => {
-                    let a = stack.pop().unwrap();
+                    let a = pop_stack(stack, op)?;
                     stack.push(a.exp());
                 }
                 OpCode::Neg => {
-                    let a = stack.pop().unwrap();
+                    let a = pop_stack(stack, op)?;
                     stack.push(-a);
                 }
             }
         }
 
         // The result is the last item on the stack. Default to 0.0 if empty (shouldn't happen in valid code).
-        stack.pop().unwrap_or_else(|| T::from_f64(0.0).unwrap())
+        stack.pop().ok_or(EquationError::MissingResult)
     }
 }
 
@@ -166,13 +204,13 @@ impl Compiler {
         Self { var_map, param_map }
     }
 
-    pub fn compile(&self, expr: &Expr) -> Bytecode {
+    pub fn compile(&self, expr: &Expr) -> EquationResult<Bytecode> {
         let mut ops = Vec::new();
-        self.compile_recursive(expr, &mut ops);
-        Bytecode { ops }
+        self.compile_recursive(expr, &mut ops)?;
+        Ok(Bytecode { ops })
     }
 
-    fn compile_recursive(&self, expr: &Expr, ops: &mut Vec<OpCode>) {
+    fn compile_recursive(&self, expr: &Expr, ops: &mut Vec<OpCode>) -> EquationResult<()> {
         match expr {
             Expr::Number(n) => ops.push(OpCode::LoadConst(*n)),
             Expr::Variable(name) => {
@@ -181,48 +219,53 @@ impl Compiler {
                 } else if let Some(&idx) = self.param_map.get(name) {
                     ops.push(OpCode::LoadParam(idx));
                 } else {
-                    panic!("Unknown variable or parameter: {}", name);
+                    return Err(EquationError::UnknownSymbol(name.clone()));
                 }
             }
             Expr::Binary(left, op, right) => {
-                self.compile_recursive(left, ops);
-                self.compile_recursive(right, ops);
+                self.compile_recursive(left, ops)?;
+                self.compile_recursive(right, ops)?;
                 match op {
                     '+' => ops.push(OpCode::Add),
                     '-' => ops.push(OpCode::Sub),
                     '*' => ops.push(OpCode::Mul),
                     '/' => ops.push(OpCode::Div),
                     '^' => ops.push(OpCode::Pow),
-                    _ => panic!("Unknown binary operator: {}", op),
+                    _ => return Err(EquationError::UnknownBinaryOperator(*op)),
                 }
             }
             Expr::Unary(op, operand) => {
-                self.compile_recursive(operand, ops);
+                self.compile_recursive(operand, ops)?;
                 match op {
                     '-' => ops.push(OpCode::Neg),
-                    _ => panic!("Unknown unary operator: {}", op),
+                    _ => return Err(EquationError::UnknownUnaryOperator(*op)),
                 }
             }
             Expr::Call(func, arg) => {
-                self.compile_recursive(arg, ops);
+                self.compile_recursive(arg, ops)?;
                 match func.as_str() {
                     "sin" => ops.push(OpCode::Sin),
                     "cos" => ops.push(OpCode::Cos),
                     "exp" => ops.push(OpCode::Exp),
-                    _ => panic!("Unknown function: {}", func),
+                    _ => return Err(EquationError::UnknownFunction(func.clone())),
                 }
             }
         }
+        Ok(())
     }
 }
 
 // --- Simple Parser ---
 
 /// Parses a string expression into an AST.
-pub fn parse(input: &str) -> Result<Expr, String> {
-    let tokens = tokenize(input);
+pub fn parse(input: &str) -> EquationResult<Expr> {
+    let tokens = tokenize(input)?;
     let mut parser = Parser { tokens, pos: 0 };
-    parser.parse_expression()
+    let expr = parser.parse_expression()?;
+    if parser.peek().is_some() {
+        return Err(EquationError::Parse("Unexpected token".to_string()));
+    }
+    Ok(expr)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -238,7 +281,7 @@ enum Token {
     RParen,
 }
 
-fn tokenize(input: &str) -> Vec<Token> {
+fn tokenize(input: &str) -> EquationResult<Vec<Token>> {
     let mut tokens = Vec::new();
     let mut chars = input.chars().peekable();
 
@@ -255,7 +298,10 @@ fn tokenize(input: &str) -> Vec<Token> {
                     break;
                 }
             }
-            tokens.push(Token::Number(num_str.parse().unwrap_or(0.0)));
+            let value = num_str
+                .parse()
+                .map_err(|_| EquationError::Parse(format!("Invalid number literal: {}", num_str)))?;
+            tokens.push(Token::Number(value));
         } else if c.is_alphabetic() {
             let mut ident = String::new();
             while let Some(&d) = chars.peek() {
@@ -276,12 +322,17 @@ fn tokenize(input: &str) -> Vec<Token> {
                 '^' => tokens.push(Token::Caret),
                 '(' => tokens.push(Token::LParen),
                 ')' => tokens.push(Token::RParen),
-                _ => {} // Ignore unknown
+                _ => {
+                    return Err(EquationError::Parse(format!(
+                        "Unexpected character: {}",
+                        c
+                    )))
+                }
             }
             chars.next();
         }
     }
-    tokens
+    Ok(tokens)
 }
 
 struct Parser {
@@ -304,11 +355,11 @@ impl Parser {
         }
     }
 
-    fn parse_expression(&mut self) -> Result<Expr, String> {
+    fn parse_expression(&mut self) -> EquationResult<Expr> {
         self.parse_term()
     }
 
-    fn parse_term(&mut self) -> Result<Expr, String> {
+    fn parse_term(&mut self) -> EquationResult<Expr> {
         let mut left = self.parse_factor()?;
 
         while let Some(token) = self.peek() {
@@ -329,12 +380,12 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_factor(&mut self) -> Result<Expr, String> {
+    fn parse_factor(&mut self) -> EquationResult<Expr> {
         let left = self.parse_factor_op()?;
         Ok(left)
     }
 
-    fn parse_factor_op(&mut self) -> Result<Expr, String> {
+    fn parse_factor_op(&mut self) -> EquationResult<Expr> {
         let mut left = self.parse_power()?;
 
         while let Some(token) = self.peek() {
@@ -355,7 +406,7 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_power(&mut self) -> Result<Expr, String> {
+    fn parse_power(&mut self) -> EquationResult<Expr> {
         let mut left = self.parse_unary()?;
 
         while let Some(token) = self.peek() {
@@ -371,7 +422,7 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_unary(&mut self) -> Result<Expr, String> {
+    fn parse_unary(&mut self) -> EquationResult<Expr> {
         if let Some(token) = self.peek() {
             if let Token::Minus = token {
                 self.consume();
@@ -382,7 +433,7 @@ impl Parser {
         self.parse_primary()
     }
 
-    fn parse_primary(&mut self) -> Result<Expr, String> {
+    fn parse_primary(&mut self) -> EquationResult<Expr> {
         match self.consume() {
             Some(Token::Number(n)) => Ok(Expr::Number(n)),
             Some(Token::Identifier(name)) => {
@@ -392,7 +443,7 @@ impl Parser {
                     if let Some(Token::RParen) = self.consume() {
                         Ok(Expr::Call(name, Box::new(arg)))
                     } else {
-                        Err("Expected ')'".to_string())
+                        Err(EquationError::Parse("Expected ')'".to_string()))
                     }
                 } else {
                     Ok(Expr::Variable(name))
@@ -403,10 +454,10 @@ impl Parser {
                 if let Some(Token::RParen) = self.consume() {
                     Ok(expr)
                 } else {
-                    Err("Expected ')'".to_string())
+                    Err(EquationError::Parse("Expected ')'".to_string()))
                 }
             }
-            _ => Err("Unexpected token".to_string()),
+            _ => Err(EquationError::Parse("Unexpected token".to_string())),
         }
     }
 }
@@ -424,6 +475,7 @@ pub struct EquationSystem {
     stack_f64: RefCell<Vec<f64>>,
     stack_dual: RefCell<Vec<Dual>>,
     pub(crate) params_dual: RefCell<Vec<Dual>>,
+    last_error: RefCell<Option<EquationError>>,
 }
 
 impl EquationSystem {
@@ -436,6 +488,7 @@ impl EquationSystem {
             stack_f64: RefCell::new(Vec::with_capacity(64)),
             stack_dual: RefCell::new(Vec::with_capacity(64)),
             params_dual: RefCell::new(Vec::new()),
+            last_error: RefCell::new(None),
         }
     }
 
@@ -456,6 +509,29 @@ impl EquationSystem {
         }
     }
 
+    pub fn take_last_error(&self) -> Option<EquationError> {
+        self.last_error.borrow_mut().take()
+    }
+
+    fn execute_or_default<T: Scalar>(
+        &self,
+        bytecode: &Bytecode,
+        vars: &[T],
+        params: &[T],
+        stack: &mut Vec<T>,
+    ) -> T {
+        match VM::execute(bytecode, vars, params, stack) {
+            Ok(value) => {
+                self.last_error.borrow_mut().take();
+                value
+            }
+            Err(err) => {
+                *self.last_error.borrow_mut() = Some(err);
+                T::zero()
+            }
+        }
+    }
+
     /// Evaluates the equations using Dual numbers, differentiating with respect to a specific parameter.
     /// The state variables `x` are treated as constants.
     pub fn evaluate_dual_wrt_param(&self, x: &[f64], param_idx: usize, out: &mut [Dual]) {
@@ -471,7 +547,7 @@ impl EquationSystem {
         let params = self.params_dual.borrow();
         let mut stack = self.stack_dual.borrow_mut();
         for (i, eq) in self.equations.iter().enumerate() {
-            out[i] = VM::execute(eq, &x_dual, &params, &mut stack);
+            out[i] = self.execute_or_default(eq, &x_dual, &params, &mut stack);
         }
     }
 }
@@ -484,7 +560,7 @@ impl DynamicalSystem<f64> for EquationSystem {
     fn apply(&self, _t: f64, x: &[f64], out: &mut [f64]) {
         let mut stack = self.stack_f64.borrow_mut();
         for (i, eq) in self.equations.iter().enumerate() {
-            out[i] = VM::execute(eq, x, &self.params, &mut stack);
+            out[i] = self.execute_or_default(eq, x, &self.params, &mut stack);
         }
     }
 }
@@ -499,7 +575,7 @@ impl DynamicalSystem<Dual> for EquationSystem {
         let params = self.params_dual.borrow();
         let mut stack = self.stack_dual.borrow_mut();
         for (i, eq) in self.equations.iter().enumerate() {
-            out[i] = VM::execute(eq, x, &params, &mut stack);
+            out[i] = self.execute_or_default(eq, x, &params, &mut stack);
         }
     }
 }
@@ -521,5 +597,52 @@ impl DynamicalSystem<Dual> for &EquationSystem {
 
     fn apply(&self, t: Dual, x: &[Dual], out: &mut [Dual]) {
         (*self).apply(t, x, out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_reports_malformed_expression() {
+        let err = parse("sin(").unwrap_err();
+        assert!(matches!(err, EquationError::Parse(_)));
+    }
+
+    #[test]
+    fn compile_reports_unknown_symbol() {
+        let compiler = Compiler::new(&[String::from("x")], &[]);
+        let expr = Expr::Variable("y".to_string());
+        let err = compiler.compile(&expr).unwrap_err();
+        assert!(matches!(err, EquationError::UnknownSymbol(name) if name == "y"));
+    }
+
+    #[test]
+    fn compile_reports_unknown_function() {
+        let compiler = Compiler::new(&[String::from("x")], &[]);
+        let expr = Expr::Call("log".to_string(), Box::new(Expr::Variable("x".to_string())));
+        let err = compiler.compile(&expr).unwrap_err();
+        assert!(matches!(err, EquationError::UnknownFunction(name) if name == "log"));
+    }
+
+    #[test]
+    fn vm_reports_stack_underflow() {
+        let bytecode = Bytecode {
+            ops: vec![OpCode::Add],
+        };
+        let mut stack: Vec<f64> = Vec::new();
+        let err = VM::execute(&bytecode, &[], &[], &mut stack).unwrap_err();
+        assert!(matches!(err, EquationError::StackUnderflow(OpCode::Add)));
+    }
+
+    #[test]
+    fn vm_reports_invalid_var_index() {
+        let bytecode = Bytecode {
+            ops: vec![OpCode::LoadVar(1)],
+        };
+        let mut stack = Vec::new();
+        let err = VM::execute(&bytecode, &[1.0], &[], &mut stack).unwrap_err();
+        assert!(matches!(err, EquationError::VarIndexOutOfBounds(1)));
     }
 }
