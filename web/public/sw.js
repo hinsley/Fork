@@ -5,9 +5,6 @@ const SHELL_ASSETS = [
   '/index.html',
   '/manifest.webmanifest',
   '/favicon.svg',
-  '/pwa/icon-192.png',
-  '/pwa/icon-512.png',
-  '/pwa/apple-touch-icon.png',
 ]
 
 self.addEventListener('install', (event) => {
