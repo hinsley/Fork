@@ -2112,7 +2112,7 @@ export function InspectorDetailsPanel({
     const clvPlotDim =
       orbit?.covariantVectors?.dim ??
       (orbit?.data?.[0] ? orbit.data[0].length - 1 : system.config.varNames.length)
-    const clvNeeds3d = clvPlotDim < 3
+    const clvNeeds2d = clvPlotDim < 2
 
     return (
       <div className="inspector-panel" data-testid="inspector-panel-body">
@@ -2339,9 +2339,9 @@ export function InspectorDetailsPanel({
                   {!clvHasData ? (
                     <p className="empty-state">Covariant vectors not computed yet.</p>
                   ) : null}
-                  {clvNeeds3d ? (
+                  {clvNeeds2d ? (
                     <div className="field-warning">
-                      CLV plotting requires at least three state variables.
+                      CLV plotting requires at least two state variables.
                     </div>
                   ) : null}
                   <label>

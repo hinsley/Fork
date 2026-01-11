@@ -185,9 +185,13 @@ function buildCobwebBaseTraces(
 function buildClvTraces(nodeId: string, orbit: OrbitObject, clv: ClvRenderStyle): Data[] {
   const covariant = orbit.covariantVectors
   if (!covariant || covariant.vectors.length === 0) return []
-  if (covariant.dim < 3 || orbit.data.length === 0) return []
+  if (orbit.data.length === 0) return []
+  const orbitDim = orbit.data[0]?.length ? orbit.data[0].length - 1 : 0
+  const plotDim = Math.min(covariant.dim, orbitDim)
+  if (plotDim < 2) return []
   if (clv.vectorIndices.length === 0) return []
 
+  const use3d = plotDim >= 3
   const orbitTimes: number[] = []
   const orbitStates: Array<[number, number, number]> = []
   let minX = Number.POSITIVE_INFINITY
@@ -198,10 +202,10 @@ function buildClvTraces(nodeId: string, orbit: OrbitObject, clv: ClvRenderStyle)
   let maxZ = Number.NEGATIVE_INFINITY
 
   for (const row of orbit.data) {
-    if (row.length < 4) continue
+    if (row.length < (use3d ? 4 : 3)) continue
     const x = row[1]
     const y = row[2]
-    const z = row[3]
+    const z = use3d ? row[3] : 0
     orbitTimes.push(row[0])
     orbitStates.push([x, y, z])
     minX = Math.min(minX, x)
@@ -215,7 +219,7 @@ function buildClvTraces(nodeId: string, orbit: OrbitObject, clv: ClvRenderStyle)
   if (orbitTimes.length === 0) return []
   const dx = maxX - minX
   const dy = maxY - minY
-  const dz = maxZ - minZ
+  const dz = use3d ? maxZ - minZ : 0
   const diag = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
   const length = clv.lengthScale * diag
   if (!Number.isFinite(length) || length <= 0) return []
@@ -231,6 +235,8 @@ function buildClvTraces(nodeId: string, orbit: OrbitObject, clv: ClvRenderStyle)
     const lineX: Array<number | null> = []
     const lineY: Array<number | null> = []
     const lineZ: Array<number | null> = []
+    const headLineX: Array<number | null> = []
+    const headLineY: Array<number | null> = []
     const headX: number[] = []
     const headY: number[] = []
     const headZ: number[] = []
@@ -245,8 +251,11 @@ function buildClvTraces(nodeId: string, orbit: OrbitObject, clv: ClvRenderStyle)
       const vec = vectorsAtStep[vectorIndex]
       const vx = vec[0]
       const vy = vec[1]
-      const vz = vec[2]
-      const norm = Math.sqrt(vx * vx + vy * vy + vz * vz)
+      const vz = use3d ? vec[2] : 0
+      if (!Number.isFinite(vx) || !Number.isFinite(vy) || (use3d && !Number.isFinite(vz))) {
+        continue
+      }
+      const norm = Math.sqrt(vx * vx + vy * vy + (use3d ? vz * vz : 0))
       if (!Number.isFinite(norm) || norm === 0) continue
 
       const base = interpolateOrbitState(orbitTimes, orbitStates, covariant.times[idx])
@@ -259,59 +268,108 @@ function buildClvTraces(nodeId: string, orbit: OrbitObject, clv: ClvRenderStyle)
 
       lineX.push(base[0], shaftX, null)
       lineY.push(base[1], shaftY, null)
-      lineZ.push(base[2], shaftZ, null)
+      if (use3d) {
+        lineZ.push(base[2], shaftZ, null)
+      }
 
       const headBaseX = shaftX
       const headBaseY = shaftY
       const headBaseZ = shaftZ
       if (showHeads) {
-        headX.push(headBaseX)
-        headY.push(headBaseY)
-        headZ.push(headBaseZ)
-        headU.push(ux)
-        headV.push(uy)
-        headW.push(uz)
+        if (use3d) {
+          headX.push(headBaseX)
+          headY.push(headBaseY)
+          headZ.push(headBaseZ)
+          headU.push(ux)
+          headV.push(uy)
+          headW.push(uz)
+        } else {
+          const tipX = headBaseX + ux * headLength
+          const tipY = headBaseY + uy * headLength
+          const wingScale = headLength * 0.5
+          const perpX = -uy
+          const perpY = ux
+          const leftX = headBaseX + perpX * wingScale
+          const leftY = headBaseY + perpY * wingScale
+          const rightX = headBaseX - perpX * wingScale
+          const rightY = headBaseY - perpY * wingScale
+          headLineX.push(tipX, leftX, null, tipX, rightX, null)
+          headLineY.push(tipY, leftY, null, tipY, rightY, null)
+        }
       }
     }
 
     if (lineX.length > 0) {
-      traces.push({
-        type: 'scatter3d',
-        mode: 'lines',
-        x: lineX,
-        y: lineY,
-        z: lineZ,
-        uid: nodeId,
-        line: {
-          color,
-          width: clv.thickness,
-        },
-        showlegend: false,
-        hoverinfo: 'none',
-      })
+      if (use3d) {
+        traces.push({
+          type: 'scatter3d',
+          mode: 'lines',
+          x: lineX,
+          y: lineY,
+          z: lineZ,
+          uid: nodeId,
+          line: {
+            color,
+            width: clv.thickness,
+          },
+          showlegend: false,
+          hoverinfo: 'none',
+        })
+      } else {
+        traces.push({
+          type: 'scatter',
+          mode: 'lines',
+          x: lineX,
+          y: lineY,
+          uid: nodeId,
+          line: {
+            color,
+            width: clv.thickness,
+          },
+          showlegend: false,
+          hoverinfo: 'none',
+        })
+      }
     }
 
-    if (showHeads && headX.length > 0) {
-      traces.push({
-        type: 'cone',
-        x: headX,
-        y: headY,
-        z: headZ,
-        u: headU,
-        v: headV,
-        w: headW,
-        uid: nodeId,
-        anchor: 'tail',
-        // Use raw sizing to avoid per-trace scaling differences between CLVs.
-        sizemode: 'raw',
-        sizeref: headLength,
-        colorscale: [
-          [0, color],
-          [1, color],
-        ],
-        showscale: false,
-        hoverinfo: 'none',
-      } as Data)
+    if (showHeads) {
+      if (use3d && headX.length > 0) {
+        traces.push({
+          type: 'cone',
+          x: headX,
+          y: headY,
+          z: headZ,
+          u: headU,
+          v: headV,
+          w: headW,
+          uid: nodeId,
+          anchor: 'tail',
+          // Use raw sizing to avoid per-trace scaling differences between CLVs.
+          sizemode: 'raw',
+          sizeref: headLength,
+          colorscale: [
+            [0, color],
+            [1, color],
+          ],
+          showscale: false,
+          hoverinfo: 'none',
+        } as Data)
+      }
+      if (!use3d && headLineX.length > 0) {
+        traces.push({
+          type: 'scatter',
+          mode: 'lines',
+          x: headLineX,
+          y: headLineY,
+          uid: nodeId,
+          line: {
+            color,
+            width: clv.thickness,
+          },
+          showlegend: false,
+          hoverinfo: 'none',
+        })
+      }
     }
   })
 
@@ -735,7 +793,7 @@ function buildSceneTraces(
       }
     }
 
-    if (dimension >= 3 && system.config.varNames.length >= 3) {
+    if (dimension >= 2 && system.config.varNames.length >= 2) {
       const clvRender = resolveClvRender(node.render?.clv, object.covariantVectors?.dim)
       if (clvRender.enabled) {
         traces.push(...buildClvTraces(nodeId, object, clvRender))
