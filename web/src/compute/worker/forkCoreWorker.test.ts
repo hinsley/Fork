@@ -12,8 +12,10 @@ const workerScope: WorkerScope = {
 }
 
 const wasmState = {
-  throwMode: 'none' as 'none' | 'validate',
+  throwMode: 'none' as 'none' | 'validate' | 'abort',
   lastRunStepsArg: null as number | null,
+  initPromise: Promise.resolve() as Promise<void>,
+  initResolver: null as null | (() => void),
 }
 
 const baseSystem: SystemConfig = {
@@ -47,7 +49,15 @@ beforeAll(async () => {
   vi.stubGlobal('self', workerScope)
   vi.doMock('@fork-wasm', () => {
     class MockWasmSystem {
+      private state = new Float64Array([0])
+      private t = 0
+
       constructor(equations: string[]) {
+        if (wasmState.throwMode === 'abort') {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
         if (wasmState.throwMode !== 'validate') return
         if (equations.length > 1) {
           throw new Error('full system failed')
@@ -56,23 +66,36 @@ beforeAll(async () => {
           throw new Error('bad equation')
         }
       }
-      set_state() {}
+      set_state(state: Float64Array) {
+        this.state = new Float64Array(state)
+      }
       get_state() {
-        return new Float64Array([0])
+        return this.state
       }
-      set_t() {}
+      set_t(t: number) {
+        this.t = t
+      }
       get_t() {
-        return 0
+        return this.t
       }
-      step() {}
+      step(dt = 1) {
+        this.t += dt
+        this.state = new Float64Array(Array.from(this.state, (value) => value + dt))
+      }
       solve_equilibrium() {
-        return { state: [], residual_norm: 0, iterations: 0, jacobian: [], eigenpairs: [] }
+        return {
+          state: [1],
+          residual_norm: 0.1,
+          iterations: 2,
+          jacobian: [],
+          eigenpairs: [],
+        }
       }
       compute_lyapunov_exponents() {
-        return new Float64Array([0])
+        return new Float64Array([1, 2, 3])
       }
       compute_covariant_lyapunov_vectors() {
-        return { dimension: 0, checkpoints: 0, times: [], vectors: [] }
+        return { dimension: 2, checkpoints: 1, times: [0], vectors: [] }
       }
     }
 
@@ -126,7 +149,7 @@ beforeAll(async () => {
     }
 
     return {
-      default: vi.fn(() => Promise.resolve()),
+      default: vi.fn(() => wasmState.initPromise ?? Promise.resolve()),
       WasmSystem: MockWasmSystem,
       WasmEquilibriumRunner: MockWasmEquilibriumRunner,
       WasmFoldCurveRunner: MockContinuationRunner,
@@ -146,6 +169,8 @@ beforeEach(() => {
   workerScope.postMessage.mockClear()
   wasmState.throwMode = 'none'
   wasmState.lastRunStepsArg = null
+  wasmState.initPromise = Promise.resolve()
+  wasmState.initResolver = null
 })
 
 describe('forkCoreWorker', () => {
@@ -185,6 +210,225 @@ describe('forkCoreWorker', () => {
       id: 'job-1',
       ok: true,
       result: { points: [], bifurcations: [], indices: [] },
+    })
+  })
+
+  it('simulates orbits and returns time series data', async () => {
+    const handler = requireHandler()
+    const message = {
+      id: 'job-orbit',
+      kind: 'simulateOrbit',
+      payload: {
+        system: baseSystem,
+        initialState: [1, 2],
+        steps: 2,
+        dt: 0.5,
+      },
+    }
+
+    await handler({ data: message } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(workerScope.postMessage).toHaveBeenCalledTimes(1)
+    const response = workerScope.postMessage.mock.calls[0][0] as {
+      ok: boolean
+      result: { data: number[][]; t_end: number }
+    }
+    expect(response.ok).toBe(true)
+    expect(response.result.data).toHaveLength(3)
+    expect(response.result.data[0]).toEqual([0, 1, 2])
+    expect(response.result.data[2]).toEqual([1, 2, 3])
+    expect(response.result.t_end).toBe(1)
+  })
+
+  it('samples 1D map functions for map systems', async () => {
+    const handler = requireHandler()
+    const message = {
+      id: 'job-map',
+      kind: 'sampleMap1DFunction',
+      payload: {
+        system: {
+          ...baseSystem,
+          type: 'map',
+          solver: 'discrete',
+          varNames: ['x'],
+        },
+        min: 0,
+        max: 2,
+        samples: 3,
+      },
+    }
+
+    await handler({ data: message } as unknown as MessageEvent<Record<string, unknown>>)
+
+    const response = workerScope.postMessage.mock.calls[0][0] as {
+      ok: boolean
+      result: { x: number[]; y: number[] }
+    }
+    expect(response.ok).toBe(true)
+    expect(response.result).toEqual({ x: [0, 1, 2], y: [1, 2, 3] })
+  })
+
+  it('returns empty map samples for invalid requests', async () => {
+    const handler = requireHandler()
+    const message = {
+      id: 'job-map-invalid',
+      kind: 'sampleMap1DFunction',
+      payload: {
+        system: baseSystem,
+        min: Number.NaN,
+        max: 1,
+        samples: 3,
+      },
+    }
+
+    await handler({ data: message } as unknown as MessageEvent<Record<string, unknown>>)
+
+    const response = workerScope.postMessage.mock.calls[0][0] as {
+      ok: boolean
+      result: { x: number[]; y: number[] }
+    }
+    expect(response.ok).toBe(true)
+    expect(response.result).toEqual({ x: [], y: [] })
+  })
+
+  it('handles compute and solve requests', async () => {
+    const handler = requireHandler()
+
+    await handler({
+      data: {
+        id: 'job-lyap',
+        kind: 'computeLyapunovExponents',
+        payload: {
+          system: baseSystem,
+          startState: [0],
+          startTime: 0,
+          steps: 10,
+          dt: 0.1,
+          qrStride: 2,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    const lyapResponse = workerScope.postMessage.mock.calls[0][0] as {
+      ok: boolean
+      result: number[]
+    }
+    expect(lyapResponse.ok).toBe(true)
+    expect(lyapResponse.result).toEqual([1, 2, 3])
+
+    workerScope.postMessage.mockClear()
+
+    await handler({
+      data: {
+        id: 'job-clv',
+        kind: 'computeCovariantLyapunovVectors',
+        payload: {
+          system: baseSystem,
+          startState: [0],
+          startTime: 0,
+          windowSteps: 5,
+          dt: 0.1,
+          qrStride: 2,
+          forwardTransient: 1,
+          backwardTransient: 1,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    const covariantResponse = workerScope.postMessage.mock.calls[0][0] as {
+      ok: boolean
+      result: { dimension: number; checkpoints: number; times: number[]; vectors: number[] }
+    }
+    expect(covariantResponse.ok).toBe(true)
+    expect(covariantResponse.result.dimension).toBe(2)
+
+    workerScope.postMessage.mockClear()
+
+    await handler({
+      data: {
+        id: 'job-eq',
+        kind: 'solveEquilibrium',
+        payload: {
+          system: baseSystem,
+          initialGuess: [0],
+          maxSteps: 10,
+          dampingFactor: 0.5,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    const equilibriumResponse = workerScope.postMessage.mock.calls[0][0] as {
+      ok: boolean
+      result: { state: number[]; residual_norm: number; iterations: number }
+    }
+    expect(equilibriumResponse.ok).toBe(true)
+    expect(equilibriumResponse.result.state).toEqual([1])
+  })
+
+  it('posts progress and results for continuation runners', async () => {
+    const handler = requireHandler()
+
+    await handler({
+      data: {
+        id: 'job-extension',
+        kind: 'runContinuationExtension',
+        payload: {
+          system: baseSystem,
+          branchData: { points: [], bifurcations: [], indices: [] },
+          parameterName: 'p1',
+          settings: continuationSettings,
+          forward: true,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(workerScope.postMessage).toHaveBeenCalledTimes(2)
+    expect(workerScope.postMessage.mock.calls[0][0]).toMatchObject({
+      id: 'job-extension',
+      kind: 'progress',
+    })
+    expect(workerScope.postMessage.mock.calls[1][0]).toMatchObject({
+      id: 'job-extension',
+      ok: true,
+      result: { points: [] },
+    })
+  })
+
+  it('marks requests as aborted when canceled', async () => {
+    const handler = requireHandler()
+    wasmState.initPromise = new Promise((resolve) => {
+      wasmState.initResolver = resolve
+    })
+
+    const message = {
+      id: 'job-cancel',
+      kind: 'simulateOrbit',
+      payload: {
+        system: baseSystem,
+        initialState: [0],
+        steps: 3,
+        dt: 0.1,
+      },
+    }
+
+    const runPromise = handler({
+      data: message,
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    await Promise.resolve()
+
+    await handler({
+      data: { id: 'job-cancel', kind: 'cancel' },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    wasmState.initResolver?.()
+    await runPromise
+
+    expect(workerScope.postMessage).toHaveBeenCalledTimes(1)
+    expect(workerScope.postMessage.mock.calls[0][0]).toMatchObject({
+      id: 'job-cancel',
+      ok: false,
+      aborted: true,
     })
   })
 
