@@ -392,14 +392,14 @@ function collectMap1DRange(system: System): [number, number] | null {
     }
     if (object.type === 'equilibrium') {
       const value = object.solution?.state?.[0]
-      if (!Number.isFinite(value)) continue
+      if (typeof value !== 'number' || !Number.isFinite(value)) continue
       min = Math.min(min, value)
       max = Math.max(max, value)
       continue
     }
     if (object.type === 'limit_cycle') {
       const value = object.state?.[0]
-      if (!Number.isFinite(value)) continue
+      if (typeof value !== 'number' || !Number.isFinite(value)) continue
       min = Math.min(min, value)
       max = Math.max(max, value)
     }
