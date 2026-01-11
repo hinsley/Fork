@@ -2269,7 +2269,7 @@ export function InspectorDetailsPanel({
                       <InspectorMetrics
                         rows={[
                           ...orbit.lyapunovExponents.map((value, index) => ({
-                            label: `lambda ${index + 1}`,
+                            label: `λ${index + 1}`,
                             value: formatFixed(value, 6),
                           })),
                           ...(lyapunovDimension !== null
