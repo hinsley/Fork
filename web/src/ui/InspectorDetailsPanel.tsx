@@ -16,12 +16,7 @@ import type {
   TreeNode,
 } from '../system/types'
 import { DEFAULT_RENDER } from '../system/model'
-import {
-  defaultClvIndices,
-  parseClvIndicesText,
-  resolveClvColors,
-  resolveClvRender,
-} from '../system/clv'
+import { defaultClvIndices, resolveClvColors, resolveClvRender } from '../system/clv'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
 import type {
   BranchContinuationRequest,
@@ -793,8 +788,13 @@ export function InspectorDetailsPanel({
     ? { ...DEFAULT_RENDER, ...(selectionNode.render ?? {}) }
     : DEFAULT_RENDER
   const clvDim = orbit?.covariantVectors?.dim
+  const clvPlotDim =
+    clvDim ??
+    (orbit?.data?.[0] ? orbit.data[0].length - 1 : system.config.varNames.length)
   const clvRender = resolveClvRender(selectionNode?.render?.clv, clvDim)
-  const clvIndexText = clvRender.vectorIndices.join(', ')
+  const clvIndices = defaultClvIndices(clvPlotDim)
+  const clvColors = resolveClvColors(clvIndices, clvRender.vectorIndices, clvRender.colors)
+  const clvVisibleSet = new Set(clvRender.vectorIndices)
   const nodeVisibility = selectionNode?.visibility ?? true
   const showVisibilityToggle =
     selectionNode?.kind === 'object' || selectionNode?.kind === 'branch'
@@ -869,7 +869,6 @@ export function InspectorDetailsPanel({
     makeCovariantLyapunovDraft()
   )
   const [covariantError, setCovariantError] = useState<string | null>(null)
-  const [clvIndexDraft, setClvIndexDraft] = useState(() => clvIndexText)
 
   const [equilibriumDraft, setEquilibriumDraft] = useState<EquilibriumSolveDraft>(() =>
     makeEquilibriumSolveDraft(system.config)
@@ -1026,10 +1025,6 @@ export function InspectorDetailsPanel({
       setContinuationError(null)
     }
   }, [object?.type, selectedNodeId, systemConfigKey])
-
-  useEffect(() => {
-    setClvIndexDraft(clvIndexText)
-  }, [selectionKey, clvIndexText])
 
   useEffect(() => {
     if (!sceneId) return
@@ -2090,15 +2085,25 @@ export function InspectorDetailsPanel({
     [clvDim, clvRender, onUpdateRender, selectionNode]
   )
 
-  const handleClvIndicesChange = (value: string) => {
-    setClvIndexDraft(value)
+  const handleClvVisibilityChange = (index: number, visible: boolean) => {
+    const nextSet = new Set(clvRender.vectorIndices)
+    if (visible) {
+      nextSet.add(index)
+    } else {
+      nextSet.delete(index)
+    }
+    const nextIndices = clvIndices.filter((value) => nextSet.has(value))
+    const colors = resolveClvColors(nextIndices, clvRender.vectorIndices, clvRender.colors)
+    updateClvRender({ vectorIndices: nextIndices, colors })
   }
 
-  const commitClvIndices = () => {
-    const indices = parseClvIndicesText(clvIndexDraft, clvDim)
-    const colors = resolveClvColors(indices, clvRender.vectorIndices, clvRender.colors)
-    updateClvRender({ vectorIndices: indices, colors })
-    setClvIndexDraft(indices.join(', '))
+  const handleClvColorChange = (index: number, color: string) => {
+    const colorIndex = clvRender.vectorIndices.indexOf(index)
+    if (colorIndex === -1) return
+    const colors = clvRender.colors.map((value, idx) =>
+      idx === colorIndex ? color : value
+    )
+    updateClvRender({ colors })
   }
 
   const renderSelectionView = () => {
@@ -2109,9 +2114,6 @@ export function InspectorDetailsPanel({
     const clvHasData = Boolean(
       orbit?.covariantVectors && orbit.covariantVectors.vectors.length > 0
     )
-    const clvPlotDim =
-      orbit?.covariantVectors?.dim ??
-      (orbit?.data?.[0] ? orbit.data[0].length - 1 : system.config.varNames.length)
     const clvNeeds2d = clvPlotDim < 2
 
     return (
@@ -2404,46 +2406,41 @@ export function InspectorDetailsPanel({
                       data-testid="clv-plot-thickness"
                     />
                   </label>
-                  <label>
-                    Vector indices (comma-separated, zero-based)
-                    <input
-                      type="text"
-                      value={clvIndexDraft}
-                      placeholder={defaultClvIndices(clvDim).join(', ')}
-                      onChange={(event) => handleClvIndicesChange(event.target.value)}
-                      onBlur={commitClvIndices}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          commitClvIndices()
-                        }
-                      }}
-                      data-testid="clv-plot-indices"
-                    />
-                  </label>
                 </div>
                 <div className="inspector-section">
                   <h4 className="inspector-subheading">Vector colors</h4>
-                  {clvRender.vectorIndices.length > 0 ? (
+                  {clvIndices.length > 0 ? (
                     <div className="inspector-list">
-                      {clvRender.vectorIndices.map((index, idx) => (
-                        <label key={`clv-color-${index}`}>
-                          CLV {index + 1}
-                          <input
-                            type="color"
-                            value={clvRender.colors[idx]}
-                            onChange={(event) => {
-                              const colors = clvRender.colors.map((color, colorIndex) =>
-                                colorIndex === idx ? event.target.value : color
-                              )
-                              updateClvRender({ colors })
-                            }}
-                            data-testid={`clv-plot-color-${index}`}
-                          />
-                        </label>
-                      ))}
+                      {clvIndices.map((index, idx) => {
+                        const visible = clvVisibleSet.has(index)
+                        return (
+                          <div className="clv-control-row" key={`clv-color-${index}`}>
+                            <span className="clv-control-row__label">CLV {index + 1}</span>
+                            <input
+                              type="checkbox"
+                              checked={visible}
+                              onChange={(event) =>
+                                handleClvVisibilityChange(index, event.target.checked)
+                              }
+                              aria-label={`Show CLV ${index + 1}`}
+                              data-testid={`clv-plot-show-${index}`}
+                            />
+                            <input
+                              type="color"
+                              value={clvColors[idx]}
+                              onChange={(event) =>
+                                handleClvColorChange(index, event.target.value)
+                              }
+                              disabled={!visible}
+                              aria-label={`CLV ${index + 1} color`}
+                              data-testid={`clv-plot-color-${index}`}
+                            />
+                          </div>
+                        )
+                      })}
                     </div>
                   ) : (
-                    <p className="empty-state">Select vector indices to plot.</p>
+                    <p className="empty-state">Covariant vectors not computed yet.</p>
                   )}
                 </div>
               </InspectorDisclosure>

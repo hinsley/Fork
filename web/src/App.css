@@ -530,6 +530,19 @@
   gap: 6px;
 }
 
+.clv-control-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--text);
+}
+
+.clv-control-row__label {
+  color: var(--text-muted);
+}
+
 .inspector-metrics {
   display: grid;
   gap: 4px;
