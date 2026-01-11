@@ -259,6 +259,12 @@ function formatComplexValue(value: ComplexValue): string {
   return `${real} ${sign} ${imag}i`
 }
 
+function formatPolarValue(value: ComplexValue, digits = 6): string {
+  const radius = Math.hypot(value.re, value.im)
+  const theta = Math.atan2(value.im, value.re)
+  return `r=${formatNumber(radius, digits)}, theta=${formatNumber(theta, digits)} rad`
+}
+
 function formatNumberSafe(value: number | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 'NaN'
   return formatNumber(value)
@@ -279,7 +285,10 @@ function summarizeEigenvalues(point: ContinuationPoint, branchType?: string): st
   return `${label}: ${formatted.join(', ')}${suffix}`
 }
 
-function buildEigenvaluePlot(eigenvalues?: ComplexValue[] | null) {
+function buildEigenvaluePlot(
+  eigenvalues?: ComplexValue[] | null,
+  options?: { showRadiusLines?: boolean }
+) {
   if (!eigenvalues || eigenvalues.length === 0) return null
   const x = eigenvalues.map((value) => value.re)
   const y = eigenvalues.map((value) => value.im)
@@ -300,7 +309,22 @@ function buildEigenvaluePlot(eigenvalues?: ComplexValue[] | null) {
   const centerY = (minY + maxY) / 2
   const rangeX: [number, number] = [centerX - halfSpan, centerX + halfSpan]
   const rangeY: [number, number] = [centerY - halfSpan, centerY + halfSpan]
+  const radiusLines: Data[] =
+    options?.showRadiusLines
+      ? eigenvalues
+          .filter((value) => Number.isFinite(value.re) && Number.isFinite(value.im))
+          .map((value) => ({
+            x: [0, value.re],
+            y: [0, value.im],
+            mode: 'lines',
+            type: 'scatter',
+            line: { color: 'rgba(120,120,120,0.35)', width: 1 },
+            hoverinfo: 'skip',
+            showlegend: false,
+          }))
+      : []
   const data: Data[] = [
+    ...radiusLines,
     {
       x,
       y,
@@ -1100,11 +1124,14 @@ export function InspectorDetailsPanel({
   const showSystemErrors = systemTouched || systemDirty
   const hasWasmErrors = wasmEquationErrors.some((entry) => entry)
   const runDisabled = systemDirty || !systemValidation.valid || hasWasmErrors
+  const isDiscreteMap = systemDraft.type === 'map'
   const equilibriumEigenPlot = useMemo(() => {
     const eigenpairs = equilibrium?.solution?.eigenpairs
     if (!eigenpairs || eigenpairs.length === 0) return null
-    return buildEigenvaluePlot(eigenpairs.map((pair) => pair.value))
-  }, [equilibrium?.solution?.eigenpairs])
+    return buildEigenvaluePlot(eigenpairs.map((pair) => pair.value), {
+      showRadiusLines: isDiscreteMap,
+    })
+  }, [equilibrium?.solution?.eigenpairs, isDiscreteMap])
 
   useEffect(() => {
     if (!systemDirty && !systemTouched) {
@@ -1273,7 +1300,9 @@ export function InspectorDetailsPanel({
     ? normalizeEigenvalueArray(selectedBranchPoint.eigenvalues)
     : []
   const branchEigenPlot =
-    branch?.branchType === 'equilibrium' ? buildEigenvaluePlot(branchEigenvalues) : null
+    branch?.branchType === 'equilibrium'
+      ? buildEigenvaluePlot(branchEigenvalues, { showRadiusLines: isDiscreteMap })
+      : null
 
   const handleApplySystem = async () => {
     setSystemTouched(true)
@@ -2816,6 +2845,9 @@ export function InspectorDetailsPanel({
                               <span className="inspector-eigenpair__value-label">Value</span>
                               <span className="inspector-eigenpair__value-number">
                                 {formatComplexValue(pair.value)}
+                                {isDiscreteMap
+                                  ? ` (${formatPolarValue(pair.value, 4)})`
+                                  : null}
                               </span>
                             </span>
                           </div>
@@ -3746,7 +3778,9 @@ export function InspectorDetailsPanel({
                             <InspectorMetrics
                               rows={branchEigenvalues.map((ev, index) => ({
                                 label: `λ${index + 1}`,
-                                value: `${formatNumberSafe(ev.re)} + ${formatNumberSafe(ev.im)}i`,
+                                value: isDiscreteMap
+                                  ? `${formatNumberSafe(ev.re)} + ${formatNumberSafe(ev.im)}i (${formatPolarValue(ev)})`
+                                  : `${formatNumberSafe(ev.re)} + ${formatNumberSafe(ev.im)}i`,
                               }))}
                             />
                           </div>
