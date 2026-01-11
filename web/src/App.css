@@ -1004,8 +1004,10 @@
 
 @media (max-width: 900px) {
   .workspace {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 
   .splitter {
@@ -1016,5 +1018,13 @@
   .workspace__center,
   .workspace__right {
     width: 100%;
+    flex: 0 0 auto;
+    min-height: auto;
+  }
+
+  .workspace__left .panel,
+  .workspace__center .panel,
+  .workspace__right .panel {
+    flex: 0 0 auto;
   }
 }
