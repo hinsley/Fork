@@ -126,18 +126,6 @@ function interpolateOrbitState(
   ]
 }
 
-function collectMapPairs(rows: number[][]): Array<[number, number]> {
-  const pairs: Array<[number, number]> = []
-  if (rows.length < 2) return pairs
-  for (let i = 0; i < rows.length - 1; i += 1) {
-    const x = rows[i]?.[1]
-    const y = rows[i + 1]?.[1]
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue
-    pairs.push([x, y])
-  }
-  return pairs
-}
-
 function buildCobwebPath(rows: number[][]): { x: number[]; y: number[] } {
   const x: number[] = []
   const y: number[] = []
@@ -650,15 +638,20 @@ function buildSceneTraces(
           },
         })
       } else if (isMap1D) {
-        const pairs = collectMapPairs(rows)
-        if (pairs.length > 0) {
+        const diagonal: number[] = []
+        for (const row of rows) {
+          const value = row[1]
+          if (typeof value !== 'number' || !Number.isFinite(value)) continue
+          diagonal.push(value)
+        }
+        if (diagonal.length > 0) {
           traces.push({
             type: 'scatter',
             mode: 'markers',
             name: object.name,
             uid: nodeId,
-            x: pairs.map((pair) => pair[0]),
-            y: pairs.map((pair) => pair[1]),
+            x: diagonal,
+            y: diagonal,
             marker: {
               color: node.render.color,
               size,
