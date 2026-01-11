@@ -14,4 +14,9 @@ describe('naming utils', () => {
     expect(toCliSafeName('a/b\\c')).toBe('a_b_c')
     expect(toCliSafeName('Already_OK')).toBe('Already_OK')
   })
+
+  it('handles whitespace-only input', () => {
+    expect(toCliSafeName('   ')).toBe('')
+    expect(isCliSafeName(toCliSafeName('   '))).toBe(false)
+  })
 })
