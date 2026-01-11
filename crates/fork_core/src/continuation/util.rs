@@ -163,3 +163,131 @@ pub fn neutral_saddle_test_function(eigenvalues: &[Complex<f64>]) -> f64 {
         1.0
     }
 }
+
+#[cfg(test)]
+mod tests_additional {
+    use super::{
+        compute_eigenvalues, compute_nullspace_tangent, continuation_point_to_aug,
+        hopf_test_function, neutral_saddle_test_function,
+    };
+    use crate::continuation::types::{BifurcationType, ContinuationPoint};
+    use nalgebra::DMatrix;
+    use num_complex::Complex;
+
+    #[test]
+    fn compute_nullspace_tangent_finds_null_vector() {
+        let mat = DMatrix::from_row_slice(2, 3, &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+        let tangent = compute_nullspace_tangent(&mat).expect("tangent should compute");
+        let residual = &mat * &tangent;
+        assert!(tangent.norm() > 0.0);
+        assert!(residual.iter().all(|v| v.abs() < 1e-9));
+    }
+
+    #[test]
+    fn continuation_point_to_aug_places_param_first() {
+        let point = ContinuationPoint {
+            state: vec![1.0, 2.0],
+            param_value: 3.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+        };
+        let aug = continuation_point_to_aug(&point);
+        assert_eq!(aug.as_slice(), &[3.0, 1.0, 2.0]);
+    }
+
+    #[test]
+    fn compute_eigenvalues_handles_diagonal_matrix() {
+        let mat = DMatrix::from_row_slice(2, 2, &[1.0, 0.0, 0.0, 2.0]);
+        let mut eigenvalues = compute_eigenvalues(&mat).expect("eigenvalues should compute");
+        eigenvalues.sort_by(|a, b| a.re.partial_cmp(&b.re).unwrap());
+        assert!((eigenvalues[0].re - 1.0).abs() < 1e-12);
+        assert!((eigenvalues[1].re - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn hopf_test_function_zero_for_canceling_pair() {
+        let eigenvalues = vec![Complex::new(1.0, 0.0), Complex::new(-1.0, 0.0)];
+        let value = hopf_test_function(&eigenvalues);
+        assert!(value.norm() < 1e-12);
+    }
+
+    #[test]
+    fn neutral_saddle_test_function_defaults_when_no_real_pairs() {
+        let eigenvalues = vec![Complex::new(0.0, 1.0), Complex::new(0.0, -1.0)];
+        let value = neutral_saddle_test_function(&eigenvalues);
+        assert!((value - 1.0).abs() < 1e-12);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::continuation::types::{BifurcationType, ContinuationPoint};
+    use nalgebra::{DMatrix, DVector};
+    use num_complex::Complex;
+
+    #[test]
+    fn continuation_point_to_aug_puts_param_first() {
+        let point = ContinuationPoint {
+            state: vec![1.0, 2.0],
+            param_value: 3.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+        };
+
+        let aug = continuation_point_to_aug(&point);
+
+        assert_eq!(aug.len(), 3);
+        assert_eq!(aug[0], 3.0);
+        assert_eq!(aug[1], 1.0);
+        assert_eq!(aug[2], 2.0);
+    }
+
+    #[test]
+    fn compute_eigenvalues_handles_empty_and_real() {
+        let empty = DMatrix::<f64>::zeros(0, 0);
+        let values = compute_eigenvalues(&empty).expect("empty eigenvalues should be ok");
+        assert!(values.is_empty());
+
+        let mat = DMatrix::from_diagonal(&DVector::from_vec(vec![1.0, 2.0]));
+        let mut values = compute_eigenvalues(&mat).expect("eigenvalues should compute");
+        values.sort_by(|a, b| a.re.partial_cmp(&b.re).unwrap());
+        assert!((values[0].re - 1.0).abs() < 1e-12);
+        assert!((values[1].re - 2.0).abs() < 1e-12);
+        assert!(values.iter().all(|v| v.im.abs() < 1e-12));
+    }
+
+    #[test]
+    fn compute_nullspace_tangent_returns_null_vector() {
+        let j_ext = DMatrix::from_row_slice(1, 2, &[1.0, 2.0]);
+        let tangent = compute_nullspace_tangent(&j_ext).expect("tangent should compute");
+        let residual = 1.0 * tangent[0] + 2.0 * tangent[1];
+        assert!(residual.abs() < 1e-8);
+    }
+
+    #[test]
+    fn compute_tangent_linear_solve_returns_null_vector() {
+        let j_ext = DMatrix::from_row_slice(1, 2, &[1.0, 2.0]);
+        let tangent = compute_tangent_linear_solve(&j_ext).expect("tangent should compute");
+        let residual = 1.0 * tangent[0] + 2.0 * tangent[1];
+        assert!(residual.abs() < 1e-8);
+    }
+
+    #[test]
+    fn hopf_test_function_zero_crossing() {
+        let eigenvalues = vec![Complex::new(1.0, 0.0), Complex::new(-1.0, 0.0)];
+        let value = hopf_test_function(&eigenvalues);
+        assert!(value.norm() < 1e-12);
+    }
+
+    #[test]
+    fn neutral_saddle_test_function_handles_real_and_complex_pairs() {
+        let real_pair = vec![Complex::new(1.0, 0.0), Complex::new(-1.0, 0.0)];
+        let real_value = neutral_saddle_test_function(&real_pair);
+        assert!(real_value.abs() < 1e-12);
+
+        let complex_pair = vec![Complex::new(0.0, 1.0), Complex::new(0.0, -1.0)];
+        let complex_value = neutral_saddle_test_function(&complex_pair);
+        assert!((complex_value - 1.0).abs() < 1e-12);
+    }
+}

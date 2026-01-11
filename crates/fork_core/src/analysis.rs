@@ -418,3 +418,144 @@ fn unit_upper_triangular(dim: usize) -> Vec<f64> {
     }
     matrix
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        apply_qr, covariant_lyapunov_vectors, kaplan_yorke, lyapunov_exponents, LyapunovStepper,
+    };
+    use crate::autodiff::Dual;
+    use crate::traits::DynamicalSystem;
+    use nalgebra::linalg::QR;
+    use nalgebra::DMatrix;
+
+    #[derive(Clone, Copy)]
+    struct LinearSystem {
+        rate: f64,
+    }
+
+    impl DynamicalSystem<f64> for LinearSystem {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn apply(&self, _t: f64, x: &[f64], out: &mut [f64]) {
+            out[0] = self.rate * x[0];
+        }
+    }
+
+    impl DynamicalSystem<Dual> for LinearSystem {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn apply(&self, _t: Dual, x: &[Dual], out: &mut [Dual]) {
+            out[0] = Dual::new(self.rate, 0.0) * x[0];
+        }
+    }
+
+    fn assert_err_contains<T: std::fmt::Debug>(result: anyhow::Result<T>, needle: &str) {
+        let err = result.expect_err("expected error");
+        let message = format!("{err}");
+        assert!(
+            message.contains(needle),
+            "expected error to contain \"{needle}\", got \"{message}\""
+        );
+    }
+
+    #[test]
+    fn lyapunov_exponents_rejects_invalid_inputs() {
+        let system = LinearSystem { rate: 1.0 };
+        assert_err_contains(
+            lyapunov_exponents(system, LyapunovStepper::Rk4, &[], 0.0, 10, 0.1, 1),
+            "Initial state",
+        );
+        let system = LinearSystem { rate: 1.0 };
+        assert_err_contains(
+            lyapunov_exponents(system, LyapunovStepper::Rk4, &[1.0], 0.0, 0, 0.1, 1),
+            "at least one integration step",
+        );
+        let system = LinearSystem { rate: 1.0 };
+        assert_err_contains(
+            lyapunov_exponents(system, LyapunovStepper::Rk4, &[1.0], 0.0, 10, 0.0, 1),
+            "dt must be positive",
+        );
+        let system = LinearSystem { rate: 1.0 };
+        assert_err_contains(
+            lyapunov_exponents(system, LyapunovStepper::Rk4, &[1.0], 0.0, 10, 0.1, 0),
+            "qr_stride",
+        );
+    }
+
+    #[test]
+    fn lyapunov_exponents_discrete_map_matches_log_growth() {
+        let system = LinearSystem { rate: 2.0 };
+        let exponents =
+            lyapunov_exponents(system, LyapunovStepper::Discrete, &[1.0], 0.0, 8, 1.0, 1)
+                .expect("lyapunov exponents should compute");
+        let expected = 2.0_f64.ln();
+        assert!((exponents[0] - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn lyapunov_exponents_tracks_linear_rate() {
+        let system = LinearSystem { rate: -1.0 };
+        let exponents =
+            lyapunov_exponents(system, LyapunovStepper::Rk4, &[1.0], 0.0, 100, 0.05, 1)
+                .expect("lyapunov exponents should compute");
+        assert!((exponents[0] + 1.0).abs() < 1e-2);
+    }
+
+    #[test]
+    fn apply_qr_writes_q_row_major_and_accumulates_logs() {
+        let dim = 2;
+        let mut phi = vec![1.0, 2.0, 3.0, 4.0];
+        let original = phi.clone();
+        let mut accum = vec![0.0; dim];
+
+        apply_qr(&mut phi, dim, &mut accum).expect("QR should succeed");
+
+        let matrix = DMatrix::from_row_slice(dim, dim, &original);
+        let qr = QR::new(matrix);
+        let (q, r) = qr.unpack();
+
+        for i in 0..dim {
+            for j in 0..dim {
+                assert!((phi[i * dim + j] - q[(i, j)]).abs() < 1e-12);
+            }
+            let expected = r[(i, i)].abs().ln();
+            assert!((accum[i] - expected).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn covariant_lyapunov_vectors_returns_normalized_vectors() {
+        let system = LinearSystem { rate: -0.4 };
+        let result = covariant_lyapunov_vectors(
+            system,
+            LyapunovStepper::Rk4,
+            &[1.0],
+            0.0,
+            0.1,
+            1,
+            2,
+            0,
+            1,
+        )
+        .expect("covariant lyapunov vectors should compute");
+        assert_eq!(result.dimension, 1);
+        assert_eq!(result.checkpoints, 2);
+        assert_eq!(result.times.len(), 2);
+        assert_eq!(result.vectors.len(), 2);
+        for value in result.vectors {
+            assert!((value.abs() - 1.0).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn kaplan_yorke_handles_empty_and_partial_sum() {
+        assert_eq!(kaplan_yorke(&[]), 0.0);
+        let result = kaplan_yorke(&[0.1, 0.0, -1.0]);
+        assert!((result - 2.1).abs() < 1e-12);
+    }
+}

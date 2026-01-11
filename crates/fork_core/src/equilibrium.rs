@@ -233,8 +233,30 @@ fn normalize_complex_vector(vec: &mut [Complex<f64>]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{solve_equilibrium, NewtonSettings, SystemKind};
+    use super::{compute_jacobian, solve_equilibrium, NewtonSettings, SystemKind};
     use crate::equation_engine::{parse, Compiler, EquationSystem};
+
+    fn assert_err_contains<T: std::fmt::Debug>(result: anyhow::Result<T>, needle: &str) {
+        let err = result.expect_err("expected error");
+        let message = format!("{err}");
+        assert!(
+            message.contains(needle),
+            "expected error to contain \"{needle}\", got \"{message}\""
+        );
+    }
+
+    fn build_mu_system(mu: f64) -> EquationSystem {
+        let equation = "mu * x";
+        let param_names = vec!["mu".to_string()];
+        let var_names = vec!["x".to_string()];
+        let compiler = Compiler::new(&var_names, &param_names);
+        let expr = parse(equation).expect("simple equation should parse");
+        let bytecode = compiler.compile(&expr);
+
+        let mut system = EquationSystem::new(vec![bytecode], vec![mu]);
+        system.set_maps(compiler.param_map, compiler.var_map);
+        system
+    }
 
     #[test]
     fn tent_map_default_system_eigenvalue_matches_map_jacobian() {
@@ -264,5 +286,79 @@ mod tests {
             "expected eigenvalue near -2, got {}",
             eig
         );
+    }
+
+    #[test]
+    fn compute_jacobian_adjusts_map_identity() {
+        let system = build_mu_system(2.0);
+
+        let flow_jac = compute_jacobian(&system, SystemKind::Flow, &[1.0])
+            .expect("flow jacobian should compute");
+        let map_jac = compute_jacobian(&system, SystemKind::Map, &[1.0])
+            .expect("map jacobian should compute");
+
+        assert!((flow_jac[0] - 2.0).abs() < 1e-12);
+        assert!((map_jac[0] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn solve_equilibrium_rejects_invalid_settings() {
+        let system = build_mu_system(2.0);
+        assert_err_contains(
+            solve_equilibrium(&system, SystemKind::Flow, &[1.0, 2.0], NewtonSettings::default()),
+            "dimension mismatch",
+        );
+        assert_err_contains(
+            solve_equilibrium(
+                &system,
+                SystemKind::Flow,
+                &[1.0],
+                NewtonSettings {
+                    max_steps: 0,
+                    ..NewtonSettings::default()
+                },
+            ),
+            "max_steps",
+        );
+        assert_err_contains(
+            solve_equilibrium(
+                &system,
+                SystemKind::Flow,
+                &[1.0],
+                NewtonSettings {
+                    damping: 0.0,
+                    ..NewtonSettings::default()
+                },
+            ),
+            "damping",
+        );
+        assert_err_contains(
+            solve_equilibrium(
+                &system,
+                SystemKind::Flow,
+                &[1.0],
+                NewtonSettings {
+                    tolerance: 0.0,
+                    ..NewtonSettings::default()
+                },
+            ),
+            "tolerance",
+        );
+    }
+
+    #[test]
+    fn solve_equilibrium_converges_for_linear_flow() {
+        let system = build_mu_system(1.0);
+        let result = solve_equilibrium(
+            &system,
+            SystemKind::Flow,
+            &[0.2],
+            NewtonSettings::default(),
+        )
+        .expect("linear flow equilibrium should converge");
+        assert_eq!(result.state.len(), 1);
+        assert!(result.state[0].abs() < 1e-9);
+        assert!(result.residual_norm <= 1e-9);
+        assert_eq!(result.iterations, 1);
     }
 }

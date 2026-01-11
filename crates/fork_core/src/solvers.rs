@@ -219,3 +219,81 @@ impl<T: Scalar> Steppable<T> for DiscreteMap<T> {
         *t = *t + dt;
     }
 }
+
+#[cfg(test)]
+mod tests_accuracy {
+    use super::{DiscreteMap, RK4, Tsit5};
+    use crate::traits::{DynamicalSystem, Steppable};
+
+    #[derive(Clone, Copy)]
+    struct LinearFlow {
+        rate: f64,
+    }
+
+    impl DynamicalSystem<f64> for LinearFlow {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn apply(&self, _t: f64, x: &[f64], out: &mut [f64]) {
+            out[0] = self.rate * x[0];
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct AffineMap {
+        scale: f64,
+        offset: f64,
+    }
+
+    impl DynamicalSystem<f64> for AffineMap {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn apply(&self, _t: f64, x: &[f64], out: &mut [f64]) {
+            out[0] = self.scale * x[0] + self.offset;
+        }
+    }
+
+    #[test]
+    fn rk4_step_matches_exponential() {
+        let system = LinearFlow { rate: 1.0 };
+        let mut solver = RK4::new(1);
+        let mut t = 0.0;
+        let mut state = vec![1.0];
+        let dt = 0.1;
+        solver.step(&system, &mut t, &mut state, dt);
+        let expected = (system.rate * dt).exp();
+        assert!((state[0] - expected).abs() < 1e-6);
+        assert!((t - dt).abs() < 1e-12);
+    }
+
+    #[test]
+    fn tsit5_step_matches_exponential() {
+        let system = LinearFlow { rate: 1.0 };
+        let mut solver = Tsit5::new(1);
+        let mut t = 0.0;
+        let mut state = vec![1.0];
+        let dt = 0.1;
+        solver.step(&system, &mut t, &mut state, dt);
+        let expected = (system.rate * dt).exp();
+        assert!((state[0] - expected).abs() < 1e-6);
+        assert!((t - dt).abs() < 1e-12);
+    }
+
+    #[test]
+    fn discrete_map_updates_state_and_time() {
+        let system = AffineMap {
+            scale: 2.0,
+            offset: 1.0,
+        };
+        let mut solver = DiscreteMap::new(1);
+        let mut t: f64 = 2.0;
+        let mut state = vec![3.0_f64];
+        let dt: f64 = 0.25;
+        solver.step(&system, &mut t, &mut state, dt);
+        assert!((state[0] - 7.0).abs() < 1e-12);
+        assert!((t - 2.25).abs() < 1e-12);
+    }
+}
