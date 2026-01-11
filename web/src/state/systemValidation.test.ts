@@ -35,6 +35,13 @@ describe('validateSystemConfig', () => {
     )
   })
 
+  it('requires a non-empty system name', () => {
+    const result = validateSystemConfig(buildConfig({ name: '   ' }))
+
+    expect(result.valid).toBe(false)
+    expect(result.errors.name).toBe('System name is required.')
+  })
+
   it('flags invalid variable names', () => {
     const result = validateSystemConfig(buildConfig({ varNames: ['1bad', 'good'] }))
 
@@ -42,8 +49,36 @@ describe('validateSystemConfig', () => {
     expect(result.errors.varNames).toBe('Invalid variable names: 1bad.')
   })
 
+  it('requires at least one variable', () => {
+    const result = validateSystemConfig(
+      buildConfig({ varNames: [], equations: [] })
+    )
+
+    expect(result.valid).toBe(false)
+    expect(result.errors.varNames).toBe('At least one variable is required.')
+    expect(result.errors.equations).toBeUndefined()
+  })
+
+  it('flags empty variable names when others are present', () => {
+    const result = validateSystemConfig(
+      buildConfig({ varNames: ['x', ' '], equations: ['x', 'y'] })
+    )
+
+    expect(result.valid).toBe(false)
+    expect(result.errors.varNames).toBe('Variable names cannot be empty.')
+  })
+
   it('flags duplicate variable names', () => {
     const result = validateSystemConfig(buildConfig({ varNames: ['x', 'x'] }))
+
+    expect(result.valid).toBe(false)
+    expect(result.errors.varNames).toBe('Duplicate variable names: x.')
+  })
+
+  it('treats trimmed variable names as duplicates', () => {
+    const result = validateSystemConfig(
+      buildConfig({ varNames: [' x ', 'x'], equations: ['x', 'x'] })
+    )
 
     expect(result.valid).toBe(false)
     expect(result.errors.varNames).toBe('Duplicate variable names: x.')
@@ -62,10 +97,37 @@ describe('validateSystemConfig', () => {
     const mismatch = validateSystemConfig(buildConfig({ params: [], paramNames: ['a'] }))
     expect(mismatch.errors.params).toEqual(['Parameter count mismatch.'])
 
+    const emptyNames = validateSystemConfig(
+      buildConfig({ paramNames: ['a', ' '], params: [1, 2] })
+    )
+    expect(emptyNames.errors.paramNames).toBe('Parameter names cannot be empty.')
+
+    const invalidNames = validateSystemConfig(
+      buildConfig({ paramNames: ['a', '1b'], params: [1, 2] })
+    )
+    expect(invalidNames.errors.paramNames).toBe('Invalid parameter names: 1b.')
+
+    const duplicates = validateSystemConfig(
+      buildConfig({ paramNames: ['a', 'a'], params: [1, 2] })
+    )
+    expect(duplicates.errors.paramNames).toBe('Duplicate parameter names: a.')
+
     const nonNumeric = validateSystemConfig(
       buildConfig({ params: [0, Number.NaN], paramNames: ['a', 'b'] })
     )
     expect(nonNumeric.errors.params).toEqual(['', 'Parameter must be numeric.'])
+  })
+
+  it('requires parameter counts to match names when multiple params exist', () => {
+    const result = validateSystemConfig(
+      buildConfig({ params: [1], paramNames: ['a', 'b'] })
+    )
+
+    expect(result.valid).toBe(false)
+    expect(result.errors.params).toEqual([
+      'Parameter count mismatch.',
+      'Parameter count mismatch.',
+    ])
   })
 
   it('enforces solver compatibility with the system type', () => {
@@ -78,5 +140,17 @@ describe('validateSystemConfig', () => {
       buildConfig({ type: 'flow', solver: 'discrete' })
     )
     expect(flowResult.errors.solver).toBe('Flow systems must use rk4 or tsit5.')
+  })
+
+  it('allows compatible solver selections', () => {
+    const mapResult = validateSystemConfig(
+      buildConfig({ type: 'map', solver: 'discrete' })
+    )
+    expect(mapResult.errors.solver).toBeUndefined()
+
+    const flowResult = validateSystemConfig(
+      buildConfig({ type: 'flow', solver: 'tsit5' })
+    )
+    expect(flowResult.errors.solver).toBeUndefined()
   })
 })
