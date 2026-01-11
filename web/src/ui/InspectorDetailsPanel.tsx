@@ -793,7 +793,12 @@ export function InspectorDetailsPanel({
     (orbit?.data?.[0] ? orbit.data[0].length - 1 : system.config.varNames.length)
   const clvRender = resolveClvRender(selectionNode?.render?.clv, clvDim)
   const clvIndices = defaultClvIndices(clvPlotDim)
-  const clvColors = resolveClvColors(clvIndices, clvRender.vectorIndices, clvRender.colors)
+  const clvColors = resolveClvColors(
+    clvIndices,
+    clvRender.vectorIndices,
+    clvRender.colors,
+    clvRender.colorOverrides
+  )
   const clvVisibleSet = new Set(clvRender.vectorIndices)
   const nodeVisibility = selectionNode?.visibility ?? true
   const showVisibilityToggle =
@@ -2093,7 +2098,12 @@ export function InspectorDetailsPanel({
       nextSet.delete(index)
     }
     const nextIndices = clvIndices.filter((value) => nextSet.has(value))
-    const colors = resolveClvColors(nextIndices, clvRender.vectorIndices, clvRender.colors)
+    const colors = resolveClvColors(
+      nextIndices,
+      clvRender.vectorIndices,
+      clvRender.colors,
+      clvRender.colorOverrides
+    )
     updateClvRender({ vectorIndices: nextIndices, colors })
   }
 

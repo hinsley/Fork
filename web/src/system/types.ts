@@ -175,6 +175,7 @@ export interface ClvRenderStyle {
   thickness: number
   vectorIndices: number[]
   colors: string[]
+  colorOverrides?: Record<number, string>
 }
 
 export interface RenderStyle {

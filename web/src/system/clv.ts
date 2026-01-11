@@ -35,6 +35,37 @@ function defaultClvColor(index: number): string {
   return CLV_COLOR_PALETTE[paletteIndex]
 }
 
+function normalizeClvColorOverrides(
+  overrides: Record<number, string> | undefined
+): Record<number, string> {
+  if (!overrides || typeof overrides !== 'object') {
+    return {}
+  }
+  const result: Record<number, string> = {}
+  for (const [key, value] of Object.entries(overrides)) {
+    const index = Number.parseInt(key, 10)
+    if (!Number.isFinite(index) || index < 0) continue
+    if (typeof value !== 'string' || !value) continue
+    result[index] = value
+  }
+  return result
+}
+
+function applyClvColorOverrides(
+  overrides: Record<number, string>,
+  indices: number[],
+  colors: string[]
+): Record<number, string> {
+  const next = { ...overrides }
+  indices.forEach((index, idx) => {
+    const color = colors[idx]
+    if (typeof color === 'string' && color) {
+      next[index] = color
+    }
+  })
+  return next
+}
+
 function normalizeStride(value: number | undefined): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return DEFAULT_CLV_RENDER.stride
@@ -84,9 +115,18 @@ export function normalizeClvIndices(indices: number[], dim?: number): number[] {
 export function resolveClvColors(
   indices: number[],
   previousIndices: number[],
-  previousColors: string[]
+  previousColors: string[],
+  overrides?: Record<number, string>
 ): string[] {
   const colorMap = new Map<number, string>()
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      const index = Number.parseInt(key, 10)
+      if (!Number.isFinite(index) || index < 0) continue
+      if (typeof value !== 'string' || !value) continue
+      colorMap.set(index, value)
+    }
+  }
   previousIndices.forEach((index, idx) => {
     const color = previousColors[idx]
     if (typeof color === 'string' && color) {
@@ -103,13 +143,23 @@ export function resolveClvRender(
 ): ClvRenderStyle {
   const hasIndices = Array.isArray(render?.vectorIndices)
   const fallbackIndices = defaultClvIndices(dim)
+  const previousIndices = hasIndices ? render?.vectorIndices ?? [] : fallbackIndices
+  const previousColors = render?.colors ?? DEFAULT_CLV_RENDER.colors
   const rawIndices = hasIndices ? render?.vectorIndices ?? [] : fallbackIndices
   const indices = normalizeClvIndices(rawIndices, dim)
+  const baseOverrides = normalizeClvColorOverrides(render?.colorOverrides)
+  const mergedOverrides = applyClvColorOverrides(
+    baseOverrides,
+    previousIndices,
+    previousColors
+  )
   const colors = resolveClvColors(
     indices,
-    hasIndices ? render?.vectorIndices ?? [] : fallbackIndices,
-    render?.colors ?? DEFAULT_CLV_RENDER.colors
+    previousIndices,
+    previousColors,
+    mergedOverrides
   )
+  const colorOverrides = applyClvColorOverrides(mergedOverrides, indices, colors)
 
   return {
     enabled: Boolean(render?.enabled ?? DEFAULT_CLV_RENDER.enabled),
@@ -119,6 +169,7 @@ export function resolveClvRender(
     thickness: normalizeThickness(render?.thickness ?? DEFAULT_CLV_RENDER.thickness),
     vectorIndices: indices,
     colors,
+    colorOverrides,
   }
 }
 
