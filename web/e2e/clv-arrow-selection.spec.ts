@@ -1,6 +1,16 @@
 import { expect, test } from '@playwright/test'
 import { createHarness } from './harness'
 
+type PlotlyTrace = {
+  type?: string
+  uid?: string
+}
+
+type PlotlyGraphDiv = HTMLElement & {
+  data?: PlotlyTrace[]
+  emit?: (event: string, payload: { points: Array<{ data?: PlotlyTrace }> }) => void
+}
+
 test('clicking a CLV arrow selects the orbit', async ({ page }) => {
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: true })
@@ -26,14 +36,18 @@ test('clicking a CLV arrow selects the orbit', async ({ page }) => {
   await expect(harness.inspectorName()).toHaveValue(/Equilibrium_1/i)
 
   await page.waitForFunction(() => {
-    const node = document.querySelector('[data-testid^="plotly-viewport-"]') as any
-    return Boolean(node?.data?.some((trace: any) => trace?.type === 'cone'))
+    const node = document.querySelector('[data-testid^="plotly-viewport-"]') as
+      | PlotlyGraphDiv
+      | null
+    return Boolean(node?.data?.some((trace) => trace?.type === 'cone'))
   })
 
   await page.evaluate(() => {
-    const node = document.querySelector('[data-testid^="plotly-viewport-"]') as any
+    const node = document.querySelector('[data-testid^="plotly-viewport-"]') as
+      | PlotlyGraphDiv
+      | null
     if (!node) throw new Error('Plotly viewport not found')
-    const trace = node.data?.find((entry: any) => entry?.type === 'cone')
+    const trace = node.data?.find((entry) => entry?.type === 'cone')
     if (!trace) throw new Error('CLV cone trace not found')
     if (typeof trace.uid !== 'string') throw new Error('CLV trace uid missing')
     if (typeof node.emit !== 'function') throw new Error('Plotly emit missing')
