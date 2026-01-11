@@ -941,6 +941,7 @@ function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
   } satisfies Partial<Layout>
 
   const varNames = system.config.varNames
+  const panMode = varNames.length === 2 ? { dragmode: 'pan' as const } : {}
   if (varNames.length >= 3) {
     return {
       ...base,
@@ -998,6 +999,7 @@ function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
 
   return {
     ...base,
+    ...panMode,
     xaxis: { zerolinecolor: 'rgba(120,120,120,0.3)' },
     yaxis: { zerolinecolor: 'rgba(120,120,120,0.3)' },
   }
@@ -1028,6 +1030,7 @@ function buildDiagramLayout(
     paper_bgcolor: 'rgba(0,0,0,0)',
     plot_bgcolor: 'rgba(0,0,0,0)',
     showlegend: hasData,
+    dragmode: 'pan',
     uirevision: diagram.id,
     xaxis: hasAxes
       ? {

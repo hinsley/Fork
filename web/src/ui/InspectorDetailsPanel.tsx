@@ -345,6 +345,7 @@ function buildEigenvaluePlot(
     paper_bgcolor: 'rgba(0,0,0,0)',
     plot_bgcolor: 'rgba(0,0,0,0)',
     showlegend: false,
+    dragmode: 'pan',
     xaxis: {
       title: { text: 'Real part', font: { size: 11, color: 'var(--text)' } },
       zerolinecolor: 'rgba(120,120,120,0.3)',
