@@ -372,6 +372,62 @@
   gap: 6px;
 }
 
+.inspector-eigenpair {
+  gap: 8px;
+}
+
+.inspector-eigenpair__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
+.inspector-eigenpair__value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.75rem;
+}
+
+.inspector-eigenpair__value-label {
+  color: var(--text-muted);
+}
+
+.inspector-eigenpair__value-number {
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+}
+
+.inspector-eigenvector {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px 12px;
+  padding: 6px;
+  border-radius: 4px;
+  border: 1px solid var(--panel-border);
+  background: var(--input-bg);
+}
+
+.inspector-eigenvector__entry {
+  display: grid;
+  gap: 2px;
+}
+
+.inspector-eigenvector__label {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.inspector-eigenvector__value {
+  color: var(--text);
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+}
+
 .inspector-section label {
   display: grid;
   gap: 4px;

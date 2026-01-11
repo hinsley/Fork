@@ -2803,21 +2803,42 @@ export function InspectorDetailsPanel({
                           />
                         </div>
                       ) : null}
-                      {equilibrium.solution.eigenpairs.map((pair, index) => (
-                        <div className="inspector-subsection" key={`eq-eigen-${index}`}>
-                          <div className="inspector-subheading">
-                            Eigenpair {index + 1}
+                      {equilibrium.solution.eigenpairs.map((pair, pairIndex) => (
+                        <div
+                          className="inspector-subsection inspector-eigenpair"
+                          key={`eq-eigen-${pairIndex}`}
+                        >
+                          <div className="inspector-eigenpair__header">
+                            <span className="inspector-subheading">
+                              Eigenpair {pairIndex + 1}
+                            </span>
+                            <span className="inspector-eigenpair__value">
+                              <span className="inspector-eigenpair__value-label">Value</span>
+                              <span className="inspector-eigenpair__value-number">
+                                {formatComplexValue(pair.value)}
+                              </span>
+                            </span>
                           </div>
-                          <InspectorMetrics
-                            rows={[{ label: 'Value', value: formatComplexValue(pair.value) }]}
-                          />
-                          <InspectorMetrics
-                            rows={pair.vector.map((entry, vIndex) => ({
-                              label:
-                                systemDraft.varNames[vIndex] || `v${index + 1}_${vIndex + 1}`,
-                              value: formatComplexValue(entry),
-                            }))}
-                          />
+                          {pair.vector.length > 0 ? (
+                            <div className="inspector-eigenvector">
+                              {pair.vector.map((entry, vectorIndex) => (
+                                <div
+                                  className="inspector-eigenvector__entry"
+                                  key={`eq-eigen-${pairIndex}-${vectorIndex}`}
+                                >
+                                  <span className="inspector-eigenvector__label">
+                                    {systemDraft.varNames[vectorIndex] ||
+                                      `v${pairIndex + 1}_${vectorIndex + 1}`}
+                                  </span>
+                                  <span className="inspector-eigenvector__value">
+                                    {formatComplexValue(entry)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="empty-state">No eigenvector components stored.</p>
+                          )}
                         </div>
                       ))}
                     </div>
