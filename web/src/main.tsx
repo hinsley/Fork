@@ -40,6 +40,27 @@ async function seedDefaultSystems(store: SystemStore) {
   markDefaultSystemsSeeded()
 }
 
+function registerServiceWorker(deterministic: boolean) {
+  if (deterministic) return
+  if (!import.meta.env.PROD) return
+  if (typeof window === 'undefined') return
+  if (!('serviceWorker' in navigator)) return
+
+  const register = () => {
+    navigator.serviceWorker
+      .register('/sw.js')
+      .catch((error) => {
+        console.warn('[PWA] Service worker registration failed', error)
+      })
+  }
+
+  if (document.readyState === 'complete') {
+    register()
+  } else {
+    window.addEventListener('load', register, { once: true })
+  }
+}
+
 async function bootstrap() {
   const params = new URLSearchParams(window.location.search)
   const deterministicFromUrl = params.has('test') || params.has('deterministic')
@@ -86,6 +107,8 @@ async function bootstrap() {
       </AppProvider>
     </StrictMode>
   )
+
+  registerServiceWorker(deterministic)
 }
 
 void bootstrap()
