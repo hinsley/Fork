@@ -15,8 +15,12 @@ class MockWorker {
   onmessage: ((event: MessageEvent<WorkerMessage>) => void) | null = null
   posted: WorkerMessage[] = []
   terminated = false
+  url: string | URL
+  options?: WorkerOptions
 
-  constructor(_url: string | URL, _options?: WorkerOptions) {
+  constructor(url: string | URL, options?: WorkerOptions) {
+    this.url = url
+    this.options = options
     MockWorker.instances.push(this)
   }
 
