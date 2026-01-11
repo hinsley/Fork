@@ -182,7 +182,14 @@ function buildCobwebBaseTraces(
   return traces
 }
 
-function buildClvTraces(nodeId: string, orbit: OrbitObject, clv: ClvRenderStyle): Data[] {
+type PlotSize = { width: number; height: number }
+
+function buildClvTraces(
+  nodeId: string,
+  orbit: OrbitObject,
+  clv: ClvRenderStyle,
+  plotSize?: PlotSize | null
+): Data[] {
   const covariant = orbit.covariantVectors
   if (!covariant || covariant.vectors.length === 0) return []
   if (orbit.data.length === 0) return []
@@ -221,7 +228,23 @@ function buildClvTraces(nodeId: string, orbit: OrbitObject, clv: ClvRenderStyle)
   const dy = maxY - minY
   const dz = use3d ? maxZ - minZ : 0
   const diag = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
-  const length = clv.lengthScale * diag
+  const hasAspectScale =
+    !use3d &&
+    plotSize &&
+    Number.isFinite(plotSize.width) &&
+    Number.isFinite(plotSize.height) &&
+    plotSize.width > 0 &&
+    plotSize.height > 0 &&
+    Number.isFinite(dx) &&
+    Number.isFinite(dy) &&
+    dx > 0 &&
+    dy > 0
+  const scaleX = hasAspectScale ? plotSize.width / dx : 1
+  const scaleY = hasAspectScale ? plotSize.height / dy : 1
+  const diagPixels = hasAspectScale
+    ? Math.sqrt(plotSize.width * plotSize.width + plotSize.height * plotSize.height)
+    : diag
+  const length = clv.lengthScale * diagPixels
   if (!Number.isFinite(length) || length <= 0) return []
 
   const headLength = length * CLV_HEAD_RATIO * clv.headScale
@@ -255,7 +278,11 @@ function buildClvTraces(nodeId: string, orbit: OrbitObject, clv: ClvRenderStyle)
       if (!Number.isFinite(vx) || !Number.isFinite(vy) || (use3d && !Number.isFinite(vz))) {
         continue
       }
-      const norm = Math.sqrt(vx * vx + vy * vy + (use3d ? vz * vz : 0))
+      const norm = use3d
+        ? Math.sqrt(vx * vx + vy * vy + vz * vz)
+        : Math.sqrt(
+            (vx * scaleX) * (vx * scaleX) + (vy * scaleY) * (vy * scaleY)
+          )
       if (!Number.isFinite(norm) || norm === 0) continue
 
       const base = interpolateOrbitState(orbitTimes, orbitStates, covariant.times[idx])
@@ -287,8 +314,10 @@ function buildClvTraces(nodeId: string, orbit: OrbitObject, clv: ClvRenderStyle)
           const tipX = headBaseX + ux * headLength
           const tipY = headBaseY + uy * headLength
           const wingScale = headLength * 0.5
-          const perpX = -uy
-          const perpY = ux
+          const uxScreen = ux * scaleX
+          const uyScreen = uy * scaleY
+          const perpX = hasAspectScale ? -uyScreen / scaleX : -uy
+          const perpY = hasAspectScale ? uxScreen / scaleY : ux
           const leftX = headBaseX + perpX * wingScale
           const leftY = headBaseY + perpY * wingScale
           const rightX = headBaseX - perpX * wingScale
@@ -515,7 +544,8 @@ function buildSceneTraces(
   selectedNodeId: string | null,
   timeSeriesMeta?: TimeSeriesViewportMeta | null,
   mapRange?: [number, number] | null,
-  mapFunctionSamples?: MapFunctionSamples | null
+  mapFunctionSamples?: MapFunctionSamples | null,
+  plotSize?: PlotSize | null
 ): Data[] {
   const traces: Data[] = []
   const isMap = system.config.type === 'map'
@@ -796,7 +826,7 @@ function buildSceneTraces(
     if (dimension >= 2 && system.config.varNames.length >= 2) {
       const clvRender = resolveClvRender(node.render?.clv, object.covariantVectors?.dim)
       if (clvRender.enabled) {
-        traces.push(...buildClvTraces(nodeId, object, clvRender))
+        traces.push(...buildClvTraces(nodeId, object, clvRender, plotSize))
       }
     }
   }
@@ -1158,6 +1188,7 @@ function ViewportTile({
     range: null,
     height: null,
   }))
+  const [plotSize, setPlotSize] = useState<PlotSize | null>(null)
   const activeSceneId = scene?.id ?? null
   const timeSeriesRange =
     timeSeriesState.sceneId === activeSceneId ? timeSeriesState.range : null
@@ -1188,7 +1219,14 @@ function ViewportTile({
 
   const handleResize = useCallback(
     (size: { width: number; height: number }) => {
-      if (!scene || system.config.varNames.length !== 1 || system.config.type === 'map') return
+      if (!scene) return
+      setPlotSize((prev) => {
+        if (prev && prev.width === size.width && prev.height === size.height) {
+          return prev
+        }
+        return { width: size.width, height: size.height }
+      })
+      if (system.config.varNames.length !== 1 || system.config.type === 'map') return
       const height = size.height
       const sceneId = scene.id
       setTimeSeriesState((prev) => {
@@ -1214,6 +1252,25 @@ function ViewportTile({
     return buildDiagramTraces(system, diagram, selectedNodeId)
   }, [diagram, selectedNodeId, system])
 
+  const layout = useMemo(() => {
+    if (scene) return buildSceneLayout(system, scene)
+    if (diagram) return buildDiagramLayout(diagram, diagramTraceState)
+    return buildSceneLayout(system, system.scenes[0])
+  }, [system, scene, diagram, diagramTraceState])
+
+  const plotAreaSize = useMemo(() => {
+    if (!plotSize) return null
+    const margin = layout.margin
+    const left = typeof margin?.l === 'number' ? margin.l : 0
+    const right = typeof margin?.r === 'number' ? margin.r : 0
+    const top = typeof margin?.t === 'number' ? margin.t : 0
+    const bottom = typeof margin?.b === 'number' ? margin.b : 0
+    return {
+      width: Math.max(1, plotSize.width - left - right),
+      height: Math.max(1, plotSize.height - top - bottom),
+    }
+  }, [layout.margin, plotSize])
+
   const data = useMemo(() => {
     if (scene) {
       return buildSceneTraces(
@@ -1222,7 +1279,8 @@ function ViewportTile({
         selectedNodeId,
         timeSeriesMeta,
         mapRange,
-        mapFunctionSamples
+        mapFunctionSamples,
+        plotAreaSize
       )
     }
     if (diagram) return diagramTraceState?.traces ?? []
@@ -1232,17 +1290,12 @@ function ViewportTile({
     diagramTraceState,
     mapFunctionSamples,
     mapRange,
+    plotAreaSize,
     scene,
     selectedNodeId,
     system,
     timeSeriesMeta,
   ])
-
-  const layout = useMemo(() => {
-    if (scene) return buildSceneLayout(system, scene)
-    if (diagram) return buildDiagramLayout(diagram, diagramTraceState)
-    return buildSceneLayout(system, system.scenes[0])
-  }, [system, scene, diagram, diagramTraceState])
 
   const label = scene ? 'State Space' : 'Bifurcation Diagram'
 
