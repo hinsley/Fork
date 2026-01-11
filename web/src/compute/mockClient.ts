@@ -52,13 +52,26 @@ export class MockForkCoreClient implements ForkCoreClient {
         }
 
         const data: number[][] = []
+        const dimension = Math.max(
+          1,
+          request.system.varNames.length,
+          request.initialState.length
+        )
         let t = 0
-        data.push([t, ...request.initialState])
+        const initialState = Array.from(
+          { length: dimension },
+          (_, index) => request.initialState[index] ?? 0
+        )
+        data.push([t, ...initialState])
         for (let i = 0; i < request.steps; i += 1) {
           t += request.dt
-          const x = Math.cos(t)
-          const y = Math.sin(t)
-          data.push([t, x, y])
+          const state = Array.from({ length: dimension }, (_, index) => {
+            const phase = t + index * 0.7
+            if (index % 3 === 0) return Math.cos(phase)
+            if (index % 3 === 1) return Math.sin(phase)
+            return Math.cos(phase * 0.5)
+          })
+          data.push([t, ...state])
         }
         return {
           data,
