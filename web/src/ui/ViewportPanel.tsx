@@ -71,6 +71,8 @@ type TimeSeriesViewportMeta = {
 
 const MIN_VIEWPORT_HEIGHT = 200
 const CLV_HEAD_RATIO = 0.25
+const COBWEB_DIAGONAL_COLOR = 'rgba(120,120,120,0.45)'
+const COBWEB_FUNCTION_COLOR = '#6f7a89'
 
 function interpolateOrbitState(
   times: number[],
@@ -103,6 +105,75 @@ function interpolateOrbitState(
     x0 + (x1 - x0) * weight,
     y0 + (y1 - y0) * weight,
     z0 + (z1 - z0) * weight,
+  ]
+}
+
+function collectMapPairs(rows: number[][]): Array<[number, number]> {
+  const pairs: Array<[number, number]> = []
+  if (rows.length < 2) return pairs
+  for (let i = 0; i < rows.length - 1; i += 1) {
+    const x = rows[i]?.[1]
+    const y = rows[i + 1]?.[1]
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue
+    pairs.push([x, y])
+  }
+  return pairs
+}
+
+function buildCobwebPath(rows: number[][]): { x: number[]; y: number[] } {
+  const x: number[] = []
+  const y: number[] = []
+  if (rows.length < 2) return { x, y }
+
+  for (let i = 0; i < rows.length - 1; i += 1) {
+    const x0 = rows[i]?.[1]
+    const x1 = rows[i + 1]?.[1]
+    if (!Number.isFinite(x0) || !Number.isFinite(x1)) continue
+    if (x.length === 0) {
+      x.push(x0)
+      y.push(x0)
+    }
+    x.push(x0)
+    y.push(x1)
+    x.push(x1)
+    y.push(x1)
+  }
+  return { x, y }
+}
+
+function buildCobwebBaseTraces(pairs: Array<[number, number]>): Data[] {
+  if (pairs.length === 0) return []
+  let min = Number.POSITIVE_INFINITY
+  let max = Number.NEGATIVE_INFINITY
+  for (const [x, y] of pairs) {
+    min = Math.min(min, x, y)
+    max = Math.max(max, x, y)
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return []
+
+  const sorted = [...pairs].sort((a, b) => a[0] - b[0])
+  const mapX = sorted.map((pair) => pair[0])
+  const mapY = sorted.map((pair) => pair[1])
+
+  return [
+    {
+      type: 'scatter',
+      mode: 'lines',
+      x: mapX,
+      y: mapY,
+      line: { color: COBWEB_FUNCTION_COLOR, width: 1.5 },
+      hoverinfo: 'skip',
+      showlegend: false,
+    },
+    {
+      type: 'scatter',
+      mode: 'lines',
+      x: [min, max],
+      y: [min, max],
+      line: { color: COBWEB_DIAGONAL_COLOR, width: 1, dash: 'dot' },
+      hoverinfo: 'skip',
+      showlegend: false,
+    },
   ]
 }
 
@@ -345,7 +416,9 @@ function buildSceneTraces(
   timeSeriesMeta?: TimeSeriesViewportMeta | null
 ): Data[] {
   const traces: Data[] = []
-  const isTimeSeries = system.config.varNames.length === 1
+  const isMap = system.config.type === 'map'
+  const isTimeSeries = system.config.varNames.length === 1 && !isMap
+  const isMap1D = isMap && system.config.varNames.length === 1
   const manualSelection = scene.selectedNodeIds ?? []
   const candidateIds =
     manualSelection.length > 0
@@ -366,6 +439,17 @@ function buildSceneTraces(
   let maxY = Number.NEGATIVE_INFINITY
   let minEquilibrium = Number.POSITIVE_INFINITY
   let maxEquilibrium = Number.NEGATIVE_INFINITY
+  if (isMap1D) {
+    const mapPairs: Array<[number, number]> = []
+    for (const nodeId of candidateIds) {
+      const node = system.nodes[nodeId]
+      if (!node || node.kind !== 'object' || !node.visibility) continue
+      const object = system.objects[nodeId]
+      if (!object || object.type !== 'orbit' || object.data.length < 2) continue
+      mapPairs.push(...collectMapPairs(object.data))
+    }
+    traces.push(...buildCobwebBaseTraces(mapPairs))
+  }
   if (isTimeSeries) {
     let minT = Number.POSITIVE_INFINITY
     let maxT = Number.NEGATIVE_INFINITY
@@ -423,6 +507,19 @@ function buildSceneTraces(
             size,
           },
         })
+      } else if (isMap1D) {
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: object.name,
+          uid: nodeId,
+          x: [state[0]],
+          y: [state[0]],
+          marker: {
+            color: node.render.color,
+            size,
+          },
+        })
       } else if (isTimeSeries && timeRange && timeRange[0] !== timeRange[1]) {
         pendingEquilibria.push({
           nodeId,
@@ -458,61 +555,139 @@ function buildSceneTraces(
     if (rows.length === 0) continue
     // Use the first three state components for 3D systems to match CLI state-space views.
     const dimension = rows[0].length - 1
-    const x: number[] = []
-    const y: number[] = []
-    const z: number[] = []
-
-    if (dimension >= 3) {
-      for (const row of rows) {
-        x.push(row[1])
-        y.push(row[2])
-        z.push(row[3])
-      }
-    } else if (dimension >= 2) {
-      for (const row of rows) {
-        x.push(row[1])
-        y.push(row[2])
-      }
-    } else {
-      for (const row of rows) {
-        const value = row[1]
-        x.push(row[0])
-        y.push(value)
-        if (isTimeSeries) {
-          minY = Math.min(minY, value)
-          maxY = Math.max(maxY, value)
+    const highlight = nodeId === selectedNodeId
+    if (isMap) {
+      const size = highlight ? node.render.pointSize + 2 : node.render.pointSize
+      if (dimension >= 3) {
+        const x: number[] = []
+        const y: number[] = []
+        const z: number[] = []
+        for (const row of rows) {
+          x.push(row[1])
+          y.push(row[2])
+          z.push(row[3])
+        }
+        traces.push({
+          type: 'scatter3d',
+          mode: 'markers',
+          name: object.name,
+          uid: nodeId,
+          x,
+          y,
+          z,
+          marker: {
+            color: node.render.color,
+            size,
+          },
+        })
+      } else if (dimension >= 2) {
+        const x: number[] = []
+        const y: number[] = []
+        for (const row of rows) {
+          x.push(row[1])
+          y.push(row[2])
+        }
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: object.name,
+          uid: nodeId,
+          x,
+          y,
+          marker: {
+            color: node.render.color,
+            size,
+          },
+        })
+      } else if (isMap1D) {
+        const pairs = collectMapPairs(rows)
+        if (pairs.length > 0) {
+          traces.push({
+            type: 'scatter',
+            mode: 'markers',
+            name: object.name,
+            uid: nodeId,
+            x: pairs.map((pair) => pair[0]),
+            y: pairs.map((pair) => pair[1]),
+            marker: {
+              color: node.render.color,
+              size,
+            },
+          })
+        }
+        const cobweb = buildCobwebPath(rows)
+        if (cobweb.x.length > 0) {
+          traces.push({
+            type: 'scatter',
+            mode: 'lines',
+            name: object.name,
+            uid: nodeId,
+            x: cobweb.x,
+            y: cobweb.y,
+            line: {
+              color: node.render.color,
+              width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
+            },
+            hoverinfo: 'skip',
+            showlegend: false,
+          })
         }
       }
-    }
-
-    const highlight = nodeId === selectedNodeId
-    if (dimension >= 3) {
-      traces.push({
-        type: 'scatter3d',
-        mode: 'lines',
-        name: object.name,
-        uid: nodeId,
-        x,
-        y,
-        z,
-        line: {
-          color: node.render.color,
-          width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
-        },
-      })
     } else {
-      traces.push({
-        type: 'scatter',
-        mode: 'lines',
-        name: object.name,
-        uid: nodeId,
-        x,
-        y,
-        line: {
-          color: node.render.color,
-          width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
-        },
-      })
+      const x: number[] = []
+      const y: number[] = []
+      const z: number[] = []
+      if (dimension >= 3) {
+        for (const row of rows) {
+          x.push(row[1])
+          y.push(row[2])
+          z.push(row[3])
+        }
+      } else if (dimension >= 2) {
+        for (const row of rows) {
+          x.push(row[1])
+          y.push(row[2])
+        }
+      } else {
+        for (const row of rows) {
+          const value = row[1]
+          x.push(row[0])
+          y.push(value)
+          if (isTimeSeries) {
+            minY = Math.min(minY, value)
+            maxY = Math.max(maxY, value)
+          }
+        }
+      }
+
+      if (dimension >= 3) {
+        traces.push({
+          type: 'scatter3d',
+          mode: 'lines',
+          name: object.name,
+          uid: nodeId,
+          x,
+          y,
+          z,
+          line: {
+            color: node.render.color,
+            width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
+          },
+        })
+      } else {
+        traces.push({
+          type: 'scatter',
+          mode: 'lines',
+          name: object.name,
+          uid: nodeId,
+          x,
+          y,
+          line: {
+            color: node.render.color,
+            width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
+          },
+        })
+      }
     }
 
     if (dimension >= 3 && system.config.varNames.length >= 3) {
@@ -747,6 +922,21 @@ function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
     }
   }
 
+  if (varNames.length === 1 && system.config.type === 'map') {
+    const name = varNames[0] ?? 'x'
+    return {
+      ...base,
+      xaxis: {
+        title: { text: `${name}_n` },
+        zerolinecolor: 'rgba(120,120,120,0.3)',
+      },
+      yaxis: {
+        title: { text: `${name}_{n+1}` },
+        zerolinecolor: 'rgba(120,120,120,0.3)',
+      },
+    }
+  }
+
   if (varNames.length === 1) {
     return {
       ...base,
@@ -868,7 +1058,7 @@ function ViewportTile({
 
   const handleRelayout = useCallback(
     (event: PlotlyRelayoutEvent) => {
-      if (!scene || system.config.varNames.length !== 1) return
+      if (!scene || system.config.varNames.length !== 1 || system.config.type === 'map') return
       const nextRange = readAxisRange(event, 'yaxis')
       if (nextRange === undefined) return
       const sceneId = scene.id
@@ -885,12 +1075,12 @@ function ViewportTile({
         return { ...prev, range: nextRange }
       })
     },
-    [scene, system.config.varNames.length]
+    [scene, system.config.type, system.config.varNames.length]
   )
 
   const handleResize = useCallback(
     (size: { width: number; height: number }) => {
-      if (!scene || system.config.varNames.length !== 1) return
+      if (!scene || system.config.varNames.length !== 1 || system.config.type === 'map') return
       const height = size.height
       const sceneId = scene.id
       setTimeSeriesState((prev) => {
@@ -903,13 +1093,13 @@ function ViewportTile({
         return { ...prev, height }
       })
     },
-    [scene, system.config.varNames.length]
+    [scene, system.config.type, system.config.varNames.length]
   )
 
   const timeSeriesMeta = useMemo(() => {
-    if (!scene || system.config.varNames.length !== 1) return null
+    if (!scene || system.config.varNames.length !== 1 || system.config.type === 'map') return null
     return { yRange: timeSeriesRange, height: plotHeight }
-  }, [plotHeight, scene, system.config.varNames.length, timeSeriesRange])
+  }, [plotHeight, scene, system.config.type, system.config.varNames.length, timeSeriesRange])
 
   const diagramTraceState = useMemo(() => {
     if (!diagram) return null
