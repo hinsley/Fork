@@ -529,6 +529,85 @@ mod tests {
     }
 
     #[test]
+    fn apply_qr_rejects_near_singular_matrix() {
+        let dim = 2;
+        let mut phi = vec![0.0; dim * dim];
+        let mut accum = vec![0.0; dim];
+
+        assert_err_contains(
+            apply_qr(&mut phi, dim, &mut accum),
+            "near-singular R matrix",
+        );
+    }
+
+    #[test]
+    fn covariant_lyapunov_vectors_rejects_invalid_inputs() {
+        let system = LinearSystem { rate: 1.0 };
+        assert_err_contains(
+            covariant_lyapunov_vectors(
+                system,
+                LyapunovStepper::Rk4,
+                &[],
+                0.0,
+                0.1,
+                1,
+                1,
+                0,
+                0,
+            ),
+            "Initial state",
+        );
+
+        let system = LinearSystem { rate: 1.0 };
+        assert_err_contains(
+            covariant_lyapunov_vectors(
+                system,
+                LyapunovStepper::Rk4,
+                &[1.0],
+                0.0,
+                0.0,
+                1,
+                1,
+                0,
+                0,
+            ),
+            "dt must be positive",
+        );
+
+        let system = LinearSystem { rate: 1.0 };
+        assert_err_contains(
+            covariant_lyapunov_vectors(
+                system,
+                LyapunovStepper::Rk4,
+                &[1.0],
+                0.0,
+                0.1,
+                0,
+                1,
+                0,
+                0,
+            ),
+            "qr_stride",
+        );
+
+        let system = LinearSystem { rate: 1.0 };
+        assert_err_contains(
+            covariant_lyapunov_vectors(
+                system,
+                LyapunovStepper::Rk4,
+                &[1.0],
+                0.0,
+                0.1,
+                1,
+                0,
+                0,
+                0,
+            ),
+            "Window size",
+        );
+    }
+
+    #[test]
     fn covariant_lyapunov_vectors_returns_normalized_vectors() {
         let system = LinearSystem { rate: -0.4 };
         let result = covariant_lyapunov_vectors(
