@@ -5,7 +5,12 @@ type PlotlyModule = {
     container: HTMLElement,
     data: Data[],
     layout: Partial<Layout>,
-    config: { displaylogo: boolean; responsive: boolean }
+    config: {
+      displaylogo: boolean
+      responsive: boolean
+      scrollZoom: boolean
+      doubleClick: boolean
+    }
   ) => Promise<void>
   purge: (container: HTMLElement) => void
   Plots?: {
@@ -48,7 +53,16 @@ export async function renderPlot(
 ) {
   const Plotly = await loadPlotly()
   if (opts?.signal?.aborted) return
-  await Plotly.react(container, data, layout, { displaylogo: false, responsive: true })
+  const layoutWithDefaults = {
+    ...layout,
+    dragmode: layout.dragmode ?? 'pan',
+  }
+  await Plotly.react(container, data, layoutWithDefaults, {
+    displaylogo: false,
+    responsive: true,
+    scrollZoom: true,
+    doubleClick: false,
+  })
 }
 
 export async function resizePlot(container: HTMLElement) {
