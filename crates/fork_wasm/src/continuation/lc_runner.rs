@@ -213,3 +213,25 @@ impl WasmLimitCycleRunner {
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{flatten_collocation_state, validate_mesh_states};
+
+    #[test]
+    fn validate_mesh_states_rejects_wrong_count() {
+        let states = vec![vec![0.0]];
+        let err = validate_mesh_states(1, 2, &states).expect_err("should reject count mismatch");
+        let message = err.to_string();
+        assert!(message.contains("mesh states"));
+    }
+
+    #[test]
+    fn flatten_collocation_state_appends_period() {
+        let mesh_states = vec![vec![1.0], vec![2.0]];
+        let stage_states = vec![vec![vec![1.5]], vec![vec![2.5]]];
+        let flat = flatten_collocation_state(&mesh_states, &stage_states, 3.0);
+
+        assert_eq!(flat, vec![1.0, 2.0, 1.5, 2.5, 3.0]);
+    }
+}
