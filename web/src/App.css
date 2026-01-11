@@ -23,6 +23,8 @@
   display: flex;
   align-items: baseline;
   gap: 12px;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .toolbar__logo {
@@ -118,6 +120,11 @@
 .toolbar__status {
   font-size: 0.85rem;
   color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .toolbar__progress {
