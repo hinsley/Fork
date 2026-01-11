@@ -409,15 +409,17 @@ impl WasmContinuationExtensionRunner {
 #[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
     use super::WasmContinuationExtensionRunner;
-    use fork_core::continuation::{BranchType, ContinuationBranch, ContinuationSettings};
-    use serde_wasm_bindgen::to_value;
+    use fork_core::continuation::{
+        BifurcationType, BranchType, ContinuationBranch, ContinuationPoint, ContinuationSettings,
+    };
+    use serde_wasm_bindgen::{from_value, to_value};
 
-    fn settings_value() -> wasm_bindgen::JsValue {
+    fn settings_value(max_steps: usize) -> wasm_bindgen::JsValue {
         let settings = ContinuationSettings {
             step_size: 0.1,
             min_step_size: 1e-6,
             max_step_size: 1.0,
-            max_steps: 3,
+            max_steps,
             corrector_steps: 1,
             corrector_tolerance: 1e-9,
             step_tolerance: 1e-6,
@@ -444,12 +446,92 @@ mod tests {
             "flow",
             branch_val,
             "p",
-            settings_value(),
+            settings_value(3),
             true,
         );
 
         assert!(result.is_err(), "should reject empty branch");
         let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
         assert!(message.contains("Branch has no indices"));
+    }
+
+    #[test]
+    fn extension_runner_fills_missing_indices() {
+        let branch = ContinuationBranch {
+            points: vec![ContinuationPoint {
+                state: vec![0.0],
+                param_value: 0.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+            }],
+            bifurcations: Vec::new(),
+            indices: Vec::new(),
+            branch_type: BranchType::Equilibrium,
+            upoldp: None,
+        };
+        let branch_val = to_value(&branch).expect("branch");
+
+        let mut runner = WasmContinuationExtensionRunner::new(
+            vec!["x - a".to_string()],
+            vec![0.0],
+            vec!["a".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            branch_val,
+            "a",
+            settings_value(0),
+            true,
+        )
+        .expect("runner");
+
+        runner.run_steps(1).expect("run steps");
+        let result_val = runner.get_result().expect("result");
+        let result_branch: ContinuationBranch = from_value(result_val).expect("branch");
+        assert_eq!(result_branch.points.len(), 1);
+        assert_eq!(result_branch.indices, vec![0]);
+    }
+
+    #[test]
+    fn extension_runner_merges_indices_after_step() {
+        let branch = ContinuationBranch {
+            points: vec![
+                ContinuationPoint {
+                    state: vec![1.0],
+                    param_value: 1.0,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                },
+                ContinuationPoint {
+                    state: vec![1.1],
+                    param_value: 1.1,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                },
+            ],
+            bifurcations: Vec::new(),
+            indices: vec![0, 1],
+            branch_type: BranchType::Equilibrium,
+            upoldp: None,
+        };
+        let branch_val = to_value(&branch).expect("branch");
+
+        let mut runner = WasmContinuationExtensionRunner::new(
+            vec!["x - a".to_string()],
+            vec![1.1],
+            vec!["a".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            branch_val,
+            "a",
+            settings_value(1),
+            true,
+        )
+        .expect("runner");
+
+        runner.run_steps(1).expect("run steps");
+        let result_val = runner.get_result().expect("result");
+        let result_branch: ContinuationBranch = from_value(result_val).expect("branch");
+        assert_eq!(result_branch.indices.len(), 3);
+        assert_eq!(result_branch.indices.last().copied(), Some(2));
     }
 }
