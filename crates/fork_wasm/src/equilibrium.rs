@@ -300,3 +300,169 @@ fn normalize_complex_vector(vec: &mut [Complex<f64>]) {
         }
     }
 }
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod wasm_wrapper_tests {
+    use super::*;
+
+    #[test]
+    fn runner_rejects_zero_dimension_system() {
+        let result = WasmEquilibriumSolverRunner::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            "flow",
+            Vec::new(),
+            10,
+            1.0,
+        );
+
+        assert!(result.is_err(), "expected error for zero-dimension system");
+    }
+
+    #[test]
+    fn runner_rejects_initial_guess_dimension_mismatch() {
+        let result = WasmEquilibriumSolverRunner::new(
+            vec!["x".to_string()],
+            Vec::new(),
+            Vec::new(),
+            vec!["x".to_string()],
+            "flow",
+            vec![0.0, 1.0],
+            10,
+            1.0,
+        );
+
+        assert!(result.is_err(), "expected error for initial guess mismatch");
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    fn runner_progresses_and_completes() {
+        let mut runner = WasmEquilibriumSolverRunner::new(
+            vec!["x".to_string()],
+            Vec::new(),
+            Vec::new(),
+            vec!["x".to_string()],
+            "flow",
+            vec![1.0],
+            10,
+            1.0,
+        )
+        .expect("runner");
+
+        assert!(runner.get_result().is_err(), "expected not converged yet");
+
+        let state = runner.state.as_ref().expect("state");
+        assert!(!state.done);
+        assert!(state.residual_norm > 0.0);
+
+        runner.run_steps(1).expect("run steps");
+        let state = runner.state.as_ref().expect("state");
+        assert_eq!(state.iterations, 1);
+        assert!(state.residual_norm <= state.settings.tolerance);
+        assert!(!state.done);
+
+        runner.run_steps(1).expect("run steps");
+        let state = runner.state.as_ref().expect("state");
+        assert!(state.done);
+        assert!(runner.is_done());
+
+        assert!(runner.get_result().is_ok(), "expected converged result");
+    }
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod wasm_value_tests {
+    use super::WasmEquilibriumSolverRunner;
+    use crate::system::WasmSystem;
+    use fork_core::equilibrium::EquilibriumResult;
+    use serde_wasm_bindgen::from_value;
+
+    fn build_linear_system() -> WasmSystem {
+        WasmSystem::new(
+            vec!["x".to_string()],
+            vec![],
+            vec![],
+            vec!["x".to_string()],
+            "rk4",
+            "flow",
+        )
+        .expect("system should build")
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    fn solve_equilibrium_converges_for_linear_system() {
+        let system = build_linear_system();
+        let result_val = system
+            .solve_equilibrium(vec![1.0], 8, 1.0)
+            .expect("solve equilibrium");
+        let result: EquilibriumResult = from_value(result_val).expect("decode result");
+
+        assert!(result.state[0].abs() < 1e-6);
+        assert!(result.iterations <= 8);
+    }
+
+    #[test]
+    fn equilibrium_runner_rejects_dimension_mismatch() {
+        let result = WasmEquilibriumSolverRunner::new(
+            vec!["x".to_string()],
+            vec![],
+            vec![],
+            vec!["x".to_string()],
+            "flow",
+            vec![1.0, 2.0],
+            5,
+            1.0,
+        );
+
+        assert!(result.is_err(), "should error on dimension mismatch");
+        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        assert!(message.contains("Initial guess dimension mismatch"));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    fn equilibrium_runner_requires_convergence_for_result() {
+        let runner = WasmEquilibriumSolverRunner::new(
+            vec!["x".to_string()],
+            vec![],
+            vec![],
+            vec!["x".to_string()],
+            "flow",
+            vec![1.0],
+            5,
+            1.0,
+        )
+        .expect("runner");
+
+        let err = match runner.get_result() {
+            Ok(_) => panic!("expected convergence error before get_result"),
+            Err(err) => err,
+        };
+        let message = err.as_string().unwrap_or_default();
+        assert!(message.contains("not converged"));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    fn equilibrium_runner_marks_done_when_residual_is_small() {
+        let mut runner = WasmEquilibriumSolverRunner::new(
+            vec!["x".to_string()],
+            vec![],
+            vec![],
+            vec!["x".to_string()],
+            "flow",
+            vec![0.0],
+            5,
+            1.0,
+        )
+        .expect("runner");
+
+        assert!(!runner.is_done(), "runner should start as not done");
+        runner.run_steps(1).expect("run steps");
+        assert!(runner.is_done(), "runner should mark done after step");
+    }
+}

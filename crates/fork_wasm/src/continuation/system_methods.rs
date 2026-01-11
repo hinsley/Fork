@@ -1036,3 +1036,54 @@ impl WasmSystem {
         to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 }
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod tests {
+    use crate::system::WasmSystem;
+
+    fn build_two_dim_system() -> WasmSystem {
+        WasmSystem::new(
+            vec!["x".to_string(), "y".to_string()],
+            vec![],
+            vec![],
+            vec!["x".to_string(), "y".to_string()],
+            "rk4",
+            "flow",
+        )
+        .expect("system should build")
+    }
+
+    fn build_two_dim_system_with_param() -> WasmSystem {
+        WasmSystem::new(
+            vec!["x".to_string(), "y".to_string()],
+            vec![0.0],
+            vec!["p".to_string()],
+            vec!["x".to_string(), "y".to_string()],
+            "rk4",
+            "flow",
+        )
+        .expect("system should build")
+    }
+
+    #[test]
+    fn init_lc_from_orbit_rejects_nondivisible_states() {
+        let system = build_two_dim_system();
+        let err = system
+            .init_lc_from_orbit(vec![0.0], vec![1.0, 2.0, 3.0], 0.0, 2, 2, 1e-6)
+            .expect_err("should reject non-divisible orbit states");
+
+        let message = err.as_string().unwrap_or_default();
+        assert!(message.contains("not divisible"));
+    }
+
+    #[test]
+    fn compute_equilibrium_eigenvalues_rejects_state_dim() {
+        let mut system = build_two_dim_system_with_param();
+        let err = system
+            .compute_equilibrium_eigenvalues(vec![0.0], "p", 0.0)
+            .expect_err("should reject state dimension mismatch");
+
+        let message = err.as_string().unwrap_or_default();
+        assert!(message.contains("State dimension"));
+    }
+}

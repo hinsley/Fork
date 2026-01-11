@@ -117,3 +117,64 @@ impl WasmEquilibriumRunner {
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 }
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod tests {
+    use super::*;
+    use fork_core::continuation::ContinuationSettings;
+
+    fn settings_with_max_steps(max_steps: usize) -> JsValue {
+        let settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-6,
+            max_step_size: 1.0,
+            max_steps,
+            corrector_steps: 1,
+            corrector_tolerance: 1e-8,
+            step_tolerance: 1e-8,
+        };
+
+        to_value(&settings).expect("settings")
+    }
+
+    #[test]
+    fn equilibrium_runner_handles_zero_steps() {
+        let settings_val = settings_with_max_steps(0);
+        let mut runner = WasmEquilibriumRunner::new(
+            vec!["a * x".to_string()],
+            vec![1.0],
+            vec!["a".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            vec![0.0],
+            "a",
+            settings_val,
+            true,
+        )
+        .expect("runner");
+
+        assert!(!runner.is_done());
+        runner.run_steps(1).expect("run steps");
+        assert!(runner.is_done());
+        assert!(runner.get_result().is_ok());
+    }
+
+    #[test]
+    fn equilibrium_runner_rejects_unknown_parameter() {
+        let result = WasmEquilibriumRunner::new(
+            vec!["x".to_string()],
+            vec![1.0],
+            vec!["p".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            vec![0.0],
+            "missing",
+            settings_with_max_steps(3),
+            true,
+        );
+
+        assert!(result.is_err(), "should reject unknown parameter");
+        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        assert!(message.contains("Unknown parameter"));
+    }
+}

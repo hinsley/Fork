@@ -136,3 +136,93 @@ impl WasmSystem {
         jacobian
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(target_arch = "wasm32")]
+    fn build_system_rejects_invalid_equation() {
+        let equations = vec!["1 +".to_string()];
+        let params = Vec::new();
+        let param_names = Vec::new();
+        let var_names = vec!["x".to_string()];
+
+        let result = build_system(equations, params, &param_names, &var_names);
+        assert!(result.is_err(), "expected parse error for invalid equation");
+    }
+
+    #[test]
+    fn wasm_system_step_advances_state_and_time() {
+        let mut system = WasmSystem::new(
+            vec!["1".to_string()],
+            Vec::new(),
+            Vec::new(),
+            vec!["x".to_string()],
+            "rk4",
+            "flow",
+        )
+        .expect("system");
+
+        system.set_state(&[0.0]);
+        system.set_t(0.0);
+        system.step(0.5);
+
+        let state = system.get_state();
+        assert!((system.get_t() - 0.5).abs() < 1e-12);
+        assert!((state[0] - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn wasm_system_compute_jacobian_matches_parameter() {
+        let mut system = WasmSystem::new(
+            vec!["a * x".to_string()],
+            vec![2.0],
+            vec!["a".to_string()],
+            vec!["x".to_string()],
+            "rk4",
+            "flow",
+        )
+        .expect("system");
+
+        system.set_state(&[3.0]);
+        let jacobian = system.compute_jacobian();
+        assert_eq!(jacobian.len(), 1);
+        assert!((jacobian[0] - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    #[cfg(target_arch = "wasm32")]
+    fn wasm_system_rejects_unknown_solver() {
+        let result = WasmSystem::new(
+            vec!["x".to_string()],
+            Vec::new(),
+            Vec::new(),
+            vec!["x".to_string()],
+            "nope",
+            "flow",
+        );
+
+        assert!(result.is_err(), "expected unknown solver error");
+    }
+
+    #[test]
+    fn wasm_system_computes_linear_jacobian() {
+        let mut system = WasmSystem::new(
+            vec!["x".to_string()],
+            Vec::new(),
+            Vec::new(),
+            vec!["x".to_string()],
+            "rk4",
+            "flow",
+        )
+        .expect("system should build");
+
+        system.set_state(&[2.0]);
+        system.set_t(0.0);
+
+        let jacobian = system.compute_jacobian();
+        assert_eq!(jacobian, vec![1.0]);
+    }
+}

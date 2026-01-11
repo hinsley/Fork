@@ -180,6 +180,50 @@ impl WasmFoldCurveRunner {
     }
 }
 
+#[cfg(all(test, target_arch = "wasm32"))]
+mod tests {
+    use super::WasmLPCCurveRunner;
+    use fork_core::continuation::ContinuationSettings;
+    use serde_wasm_bindgen::to_value;
+
+    fn settings_value() -> wasm_bindgen::JsValue {
+        let settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-6,
+            max_step_size: 1.0,
+            max_steps: 3,
+            corrector_steps: 1,
+            corrector_tolerance: 1e-9,
+            step_tolerance: 1e-6,
+        };
+        to_value(&settings).expect("settings")
+    }
+
+    #[test]
+    fn lpc_curve_runner_rejects_invalid_state_len() {
+        let result = WasmLPCCurveRunner::new(
+            vec!["x".to_string()],
+            vec![1.0],
+            vec!["p".to_string()],
+            vec!["x".to_string()],
+            vec![0.0, 1.0, 2.0],
+            1.0,
+            "p",
+            1.0,
+            "p",
+            1.0,
+            2,
+            1,
+            settings_value(),
+            true,
+        );
+
+        assert!(result.is_err(), "should reject invalid lc_state length");
+        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        assert!(message.contains("Invalid lc_state.len()"));
+    }
+}
+
 #[wasm_bindgen]
 pub struct WasmHopfCurveRunner {
     #[allow(dead_code)]

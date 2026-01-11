@@ -174,3 +174,121 @@ pub(crate) fn compute_tangent_from_problem<P: ContinuationProblem>(
     tangent[0] = 1.0;
     Ok(tangent)
 }
+
+#[cfg(test)]
+mod problem_tests {
+    use super::*;
+    use crate::system::build_system;
+
+    fn build_linear_system(param_value: f64) -> EquationSystem {
+        build_system(
+            vec!["a * x".to_string()],
+            vec![param_value],
+            &vec!["a".to_string()],
+            &vec!["x".to_string()],
+        )
+        .expect("system")
+    }
+
+    #[test]
+    fn equilibrium_problem_residual_and_jacobian() {
+        let system = build_linear_system(2.0);
+        let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Flow, 0);
+
+        let aug_state = DVector::from_vec(vec![2.0, 3.0]);
+        let mut residual = DVector::zeros(1);
+
+        problem
+            .residual(&aug_state, &mut residual)
+            .expect("residual");
+        assert!((residual[0] - 6.0).abs() < 1e-12);
+
+        let jac = problem.extended_jacobian(&aug_state).expect("jacobian");
+        assert_eq!(jac.nrows(), 1);
+        assert_eq!(jac.ncols(), 2);
+        assert!((jac[(0, 0)] - 3.0).abs() < 1e-12);
+        assert!((jac[(0, 1)] - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn compute_tangent_returns_unit_vector() {
+        let system = build_linear_system(1.0);
+        let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Flow, 0);
+        let aug_state = DVector::from_vec(vec![1.0, 0.0]);
+
+        let tangent = compute_tangent_from_problem(&mut problem, &aug_state).expect("tangent");
+        assert_eq!(tangent.len(), 2);
+        let norm = tangent.norm();
+        assert!((norm - 1.0).abs() < 1e-12);
+        assert!(tangent.iter().all(|v| v.is_finite()));
+    }
+}
+
+#[cfg(test)]
+mod tangent_tests {
+    use super::compute_tangent_from_problem;
+    use fork_core::continuation::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
+    use nalgebra::{DMatrix, DVector};
+
+    struct DummyProblem {
+        jac: DMatrix<f64>,
+    }
+
+    impl ContinuationProblem for DummyProblem {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn residual(
+            &mut self,
+            _aug_state: &DVector<f64>,
+            out: &mut DVector<f64>,
+        ) -> anyhow::Result<()> {
+            if out.len() != 1 {
+                anyhow::bail!("Unexpected residual size");
+            }
+            out[0] = 0.0;
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, _aug_state: &DVector<f64>) -> anyhow::Result<DMatrix<f64>> {
+            Ok(self.jac.clone())
+        }
+
+        fn diagnostics(
+            &mut self,
+            _aug_state: &DVector<f64>,
+        ) -> anyhow::Result<PointDiagnostics> {
+            Ok(PointDiagnostics {
+                test_values: TestFunctionValues::equilibrium(0.0, 0.0, 0.0),
+                eigenvalues: Vec::new(),
+            })
+        }
+    }
+
+    #[test]
+    fn compute_tangent_solves_bordered_system() {
+        let mut problem = DummyProblem {
+            jac: DMatrix::from_row_slice(1, 2, &[1.0, 0.0]),
+        };
+        let aug_state = DVector::from_vec(vec![0.0, 0.0]);
+
+        let tangent = compute_tangent_from_problem(&mut problem, &aug_state).expect("tangent");
+        assert_eq!(tangent.len(), 2);
+        assert!((tangent.norm() - 1.0).abs() < 1e-8);
+        assert!(tangent[1].abs() > 0.0, "expected non-zero secondary component");
+    }
+
+    #[test]
+    fn compute_tangent_falls_back_on_singular_system() {
+        let mut problem = DummyProblem {
+            jac: DMatrix::from_row_slice(1, 2, &[0.0, 0.0]),
+        };
+        let aug_state = DVector::from_vec(vec![0.0, 0.0]);
+
+        let tangent = compute_tangent_from_problem(&mut problem, &aug_state).expect("tangent");
+        assert_eq!(tangent.len(), 2);
+        assert_eq!(tangent[0], 1.0);
+        assert_eq!(tangent[1], 0.0);
+    }
+}

@@ -405,3 +405,51 @@ impl WasmContinuationExtensionRunner {
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 }
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod tests {
+    use super::WasmContinuationExtensionRunner;
+    use fork_core::continuation::{BranchType, ContinuationBranch, ContinuationSettings};
+    use serde_wasm_bindgen::to_value;
+
+    fn settings_value() -> wasm_bindgen::JsValue {
+        let settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-6,
+            max_step_size: 1.0,
+            max_steps: 3,
+            corrector_steps: 1,
+            corrector_tolerance: 1e-9,
+            step_tolerance: 1e-6,
+        };
+        to_value(&settings).expect("settings")
+    }
+
+    #[test]
+    fn extension_runner_rejects_empty_branch() {
+        let branch = ContinuationBranch {
+            points: Vec::new(),
+            bifurcations: Vec::new(),
+            indices: Vec::new(),
+            branch_type: BranchType::Equilibrium,
+            upoldp: None,
+        };
+        let branch_val = to_value(&branch).expect("branch");
+
+        let result = WasmContinuationExtensionRunner::new(
+            vec!["x".to_string()],
+            vec![],
+            vec![],
+            vec!["x".to_string()],
+            "flow",
+            branch_val,
+            "p",
+            settings_value(),
+            true,
+        );
+
+        assert!(result.is_err(), "should reject empty branch");
+        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        assert!(message.contains("Branch has no indices"));
+    }
+}
