@@ -11,6 +11,10 @@ import type {
   Scene,
   TreeNode,
 } from '../system/types'
+import type {
+  SampleMap1DFunctionRequest,
+  SampleMap1DFunctionResult,
+} from '../compute/ForkCoreClient'
 import {
   buildSortedArrayOrder,
   ensureBranchIndices,
@@ -33,6 +37,10 @@ type ViewportPanelProps = {
   onCreateBifurcation: (targetId?: string | null) => void
   onRenameViewport: (id: string, name: string) => void
   onDeleteViewport: (id: string) => void
+  onSampleMap1DFunction?: (
+    request: SampleMap1DFunctionRequest,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<SampleMap1DFunctionResult>
 }
 
 type ViewportEntry = {
@@ -45,6 +53,8 @@ type ViewportTileProps = {
   system: System
   entry: ViewportEntry
   selectedNodeId: string | null
+  mapRange: [number, number] | null
+  mapFunctionSamples: MapFunctionSamples | null
   draggingId: string | null
   dragOverId: string | null
   setDraggingId: (id: string | null) => void
@@ -69,10 +79,18 @@ type TimeSeriesViewportMeta = {
   height?: number | null
 }
 
+type MapFunctionSamples = {
+  key: string
+  range: [number, number]
+  x: number[]
+  y: number[]
+}
+
 const MIN_VIEWPORT_HEIGHT = 200
 const CLV_HEAD_RATIO = 0.25
 const COBWEB_DIAGONAL_COLOR = 'rgba(120,120,120,0.45)'
 const COBWEB_FUNCTION_COLOR = '#6f7a89'
+const MAP_FUNCTION_SAMPLE_COUNT = 256
 
 function interpolateOrbitState(
   times: number[],
@@ -141,40 +159,39 @@ function buildCobwebPath(rows: number[][]): { x: number[]; y: number[] } {
   return { x, y }
 }
 
-function buildCobwebBaseTraces(pairs: Array<[number, number]>): Data[] {
-  if (pairs.length === 0) return []
-  let min = Number.POSITIVE_INFINITY
-  let max = Number.NEGATIVE_INFINITY
-  for (const [x, y] of pairs) {
-    min = Math.min(min, x, y)
-    max = Math.max(max, x, y)
-  }
+function buildCobwebBaseTraces(
+  range: [number, number] | null,
+  samples?: { x: number[]; y: number[] } | null
+): Data[] {
+  if (!range) return []
+  const min = Math.min(range[0], range[1])
+  const max = Math.max(range[0], range[1])
   if (!Number.isFinite(min) || !Number.isFinite(max)) return []
 
-  const sorted = [...pairs].sort((a, b) => a[0] - b[0])
-  const mapX = sorted.map((pair) => pair[0])
-  const mapY = sorted.map((pair) => pair[1])
-
-  return [
-    {
+  const traces: Data[] = []
+  if (samples && samples.x.length > 0 && samples.y.length > 0) {
+    traces.push({
       type: 'scatter',
       mode: 'lines',
-      x: mapX,
-      y: mapY,
+      x: samples.x,
+      y: samples.y,
       line: { color: COBWEB_FUNCTION_COLOR, width: 1.5 },
       hoverinfo: 'skip',
       showlegend: false,
-    },
-    {
-      type: 'scatter',
-      mode: 'lines',
-      x: [min, max],
-      y: [min, max],
-      line: { color: COBWEB_DIAGONAL_COLOR, width: 1, dash: 'dot' },
-      hoverinfo: 'skip',
-      showlegend: false,
-    },
-  ]
+    })
+  }
+
+  traces.push({
+    type: 'scatter',
+    mode: 'lines',
+    x: [min, max],
+    y: [min, max],
+    line: { color: COBWEB_DIAGONAL_COLOR, width: 1, dash: 'dot' },
+    hoverinfo: 'skip',
+    showlegend: false,
+  })
+
+  return traces
 }
 
 function buildClvTraces(orbit: OrbitObject, clv: ClvRenderStyle): Data[] {
@@ -357,6 +374,41 @@ function collectVisibleObjectIds(system: System): string[] {
   return ids
 }
 
+function collectMap1DRange(system: System): [number, number] | null {
+  let min = Number.POSITIVE_INFINITY
+  let max = Number.NEGATIVE_INFINITY
+  const ids = collectVisibleObjectIds(system)
+  for (const nodeId of ids) {
+    const object = system.objects[nodeId]
+    if (!object) continue
+    if (object.type === 'orbit') {
+      for (const row of object.data) {
+        const value = row[1]
+        if (!Number.isFinite(value)) continue
+        min = Math.min(min, value)
+        max = Math.max(max, value)
+      }
+      continue
+    }
+    if (object.type === 'equilibrium') {
+      const value = object.solution?.state?.[0]
+      if (!Number.isFinite(value)) continue
+      min = Math.min(min, value)
+      max = Math.max(max, value)
+      continue
+    }
+    if (object.type === 'limit_cycle') {
+      const value = object.state?.[0]
+      if (!Number.isFinite(value)) continue
+      min = Math.min(min, value)
+      max = Math.max(max, value)
+    }
+  }
+
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null
+  return [min, max]
+}
+
 type DiagramTraceState = {
   traces: Data[]
   hasAxes: boolean
@@ -413,7 +465,9 @@ function buildSceneTraces(
   system: System,
   scene: Scene,
   selectedNodeId: string | null,
-  timeSeriesMeta?: TimeSeriesViewportMeta | null
+  timeSeriesMeta?: TimeSeriesViewportMeta | null,
+  mapRange?: [number, number] | null,
+  mapFunctionSamples?: MapFunctionSamples | null
 ): Data[] {
   const traces: Data[] = []
   const isMap = system.config.type === 'map'
@@ -440,15 +494,11 @@ function buildSceneTraces(
   let minEquilibrium = Number.POSITIVE_INFINITY
   let maxEquilibrium = Number.NEGATIVE_INFINITY
   if (isMap1D) {
-    const mapPairs: Array<[number, number]> = []
-    for (const nodeId of candidateIds) {
-      const node = system.nodes[nodeId]
-      if (!node || node.kind !== 'object' || !node.visibility) continue
-      const object = system.objects[nodeId]
-      if (!object || object.type !== 'orbit' || object.data.length < 2) continue
-      mapPairs.push(...collectMapPairs(object.data))
-    }
-    traces.push(...buildCobwebBaseTraces(mapPairs))
+    const cobwebRange = mapRange ?? mapFunctionSamples?.range ?? null
+    const baseSamples = mapFunctionSamples
+      ? { x: mapFunctionSamples.x, y: mapFunctionSamples.y }
+      : null
+    traces.push(...buildCobwebBaseTraces(cobwebRange, baseSamples))
   }
   if (isTimeSeries) {
     let minT = Number.POSITIVE_INFINITY
@@ -1020,6 +1070,8 @@ function ViewportTile({
   system,
   entry,
   selectedNodeId,
+  mapRange,
+  mapFunctionSamples,
   draggingId,
   dragOverId,
   setDraggingId,
@@ -1107,10 +1159,28 @@ function ViewportTile({
   }, [diagram, selectedNodeId, system])
 
   const data = useMemo(() => {
-    if (scene) return buildSceneTraces(system, scene, selectedNodeId, timeSeriesMeta)
+    if (scene) {
+      return buildSceneTraces(
+        system,
+        scene,
+        selectedNodeId,
+        timeSeriesMeta,
+        mapRange,
+        mapFunctionSamples
+      )
+    }
     if (diagram) return diagramTraceState?.traces ?? []
     return []
-  }, [diagram, diagramTraceState, scene, selectedNodeId, system, timeSeriesMeta])
+  }, [
+    diagram,
+    diagramTraceState,
+    mapFunctionSamples,
+    mapRange,
+    scene,
+    selectedNodeId,
+    system,
+    timeSeriesMeta,
+  ])
 
   const layout = useMemo(() => {
     if (scene) return buildSceneLayout(system, scene)
@@ -1239,6 +1309,7 @@ export function ViewportPanel({
   onCreateBifurcation,
   onRenameViewport,
   onDeleteViewport,
+  onSampleMap1DFunction,
 }: ViewportPanelProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -1254,6 +1325,7 @@ export function ViewportPanel({
     x: number
     y: number
   } | null>(null)
+  const [mapFunctionSamples, setMapFunctionSamples] = useState<MapFunctionSamples | null>(null)
   const viewportHeights = system.ui.viewportHeights
   const tileRefs = useRef(new Map<string, HTMLDivElement | null>())
   const resizeRef = useRef<{
@@ -1261,6 +1333,7 @@ export function ViewportPanel({
     startHeight: number
     id: string
   } | null>(null)
+  const mapRequestKeyRef = useRef<string | null>(null)
 
   const viewports = useMemo(() => {
     const entries: ViewportEntry[] = []
@@ -1279,6 +1352,75 @@ export function ViewportPanel({
     }
     return entries
   }, [system])
+
+  const isMap1D = system.config.type === 'map' && system.config.varNames.length === 1
+  const mapRangeKey = useMemo(() => {
+    if (!isMap1D) return null
+    const range = collectMap1DRange(system)
+    if (!range) return null
+    return `${range[0]}|${range[1]}`
+  }, [isMap1D, system])
+  const mapRangeValues = useMemo(() => {
+    if (!mapRangeKey) return null
+    const parts = mapRangeKey.split('|').map((value) => Number(value))
+    if (parts.length !== 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) {
+      return null
+    }
+    return [parts[0], parts[1]] as [number, number]
+  }, [mapRangeKey])
+  const mapConfigJson = isMap1D
+    ? JSON.stringify({
+        ...system.config,
+        equations: [...system.config.equations],
+        params: [...system.config.params],
+        paramNames: [...system.config.paramNames],
+        varNames: [...system.config.varNames],
+      })
+    : null
+  const mapConfig = useMemo(() => {
+    if (!mapConfigJson) return null
+    return JSON.parse(mapConfigJson) as SampleMap1DFunctionRequest['system']
+  }, [mapConfigJson])
+  const mapKey = mapConfigJson && mapRangeKey ? `${mapConfigJson}|${mapRangeKey}` : null
+  const activeMapFunction =
+    mapFunctionSamples && mapFunctionSamples.key === mapKey ? mapFunctionSamples : null
+
+  useEffect(() => {
+    if (!isMap1D || !mapKey || !mapConfig || !mapRangeValues || !onSampleMap1DFunction) {
+      mapRequestKeyRef.current = null
+      return
+    }
+    if (mapRequestKeyRef.current === mapKey) return
+
+    mapRequestKeyRef.current = mapKey
+    const controller = new AbortController()
+    const request: SampleMap1DFunctionRequest = {
+      system: mapConfig,
+      min: mapRangeValues[0],
+      max: mapRangeValues[1],
+      samples: MAP_FUNCTION_SAMPLE_COUNT,
+    }
+
+    onSampleMap1DFunction(request, { signal: controller.signal })
+      .then((result) => {
+        if (controller.signal.aborted || mapRequestKeyRef.current !== mapKey) return
+        setMapFunctionSamples({
+          key: mapKey,
+          range: mapRangeValues,
+          x: result.x,
+          y: result.y,
+        })
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return
+        if (err instanceof Error && err.name === 'AbortError') return
+        setMapFunctionSamples(null)
+      })
+
+    return () => {
+      controller.abort()
+    }
+  }, [isMap1D, mapConfig, mapKey, mapRangeValues, onSampleMap1DFunction])
 
   useEffect(() => {
     if (!createMenu && !nodeContextMenu) return
@@ -1444,6 +1586,8 @@ export function ViewportPanel({
                 system={system}
                 entry={entry}
                 selectedNodeId={selectedNodeId}
+                mapRange={mapRangeValues}
+                mapFunctionSamples={activeMapFunction}
                 draggingId={draggingId}
                 dragOverId={dragOverId}
                 setDraggingId={setDraggingId}

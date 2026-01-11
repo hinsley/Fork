@@ -12,6 +12,8 @@ import type {
   FoldCurveContinuationRequest,
   HopfCurveContinuationRequest,
   LyapunovExponentsRequest,
+  SampleMap1DFunctionRequest,
+  SampleMap1DFunctionResult,
   SolveEquilibriumRequest,
   SolveEquilibriumResult,
   SimulateOrbitRequest,
@@ -22,6 +24,7 @@ import type {
 
 type WorkerRequest =
   | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
+  | { id: string; kind: 'sampleMap1DFunction'; payload: SampleMap1DFunctionRequest }
   | { id: string; kind: 'computeLyapunovExponents'; payload: LyapunovExponentsRequest }
   | { id: string; kind: 'computeCovariantLyapunovVectors'; payload: CovariantLyapunovRequest }
   | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
@@ -40,6 +43,7 @@ type WorkerResponse =
       ok: true
       result:
         | SimulateOrbitResult
+        | SampleMap1DFunctionResult
         | number[]
         | CovariantLyapunovResponse
         | SolveEquilibriumResult
@@ -209,6 +213,51 @@ async function runOrbit(request: SimulateOrbitRequest, signal: AbortSignal): Pro
     t_end: t,
     dt: request.dt,
   }
+}
+
+async function runSampleMap1DFunction(
+  request: SampleMap1DFunctionRequest,
+  signal: AbortSignal
+): Promise<SampleMap1DFunctionResult> {
+  const wasm = await loadWasm()
+  const { system: config } = request
+  if (config.type !== 'map' || config.varNames.length !== 1) {
+    return { x: [], y: [] }
+  }
+
+  const min = Math.min(request.min, request.max)
+  const max = Math.max(request.min, request.max)
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return { x: [], y: [] }
+  }
+
+  const sampleCount = Math.max(1, Math.floor(request.samples))
+  const steps = Math.max(sampleCount - 1, 0)
+  const xValues: number[] = []
+  const yValues: number[] = []
+
+  const system = new wasm.WasmSystem(
+    config.equations,
+    new Float64Array(config.params),
+    config.paramNames,
+    config.varNames,
+    config.solver,
+    config.type
+  )
+
+  for (let i = 0; i < sampleCount; i += 1) {
+    abortIfNeeded(signal)
+    const t = steps === 0 ? min : min + ((max - min) * i) / steps
+    system.set_t(0)
+    system.set_state(new Float64Array([t]))
+    system.step(1)
+    const next = system.get_state()[0]
+    if (!Number.isFinite(next)) continue
+    xValues.push(t)
+    yValues.push(next)
+  }
+
+  return { x: xValues, y: yValues }
 }
 
 async function runLyapunovExponents(
@@ -506,6 +555,13 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   try {
     if (message.kind === 'simulateOrbit') {
       const result = await runOrbit(message.payload, controller.signal)
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'sampleMap1DFunction') {
+      const result = await runSampleMap1DFunction(message.payload, controller.signal)
       const response: WorkerResponse = { id: message.id, ok: true, result }
       ctx.postMessage(response)
       return

@@ -11,6 +11,8 @@ import type {
   ForkCoreClient,
   HopfCurveContinuationRequest,
   LyapunovExponentsRequest,
+  SampleMap1DFunctionRequest,
+  SampleMap1DFunctionResult,
   SolveEquilibriumRequest,
   SolveEquilibriumResult,
   SimulateOrbitRequest,
@@ -64,6 +66,42 @@ export class MockForkCoreClient implements ForkCoreClient {
           t_end: t,
           dt: request.dt,
         }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async sampleMap1DFunction(
+    request: SampleMap1DFunctionRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<SampleMap1DFunctionResult> {
+    const job = this.queue.enqueue(
+      'sampleMap1DFunction',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const min = Math.min(request.min, request.max)
+        const max = Math.max(request.min, request.max)
+        if (!Number.isFinite(min) || !Number.isFinite(max)) {
+          return { x: [], y: [] }
+        }
+
+        const sampleCount = Math.max(1, Math.floor(request.samples))
+        const steps = Math.max(sampleCount - 1, 0)
+        const x: number[] = []
+        const y: number[] = []
+        for (let i = 0; i < sampleCount; i += 1) {
+          const t = steps === 0 ? min : min + ((max - min) * i) / steps
+          x.push(t)
+          y.push(t)
+        }
+        return { x, y }
       },
       opts
     )

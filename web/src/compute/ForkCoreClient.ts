@@ -29,6 +29,18 @@ export type SimulateOrbitResult = {
   dt: number
 }
 
+export type SampleMap1DFunctionRequest = {
+  system: SystemConfig
+  min: number
+  max: number
+  samples: number
+}
+
+export type SampleMap1DFunctionResult = {
+  x: number[]
+  y: number[]
+}
+
 export type LyapunovExponentsRequest = {
   system: SystemConfig
   startState: number[]
@@ -149,6 +161,10 @@ export interface ForkCoreClient {
     request: SimulateOrbitRequest,
     opts?: { signal?: AbortSignal }
   ): Promise<SimulateOrbitResult>
+  sampleMap1DFunction(
+    request: SampleMap1DFunctionRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<SampleMap1DFunctionResult>
   computeLyapunovExponents(
     request: LyapunovExponentsRequest,
     opts?: { signal?: AbortSignal }

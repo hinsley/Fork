@@ -5,6 +5,8 @@ import type {
   CovariantLyapunovResponse,
   ForkCoreClient,
   LyapunovExponentsRequest as CoreLyapunovExponentsRequest,
+  SampleMap1DFunctionRequest,
+  SampleMap1DFunctionResult,
   ValidateSystemResult,
 } from '../compute/ForkCoreClient'
 import type { JobTiming } from '../compute/jobQueue'
@@ -297,6 +299,10 @@ type AppActions = {
   createOrbitObject: (name: string) => Promise<string | null>
   createEquilibriumObject: (name: string) => Promise<string | null>
   runOrbit: (request: OrbitRunRequest) => Promise<void>
+  sampleMap1DFunction: (
+    request: SampleMap1DFunctionRequest,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<SampleMap1DFunctionResult>
   computeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
   computeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
   solveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
@@ -726,6 +732,22 @@ export function AppProvider({
       }
     },
     [client, state.system, store]
+  )
+
+  const sampleMap1DFunction = useCallback(
+    async (request: SampleMap1DFunctionRequest, opts?: { signal?: AbortSignal }) => {
+      try {
+        return await client.sampleMap1DFunction(request, opts)
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          throw err
+        }
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+        throw err
+      }
+    },
+    [client]
   )
 
   const computeLyapunovExponents = useCallback(
@@ -1779,6 +1801,7 @@ export function AppProvider({
       createOrbitObject,
       createEquilibriumObject,
       runOrbit,
+      sampleMap1DFunction,
       computeLyapunovExponents,
       computeCovariantLyapunovVectors,
       solveEquilibrium,
@@ -1798,6 +1821,7 @@ export function AppProvider({
       createLimitCycleObject,
       createOrbitObject,
       runOrbit,
+      sampleMap1DFunction,
       computeLyapunovExponents,
       computeCovariantLyapunovVectors,
       solveEquilibrium,

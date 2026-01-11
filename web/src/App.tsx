@@ -292,6 +292,7 @@ function App() {
                 onCreateBifurcation={createBifurcation}
                 onRenameViewport={actions.renameNode}
                 onDeleteViewport={actions.deleteNode}
+                onSampleMap1DFunction={actions.sampleMap1DFunction}
               />
             </Panel>
           </div>
