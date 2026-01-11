@@ -14,6 +14,17 @@ use super::types::ContinuationPoint;
 /// Uses Gram-Schmidt eigenvalue decomposition first, falling back to
 /// bordered linear solve if that fails.
 pub fn compute_nullspace_tangent(j_ext: &DMatrix<f64>) -> Result<DVector<f64>> {
+    let dim = j_ext.nrows();
+    if dim == 0 {
+        bail!("Failed to compute tangent: zero-dimensional system");
+    }
+    if j_ext.ncols() != dim + 1 {
+        bail!(
+            "Failed to compute tangent: expected {} columns, got {}",
+            dim + 1,
+            j_ext.ncols()
+        );
+    }
     if let Some(vec) = try_gram_eigen(j_ext) {
         return Ok(vec);
     }
@@ -82,6 +93,13 @@ fn compute_tangent_linear_solve(j_ext: &DMatrix<f64>) -> Result<DVector<f64>> {
     let dim = j_ext.nrows();
     if dim == 0 {
         bail!("Failed to compute tangent: zero-dimensional system");
+    }
+    if j_ext.ncols() != dim + 1 {
+        bail!(
+            "Failed to compute tangent: expected {} columns, got {}",
+            dim + 1,
+            j_ext.ncols()
+        );
     }
 
     let mut a = DMatrix::zeros(dim + 1, dim + 1);
@@ -263,6 +281,14 @@ mod tests {
         let tangent = compute_nullspace_tangent(&j_ext).expect("tangent should compute");
         let residual = 1.0 * tangent[0] + 2.0 * tangent[1];
         assert!(residual.abs() < 1e-8);
+    }
+
+    #[test]
+    fn compute_nullspace_tangent_rejects_invalid_shape() {
+        let j_ext = DMatrix::from_row_slice(2, 2, &[1.0, 0.0, 0.0, 1.0]);
+        let err = compute_nullspace_tangent(&j_ext).expect_err("expected shape error");
+        let message = format!("{err}");
+        assert!(message.contains("expected 3 columns"));
     }
 
     #[test]
