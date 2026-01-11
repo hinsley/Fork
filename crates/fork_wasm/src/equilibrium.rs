@@ -392,6 +392,18 @@ mod wasm_value_tests {
         .expect("system should build")
     }
 
+    fn build_identity_map_system() -> WasmSystem {
+        WasmSystem::new(
+            vec!["x".to_string()],
+            vec![],
+            vec![],
+            vec!["x".to_string()],
+            "discrete",
+            "map",
+        )
+        .expect("system should build")
+    }
+
     #[cfg(target_arch = "wasm32")]
     #[test]
     fn solve_equilibrium_converges_for_linear_system() {
@@ -403,6 +415,31 @@ mod wasm_value_tests {
 
         assert!(result.state[0].abs() < 1e-6);
         assert!(result.iterations <= 8);
+    }
+
+    #[test]
+    fn solve_equilibrium_reports_core_errors() {
+        let system = build_linear_system();
+        let err = system
+            .solve_equilibrium(vec![1.0], 0, 1.0)
+            .expect_err("expected error");
+
+        let message = err.as_string().unwrap_or_default();
+        assert!(message.contains("Equilibrium solve failed"));
+        assert!(message.contains("max_steps must be greater than zero"));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    fn solve_equilibrium_converges_for_identity_map() {
+        let system = build_identity_map_system();
+        let result_val = system
+            .solve_equilibrium(vec![2.0], 4, 1.0)
+            .expect("solve equilibrium");
+        let result: EquilibriumResult = from_value(result_val).expect("decode result");
+
+        assert!(result.residual_norm.abs() < 1e-12);
+        assert_eq!(result.iterations, 0);
     }
 
     #[test]
