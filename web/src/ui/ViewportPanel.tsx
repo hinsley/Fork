@@ -287,7 +287,7 @@ function buildClvTraces(nodeId: string, orbit: OrbitObject, clv: ClvRenderStyle)
           width: clv.thickness,
         },
         showlegend: false,
-        hoverinfo: 'skip',
+        hoverinfo: 'none',
       })
     }
 
@@ -310,7 +310,7 @@ function buildClvTraces(nodeId: string, orbit: OrbitObject, clv: ClvRenderStyle)
           [1, color],
         ],
         showscale: false,
-        hoverinfo: 'skip',
+        hoverinfo: 'none',
       } as Data)
     }
   })
