@@ -72,6 +72,11 @@ describe('continuation helpers', () => {
     ])
   })
 
+  it('returns an empty array for missing eigenvalues', () => {
+    expect(normalizeEigenvalueArray(null)).toEqual([])
+    expect(normalizeEigenvalueArray({})).toEqual([])
+  })
+
   it('extracts a Hopf omega from eigenvalues', () => {
     const point: ContinuationPoint = {
       ...basePoint,
@@ -83,6 +88,27 @@ describe('continuation helpers', () => {
     }
 
     expect(extractHopfOmega(point)).toBe(3)
+  })
+
+  it('uses the smallest real part to pick a Hopf omega', () => {
+    const point: ContinuationPoint = {
+      ...basePoint,
+      eigenvalues: [
+        { re: 0.2, im: 4 },
+        { re: 0.01, im: 2 },
+      ],
+    }
+
+    expect(extractHopfOmega(point)).toBe(2)
+  })
+
+  it('falls back to 1.0 when Hopf eigenvalues are unavailable', () => {
+    const point: ContinuationPoint = {
+      ...basePoint,
+      eigenvalues: [{ re: 1, im: 0 }],
+    }
+
+    expect(extractHopfOmega(point)).toBe(1)
   })
 
   it('normalizes eigenvalues across branch points', () => {
@@ -135,6 +161,51 @@ describe('continuation helpers', () => {
     expect(serialized.points[1].eigenvalues).toEqual([[3, 4]])
   })
 
+  it('preserves explicit indices when they match the point count', () => {
+    const branch: ContinuationObject = {
+      ...baseBranch,
+      data: {
+        ...baseBranch.data,
+        points: [basePoint, { ...basePoint, param_value: 1 }],
+        indices: [5, 6],
+      },
+    }
+
+    const serialized = serializeBranchDataForWasm(branch)
+
+    expect(serialized.indices).toEqual([5, 6])
+  })
+
+  it('normalizes limit-cycle branch metadata defaults', () => {
+    const branch: ContinuationObject = {
+      ...baseBranch,
+      branchType: 'limit_cycle',
+      data: {
+        ...baseBranch.data,
+        branch_type: 'LimitCycle' as unknown as ContinuationObject['data']['branch_type'],
+      },
+    }
+
+    const serialized = serializeBranchDataForWasm(branch)
+
+    expect(serialized.branch_type).toEqual({ type: 'LimitCycle', ntst: 20, ncol: 4 })
+  })
+
+  it('keeps explicit limit-cycle settings', () => {
+    const branch: ContinuationObject = {
+      ...baseBranch,
+      branchType: 'limit_cycle',
+      data: {
+        ...baseBranch.data,
+        branch_type: { type: 'LimitCycle', ntst: 12, ncol: 5 },
+      },
+    }
+
+    const serialized = serializeBranchDataForWasm(branch)
+
+    expect(serialized.branch_type).toEqual({ type: 'LimitCycle', ntst: 12, ncol: 5 })
+  })
+
   it('preserves provided indices and sorts by logical order', () => {
     const data = {
       points: [basePoint, { ...basePoint, param_value: 1 }],
@@ -144,6 +215,16 @@ describe('continuation helpers', () => {
 
     expect(ensureBranchIndices(data)).toEqual([2, 0])
     expect(buildSortedArrayOrder([3, 1, 2])).toEqual([1, 2, 0])
+  })
+
+  it('generates indices when missing or mismatched', () => {
+    const data = {
+      points: [basePoint, { ...basePoint, param_value: 1 }],
+      bifurcations: [],
+      indices: [1],
+    }
+
+    expect(ensureBranchIndices(data)).toEqual([0, 1])
   })
 
   it('derives branch parameters from branch, parent, or system config', () => {
@@ -165,6 +246,13 @@ describe('continuation helpers', () => {
 
     const withoutBranchParams = { ...baseBranch }
     expect(getBranchParams(withObject, withoutBranchParams)).toEqual([9, 8])
+  })
+
+  it('falls back to system params when no branch or parent params match', () => {
+    const system = createSystem({ name: 'Sys', config: baseConfig })
+    const branch = { ...baseBranch, parentObject: 'Missing' }
+
+    expect(getBranchParams(system, branch)).toEqual(baseConfig.params)
   })
 
   it('formats bifurcation labels', () => {
