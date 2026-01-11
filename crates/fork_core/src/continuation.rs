@@ -42,7 +42,7 @@ pub use util::{
 
 use crate::autodiff::Dual;
 use crate::equation_engine::EquationSystem;
-use crate::equilibrium::SystemKind;
+use crate::equilibrium::{compute_system_jacobian, SystemKind};
 use crate::traits::DynamicalSystem;
 use anyhow::{anyhow, bail, Result};
 use nalgebra::{DMatrix, DVector};
@@ -1797,14 +1797,27 @@ fn compute_point_diagnostics(
     let old_param = system.params[param_index];
     system.params[param_index] = param;
 
-    let jac = crate::equilibrium::compute_jacobian(system, kind, &state)?;
+    let system_jac = compute_system_jacobian(system, &state)?;
 
     system.params[param_index] = old_param;
 
-    let mat = DMatrix::from_row_slice(dim, dim, &jac);
-    let fold = mat.determinant();
+    let mut residual_jac = system_jac.clone();
+    if matches!(kind, SystemKind::Map) {
+        for i in 0..dim {
+            residual_jac[i * dim + i] -= 1.0;
+        }
+    }
 
-    let eigenvalues = compute_eigenvalues(&mat)?;
+    let residual_mat = DMatrix::from_row_slice(dim, dim, &residual_jac);
+    let fold = residual_mat.determinant();
+
+    let eigen_mat = if matches!(kind, SystemKind::Map) {
+        DMatrix::from_row_slice(dim, dim, &system_jac)
+    } else {
+        residual_mat.clone()
+    };
+
+    let eigenvalues = compute_eigenvalues(&eigen_mat)?;
     let (hopf, neutral) = if matches!(kind, SystemKind::Flow) && dim >= 2 {
         (
             hopf_test_function(&eigenvalues).re,

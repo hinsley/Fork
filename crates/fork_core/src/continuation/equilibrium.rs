@@ -5,7 +5,7 @@ use super::{
 };
 use crate::autodiff::Dual;
 use crate::equation_engine::EquationSystem;
-use crate::equilibrium::{compute_jacobian, SystemKind};
+use crate::equilibrium::{compute_jacobian, compute_system_jacobian, SystemKind};
 use crate::traits::DynamicalSystem;
 use anyhow::{bail, Result};
 use nalgebra::{DMatrix, DVector};
@@ -95,13 +95,25 @@ impl<'a> ContinuationProblem for EquilibriumContinuationProblem<'a> {
         let state: Vec<f64> = aug_state.rows(1, dim).iter().cloned().collect();
         let kind = self.kind;
 
-        let mat = self.with_param(param, |system| {
-            let jac = compute_jacobian(system, kind, &state)?;
-            Ok(DMatrix::from_row_slice(dim, dim, &jac))
+        let (residual_mat, eigen_mat) = self.with_param(param, |system| {
+            let system_jac = compute_system_jacobian(system, &state)?;
+            let mut residual_jac = system_jac.clone();
+            if matches!(kind, SystemKind::Map) {
+                for i in 0..dim {
+                    residual_jac[i * dim + i] -= 1.0;
+                }
+            }
+            let residual_mat = DMatrix::from_row_slice(dim, dim, &residual_jac);
+            let eigen_mat = if matches!(kind, SystemKind::Map) {
+                DMatrix::from_row_slice(dim, dim, &system_jac)
+            } else {
+                residual_mat.clone()
+            };
+            Ok((residual_mat, eigen_mat))
         })?;
 
-        let fold = mat.determinant();
-        let eigenvalues = compute_eigenvalues(&mat)?;
+        let fold = residual_mat.determinant();
+        let eigenvalues = compute_eigenvalues(&eigen_mat)?;
         let (hopf, neutral) = if matches!(self.kind, SystemKind::Flow) && dim >= 2 {
             (
                 hopf_test_function(&eigenvalues).re,

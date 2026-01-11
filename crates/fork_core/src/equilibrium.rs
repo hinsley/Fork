@@ -116,7 +116,7 @@ pub fn solve_equilibrium(
         residual_norm = l2_norm(&residual);
     }
 
-    let jacobian = compute_jacobian(system, kind, &state)?;
+    let jacobian = compute_system_jacobian(system, &state)?;
     let eigenpairs = compute_eigenpairs(dim, &jacobian)
         .context("Failed to compute eigenvalues/eigenvectors of Jacobian.")?;
 
@@ -147,6 +147,18 @@ pub fn compute_jacobian(
     state: &[f64],
 ) -> Result<Vec<f64>> {
     let dim = system.equations.len();
+    let mut jacobian = compute_system_jacobian(system, state)?;
+    if matches!(kind, SystemKind::Map) {
+        for i in 0..dim {
+            jacobian[i * dim + i] -= 1.0;
+        }
+    }
+
+    Ok(jacobian)
+}
+
+pub fn compute_system_jacobian(system: &EquationSystem, state: &[f64]) -> Result<Vec<f64>> {
+    let dim = system.equations.len();
     let mut jacobian = vec![0.0; dim * dim];
     let mut dual_state = vec![Dual::new(0.0, 0.0); dim];
     let mut dual_out = vec![Dual::new(0.0, 0.0); dim];
@@ -158,11 +170,7 @@ pub fn compute_jacobian(
         }
         system.apply(t_dual, &dual_state, &mut dual_out);
         for i in 0..dim {
-            let deriv = dual_out[i].eps;
-            jacobian[i * dim + j] = match kind {
-                SystemKind::Flow => deriv,
-                SystemKind::Map => deriv - if i == j { 1.0 } else { 0.0 },
-            };
+            jacobian[i * dim + j] = dual_out[i].eps;
         }
     }
 
@@ -220,5 +228,41 @@ fn normalize_complex_vector(vec: &mut [Complex<f64>]) {
         for entry in vec {
             *entry /= norm;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{solve_equilibrium, NewtonSettings, SystemKind};
+    use crate::equation_engine::{parse, Compiler, EquationSystem};
+
+    #[test]
+    fn tent_map_default_system_eigenvalue_matches_map_jacobian() {
+        // Matches the TentMap entry in web/src/system/defaultSystems.ts.
+        let equation = "mu * (0.5 - (((x - 0.5) ^ 2) ^ 0.5))";
+        let param_names = vec!["mu".to_string()];
+        let var_names = vec!["x".to_string()];
+        let compiler = Compiler::new(&var_names, &param_names);
+        let expr = parse(equation).expect("tent map equation should parse");
+        let bytecode = compiler.compile(&expr);
+
+        let mut system = EquationSystem::new(vec![bytecode], vec![2.0]);
+        system.set_maps(compiler.param_map, compiler.var_map);
+
+        let result = solve_equilibrium(
+            &system,
+            SystemKind::Map,
+            &[0.6],
+            NewtonSettings::default(),
+        )
+        .expect("tent map equilibrium should converge");
+
+        assert_eq!(result.eigenpairs.len(), 1);
+        let eig = result.eigenpairs[0].value.re;
+        assert!(
+            (eig + 2.0).abs() < 1e-9,
+            "expected eigenvalue near -2, got {}",
+            eig
+        );
     }
 }

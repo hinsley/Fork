@@ -2,8 +2,8 @@
 
 use crate::system::{build_system, SystemType, WasmSystem};
 use fork_core::equilibrium::{
-    solve_equilibrium as core_equilibrium_solver, EigenPair, EquilibriumResult, NewtonSettings,
-    SystemKind,
+    compute_system_jacobian, solve_equilibrium as core_equilibrium_solver, EigenPair,
+    EquilibriumResult, NewtonSettings, SystemKind,
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::traits::DynamicalSystem;
@@ -207,12 +207,8 @@ impl WasmEquilibriumSolverRunner {
             return Err(JsValue::from_str("Equilibrium solver has not converged yet."));
         }
 
-        let jacobian = fork_core::equilibrium::compute_jacobian(
-            &state.system,
-            state.kind,
-            &state.state,
-        )
-        .map_err(|e| JsValue::from_str(&format!("Jacobian failed: {}", e)))?;
+        let jacobian = compute_system_jacobian(&state.system, &state.state)
+            .map_err(|e| JsValue::from_str(&format!("Jacobian failed: {}", e)))?;
         let eigenpairs = compute_equilibrium_eigenpairs(state.system.equations.len(), &jacobian)
             .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
 
