@@ -124,7 +124,7 @@ describe('continuation helpers', () => {
           },
         ],
         indices: [12],
-        branch_type: { LimitCycle: { ntst: 10 } } as ContinuationObject['data']['branch_type'],
+        branch_type: { LimitCycle: { ntst: 10 } } as unknown as ContinuationObject['data']['branch_type'],
       },
     }
 

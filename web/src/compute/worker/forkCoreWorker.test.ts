@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { SystemConfig } from '../../system/types'
 
 type WorkerScope = {
   postMessage: ReturnType<typeof vi.fn>
@@ -15,7 +16,7 @@ const wasmState = {
   lastRunStepsArg: null as number | null,
 }
 
-const baseSystem = {
+const baseSystem: SystemConfig = {
   name: 'Test System',
   equations: ['x'],
   params: [],
@@ -162,7 +163,7 @@ describe('forkCoreWorker', () => {
       },
     }
 
-    await handler({ data: message } as MessageEvent<Record<string, unknown>>)
+    await handler({ data: message } as unknown as MessageEvent<Record<string, unknown>>)
 
     expect(wasmState.lastRunStepsArg).toBe(2)
     expect(workerScope.postMessage).toHaveBeenCalledTimes(3)
@@ -201,7 +202,7 @@ describe('forkCoreWorker', () => {
       },
     }
 
-    await handler({ data: message } as MessageEvent<Record<string, unknown>>)
+    await handler({ data: message } as unknown as MessageEvent<Record<string, unknown>>)
 
     expect(workerScope.postMessage).toHaveBeenCalledTimes(1)
     const response = workerScope.postMessage.mock.calls[0][0] as {

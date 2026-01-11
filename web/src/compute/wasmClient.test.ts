@@ -5,6 +5,7 @@ import type {
   LyapunovExponentsRequest,
   SimulateOrbitRequest,
 } from './ForkCoreClient'
+import type { SystemConfig } from '../system/types'
 import { WasmForkCoreClient } from './wasmClient'
 import { enableDeterministicMode } from '../utils/determinism'
 
@@ -47,7 +48,7 @@ function flushQueue() {
   })
 }
 
-const baseSystem = {
+const baseSystem: SystemConfig = {
   name: 'Test System',
   equations: ['x'],
   params: [],
