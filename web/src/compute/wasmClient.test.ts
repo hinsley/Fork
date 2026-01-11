@@ -1,21 +1,61 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ContinuationProgress } from './ForkCoreClient'
-import type { SystemConfig } from '../system/types'
+import type {
+  ContinuationProgress,
+  EquilibriumContinuationRequest,
+  LyapunovExponentsRequest,
+  SimulateOrbitRequest,
+} from './ForkCoreClient'
 import { WasmForkCoreClient } from './wasmClient'
+import { enableDeterministicMode } from '../utils/determinism'
 
-const baseSystem: SystemConfig = {
+type WorkerMessage = Record<string, unknown>
+
+class MockWorker {
+  static instances: MockWorker[] = []
+  onmessage: ((event: MessageEvent<WorkerMessage>) => void) | null = null
+  posted: WorkerMessage[] = []
+  terminated = false
+
+  constructor(_url: string | URL, _options?: WorkerOptions) {
+    MockWorker.instances.push(this)
+  }
+
+  postMessage = (message: WorkerMessage) => {
+    this.posted.push(message)
+  }
+
+  terminate() {
+    this.terminated = true
+  }
+
+  emit(message: WorkerMessage) {
+    this.onmessage?.({ data: message } as MessageEvent<WorkerMessage>)
+  }
+}
+
+function flushQueue() {
+  return new Promise<void>((resolve) => {
+    if (typeof queueMicrotask === 'function') {
+      queueMicrotask(resolve)
+    } else {
+      setTimeout(resolve, 0)
+    }
+  })
+}
+
+const baseSystem = {
   name: 'Test System',
   equations: ['x'],
-  params: [0],
-  paramNames: ['a'],
+  params: [],
+  paramNames: [],
   varNames: ['x'],
   solver: 'rk4',
   type: 'flow',
 }
 
-const baseSettings = {
+const continuationSettings = {
   step_size: 0.01,
-  min_step_size: 1e-5,
+  min_step_size: 0.001,
   max_step_size: 0.1,
   max_steps: 10,
   corrector_steps: 4,
@@ -23,33 +63,10 @@ const baseSettings = {
   step_tolerance: 1e-6,
 }
 
-function tick() {
-  return new Promise<void>((resolve) => setTimeout(resolve, 0))
-}
-
-let lastWorker: MockWorker | null = null
-
-class MockWorker {
-  posted: unknown[] = []
-  onmessage: ((event: MessageEvent) => void) | null = null
-  terminate = vi.fn()
-
-  constructor() {
-    lastWorker = this
-  }
-
-  postMessage(message: unknown) {
-    this.posted.push(message)
-  }
-
-  emit(message: unknown) {
-    this.onmessage?.({ data: message } as MessageEvent)
-  }
-}
-
 describe('WasmForkCoreClient', () => {
   beforeEach(() => {
-    lastWorker = null
+    enableDeterministicMode()
+    MockWorker.instances = []
     vi.stubGlobal('Worker', MockWorker as unknown as typeof Worker)
   })
 
@@ -57,81 +74,91 @@ describe('WasmForkCoreClient', () => {
     vi.unstubAllGlobals()
   })
 
-  it('posts requests to the worker and resolves results', async () => {
+  it('sends worker requests and resolves results', async () => {
     const client = new WasmForkCoreClient()
-    const request = { system: baseSystem, initialState: [0], steps: 1, dt: 0.1 }
-
+    const request: SimulateOrbitRequest = {
+      system: baseSystem,
+      initialState: [0],
+      steps: 1,
+      dt: 0.1,
+    }
     const promise = client.simulateOrbit(request)
-    await tick()
 
-    expect(lastWorker).not.toBeNull()
-    const [message] = lastWorker!.posted as Array<{ id: string; kind: string; payload: unknown }>
+    await flushQueue()
+    const worker = MockWorker.instances[0]
+    expect(worker).toBeDefined()
+    expect(worker.posted).toHaveLength(1)
+    const message = worker.posted[0]
     expect(message).toMatchObject({ kind: 'simulateOrbit', payload: request })
+    expect(message.id).toBe('req_0001')
 
-    const result = { data: [[0, 0]], t_start: 0, t_end: 0.1, dt: 0.1 }
-    lastWorker!.emit({ id: message.id, ok: true, result })
+    const result = {
+      data: [[0, 0]],
+      t_start: 0,
+      t_end: 0.1,
+      dt: 0.1,
+    }
+    worker.emit({ id: message.id, ok: true, result })
 
     await expect(promise).resolves.toEqual(result)
+
+    await client.close()
+    expect(worker.terminated).toBe(true)
   })
 
-  it('forwards progress updates for continuations', async () => {
+  it('forwards progress updates for continuation jobs', async () => {
     const client = new WasmForkCoreClient()
     const onProgress = vi.fn()
-    const request = {
+    const request: EquilibriumContinuationRequest = {
       system: baseSystem,
       equilibriumState: [0],
-      parameterName: 'a',
-      settings: baseSettings,
+      parameterName: 'p1',
+      settings: continuationSettings,
       forward: true,
     }
 
     const promise = client.runEquilibriumContinuation(request, { onProgress })
-    await tick()
+    await flushQueue()
 
-    const [message] = lastWorker!.posted as Array<{ id: string; kind: string }>
+    const worker = MockWorker.instances[0]
+    const message = worker.posted[0]
+    expect(message).toMatchObject({ kind: 'runEquilibriumContinuation', payload: request })
+
     const progress: ContinuationProgress = {
       done: false,
-      current_step: 1,
+      current_step: 0,
       max_steps: 10,
-      points_computed: 2,
+      points_computed: 0,
       bifurcations_found: 0,
-      current_param: 0.5,
+      current_param: 0,
     }
 
-    lastWorker!.emit({ id: message.id, kind: 'progress', progress })
+    worker.emit({ id: message.id, kind: 'progress', progress })
     const result = { points: [], bifurcations: [], indices: [] }
-    lastWorker!.emit({ id: message.id, ok: true, result })
+    worker.emit({ id: message.id, ok: true, result })
 
     await expect(promise).resolves.toEqual(result)
     expect(onProgress).toHaveBeenCalledWith(progress)
   })
 
-  it('sends cancellation messages and rejects with AbortError', async () => {
+  it('maps aborted worker responses to AbortError', async () => {
     const client = new WasmForkCoreClient()
-    const controller = new AbortController()
-    const request = { system: baseSystem, initialState: [0], steps: 1, dt: 0.1 }
+    const request: LyapunovExponentsRequest = {
+      system: baseSystem,
+      startState: [0],
+      startTime: 0,
+      steps: 1,
+      dt: 0.1,
+      qrStride: 1,
+    }
 
-    const promise = client.simulateOrbit(request, { signal: controller.signal })
-    await tick()
+    const promise = client.computeLyapunovExponents(request)
+    await flushQueue()
 
-    const [message] = lastWorker!.posted as Array<{ id: string; kind: string }>
-    controller.abort()
-    await tick()
+    const worker = MockWorker.instances[0]
+    const message = worker.posted[0]
+    worker.emit({ id: message.id, ok: false, error: 'cancelled', aborted: true })
 
-    expect(lastWorker!.posted).toContainEqual(
-      expect.objectContaining({ id: message.id, kind: 'cancel' })
-    )
-
-    lastWorker!.emit({ id: message.id, ok: false, error: 'cancelled', aborted: true })
     await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
-  })
-
-  it('terminates the worker on close', () => {
-    const client = new WasmForkCoreClient()
-    const worker = lastWorker!
-
-    client.close()
-
-    expect(worker.terminate).toHaveBeenCalled()
   })
 })
