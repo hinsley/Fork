@@ -182,7 +182,7 @@ function buildCobwebBaseTraces(
   return traces
 }
 
-function buildClvTraces(orbit: OrbitObject, clv: ClvRenderStyle): Data[] {
+function buildClvTraces(nodeId: string, orbit: OrbitObject, clv: ClvRenderStyle): Data[] {
   const covariant = orbit.covariantVectors
   if (!covariant || covariant.vectors.length === 0) return []
   if (covariant.dim < 3 || orbit.data.length === 0) return []
@@ -281,6 +281,7 @@ function buildClvTraces(orbit: OrbitObject, clv: ClvRenderStyle): Data[] {
         x: lineX,
         y: lineY,
         z: lineZ,
+        uid: nodeId,
         line: {
           color,
           width: clv.thickness,
@@ -299,6 +300,7 @@ function buildClvTraces(orbit: OrbitObject, clv: ClvRenderStyle): Data[] {
         u: headU,
         v: headV,
         w: headW,
+        uid: nodeId,
         anchor: 'tail',
         // Use raw sizing to avoid per-trace scaling differences between CLVs.
         sizemode: 'raw',
@@ -736,7 +738,7 @@ function buildSceneTraces(
     if (dimension >= 3 && system.config.varNames.length >= 3) {
       const clvRender = resolveClvRender(node.render?.clv, object.covariantVectors?.dim)
       if (clvRender.enabled) {
-        traces.push(...buildClvTraces(object, clvRender))
+        traces.push(...buildClvTraces(nodeId, object, clvRender))
       }
     }
   }
