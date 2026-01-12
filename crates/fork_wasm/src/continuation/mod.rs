@@ -4,6 +4,7 @@
 //! to keep each workflow focused and easier to navigate.
 
 mod curve_runners;
+mod codim1_extension_runner;
 mod eq_runner;
 mod extension_runner;
 mod lc_runner;
@@ -14,6 +15,7 @@ pub use curve_runners::{
     WasmFoldCurveRunner, WasmHopfCurveRunner, WasmLPCCurveRunner, WasmNSCurveRunner,
     WasmPDCurveRunner,
 };
+pub use codim1_extension_runner::WasmCodim1CurveExtensionRunner;
 pub use eq_runner::WasmEquilibriumRunner;
 pub use extension_runner::WasmContinuationExtensionRunner;
 pub use lc_runner::WasmLimitCycleRunner;
@@ -21,9 +23,9 @@ pub use lc_runner::WasmLimitCycleRunner;
 #[cfg(test)]
 mod tests {
     use super::{
-        WasmContinuationExtensionRunner, WasmEquilibriumRunner, WasmFoldCurveRunner,
-        WasmHopfCurveRunner, WasmLPCCurveRunner, WasmLimitCycleRunner, WasmNSCurveRunner,
-        WasmPDCurveRunner,
+        WasmCodim1CurveExtensionRunner, WasmContinuationExtensionRunner, WasmEquilibriumRunner,
+        WasmFoldCurveRunner, WasmHopfCurveRunner, WasmLPCCurveRunner, WasmLimitCycleRunner,
+        WasmNSCurveRunner, WasmPDCurveRunner,
     };
 
     #[test]
@@ -49,6 +51,10 @@ mod tests {
         assert!(
             std::any::type_name::<WasmContinuationExtensionRunner>()
                 .ends_with("WasmContinuationExtensionRunner")
+        );
+        assert!(
+            std::any::type_name::<WasmCodim1CurveExtensionRunner>()
+                .ends_with("WasmCodim1CurveExtensionRunner")
         );
         assert!(
             std::any::type_name::<WasmLimitCycleRunner>().ends_with("WasmLimitCycleRunner")

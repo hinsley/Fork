@@ -73,6 +73,7 @@ dependencies = [
  "fork_core",
  "js-sys",
  "nalgebra",
+ "num-complex",
  "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",

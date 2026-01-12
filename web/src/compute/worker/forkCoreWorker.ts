@@ -158,6 +158,21 @@ type WasmModule = {
     get_progress: () => ContinuationProgress
     get_result: () => ContinuationExtensionResult
   }
+  WasmCodim1CurveExtensionRunner: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    systemType: string,
+    branchData: ContinuationExtensionRequest['branchData'],
+    parameterName: string,
+    settings: Record<string, number>,
+    forward: boolean
+  ) => {
+    run_steps: (batchSize: number) => ContinuationProgress
+    get_progress: () => ContinuationProgress
+    get_result: () => ContinuationExtensionResult
+  }
   default?: (input?: RequestInfo | URL | Response | BufferSource | WebAssembly.Module) => Promise<void>
 }
 
@@ -373,6 +388,20 @@ async function runEquilibriumContinuation(
   return runner.get_result()
 }
 
+function isCodim1BranchType(branchType: unknown): boolean {
+  if (!branchType || typeof branchType !== 'object') {
+    return false
+  }
+  const type = (branchType as { type?: string }).type
+  return (
+    type === 'FoldCurve' ||
+    type === 'HopfCurve' ||
+    type === 'LPCCurve' ||
+    type === 'PDCurve' ||
+    type === 'NSCurve'
+  )
+}
+
 async function runContinuationExtension(
   request: ContinuationExtensionRequest,
   signal: AbortSignal,
@@ -381,17 +410,29 @@ async function runContinuationExtension(
   abortIfNeeded(signal)
   const wasm = await loadWasm()
   const settings: Record<string, number> = { ...request.settings }
-  const runner = new wasm.WasmContinuationExtensionRunner(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.type,
-    request.branchData,
-    request.parameterName,
-    settings,
-    request.forward
-  )
+  const runner = isCodim1BranchType(request.branchData.branch_type)
+    ? new wasm.WasmCodim1CurveExtensionRunner(
+        request.system.equations,
+        new Float64Array(request.system.params),
+        request.system.paramNames,
+        request.system.varNames,
+        request.system.type,
+        request.branchData,
+        request.parameterName,
+        settings,
+        request.forward
+      )
+    : new wasm.WasmContinuationExtensionRunner(
+        request.system.equations,
+        new Float64Array(request.system.params),
+        request.system.paramNames,
+        request.system.varNames,
+        request.system.type,
+        request.branchData,
+        request.parameterName,
+        settings,
+        request.forward
+      )
 
   let progress = runner.get_progress()
   onProgress(progress)

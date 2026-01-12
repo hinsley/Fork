@@ -155,6 +155,7 @@ beforeAll(async () => {
       WasmFoldCurveRunner: MockContinuationRunner,
       WasmHopfCurveRunner: MockContinuationRunner,
       WasmContinuationExtensionRunner: MockContinuationRunner,
+      WasmCodim1CurveExtensionRunner: MockContinuationRunner,
     }
   })
   await import('./forkCoreWorker')

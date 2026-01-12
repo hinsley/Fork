@@ -142,7 +142,12 @@ export class WasmBridge {
     ): ContinuationRunner {
         if (!wasmModule) throw new Error("WASM module not loaded");
 
-        return new wasmModule.WasmContinuationExtensionRunner(
+        const useCodim1 = isCodim1BranchType((branchData as any)?.branch_type);
+        const Runner = useCodim1
+            ? wasmModule.WasmCodim1CurveExtensionRunner
+            : wasmModule.WasmContinuationExtensionRunner;
+
+        return new Runner(
             this.config.equations,
             new Float64Array(this.config.params),
             this.config.paramNames,
@@ -803,6 +808,20 @@ export class WasmBridge {
             forward
         );
     }
+}
+
+function isCodim1BranchType(branchType: any): boolean {
+    if (!branchType || typeof branchType !== 'object') {
+        return false;
+    }
+    const type = branchType.type;
+    return (
+        type === 'FoldCurve' ||
+        type === 'HopfCurve' ||
+        type === 'LPCCurve' ||
+        type === 'PDCurve' ||
+        type === 'NSCurve'
+    );
 }
 
 function normalizeEigenvalues(raw: unknown): ContinuationEigenvalue[] {

@@ -12,9 +12,9 @@ mod system;
 
 pub use analysis::{WasmCovariantLyapunovRunner, WasmLyapunovRunner};
 pub use continuation::{
-    WasmContinuationExtensionRunner, WasmEquilibriumRunner, WasmFoldCurveRunner,
-    WasmHopfCurveRunner, WasmLimitCycleRunner, WasmLPCCurveRunner, WasmNSCurveRunner,
-    WasmPDCurveRunner,
+    WasmCodim1CurveExtensionRunner, WasmContinuationExtensionRunner, WasmEquilibriumRunner,
+    WasmFoldCurveRunner, WasmHopfCurveRunner, WasmLimitCycleRunner, WasmLPCCurveRunner,
+    WasmNSCurveRunner, WasmPDCurveRunner,
 };
 pub use equilibrium::WasmEquilibriumSolverRunner;
 pub use system::WasmSystem;

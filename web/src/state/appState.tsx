@@ -1287,10 +1287,19 @@ export function AppProvider({
           throw new Error('Select a valid branch to extend.')
         }
         if (
-          sourceBranch.branchType !== 'equilibrium' &&
-          sourceBranch.branchType !== 'limit_cycle'
+          ![
+            'equilibrium',
+            'limit_cycle',
+            'fold_curve',
+            'hopf_curve',
+            'lpc_curve',
+            'pd_curve',
+            'ns_curve',
+          ].includes(sourceBranch.branchType)
         ) {
-          throw new Error('Branch extension is only available for equilibrium or limit cycle branches.')
+          throw new Error(
+            'Branch extension is only available for equilibrium, limit cycle, or bifurcation curve branches.'
+          )
         }
         if (!sourceBranch.data.points.length) {
           throw new Error('Branch has no points to extend.')
