@@ -32,6 +32,7 @@ import {
   resolveEquilibriumEigenvectorRender,
 } from '../system/equilibriumEigenvectors'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
+import { resolvePlotlyBackgroundColor } from '../viewports/plotly/plotlyTheme'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
 
 type ViewportPanelProps = {
@@ -89,6 +90,7 @@ type ViewportTileProps = {
     id: string,
     update: Partial<Omit<BifurcationDiagram, 'id' | 'name'>>
   ) => void
+  plotlyBackground: string
 }
 
 type PlotlyRelayoutEvent = Record<string, unknown>
@@ -1513,14 +1515,18 @@ function buildDiagramTraces(
   return { traces, hasAxes, hasBranches, hasData, xTitle, yTitle }
 }
 
-function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
+function buildSceneLayout(
+  system: System,
+  scene: Scene,
+  plotlyBackground: string
+): Partial<Layout> {
   const uirevision = scene.id
   const axisRanges = scene.axisRanges
   const base = {
     autosize: true,
     margin: { l: 40, r: 20, t: 20, b: 40 },
-    paper_bgcolor: 'rgba(0,0,0,0)',
-    plot_bgcolor: 'rgba(0,0,0,0)',
+    paper_bgcolor: plotlyBackground,
+    plot_bgcolor: plotlyBackground,
     showlegend: false,
     uirevision,
     legend: { font: { color: PLOTLY_TEXT_COLOR } },
@@ -1552,6 +1558,7 @@ function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
           center: { ...scene.camera.center },
           up: { ...scene.camera.up },
         },
+        bgcolor: plotlyBackground,
         aspectmode: 'data',
       },
     }
@@ -1618,7 +1625,8 @@ function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
 
 function buildDiagramLayout(
   diagram: BifurcationDiagram,
-  traceState: DiagramTraceState | null
+  traceState: DiagramTraceState | null,
+  plotlyBackground: string
 ): Partial<Layout> {
   const axisRanges = diagram.axisRanges
   const hasAxes = traceState?.hasAxes ?? false
@@ -1639,8 +1647,8 @@ function buildDiagramLayout(
   return {
     autosize: true,
     margin: { l: 40, r: 20, t: 20, b: 40 },
-    paper_bgcolor: 'rgba(0,0,0,0)',
-    plot_bgcolor: 'rgba(0,0,0,0)',
+    paper_bgcolor: plotlyBackground,
+    plot_bgcolor: plotlyBackground,
     showlegend: hasData,
     dragmode: 'pan',
     uirevision: diagram.id,
@@ -1708,6 +1716,7 @@ function ViewportTile({
   onCancelRename,
   onUpdateScene,
   onUpdateBifurcationDiagram,
+  plotlyBackground,
 }: ViewportTileProps) {
   const { node, scene, diagram } = entry
   const isSelected = node.id === selectedNodeId
@@ -1827,10 +1836,10 @@ function ViewportTile({
   }, [diagram, selectedNodeId, system])
 
   const layout = useMemo(() => {
-    if (scene) return buildSceneLayout(system, scene)
-    if (diagram) return buildDiagramLayout(diagram, diagramTraceState)
-    return buildSceneLayout(system, system.scenes[0])
-  }, [system, scene, diagram, diagramTraceState])
+    if (scene) return buildSceneLayout(system, scene, plotlyBackground)
+    if (diagram) return buildDiagramLayout(diagram, diagramTraceState, plotlyBackground)
+    return buildSceneLayout(system, system.scenes[0], plotlyBackground)
+  }, [diagram, diagramTraceState, plotlyBackground, scene, system])
 
   const plotAreaSize = useMemo(() => {
     if (!plotSize) return null
@@ -2019,6 +2028,7 @@ export function ViewportPanel({
     id: string
   } | null>(null)
   const mapRequestKeyRef = useRef<string | null>(null)
+  const plotlyBackground = resolvePlotlyBackgroundColor()
 
   const viewports = useMemo(() => {
     const entries: ViewportEntry[] = []
@@ -2290,6 +2300,7 @@ export function ViewportPanel({
                 onCancelRename={cancelRename}
                 onUpdateScene={onUpdateScene}
                 onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
+                plotlyBackground={plotlyBackground}
               />
             </div>
             <div className="viewport-insert" data-testid={`viewport-insert-${entry.node.id}`}>

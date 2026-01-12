@@ -26,6 +26,7 @@ import {
   resolveEquilibriumEigenvectorRender,
 } from '../system/equilibriumEigenvectors'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
+import { resolvePlotlyBackgroundColor } from '../viewports/plotly/plotlyTheme'
 import type {
   BranchContinuationRequest,
   BranchExtensionRequest,
@@ -289,7 +290,8 @@ function summarizeEigenvalues(point: ContinuationPoint, branchType?: string): st
 }
 
 function buildEigenvaluePlot(
-  eigenvalues?: ComplexValue[] | null,
+  eigenvalues: ComplexValue[] | null | undefined,
+  plotlyBackground: string,
   options?: { showRadiusLines?: boolean }
 ) {
   if (!eigenvalues || eigenvalues.length === 0) return null
@@ -345,8 +347,8 @@ function buildEigenvaluePlot(
   const layout: Partial<Layout> = {
     autosize: true,
     margin: { l: 36, r: 16, t: 8, b: 32 },
-    paper_bgcolor: 'rgba(0,0,0,0)',
-    plot_bgcolor: 'rgba(0,0,0,0)',
+    paper_bgcolor: plotlyBackground,
+    plot_bgcolor: plotlyBackground,
     showlegend: false,
     dragmode: 'pan',
     xaxis: {
@@ -1158,13 +1160,14 @@ export function InspectorDetailsPanel({
   const hasWasmErrors = wasmEquationErrors.some((entry) => entry)
   const runDisabled = systemDirty || !systemValidation.valid || hasWasmErrors
   const isDiscreteMap = systemDraft.type === 'map'
+  const plotlyBackground = resolvePlotlyBackgroundColor()
   const equilibriumEigenPlot = useMemo(() => {
     const eigenpairs = equilibrium?.solution?.eigenpairs
     if (!eigenpairs || eigenpairs.length === 0) return null
-    return buildEigenvaluePlot(eigenpairs.map((pair) => pair.value), {
+    return buildEigenvaluePlot(eigenpairs.map((pair) => pair.value), plotlyBackground, {
       showRadiusLines: isDiscreteMap,
     })
-  }, [equilibrium?.solution?.eigenpairs, isDiscreteMap])
+  }, [equilibrium?.solution?.eigenpairs, isDiscreteMap, plotlyBackground])
 
   useEffect(() => {
     if (!systemDirty && !systemTouched) {
@@ -1334,7 +1337,7 @@ export function InspectorDetailsPanel({
     : []
   const branchEigenPlot =
     branch?.branchType === 'equilibrium'
-      ? buildEigenvaluePlot(branchEigenvalues, { showRadiusLines: isDiscreteMap })
+      ? buildEigenvaluePlot(branchEigenvalues, plotlyBackground, { showRadiusLines: isDiscreteMap })
       : null
 
   const handleApplySystem = async () => {
