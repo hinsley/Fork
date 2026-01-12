@@ -190,6 +190,16 @@ mod problem_tests {
         .expect("system")
     }
 
+    fn build_two_param_system(a_value: f64, b_value: f64) -> EquationSystem {
+        build_system(
+            vec!["a * x".to_string(), "b * y".to_string()],
+            vec![a_value, b_value],
+            &vec!["a".to_string(), "b".to_string()],
+            &vec!["x".to_string(), "y".to_string()],
+        )
+        .expect("system")
+    }
+
     #[test]
     fn equilibrium_problem_residual_and_jacobian() {
         let system = build_linear_system(2.0);
@@ -208,6 +218,84 @@ mod problem_tests {
         assert_eq!(jac.ncols(), 2);
         assert!((jac[(0, 0)] - 3.0).abs() < 1e-12);
         assert!((jac[(0, 1)] - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn equilibrium_problem_residual_rejects_wrong_buffer_size() {
+        let system = build_linear_system(2.0);
+        let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Flow, 0);
+
+        let aug_state = DVector::from_vec(vec![2.0, 3.0]);
+        let mut residual = DVector::zeros(2);
+
+        let err = problem
+            .residual(&aug_state, &mut residual)
+            .expect_err("should reject mismatched residual buffer");
+        assert!(err.to_string().contains("incorrect dimension"));
+    }
+
+    #[test]
+    fn equilibrium_problem_residual_map_restores_param() {
+        let system = build_linear_system(1.0);
+        let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Map, 0);
+
+        let aug_state = DVector::from_vec(vec![2.0, 3.0]);
+        let mut residual = DVector::zeros(1);
+
+        problem
+            .residual(&aug_state, &mut residual)
+            .expect("residual");
+        assert!((residual[0] - 3.0).abs() < 1e-12);
+        assert!((problem.system.params[0] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn equilibrium_problem_with_param_restores_after_error() {
+        let system = build_linear_system(2.0);
+        let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Flow, 0);
+
+        let result: anyhow::Result<()> =
+            problem.with_param(5.0, |_system| anyhow::bail!("fail"));
+        assert!(result.is_err());
+        assert!((problem.system.params[0] - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn equilibrium_problem_diagnostics_flow_reports_bifurcations() {
+        let system = build_two_param_system(2.0, 3.0);
+        let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Flow, 0);
+        let aug_state = DVector::from_vec(vec![2.0, 0.5, -0.25]);
+
+        let diagnostics = problem.diagnostics(&aug_state).expect("diagnostics");
+        let values = diagnostics.test_values;
+        assert!((values.fold - 6.0).abs() < 1e-12);
+        assert!((values.hopf - 5.0).abs() < 1e-12);
+        assert!((values.neutral_saddle - 5.0).abs() < 1e-12);
+
+        let mut eigenvalues: Vec<f64> = diagnostics.eigenvalues.iter().map(|v| v.re).collect();
+        eigenvalues.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(eigenvalues.len(), 2);
+        assert!((eigenvalues[0] - 2.0).abs() < 1e-12);
+        assert!((eigenvalues[1] - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn equilibrium_problem_diagnostics_map_zeroes_hopf_and_neutral() {
+        let system = build_two_param_system(2.0, 3.0);
+        let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Map, 0);
+        let aug_state = DVector::from_vec(vec![2.0, 0.5, -0.25]);
+
+        let diagnostics = problem.diagnostics(&aug_state).expect("diagnostics");
+        let values = diagnostics.test_values;
+        assert!((values.fold - 2.0).abs() < 1e-12);
+        assert_eq!(values.hopf, 0.0);
+        assert_eq!(values.neutral_saddle, 0.0);
+
+        let mut eigenvalues: Vec<f64> = diagnostics.eigenvalues.iter().map(|v| v.re).collect();
+        eigenvalues.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(eigenvalues.len(), 2);
+        assert!((eigenvalues[0] - 1.0).abs() < 1e-12);
+        assert!((eigenvalues[1] - 2.0).abs() < 1e-12);
     }
 
     #[test]
@@ -280,6 +368,22 @@ mod tangent_tests {
     }
 
     #[test]
+    fn compute_tangent_reports_mismatched_jacobian_dims() {
+        let mut problem = DummyProblem {
+            jac: DMatrix::from_row_slice(2, 2, &[1.0, 0.0, 0.0, 1.0]),
+        };
+        let aug_state = DVector::from_vec(vec![0.0, 0.0]);
+
+        let err = compute_tangent_from_problem(&mut problem, &aug_state)
+            .expect_err("expected Jacobian dimension error");
+        let message = format!("{err}");
+        assert!(
+            message.contains("Jacobian has unexpected dimensions"),
+            "unexpected error message: {message}"
+        );
+    }
+
+    #[test]
     fn compute_tangent_falls_back_on_singular_system() {
         let mut problem = DummyProblem {
             jac: DMatrix::from_row_slice(1, 2, &[0.0, 0.0]),
@@ -290,5 +394,17 @@ mod tangent_tests {
         assert_eq!(tangent.len(), 2);
         assert_eq!(tangent[0], 1.0);
         assert_eq!(tangent[1], 0.0);
+    }
+
+    #[test]
+    fn compute_tangent_rejects_mismatched_jacobian_dimensions() {
+        let mut problem = DummyProblem {
+            jac: DMatrix::from_row_slice(2, 2, &[1.0, 0.0, 0.0, 1.0]),
+        };
+        let aug_state = DVector::from_vec(vec![0.0, 0.0]);
+
+        let err = compute_tangent_from_problem(&mut problem, &aug_state)
+            .expect_err("should reject unexpected Jacobian dimensions");
+        assert!(err.to_string().contains("unexpected dimensions"));
     }
 }

@@ -238,10 +238,11 @@ mod tests {
 
     fn assert_err_contains<T: std::fmt::Debug>(result: anyhow::Result<T>, needle: &str) {
         let err = result.expect_err("expected error");
-        let message = format!("{err}");
+        let messages: Vec<String> = err.chain().map(|cause| cause.to_string()).collect();
+        let found = messages.iter().any(|message| message.contains(needle));
         assert!(
-            message.contains(needle),
-            "expected error to contain \"{needle}\", got \"{message}\""
+            found,
+            "expected error to contain \"{needle}\", got {messages:?}"
         );
     }
 
@@ -254,6 +255,19 @@ mod tests {
         let bytecode = compiler.compile(&expr);
 
         let mut system = EquationSystem::new(vec![bytecode], vec![mu]);
+        system.set_maps(compiler.param_map, compiler.var_map);
+        system
+    }
+
+    fn build_constant_system(value: f64) -> EquationSystem {
+        let equation = format!("{value}");
+        let param_names: Vec<String> = Vec::new();
+        let var_names = vec!["x".to_string()];
+        let compiler = Compiler::new(&var_names, &param_names);
+        let expr = parse(&equation).expect("constant equation should parse");
+        let bytecode = compiler.compile(&expr);
+
+        let mut system = EquationSystem::new(vec![bytecode], Vec::new());
         system.set_maps(compiler.param_map, compiler.var_map);
         system
     }
@@ -360,5 +374,23 @@ mod tests {
         assert!(result.state[0].abs() < 1e-9);
         assert!(result.residual_norm <= 1e-9);
         assert_eq!(result.iterations, 1);
+    }
+
+    #[test]
+    fn solve_equilibrium_rejects_zero_dimension_system() {
+        let system = EquationSystem::new(Vec::new(), Vec::new());
+        assert_err_contains(
+            solve_equilibrium(&system, SystemKind::Flow, &[], NewtonSettings::default()),
+            "zero dimension",
+        );
+    }
+
+    #[test]
+    fn solve_equilibrium_rejects_singular_jacobian() {
+        let system = build_constant_system(1.0);
+        assert_err_contains(
+            solve_equilibrium(&system, SystemKind::Flow, &[0.0], NewtonSettings::default()),
+            "Jacobian is singular",
+        );
     }
 }

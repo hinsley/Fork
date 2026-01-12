@@ -241,6 +241,38 @@ mod tests_accuracy {
     }
 
     #[derive(Clone, Copy)]
+    struct DiagonalLinearFlow {
+        rates: [f64; 2],
+    }
+
+    impl DynamicalSystem<f64> for DiagonalLinearFlow {
+        fn dimension(&self) -> usize {
+            2
+        }
+
+        fn apply(&self, _t: f64, x: &[f64], out: &mut [f64]) {
+            out[0] = self.rates[0] * x[0];
+            out[1] = self.rates[1] * x[1];
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct ConstantFlow {
+        values: [f64; 2],
+    }
+
+    impl DynamicalSystem<f64> for ConstantFlow {
+        fn dimension(&self) -> usize {
+            2
+        }
+
+        fn apply(&self, _t: f64, _x: &[f64], out: &mut [f64]) {
+            out[0] = self.values[0];
+            out[1] = self.values[1];
+        }
+    }
+
+    #[derive(Clone, Copy)]
     struct AffineMap {
         scale: f64,
         offset: f64,
@@ -283,6 +315,40 @@ mod tests_accuracy {
     }
 
     #[test]
+    fn rk4_step_matches_two_dimensional_linear_flow() {
+        let system = DiagonalLinearFlow {
+            rates: [1.0, -2.0],
+        };
+        let mut solver = RK4::new(2);
+        let mut t = 0.0;
+        let mut state = vec![1.0, 2.0];
+        let dt = 0.05;
+        solver.step(&system, &mut t, &mut state, dt);
+        let actual_x = state[0];
+        let actual_y = state[1];
+        let target_x = (system.rates[0] * dt).exp();
+        let target_y = 2.0 * (system.rates[1] * dt).exp();
+        assert!((actual_x - target_x).abs() < 1e-6);
+        assert!((actual_y - target_y).abs() < 1e-6);
+        assert!((t - dt).abs() < 1e-12);
+    }
+
+    #[test]
+    fn tsit5_step_matches_constant_flow() {
+        let system = ConstantFlow {
+            values: [1.5, -0.5],
+        };
+        let mut solver = Tsit5::new(2);
+        let mut t = 1.0;
+        let mut state = vec![2.0, 4.0];
+        let dt = 0.2;
+        solver.step(&system, &mut t, &mut state, dt);
+        assert!((state[0] - (2.0 + 1.5 * dt)).abs() < 1e-12);
+        assert!((state[1] - (4.0 - 0.5 * dt)).abs() < 1e-12);
+        assert!((t - 1.2).abs() < 1e-12);
+    }
+
+    #[test]
     fn discrete_map_updates_state_and_time() {
         let system = AffineMap {
             scale: 2.0,
@@ -295,5 +361,27 @@ mod tests_accuracy {
         solver.step(&system, &mut t, &mut state, dt);
         assert!((state[0] - 7.0).abs() < 1e-12);
         assert!((t - 2.25).abs() < 1e-12);
+    }
+
+    #[test]
+    fn discrete_map_ignores_dt_for_state_update() {
+        let system = AffineMap {
+            scale: 1.0,
+            offset: 1.0,
+        };
+        let mut solver = DiscreteMap::new(1);
+        let mut t_small = 0.0;
+        let mut state_small = vec![5.0];
+        solver.step(&system, &mut t_small, &mut state_small, 0.1);
+
+        let mut solver = DiscreteMap::new(1);
+        let mut t_large = 0.0;
+        let mut state_large = vec![5.0];
+        solver.step(&system, &mut t_large, &mut state_large, 2.5);
+
+        assert!((state_small[0] - 6.0).abs() < 1e-12);
+        assert!((state_large[0] - 6.0).abs() < 1e-12);
+        assert!((t_small - 0.1).abs() < 1e-12);
+        assert!((t_large - 2.5).abs() < 1e-12);
     }
 }

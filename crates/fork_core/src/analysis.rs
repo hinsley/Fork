@@ -422,7 +422,8 @@ fn unit_upper_triangular(dim: usize) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_qr, covariant_lyapunov_vectors, kaplan_yorke, lyapunov_exponents, LyapunovStepper,
+        apply_qr, covariant_lyapunov_vectors, kaplan_yorke, lyapunov_exponents, normalize_columns,
+        solve_upper, thin_qr_positive, LyapunovStepper,
     };
     use crate::autodiff::Dual;
     use crate::traits::DynamicalSystem;
@@ -526,6 +527,123 @@ mod tests {
             let expected = r[(i, i)].abs().ln();
             assert!((accum[i] - expected).abs() < 1e-12);
         }
+    }
+
+    #[test]
+    fn apply_qr_rejects_near_singular_matrix() {
+        let dim = 2;
+        let mut phi = vec![0.0; dim * dim];
+        let mut accum = vec![0.0; dim];
+
+        assert_err_contains(
+            apply_qr(&mut phi, dim, &mut accum),
+            "near-singular R matrix",
+        );
+    }
+
+    #[test]
+    fn thin_qr_positive_enforces_positive_diagonal() {
+        let dim = 2;
+        let slice = vec![-2.0, 0.0, 0.0, 1.0];
+        let (q, r) = thin_qr_positive(&slice, dim).expect("qr should succeed");
+        assert!(r[(0, 0)] > 0.0);
+        assert!(r[(1, 1)] > 0.0);
+
+        let qtq: DMatrix<f64> = q.transpose() * &q;
+        let identity = DMatrix::<f64>::identity(dim, dim);
+        for i in 0..dim {
+            for j in 0..dim {
+                assert!((qtq[(i, j)] - identity[(i, j)]).abs() < 1e-10);
+            }
+        }
+    }
+
+    #[test]
+    fn normalize_columns_rejects_zero_column() {
+        let dim = 2;
+        let mut matrix = vec![1.0, 0.0, 0.0, 0.0];
+        assert_err_contains(
+            normalize_columns(&mut matrix, dim),
+            "degenerate CLV column",
+        );
+    }
+
+    #[test]
+    fn solve_upper_rejects_zero_diagonal() {
+        let dim = 2;
+        let r = vec![0.0, 1.0, 0.0, 1.0];
+        let rhs = vec![1.0, 0.0, 0.0, 1.0];
+        assert_err_contains(
+            solve_upper(&r, &rhs, dim),
+            "near-singular R matrix",
+        );
+    }
+
+    #[test]
+    fn covariant_lyapunov_vectors_rejects_invalid_inputs() {
+        let system = LinearSystem { rate: 1.0 };
+        assert_err_contains(
+            covariant_lyapunov_vectors(
+                system,
+                LyapunovStepper::Rk4,
+                &[],
+                0.0,
+                0.1,
+                1,
+                1,
+                0,
+                0,
+            ),
+            "Initial state",
+        );
+
+        let system = LinearSystem { rate: 1.0 };
+        assert_err_contains(
+            covariant_lyapunov_vectors(
+                system,
+                LyapunovStepper::Rk4,
+                &[1.0],
+                0.0,
+                0.0,
+                1,
+                1,
+                0,
+                0,
+            ),
+            "dt must be positive",
+        );
+
+        let system = LinearSystem { rate: 1.0 };
+        assert_err_contains(
+            covariant_lyapunov_vectors(
+                system,
+                LyapunovStepper::Rk4,
+                &[1.0],
+                0.0,
+                0.1,
+                0,
+                1,
+                0,
+                0,
+            ),
+            "qr_stride",
+        );
+
+        let system = LinearSystem { rate: 1.0 };
+        assert_err_contains(
+            covariant_lyapunov_vectors(
+                system,
+                LyapunovStepper::Rk4,
+                &[1.0],
+                0.0,
+                0.1,
+                1,
+                0,
+                0,
+                0,
+            ),
+            "Window size",
+        );
     }
 
     #[test]

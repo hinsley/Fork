@@ -235,3 +235,99 @@ mod tests {
         assert_eq!(flat, vec![1.0, 2.0, 1.5, 2.5, 3.0]);
     }
 }
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod wasm_tests {
+    use super::WasmLimitCycleRunner;
+    use fork_core::continuation::{
+        BranchType, ContinuationBranch, ContinuationSettings, LimitCycleGuess, LimitCycleSetup,
+    };
+    use serde_wasm_bindgen::{from_value, to_value};
+    use wasm_bindgen::JsValue;
+
+    fn settings_value(max_steps: usize) -> JsValue {
+        let settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-6,
+            max_step_size: 1.0,
+            max_steps,
+            corrector_steps: 1,
+            corrector_tolerance: 1e-8,
+            step_tolerance: 1e-8,
+        };
+        to_value(&settings).expect("settings")
+    }
+
+    fn setup_value(mesh_points: usize, degree: usize) -> JsValue {
+        let guess = LimitCycleGuess {
+            param_value: 1.0,
+            period: 1.0,
+            mesh_states: vec![vec![0.0]; mesh_points],
+            stage_states: Vec::new(),
+        };
+        let setup = LimitCycleSetup {
+            guess,
+            phase_anchor: vec![0.0],
+            phase_direction: vec![1.0],
+            mesh_points,
+            collocation_degree: degree,
+        };
+        to_value(&setup).expect("setup")
+    }
+
+    #[test]
+    fn limit_cycle_runner_rejects_unknown_parameter() {
+        let result = WasmLimitCycleRunner::new(
+            vec!["a * x".to_string()],
+            vec![1.0],
+            vec!["a".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            setup_value(2, 1),
+            "missing",
+            settings_value(1),
+            true,
+        );
+
+        assert!(result.is_err(), "should reject unknown parameter");
+        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        assert!(message.contains("Unknown parameter"));
+    }
+
+    #[test]
+    fn limit_cycle_runner_sets_branch_type_and_state_shape() {
+        let mesh_points = 2;
+        let degree = 1;
+        let mut runner = WasmLimitCycleRunner::new(
+            vec!["a * x".to_string()],
+            vec![1.0],
+            vec!["a".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            setup_value(mesh_points, degree),
+            "a",
+            settings_value(0),
+            true,
+        )
+        .expect("runner");
+
+        assert!(!runner.is_done());
+        runner.run_steps(1).expect("run steps");
+        assert!(runner.is_done());
+
+        let result_val = runner.get_result().expect("result");
+        let branch: ContinuationBranch = from_value(result_val).expect("branch");
+        assert_eq!(
+            branch.branch_type,
+            BranchType::LimitCycle {
+                ntst: mesh_points,
+                ncol: degree,
+            }
+        );
+        assert_eq!(branch.points.len(), 1);
+        assert_eq!(branch.indices, vec![0]);
+        let state = &branch.points[0].state;
+        assert_eq!(state.len(), (mesh_points + mesh_points * degree) + 1);
+        assert_eq!(state.last().copied(), Some(1.0));
+    }
+}

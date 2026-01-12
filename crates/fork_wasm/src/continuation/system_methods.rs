@@ -1040,6 +1040,9 @@ impl WasmSystem {
 #[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
     use crate::system::WasmSystem;
+    use fork_core::continuation::{BranchType, ContinuationBranch, ContinuationSettings};
+    use serde_wasm_bindgen::to_value;
+    use wasm_bindgen::JsValue;
 
     fn build_two_dim_system() -> WasmSystem {
         WasmSystem::new(
@@ -1065,6 +1068,20 @@ mod tests {
         .expect("system should build")
     }
 
+    fn continuation_settings(max_steps: usize) -> JsValue {
+        let settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-6,
+            max_step_size: 1.0,
+            max_steps,
+            corrector_steps: 1,
+            corrector_tolerance: 1e-8,
+            step_tolerance: 1e-8,
+        };
+
+        to_value(&settings).expect("settings")
+    }
+
     #[test]
     fn init_lc_from_orbit_rejects_nondivisible_states() {
         let system = build_two_dim_system();
@@ -1077,6 +1094,28 @@ mod tests {
     }
 
     #[test]
+    fn init_lc_from_orbit_rejects_time_state_mismatch() {
+        let system = build_two_dim_system();
+        let err = system
+            .init_lc_from_orbit(vec![0.0], vec![1.0, 2.0, 3.0, 4.0], 0.0, 2, 2, 1e-6)
+            .expect_err("should reject mismatched time/state counts");
+
+        let message = err.as_string().unwrap_or_default();
+        assert!(message.contains("Orbit has"));
+    }
+
+    #[test]
+    fn compute_continuation_rejects_unknown_parameter() {
+        let mut system = build_two_dim_system_with_param();
+        let err = system
+            .compute_continuation(vec![0.0, 0.0], "missing", continuation_settings(1), true)
+            .expect_err("should reject unknown parameter");
+
+        let message = err.as_string().unwrap_or_default();
+        assert!(message.contains("Unknown parameter"));
+    }
+
+    #[test]
     fn compute_equilibrium_eigenvalues_rejects_state_dim() {
         let mut system = build_two_dim_system_with_param();
         let err = system
@@ -1085,5 +1124,44 @@ mod tests {
 
         let message = err.as_string().unwrap_or_default();
         assert!(message.contains("State dimension"));
+    }
+
+    #[test]
+    fn extend_continuation_rejects_missing_upoldp() {
+        let mut system = build_two_dim_system_with_param();
+        let branch = ContinuationBranch {
+            points: Vec::new(),
+            bifurcations: Vec::new(),
+            indices: Vec::new(),
+            branch_type: BranchType::LimitCycle { ntst: 3, ncol: 2 },
+            upoldp: None,
+        };
+        let branch_val = to_value(&branch).expect("branch");
+
+        let err = system
+            .extend_continuation(branch_val, "p", continuation_settings(1), true)
+            .expect_err("should reject missing upoldp");
+
+        let message = err.as_string().unwrap_or_default();
+        assert!(message.contains("upoldp"));
+    }
+
+    #[test]
+    fn continue_fold_curve_rejects_unknown_parameter() {
+        let mut system = build_two_dim_system_with_param();
+        let err = system
+            .continue_fold_curve(
+                vec![0.0, 0.0],
+                "p",
+                0.0,
+                "missing",
+                0.0,
+                continuation_settings(1),
+                true,
+            )
+            .expect_err("should reject unknown parameter");
+
+        let message = err.as_string().unwrap_or_default();
+        assert!(message.contains("Unknown parameter"));
     }
 }
