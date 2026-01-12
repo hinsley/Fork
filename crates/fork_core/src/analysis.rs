@@ -422,7 +422,8 @@ fn unit_upper_triangular(dim: usize) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_qr, covariant_lyapunov_vectors, kaplan_yorke, lyapunov_exponents, LyapunovStepper,
+        apply_qr, covariant_lyapunov_vectors, kaplan_yorke, lyapunov_exponents, normalize_columns,
+        solve_upper, thin_qr_positive, LyapunovStepper,
     };
     use crate::autodiff::Dual;
     use crate::traits::DynamicalSystem;
@@ -536,6 +537,44 @@ mod tests {
 
         assert_err_contains(
             apply_qr(&mut phi, dim, &mut accum),
+            "near-singular R matrix",
+        );
+    }
+
+    #[test]
+    fn thin_qr_positive_enforces_positive_diagonal() {
+        let dim = 2;
+        let slice = vec![-2.0, 0.0, 0.0, 1.0];
+        let (q, r) = thin_qr_positive(&slice, dim).expect("qr should succeed");
+        assert!(r[(0, 0)] > 0.0);
+        assert!(r[(1, 1)] > 0.0);
+
+        let qtq: DMatrix<f64> = q.transpose() * &q;
+        let identity = DMatrix::<f64>::identity(dim, dim);
+        for i in 0..dim {
+            for j in 0..dim {
+                assert!((qtq[(i, j)] - identity[(i, j)]).abs() < 1e-10);
+            }
+        }
+    }
+
+    #[test]
+    fn normalize_columns_rejects_zero_column() {
+        let dim = 2;
+        let mut matrix = vec![1.0, 0.0, 0.0, 0.0];
+        assert_err_contains(
+            normalize_columns(&mut matrix, dim),
+            "degenerate CLV column",
+        );
+    }
+
+    #[test]
+    fn solve_upper_rejects_zero_diagonal() {
+        let dim = 2;
+        let r = vec![0.0, 1.0, 0.0, 1.0];
+        let rhs = vec![1.0, 0.0, 0.0, 1.0];
+        assert_err_contains(
+            solve_upper(&r, &rhs, dim),
             "near-singular R matrix",
         );
     }
