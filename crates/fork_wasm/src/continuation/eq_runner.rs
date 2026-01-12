@@ -137,6 +137,21 @@ mod tests {
         to_value(&settings).expect("settings")
     }
 
+    fn build_runner(max_steps: usize) -> WasmEquilibriumRunner {
+        WasmEquilibriumRunner::new(
+            vec!["a * x".to_string()],
+            vec![1.0],
+            vec!["a".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            vec![0.0],
+            "a",
+            settings_with_max_steps(max_steps),
+            true,
+        )
+        .expect("runner")
+    }
+
     #[test]
     fn equilibrium_runner_handles_zero_steps() {
         let settings_val = settings_with_max_steps(0);
@@ -176,5 +191,54 @@ mod tests {
         assert!(result.is_err(), "should reject unknown parameter");
         let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
         assert!(message.contains("Unknown parameter"));
+    }
+
+    #[test]
+    fn equilibrium_runner_rejects_invalid_settings() {
+        let result = WasmEquilibriumRunner::new(
+            vec!["a * x".to_string()],
+            vec![1.0],
+            vec!["a".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            vec![0.0],
+            "a",
+            JsValue::from_str("nope"),
+            true,
+        );
+
+        assert!(result.is_err(), "should reject invalid settings");
+        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        assert!(message.contains("Invalid continuation settings"));
+    }
+
+    #[test]
+    fn equilibrium_runner_rejects_invalid_equation() {
+        let result = WasmEquilibriumRunner::new(
+            vec!["1 +".to_string()],
+            vec![1.0],
+            vec!["a".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            vec![0.0],
+            "a",
+            settings_with_max_steps(1),
+            true,
+        );
+
+        assert!(result.is_err(), "should reject invalid equation");
+        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        assert!(message.contains("Unexpected token"));
+    }
+
+    #[test]
+    fn equilibrium_runner_errors_after_result_taken() {
+        let mut runner = build_runner(0);
+        runner.run_steps(1).expect("run steps");
+        runner.get_result().expect("result");
+
+        let err = runner.run_steps(1).expect_err("runner should be consumed");
+        let message = err.as_string().unwrap_or_default();
+        assert!(message.contains("Runner not initialized"));
     }
 }
