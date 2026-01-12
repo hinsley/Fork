@@ -737,9 +737,9 @@ function readAxisRange(
   }
   const startKey = `${axis}.range[0]`
   const endKey = `${axis}.range[1]`
-  const start = event[startKey]
-  const end = event[endKey]
-  if (typeof start === 'number' && typeof end === 'number') {
+  const start = readNumber(event[startKey])
+  const end = readNumber(event[endKey])
+  if (start !== null && end !== null) {
     return [start, end]
   }
   return undefined
@@ -747,6 +747,17 @@ function readAxisRange(
 
 type CameraVec3 = Scene['camera']['eye']
 type AxisLayout = NonNullable<Layout['xaxis']>
+
+function readNumber(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
 
 function isSameAxisRange(left: AxisRange | null | undefined, right: AxisRange | null | undefined) {
   if (left === right) return true
@@ -767,12 +778,34 @@ function isSameCamera(left: Scene['camera'], right: Scene['camera']) {
 }
 
 function normalizeVec3(value: unknown): CameraVec3 | null {
-  if (!value || typeof value !== 'object') return null
+  if (!value) return null
+  if (Array.isArray(value)) {
+    const x = readNumber(value[0])
+    const y = readNumber(value[1])
+    const z = readNumber(value[2])
+    if (x !== null && y !== null && z !== null) {
+      return { x, y, z }
+    }
+    return null
+  }
+  if (typeof value !== 'object') return null
   const record = value as { x?: unknown; y?: unknown; z?: unknown }
-  const x = typeof record.x === 'number' ? record.x : Number.NaN
-  const y = typeof record.y === 'number' ? record.y : Number.NaN
-  const z = typeof record.z === 'number' ? record.z : Number.NaN
-  if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+  const x = readNumber(record.x)
+  const y = readNumber(record.y)
+  const z = readNumber(record.z)
+  if (x !== null && y !== null && z !== null) {
+    return { x, y, z }
+  }
+  return null
+}
+
+function readVec3FromEvent(event: PlotlyRelayoutEvent, key: string): CameraVec3 | null {
+  const direct = normalizeVec3(event[key])
+  if (direct) return direct
+  const x = readNumber(event[`${key}.x`])
+  const y = readNumber(event[`${key}.y`])
+  const z = readNumber(event[`${key}.z`])
+  if (x !== null && y !== null && z !== null) {
     return { x, y, z }
   }
   return null
@@ -796,9 +829,9 @@ function readSceneCamera(
       }
     }
   }
-  const eye = normalizeVec3(event['scene.camera.eye'])
-  const center = normalizeVec3(event['scene.camera.center'])
-  const up = normalizeVec3(event['scene.camera.up'])
+  const eye = readVec3FromEvent(event, 'scene.camera.eye')
+  const center = readVec3FromEvent(event, 'scene.camera.center')
+  const up = readVec3FromEvent(event, 'scene.camera.up')
   if (eye || center || up) {
     return {
       eye: eye ?? current.eye,
