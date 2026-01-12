@@ -44,6 +44,7 @@ const DEFAULT_SCENE: Scene = {
     center: { x: 0, y: 0, z: 0 },
     up: { x: 0, y: 0, z: 1 },
   },
+  axisRanges: {},
   selectedNodeIds: [],
   display: 'all',
 }
@@ -177,6 +178,7 @@ export function addScene(system: System, name: string): { system: System; nodeId
     id: sceneId,
     name,
     camera: structuredClone(DEFAULT_SCENE.camera),
+    axisRanges: structuredClone(DEFAULT_SCENE.axisRanges),
     selectedNodeIds: [],
     display: 'all',
   })
@@ -205,6 +207,7 @@ export function addBifurcationDiagram(
     selectedBranchIds: [],
     xAxis: null,
     yAxis: null,
+    axisRanges: {},
   })
   next.updatedAt = nowIso()
   return { system: next, nodeId: node.id }
@@ -455,6 +458,7 @@ export function normalizeSystem(system: System): System {
     ...scene,
     selectedNodeIds: scene.selectedNodeIds ?? [],
     display: scene.display ?? 'all',
+    axisRanges: scene.axisRanges ?? {},
   }))
 
   if (!next.bifurcationDiagrams) {
@@ -487,6 +491,7 @@ export function normalizeSystem(system: System): System {
         xAxis,
         yAxis,
         selectedBranchIds,
+        axisRanges: rest.axisRanges ?? {},
       }
     })
   }

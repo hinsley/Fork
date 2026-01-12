@@ -1,6 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Data, Layout } from 'plotly.js'
 import type {
+  AxisRange,
+  AxisRanges,
   BifurcationAxis,
   BifurcationDiagram,
   ClvRenderStyle,
@@ -44,6 +46,11 @@ type ViewportPanelProps = {
   onCreateBifurcation: (targetId?: string | null) => void
   onRenameViewport: (id: string, name: string) => void
   onDeleteViewport: (id: string) => void
+  onUpdateScene: (id: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
+  onUpdateBifurcationDiagram: (
+    id: string,
+    update: Partial<Omit<BifurcationDiagram, 'id' | 'name'>>
+  ) => void
   onSampleMap1DFunction?: (
     request: SampleMap1DFunctionRequest,
     opts?: { signal?: AbortSignal }
@@ -77,6 +84,11 @@ type ViewportTileProps = {
   onDraftNameChange: (value: string) => void
   onCommitRename: () => void
   onCancelRename: () => void
+  onUpdateScene: (id: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
+  onUpdateBifurcationDiagram: (
+    id: string,
+    update: Partial<Omit<BifurcationDiagram, 'id' | 'name'>>
+  ) => void
 }
 
 type PlotlyRelayoutEvent = Record<string, unknown>
@@ -733,6 +745,101 @@ function readAxisRange(
   return undefined
 }
 
+type CameraVec3 = Scene['camera']['eye']
+type AxisLayout = NonNullable<Layout['xaxis']>
+
+function isSameAxisRange(left: AxisRange | null | undefined, right: AxisRange | null | undefined) {
+  if (left === right) return true
+  if (!left || !right) return false
+  return left[0] === right[0] && left[1] === right[1]
+}
+
+function isSameVec3(left: CameraVec3, right: CameraVec3) {
+  return left.x === right.x && left.y === right.y && left.z === right.z
+}
+
+function isSameCamera(left: Scene['camera'], right: Scene['camera']) {
+  return (
+    isSameVec3(left.eye, right.eye) &&
+    isSameVec3(left.center, right.center) &&
+    isSameVec3(left.up, right.up)
+  )
+}
+
+function normalizeVec3(value: unknown): CameraVec3 | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as { x?: unknown; y?: unknown; z?: unknown }
+  const x = typeof record.x === 'number' ? record.x : Number.NaN
+  const y = typeof record.y === 'number' ? record.y : Number.NaN
+  const z = typeof record.z === 'number' ? record.z : Number.NaN
+  if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+    return { x, y, z }
+  }
+  return null
+}
+
+function readSceneCamera(
+  event: PlotlyRelayoutEvent,
+  current: Scene['camera']
+): Scene['camera'] | undefined {
+  const camera = event['scene.camera']
+  if (camera && typeof camera === 'object') {
+    const record = camera as { eye?: unknown; center?: unknown; up?: unknown }
+    const eye = normalizeVec3(record.eye)
+    const center = normalizeVec3(record.center)
+    const up = normalizeVec3(record.up)
+    if (eye || center || up) {
+      return {
+        eye: eye ?? current.eye,
+        center: center ?? current.center,
+        up: up ?? current.up,
+      }
+    }
+  }
+  const eye = normalizeVec3(event['scene.camera.eye'])
+  const center = normalizeVec3(event['scene.camera.center'])
+  const up = normalizeVec3(event['scene.camera.up'])
+  if (eye || center || up) {
+    return {
+      eye: eye ?? current.eye,
+      center: center ?? current.center,
+      up: up ?? current.up,
+    }
+  }
+  return undefined
+}
+
+function mergeAxisRanges(
+  current: AxisRanges,
+  nextX: AxisRange | null | undefined,
+  nextY: AxisRange | null | undefined
+): AxisRanges | null {
+  let updated = false
+  const next: AxisRanges = { ...current }
+
+  if (nextX !== undefined && !isSameAxisRange(nextX, current.x)) {
+    next.x = nextX
+    updated = true
+  }
+  if (nextY !== undefined && !isSameAxisRange(nextY, current.y)) {
+    next.y = nextY
+    updated = true
+  }
+
+  return updated ? next : null
+}
+
+function applyAxisRange(
+  axis: AxisLayout,
+  range: AxisRange | null | undefined
+) {
+  if (range === undefined) return axis
+  if (range === null) {
+    return { ...axis, autorange: true }
+  }
+  return { ...axis, range: [range[0], range[1]], autorange: false }
+}
+
 function collectVisibleObjectIds(system: System): string[] {
   const ids: string[] = []
   const stack = [...system.rootIds]
@@ -1375,6 +1482,7 @@ function buildDiagramTraces(
 
 function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
   const uirevision = scene.id
+  const axisRanges = scene.axisRanges
   const base = {
     autosize: true,
     margin: { l: 40, r: 20, t: 20, b: 40 },
@@ -1420,40 +1528,58 @@ function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
     const name = varNames[0] ?? 'x'
     return {
       ...base,
-      xaxis: {
-        title: { text: `${name}_n`, font: { color: PLOTLY_TEXT_COLOR } },
-        tickfont: { color: PLOTLY_TEXT_COLOR },
-        zerolinecolor: 'rgba(120,120,120,0.3)',
-      },
-      yaxis: {
-        title: { text: `${name}_{n+1}`, font: { color: PLOTLY_TEXT_COLOR } },
-        tickfont: { color: PLOTLY_TEXT_COLOR },
-        zerolinecolor: 'rgba(120,120,120,0.3)',
-      },
+      xaxis: applyAxisRange(
+        {
+          title: { text: `${name}_n`, font: { color: PLOTLY_TEXT_COLOR } },
+          tickfont: { color: PLOTLY_TEXT_COLOR },
+          zerolinecolor: 'rgba(120,120,120,0.3)',
+        },
+        axisRanges.x
+      ),
+      yaxis: applyAxisRange(
+        {
+          title: { text: `${name}_{n+1}`, font: { color: PLOTLY_TEXT_COLOR } },
+          tickfont: { color: PLOTLY_TEXT_COLOR },
+          zerolinecolor: 'rgba(120,120,120,0.3)',
+        },
+        axisRanges.y
+      ),
     }
   }
 
   if (varNames.length === 1) {
     return {
       ...base,
-      xaxis: {
-        title: { text: 't', font: { color: PLOTLY_TEXT_COLOR } },
-        tickfont: { color: PLOTLY_TEXT_COLOR },
-        zerolinecolor: 'rgba(120,120,120,0.3)',
-      },
-      yaxis: {
-        title: { text: varNames[0] ?? 'x', font: { color: PLOTLY_TEXT_COLOR } },
-        tickfont: { color: PLOTLY_TEXT_COLOR },
-        zerolinecolor: 'rgba(120,120,120,0.3)',
-      },
+      xaxis: applyAxisRange(
+        {
+          title: { text: 't', font: { color: PLOTLY_TEXT_COLOR } },
+          tickfont: { color: PLOTLY_TEXT_COLOR },
+          zerolinecolor: 'rgba(120,120,120,0.3)',
+        },
+        axisRanges.x
+      ),
+      yaxis: applyAxisRange(
+        {
+          title: { text: varNames[0] ?? 'x', font: { color: PLOTLY_TEXT_COLOR } },
+          tickfont: { color: PLOTLY_TEXT_COLOR },
+          zerolinecolor: 'rgba(120,120,120,0.3)',
+        },
+        axisRanges.y
+      ),
     }
   }
 
   return {
     ...base,
     ...panMode,
-    xaxis: { zerolinecolor: 'rgba(120,120,120,0.3)', tickfont: { color: PLOTLY_TEXT_COLOR } },
-    yaxis: { zerolinecolor: 'rgba(120,120,120,0.3)', tickfont: { color: PLOTLY_TEXT_COLOR } },
+    xaxis: applyAxisRange(
+      { zerolinecolor: 'rgba(120,120,120,0.3)', tickfont: { color: PLOTLY_TEXT_COLOR } },
+      axisRanges.x
+    ),
+    yaxis: applyAxisRange(
+      { zerolinecolor: 'rgba(120,120,120,0.3)', tickfont: { color: PLOTLY_TEXT_COLOR } },
+      axisRanges.y
+    ),
   }
 }
 
@@ -1461,6 +1587,7 @@ function buildDiagramLayout(
   diagram: BifurcationDiagram,
   traceState: DiagramTraceState | null
 ): Partial<Layout> {
+  const axisRanges = diagram.axisRanges
   const hasAxes = traceState?.hasAxes ?? false
   const hasBranches = traceState?.hasBranches ?? false
   const hasData = traceState?.hasData ?? false
@@ -1486,22 +1613,28 @@ function buildDiagramLayout(
     uirevision: diagram.id,
     legend: { font: { color: PLOTLY_TEXT_COLOR } },
     xaxis: hasAxes
-      ? {
-          title: { text: xTitle, font: { color: PLOTLY_TEXT_COLOR } },
-          tickfont: { color: PLOTLY_TEXT_COLOR },
-          zerolinecolor: 'rgba(120,120,120,0.3)',
-          gridcolor: 'rgba(120,120,120,0.15)',
-          automargin: true,
-        }
+      ? applyAxisRange(
+          {
+            title: { text: xTitle, font: { color: PLOTLY_TEXT_COLOR } },
+            tickfont: { color: PLOTLY_TEXT_COLOR },
+            zerolinecolor: 'rgba(120,120,120,0.3)',
+            gridcolor: 'rgba(120,120,120,0.15)',
+            automargin: true,
+          },
+          axisRanges.x
+        )
       : { visible: false },
     yaxis: hasAxes
-      ? {
-          title: { text: yTitle, font: { color: PLOTLY_TEXT_COLOR } },
-          tickfont: { color: PLOTLY_TEXT_COLOR },
-          zerolinecolor: 'rgba(120,120,120,0.3)',
-          gridcolor: 'rgba(120,120,120,0.15)',
-          automargin: true,
-        }
+      ? applyAxisRange(
+          {
+            title: { text: yTitle, font: { color: PLOTLY_TEXT_COLOR } },
+            tickfont: { color: PLOTLY_TEXT_COLOR },
+            zerolinecolor: 'rgba(120,120,120,0.3)',
+            gridcolor: 'rgba(120,120,120,0.15)',
+            automargin: true,
+          },
+          axisRanges.y
+        )
       : { visible: false },
     annotations: message
       ? [
@@ -1540,6 +1673,8 @@ function ViewportTile({
   onDraftNameChange,
   onCommitRename,
   onCancelRename,
+  onUpdateScene,
+  onUpdateBifurcationDiagram,
 }: ViewportTileProps) {
   const { node, scene, diagram } = entry
   const isSelected = node.id === selectedNodeId
@@ -1562,26 +1697,65 @@ function ViewportTile({
   const plotHeight =
     timeSeriesState.sceneId === activeSceneId ? timeSeriesState.height : null
 
-  const handleRelayout = useCallback(
+  const handleSceneRelayout = useCallback(
     (event: PlotlyRelayoutEvent) => {
-      if (!scene || system.config.varNames.length !== 1 || system.config.type === 'map') return
-      const nextRange = readAxisRange(event, 'yaxis')
-      if (nextRange === undefined) return
-      const sceneId = scene.id
-      setTimeSeriesState((prev) => {
-        if (prev.sceneId !== sceneId) {
-          return { sceneId, range: nextRange ?? null, height: null }
+      if (!scene) return
+      const updates: Partial<Omit<Scene, 'id' | 'name'>> = {}
+      const nextCamera = readSceneCamera(event, scene.camera)
+      if (nextCamera && !isSameCamera(nextCamera, scene.camera)) {
+        updates.camera = nextCamera
+      }
+
+      if (system.config.varNames.length < 3) {
+        const nextRanges = mergeAxisRanges(
+          scene.axisRanges,
+          readAxisRange(event, 'xaxis'),
+          readAxisRange(event, 'yaxis')
+        )
+        if (nextRanges) {
+          updates.axisRanges = nextRanges
         }
-        if (nextRange === null) {
-          return prev.range === null ? prev : { ...prev, range: null }
+      }
+
+      if (system.config.varNames.length === 1 && system.config.type !== 'map') {
+        const nextRange = readAxisRange(event, 'yaxis')
+        if (nextRange !== undefined) {
+          const sceneId = scene.id
+          setTimeSeriesState((prev) => {
+            if (prev.sceneId !== sceneId) {
+              return { sceneId, range: nextRange ?? null, height: null }
+            }
+            if (nextRange === null) {
+              return prev.range === null ? prev : { ...prev, range: null }
+            }
+            if (prev.range && prev.range[0] === nextRange[0] && prev.range[1] === nextRange[1]) {
+              return prev
+            }
+            return { ...prev, range: nextRange }
+          })
         }
-        if (prev.range && prev.range[0] === nextRange[0] && prev.range[1] === nextRange[1]) {
-          return prev
-        }
-        return { ...prev, range: nextRange }
-      })
+      }
+
+      if (Object.keys(updates).length > 0) {
+        onUpdateScene(scene.id, updates)
+      }
     },
-    [scene, system.config.type, system.config.varNames.length]
+    [onUpdateScene, scene, system.config.type, system.config.varNames.length]
+  )
+
+  const handleDiagramRelayout = useCallback(
+    (event: PlotlyRelayoutEvent) => {
+      if (!diagram) return
+      const nextRanges = mergeAxisRanges(
+        diagram.axisRanges,
+        readAxisRange(event, 'xaxis'),
+        readAxisRange(event, 'yaxis')
+      )
+      if (nextRanges) {
+        onUpdateBifurcationDiagram(diagram.id, { axisRanges: nextRanges })
+      }
+    },
+    [diagram, onUpdateBifurcationDiagram]
   )
 
   const handleResize = useCallback(
@@ -1758,7 +1932,7 @@ function ViewportTile({
               layout={layout}
               testId={`plotly-viewport-${node.id}`}
               onPointClick={scene || diagram ? onSelectObject : undefined}
-              onRelayout={scene ? handleRelayout : undefined}
+              onRelayout={scene ? handleSceneRelayout : diagram ? handleDiagramRelayout : undefined}
               onResize={scene ? handleResize : undefined}
             />
           </div>
@@ -1785,6 +1959,8 @@ export function ViewportPanel({
   onCreateBifurcation,
   onRenameViewport,
   onDeleteViewport,
+  onUpdateScene,
+  onUpdateBifurcationDiagram,
   onSampleMap1DFunction,
 }: ViewportPanelProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -2079,6 +2255,8 @@ export function ViewportPanel({
                 onDraftNameChange={(value) => setDraftName(value)}
                 onCommitRename={() => commitRename(entry.node)}
                 onCancelRename={cancelRename}
+                onUpdateScene={onUpdateScene}
+                onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
               />
             </div>
             <div className="viewport-insert" data-testid={`viewport-insert-${entry.node.id}`}>

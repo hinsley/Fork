@@ -209,6 +209,14 @@ export interface TreeNode {
   render: RenderStyle
 }
 
+export type AxisRange = [number, number]
+
+export type AxisRanges = {
+  x?: AxisRange | null
+  y?: AxisRange | null
+  z?: AxisRange | null
+}
+
 export interface Scene {
   id: string
   name: string
@@ -217,6 +225,7 @@ export interface Scene {
     center: { x: number; y: number; z: number }
     up: { x: number; y: number; z: number }
   }
+  axisRanges: AxisRanges
   selectedNodeIds: string[]
   display: 'all' | 'selection'
 }
@@ -227,6 +236,7 @@ export interface BifurcationDiagram {
   selectedBranchIds: string[]
   xAxis: BifurcationAxis | null
   yAxis: BifurcationAxis | null
+  axisRanges: AxisRanges
 }
 
 export type BifurcationAxisKind = 'parameter' | 'state'
