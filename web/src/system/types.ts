@@ -178,11 +178,16 @@ export interface ClvRenderStyle {
   colorOverrides?: Record<number, string>
 }
 
+export interface EquilibriumEigenvectorRenderStyle {
+  enabled: boolean
+}
+
 export interface RenderStyle {
   color: string
   lineWidth: number
   pointSize: number
   clv?: ClvRenderStyle
+  equilibriumEigenvectors?: EquilibriumEigenvectorRenderStyle
 }
 
 export interface TreeNode {

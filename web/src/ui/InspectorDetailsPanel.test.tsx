@@ -259,4 +259,64 @@ describe('InspectorDetailsPanel', () => {
       dampingFactor: 0.8,
     })
   })
+
+  it('toggles equilibrium eigenvector plotting', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({ name: 'Eigenvector System' })
+    const eqObject: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ Eigen',
+      systemName: baseSystem.config.name,
+      solution: {
+        state: [0, 0],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [
+          {
+            value: { re: 1, im: 0 },
+            vector: [
+              { re: 1, im: 0 },
+              { re: 0, im: 1 },
+            ],
+          },
+        ],
+      },
+      parameters: [...baseSystem.config.params],
+    }
+    const { system, nodeId } = addObject(baseSystem, eqObject)
+    const onUpdateRender = vi.fn()
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={nodeId}
+        view="selection"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={onUpdateRender}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('equilibrium-eigenvector-toggle'))
+    await user.click(screen.getByTestId('equilibrium-eigenvector-enabled'))
+
+    expect(onUpdateRender).toHaveBeenCalledWith(nodeId, {
+      equilibriumEigenvectors: { enabled: true },
+    })
+  })
 })

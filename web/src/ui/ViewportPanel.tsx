@@ -6,6 +6,7 @@ import type {
   ClvRenderStyle,
   ContinuationObject,
   ContinuationPoint,
+  EquilibriumEigenPair,
   OrbitObject,
   System,
   Scene,
@@ -21,7 +22,8 @@ import {
   formatBifurcationLabel,
   getBranchParams,
 } from '../system/continuation'
-import { resolveClvRender } from '../system/clv'
+import { CLV_COLOR_PALETTE, resolveClvRender } from '../system/clv'
+import { resolveEquilibriumEigenvectorRender } from '../system/equilibriumEigenvectors'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
 
@@ -88,6 +90,7 @@ type MapFunctionSamples = {
 
 const MIN_VIEWPORT_HEIGHT = 200
 const CLV_HEAD_RATIO = 0.25
+const EIGENVECTOR_LENGTH_SCALE = 0.2
 const COBWEB_DIAGONAL_COLOR = 'rgba(120,120,120,0.45)'
 const COBWEB_FUNCTION_COLOR = '#6f7a89'
 const MAP_FUNCTION_SAMPLE_COUNT = 256
@@ -185,6 +188,15 @@ function buildCobwebBaseTraces(
 }
 
 type PlotSize = { width: number; height: number }
+
+type SceneBounds = {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+  minZ: number
+  maxZ: number
+}
 
 function buildClvTraces(
   nodeId: string,
@@ -407,6 +419,139 @@ function buildClvTraces(
   return traces
 }
 
+type PendingEigenvector = {
+  nodeId: string
+  state: number[]
+  eigenpairs: EquilibriumEigenPair[]
+  lineWidth: number
+  highlight: boolean
+  color: string
+}
+
+function updateSceneBounds(bounds: SceneBounds, x: number, y: number, z?: number) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return
+  const safeZ = typeof z === 'number' && Number.isFinite(z) ? z : 0
+  bounds.minX = Math.min(bounds.minX, x)
+  bounds.maxX = Math.max(bounds.maxX, x)
+  bounds.minY = Math.min(bounds.minY, y)
+  bounds.maxY = Math.max(bounds.maxY, y)
+  bounds.minZ = Math.min(bounds.minZ, safeZ)
+  bounds.maxZ = Math.max(bounds.maxZ, safeZ)
+}
+
+function buildEquilibriumEigenvectorTraces(
+  entry: PendingEigenvector,
+  bounds: SceneBounds,
+  plotSize?: PlotSize | null
+): Data[] {
+  if (entry.state.length < 2 || entry.eigenpairs.length === 0) return []
+  const plotDim = entry.state.length >= 3 ? 3 : 2
+  const use3d = plotDim === 3
+  const stateX = entry.state[0]
+  const stateY = entry.state[1]
+  const stateZ = use3d ? entry.state[2] : 0
+  if (!Number.isFinite(stateX) || !Number.isFinite(stateY) || (use3d && !Number.isFinite(stateZ))) {
+    return []
+  }
+
+  const dx = bounds.maxX - bounds.minX
+  const dy = bounds.maxY - bounds.minY
+  const dz = use3d ? bounds.maxZ - bounds.minZ : 0
+  const diag = Math.sqrt(dx * dx + dy * dy + dz * dz)
+  const fallbackScale = Math.max(
+    1,
+    Math.abs(stateX),
+    Math.abs(stateY),
+    use3d ? Math.abs(stateZ) : 0
+  )
+  const baseDiag = Number.isFinite(diag) && diag > 0 ? diag : fallbackScale
+  const hasAspectScale =
+    !use3d &&
+    plotSize &&
+    Number.isFinite(plotSize.width) &&
+    Number.isFinite(plotSize.height) &&
+    plotSize.width > 0 &&
+    plotSize.height > 0 &&
+    Number.isFinite(dx) &&
+    Number.isFinite(dy) &&
+    dx > 0 &&
+    dy > 0
+  const scaleX = hasAspectScale ? plotSize.width / dx : 1
+  const scaleY = hasAspectScale ? plotSize.height / dy : 1
+  const diagPixels = hasAspectScale
+    ? Math.sqrt(plotSize.width * plotSize.width + plotSize.height * plotSize.height)
+    : baseDiag
+  const length = EIGENVECTOR_LENGTH_SCALE * diagPixels
+  if (!Number.isFinite(length) || length <= 0) return []
+  const halfLength = length * 0.5
+
+  const baseWidth = Number.isFinite(entry.lineWidth) ? Math.max(1, entry.lineWidth) : 1
+  const lineWidth = entry.highlight ? baseWidth + 1 : baseWidth
+  const traces: Data[] = []
+
+  entry.eigenpairs.forEach((pair, index) => {
+    if (pair.vector.length < plotDim) return
+    const real = pair.vector.slice(0, plotDim).map((component) => component.re)
+    const imag = pair.vector.slice(0, plotDim).map((component) => component.im)
+    if (!real.every(Number.isFinite) || !imag.every(Number.isFinite)) return
+    const realNorm = use3d
+      ? Math.sqrt(real[0] ** 2 + real[1] ** 2 + (real[2] ?? 0) ** 2)
+      : Math.sqrt((real[0] * scaleX) ** 2 + (real[1] * scaleY) ** 2)
+    const imagNorm = use3d
+      ? Math.sqrt(imag[0] ** 2 + imag[1] ** 2 + (imag[2] ?? 0) ** 2)
+      : Math.sqrt((imag[0] * scaleX) ** 2 + (imag[1] * scaleY) ** 2)
+    const useReal = realNorm >= imagNorm
+    const components = useReal ? real : imag
+    const norm = useReal ? realNorm : imagNorm
+    if (!Number.isFinite(norm) || norm <= 0) return
+
+    const ux = components[0] / norm
+    const uy = components[1] / norm
+    const uz = use3d ? (components[2] ?? 0) / norm : 0
+    const x0 = stateX - ux * halfLength
+    const x1 = stateX + ux * halfLength
+    const y0 = stateY - uy * halfLength
+    const y1 = stateY + uy * halfLength
+    const z0 = stateZ - uz * halfLength
+    const z1 = stateZ + uz * halfLength
+    const paletteIndex = index % CLV_COLOR_PALETTE.length
+    const color = CLV_COLOR_PALETTE[paletteIndex] ?? entry.color
+
+    if (use3d) {
+      traces.push({
+        type: 'scatter3d',
+        mode: 'lines',
+        uid: entry.nodeId,
+        x: [x0, x1],
+        y: [y0, y1],
+        z: [z0, z1],
+        line: {
+          color,
+          width: lineWidth,
+        },
+        showlegend: false,
+        hoverinfo: 'none',
+      })
+    } else {
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        uid: entry.nodeId,
+        x: [x0, x1],
+        y: [y0, y1],
+        line: {
+          color,
+          width: lineWidth,
+        },
+        showlegend: false,
+        hoverinfo: 'none',
+      })
+    }
+  })
+
+  return traces
+}
+
 function readAxisRange(
   event: PlotlyRelayoutEvent,
   axis: 'xaxis' | 'yaxis'
@@ -560,6 +705,7 @@ function buildSceneTraces(
       : scene.display === 'selection' && selectedNodeId
         ? [selectedNodeId]
         : collectVisibleObjectIds(system)
+  const canPlotEigenvectors = !isTimeSeries && !isMap1D
   let timeRange: [number, number] | null = null
   const pendingEquilibria: Array<{
     nodeId: string
@@ -569,6 +715,15 @@ function buildSceneTraces(
     lineWidth: number
     highlight: boolean
   }> = []
+  const pendingEigenvectors: PendingEigenvector[] = []
+  const sceneBounds: SceneBounds = {
+    minX: Number.POSITIVE_INFINITY,
+    maxX: Number.NEGATIVE_INFINITY,
+    minY: Number.POSITIVE_INFINITY,
+    maxY: Number.NEGATIVE_INFINITY,
+    minZ: Number.POSITIVE_INFINITY,
+    maxZ: Number.NEGATIVE_INFINITY,
+  }
   let minY = Number.POSITIVE_INFINITY
   let maxY = Number.NEGATIVE_INFINITY
   let minEquilibrium = Number.POSITIVE_INFINITY
@@ -610,6 +765,24 @@ function buildSceneTraces(
       const dimension = state.length
       const highlight = nodeId === selectedNodeId
       const size = highlight ? node.render.pointSize + 2 : node.render.pointSize
+      if (canPlotEigenvectors && dimension >= 2) {
+        updateSceneBounds(sceneBounds, state[0], state[1], dimension >= 3 ? state[2] : 0)
+        const eigenvectorRender = resolveEquilibriumEigenvectorRender(
+          node.render?.equilibriumEigenvectors
+        )
+        const eigenpairs = object.solution.eigenpairs ?? []
+        const hasEigenvectors = eigenpairs.some((pair) => pair.vector.length >= 2)
+        if (eigenvectorRender.enabled && hasEigenvectors) {
+          pendingEigenvectors.push({
+            nodeId,
+            state,
+            eigenpairs,
+            lineWidth: node.render.lineWidth,
+            highlight,
+            color: node.render.color,
+          })
+        }
+      }
       if (dimension >= 3) {
         traces.push({
           type: 'scatter3d',
@@ -696,6 +869,9 @@ function buildSceneTraces(
           x.push(row[1])
           y.push(row[2])
           z.push(row[3])
+          if (canPlotEigenvectors) {
+            updateSceneBounds(sceneBounds, row[1], row[2], row[3])
+          }
         }
         traces.push({
           type: 'scatter3d',
@@ -716,6 +892,9 @@ function buildSceneTraces(
         for (const row of rows) {
           x.push(row[1])
           y.push(row[2])
+          if (canPlotEigenvectors) {
+            updateSceneBounds(sceneBounds, row[1], row[2], 0)
+          }
         }
         traces.push({
           type: 'scatter',
@@ -777,11 +956,17 @@ function buildSceneTraces(
           x.push(row[1])
           y.push(row[2])
           z.push(row[3])
+          if (canPlotEigenvectors) {
+            updateSceneBounds(sceneBounds, row[1], row[2], row[3])
+          }
         }
       } else if (dimension >= 2) {
         for (const row of rows) {
           x.push(row[1])
           y.push(row[2])
+          if (canPlotEigenvectors) {
+            updateSceneBounds(sceneBounds, row[1], row[2], 0)
+          }
         }
       } else {
         for (const row of rows) {
@@ -831,6 +1016,12 @@ function buildSceneTraces(
         traces.push(...buildClvTraces(nodeId, object, clvRender, plotSize))
       }
     }
+  }
+
+  if (pendingEigenvectors.length > 0) {
+    pendingEigenvectors.forEach((entry) => {
+      traces.push(...buildEquilibriumEigenvectorTraces(entry, sceneBounds, plotSize))
+    })
   }
 
   if (isTimeSeries && timeRange && timeRange[0] !== timeRange[1] && pendingEquilibria.length > 0) {

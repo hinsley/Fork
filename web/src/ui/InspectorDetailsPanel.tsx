@@ -17,6 +17,7 @@ import type {
 } from '../system/types'
 import { DEFAULT_RENDER } from '../system/model'
 import { defaultClvIndices, resolveClvColors, resolveClvRender } from '../system/clv'
+import { resolveEquilibriumEigenvectorRender } from '../system/equilibriumEigenvectors'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
 import type {
   BranchContinuationRequest,
@@ -792,6 +793,9 @@ export function InspectorDetailsPanel({
     clvDim ??
     (orbit?.data?.[0] ? orbit.data[0].length - 1 : system.config.varNames.length)
   const clvRender = resolveClvRender(selectionNode?.render?.clv, clvDim)
+  const equilibriumEigenvectorRender = resolveEquilibriumEigenvectorRender(
+    selectionNode?.render?.equilibriumEigenvectors
+  )
   const clvIndices = defaultClvIndices(clvPlotDim)
   const clvColors = resolveClvColors(
     clvIndices,
@@ -800,6 +804,11 @@ export function InspectorDetailsPanel({
     clvRender.colorOverrides
   )
   const clvVisibleSet = new Set(clvRender.vectorIndices)
+  const equilibriumPlotDim = equilibrium?.solution?.state?.length ?? system.config.varNames.length
+  const equilibriumHasEigenvectors = Boolean(
+    equilibrium?.solution?.eigenpairs?.some((pair) => pair.vector.length > 0)
+  )
+  const equilibriumNeeds2d = equilibriumPlotDim < 2
   const nodeVisibility = selectionNode?.visibility ?? true
   const showVisibilityToggle =
     selectionNode?.kind === 'object' || selectionNode?.kind === 'branch'
@@ -2090,6 +2099,18 @@ export function InspectorDetailsPanel({
     [clvDim, clvRender, onUpdateRender, selectionNode]
   )
 
+  const updateEquilibriumEigenvectorRender = useCallback(
+    (enabled: boolean) => {
+      if (!selectionNode) return
+      const merged = resolveEquilibriumEigenvectorRender({
+        ...equilibriumEigenvectorRender,
+        enabled,
+      })
+      onUpdateRender(selectionNode.id, { equilibriumEigenvectors: merged })
+    },
+    [equilibriumEigenvectorRender, onUpdateRender, selectionNode]
+  )
+
   const handleClvVisibilityChange = (index: number, visible: boolean) => {
     const nextSet = new Set(clvRender.vectorIndices)
     if (visible) {
@@ -2950,6 +2971,35 @@ export function InspectorDetailsPanel({
                   ) : (
                     <p className="empty-state">No cached solver parameters yet.</p>
                   )}
+                </div>
+              </InspectorDisclosure>
+
+              <InspectorDisclosure
+                key={`${selectionKey}-equilibrium-eigenvector-plot`}
+                title="Eigenvector Plotting"
+                testId="equilibrium-eigenvector-toggle"
+                defaultOpen={false}
+              >
+                <div className="inspector-section">
+                  {!equilibriumHasEigenvectors ? (
+                    <p className="empty-state">Eigenvectors not computed yet.</p>
+                  ) : null}
+                  {equilibriumNeeds2d ? (
+                    <div className="field-warning">
+                      Eigenvector plotting requires at least two state variables.
+                    </div>
+                  ) : null}
+                  <label>
+                    Show eigenvectors
+                    <input
+                      type="checkbox"
+                      checked={equilibriumEigenvectorRender.enabled}
+                      onChange={(event) =>
+                        updateEquilibriumEigenvectorRender(event.target.checked)
+                      }
+                      data-testid="equilibrium-eigenvector-enabled"
+                    />
+                  </label>
                 </div>
               </InspectorDisclosure>
 
