@@ -17,6 +17,10 @@ export const DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER: EquilibriumEigenvectorRende
   enabled: false,
   vectorIndices: [0],
   colors: [EIGENVECTOR_COLOR_PALETTE[0]],
+  lineLengthScale: 0.2,
+  lineThickness: 2,
+  discRadiusScale: 0.2,
+  discThickness: 2,
 }
 
 const REAL_EIGENVALUE_EPS = 1e-6
@@ -88,6 +92,34 @@ function applyEigenvectorColorOverrides(
     }
   })
   return next
+}
+
+function normalizeLineLengthScale(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER.lineLengthScale
+  }
+  return Math.max(0, value)
+}
+
+function normalizeLineThickness(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER.lineThickness
+  }
+  return Math.max(0.5, value)
+}
+
+function normalizeDiscRadiusScale(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER.discRadiusScale
+  }
+  return Math.max(0, value)
+}
+
+function normalizeDiscThickness(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER.discThickness
+  }
+  return Math.max(0.5, value)
 }
 
 export function normalizeEquilibriumEigenvectorIndices(
@@ -167,5 +199,9 @@ export function resolveEquilibriumEigenvectorRender(
     vectorIndices: indices,
     colors,
     colorOverrides,
+    lineLengthScale: normalizeLineLengthScale(render?.lineLengthScale),
+    lineThickness: normalizeLineThickness(render?.lineThickness),
+    discRadiusScale: normalizeDiscRadiusScale(render?.discRadiusScale),
+    discThickness: normalizeDiscThickness(render?.discThickness),
   }
 }

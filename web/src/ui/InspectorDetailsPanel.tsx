@@ -2921,6 +2921,66 @@ export function InspectorDetailsPanel({
                           data-testid="equilibrium-eigenvector-enabled"
                         />
                       </label>
+                      <label>
+                        Eigenline length (fraction of scene)
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          value={equilibriumEigenvectorRender.lineLengthScale}
+                          onChange={(event) =>
+                            updateEquilibriumEigenvectorRender({
+                              lineLengthScale: Number(event.target.value),
+                            })
+                          }
+                          data-testid="equilibrium-eigenvector-line-length"
+                        />
+                      </label>
+                      <label>
+                        Eigenline thickness (px)
+                        <input
+                          type="number"
+                          min={0.5}
+                          step={0.5}
+                          value={equilibriumEigenvectorRender.lineThickness}
+                          onChange={(event) =>
+                            updateEquilibriumEigenvectorRender({
+                              lineThickness: Number(event.target.value),
+                            })
+                          }
+                          data-testid="equilibrium-eigenvector-line-thickness"
+                        />
+                      </label>
+                      <label>
+                        Eigenspace disc radius (fraction of scene)
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          value={equilibriumEigenvectorRender.discRadiusScale}
+                          onChange={(event) =>
+                            updateEquilibriumEigenvectorRender({
+                              discRadiusScale: Number(event.target.value),
+                            })
+                          }
+                          data-testid="equilibrium-eigenvector-disc-radius"
+                        />
+                      </label>
+                      <label>
+                        Eigenspace disc thickness (px)
+                        <input
+                          type="number"
+                          min={0.5}
+                          step={0.5}
+                          value={equilibriumEigenvectorRender.discThickness}
+                          onChange={(event) =>
+                            updateEquilibriumEigenvectorRender({
+                              discThickness: Number(event.target.value),
+                            })
+                          }
+                          data-testid="equilibrium-eigenvector-disc-thickness"
+                        />
+                      </label>
                       {equilibriumEigenvectorIndices.length > 0 ? (
                         <div className="inspector-list">
                           {equilibriumEigenvectorIndices.map((index, idx) => {

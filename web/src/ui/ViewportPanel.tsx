@@ -95,7 +95,6 @@ type MapFunctionSamples = {
 
 const MIN_VIEWPORT_HEIGHT = 200
 const CLV_HEAD_RATIO = 0.25
-const EIGENVECTOR_LENGTH_SCALE = 0.2
 const COBWEB_DIAGONAL_COLOR = 'rgba(120,120,120,0.45)'
 const COBWEB_FUNCTION_COLOR = '#6f7a89'
 const MAP_FUNCTION_SAMPLE_COUNT = 256
@@ -434,7 +433,10 @@ type PendingEigenvector = {
   eigenpairs: EquilibriumEigenPair[]
   vectorIndices: number[]
   colors: string[]
-  lineWidth: number
+  lineLengthScale: number
+  lineThickness: number
+  discRadiusScale: number
+  discThickness: number
   highlight: boolean
 }
 
@@ -491,12 +493,18 @@ function buildEquilibriumEigenvectorTraces(
   const diagPixels = hasAspectScale
     ? Math.sqrt(plotSize.width * plotSize.width + plotSize.height * plotSize.height)
     : baseDiag
-  const length = EIGENVECTOR_LENGTH_SCALE * diagPixels
-  if (!Number.isFinite(length) || length <= 0) return []
-  const halfLength = length * 0.5
+  const lineLength = entry.lineLengthScale * diagPixels
+  const discRadius = entry.discRadiusScale * diagPixels
+  const lineHalfLength = lineLength * 0.5
 
-  const baseWidth = Number.isFinite(entry.lineWidth) ? Math.max(1, entry.lineWidth) : 1
-  const lineWidth = entry.highlight ? baseWidth + 1 : baseWidth
+  const baseLineWidth = Number.isFinite(entry.lineThickness)
+    ? Math.max(0.5, entry.lineThickness)
+    : 1
+  const lineWidth = entry.highlight ? baseLineWidth + 1 : baseLineWidth
+  const baseDiscWidth = Number.isFinite(entry.discThickness)
+    ? Math.max(0.5, entry.discThickness)
+    : 1
+  const discLineWidth = entry.highlight ? baseDiscWidth + 1 : baseDiscWidth
   const traces: Data[] = []
 
   const colorWithAlpha = (value: string, alpha: number) => {
@@ -555,12 +563,12 @@ function buildEquilibriumEigenvectorTraces(
   }
 
   const pushLine = (ux: number, uy: number, uz: number, color: string) => {
-    const x0 = stateX - ux * halfLength
-    const x1 = stateX + ux * halfLength
-    const y0 = stateY - uy * halfLength
-    const y1 = stateY + uy * halfLength
-    const z0 = stateZ - uz * halfLength
-    const z1 = stateZ + uz * halfLength
+    const x0 = stateX - ux * lineHalfLength
+    const x1 = stateX + ux * lineHalfLength
+    const y0 = stateY - uy * lineHalfLength
+    const y1 = stateY + uy * lineHalfLength
+    const z0 = stateZ - uz * lineHalfLength
+    const z1 = stateZ + uz * lineHalfLength
     if (use3d) {
       traces.push({
         type: 'scatter3d',
@@ -595,9 +603,9 @@ function buildEquilibriumEigenvectorTraces(
       const theta = (idx / EIGENVECTOR_DISC_SEGMENTS) * Math.PI * 2
       const cos = Math.cos(theta)
       const sin = Math.sin(theta)
-      ringX.push(stateX + halfLength * (u[0] * cos + v[0] * sin))
-      ringY.push(stateY + halfLength * (u[1] * cos + v[1] * sin))
-      ringZ.push(stateZ + halfLength * ((u[2] ?? 0) * cos + (v[2] ?? 0) * sin))
+      ringX.push(stateX + discRadius * (u[0] * cos + v[0] * sin))
+      ringY.push(stateY + discRadius * (u[1] * cos + v[1] * sin))
+      ringZ.push(stateZ + discRadius * ((u[2] ?? 0) * cos + (v[2] ?? 0) * sin))
     }
     if (use3d) {
       const meshX = [stateX, ...ringX.slice(0, -1)]
@@ -638,7 +646,7 @@ function buildEquilibriumEigenvectorTraces(
         x: ringX,
         y: ringY,
         z: ringZ,
-        line: { color, width: lineWidth },
+        line: { color, width: discLineWidth },
         showlegend: false,
         hoverinfo: 'none',
       })
@@ -651,7 +659,7 @@ function buildEquilibriumEigenvectorTraces(
         y: ringY,
         fill: 'toself',
         fillcolor: colorWithAlpha(color, EIGENVECTOR_DISC_OPACITY),
-        line: { color, width: lineWidth },
+        line: { color, width: discLineWidth },
         showlegend: false,
         hoverinfo: 'none',
       })
@@ -669,12 +677,15 @@ function buildEquilibriumEigenvectorTraces(
     const color = entry.colors[colorIndex] ?? EIGENVECTOR_COLOR_PALETTE[paletteIndex]
 
     if (!isRealEigenvalue(pair.value)) {
+      if (discRadius <= 0) return
       const basis = orthonormalize(real, imag)
       if (basis) {
         pushDisc(basis.u, basis.v, color)
-        return
       }
+      return
     }
+
+    if (!Number.isFinite(lineLength) || lineLength <= 0) return
 
     const realNorm = use3d
       ? norm(real)
@@ -927,7 +938,10 @@ function buildSceneTraces(
             eigenpairs,
             vectorIndices: eigenvectorRender.vectorIndices,
             colors: eigenvectorRender.colors,
-            lineWidth: node.render.lineWidth,
+            lineLengthScale: eigenvectorRender.lineLengthScale,
+            lineThickness: eigenvectorRender.lineThickness,
+            discRadiusScale: eigenvectorRender.discRadiusScale,
+            discThickness: eigenvectorRender.discThickness,
             highlight,
           })
         }

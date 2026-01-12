@@ -183,6 +183,10 @@ export interface EquilibriumEigenvectorRenderStyle {
   vectorIndices: number[]
   colors: string[]
   colorOverrides?: Record<number, string>
+  lineLengthScale: number
+  lineThickness: number
+  discRadiusScale: number
+  discThickness: number
 }
 
 export interface RenderStyle {
