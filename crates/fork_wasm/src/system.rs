@@ -225,4 +225,76 @@ mod tests {
         let jacobian = system.compute_jacobian();
         assert_eq!(jacobian, vec![1.0]);
     }
+
+    #[test]
+    fn wasm_system_sets_system_type_for_map() {
+        let system = WasmSystem::new(
+            vec!["x".to_string()],
+            Vec::new(),
+            Vec::new(),
+            vec!["x".to_string()],
+            "rk4",
+            "map",
+        )
+        .expect("system should build");
+
+        assert!(matches!(system.system_type, SystemType::Map));
+    }
+
+    #[test]
+    fn wasm_system_discrete_solver_updates_state_once() {
+        let mut system = WasmSystem::new(
+            vec!["x + 1".to_string()],
+            Vec::new(),
+            Vec::new(),
+            vec!["x".to_string()],
+            "discrete",
+            "map",
+        )
+        .expect("system should build");
+
+        system.set_state(&[2.0]);
+        system.set_t(1.0);
+        system.step(0.25);
+
+        let state = system.get_state();
+        assert!((state[0] - 3.0).abs() < 1e-12);
+        assert!((system.get_t() - 1.25).abs() < 1e-12);
+    }
+
+    #[test]
+    fn wasm_system_get_state_returns_copy() {
+        let mut system = WasmSystem::new(
+            vec!["x".to_string(), "y".to_string()],
+            Vec::new(),
+            Vec::new(),
+            vec!["x".to_string(), "y".to_string()],
+            "rk4",
+            "flow",
+        )
+        .expect("system should build");
+
+        system.set_state(&[1.0, 2.0]);
+        let mut snapshot = system.get_state();
+        snapshot[0] = 9.0;
+
+        assert_eq!(system.get_state(), vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn wasm_system_compute_jacobian_multi_dimensional() {
+        let mut system = WasmSystem::new(
+            vec!["a * x".to_string(), "b * y".to_string()],
+            vec![2.0, 3.0],
+            vec!["a".to_string(), "b".to_string()],
+            vec!["x".to_string(), "y".to_string()],
+            "rk4",
+            "flow",
+        )
+        .expect("system should build");
+
+        system.set_state(&[1.0, 1.0]);
+        let jacobian = system.compute_jacobian();
+        assert_eq!(jacobian, vec![2.0, 0.0, 0.0, 3.0]);
+    }
 }
