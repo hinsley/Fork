@@ -182,16 +182,21 @@ impl WasmFoldCurveRunner {
 
 #[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
-    use super::WasmLPCCurveRunner;
-    use fork_core::continuation::ContinuationSettings;
-    use serde_wasm_bindgen::to_value;
+    use super::{
+        WasmFoldCurveRunner, WasmHopfCurveRunner, WasmLPCCurveRunner, WasmNSCurveRunner,
+        WasmPDCurveRunner,
+    };
+    use fork_core::continuation::{
+        Codim1CurveBranch, Codim1CurveType, Codim2BifurcationType, ContinuationSettings,
+    };
+    use serde_wasm_bindgen::{from_value, to_value};
 
-    fn settings_value() -> wasm_bindgen::JsValue {
+    fn settings_value(max_steps: usize) -> wasm_bindgen::JsValue {
         let settings = ContinuationSettings {
             step_size: 0.1,
             min_step_size: 1e-6,
             max_step_size: 1.0,
-            max_steps: 3,
+            max_steps,
             corrector_steps: 1,
             corrector_tolerance: 1e-9,
             step_tolerance: 1e-6,
@@ -214,13 +219,139 @@ mod tests {
             1.0,
             2,
             1,
-            settings_value(),
+            settings_value(3),
             true,
         );
 
         assert!(result.is_err(), "should reject invalid lc_state length");
         let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
         assert!(message.contains("Invalid lc_state.len()"));
+    }
+
+    #[test]
+    fn ns_curve_runner_rejects_invalid_state_len() {
+        let result = WasmNSCurveRunner::new(
+            vec!["x".to_string()],
+            vec![1.0, 2.0],
+            vec!["a".to_string(), "b".to_string()],
+            vec!["x".to_string()],
+            vec![0.0, 1.0, 2.0],
+            1.0,
+            "a",
+            1.0,
+            "b",
+            2.0,
+            0.5,
+            2,
+            1,
+            settings_value(3),
+            true,
+        );
+
+        assert!(result.is_err(), "should reject invalid lc_state length");
+        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        assert!(message.contains("Invalid lc_state.len()"));
+    }
+
+    #[test]
+    fn fold_curve_runner_emits_expected_initial_point() {
+        let mut runner = WasmFoldCurveRunner::new(
+            vec!["a * x - b".to_string()],
+            vec![1.0, 2.0],
+            vec!["a".to_string(), "b".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            vec![0.0],
+            "a",
+            1.0,
+            "b",
+            2.0,
+            settings_value(0),
+            true,
+        )
+        .expect("runner");
+
+        runner.run_steps(1).expect("run steps");
+        let branch_val = runner.get_result().expect("result");
+        let branch: Codim1CurveBranch = from_value(branch_val).expect("branch");
+
+        assert_eq!(branch.curve_type, Codim1CurveType::Fold);
+        assert_eq!(branch.param1_index, 0);
+        assert_eq!(branch.param2_index, 1);
+        assert_eq!(branch.indices, vec![0]);
+        assert_eq!(branch.points.len(), 1);
+        let point = &branch.points[0];
+        assert_eq!(point.state, vec![0.0]);
+        assert_eq!(point.param1_value, 1.0);
+        assert_eq!(point.param2_value, 2.0);
+        assert_eq!(point.codim2_type, Codim2BifurcationType::None);
+        assert!(point.auxiliary.is_none());
+    }
+
+    #[test]
+    fn hopf_curve_runner_sets_kappa_auxiliary() {
+        let hopf_omega = 3.0;
+        let mut runner = WasmHopfCurveRunner::new(
+            vec!["a * x".to_string(), "b * y".to_string()],
+            vec![-1.0, 2.0],
+            vec!["a".to_string(), "b".to_string()],
+            vec!["x".to_string(), "y".to_string()],
+            "flow",
+            vec![0.0, 0.0],
+            hopf_omega,
+            "a",
+            -1.0,
+            "b",
+            2.0,
+            settings_value(0),
+            true,
+        )
+        .expect("runner");
+
+        runner.run_steps(1).expect("run steps");
+        let branch_val = runner.get_result().expect("result");
+        let branch: Codim1CurveBranch = from_value(branch_val).expect("branch");
+
+        assert_eq!(branch.curve_type, Codim1CurveType::Hopf);
+        assert_eq!(branch.points.len(), 1);
+        let point = &branch.points[0];
+        assert_eq!(point.state, vec![0.0, 0.0]);
+        assert_eq!(point.param1_value, -1.0);
+        assert_eq!(point.param2_value, 2.0);
+        assert_eq!(point.auxiliary, Some(hopf_omega * hopf_omega));
+    }
+
+    #[test]
+    fn pd_curve_runner_pads_implicit_state_and_includes_period() {
+        let period = 5.0;
+        let mut runner = WasmPDCurveRunner::new(
+            vec!["a * x + b".to_string()],
+            vec![1.0, 2.0],
+            vec!["a".to_string(), "b".to_string()],
+            vec!["x".to_string()],
+            vec![0.5, 0.75],
+            period,
+            "a",
+            1.0,
+            "b",
+            2.0,
+            1,
+            1,
+            settings_value(0),
+            true,
+        )
+        .expect("runner");
+
+        runner.run_steps(1).expect("run steps");
+        let branch_val = runner.get_result().expect("result");
+        let branch: Codim1CurveBranch = from_value(branch_val).expect("branch");
+
+        assert_eq!(branch.curve_type, Codim1CurveType::PeriodDoubling);
+        assert_eq!(branch.points.len(), 1);
+        let point = &branch.points[0];
+        assert_eq!(point.param1_value, 1.0);
+        assert_eq!(point.param2_value, 2.0);
+        assert_eq!(point.state, vec![0.5, 0.5, 0.75, period]);
     }
 }
 
