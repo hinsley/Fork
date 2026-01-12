@@ -91,6 +91,8 @@ const CLV_HEAD_RATIO = 0.25
 const COBWEB_DIAGONAL_COLOR = 'rgba(120,120,120,0.45)'
 const COBWEB_FUNCTION_COLOR = '#6f7a89'
 const MAP_FUNCTION_SAMPLE_COUNT = 256
+const PLOTLY_TEXT_COLOR = 'var(--text)'
+const PLOTLY_MUTED_TEXT_COLOR = 'var(--text-muted)'
 
 function interpolateOrbitState(
   times: number[],
@@ -1026,6 +1028,7 @@ function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
     plot_bgcolor: 'rgba(0,0,0,0)',
     showlegend: false,
     uirevision,
+    legend: { font: { color: PLOTLY_TEXT_COLOR } },
   } satisfies Partial<Layout>
 
   const varNames = system.config.varNames
@@ -1035,15 +1038,18 @@ function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
       ...base,
       scene: {
         xaxis: {
-          title: { text: varNames[0] ?? 'x' },
+          title: { text: varNames[0] ?? 'x', font: { color: PLOTLY_TEXT_COLOR } },
+          tickfont: { color: PLOTLY_TEXT_COLOR },
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
         yaxis: {
-          title: { text: varNames[1] ?? 'y' },
+          title: { text: varNames[1] ?? 'y', font: { color: PLOTLY_TEXT_COLOR } },
+          tickfont: { color: PLOTLY_TEXT_COLOR },
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
         zaxis: {
-          title: { text: varNames[2] ?? 'z' },
+          title: { text: varNames[2] ?? 'z', font: { color: PLOTLY_TEXT_COLOR } },
+          tickfont: { color: PLOTLY_TEXT_COLOR },
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
         camera: {
@@ -1061,11 +1067,13 @@ function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
     return {
       ...base,
       xaxis: {
-        title: { text: `${name}_n` },
+        title: { text: `${name}_n`, font: { color: PLOTLY_TEXT_COLOR } },
+        tickfont: { color: PLOTLY_TEXT_COLOR },
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },
       yaxis: {
-        title: { text: `${name}_{n+1}` },
+        title: { text: `${name}_{n+1}`, font: { color: PLOTLY_TEXT_COLOR } },
+        tickfont: { color: PLOTLY_TEXT_COLOR },
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },
     }
@@ -1075,11 +1083,13 @@ function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
     return {
       ...base,
       xaxis: {
-        title: { text: 't' },
+        title: { text: 't', font: { color: PLOTLY_TEXT_COLOR } },
+        tickfont: { color: PLOTLY_TEXT_COLOR },
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },
       yaxis: {
-        title: { text: varNames[0] ?? 'x' },
+        title: { text: varNames[0] ?? 'x', font: { color: PLOTLY_TEXT_COLOR } },
+        tickfont: { color: PLOTLY_TEXT_COLOR },
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },
     }
@@ -1088,8 +1098,8 @@ function buildSceneLayout(system: System, scene: Scene): Partial<Layout> {
   return {
     ...base,
     ...panMode,
-    xaxis: { zerolinecolor: 'rgba(120,120,120,0.3)' },
-    yaxis: { zerolinecolor: 'rgba(120,120,120,0.3)' },
+    xaxis: { zerolinecolor: 'rgba(120,120,120,0.3)', tickfont: { color: PLOTLY_TEXT_COLOR } },
+    yaxis: { zerolinecolor: 'rgba(120,120,120,0.3)', tickfont: { color: PLOTLY_TEXT_COLOR } },
   }
 }
 
@@ -1120,9 +1130,11 @@ function buildDiagramLayout(
     showlegend: hasData,
     dragmode: 'pan',
     uirevision: diagram.id,
+    legend: { font: { color: PLOTLY_TEXT_COLOR } },
     xaxis: hasAxes
       ? {
-          title: { text: xTitle },
+          title: { text: xTitle, font: { color: PLOTLY_TEXT_COLOR } },
+          tickfont: { color: PLOTLY_TEXT_COLOR },
           zerolinecolor: 'rgba(120,120,120,0.3)',
           gridcolor: 'rgba(120,120,120,0.15)',
           automargin: true,
@@ -1130,7 +1142,8 @@ function buildDiagramLayout(
       : { visible: false },
     yaxis: hasAxes
       ? {
-          title: { text: yTitle },
+          title: { text: yTitle, font: { color: PLOTLY_TEXT_COLOR } },
+          tickfont: { color: PLOTLY_TEXT_COLOR },
           zerolinecolor: 'rgba(120,120,120,0.3)',
           gridcolor: 'rgba(120,120,120,0.15)',
           automargin: true,
@@ -1145,7 +1158,7 @@ function buildDiagramLayout(
             xref: 'paper',
             yref: 'paper',
             showarrow: false,
-            font: { color: '#9aa3b2', size: 12 },
+            font: { color: PLOTLY_MUTED_TEXT_COLOR, size: 12 },
           },
         ]
       : [],
