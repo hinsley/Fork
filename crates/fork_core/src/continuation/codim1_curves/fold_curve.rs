@@ -160,6 +160,10 @@ impl<'a> FoldCurveProblem<'a> {
 
         Ok(tests)
     }
+
+    pub fn codim2_tests(&self) -> Codim2TestFunctions {
+        self.codim2_tests
+    }
 }
 
 impl<'a> ContinuationProblem for FoldCurveProblem<'a> {

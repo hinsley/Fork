@@ -4,8 +4,9 @@ use crate::system::build_system;
 use super::shared::compute_tangent_from_problem;
 use fork_core::continuation::codim1_curves::estimate_hopf_kappa_from_jacobian;
 use fork_core::continuation::{
-    ContinuationPoint, ContinuationRunner, ContinuationSettings, FoldCurveProblem, HopfCurveProblem,
-    LPCCurveProblem, NSCurveProblem, PDCurveProblem,
+    Codim2BifurcationType, Codim2TestFunctions, ContinuationBranch, ContinuationPoint,
+    ContinuationProblem, ContinuationRunner, ContinuationSettings, FoldCurveProblem,
+    HopfCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::{compute_jacobian, SystemKind};
@@ -108,29 +109,31 @@ struct ExtensionMergeContext {
 
 enum Codim1ExtensionRunnerKind {
     Fold {
-        _system: Box<EquationSystem>,
+        system: Box<EquationSystem>,
+        kind: SystemKind,
         runner: ContinuationRunner<FoldCurveProblem<'static>>,
         merge: ExtensionMergeContext,
         dim: usize,
     },
     Hopf {
-        _system: Box<EquationSystem>,
+        system: Box<EquationSystem>,
+        kind: SystemKind,
         runner: ContinuationRunner<HopfCurveProblem<'static>>,
         merge: ExtensionMergeContext,
         dim: usize,
     },
     LPC {
-        _system: Box<EquationSystem>,
+        system: Box<EquationSystem>,
         runner: ContinuationRunner<LPCCurveProblem<'static>>,
         merge: ExtensionMergeContext,
     },
     PD {
-        _system: Box<EquationSystem>,
+        system: Box<EquationSystem>,
         runner: ContinuationRunner<PDCurveProblem<'static>>,
         merge: ExtensionMergeContext,
     },
     NS {
-        _system: Box<EquationSystem>,
+        system: Box<EquationSystem>,
         runner: ContinuationRunner<NSCurveProblem<'static>>,
         merge: ExtensionMergeContext,
     },
@@ -304,7 +307,8 @@ impl WasmCodim1CurveExtensionRunner {
                 .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
 
                 Codim1ExtensionRunnerKind::Fold {
-                    _system: boxed_system,
+                    system: boxed_system,
+                    kind,
                     runner,
                     merge,
                     dim,
@@ -388,7 +392,8 @@ impl WasmCodim1CurveExtensionRunner {
                 .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
 
                 Codim1ExtensionRunnerKind::Hopf {
-                    _system: boxed_system,
+                    system: boxed_system,
+                    kind,
                     runner,
                     merge,
                     dim,
@@ -468,7 +473,7 @@ impl WasmCodim1CurveExtensionRunner {
                 .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
 
                 Codim1ExtensionRunnerKind::LPC {
-                    _system: boxed_system,
+                    system: boxed_system,
                     runner,
                     merge,
                 }
@@ -547,7 +552,7 @@ impl WasmCodim1CurveExtensionRunner {
                 .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
 
                 Codim1ExtensionRunnerKind::PD {
-                    _system: boxed_system,
+                    system: boxed_system,
                     runner,
                     merge,
                 }
@@ -631,7 +636,7 @@ impl WasmCodim1CurveExtensionRunner {
                 .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
 
                 Codim1ExtensionRunnerKind::NS {
-                    _system: boxed_system,
+                    system: boxed_system,
                     runner,
                     merge,
                 }
@@ -696,21 +701,70 @@ impl WasmCodim1CurveExtensionRunner {
             .take()
             .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
 
-        let (extension, mut merge, curve_dim) = match runner_kind {
-            Codim1ExtensionRunnerKind::Fold { runner, merge, dim, .. } => {
-                (runner.take_result(), merge, CurveDim::Equilibrium(dim))
+        let (extension, mut merge, curve_dim, codim2_types) = match runner_kind {
+            Codim1ExtensionRunnerKind::Fold {
+                runner,
+                merge,
+                dim,
+                mut system,
+                kind,
+            } => {
+                let extension = runner.take_result();
+                let codim2_types =
+                    detect_codim2_fold(&extension, &merge.branch.branch_type, system.as_mut(), kind, dim)?;
+                (
+                    extension,
+                    merge,
+                    CurveDim::Equilibrium(dim),
+                    codim2_types,
+                )
             }
-            Codim1ExtensionRunnerKind::Hopf { runner, merge, dim, .. } => {
-                (runner.take_result(), merge, CurveDim::Equilibrium(dim))
+            Codim1ExtensionRunnerKind::Hopf {
+                runner,
+                merge,
+                dim,
+                mut system,
+                kind,
+            } => {
+                let extension = runner.take_result();
+                let codim2_types =
+                    detect_codim2_hopf(&extension, &merge.branch.branch_type, system.as_mut(), kind, dim)?;
+                (
+                    extension,
+                    merge,
+                    CurveDim::Equilibrium(dim),
+                    codim2_types,
+                )
             }
-            Codim1ExtensionRunnerKind::LPC { runner, merge, .. } => {
-                (runner.take_result(), merge, CurveDim::LimitCycle)
+            Codim1ExtensionRunnerKind::LPC {
+                runner,
+                merge,
+                mut system,
+            } => {
+                let extension = runner.take_result();
+                let codim2_types =
+                    detect_codim2_lpc(&extension, &merge.branch.branch_type, system.as_mut())?;
+                (extension, merge, CurveDim::LimitCycle, codim2_types)
             }
-            Codim1ExtensionRunnerKind::PD { runner, merge, .. } => {
-                (runner.take_result(), merge, CurveDim::LimitCycle)
+            Codim1ExtensionRunnerKind::PD {
+                runner,
+                merge,
+                mut system,
+            } => {
+                let extension = runner.take_result();
+                let codim2_types =
+                    detect_codim2_pd(&extension, &merge.branch.branch_type, system.as_mut())?;
+                (extension, merge, CurveDim::LimitCycle, codim2_types)
             }
-            Codim1ExtensionRunnerKind::NS { runner, merge, .. } => {
-                (runner.take_result(), merge, CurveDim::LimitCycle)
+            Codim1ExtensionRunnerKind::NS {
+                runner,
+                merge,
+                mut system,
+            } => {
+                let extension = runner.take_result();
+                let codim2_types =
+                    detect_codim2_ns(&extension, &merge.branch.branch_type, system.as_mut())?;
+                (extension, merge, CurveDim::LimitCycle, codim2_types)
             }
         };
 
@@ -720,8 +774,17 @@ impl WasmCodim1CurveExtensionRunner {
             ..
         } = merge;
 
+        let mut codim2_iter = codim2_types.into_iter();
+
         for (i, pt) in extension.points.into_iter().enumerate().skip(1) {
-            let converted = convert_extension_point(&merge.branch.branch_type, &pt, curve_dim)?;
+            let codim2_type = codim2_iter
+                .next()
+                .unwrap_or(Codim2BifurcationType::None);
+            let converted =
+                convert_extension_point(&merge.branch.branch_type, &pt, curve_dim, codim2_type)?;
+            if codim2_type != Codim2BifurcationType::None {
+                merge.branch.bifurcations.push(merge.branch.points.len());
+            }
             merge.branch.points.push(converted);
             let idx = extension.indices.get(i).cloned().unwrap_or(i as i32);
             merge.branch.indices.push(index_offset + idx * sign);
@@ -1006,7 +1069,9 @@ fn convert_extension_point(
     branch_type: &Codim1BranchType,
     point: &ContinuationPoint,
     curve_dim: CurveDim,
+    codim2_type: Codim2BifurcationType,
 ) -> Result<Codim1BranchPoint, JsValue> {
+    let stability = Some(codim2_stability_label(codim2_type));
     match branch_type {
         Codim1BranchType::FoldCurve { .. } => match curve_dim {
             CurveDim::Equilibrium(dim) => {
@@ -1021,7 +1086,7 @@ fn convert_extension_point(
                     state: physical_state,
                     param_value: point.param_value,
                     param2_value: Some(param2_value),
-                    stability: Some("None".to_string()),
+                    stability,
                     eigenvalues: point.eigenvalues.clone(),
                     auxiliary: None,
                 })
@@ -1042,7 +1107,7 @@ fn convert_extension_point(
                     state: physical_state,
                     param_value: point.param_value,
                     param2_value: Some(param2_value),
-                    stability: Some("None".to_string()),
+                    stability,
                     eigenvalues: point.eigenvalues.clone(),
                     auxiliary: Some(kappa),
                 })
@@ -1065,7 +1130,7 @@ fn convert_extension_point(
                 state: physical_state,
                 param_value: point.param_value,
                 param2_value: Some(param2_value),
-                stability: Some("None".to_string()),
+                stability,
                 eigenvalues: point.eigenvalues.clone(),
                 auxiliary: None,
             })
@@ -1087,10 +1152,340 @@ fn convert_extension_point(
                 state: physical_state,
                 param_value: point.param_value,
                 param2_value: Some(param2_value),
-                stability: Some("None".to_string()),
+                stability,
                 eigenvalues: point.eigenvalues.clone(),
                 auxiliary: Some(k_value),
             })
         }
+    }
+}
+
+fn codim2_stability_label(bifurcation: Codim2BifurcationType) -> String {
+    if bifurcation == Codim2BifurcationType::None {
+        "None".to_string()
+    } else {
+        format!("{:?}", bifurcation)
+    }
+}
+
+fn detect_codim2_fold(
+    extension: &ContinuationBranch,
+    branch_type: &Codim1BranchType,
+    system: &mut EquationSystem,
+    kind: SystemKind,
+    dim: usize,
+) -> Result<Vec<Codim2BifurcationType>, JsValue> {
+    let (param1_index, param2_index) = param_indices(system, branch_type)?;
+    let first = extension
+        .points
+        .first()
+        .ok_or_else(|| JsValue::from_str("Fold extension has no points"))?;
+    if first.state.len() < dim + 1 {
+        return Err(JsValue::from_str(
+            "Fold extension point has unexpected state length",
+        ));
+    }
+    let p2 = first.state[0];
+    let state = first.state[1..(dim + 1)].to_vec();
+
+    system.params[param1_index] = first.param_value;
+    system.params[param2_index] = p2;
+
+    let mut problem = FoldCurveProblem::new(system, kind, &state, param1_index, param2_index)
+        .map_err(to_js_error)?;
+
+    detect_codim2_for_extension(extension, |point| codim2_tests_for_fold(&mut problem, point))
+}
+
+fn detect_codim2_hopf(
+    extension: &ContinuationBranch,
+    branch_type: &Codim1BranchType,
+    system: &mut EquationSystem,
+    kind: SystemKind,
+    dim: usize,
+) -> Result<Vec<Codim2BifurcationType>, JsValue> {
+    let (param1_index, param2_index) = param_indices(system, branch_type)?;
+    let first = extension
+        .points
+        .first()
+        .ok_or_else(|| JsValue::from_str("Hopf extension has no points"))?;
+    if first.state.len() < dim + 2 {
+        return Err(JsValue::from_str(
+            "Hopf extension point has unexpected state length",
+        ));
+    }
+    let p2 = first.state[0];
+    let state = first.state[1..(dim + 1)].to_vec();
+    let kappa = first.state[dim + 1];
+    let hopf_omega = if kappa.is_finite() && kappa > 0.0 {
+        kappa.sqrt()
+    } else {
+        1.0
+    };
+
+    system.params[param1_index] = first.param_value;
+    system.params[param2_index] = p2;
+
+    let mut problem = HopfCurveProblem::new(
+        system,
+        kind,
+        &state,
+        hopf_omega,
+        param1_index,
+        param2_index,
+    )
+    .map_err(to_js_error)?;
+
+    detect_codim2_for_extension(extension, |point| codim2_tests_for_hopf(&mut problem, point))
+}
+
+fn detect_codim2_lpc(
+    extension: &ContinuationBranch,
+    branch_type: &Codim1BranchType,
+    system: &mut EquationSystem,
+) -> Result<Vec<Codim2BifurcationType>, JsValue> {
+    let (ntst, ncol) = match branch_type {
+        Codim1BranchType::LPCCurve { ntst, ncol, .. } => (*ntst, *ncol),
+        _ => return Err(JsValue::from_str("Branch type is not LPC")),
+    };
+    let (param1_index, param2_index) = param_indices(system, branch_type)?;
+    let dim = system.equations.len();
+    let first = extension
+        .points
+        .first()
+        .ok_or_else(|| JsValue::from_str("LPC extension has no points"))?;
+    let (full_lc_state, period, p2, _) =
+        split_lc_continuation_state(&first.state, ntst, ncol, dim, LcLayout::StageFirst, false)?;
+
+    system.params[param1_index] = first.param_value;
+    system.params[param2_index] = p2;
+
+    let mut problem = LPCCurveProblem::new(
+        system,
+        full_lc_state,
+        period,
+        param1_index,
+        param2_index,
+        first.param_value,
+        p2,
+        ntst,
+        ncol,
+    )
+    .map_err(to_js_error)?;
+
+    detect_codim2_for_extension(extension, |point| codim2_tests_for_lpc(&mut problem, point))
+}
+
+fn detect_codim2_pd(
+    extension: &ContinuationBranch,
+    branch_type: &Codim1BranchType,
+    system: &mut EquationSystem,
+) -> Result<Vec<Codim2BifurcationType>, JsValue> {
+    let (ntst, ncol) = match branch_type {
+        Codim1BranchType::PDCurve { ntst, ncol, .. } => (*ntst, *ncol),
+        _ => return Err(JsValue::from_str("Branch type is not PD")),
+    };
+    let (param1_index, param2_index) = param_indices(system, branch_type)?;
+    let dim = system.equations.len();
+    let first = extension
+        .points
+        .first()
+        .ok_or_else(|| JsValue::from_str("PD extension has no points"))?;
+    let (full_lc_state, period, p2, _) =
+        split_lc_continuation_state(&first.state, ntst, ncol, dim, LcLayout::MeshFirst, false)?;
+
+    system.params[param1_index] = first.param_value;
+    system.params[param2_index] = p2;
+
+    let mut problem = PDCurveProblem::new(
+        system,
+        full_lc_state,
+        period,
+        param1_index,
+        param2_index,
+        first.param_value,
+        p2,
+        ntst,
+        ncol,
+    )
+    .map_err(to_js_error)?;
+
+    detect_codim2_for_extension(extension, |point| codim2_tests_for_pd(&mut problem, point))
+}
+
+fn detect_codim2_ns(
+    extension: &ContinuationBranch,
+    branch_type: &Codim1BranchType,
+    system: &mut EquationSystem,
+) -> Result<Vec<Codim2BifurcationType>, JsValue> {
+    let (ntst, ncol) = match branch_type {
+        Codim1BranchType::NSCurve { ntst, ncol, .. } => (*ntst, *ncol),
+        _ => return Err(JsValue::from_str("Branch type is not NS")),
+    };
+    let (param1_index, param2_index) = param_indices(system, branch_type)?;
+    let dim = system.equations.len();
+    let first = extension
+        .points
+        .first()
+        .ok_or_else(|| JsValue::from_str("NS extension has no points"))?;
+    let (full_lc_state, period, p2, k_value) =
+        split_lc_continuation_state(&first.state, ntst, ncol, dim, LcLayout::StageFirst, true)?;
+    let k_value = k_value.ok_or_else(|| JsValue::from_str("NS extension missing k value"))?;
+
+    system.params[param1_index] = first.param_value;
+    system.params[param2_index] = p2;
+
+    let mut problem = NSCurveProblem::new(
+        system,
+        full_lc_state,
+        period,
+        param1_index,
+        param2_index,
+        first.param_value,
+        p2,
+        k_value,
+        ntst,
+        ncol,
+    )
+    .map_err(to_js_error)?;
+
+    detect_codim2_for_extension(extension, |point| codim2_tests_for_ns(&mut problem, point))
+}
+
+fn detect_codim2_for_extension<F>(
+    extension: &ContinuationBranch,
+    mut compute_tests: F,
+) -> Result<Vec<Codim2BifurcationType>, JsValue>
+where
+    F: FnMut(&ContinuationPoint) -> Result<Codim2TestFunctions, JsValue>,
+{
+    if extension.points.len() <= 1 {
+        return Ok(Vec::new());
+    }
+
+    let mut prev_tests = compute_tests(&extension.points[0])?;
+    let mut detected = Vec::with_capacity(extension.points.len().saturating_sub(1));
+
+    for point in extension.points.iter().skip(1) {
+        let tests = compute_tests(point)?;
+        let change = tests
+            .detect_sign_changes(&prev_tests)
+            .first()
+            .copied()
+            .unwrap_or(Codim2BifurcationType::None);
+        detected.push(change);
+        prev_tests = tests;
+    }
+
+    Ok(detected)
+}
+
+fn codim2_tests_for_fold(
+    problem: &mut FoldCurveProblem,
+    point: &ContinuationPoint,
+) -> Result<Codim2TestFunctions, JsValue> {
+    let aug = aug_from_point(point);
+    problem.diagnostics(&aug).map_err(to_js_error)?;
+    let tests = problem.codim2_tests();
+    problem.update_after_step(&aug).map_err(to_js_error)?;
+    Ok(tests)
+}
+
+fn codim2_tests_for_hopf(
+    problem: &mut HopfCurveProblem,
+    point: &ContinuationPoint,
+) -> Result<Codim2TestFunctions, JsValue> {
+    let aug = aug_from_point(point);
+    problem.diagnostics(&aug).map_err(to_js_error)?;
+    let tests = problem.codim2_tests();
+    problem.update_after_step(&aug).map_err(to_js_error)?;
+    Ok(tests)
+}
+
+fn codim2_tests_for_lpc(
+    problem: &mut LPCCurveProblem,
+    point: &ContinuationPoint,
+) -> Result<Codim2TestFunctions, JsValue> {
+    let aug = aug_from_point(point);
+    problem.diagnostics(&aug).map_err(to_js_error)?;
+    let tests = problem.codim2_tests();
+    problem.update_after_step(&aug).map_err(to_js_error)?;
+    Ok(tests)
+}
+
+fn codim2_tests_for_pd(
+    problem: &mut PDCurveProblem,
+    point: &ContinuationPoint,
+) -> Result<Codim2TestFunctions, JsValue> {
+    let aug = aug_from_point(point);
+    problem.diagnostics(&aug).map_err(to_js_error)?;
+    let tests = problem.codim2_tests();
+    problem.update_after_step(&aug).map_err(to_js_error)?;
+    Ok(tests)
+}
+
+fn codim2_tests_for_ns(
+    problem: &mut NSCurveProblem,
+    point: &ContinuationPoint,
+) -> Result<Codim2TestFunctions, JsValue> {
+    let aug = aug_from_point(point);
+    problem.diagnostics(&aug).map_err(to_js_error)?;
+    let tests = problem.codim2_tests();
+    problem.update_after_step(&aug).map_err(to_js_error)?;
+    Ok(tests)
+}
+
+fn aug_from_point(point: &ContinuationPoint) -> DVector<f64> {
+    let mut aug = DVector::zeros(point.state.len() + 1);
+    aug[0] = point.param_value;
+    for (i, v) in point.state.iter().enumerate() {
+        aug[i + 1] = *v;
+    }
+    aug
+}
+
+fn param_indices(
+    system: &EquationSystem,
+    branch_type: &Codim1BranchType,
+) -> Result<(usize, usize), JsValue> {
+    let (param1_name, param2_name) = branch_type.param_names();
+    let param1_index = *system
+        .param_map
+        .get(param1_name)
+        .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param1_name)))?;
+    let param2_index = *system
+        .param_map
+        .get(param2_name)
+        .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+    Ok((param1_index, param2_index))
+}
+
+fn split_lc_continuation_state(
+    state: &[f64],
+    ntst: usize,
+    ncol: usize,
+    dim: usize,
+    layout: LcLayout,
+    has_k: bool,
+) -> Result<(Vec<f64>, f64, f64, Option<f64>), JsValue> {
+    if has_k {
+        if state.len() < 3 {
+            return Err(JsValue::from_str("NS continuation state is too short"));
+        }
+        let k_value = *state.last().unwrap_or(&0.0);
+        let p2 = state[state.len() - 2];
+        let state_with_period = &state[..state.len() - 2];
+        let (full_lc_state, period) =
+            unpack_lc_state(state_with_period, ntst, ncol, dim, layout).map_err(to_js_error)?;
+        Ok((full_lc_state, period, p2, Some(k_value)))
+    } else {
+        if state.len() < 2 {
+            return Err(JsValue::from_str("LC continuation state is too short"));
+        }
+        let p2 = *state.last().unwrap_or(&0.0);
+        let state_with_period = &state[..state.len() - 1];
+        let (full_lc_state, period) =
+            unpack_lc_state(state_with_period, ntst, ncol, dim, layout).map_err(to_js_error)?;
+        Ok((full_lc_state, period, p2, None))
     }
 }

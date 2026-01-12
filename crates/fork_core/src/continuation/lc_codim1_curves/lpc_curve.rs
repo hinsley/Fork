@@ -149,6 +149,10 @@ impl<'a> LPCCurveProblem<'a> {
         1 + self.ncoords() + 1 + 1
     }
 
+    pub fn codim2_tests(&self) -> Codim2TestFunctions {
+        self.codim2_tests
+    }
+
     /// Number of residual equations
     fn n_eqs(&self) -> usize {
         // collocation + continuity + phase + G

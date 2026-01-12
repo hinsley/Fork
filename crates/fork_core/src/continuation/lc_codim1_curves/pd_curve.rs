@@ -163,6 +163,10 @@ impl<'a> PDCurveProblem<'a> {
         1 + self.ncoords() + 1 + 1
     }
 
+    pub fn codim2_tests(&self) -> Codim2TestFunctions {
+        self.codim2_tests
+    }
+
     /// DEBUG_PD_CURVE: Compute and return residual breakdown as debug strings
     pub fn debug_initial_residual(&mut self, p1: f64, p2: f64, period: f64, lc_state: &[f64]) -> Vec<String> {
         let mut logs = vec![];
