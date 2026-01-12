@@ -582,6 +582,67 @@
   color: var(--text-muted);
 }
 
+.orbit-preview {
+  display: grid;
+  gap: 8px;
+}
+
+.orbit-preview__controls {
+  display: grid;
+  gap: 6px;
+}
+
+.orbit-preview__page {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-align: right;
+  justify-self: end;
+}
+
+.orbit-preview__summary {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.inspector-row.orbit-preview__jump {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.orbit-preview__table {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 0.7rem;
+  border-radius: 4px;
+  border: 1px solid var(--panel-border);
+  background: var(--input-bg);
+  color: var(--text);
+  padding: 4px;
+  overflow-x: auto;
+}
+
+.orbit-preview__table-grid {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.orbit-preview__table-grid th,
+.orbit-preview__table-grid td {
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--panel-border);
+  white-space: nowrap;
+  text-align: right;
+}
+
+.orbit-preview__table-grid th {
+  font-weight: 600;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+
+.orbit-preview__table-grid tbody tr:last-child td {
+  border-bottom: none;
+}
+
 .inspector-plot {
   border: 1px solid var(--panel-border);
   background: var(--input-bg);
