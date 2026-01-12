@@ -244,6 +244,15 @@ mod tests {
     use nalgebra::{DMatrix, DVector};
     use num_complex::Complex;
 
+    fn assert_err_contains<T: std::fmt::Debug>(result: Result<T>, needle: &str) {
+        let err = result.expect_err("expected error");
+        let message = format!("{err}");
+        assert!(
+            message.contains(needle),
+            "expected error to contain \"{needle}\", got \"{message}\""
+        );
+    }
+
     #[test]
     fn continuation_point_to_aug_puts_param_first() {
         let point = ContinuationPoint {
@@ -297,6 +306,21 @@ mod tests {
         let tangent = compute_tangent_linear_solve(&j_ext).expect("tangent should compute");
         let residual = 1.0 * tangent[0] + 2.0 * tangent[1];
         assert!(residual.abs() < 1e-8);
+    }
+
+    #[test]
+    fn compute_nullspace_tangent_errors_on_empty_matrix() {
+        let j_ext = DMatrix::<f64>::zeros(0, 0);
+        assert_err_contains(
+            compute_nullspace_tangent(&j_ext),
+            "zero-dimensional system",
+        );
+    }
+
+    #[test]
+    fn compute_tangent_linear_solve_errors_on_singular_system() {
+        let j_ext = DMatrix::<f64>::zeros(1, 2);
+        assert_err_contains(compute_tangent_linear_solve(&j_ext), "all bordered solves");
     }
 
     #[test]
