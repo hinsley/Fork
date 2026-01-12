@@ -17,3 +17,41 @@ pub use curve_runners::{
 pub use eq_runner::WasmEquilibriumRunner;
 pub use extension_runner::WasmContinuationExtensionRunner;
 pub use lc_runner::WasmLimitCycleRunner;
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        WasmContinuationExtensionRunner, WasmEquilibriumRunner, WasmFoldCurveRunner,
+        WasmHopfCurveRunner, WasmLPCCurveRunner, WasmLimitCycleRunner, WasmNSCurveRunner,
+        WasmPDCurveRunner,
+    };
+
+    #[test]
+    fn continuation_reexports_are_wired() {
+        assert!(
+            std::any::type_name::<WasmFoldCurveRunner>().ends_with("WasmFoldCurveRunner")
+        );
+        assert!(
+            std::any::type_name::<WasmHopfCurveRunner>().ends_with("WasmHopfCurveRunner")
+        );
+        assert!(
+            std::any::type_name::<WasmLPCCurveRunner>().ends_with("WasmLPCCurveRunner")
+        );
+        assert!(
+            std::any::type_name::<WasmNSCurveRunner>().ends_with("WasmNSCurveRunner")
+        );
+        assert!(
+            std::any::type_name::<WasmPDCurveRunner>().ends_with("WasmPDCurveRunner")
+        );
+        assert!(
+            std::any::type_name::<WasmEquilibriumRunner>().ends_with("WasmEquilibriumRunner")
+        );
+        assert!(
+            std::any::type_name::<WasmContinuationExtensionRunner>()
+                .ends_with("WasmContinuationExtensionRunner")
+        );
+        assert!(
+            std::any::type_name::<WasmLimitCycleRunner>().ends_with("WasmLimitCycleRunner")
+        );
+    }
+}
