@@ -613,21 +613,24 @@ function buildEquilibriumEigenvectorTraces(
         j.push(idx)
         k.push(next)
       }
+      const iTyped = Uint32Array.from(i)
+      const jTyped = Uint32Array.from(j)
+      const kTyped = Uint32Array.from(k)
       traces.push({
         type: 'mesh3d',
         uid: entry.nodeId,
         x: meshX,
         y: meshY,
         z: meshZ,
-        i,
-        j,
-        k,
+        i: iTyped,
+        j: jTyped,
+        k: kTyped,
         color,
         opacity: EIGENVECTOR_DISC_OPACITY,
         flatshading: true,
         showscale: false,
         hoverinfo: 'none',
-      })
+      } as Data)
       traces.push({
         type: 'scatter3d',
         mode: 'lines',
