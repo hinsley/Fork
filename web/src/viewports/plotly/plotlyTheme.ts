@@ -17,7 +17,10 @@ function detectTheme(): 'light' | 'dark' | null {
   return theme === 'light' || theme === 'dark' ? theme : null
 }
 
-export function resolvePlotlyBackgroundColor(): string {
+export function resolvePlotlyBackgroundColor(theme?: 'light' | 'dark'): string {
+  if (theme) {
+    return FALLBACK_PANEL[theme]
+  }
   return (
     readCssVar('--panel') ??
     (detectTheme() === 'light' ? FALLBACK_PANEL.light : FALLBACK_PANEL.dark)

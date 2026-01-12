@@ -28,6 +28,7 @@ describe('SystemSettingsDialog', () => {
         open
         system={system}
         selectedNodeId={null}
+        theme="light"
         onClose={onClose}
         onRename={vi.fn()}
         onToggleVisibility={vi.fn()}
@@ -83,6 +84,7 @@ describe('SystemSettingsDialog', () => {
         open
         system={system}
         selectedNodeId="node-1"
+        theme="light"
         onClose={vi.fn()}
         onRename={onRename}
         onToggleVisibility={onToggleVisibility}
@@ -108,6 +110,7 @@ describe('SystemSettingsDialog', () => {
     expect(capturedProps?.system).toBe(system)
     expect(capturedProps?.selectedNodeId).toBe('node-1')
     expect(capturedProps?.view).toBe('system')
+    expect(capturedProps?.theme).toBe('light')
     expect(capturedProps?.onRename).toBe(onRename)
     expect(capturedProps?.onToggleVisibility).toBe(onToggleVisibility)
     expect(capturedProps?.onUpdateRender).toBe(onUpdateRender)
@@ -135,6 +138,7 @@ describe('SystemSettingsDialog', () => {
         open
         system={null}
         selectedNodeId={null}
+        theme="light"
         onClose={vi.fn()}
         onRename={vi.fn()}
         onToggleVisibility={vi.fn()}
@@ -166,6 +170,7 @@ describe('SystemSettingsDialog', () => {
         open={false}
         system={system}
         selectedNodeId={null}
+        theme="light"
         onClose={vi.fn()}
         onRename={vi.fn()}
         onToggleVisibility={vi.fn()}

@@ -38,6 +38,7 @@ import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
 type ViewportPanelProps = {
   system: System
   selectedNodeId: string | null
+  theme: 'light' | 'dark'
   onSelectViewport: (id: string) => void
   onSelectObject: (id: string) => void
   onReorderViewport: (nodeId: string, targetId: string) => void
@@ -1992,6 +1993,7 @@ function ViewportTile({
 export function ViewportPanel({
   system,
   selectedNodeId,
+  theme,
   onSelectViewport,
   onSelectObject,
   onReorderViewport,
@@ -2028,7 +2030,7 @@ export function ViewportPanel({
     id: string
   } | null>(null)
   const mapRequestKeyRef = useRef<string | null>(null)
-  const plotlyBackground = resolvePlotlyBackgroundColor()
+  const plotlyBackground = resolvePlotlyBackgroundColor(theme)
 
   const viewports = useMemo(() => {
     const entries: ViewportEntry[] = []

@@ -16,6 +16,7 @@ import type {
 type InspectorPanelProps = {
   system: System
   selectedNodeId: string | null
+  theme: 'light' | 'dark'
   onRename: (id: string, name: string) => void
   onToggleVisibility: (id: string) => void
   onUpdateRender: (id: string, render: Partial<TreeNode['render']>) => void
@@ -45,6 +46,7 @@ type InspectorPanelProps = {
 export function InspectorPanel({
   system,
   selectedNodeId,
+  theme,
   onRename,
   onToggleVisibility,
   onUpdateRender,
@@ -69,6 +71,7 @@ export function InspectorPanel({
         <InspectorDetailsPanel
           system={system}
           selectedNodeId={selectedNodeId}
+          theme={theme}
           view="selection"
           onRename={onRename}
           onToggleVisibility={onToggleVisibility}

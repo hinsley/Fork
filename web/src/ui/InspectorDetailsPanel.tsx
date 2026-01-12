@@ -54,6 +54,7 @@ type InspectorDetailsPanelProps = {
   system: System
   selectedNodeId: string | null
   view: 'selection' | 'system'
+  theme: 'light' | 'dark'
   onRename: (id: string, name: string) => void
   onToggleVisibility: (id: string) => void
   onUpdateRender: (id: string, render: Partial<TreeNode['render']>) => void
@@ -722,6 +723,7 @@ export function InspectorDetailsPanel({
   system,
   selectedNodeId,
   view,
+  theme,
   onRename,
   onToggleVisibility,
   onUpdateRender,
@@ -1160,7 +1162,7 @@ export function InspectorDetailsPanel({
   const hasWasmErrors = wasmEquationErrors.some((entry) => entry)
   const runDisabled = systemDirty || !systemValidation.valid || hasWasmErrors
   const isDiscreteMap = systemDraft.type === 'map'
-  const plotlyBackground = resolvePlotlyBackgroundColor()
+  const plotlyBackground = resolvePlotlyBackgroundColor(theme)
   const equilibriumEigenPlot = useMemo(() => {
     const eigenpairs = equilibrium?.solution?.eigenpairs
     if (!eigenpairs || eigenpairs.length === 0) return null

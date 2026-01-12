@@ -205,6 +205,7 @@ function App() {
         open={isSystemSettingsOpen}
         system={system}
         selectedNodeId={system?.ui.selectedNodeId ?? null}
+        theme={theme}
         onClose={closeSystemSettings}
         onRename={actions.renameNode}
         onToggleVisibility={actions.toggleVisibility}
@@ -283,6 +284,7 @@ function App() {
               <ViewportPanel
                 system={system}
                 selectedNodeId={system.ui.selectedNodeId}
+                theme={theme}
                 onSelectViewport={selectNode}
                 onSelectObject={selectNode}
                 onReorderViewport={actions.reorderNode}
@@ -319,6 +321,7 @@ function App() {
               <InspectorPanel
                 system={system}
                 selectedNodeId={system.ui.selectedNodeId}
+                theme={theme}
                 onRename={actions.renameNode}
                 onToggleVisibility={actions.toggleVisibility}
                 onUpdateRender={actions.updateRender}

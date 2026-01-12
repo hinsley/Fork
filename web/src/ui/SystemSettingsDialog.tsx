@@ -17,6 +17,7 @@ type SystemSettingsDialogProps = {
   open: boolean
   system: System | null
   selectedNodeId: string | null
+  theme: 'light' | 'dark'
   onClose: () => void
   onRename: (id: string, name: string) => void
   onToggleVisibility: (id: string) => void
@@ -48,6 +49,7 @@ export function SystemSettingsDialog({
   open,
   system,
   selectedNodeId,
+  theme,
   onClose,
   onRename,
   onToggleVisibility,
@@ -93,6 +95,7 @@ export function SystemSettingsDialog({
             system={system}
             selectedNodeId={selectedNodeId}
             view="system"
+            theme={theme}
             onRename={onRename}
             onToggleVisibility={onToggleVisibility}
             onUpdateRender={onUpdateRender}
