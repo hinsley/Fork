@@ -7,6 +7,7 @@ type PlotlyModule = {
     layout: Partial<Layout>,
     config: {
       displaylogo: boolean
+      displayModeBar: boolean
       responsive: boolean
       scrollZoom: boolean
       doubleClick: boolean
@@ -55,6 +56,7 @@ export async function renderPlot(
   if (opts?.signal?.aborted) return
   await Plotly.react(container, data, layout, {
     displaylogo: false,
+    displayModeBar: true,
     responsive: true,
     scrollZoom: true,
     doubleClick: false,

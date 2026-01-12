@@ -732,6 +732,18 @@
   color: var(--error);
 }
 
+@media (pointer: coarse) {
+  .js-plotly-plot .modebar {
+    opacity: 1;
+  }
+
+  .js-plotly-plot .modebar-btn {
+    min-width: 34px;
+    min-height: 34px;
+    padding: 4px;
+  }
+}
+
 .viewport-workspace {
   display: flex;
   flex-direction: column;
