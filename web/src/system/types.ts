@@ -180,6 +180,9 @@ export interface ClvRenderStyle {
 
 export interface EquilibriumEigenvectorRenderStyle {
   enabled: boolean
+  vectorIndices: number[]
+  colors: string[]
+  colorOverrides?: Record<number, string>
 }
 
 export interface RenderStyle {

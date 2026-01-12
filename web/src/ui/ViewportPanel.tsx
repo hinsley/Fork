@@ -22,8 +22,13 @@ import {
   formatBifurcationLabel,
   getBranchParams,
 } from '../system/continuation'
-import { CLV_COLOR_PALETTE, resolveClvRender } from '../system/clv'
-import { resolveEquilibriumEigenvectorRender } from '../system/equilibriumEigenvectors'
+import { resolveClvRender } from '../system/clv'
+import {
+  EIGENVECTOR_COLOR_PALETTE,
+  isRealEigenvalue,
+  resolveEquilibriumEigenspaceIndices,
+  resolveEquilibriumEigenvectorRender,
+} from '../system/equilibriumEigenvectors'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
 
@@ -197,6 +202,10 @@ type SceneBounds = {
   minZ: number
   maxZ: number
 }
+
+const EIGENVECTOR_DISC_SEGMENTS = 48
+const EIGENVECTOR_DISC_OPACITY = 0.18
+const EIGENVECTOR_ORTHO_EPS = 1e-9
 
 function buildClvTraces(
   nodeId: string,
@@ -423,9 +432,10 @@ type PendingEigenvector = {
   nodeId: string
   state: number[]
   eigenpairs: EquilibriumEigenPair[]
+  vectorIndices: number[]
+  colors: string[]
   lineWidth: number
   highlight: boolean
-  color: string
 }
 
 function updateSceneBounds(bounds: SceneBounds, x: number, y: number, z?: number) {
@@ -489,34 +499,68 @@ function buildEquilibriumEigenvectorTraces(
   const lineWidth = entry.highlight ? baseWidth + 1 : baseWidth
   const traces: Data[] = []
 
-  entry.eigenpairs.forEach((pair, index) => {
-    if (pair.vector.length < plotDim) return
-    const real = pair.vector.slice(0, plotDim).map((component) => component.re)
-    const imag = pair.vector.slice(0, plotDim).map((component) => component.im)
-    if (!real.every(Number.isFinite) || !imag.every(Number.isFinite)) return
-    const realNorm = use3d
-      ? Math.sqrt(real[0] ** 2 + real[1] ** 2 + (real[2] ?? 0) ** 2)
-      : Math.sqrt((real[0] * scaleX) ** 2 + (real[1] * scaleY) ** 2)
-    const imagNorm = use3d
-      ? Math.sqrt(imag[0] ** 2 + imag[1] ** 2 + (imag[2] ?? 0) ** 2)
-      : Math.sqrt((imag[0] * scaleX) ** 2 + (imag[1] * scaleY) ** 2)
-    const useReal = realNorm >= imagNorm
-    const components = useReal ? real : imag
-    const norm = useReal ? realNorm : imagNorm
-    if (!Number.isFinite(norm) || norm <= 0) return
+  const colorWithAlpha = (value: string, alpha: number) => {
+    if (!value.startsWith('#')) return value
+    const raw = value.slice(1)
+    if (raw.length !== 6 && raw.length !== 3) return value
+    const digits =
+      raw.length === 3
+        ? raw.split('').map((char) => char.repeat(2)).join('')
+        : raw
+    const r = Number.parseInt(digits.slice(0, 2), 16)
+    const g = Number.parseInt(digits.slice(2, 4), 16)
+    const b = Number.parseInt(digits.slice(4, 6), 16)
+    if (![r, g, b].every(Number.isFinite)) return value
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`
+  }
 
-    const ux = components[0] / norm
-    const uy = components[1] / norm
-    const uz = use3d ? (components[2] ?? 0) / norm : 0
+  const dot = (a: number[], b: number[]) =>
+    a.reduce((sum, value, index) => sum + value * (b[index] ?? 0), 0)
+  const norm = (vec: number[]) => Math.sqrt(vec.reduce((sum, value) => sum + value * value, 0))
+  const normalize = (vec: number[]) => {
+    const magnitude = norm(vec)
+    if (!Number.isFinite(magnitude) || magnitude <= EIGENVECTOR_ORTHO_EPS) return null
+    return vec.map((value) => value / magnitude)
+  }
+  const subtractScaled = (vec: number[], basis: number[], scale: number) =>
+    vec.map((value, index) => value - (basis[index] ?? 0) * scale)
+  const cross = (a: number[], b: number[]) => [
+    (a[1] ?? 0) * (b[2] ?? 0) - (a[2] ?? 0) * (b[1] ?? 0),
+    (a[2] ?? 0) * (b[0] ?? 0) - (a[0] ?? 0) * (b[2] ?? 0),
+    (a[0] ?? 0) * (b[1] ?? 0) - (a[1] ?? 0) * (b[0] ?? 0),
+  ]
+  const orthonormalize = (a: number[], b: number[]) => {
+    const normA = norm(a)
+    const normB = norm(b)
+    if (normA <= EIGENVECTOR_ORTHO_EPS && normB <= EIGENVECTOR_ORTHO_EPS) return null
+    const primary = normB > normA ? b : a
+    const secondary = normB > normA ? a : b
+    const u = normalize(primary)
+    if (!u) return null
+    const projection = dot(secondary, u)
+    let vRaw = subtractScaled(secondary, u, projection)
+    let v = normalize(vRaw)
+    if (!v) {
+      if (plotDim === 2) {
+        vRaw = [-u[1], u[0]]
+        v = normalize(vRaw)
+      } else {
+        const axis = Math.abs(u[2] ?? 0) < 0.9 ? [0, 0, 1] : [0, 1, 0]
+        vRaw = cross(u, axis)
+        v = normalize(vRaw)
+      }
+    }
+    if (!v) return null
+    return { u, v }
+  }
+
+  const pushLine = (ux: number, uy: number, uz: number, color: string) => {
     const x0 = stateX - ux * halfLength
     const x1 = stateX + ux * halfLength
     const y0 = stateY - uy * halfLength
     const y1 = stateY + uy * halfLength
     const z0 = stateZ - uz * halfLength
     const z1 = stateZ + uz * halfLength
-    const paletteIndex = index % CLV_COLOR_PALETTE.length
-    const color = CLV_COLOR_PALETTE[paletteIndex] ?? entry.color
-
     if (use3d) {
       traces.push({
         type: 'scatter3d',
@@ -525,10 +569,7 @@ function buildEquilibriumEigenvectorTraces(
         x: [x0, x1],
         y: [y0, y1],
         z: [z0, z1],
-        line: {
-          color,
-          width: lineWidth,
-        },
+        line: { color, width: lineWidth },
         showlegend: false,
         hoverinfo: 'none',
       })
@@ -539,14 +580,113 @@ function buildEquilibriumEigenvectorTraces(
         uid: entry.nodeId,
         x: [x0, x1],
         y: [y0, y1],
-        line: {
-          color,
-          width: lineWidth,
-        },
+        line: { color, width: lineWidth },
         showlegend: false,
         hoverinfo: 'none',
       })
     }
+  }
+
+  const pushDisc = (u: number[], v: number[], color: string) => {
+    const ringX: number[] = []
+    const ringY: number[] = []
+    const ringZ: number[] = []
+    for (let idx = 0; idx <= EIGENVECTOR_DISC_SEGMENTS; idx += 1) {
+      const theta = (idx / EIGENVECTOR_DISC_SEGMENTS) * Math.PI * 2
+      const cos = Math.cos(theta)
+      const sin = Math.sin(theta)
+      ringX.push(stateX + halfLength * (u[0] * cos + v[0] * sin))
+      ringY.push(stateY + halfLength * (u[1] * cos + v[1] * sin))
+      ringZ.push(stateZ + halfLength * ((u[2] ?? 0) * cos + (v[2] ?? 0) * sin))
+    }
+    if (use3d) {
+      const meshX = [stateX, ...ringX.slice(0, -1)]
+      const meshY = [stateY, ...ringY.slice(0, -1)]
+      const meshZ = [stateZ, ...ringZ.slice(0, -1)]
+      const i: number[] = []
+      const j: number[] = []
+      const k: number[] = []
+      const ringCount = meshX.length - 1
+      for (let idx = 1; idx <= ringCount; idx += 1) {
+        const next = idx < ringCount ? idx + 1 : 1
+        i.push(0)
+        j.push(idx)
+        k.push(next)
+      }
+      traces.push({
+        type: 'mesh3d',
+        uid: entry.nodeId,
+        x: meshX,
+        y: meshY,
+        z: meshZ,
+        i,
+        j,
+        k,
+        color,
+        opacity: EIGENVECTOR_DISC_OPACITY,
+        flatshading: true,
+        showscale: false,
+        hoverinfo: 'none',
+      })
+      traces.push({
+        type: 'scatter3d',
+        mode: 'lines',
+        uid: entry.nodeId,
+        x: ringX,
+        y: ringY,
+        z: ringZ,
+        line: { color, width: lineWidth },
+        showlegend: false,
+        hoverinfo: 'none',
+      })
+    } else {
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        uid: entry.nodeId,
+        x: ringX,
+        y: ringY,
+        fill: 'toself',
+        fillcolor: colorWithAlpha(color, EIGENVECTOR_DISC_OPACITY),
+        line: { color, width: lineWidth },
+        showlegend: false,
+        hoverinfo: 'none',
+      })
+    }
+  }
+
+  entry.vectorIndices.forEach((vectorIndex, colorIndex) => {
+    const pair = entry.eigenpairs[vectorIndex]
+    if (!pair) return
+    if (pair.vector.length < plotDim) return
+    const real = pair.vector.slice(0, plotDim).map((component) => component.re)
+    const imag = pair.vector.slice(0, plotDim).map((component) => component.im)
+    if (!real.every(Number.isFinite) || !imag.every(Number.isFinite)) return
+    const paletteIndex = vectorIndex % EIGENVECTOR_COLOR_PALETTE.length
+    const color = entry.colors[colorIndex] ?? EIGENVECTOR_COLOR_PALETTE[paletteIndex]
+
+    if (!isRealEigenvalue(pair.value)) {
+      const basis = orthonormalize(real, imag)
+      if (basis) {
+        pushDisc(basis.u, basis.v, color)
+        return
+      }
+    }
+
+    const realNorm = use3d
+      ? norm(real)
+      : Math.sqrt((real[0] * scaleX) ** 2 + (real[1] * scaleY) ** 2)
+    const imagNorm = use3d
+      ? norm(imag)
+      : Math.sqrt((imag[0] * scaleX) ** 2 + (imag[1] * scaleY) ** 2)
+    const useReal = realNorm >= imagNorm
+    const components = useReal ? real : imag
+    const componentNorm = useReal ? realNorm : imagNorm
+    if (!Number.isFinite(componentNorm) || componentNorm <= 0) return
+    const ux = components[0] / componentNorm
+    const uy = components[1] / componentNorm
+    const uz = use3d ? (components[2] ?? 0) / componentNorm : 0
+    pushLine(ux, uy, uz, color)
   })
 
   return traces
@@ -767,19 +907,25 @@ function buildSceneTraces(
       const size = highlight ? node.render.pointSize + 2 : node.render.pointSize
       if (canPlotEigenvectors && dimension >= 2) {
         updateSceneBounds(sceneBounds, state[0], state[1], dimension >= 3 ? state[2] : 0)
-        const eigenvectorRender = resolveEquilibriumEigenvectorRender(
-          node.render?.equilibriumEigenvectors
-        )
         const eigenpairs = object.solution.eigenpairs ?? []
-        const hasEigenvectors = eigenpairs.some((pair) => pair.vector.length >= 2)
-        if (eigenvectorRender.enabled && hasEigenvectors) {
+        const eigenspaceIndices = resolveEquilibriumEigenspaceIndices(eigenpairs)
+        const eigenvectorRender = resolveEquilibriumEigenvectorRender(
+          node.render?.equilibriumEigenvectors,
+          eigenspaceIndices
+        )
+        const eigenvectorPlotDim = dimension >= 3 ? 3 : 2
+        const hasEigenvectors = eigenpairs.some(
+          (pair) => pair.vector.length >= eigenvectorPlotDim
+        )
+        if (eigenvectorRender.enabled && hasEigenvectors && eigenvectorRender.vectorIndices.length > 0) {
           pendingEigenvectors.push({
             nodeId,
             state,
             eigenpairs,
+            vectorIndices: eigenvectorRender.vectorIndices,
+            colors: eigenvectorRender.colors,
             lineWidth: node.render.lineWidth,
             highlight,
-            color: node.render.color,
           })
         }
       }

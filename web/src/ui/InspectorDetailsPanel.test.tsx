@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createDemoSystem } from '../system/fixtures'
@@ -280,6 +280,13 @@ describe('InspectorDetailsPanel', () => {
               { re: 0, im: 1 },
             ],
           },
+          {
+            value: { re: -0.5, im: 0.1 },
+            vector: [
+              { re: 0.2, im: 0 },
+              { re: 0.8, im: 0.1 },
+            ],
+          },
         ],
       },
       parameters: [...baseSystem.config.params],
@@ -312,11 +319,21 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('equilibrium-eigenvector-toggle'))
+    await user.click(screen.getByTestId('equilibrium-data-toggle'))
     await user.click(screen.getByTestId('equilibrium-eigenvector-enabled'))
 
     expect(onUpdateRender).toHaveBeenCalledWith(nodeId, {
-      equilibriumEigenvectors: { enabled: true },
+      equilibriumEigenvectors: expect.objectContaining({ enabled: true, vectorIndices: [0, 1] }),
+    })
+
+    fireEvent.change(screen.getByTestId('equilibrium-eigenvector-color-1'), {
+      target: { value: '#ff0000' },
+    })
+
+    expect(onUpdateRender).toHaveBeenLastCalledWith(nodeId, {
+      equilibriumEigenvectors: expect.objectContaining({
+        colors: expect.arrayContaining(['#ff0000']),
+      }),
     })
   })
 })

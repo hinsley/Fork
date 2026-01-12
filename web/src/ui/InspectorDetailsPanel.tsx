@@ -7,6 +7,7 @@ import type {
   ComplexValue,
   ContinuationObject,
   ContinuationPoint,
+  EquilibriumEigenvectorRenderStyle,
   EquilibriumObject,
   LimitCycleOrigin,
   OrbitObject,
@@ -17,7 +18,13 @@ import type {
 } from '../system/types'
 import { DEFAULT_RENDER } from '../system/model'
 import { defaultClvIndices, resolveClvColors, resolveClvRender } from '../system/clv'
-import { resolveEquilibriumEigenvectorRender } from '../system/equilibriumEigenvectors'
+import {
+  defaultEquilibriumEigenvectorIndices,
+  isRealEigenvalue,
+  resolveEquilibriumEigenvectorColors,
+  resolveEquilibriumEigenspaceIndices,
+  resolveEquilibriumEigenvectorRender,
+} from '../system/equilibriumEigenvectors'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
 import type {
   BranchContinuationRequest,
@@ -793,8 +800,13 @@ export function InspectorDetailsPanel({
     clvDim ??
     (orbit?.data?.[0] ? orbit.data[0].length - 1 : system.config.varNames.length)
   const clvRender = resolveClvRender(selectionNode?.render?.clv, clvDim)
+  const equilibriumEigenpairs = equilibrium?.solution?.eigenpairs ?? []
+  const equilibriumEigenspaceIndices = resolveEquilibriumEigenspaceIndices(
+    equilibriumEigenpairs
+  )
   const equilibriumEigenvectorRender = resolveEquilibriumEigenvectorRender(
-    selectionNode?.render?.equilibriumEigenvectors
+    selectionNode?.render?.equilibriumEigenvectors,
+    equilibriumEigenspaceIndices
   )
   const clvIndices = defaultClvIndices(clvPlotDim)
   const clvColors = resolveClvColors(
@@ -804,9 +816,20 @@ export function InspectorDetailsPanel({
     clvRender.colorOverrides
   )
   const clvVisibleSet = new Set(clvRender.vectorIndices)
+  const equilibriumEigenvectorIndices = defaultEquilibriumEigenvectorIndices(
+    equilibriumEigenspaceIndices
+  )
+  const equilibriumEigenvectorColors = resolveEquilibriumEigenvectorColors(
+    equilibriumEigenvectorIndices,
+    equilibriumEigenvectorRender.vectorIndices,
+    equilibriumEigenvectorRender.colors,
+    equilibriumEigenvectorRender.colorOverrides
+  )
+  const equilibriumEigenvectorVisibleSet = new Set(equilibriumEigenvectorRender.vectorIndices)
   const equilibriumPlotDim = equilibrium?.solution?.state?.length ?? system.config.varNames.length
+  const equilibriumVectorPlotDim = equilibriumPlotDim >= 3 ? 3 : 2
   const equilibriumHasEigenvectors = Boolean(
-    equilibrium?.solution?.eigenpairs?.some((pair) => pair.vector.length > 0)
+    equilibriumEigenpairs.some((pair) => pair.vector.length >= equilibriumVectorPlotDim)
   )
   const equilibriumNeeds2d = equilibriumPlotDim < 2
   const nodeVisibility = selectionNode?.visibility ?? true
@@ -2100,16 +2123,42 @@ export function InspectorDetailsPanel({
   )
 
   const updateEquilibriumEigenvectorRender = useCallback(
-    (enabled: boolean) => {
+    (update: Partial<EquilibriumEigenvectorRenderStyle>) => {
       if (!selectionNode) return
-      const merged = resolveEquilibriumEigenvectorRender({
-        ...equilibriumEigenvectorRender,
-        enabled,
-      })
+      const merged = resolveEquilibriumEigenvectorRender(
+        { ...equilibriumEigenvectorRender, ...update },
+        equilibriumEigenspaceIndices
+      )
       onUpdateRender(selectionNode.id, { equilibriumEigenvectors: merged })
     },
-    [equilibriumEigenvectorRender, onUpdateRender, selectionNode]
+    [equilibriumEigenspaceIndices, equilibriumEigenvectorRender, onUpdateRender, selectionNode]
   )
+
+  const handleEquilibriumEigenvectorVisibilityChange = (index: number, visible: boolean) => {
+    const nextSet = new Set(equilibriumEigenvectorRender.vectorIndices)
+    if (visible) {
+      nextSet.add(index)
+    } else {
+      nextSet.delete(index)
+    }
+    const nextIndices = equilibriumEigenvectorIndices.filter((value) => nextSet.has(value))
+    const colors = resolveEquilibriumEigenvectorColors(
+      nextIndices,
+      equilibriumEigenvectorRender.vectorIndices,
+      equilibriumEigenvectorRender.colors,
+      equilibriumEigenvectorRender.colorOverrides
+    )
+    updateEquilibriumEigenvectorRender({ vectorIndices: nextIndices, colors })
+  }
+
+  const handleEquilibriumEigenvectorColorChange = (index: number, color: string) => {
+    const colorIndex = equilibriumEigenvectorRender.vectorIndices.indexOf(index)
+    if (colorIndex === -1) return
+    const colors = equilibriumEigenvectorRender.colors.map((value, idx) =>
+      idx === colorIndex ? color : value
+    )
+    updateEquilibriumEigenvectorRender({ colors })
+  }
 
   const handleClvVisibilityChange = (index: number, visible: boolean) => {
     const nextSet = new Set(clvRender.vectorIndices)
@@ -2851,6 +2900,69 @@ export function InspectorDetailsPanel({
                   <h4 className="inspector-subheading">Eigenpairs</h4>
                   {equilibrium.solution && equilibrium.solution.eigenpairs.length > 0 ? (
                     <div className="inspector-list">
+                      {!equilibriumHasEigenvectors ? (
+                        <p className="empty-state">Eigenvectors not computed yet.</p>
+                      ) : null}
+                      {equilibriumNeeds2d ? (
+                        <div className="field-warning">
+                          Eigenvector plotting requires at least two state variables.
+                        </div>
+                      ) : null}
+                      <label>
+                        Show eigenvectors
+                        <input
+                          type="checkbox"
+                          checked={equilibriumEigenvectorRender.enabled}
+                          onChange={(event) =>
+                            updateEquilibriumEigenvectorRender({
+                              enabled: event.target.checked,
+                            })
+                          }
+                          data-testid="equilibrium-eigenvector-enabled"
+                        />
+                      </label>
+                      {equilibriumEigenvectorIndices.length > 0 ? (
+                        <div className="inspector-list">
+                          {equilibriumEigenvectorIndices.map((index, idx) => {
+                            const pair = equilibriumEigenpairs[index]
+                            const label =
+                              pair && !isRealEigenvalue(pair.value)
+                                ? `Eigenspace ${index + 1}`
+                                : `Eigenvector ${index + 1}`
+                            const visible = equilibriumEigenvectorVisibleSet.has(index)
+                            return (
+                              <div className="clv-control-row" key={`eq-eigen-color-${index}`}>
+                                <span className="clv-control-row__label">{label}</span>
+                                <input
+                                  type="checkbox"
+                                  checked={visible}
+                                  onChange={(event) =>
+                                    handleEquilibriumEigenvectorVisibilityChange(
+                                      index,
+                                      event.target.checked
+                                    )
+                                  }
+                                  aria-label={`Show ${label.toLowerCase()}`}
+                                  data-testid={`equilibrium-eigenvector-show-${index}`}
+                                />
+                                <input
+                                  type="color"
+                                  value={equilibriumEigenvectorColors[idx]}
+                                  onChange={(event) =>
+                                    handleEquilibriumEigenvectorColorChange(
+                                      index,
+                                      event.target.value
+                                    )
+                                  }
+                                  disabled={!visible}
+                                  aria-label={`${label} color`}
+                                  data-testid={`equilibrium-eigenvector-color-${index}`}
+                                />
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : null}
                       {/* Mirror the legacy UI by plotting eigenvalues in the complex plane. */}
                       {equilibriumEigenPlot ? (
                         <div className="inspector-plot">
@@ -2971,35 +3083,6 @@ export function InspectorDetailsPanel({
                   ) : (
                     <p className="empty-state">No cached solver parameters yet.</p>
                   )}
-                </div>
-              </InspectorDisclosure>
-
-              <InspectorDisclosure
-                key={`${selectionKey}-equilibrium-eigenvector-plot`}
-                title="Eigenvector Plotting"
-                testId="equilibrium-eigenvector-toggle"
-                defaultOpen={false}
-              >
-                <div className="inspector-section">
-                  {!equilibriumHasEigenvectors ? (
-                    <p className="empty-state">Eigenvectors not computed yet.</p>
-                  ) : null}
-                  {equilibriumNeeds2d ? (
-                    <div className="field-warning">
-                      Eigenvector plotting requires at least two state variables.
-                    </div>
-                  ) : null}
-                  <label>
-                    Show eigenvectors
-                    <input
-                      type="checkbox"
-                      checked={equilibriumEigenvectorRender.enabled}
-                      onChange={(event) =>
-                        updateEquilibriumEigenvectorRender(event.target.checked)
-                      }
-                      data-testid="equilibrium-eigenvector-enabled"
-                    />
-                  </label>
                 </div>
               </InspectorDisclosure>
 
