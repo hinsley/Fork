@@ -160,6 +160,7 @@ type BranchEntry = {
 
 const FLOW_SOLVERS = ['rk4', 'tsit5']
 const MAP_SOLVERS = ['discrete']
+const ORBIT_PREVIEW_PAGE_SIZE = 10
 
 function nextName(prefix: string, existing: string[]) {
   const base = toCliSafeName(prefix)
@@ -398,24 +399,6 @@ function buildEigenvaluePlot(
     ],
   }
   return { data, layout }
-}
-
-// Keep preview snippets small so the inspector stays responsive for large orbits.
-function buildOrbitPreview(data: number[][], headCount = 3, tailCount = 3) {
-  if (data.length === 0) return null
-  const head = data.slice(0, headCount)
-  const tail =
-    data.length > headCount + tailCount ? data.slice(-tailCount) : data.slice(headCount)
-  return { head, tail, hasGap: data.length > headCount + tailCount }
-}
-
-function formatOrbitPoint(point: number[], varNames: string[]): string {
-  const time = formatFixed(point[0], 3)
-  const state = point.slice(1).map((value, index) => {
-    const label = varNames[index] || `x${index + 1}`
-    return `${label}=${formatFixed(value, 4)}`
-  })
-  return `t=${time}: ${state.join(', ')}`
 }
 
 function formatLimitCycleOrigin(origin: LimitCycleOrigin): string {
@@ -902,6 +885,9 @@ export function InspectorDetailsPanel({
     makeOrbitRunDraft(system.config)
   )
   const [orbitError, setOrbitError] = useState<string | null>(null)
+  const [orbitPreviewPage, setOrbitPreviewPage] = useState(0)
+  const [orbitPreviewInput, setOrbitPreviewInput] = useState('1')
+  const [orbitPreviewError, setOrbitPreviewError] = useState<string | null>(null)
   const [lyapunovDraft, setLyapunovDraft] = useState<LyapunovDraft>(() =>
     makeLyapunovDraft()
   )
@@ -944,6 +930,22 @@ export function InspectorDetailsPanel({
   const [branchPointError, setBranchPointError] = useState<string | null>(null)
   const [sceneSearch, setSceneSearch] = useState('')
   const [diagramSearch, setDiagramSearch] = useState('')
+  const orbitPreviewPageCount = useMemo(() => {
+    if (!orbit || orbit.data.length === 0) return 0
+    return Math.ceil(orbit.data.length / ORBIT_PREVIEW_PAGE_SIZE)
+  }, [orbit])
+  const orbitPreviewVarNames = useMemo(() => {
+    if (!orbit || orbit.data.length === 0) return []
+    const varCount = Math.max(orbit.data[0].length - 1, 0)
+    return Array.from({ length: varCount }, (_, index) => {
+      return systemDraft.varNames[index] || `x${index + 1}`
+    })
+  }, [orbit, systemDraft.varNames])
+  const orbitPreviewStart = orbitPreviewPage * ORBIT_PREVIEW_PAGE_SIZE
+  const orbitPreviewEnd = orbit
+    ? Math.min(orbitPreviewStart + ORBIT_PREVIEW_PAGE_SIZE, orbit.data.length)
+    : 0
+  const orbitPreviewRows = orbit ? orbit.data.slice(orbitPreviewStart, orbitPreviewEnd) : []
 
   useEffect(() => {
     setSystemDraft(makeSystemDraft(system.config))
@@ -951,6 +953,12 @@ export function InspectorDetailsPanel({
     setWasmEquationErrors([])
     setWasmMessage(null)
   }, [system.config, system.id])
+
+  useEffect(() => {
+    setOrbitPreviewPage(0)
+    setOrbitPreviewInput('1')
+    setOrbitPreviewError(null)
+  }, [selectedNodeId, orbit?.data.length])
 
   useEffect(() => {
     objectRef.current = object
@@ -1500,6 +1508,29 @@ export function InspectorDetailsPanel({
       qrStride,
     }
     await onComputeCovariantLyapunovVectors(request)
+  }
+
+  const setOrbitPreviewPageIndex = (page: number) => {
+    if (!orbit || orbit.data.length === 0) return
+    const maxPage = Math.max(orbitPreviewPageCount - 1, 0)
+    const nextPage = Math.min(Math.max(page, 0), maxPage)
+    setOrbitPreviewPage(nextPage)
+    setOrbitPreviewInput((nextPage + 1).toString())
+    setOrbitPreviewError(null)
+  }
+
+  const handleOrbitPreviewJump = () => {
+    if (!orbit || orbitPreviewPageCount === 0) return
+    const target = parseInteger(orbitPreviewInput)
+    if (target === null) {
+      setOrbitPreviewError('Enter a valid page number.')
+      return
+    }
+    if (target < 1 || target > orbitPreviewPageCount) {
+      setOrbitPreviewError(`Page must be between 1 and ${orbitPreviewPageCount}.`)
+      return
+    }
+    setOrbitPreviewPageIndex(target - 1)
   }
 
   const handleSolveEquilibrium = async () => {
@@ -2322,28 +2353,90 @@ export function InspectorDetailsPanel({
                 <div className="inspector-section">
                   <h4 className="inspector-subheading">Data preview</h4>
                   {orbit.data.length > 0 ? (
-                    <div className="inspector-data">
-                      {(() => {
-                        const preview = buildOrbitPreview(orbit.data)
-                        if (!preview) return null
-                        return (
-                          <>
-                            {preview.head.map((point, index) => (
-                              <div key={`orbit-head-${index}`}>
-                                {formatOrbitPoint(point, systemDraft.varNames)}
-                              </div>
+                    <div className="orbit-preview">
+                      <div className="orbit-preview__controls">
+                        <div className="inspector-row">
+                          <button
+                            type="button"
+                            onClick={() => setOrbitPreviewPageIndex(orbitPreviewPage - 1)}
+                            disabled={orbitPreviewPage <= 0}
+                            data-testid="orbit-preview-prev"
+                          >
+                            Previous
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOrbitPreviewPageIndex(orbitPreviewPage + 1)}
+                            disabled={orbitPreviewPage >= orbitPreviewPageCount - 1}
+                            data-testid="orbit-preview-next"
+                          >
+                            Next
+                          </button>
+                          <span className="orbit-preview__page">
+                            Page {orbitPreviewPage + 1} of {orbitPreviewPageCount}
+                          </span>
+                        </div>
+                        <label>
+                          Jump to page
+                          <div className="inspector-row orbit-preview__jump">
+                            <input
+                              type="number"
+                              min={1}
+                              max={orbitPreviewPageCount}
+                              value={orbitPreviewInput}
+                              onChange={(event) => {
+                                setOrbitPreviewInput(event.target.value)
+                                setOrbitPreviewError(null)
+                              }}
+                              data-testid="orbit-preview-page-input"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleOrbitPreviewJump}
+                              data-testid="orbit-preview-page-jump"
+                            >
+                              Jump
+                            </button>
+                          </div>
+                        </label>
+                        {orbitPreviewError ? (
+                          <div className="field-error">{orbitPreviewError}</div>
+                        ) : null}
+                        <div className="orbit-preview__summary">
+                          Showing {orbitPreviewStart + 1}–{orbitPreviewEnd} of{' '}
+                          {orbit.data.length.toLocaleString()}
+                        </div>
+                      </div>
+                      <div
+                        className="orbit-preview__table"
+                        role="region"
+                        aria-label="Orbit data preview"
+                      >
+                        <table className="orbit-preview__table-grid">
+                          <thead>
+                            <tr>
+                              <th>#</th>
+                              <th>t</th>
+                              {orbitPreviewVarNames.map((name, index) => (
+                                <th key={`orbit-preview-col-${index}`}>{name}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {orbitPreviewRows.map((point, rowIndex) => (
+                              <tr key={`orbit-preview-row-${orbitPreviewStart + rowIndex}`}>
+                                <td>{orbitPreviewStart + rowIndex}</td>
+                                <td>{formatFixed(point[0], 3)}</td>
+                                {orbitPreviewVarNames.map((_, varIndex) => (
+                                  <td key={`orbit-preview-cell-${rowIndex}-${varIndex}`}>
+                                    {formatFixed(point[varIndex + 1] ?? Number.NaN, 4)}
+                                  </td>
+                                ))}
+                              </tr>
                             ))}
-                            {preview.hasGap ? (
-                              <div className="inspector-data__ellipsis">...</div>
-                            ) : null}
-                            {preview.tail.map((point, index) => (
-                              <div key={`orbit-tail-${index}`}>
-                                {formatOrbitPoint(point, systemDraft.varNames)}
-                              </div>
-                            ))}
-                          </>
-                        )
-                      })()}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   ) : (
                     <p className="empty-state">No orbit samples stored yet.</p>
