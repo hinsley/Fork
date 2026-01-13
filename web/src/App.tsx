@@ -225,6 +225,8 @@ function App() {
         onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
         onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
         onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
+        onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
+        onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
       />
 
       {error ? (
@@ -341,6 +343,8 @@ function App() {
                 onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
                 onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
                 onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
+                onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
+                onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
               />
             </Panel>
           </div>

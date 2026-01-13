@@ -5,7 +5,7 @@ import App from './App'
 import { AppProvider } from './state/appState'
 import { OpfsSystemStore } from './system/opfs'
 import { MemorySystemStore, type SystemStore } from './system/store'
-import { createDemoSystem } from './system/fixtures'
+import { createDemoSystem, createPeriodDoublingSystem } from './system/fixtures'
 import { createDefaultSystems } from './system/defaultSystems'
 import { WasmForkCoreClient } from './compute/wasmClient'
 import { MockForkCoreClient } from './compute/mockClient'
@@ -84,6 +84,12 @@ async function bootstrap() {
   if (fixture === 'demo') {
     const memory = new MemorySystemStore()
     const { system } = createDemoSystem()
+    await memory.save(system)
+    store = memory
+  }
+  if (fixture === 'pd') {
+    const memory = new MemorySystemStore()
+    const { system } = createPeriodDoublingSystem()
     await memory.save(system)
     store = memory
   }

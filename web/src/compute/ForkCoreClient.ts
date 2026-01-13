@@ -168,6 +168,31 @@ export type LimitCycleContinuationFromHopfRequest = {
   forward: boolean
 }
 
+export type LimitCycleContinuationFromOrbitRequest = {
+  system: SystemConfig
+  orbitTimes: number[]
+  orbitStates: number[][]
+  parameterName: string
+  paramValue: number
+  tolerance: number
+  ntst: number
+  ncol: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type LimitCycleContinuationFromPDRequest = {
+  system: SystemConfig
+  lcState: number[]
+  parameterName: string
+  paramValue: number
+  ntst: number
+  ncol: number
+  amplitude: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
 export type LimitCycleContinuationResult = ContinuationBranchData
 
 export interface ForkCoreClient {
@@ -209,6 +234,14 @@ export interface ForkCoreClient {
   ): Promise<Codim1CurveBranch>
   runLimitCycleContinuationFromHopf(
     request: LimitCycleContinuationFromHopfRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<LimitCycleContinuationResult>
+  runLimitCycleContinuationFromOrbit(
+    request: LimitCycleContinuationFromOrbitRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<LimitCycleContinuationResult>
+  runLimitCycleContinuationFromPD(
+    request: LimitCycleContinuationFromPDRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<LimitCycleContinuationResult>
   validateSystem(

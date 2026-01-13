@@ -100,6 +100,12 @@ beforeAll(async () => {
       init_lc_from_hopf() {
         return {}
       }
+      init_lc_from_orbit() {
+        return {}
+      }
+      init_lc_from_pd() {
+        return {}
+      }
     }
 
     class MockWasmEquilibriumRunner {

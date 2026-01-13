@@ -1,6 +1,12 @@
 import { addBranch, addObject, createSystem } from './model'
 import { nowIso } from '../utils/determinism'
-import type { ContinuationObject, ContinuationSettings, OrbitObject, System } from './types'
+import type {
+  ContinuationObject,
+  ContinuationSettings,
+  LimitCycleObject,
+  OrbitObject,
+  System,
+} from './types'
 
 export function createDemoSystem(): {
   system: System
@@ -69,4 +75,82 @@ export function createDemoSystem(): {
     objectNodeId: result.nodeId,
     branchNodeId: branchResult.nodeId,
   }
+}
+
+export function createPeriodDoublingSystem(): { system: System } {
+  let system = createSystem({
+    name: 'Period Doubling Fixture',
+    config: {
+      name: 'Period Doubling Fixture',
+      equations: ['y', '-x'],
+      params: [0.2],
+      paramNames: ['mu'],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    },
+  })
+
+  const limitCycle: LimitCycleObject = {
+    type: 'limit_cycle',
+    name: 'LC_PD',
+    systemName: system.config.name,
+    origin: { type: 'orbit', orbitName: 'Orbit PD' },
+    ntst: 20,
+    ncol: 4,
+    period: 6,
+    state: [0.1, 0.2, 6],
+    parameters: [...system.config.params],
+    parameterName: 'mu',
+    paramValue: 0.2,
+    createdAt: nowIso(),
+  }
+
+  const added = addObject(system, limitCycle)
+  system = added.system
+
+  const branch: ContinuationObject = {
+    type: 'continuation',
+    name: 'lc_pd_mu',
+    systemName: system.config.name,
+    parameterName: 'mu',
+    parentObject: limitCycle.name,
+    startObject: limitCycle.name,
+    branchType: 'limit_cycle',
+    data: {
+      points: [
+        {
+          state: [0.1, 0.2, 6],
+          param_value: 0.2,
+          stability: 'None',
+          eigenvalues: [],
+        },
+        {
+          state: [0.1, 0.2, 6],
+          param_value: 0.25,
+          stability: 'PeriodDoubling',
+          eigenvalues: [{ re: -1, im: 0 }],
+        },
+      ],
+      bifurcations: [1],
+      indices: [0, 1],
+      branch_type: { type: 'LimitCycle', ntst: 20, ncol: 4 },
+    },
+    settings: {
+      step_size: 0.01,
+      min_step_size: 1e-5,
+      max_step_size: 0.1,
+      max_steps: 50,
+      corrector_steps: 4,
+      corrector_tolerance: 1e-6,
+      step_tolerance: 1e-6,
+    },
+    timestamp: nowIso(),
+    params: [...system.config.params],
+  }
+
+  const branchResult = addBranch(system, branch, added.nodeId)
+  system = branchResult.system
+
+  return { system }
 }

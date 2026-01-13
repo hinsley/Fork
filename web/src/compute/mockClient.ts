@@ -11,6 +11,8 @@ import type {
   ForkCoreClient,
   HopfCurveContinuationRequest,
   LimitCycleContinuationFromHopfRequest,
+  LimitCycleContinuationFromOrbitRequest,
+  LimitCycleContinuationFromPDRequest,
   LimitCycleContinuationResult,
   LyapunovExponentsRequest,
   SampleMap1DFunctionRequest,
@@ -462,6 +464,124 @@ export class MockForkCoreClient implements ForkCoreClient {
           bifurcations: [],
           indices: [0, 1],
           branch_type: { type: 'LimitCycle', ntst: request.ntst, ncol: request.ncol },
+        })
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runLimitCycleContinuationFromOrbit(
+    request: LimitCycleContinuationFromOrbitRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<LimitCycleContinuationResult> {
+    const job = this.queue.enqueue(
+      'runLimitCycleContinuationFromOrbit',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const progress: ContinuationProgress = {
+          done: false,
+          current_step: 0,
+          max_steps: request.settings.max_steps,
+          points_computed: 0,
+          bifurcations_found: 0,
+          current_param: request.paramValue,
+        }
+        opts?.onProgress?.(progress)
+
+        progress.done = true
+        progress.current_step = request.settings.max_steps
+        progress.points_computed = 2
+        opts?.onProgress?.({ ...progress })
+
+        const initialState = new Array(request.system.varNames.length + 1).fill(0)
+        return normalizeBranchEigenvalues({
+          points: [
+            {
+              state: initialState,
+              param_value: request.paramValue,
+              stability: 'None',
+              eigenvalues: [],
+            },
+            {
+              state: initialState,
+              param_value: request.paramValue + request.settings.step_size,
+              stability: 'None',
+              eigenvalues: [],
+            },
+          ],
+          bifurcations: [],
+          indices: [0, 1],
+          branch_type: { type: 'LimitCycle', ntst: request.ntst, ncol: request.ncol },
+        })
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runLimitCycleContinuationFromPD(
+    request: LimitCycleContinuationFromPDRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<LimitCycleContinuationResult> {
+    const job = this.queue.enqueue(
+      'runLimitCycleContinuationFromPD',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const progress: ContinuationProgress = {
+          done: false,
+          current_step: 0,
+          max_steps: request.settings.max_steps,
+          points_computed: 0,
+          bifurcations_found: 0,
+          current_param: request.paramValue,
+        }
+        opts?.onProgress?.(progress)
+
+        progress.done = true
+        progress.current_step = request.settings.max_steps
+        progress.points_computed = 2
+        opts?.onProgress?.({ ...progress })
+
+        const initialState =
+          request.lcState.length > 0
+            ? request.lcState
+            : new Array(request.system.varNames.length + 1).fill(0)
+
+        return normalizeBranchEigenvalues({
+          points: [
+            {
+              state: initialState,
+              param_value: request.paramValue,
+              stability: 'None',
+              eigenvalues: [],
+            },
+            {
+              state: initialState,
+              param_value: request.paramValue + request.settings.step_size,
+              stability: 'None',
+              eigenvalues: [],
+            },
+          ],
+          bifurcations: [],
+          indices: [0, 1],
+          branch_type: {
+            type: 'LimitCycle',
+            ntst: request.ntst * 2,
+            ncol: request.ncol,
+          },
         })
       },
       opts

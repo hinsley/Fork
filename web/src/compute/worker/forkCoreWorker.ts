@@ -8,6 +8,8 @@ import type {
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
   LimitCycleContinuationFromHopfRequest,
+  LimitCycleContinuationFromOrbitRequest,
+  LimitCycleContinuationFromPDRequest,
   LimitCycleContinuationResult,
   CovariantLyapunovRequest,
   CovariantLyapunovResponse,
@@ -38,6 +40,16 @@ type WorkerRequest =
       id: string
       kind: 'runLimitCycleContinuationFromHopf'
       payload: LimitCycleContinuationFromHopfRequest
+    }
+  | {
+      id: string
+      kind: 'runLimitCycleContinuationFromOrbit'
+      payload: LimitCycleContinuationFromOrbitRequest
+    }
+  | {
+      id: string
+      kind: 'runLimitCycleContinuationFromPD'
+      payload: LimitCycleContinuationFromPDRequest
     }
   | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
   | { id: string; kind: 'cancel' }
@@ -105,6 +117,22 @@ type WasmModule = {
       amplitude: number,
       ntst: number,
       ncol: number
+    ) => unknown
+    init_lc_from_orbit: (
+      orbitTimes: Float64Array,
+      orbitStates: Float64Array,
+      paramValue: number,
+      ntst: number,
+      ncol: number,
+      tolerance: number
+    ) => unknown
+    init_lc_from_pd: (
+      lcState: Float64Array,
+      parameterName: string,
+      paramValue: number,
+      ntst: number,
+      ncol: number,
+      amplitude: number
     ) => unknown
   }
   WasmEquilibriumRunner: new (
@@ -602,6 +630,110 @@ async function runLimitCycleContinuationFromHopf(
   return runner.get_result()
 }
 
+async function runLimitCycleContinuationFromOrbit(
+  request: LimitCycleContinuationFromOrbitRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<LimitCycleContinuationResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+
+  const orbitTimes = new Float64Array(request.orbitTimes)
+  const orbitStates = new Float64Array(request.orbitStates.flat())
+  const setup = system.init_lc_from_orbit(
+    orbitTimes,
+    orbitStates,
+    request.paramValue,
+    request.ntst,
+    request.ncol,
+    request.tolerance
+  )
+
+  const settings: Record<string, number> = { ...request.settings }
+  const runner = new wasm.WasmLimitCycleRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.type,
+    setup,
+    request.parameterName,
+    settings,
+    request.forward
+  )
+
+  let progress = runner.get_progress()
+  onProgress(progress)
+
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+
+  return runner.get_result()
+}
+
+async function runLimitCycleContinuationFromPD(
+  request: LimitCycleContinuationFromPDRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<LimitCycleContinuationResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+
+  const setup = system.init_lc_from_pd(
+    new Float64Array(request.lcState),
+    request.parameterName,
+    request.paramValue,
+    request.ntst,
+    request.ncol,
+    request.amplitude
+  )
+
+  const settings: Record<string, number> = { ...request.settings }
+  const runner = new wasm.WasmLimitCycleRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.type,
+    setup,
+    request.parameterName,
+    settings,
+    request.forward
+  )
+
+  let progress = runner.get_progress()
+  onProgress(progress)
+
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+
+  return runner.get_result()
+}
+
 function abortIfNeeded(signal: AbortSignal) {
   if (signal.aborted) {
     const error = new Error('cancelled')
@@ -785,6 +917,42 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     if (message.kind === 'runLimitCycleContinuationFromHopf') {
       const result = await runLimitCycleContinuationFromHopf(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runLimitCycleContinuationFromOrbit') {
+      const result = await runLimitCycleContinuationFromOrbit(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runLimitCycleContinuationFromPD') {
+      const result = await runLimitCycleContinuationFromPD(
         message.payload,
         controller.signal,
         (progress) => {

@@ -4,8 +4,15 @@ import { describe, expect, it, vi } from 'vitest'
 import { createDemoSystem } from '../system/fixtures'
 import { InspectorDetailsPanel } from './InspectorDetailsPanel'
 import { useState } from 'react'
-import { addObject, createSystem, renameNode, toggleNodeVisibility, updateNodeRender } from '../system/model'
-import type { EquilibriumObject } from '../system/types'
+import {
+  addBranch,
+  addObject,
+  createSystem,
+  renameNode,
+  toggleNodeVisibility,
+  updateNodeRender,
+} from '../system/model'
+import type { ContinuationObject, EquilibriumObject, LimitCycleObject } from '../system/types'
 
 describe('InspectorDetailsPanel', () => {
   it('binds name and render fields', async () => {
@@ -66,6 +73,8 @@ describe('InspectorDetailsPanel', () => {
           onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
           onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
           onCreateLimitCycleFromHopf={onCreateLimitCycleFromHopf}
+          onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
         />
       )
     }
@@ -116,6 +125,8 @@ describe('InspectorDetailsPanel', () => {
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -157,10 +168,12 @@ describe('InspectorDetailsPanel', () => {
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
-        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
-        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
-      />
+      onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+      onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+      onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+      onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+      onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+    />
     )
 
     await user.click(screen.getByTestId('orbit-run-toggle'))
@@ -205,6 +218,255 @@ describe('InspectorDetailsPanel', () => {
     })
   })
 
+  it('creates limit cycle continuation from orbit data', async () => {
+    const user = userEvent.setup()
+    const { system, objectNodeId } = createDemoSystem()
+    const onCreateLimitCycleFromOrbit = vi.fn().mockResolvedValue(undefined)
+    const systemWithParams = {
+      ...system,
+      config: {
+        ...system.config,
+        paramNames: ['mu'],
+        params: [0.5],
+      },
+    }
+
+    render(
+      <InspectorDetailsPanel
+        system={systemWithParams}
+        selectedNodeId={objectNodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={onCreateLimitCycleFromOrbit}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('limit-cycle-from-orbit-toggle'))
+    await user.clear(screen.getByTestId('limit-cycle-from-orbit-name'))
+    await user.type(screen.getByTestId('limit-cycle-from-orbit-name'), 'lc_orbit')
+    await user.clear(screen.getByTestId('limit-cycle-from-orbit-branch-name'))
+    await user.type(
+      screen.getByTestId('limit-cycle-from-orbit-branch-name'),
+      'lc_orbit_branch'
+    )
+    await user.selectOptions(
+      screen.getByTestId('limit-cycle-from-orbit-parameter'),
+      'mu'
+    )
+    await user.clear(screen.getByTestId('limit-cycle-from-orbit-tolerance'))
+    await user.type(screen.getByTestId('limit-cycle-from-orbit-tolerance'), '0.1')
+    await user.clear(screen.getByTestId('limit-cycle-from-orbit-ntst'))
+    await user.type(screen.getByTestId('limit-cycle-from-orbit-ntst'), '20')
+    await user.clear(screen.getByTestId('limit-cycle-from-orbit-ncol'))
+    await user.type(screen.getByTestId('limit-cycle-from-orbit-ncol'), '4')
+    await user.selectOptions(
+      screen.getByTestId('limit-cycle-from-orbit-direction'),
+      'backward'
+    )
+    await user.clear(screen.getByTestId('limit-cycle-from-orbit-step-size'))
+    await user.type(screen.getByTestId('limit-cycle-from-orbit-step-size'), '0.01')
+    await user.clear(screen.getByTestId('limit-cycle-from-orbit-max-steps'))
+    await user.type(screen.getByTestId('limit-cycle-from-orbit-max-steps'), '50')
+    await user.clear(screen.getByTestId('limit-cycle-from-orbit-min-step-size'))
+    await user.type(screen.getByTestId('limit-cycle-from-orbit-min-step-size'), '1e-5')
+    await user.clear(screen.getByTestId('limit-cycle-from-orbit-max-step-size'))
+    await user.type(screen.getByTestId('limit-cycle-from-orbit-max-step-size'), '0.1')
+    await user.clear(screen.getByTestId('limit-cycle-from-orbit-corrector-steps'))
+    await user.type(screen.getByTestId('limit-cycle-from-orbit-corrector-steps'), '10')
+    await user.clear(screen.getByTestId('limit-cycle-from-orbit-corrector-tolerance'))
+    await user.type(screen.getByTestId('limit-cycle-from-orbit-corrector-tolerance'), '1e-6')
+    await user.clear(screen.getByTestId('limit-cycle-from-orbit-step-tolerance'))
+    await user.type(screen.getByTestId('limit-cycle-from-orbit-step-tolerance'), '1e-6')
+    await user.click(screen.getByTestId('limit-cycle-from-orbit-submit'))
+
+    expect(onCreateLimitCycleFromOrbit).toHaveBeenCalledWith({
+      orbitId: objectNodeId,
+      limitCycleName: 'lc_orbit',
+      branchName: 'lc_orbit_branch',
+      parameterName: 'mu',
+      tolerance: 0.1,
+      ntst: 20,
+      ncol: 4,
+      settings: {
+        step_size: 0.01,
+        max_steps: 50,
+        min_step_size: 1e-5,
+        max_step_size: 0.1,
+        corrector_steps: 10,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      forward: false,
+    })
+  })
+
+  it('branches to period-doubled limit cycles', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({ name: 'PD System' })
+    const configuredSystem = {
+      ...baseSystem,
+      config: {
+        ...baseSystem.config,
+        paramNames: ['mu'],
+        params: [0.2],
+      },
+    }
+    const lcObject: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_PD',
+      systemName: configuredSystem.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit PD' },
+      ntst: 20,
+      ncol: 4,
+      period: 6,
+      state: [0.1, 0.2, 6],
+      parameters: [...configuredSystem.config.params],
+      parameterName: 'mu',
+      paramValue: 0.2,
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(configuredSystem, lcObject)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_pd_mu',
+      systemName: configuredSystem.config.name,
+      parameterName: 'mu',
+      parentObject: lcObject.name,
+      startObject: lcObject.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          {
+            state: [0.1, 0.2, 6],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [0.1, 0.2, 6],
+            param_value: 0.25,
+            stability: 'PeriodDoubling',
+            eigenvalues: [{ re: -1, im: 0 }],
+          },
+        ],
+        bifurcations: [1],
+        indices: [0, 1],
+        branch_type: { type: 'LimitCycle', ntst: 20, ncol: 4 },
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-5,
+        max_step_size: 0.1,
+        max_steps: 50,
+        corrector_steps: 4,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: new Date().toISOString(),
+      params: [...configuredSystem.config.params],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+    const onCreateLimitCycleFromPD = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <InspectorDetailsPanel
+        system={branchResult.system}
+        selectedNodeId={branchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={onCreateLimitCycleFromPD}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    await user.click(screen.getByTestId('branch-bifurcation-1'))
+    await user.click(screen.getByTestId('limit-cycle-from-pd-toggle'))
+    await user.clear(screen.getByTestId('limit-cycle-from-pd-name'))
+    await user.type(screen.getByTestId('limit-cycle-from-pd-name'), 'lc_pd')
+    await user.clear(screen.getByTestId('limit-cycle-from-pd-branch-name'))
+    await user.type(screen.getByTestId('limit-cycle-from-pd-branch-name'), 'lc_pd_branch')
+    await user.clear(screen.getByTestId('limit-cycle-from-pd-amplitude'))
+    await user.type(screen.getByTestId('limit-cycle-from-pd-amplitude'), '0.01')
+    await user.clear(screen.getByTestId('limit-cycle-from-pd-ncol'))
+    await user.type(screen.getByTestId('limit-cycle-from-pd-ncol'), '4')
+    await user.selectOptions(
+      screen.getByTestId('limit-cycle-from-pd-direction'),
+      'forward'
+    )
+    await user.clear(screen.getByTestId('limit-cycle-from-pd-step-size'))
+    await user.type(screen.getByTestId('limit-cycle-from-pd-step-size'), '0.01')
+    await user.clear(screen.getByTestId('limit-cycle-from-pd-max-steps'))
+    await user.type(screen.getByTestId('limit-cycle-from-pd-max-steps'), '50')
+    await user.clear(screen.getByTestId('limit-cycle-from-pd-min-step-size'))
+    await user.type(screen.getByTestId('limit-cycle-from-pd-min-step-size'), '1e-5')
+    await user.clear(screen.getByTestId('limit-cycle-from-pd-max-step-size'))
+    await user.type(screen.getByTestId('limit-cycle-from-pd-max-step-size'), '0.1')
+    await user.clear(screen.getByTestId('limit-cycle-from-pd-corrector-steps'))
+    await user.type(screen.getByTestId('limit-cycle-from-pd-corrector-steps'), '10')
+    await user.clear(screen.getByTestId('limit-cycle-from-pd-corrector-tolerance'))
+    await user.type(screen.getByTestId('limit-cycle-from-pd-corrector-tolerance'), '1e-6')
+    await user.clear(screen.getByTestId('limit-cycle-from-pd-step-tolerance'))
+    await user.type(screen.getByTestId('limit-cycle-from-pd-step-tolerance'), '1e-6')
+    await user.click(screen.getByTestId('limit-cycle-from-pd-submit'))
+
+    expect(onCreateLimitCycleFromPD).toHaveBeenCalledWith({
+      branchId: branchResult.nodeId,
+      pointIndex: 1,
+      limitCycleName: 'lc_pd',
+      branchName: 'lc_pd_branch',
+      amplitude: 0.01,
+      ncol: 4,
+      settings: {
+        step_size: 0.01,
+        max_steps: 50,
+        min_step_size: 1e-5,
+        max_step_size: 0.1,
+        corrector_steps: 10,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      forward: true,
+    })
+  })
+
   it('solves equilibrium requests', async () => {
     const user = userEvent.setup()
     const baseSystem = createSystem({ name: 'Test System' })
@@ -246,6 +508,8 @@ describe('InspectorDetailsPanel', () => {
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -327,6 +591,8 @@ describe('InspectorDetailsPanel', () => {
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 

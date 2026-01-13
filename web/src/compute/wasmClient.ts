@@ -11,6 +11,8 @@ import type {
   ForkCoreClient,
   HopfCurveContinuationRequest,
   LimitCycleContinuationFromHopfRequest,
+  LimitCycleContinuationFromOrbitRequest,
+  LimitCycleContinuationFromPDRequest,
   LimitCycleContinuationResult,
   LyapunovExponentsRequest,
   SampleMap1DFunctionRequest,
@@ -39,6 +41,16 @@ type WorkerRequest =
       id: string
       kind: 'runLimitCycleContinuationFromHopf'
       payload: LimitCycleContinuationFromHopfRequest
+    }
+  | {
+      id: string
+      kind: 'runLimitCycleContinuationFromOrbit'
+      payload: LimitCycleContinuationFromOrbitRequest
+    }
+  | {
+      id: string
+      kind: 'runLimitCycleContinuationFromPD'
+      payload: LimitCycleContinuationFromPDRequest
     }
   | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
   | { id: string; kind: 'cancel' }
@@ -242,6 +254,42 @@ export class WasmForkCoreClient implements ForkCoreClient {
     return await job.promise
   }
 
+  async runLimitCycleContinuationFromOrbit(
+    request: LimitCycleContinuationFromOrbitRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<LimitCycleContinuationResult> {
+    const job = this.queue.enqueue(
+      'runLimitCycleContinuationFromOrbit',
+      (signal) =>
+        this.runWorker(
+          'runLimitCycleContinuationFromOrbit',
+          request,
+          signal,
+          opts?.onProgress
+        ),
+      opts
+    )
+    return await job.promise
+  }
+
+  async runLimitCycleContinuationFromPD(
+    request: LimitCycleContinuationFromPDRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<LimitCycleContinuationResult> {
+    const job = this.queue.enqueue(
+      'runLimitCycleContinuationFromPD',
+      (signal) =>
+        this.runWorker(
+          'runLimitCycleContinuationFromPD',
+          request,
+          signal,
+          opts?.onProgress
+        ),
+      opts
+    )
+    return await job.promise
+  }
+
   async validateSystem(
     request: ValidateSystemRequest,
     opts?: { signal?: AbortSignal }
@@ -314,6 +362,18 @@ export class WasmForkCoreClient implements ForkCoreClient {
     onProgress?: (progress: ContinuationProgress) => void
   ): Promise<LimitCycleContinuationResult>
   private runWorker(
+    kind: 'runLimitCycleContinuationFromOrbit',
+    payload: LimitCycleContinuationFromOrbitRequest,
+    signal: AbortSignal,
+    onProgress?: (progress: ContinuationProgress) => void
+  ): Promise<LimitCycleContinuationResult>
+  private runWorker(
+    kind: 'runLimitCycleContinuationFromPD',
+    payload: LimitCycleContinuationFromPDRequest,
+    signal: AbortSignal,
+    onProgress?: (progress: ContinuationProgress) => void
+  ): Promise<LimitCycleContinuationResult>
+  private runWorker(
     kind: 'validateSystem',
     payload: ValidateSystemRequest,
     signal: AbortSignal
@@ -330,6 +390,8 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | 'runFoldCurveContinuation'
       | 'runHopfCurveContinuation'
       | 'runLimitCycleContinuationFromHopf'
+      | 'runLimitCycleContinuationFromOrbit'
+      | 'runLimitCycleContinuationFromPD'
       | 'validateSystem',
     payload:
       | SimulateOrbitRequest
@@ -342,6 +404,8 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | FoldCurveContinuationRequest
       | HopfCurveContinuationRequest
       | LimitCycleContinuationFromHopfRequest
+      | LimitCycleContinuationFromOrbitRequest
+      | LimitCycleContinuationFromPDRequest
       | ValidateSystemRequest,
     signal: AbortSignal,
     onProgress?: (progress: ContinuationProgress) => void
@@ -379,7 +443,11 @@ export class WasmForkCoreClient implements ForkCoreClient {
           ? { id, kind, payload: payload as HopfCurveContinuationRequest }
           : kind === 'runLimitCycleContinuationFromHopf'
             ? { id, kind, payload: payload as LimitCycleContinuationFromHopfRequest }
-            : { id, kind, payload: payload as ValidateSystemRequest }
+            : kind === 'runLimitCycleContinuationFromOrbit'
+              ? { id, kind, payload: payload as LimitCycleContinuationFromOrbitRequest }
+              : kind === 'runLimitCycleContinuationFromPD'
+                ? { id, kind, payload: payload as LimitCycleContinuationFromPDRequest }
+                : { id, kind, payload: payload as ValidateSystemRequest }
 
     const promise = new Promise<
       | SimulateOrbitResult
@@ -391,6 +459,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | EquilibriumContinuationResult
       | ContinuationExtensionResult
       | Codim1CurveBranch
+      | LimitCycleContinuationResult
     >((resolve, reject) => {
       this.pending.set(id, { resolve, reject, onProgress })
     })

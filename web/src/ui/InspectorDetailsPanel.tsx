@@ -39,6 +39,8 @@ import type {
   OrbitLyapunovRequest,
   OrbitRunRequest,
   LimitCycleHopfContinuationRequest,
+  LimitCycleOrbitContinuationRequest,
+  LimitCyclePDContinuationRequest,
 } from '../state/appState'
 import { validateSystemConfig } from '../state/systemValidation'
 import {
@@ -81,6 +83,8 @@ type InspectorDetailsPanelProps = {
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
   onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
+  onCreateLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
+  onCreateLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
 }
 
 type SystemDraft = {
@@ -126,11 +130,43 @@ type LimitCycleDraft = {
   parameterName: string
 }
 
+type LimitCycleFromOrbitDraft = {
+  limitCycleName: string
+  branchName: string
+  parameterName: string
+  tolerance: string
+  ntst: string
+  ncol: string
+  stepSize: string
+  maxSteps: string
+  minStepSize: string
+  maxStepSize: string
+  correctorSteps: string
+  correctorTolerance: string
+  stepTolerance: string
+  forward: boolean
+}
+
 type LimitCycleFromHopfDraft = {
   limitCycleName: string
   branchName: string
   amplitude: string
   ntst: string
+  ncol: string
+  stepSize: string
+  maxSteps: string
+  minStepSize: string
+  maxStepSize: string
+  correctorSteps: string
+  correctorTolerance: string
+  stepTolerance: string
+  forward: boolean
+}
+
+type LimitCycleFromPDDraft = {
+  limitCycleName: string
+  branchName: string
+  amplitude: string
   ncol: string
   stepSize: string
   maxSteps: string
@@ -525,6 +561,25 @@ function makeLimitCycleDraft(system: SystemConfig, orbit?: OrbitObject): LimitCy
   }
 }
 
+function makeLimitCycleFromOrbitDraft(system: SystemConfig): LimitCycleFromOrbitDraft {
+  return {
+    limitCycleName: '',
+    branchName: '',
+    parameterName: system.paramNames[0] ?? '',
+    tolerance: '0.1',
+    ntst: '20',
+    ncol: '4',
+    stepSize: '0.01',
+    maxSteps: '50',
+    minStepSize: '1e-5',
+    maxStepSize: '0.1',
+    correctorSteps: '10',
+    correctorTolerance: '1e-6',
+    stepTolerance: '1e-6',
+    forward: true,
+  }
+}
+
 function makeLimitCycleFromHopfDraft(): LimitCycleFromHopfDraft {
   return {
     limitCycleName: '',
@@ -532,6 +587,23 @@ function makeLimitCycleFromHopfDraft(): LimitCycleFromHopfDraft {
     amplitude: '0.1',
     ntst: '20',
     ncol: '4',
+    stepSize: '0.01',
+    maxSteps: '50',
+    minStepSize: '1e-5',
+    maxStepSize: '0.1',
+    correctorSteps: '10',
+    correctorTolerance: '1e-6',
+    stepTolerance: '1e-6',
+    forward: true,
+  }
+}
+
+function makeLimitCycleFromPDDraft(ncol = 4): LimitCycleFromPDDraft {
+  return {
+    limitCycleName: '',
+    branchName: '',
+    amplitude: '0.01',
+    ncol: ncol.toString(),
     stepSize: '0.01',
     maxSteps: '50',
     minStepSize: '1e-5',
@@ -761,6 +833,8 @@ export function InspectorDetailsPanel({
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
   onCreateLimitCycleFromHopf,
+  onCreateLimitCycleFromOrbit,
+  onCreateLimitCycleFromPD,
 }: InspectorDetailsPanelProps) {
   const node = selectedNodeId ? system.nodes[selectedNodeId] : null
   const object = selectedNodeId ? system.objects[selectedNodeId] : undefined
@@ -958,9 +1032,18 @@ export function InspectorDetailsPanel({
     makeLimitCycleDraft(system.config)
   )
   const [limitCycleError, setLimitCycleError] = useState<string | null>(null)
+  const [limitCycleFromOrbitDraft, setLimitCycleFromOrbitDraft] =
+    useState<LimitCycleFromOrbitDraft>(() => makeLimitCycleFromOrbitDraft(system.config))
+  const [limitCycleFromOrbitError, setLimitCycleFromOrbitError] = useState<string | null>(
+    null
+  )
   const [limitCycleFromHopfDraft, setLimitCycleFromHopfDraft] =
     useState<LimitCycleFromHopfDraft>(() => makeLimitCycleFromHopfDraft())
   const [limitCycleFromHopfError, setLimitCycleFromHopfError] = useState<string | null>(null)
+  const [limitCycleFromPDDraft, setLimitCycleFromPDDraft] = useState<LimitCycleFromPDDraft>(
+    () => makeLimitCycleFromPDDraft()
+  )
+  const [limitCycleFromPDError, setLimitCycleFromPDError] = useState<string | null>(null)
   const [foldCurveDraft, setFoldCurveDraft] = useState<Codim1CurveDraft>(() =>
     makeCodim1CurveDraft(system.config)
   )
@@ -996,6 +1079,33 @@ export function InspectorDetailsPanel({
     ? Math.min(orbitPreviewStart + ORBIT_PREVIEW_PAGE_SIZE, orbit.data.length)
     : 0
   const orbitPreviewRows = orbit ? orbit.data.slice(orbitPreviewStart, orbitPreviewEnd) : []
+  const limitCycleMesh = useMemo(() => {
+    if (!branch || branch.branchType !== 'limit_cycle') {
+      return { ntst: 20, ncol: 4 }
+    }
+    const branchType = branch.data.branch_type
+    if (branchType?.type === 'LimitCycle') {
+      return { ntst: branchType.ntst, ncol: branchType.ncol }
+    }
+    return { ntst: 20, ncol: 4 }
+  }, [branch])
+
+  const limitCycleFromPDNameSuggestion = useMemo(() => {
+    if (!branch) return 'lc_pd'
+    const safeBranchName = toCliSafeName(branch.name)
+    const pointIndex = branchPointIndex ?? 0
+    return `lc_pd_${safeBranchName}_idx${pointIndex}`
+  }, [branch, branchPointIndex])
+
+  const limitCycleFromPDBranchSuggestion = useMemo(() => {
+    const baseName =
+      limitCycleFromPDDraft.limitCycleName.trim() || limitCycleFromPDNameSuggestion
+    return branchParameterName ? `${baseName}_${branchParameterName}` : baseName
+  }, [
+    branchParameterName,
+    limitCycleFromPDDraft.limitCycleName,
+    limitCycleFromPDNameSuggestion,
+  ])
 
   useEffect(() => {
     setSystemDraft(makeSystemDraft(system.config))
@@ -1065,6 +1175,16 @@ export function InspectorDetailsPanel({
       }
       return { ...prev, parameterName: systemDraft.paramNames[0] ?? '' }
     })
+    setLimitCycleFromOrbitDraft((prev) => {
+      if (systemDraft.paramNames.length === 0) {
+        if (!prev.parameterName) return prev
+        return { ...prev, parameterName: '' }
+      }
+      if (systemDraft.paramNames.includes(prev.parameterName)) {
+        return prev
+      }
+      return { ...prev, parameterName: systemDraft.paramNames[0] ?? '' }
+    })
     setBranchContinuationDraft((prev) => {
       if (systemDraft.paramNames.length === 0) {
         if (!prev.parameterName) return prev
@@ -1109,10 +1229,19 @@ export function InspectorDetailsPanel({
         ...makeLimitCycleDraft(stableSystemConfig, current),
         name: prev.name,
       }))
+      setLimitCycleFromOrbitDraft((prev) => ({
+        ...makeLimitCycleFromOrbitDraft(stableSystemConfig),
+        limitCycleName: prev.limitCycleName,
+        branchName: prev.branchName,
+        parameterName: stableSystemConfig.paramNames.includes(prev.parameterName)
+          ? prev.parameterName
+          : stableSystemConfig.paramNames[0] ?? '',
+      }))
       setOrbitError(null)
       setLyapunovError(null)
       setCovariantError(null)
       setLimitCycleError(null)
+      setLimitCycleFromOrbitError(null)
     }
     if (current.type === 'equilibrium') {
       setEquilibriumDraft(makeEquilibriumSolveDraft(stableSystemConfig, current))
@@ -1144,6 +1273,22 @@ export function InspectorDetailsPanel({
       return { ...prev, parameterName: paramName, name: nextName }
     })
   }, [equilibriumName, systemDraft.paramNames])
+
+  useEffect(() => {
+    if (!orbit) return
+    setLimitCycleFromOrbitDraft((prev) => {
+      const suggestedLimitCycleName = `lc_${toCliSafeName(orbit.name)}`
+      const limitCycleName =
+        prev.limitCycleName.trim().length > 0 ? prev.limitCycleName : suggestedLimitCycleName
+      const paramName = systemDraft.paramNames.includes(prev.parameterName)
+        ? prev.parameterName
+        : systemDraft.paramNames[0] ?? ''
+      const suggestedBranchName = paramName ? `${limitCycleName}_${paramName}` : limitCycleName
+      const branchName =
+        prev.branchName.trim().length > 0 ? prev.branchName : suggestedBranchName
+      return { ...prev, limitCycleName, branchName, parameterName: paramName }
+    })
+  }, [orbit, systemDraft.paramNames])
 
   useEffect(() => {
     if (!branchName) return
@@ -1198,6 +1343,10 @@ export function InspectorDetailsPanel({
         branchName: branchNameValue,
       }
     })
+    setLimitCycleFromPDDraft((prev) => ({
+      ...prev,
+      ncol: limitCycleMesh.ncol.toString(),
+    }))
     setBranchExtensionDraft(makeBranchExtensionDraft(stableSystemConfigRef.current, branch))
     setBranchContinuationError(null)
     setBranchExtensionError(null)
@@ -1205,7 +1354,8 @@ export function InspectorDetailsPanel({
     setFoldCurveError(null)
     setHopfCurveError(null)
     setLimitCycleFromHopfError(null)
-  }, [branch, branchName, branchParameterName, systemDraft.paramNames])
+    setLimitCycleFromPDError(null)
+  }, [branch, branchName, branchParameterName, limitCycleMesh.ncol, systemDraft.paramNames])
 
   useEffect(() => {
     if (!hasBranch) {
@@ -1333,6 +1483,22 @@ export function InspectorDetailsPanel({
     const names = Object.values(system.objects).map((obj) => obj.name)
     return nextName('Limit Cycle', names)
   }, [system.objects])
+
+  const limitCycleFromOrbitNameSuggestion = useMemo(() => {
+    if (!orbit) return 'lc_orbit'
+    return `lc_${toCliSafeName(orbit.name)}`
+  }, [orbit])
+
+  const limitCycleFromOrbitBranchSuggestion = useMemo(() => {
+    const baseName =
+      limitCycleFromOrbitDraft.limitCycleName.trim() || limitCycleFromOrbitNameSuggestion
+    const paramName = limitCycleFromOrbitDraft.parameterName
+    return paramName ? `${baseName}_${paramName}` : baseName
+  }, [
+    limitCycleFromOrbitDraft.limitCycleName,
+    limitCycleFromOrbitDraft.parameterName,
+    limitCycleFromOrbitNameSuggestion,
+  ])
 
   const sceneSelectedIds = useMemo(
     () => scene?.selectedNodeIds ?? [],
@@ -2023,6 +2189,199 @@ export function InspectorDetailsPanel({
       ncol,
       settings,
       forward: limitCycleFromHopfDraft.forward,
+    })
+  }
+
+  const handleCreateLimitCycleFromPD = async () => {
+    if (runDisabled) {
+      setLimitCycleFromPDError('Apply valid system settings before continuing.')
+      return
+    }
+    if (systemDraft.type === 'map') {
+      setLimitCycleFromPDError('Limit cycles require a flow system.')
+      return
+    }
+    if (!branch || !selectedNodeId) {
+      setLimitCycleFromPDError('Select a branch to continue.')
+      return
+    }
+    if (branch.branchType !== 'limit_cycle') {
+      setLimitCycleFromPDError(
+        'Period-doubling branching is only available for limit cycle branches.'
+      )
+      return
+    }
+    if (!selectedBranchPoint || branchPointIndex === null) {
+      setLimitCycleFromPDError('Select a branch point to continue from.')
+      return
+    }
+    if (selectedBranchPoint.stability !== 'PeriodDoubling') {
+      setLimitCycleFromPDError('Select a Period Doubling point to branch.')
+      return
+    }
+    if (!branchParameterName || !systemDraft.paramNames.includes(branchParameterName)) {
+      setLimitCycleFromPDError('Continuation parameter is not defined in this system.')
+      return
+    }
+
+    const limitCycleName =
+      limitCycleFromPDDraft.limitCycleName.trim() || limitCycleFromPDNameSuggestion
+    if (!limitCycleName) {
+      setLimitCycleFromPDError('Limit cycle name is required.')
+      return
+    }
+    if (!isCliSafeName(limitCycleName)) {
+      setLimitCycleFromPDError('Limit cycle names must be alphanumeric with underscores only.')
+      return
+    }
+
+    const branchName =
+      limitCycleFromPDDraft.branchName.trim() || limitCycleFromPDBranchSuggestion
+    if (!branchName) {
+      setLimitCycleFromPDError('Branch name is required.')
+      return
+    }
+    if (!isCliSafeName(branchName)) {
+      setLimitCycleFromPDError('Branch names must be alphanumeric with underscores only.')
+      return
+    }
+
+    const amplitude = parseNumber(limitCycleFromPDDraft.amplitude)
+    if (amplitude === null || amplitude <= 0) {
+      setLimitCycleFromPDError('Amplitude must be a positive number.')
+      return
+    }
+
+    const ncol = parseInteger(limitCycleFromPDDraft.ncol)
+    if (ncol === null || ncol <= 0) {
+      setLimitCycleFromPDError('NCOL must be a positive integer.')
+      return
+    }
+
+    const { settings, error } = buildContinuationSettings({
+      name: '',
+      parameterName: branchParameterName,
+      stepSize: limitCycleFromPDDraft.stepSize,
+      maxSteps: limitCycleFromPDDraft.maxSteps,
+      minStepSize: limitCycleFromPDDraft.minStepSize,
+      maxStepSize: limitCycleFromPDDraft.maxStepSize,
+      correctorSteps: limitCycleFromPDDraft.correctorSteps,
+      correctorTolerance: limitCycleFromPDDraft.correctorTolerance,
+      stepTolerance: limitCycleFromPDDraft.stepTolerance,
+      forward: limitCycleFromPDDraft.forward,
+    })
+    if (!settings) {
+      setLimitCycleFromPDError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setLimitCycleFromPDError(null)
+    await onCreateLimitCycleFromPD({
+      branchId: selectedNodeId,
+      pointIndex: branchPointIndex,
+      limitCycleName,
+      branchName,
+      amplitude,
+      ncol,
+      settings,
+      forward: limitCycleFromPDDraft.forward,
+    })
+  }
+
+  const handleCreateLimitCycleFromOrbit = async () => {
+    if (runDisabled) {
+      setLimitCycleFromOrbitError('Apply valid system settings before continuing.')
+      return
+    }
+    if (systemDraft.type === 'map') {
+      setLimitCycleFromOrbitError('Limit cycles require a flow system.')
+      return
+    }
+    if (!orbit || !selectedNodeId) {
+      setLimitCycleFromOrbitError('Select an orbit to continue.')
+      return
+    }
+    if (orbit.data.length === 0) {
+      setLimitCycleFromOrbitError('Run an orbit before continuing.')
+      return
+    }
+    if (systemDraft.paramNames.length === 0) {
+      setLimitCycleFromOrbitError('Add a parameter before continuing.')
+      return
+    }
+    if (!systemDraft.paramNames.includes(limitCycleFromOrbitDraft.parameterName)) {
+      setLimitCycleFromOrbitError('Select a continuation parameter.')
+      return
+    }
+
+    const limitCycleName =
+      limitCycleFromOrbitDraft.limitCycleName.trim() || limitCycleFromOrbitNameSuggestion
+    if (!limitCycleName) {
+      setLimitCycleFromOrbitError('Limit cycle name is required.')
+      return
+    }
+    if (!isCliSafeName(limitCycleName)) {
+      setLimitCycleFromOrbitError('Limit cycle names must be alphanumeric with underscores only.')
+      return
+    }
+
+    const branchName =
+      limitCycleFromOrbitDraft.branchName.trim() || limitCycleFromOrbitBranchSuggestion
+    if (!branchName) {
+      setLimitCycleFromOrbitError('Branch name is required.')
+      return
+    }
+    if (!isCliSafeName(branchName)) {
+      setLimitCycleFromOrbitError('Branch names must be alphanumeric with underscores only.')
+      return
+    }
+
+    const tolerance = parseNumber(limitCycleFromOrbitDraft.tolerance)
+    if (tolerance === null || tolerance <= 0) {
+      setLimitCycleFromOrbitError('Tolerance must be a positive number.')
+      return
+    }
+
+    const ntst = parseInteger(limitCycleFromOrbitDraft.ntst)
+    if (ntst === null || ntst <= 0) {
+      setLimitCycleFromOrbitError('NTST must be a positive integer.')
+      return
+    }
+
+    const ncol = parseInteger(limitCycleFromOrbitDraft.ncol)
+    if (ncol === null || ncol <= 0) {
+      setLimitCycleFromOrbitError('NCOL must be a positive integer.')
+      return
+    }
+
+    const { settings, error } = buildContinuationSettings({
+      name: '',
+      parameterName: limitCycleFromOrbitDraft.parameterName,
+      stepSize: limitCycleFromOrbitDraft.stepSize,
+      maxSteps: limitCycleFromOrbitDraft.maxSteps,
+      minStepSize: limitCycleFromOrbitDraft.minStepSize,
+      maxStepSize: limitCycleFromOrbitDraft.maxStepSize,
+      correctorSteps: limitCycleFromOrbitDraft.correctorSteps,
+      correctorTolerance: limitCycleFromOrbitDraft.correctorTolerance,
+      stepTolerance: limitCycleFromOrbitDraft.stepTolerance,
+      forward: limitCycleFromOrbitDraft.forward,
+    })
+    if (!settings) {
+      setLimitCycleFromOrbitError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setLimitCycleFromOrbitError(null)
+    await onCreateLimitCycleFromOrbit({
+      orbitId: selectedNodeId,
+      limitCycleName,
+      branchName,
+      parameterName: limitCycleFromOrbitDraft.parameterName,
+      tolerance,
+      ntst,
+      ncol,
+      settings,
+      forward: limitCycleFromOrbitDraft.forward,
     })
   }
 
@@ -3099,6 +3458,254 @@ export function InspectorDetailsPanel({
                   >
                     Create Limit Cycle
                   </button>
+                </div>
+              </InspectorDisclosure>
+
+              <InspectorDisclosure
+                key={`${selectionKey}-limit-cycle-orbit`}
+                title="Limit Cycle from Orbit"
+                testId="limit-cycle-from-orbit-toggle"
+                defaultOpen={false}
+              >
+                <div className="inspector-section">
+                  {systemDraft.type === 'map' ? (
+                    <p className="empty-state">Limit cycles require a flow system.</p>
+                  ) : null}
+                  {systemDraft.paramNames.length === 0 ? (
+                    <p className="empty-state">Add a parameter before continuing.</p>
+                  ) : null}
+                  {runDisabled ? (
+                    <div className="field-warning">
+                      Apply valid system changes before continuing.
+                    </div>
+                  ) : null}
+                  {orbit && orbit.data.length === 0 ? (
+                    <p className="empty-state">Run an orbit before continuing.</p>
+                  ) : null}
+                  {systemDraft.type === 'map' ||
+                  systemDraft.paramNames.length === 0 ||
+                  !orbit ||
+                  orbit.data.length === 0 ? null : (
+                    <>
+                      <label>
+                        Limit cycle name
+                        <input
+                          value={limitCycleFromOrbitDraft.limitCycleName}
+                          onChange={(event) =>
+                            setLimitCycleFromOrbitDraft((prev) => ({
+                              ...prev,
+                              limitCycleName: event.target.value,
+                            }))
+                          }
+                          placeholder={limitCycleFromOrbitNameSuggestion}
+                          data-testid="limit-cycle-from-orbit-name"
+                        />
+                      </label>
+                      <label>
+                        Branch name
+                        <input
+                          value={limitCycleFromOrbitDraft.branchName}
+                          onChange={(event) =>
+                            setLimitCycleFromOrbitDraft((prev) => ({
+                              ...prev,
+                              branchName: event.target.value,
+                            }))
+                          }
+                          placeholder={limitCycleFromOrbitBranchSuggestion}
+                          data-testid="limit-cycle-from-orbit-branch-name"
+                        />
+                      </label>
+                      <label>
+                        Continuation parameter
+                        <select
+                          value={limitCycleFromOrbitDraft.parameterName}
+                          onChange={(event) =>
+                            setLimitCycleFromOrbitDraft((prev) => ({
+                              ...prev,
+                              parameterName: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-orbit-parameter"
+                        >
+                          {systemDraft.paramNames.map((name) => (
+                            <option key={name} value={name}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Cycle detection tolerance
+                        <input
+                          type="number"
+                          value={limitCycleFromOrbitDraft.tolerance}
+                          onChange={(event) =>
+                            setLimitCycleFromOrbitDraft((prev) => ({
+                              ...prev,
+                              tolerance: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-orbit-tolerance"
+                        />
+                      </label>
+                      <label>
+                        NTST
+                        <input
+                          type="number"
+                          value={limitCycleFromOrbitDraft.ntst}
+                          onChange={(event) =>
+                            setLimitCycleFromOrbitDraft((prev) => ({
+                              ...prev,
+                              ntst: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-orbit-ntst"
+                        />
+                      </label>
+                      <label>
+                        NCOL
+                        <input
+                          type="number"
+                          value={limitCycleFromOrbitDraft.ncol}
+                          onChange={(event) =>
+                            setLimitCycleFromOrbitDraft((prev) => ({
+                              ...prev,
+                              ncol: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-orbit-ncol"
+                        />
+                      </label>
+                      <label>
+                        Direction
+                        <select
+                          value={limitCycleFromOrbitDraft.forward ? 'forward' : 'backward'}
+                          onChange={(event) =>
+                            setLimitCycleFromOrbitDraft((prev) => ({
+                              ...prev,
+                              forward: event.target.value === 'forward',
+                            }))
+                          }
+                          data-testid="limit-cycle-from-orbit-direction"
+                        >
+                          <option value="forward">Forward (Increasing Param)</option>
+                          <option value="backward">Backward (Decreasing Param)</option>
+                        </select>
+                      </label>
+                      <label>
+                        Initial step size
+                        <input
+                          type="number"
+                          value={limitCycleFromOrbitDraft.stepSize}
+                          onChange={(event) =>
+                            setLimitCycleFromOrbitDraft((prev) => ({
+                              ...prev,
+                              stepSize: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-orbit-step-size"
+                        />
+                      </label>
+                      <label>
+                        Max points
+                        <input
+                          type="number"
+                          value={limitCycleFromOrbitDraft.maxSteps}
+                          onChange={(event) =>
+                            setLimitCycleFromOrbitDraft((prev) => ({
+                              ...prev,
+                              maxSteps: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-orbit-max-steps"
+                        />
+                      </label>
+                      <label>
+                        Min step size
+                        <input
+                          type="number"
+                          value={limitCycleFromOrbitDraft.minStepSize}
+                          onChange={(event) =>
+                            setLimitCycleFromOrbitDraft((prev) => ({
+                              ...prev,
+                              minStepSize: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-orbit-min-step-size"
+                        />
+                      </label>
+                      <label>
+                        Max step size
+                        <input
+                          type="number"
+                          value={limitCycleFromOrbitDraft.maxStepSize}
+                          onChange={(event) =>
+                            setLimitCycleFromOrbitDraft((prev) => ({
+                              ...prev,
+                              maxStepSize: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-orbit-max-step-size"
+                        />
+                      </label>
+                      <label>
+                        Corrector steps
+                        <input
+                          type="number"
+                          value={limitCycleFromOrbitDraft.correctorSteps}
+                          onChange={(event) =>
+                            setLimitCycleFromOrbitDraft((prev) => ({
+                              ...prev,
+                              correctorSteps: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-orbit-corrector-steps"
+                        />
+                      </label>
+                      <label>
+                        Corrector tolerance
+                        <input
+                          type="number"
+                          value={limitCycleFromOrbitDraft.correctorTolerance}
+                          onChange={(event) =>
+                            setLimitCycleFromOrbitDraft((prev) => ({
+                              ...prev,
+                              correctorTolerance: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-orbit-corrector-tolerance"
+                        />
+                      </label>
+                      <label>
+                        Step tolerance
+                        <input
+                          type="number"
+                          value={limitCycleFromOrbitDraft.stepTolerance}
+                          onChange={(event) =>
+                            setLimitCycleFromOrbitDraft((prev) => ({
+                              ...prev,
+                              stepTolerance: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-orbit-step-tolerance"
+                        />
+                      </label>
+                      {limitCycleFromOrbitError ? (
+                        <div className="field-error">{limitCycleFromOrbitError}</div>
+                      ) : null}
+                      <button
+                        onClick={handleCreateLimitCycleFromOrbit}
+                        disabled={
+                          runDisabled ||
+                          systemDraft.paramNames.length === 0 ||
+                          orbit.data.length === 0
+                        }
+                        data-testid="limit-cycle-from-orbit-submit"
+                      >
+                        Continue Limit Cycle
+                      </button>
+                    </>
+                  )}
                 </div>
               </InspectorDisclosure>
             </>
@@ -5225,6 +5832,239 @@ export function InspectorDetailsPanel({
                             branch.branchType !== 'equilibrium'
                           }
                           data-testid="limit-cycle-from-hopf-submit"
+                        >
+                          Continue Limit Cycle
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </InspectorDisclosure>
+
+                <InspectorDisclosure
+                  key={`${selectionKey}-limit-cycle-pd`}
+                  title="Limit Cycle from PD"
+                  testId="limit-cycle-from-pd-toggle"
+                  defaultOpen={false}
+                >
+                  <div className="inspector-section">
+                    {branch.branchType !== 'limit_cycle' ? (
+                      <p className="empty-state">
+                        Period-doubling branching is only available for limit cycle branches.
+                      </p>
+                    ) : null}
+                    {systemDraft.type === 'map' ? (
+                      <p className="empty-state">Limit cycles require a flow system.</p>
+                    ) : null}
+                    {runDisabled ? (
+                      <div className="field-warning">
+                        Apply valid system changes before continuing.
+                      </div>
+                    ) : null}
+                    {!selectedBranchPoint ? (
+                      <p className="empty-state">Select a branch point to continue.</p>
+                    ) : selectedBranchPoint.stability !== 'PeriodDoubling' ? (
+                      <p className="empty-state">
+                        Select a Period Doubling point to branch.
+                      </p>
+                    ) : (
+                      <>
+                        <label>
+                          Limit cycle name
+                          <input
+                            value={limitCycleFromPDDraft.limitCycleName}
+                            onChange={(event) =>
+                              setLimitCycleFromPDDraft((prev) => ({
+                                ...prev,
+                                limitCycleName: event.target.value,
+                              }))
+                            }
+                            placeholder={limitCycleFromPDNameSuggestion}
+                            data-testid="limit-cycle-from-pd-name"
+                          />
+                        </label>
+                        <label>
+                          Branch name
+                          <input
+                            value={limitCycleFromPDDraft.branchName}
+                            onChange={(event) =>
+                              setLimitCycleFromPDDraft((prev) => ({
+                                ...prev,
+                                branchName: event.target.value,
+                              }))
+                            }
+                            placeholder={limitCycleFromPDBranchSuggestion}
+                            data-testid="limit-cycle-from-pd-branch-name"
+                          />
+                        </label>
+                        <label>
+                          Continuation parameter
+                          <input
+                            value={branchParameterName}
+                            disabled
+                            data-testid="limit-cycle-from-pd-parameter"
+                          />
+                        </label>
+                        <label>
+                          Perturbation amplitude
+                          <input
+                            type="number"
+                            value={limitCycleFromPDDraft.amplitude}
+                            onChange={(event) =>
+                              setLimitCycleFromPDDraft((prev) => ({
+                                ...prev,
+                                amplitude: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-pd-amplitude"
+                          />
+                        </label>
+                        <label>
+                          NTST (doubled)
+                          <input
+                            value={(limitCycleMesh.ntst * 2).toString()}
+                            disabled
+                            data-testid="limit-cycle-from-pd-ntst"
+                          />
+                        </label>
+                        <label>
+                          NCOL
+                          <input
+                            type="number"
+                            value={limitCycleFromPDDraft.ncol}
+                            onChange={(event) =>
+                              setLimitCycleFromPDDraft((prev) => ({
+                                ...prev,
+                                ncol: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-pd-ncol"
+                          />
+                        </label>
+                        <label>
+                          Direction
+                          <select
+                            value={limitCycleFromPDDraft.forward ? 'forward' : 'backward'}
+                            onChange={(event) =>
+                              setLimitCycleFromPDDraft((prev) => ({
+                                ...prev,
+                                forward: event.target.value === 'forward',
+                              }))
+                            }
+                            data-testid="limit-cycle-from-pd-direction"
+                          >
+                            <option value="forward">Forward (Increasing Param)</option>
+                            <option value="backward">Backward (Decreasing Param)</option>
+                          </select>
+                        </label>
+                        <label>
+                          Initial step size
+                          <input
+                            type="number"
+                            value={limitCycleFromPDDraft.stepSize}
+                            onChange={(event) =>
+                              setLimitCycleFromPDDraft((prev) => ({
+                                ...prev,
+                                stepSize: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-pd-step-size"
+                          />
+                        </label>
+                        <label>
+                          Max points
+                          <input
+                            type="number"
+                            value={limitCycleFromPDDraft.maxSteps}
+                            onChange={(event) =>
+                              setLimitCycleFromPDDraft((prev) => ({
+                                ...prev,
+                                maxSteps: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-pd-max-steps"
+                          />
+                        </label>
+                        <label>
+                          Min step size
+                          <input
+                            type="number"
+                            value={limitCycleFromPDDraft.minStepSize}
+                            onChange={(event) =>
+                              setLimitCycleFromPDDraft((prev) => ({
+                                ...prev,
+                                minStepSize: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-pd-min-step-size"
+                          />
+                        </label>
+                        <label>
+                          Max step size
+                          <input
+                            type="number"
+                            value={limitCycleFromPDDraft.maxStepSize}
+                            onChange={(event) =>
+                              setLimitCycleFromPDDraft((prev) => ({
+                                ...prev,
+                                maxStepSize: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-pd-max-step-size"
+                          />
+                        </label>
+                        <label>
+                          Corrector steps
+                          <input
+                            type="number"
+                            value={limitCycleFromPDDraft.correctorSteps}
+                            onChange={(event) =>
+                              setLimitCycleFromPDDraft((prev) => ({
+                                ...prev,
+                                correctorSteps: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-pd-corrector-steps"
+                          />
+                        </label>
+                        <label>
+                          Corrector tolerance
+                          <input
+                            type="number"
+                            value={limitCycleFromPDDraft.correctorTolerance}
+                            onChange={(event) =>
+                              setLimitCycleFromPDDraft((prev) => ({
+                                ...prev,
+                                correctorTolerance: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-pd-corrector-tolerance"
+                          />
+                        </label>
+                        <label>
+                          Step tolerance
+                          <input
+                            type="number"
+                            value={limitCycleFromPDDraft.stepTolerance}
+                            onChange={(event) =>
+                              setLimitCycleFromPDDraft((prev) => ({
+                                ...prev,
+                                stepTolerance: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-pd-step-tolerance"
+                          />
+                        </label>
+                        {limitCycleFromPDError ? (
+                          <div className="field-error">{limitCycleFromPDError}</div>
+                        ) : null}
+                        <button
+                          onClick={handleCreateLimitCycleFromPD}
+                          disabled={
+                            runDisabled ||
+                            branch.branchType !== 'limit_cycle' ||
+                            selectedBranchPoint?.stability !== 'PeriodDoubling'
+                          }
+                          data-testid="limit-cycle-from-pd-submit"
                         >
                           Continue Limit Cycle
                         </button>
