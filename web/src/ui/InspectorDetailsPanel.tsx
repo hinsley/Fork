@@ -1014,6 +1014,7 @@ export function InspectorDetailsPanel({
   }, [branchIndices])
   const systemConfigKey = useMemo(() => buildSystemConfigKey(system.config), [system.config])
   const stableSystemConfigRef = useRef(system.config)
+  const prevBranchIdRef = useRef<string | null>(null)
   const [branchPointIndex, setBranchPointIndex] = useState<number | null>(null)
   const selectedBranchPoint = useMemo(() => {
     if (!branch || branchPointIndex === null) return null
@@ -1490,14 +1491,26 @@ export function InspectorDetailsPanel({
   }, [branch, branchName, branchParameterName, limitCycleMesh.ncol, systemDraft.paramNames])
 
   useEffect(() => {
+    const branchId = hasBranch ? selectedNodeId : null
     if (!hasBranch) {
+      prevBranchIdRef.current = branchId
       setBranchPointIndex(null)
       setBranchPointInput('')
       return
     }
     if (branchSortedOrder.length === 0) {
+      prevBranchIdRef.current = branchId
       setBranchPointIndex(null)
       setBranchPointInput('')
+      return
+    }
+    const branchChanged = prevBranchIdRef.current !== branchId
+    const hasValidIndex =
+      branchPointIndex !== null &&
+      branchPointIndex >= 0 &&
+      branchPointIndex < branchIndices.length
+    if (!branchChanged && hasValidIndex) {
+      prevBranchIdRef.current = branchId
       return
     }
     const initialIndex = branchSortedOrder[0]
@@ -1507,7 +1520,8 @@ export function InspectorDetailsPanel({
       typeof logicalIndex === 'number' ? logicalIndex.toString() : ''
     )
     setBranchPointError(null)
-  }, [branchName, branchIndices, branchSortedOrder, hasBranch])
+    prevBranchIdRef.current = branchId
+  }, [branchIndices, branchPointIndex, branchSortedOrder, hasBranch, selectedNodeId])
 
   useEffect(() => {
     if (!onBranchPointSelect) return

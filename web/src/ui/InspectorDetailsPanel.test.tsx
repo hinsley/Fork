@@ -10,6 +10,7 @@ import {
   createSystem,
   renameNode,
   toggleNodeVisibility,
+  updateLimitCycleRenderTarget,
   updateNodeRender,
 } from '../system/model'
 import type { ContinuationObject, EquilibriumObject, LimitCycleObject } from '../system/types'
@@ -880,6 +881,74 @@ describe('InspectorDetailsPanel', () => {
       type: 'branch',
       branchId,
       pointIndex: 0,
+    })
+  })
+
+  it('keeps the selected cycle navigator point after rendering a limit cycle', async () => {
+    const user = userEvent.setup()
+    const { system } = createPeriodDoublingSystem()
+    const branchId = Object.keys(system.branches)[0]
+    const branch = branchId ? system.branches[branchId] : undefined
+    const limitCycleId =
+      branch &&
+      Object.entries(system.objects).find(([, obj]) => obj.name === branch.parentObject)?.[0]
+    if (!branchId || !branch || !limitCycleId) {
+      throw new Error('Missing limit cycle branch fixture data.')
+    }
+
+    function Wrapper() {
+      const [state, setState] = useState(system)
+      return (
+        <InspectorDetailsPanel
+          system={state}
+          selectedNodeId={branchId}
+          view="selection"
+          theme="light"
+          onRename={vi.fn()}
+          onToggleVisibility={vi.fn()}
+          onUpdateRender={vi.fn()}
+          onUpdateScene={vi.fn()}
+          onUpdateBifurcationDiagram={vi.fn()}
+          onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+          onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+          onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+          onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+          onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+          onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+          onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+          onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+          onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+          onSetLimitCycleRenderTarget={(objectId, target) => {
+            setState((prev) => updateLimitCycleRenderTarget(prev, objectId, target))
+          }}
+        />
+      )
+    }
+
+    render(<Wrapper />)
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    const input = screen.getByTestId('branch-point-input')
+    await user.clear(input)
+    await user.type(input, '1')
+    await user.click(screen.getByTestId('branch-point-jump'))
+
+    expect(screen.getByText('Selected point: logical 1 (array 1)')).toBeVisible()
+
+    const button = screen.getByTestId('branch-point-render-lc')
+    await user.click(button)
+
+    await waitFor(() => {
+      expect(screen.getByText('Selected point: logical 1 (array 1)')).toBeVisible()
+    })
+    await waitFor(() => {
+      expect(screen.queryByTestId('branch-point-render-lc')).toBeNull()
     })
   })
 
