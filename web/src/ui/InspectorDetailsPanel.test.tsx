@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createDemoSystem } from '../system/fixtures'
@@ -316,6 +316,255 @@ describe('InspectorDetailsPanel', () => {
         step_tolerance: 1e-6,
       },
       forward: false,
+    })
+  })
+
+  it('suggests cli-safe branch names for orbit limit cycle continuation', async () => {
+    const user = userEvent.setup()
+    const { system, objectNodeId } = createDemoSystem()
+    const systemWithParams = {
+      ...system,
+      config: {
+        ...system.config,
+        paramNames: ['mu beta'],
+        params: [0.5],
+      },
+    }
+
+    render(
+      <InspectorDetailsPanel
+        system={systemWithParams}
+        selectedNodeId={objectNodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('limit-cycle-from-orbit-toggle'))
+    const branchInput = screen.getByTestId('limit-cycle-from-orbit-branch-name')
+
+    await waitFor(() => {
+      expect(branchInput).toHaveValue('lc_Orbit_A_mu_beta')
+    })
+  })
+
+  it('suggests cli-safe branch names for hopf limit cycle continuation', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({ name: 'Hopf Name System' })
+    const configuredSystem = {
+      ...baseSystem,
+      config: {
+        ...baseSystem.config,
+        paramNames: ['mu beta', 'kappa'],
+        params: [-0.1, 0.2],
+      },
+    }
+    const eqObject: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ Hopf',
+      systemName: configuredSystem.config.name,
+      parameters: [...configuredSystem.config.params],
+    }
+    const added = addObject(configuredSystem, eqObject)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq hopf',
+      systemName: configuredSystem.config.name,
+      parameterName: 'mu beta',
+      parentObject: eqObject.name,
+      startObject: eqObject.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          {
+            state: [0, 0],
+            param_value: 0,
+            stability: 'Hopf',
+            eigenvalues: [
+              { re: 0, im: 1 },
+              { re: 0, im: -1 },
+            ],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+      },
+      settings: {
+        step_size: 0.02,
+        min_step_size: 1e-6,
+        max_step_size: 0.1,
+        max_steps: 40,
+        corrector_steps: 6,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: new Date().toISOString(),
+      params: [...configuredSystem.config.params],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+
+    render(
+      <InspectorDetailsPanel
+        system={branchResult.system}
+        selectedNodeId={branchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    await user.click(screen.getByTestId('branch-bifurcation-0'))
+    await user.click(screen.getByTestId('limit-cycle-from-hopf-toggle'))
+
+    const branchInput = screen.getByTestId('limit-cycle-from-hopf-branch-name')
+    await waitFor(() => {
+      expect(branchInput).toHaveValue('lc_hopf_eq_hopf_mu_beta')
+    })
+  })
+
+  it('suggests cli-safe branch names for PD limit cycle continuation', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({ name: 'PD Name System' })
+    const configuredSystem = {
+      ...baseSystem,
+      config: {
+        ...baseSystem.config,
+        paramNames: ['mu beta'],
+        params: [0.2],
+      },
+    }
+    const lcObject: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC PD',
+      systemName: configuredSystem.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit PD' },
+      ntst: 20,
+      ncol: 4,
+      period: 6,
+      state: [0.1, 0.2, 6],
+      parameters: [...configuredSystem.config.params],
+      parameterName: 'mu beta',
+      paramValue: 0.2,
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(configuredSystem, lcObject)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc pd',
+      systemName: configuredSystem.config.name,
+      parameterName: 'mu beta',
+      parentObject: lcObject.name,
+      startObject: lcObject.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          {
+            state: [0.1, 0.2, 6],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [0.1, 0.2, 6],
+            param_value: 0.25,
+            stability: 'PeriodDoubling',
+            eigenvalues: [{ re: -1, im: 0 }],
+          },
+        ],
+        bifurcations: [1],
+        indices: [0, 1],
+        branch_type: { type: 'LimitCycle', ntst: 20, ncol: 4 },
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-5,
+        max_step_size: 0.1,
+        max_steps: 50,
+        corrector_steps: 4,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: new Date().toISOString(),
+      params: [...configuredSystem.config.params],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+
+    render(
+      <InspectorDetailsPanel
+        system={branchResult.system}
+        selectedNodeId={branchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    await user.click(screen.getByTestId('branch-bifurcation-1'))
+    await user.click(screen.getByTestId('limit-cycle-from-pd-toggle'))
+
+    const branchInput = screen.getByTestId('limit-cycle-from-pd-branch-name')
+    await waitFor(() => {
+      expect(branchInput).toHaveAttribute('placeholder', 'lc_pd_lc_pd_idx1_mu_beta')
     })
   })
 

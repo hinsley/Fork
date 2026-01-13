@@ -1113,7 +1113,9 @@ export function InspectorDetailsPanel({
   const limitCycleFromPDBranchSuggestion = useMemo(() => {
     const baseName =
       limitCycleFromPDDraft.limitCycleName.trim() || limitCycleFromPDNameSuggestion
-    return branchParameterName ? `${baseName}_${branchParameterName}` : baseName
+    const safeBaseName = toCliSafeName(baseName)
+    const safeParamName = branchParameterName ? toCliSafeName(branchParameterName) : ''
+    return safeParamName ? `${safeBaseName}_${safeParamName}` : safeBaseName
   }, [
     branchParameterName,
     limitCycleFromPDDraft.limitCycleName,
@@ -1306,7 +1308,11 @@ export function InspectorDetailsPanel({
       const paramName = systemDraft.paramNames.includes(prev.parameterName)
         ? prev.parameterName
         : systemDraft.paramNames[0] ?? ''
-      const suggestedBranchName = paramName ? `${limitCycleName}_${paramName}` : limitCycleName
+      const safeLimitCycleName = toCliSafeName(limitCycleName)
+      const safeParamName = paramName ? toCliSafeName(paramName) : ''
+      const suggestedBranchName = safeParamName
+        ? `${safeLimitCycleName}_${safeParamName}`
+        : safeLimitCycleName
       const branchName =
         prev.branchName.trim().length > 0 ? prev.branchName : suggestedBranchName
       return { ...prev, limitCycleName, branchName, parameterName: paramName }
@@ -1372,7 +1378,11 @@ export function InspectorDetailsPanel({
       const paramName = systemDraft.paramNames.includes(prev.parameterName)
         ? prev.parameterName
         : hopfDefaultParam
-      const suggestedBranchName = paramName ? `${limitCycleName}_${paramName}` : limitCycleName
+      const safeLimitCycleName = toCliSafeName(limitCycleName)
+      const safeParamName = paramName ? toCliSafeName(paramName) : ''
+      const suggestedBranchName = safeParamName
+        ? `${safeLimitCycleName}_${safeParamName}`
+        : safeLimitCycleName
       const branchNameValue =
         prev.branchName.trim().length > 0 ? prev.branchName : suggestedBranchName
       return {
@@ -1532,7 +1542,9 @@ export function InspectorDetailsPanel({
     const baseName =
       limitCycleFromOrbitDraft.limitCycleName.trim() || limitCycleFromOrbitNameSuggestion
     const paramName = limitCycleFromOrbitDraft.parameterName
-    return paramName ? `${baseName}_${paramName}` : baseName
+    const safeBaseName = toCliSafeName(baseName)
+    const safeParamName = paramName ? toCliSafeName(paramName) : ''
+    return safeParamName ? `${safeBaseName}_${safeParamName}` : safeBaseName
   }, [
     limitCycleFromOrbitDraft.limitCycleName,
     limitCycleFromOrbitDraft.parameterName,
@@ -1544,7 +1556,9 @@ export function InspectorDetailsPanel({
     const baseName =
       limitCycleFromHopfDraft.limitCycleName.trim() || `lc_hopf_${toCliSafeName(branch.name)}`
     const paramName = limitCycleFromHopfDraft.parameterName
-    return paramName ? `${baseName}_${paramName}` : baseName
+    const safeBaseName = toCliSafeName(baseName)
+    const safeParamName = paramName ? toCliSafeName(paramName) : ''
+    return safeParamName ? `${safeBaseName}_${safeParamName}` : safeBaseName
   }, [branch, limitCycleFromHopfDraft.limitCycleName, limitCycleFromHopfDraft.parameterName])
 
   const sceneSelectedIds = useMemo(
