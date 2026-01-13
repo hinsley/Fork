@@ -173,6 +173,7 @@ describe('ObjectsTree', () => {
     if (!branchId || !branch || !limitCycleId) {
       throw new Error('Missing limit cycle branch fixture data.')
     }
+    const onSelect = vi.fn()
 
     function Wrapper() {
       const [state, setState] = useState(system)
@@ -180,7 +181,7 @@ describe('ObjectsTree', () => {
         <ObjectsTree
           system={state}
           selectedNodeId={null}
-          onSelect={vi.fn()}
+          onSelect={onSelect}
           onToggleVisibility={vi.fn()}
           onRename={vi.fn()}
           onToggleExpanded={(nodeId) => {
@@ -200,6 +201,7 @@ describe('ObjectsTree', () => {
 
     const toggle = screen.getByTestId(`node-expand-${limitCycleId}`)
     await user.click(toggle)
+    expect(onSelect).not.toHaveBeenCalled()
     expect(screen.queryByTestId(`object-tree-row-${branchId}`)).toBeNull()
 
     await user.click(toggle)

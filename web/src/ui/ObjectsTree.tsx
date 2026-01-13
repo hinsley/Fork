@@ -171,7 +171,10 @@ export function ObjectsTree({
           {hasChildren ? (
             <button
               className="tree-node__expand"
-              onClick={() => onToggleExpanded(nodeId)}
+              onClick={(event) => {
+                event.stopPropagation()
+                onToggleExpanded(nodeId)
+              }}
               aria-label={node.expanded ? 'Collapse node' : 'Expand node'}
               data-testid={`node-expand-${nodeId}`}
             >
@@ -182,7 +185,10 @@ export function ObjectsTree({
           )}
           <button
             className="tree-node__visibility"
-            onClick={() => onToggleVisibility(nodeId)}
+            onClick={(event) => {
+              event.stopPropagation()
+              onToggleVisibility(nodeId)
+            }}
             aria-label={node.visibility ? 'Hide node' : 'Show node'}
             data-testid={`node-visibility-${nodeId}`}
           >
