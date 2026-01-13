@@ -156,11 +156,11 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const isDropTarget = isRoot && dragOverId === nodeId && draggingId !== node.id
 
     return (
-      <div key={nodeId} className={`tree-node ${isSelected ? 'tree-node--selected' : ''}`}>
+      <div key={nodeId} className="tree-node">
         <div
-          className={`tree-node__row${isDragging ? ' tree-node__row--dragging' : ''}${
-            isDropTarget ? ' tree-node__row--drop' : ''
-          }`}
+          className={`tree-node__row${isSelected ? ' tree-node__row--selected' : ''}${
+            isDragging ? ' tree-node__row--dragging' : ''
+          }${isDropTarget ? ' tree-node__row--drop' : ''}`}
           style={{ paddingLeft: `${paddingDepth * 14}px` }}
           onClick={() => onSelect(nodeId)}
           onContextMenu={(event) => {

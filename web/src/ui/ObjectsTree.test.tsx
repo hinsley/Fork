@@ -181,6 +181,39 @@ describe('ObjectsTree', () => {
     expect(branchPadding).toBeGreaterThan(parentPadding)
   })
 
+  it('highlights only the selected node row', () => {
+    const { system } = createPeriodDoublingSystem()
+    const branchId = Object.keys(system.branches)[0]
+    const branch = branchId ? system.branches[branchId] : undefined
+    const limitCycleId =
+      branch &&
+      Object.entries(system.objects).find(([, obj]) => obj.name === branch.parentObject)?.[0]
+    if (!branchId || !branch || !limitCycleId) {
+      throw new Error('Missing limit cycle branch fixture data.')
+    }
+
+    render(
+      <ObjectsTree
+        system={system}
+        selectedNodeId={limitCycleId}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={vi.fn()}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    const parentRow = screen.getByTestId(`object-tree-row-${limitCycleId}`)
+    const branchRow = screen.getByTestId(`object-tree-row-${branchId}`)
+
+    expect(parentRow).toHaveClass('tree-node__row--selected')
+    expect(branchRow).not.toHaveClass('tree-node__row--selected')
+  })
+
   it('collapses and expands state-space objects with children', async () => {
     const user = userEvent.setup()
     const { system } = createPeriodDoublingSystem()

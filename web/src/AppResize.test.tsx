@@ -37,9 +37,16 @@ describe('App layout', () => {
     await act(async () => {
       fireEvent.pointerDown(splitter, { clientX: 200 })
       fireEvent.pointerMove(window, { clientX: 260 })
+    })
+
+    expect(workspace.style.gridTemplateColumns).toBe(initial)
+    expect(screen.getByTestId('splitter-preview')).toBeInTheDocument()
+
+    await act(async () => {
       fireEvent.pointerUp(window)
     })
 
+    expect(screen.queryByTestId('splitter-preview')).toBeNull()
     expect(workspace.style.gridTemplateColumns).not.toBe(initial)
   })
 })

@@ -45,10 +45,15 @@ function App() {
   })
   const [branchPointSelection, setBranchPointSelection] =
     useState<BranchPointSelection>(null)
-  const dragRef = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(
-    null
-  )
+  const dragRef = useRef<{
+    side: 'left' | 'right'
+    startX: number
+    startWidth: number
+    currentWidth: number
+  } | null>(null)
+  const [dragPreview, setDragPreview] = useState<{ offset: number } | null>(null)
   const objectsTreeRef = useRef<ObjectsTreeHandle | null>(null)
+  const workspaceRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     void actions.refreshSystems()
@@ -135,27 +140,50 @@ function App() {
 
   const onPointerDown = (side: 'left' | 'right') => (event: React.PointerEvent) => {
     if (!system) return
+    const workspaceRect = workspaceRef.current?.getBoundingClientRect()
+    if (!workspaceRect) return
+    const startWidth = side === 'left' ? system.ui.layout.leftWidth : system.ui.layout.rightWidth
     dragRef.current = {
       side,
       startX: event.clientX,
-      startWidth: side === 'left' ? system.ui.layout.leftWidth : system.ui.layout.rightWidth,
+      startWidth,
+      currentWidth: startWidth,
     }
 
+    const updatePreview = (nextWidth: number) => {
+      const rawOffset =
+        side === 'left'
+          ? nextWidth
+          : workspaceRect.width - nextWidth - SPLITTER_WIDTH
+      const offset = Math.min(Math.max(rawOffset, 0), workspaceRect.width)
+      setDragPreview({ offset })
+    }
+
+    updatePreview(startWidth)
+
     const handleMove = (moveEvent: PointerEvent) => {
-      if (!system || !dragRef.current) return
+      if (!dragRef.current) return
       const { startX, startWidth } = dragRef.current
       const delta = moveEvent.clientX - startX
-      if (side === 'left') {
-        const next = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_LEFT_WIDTH, startWidth + delta))
-        actions.updateLayout({ leftWidth: next })
-      } else {
-        const next = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_RIGHT_WIDTH, startWidth - delta))
-        actions.updateLayout({ rightWidth: next })
-      }
+      const nextWidth =
+        side === 'left'
+          ? Math.min(MAX_PANEL_WIDTH, Math.max(MIN_LEFT_WIDTH, startWidth + delta))
+          : Math.min(MAX_PANEL_WIDTH, Math.max(MIN_RIGHT_WIDTH, startWidth - delta))
+      dragRef.current.currentWidth = nextWidth
+      updatePreview(nextWidth)
     }
 
     const handleUp = () => {
+      if (dragRef.current) {
+        const { currentWidth } = dragRef.current
+        if (side === 'left') {
+          actions.updateLayout({ leftWidth: currentWidth })
+        } else {
+          actions.updateLayout({ rightWidth: currentWidth })
+        }
+      }
       dragRef.current = null
+      setDragPreview(null)
       window.removeEventListener('pointermove', handleMove)
       window.removeEventListener('pointerup', handleUp)
     }
@@ -257,7 +285,12 @@ function App() {
           </div>
         </main>
       ) : (
-        <main className="workspace" style={{ gridTemplateColumns }} data-testid="workspace">
+        <main
+          className="workspace"
+          style={{ gridTemplateColumns }}
+          data-testid="workspace"
+          ref={workspaceRef}
+        >
           <div className="workspace__left">
             <Panel
               title="Objects"
@@ -367,6 +400,13 @@ function App() {
               />
             </Panel>
           </div>
+          {dragPreview ? (
+            <div
+              className="splitter-preview"
+              style={{ left: `${dragPreview.offset}px` }}
+              data-testid="splitter-preview"
+            />
+          ) : null}
         </main>
       )}
       {import.meta.env.DEV ? <PerfOverlay /> : null}
