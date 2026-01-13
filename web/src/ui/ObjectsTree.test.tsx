@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ObjectsTree } from './ObjectsTree'
-import { createDemoSystem } from '../system/fixtures'
+import { createDemoSystem, createPeriodDoublingSystem } from '../system/fixtures'
 
 describe('ObjectsTree', () => {
   it('selects, renames, and toggles visibility', async () => {
@@ -124,5 +124,39 @@ describe('ObjectsTree', () => {
 
     expect(screen.getByTestId(`node-drag-${objectNodeId}`)).toBeInTheDocument()
     expect(screen.queryByTestId(`node-drag-${branchNodeId}`)).toBeNull()
+  })
+
+  it('indents limit cycle continuation branches under their parent object', () => {
+    const { system } = createPeriodDoublingSystem()
+    const branchId = Object.keys(system.branches)[0]
+    const branch = branchId ? system.branches[branchId] : undefined
+    const limitCycleId =
+      branch &&
+      Object.entries(system.objects).find(([, obj]) => obj.name === branch.parentObject)?.[0]
+    if (!branchId || !branch || !limitCycleId) {
+      throw new Error('Missing limit cycle branch fixture data.')
+    }
+
+    render(
+      <ObjectsTree
+        system={system}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={vi.fn()}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    const parentRow = screen.getByTestId(`object-tree-row-${limitCycleId}`)
+    const branchRow = screen.getByTestId(`object-tree-row-${branchId}`)
+    const parentPadding = Number.parseFloat(parentRow.style.paddingLeft || '0')
+    const branchPadding = Number.parseFloat(branchRow.style.paddingLeft || '0')
+
+    expect(branchPadding).toBeGreaterThan(parentPadding)
   })
 })

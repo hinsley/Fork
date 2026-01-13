@@ -98,6 +98,18 @@ export function ObjectsTree({
   const renderNode = (nodeId: string, depth: number) => {
     const node = system.nodes[nodeId]
     if (!node) return null
+    let inferredDepth = 0
+    let cursor = node
+    const visited = new Set<string>([nodeId])
+    while (cursor.parentId) {
+      if (visited.has(cursor.parentId)) break
+      const parent = system.nodes[cursor.parentId]
+      if (!parent) break
+      inferredDepth += 1
+      visited.add(cursor.parentId)
+      cursor = parent
+    }
+    const paddingDepth = Math.max(depth, inferredDepth)
     const isSelected = nodeId === selectedNodeId
     const hasChildren = node.children.length > 0
     const isEditing = editingId === nodeId
@@ -111,7 +123,7 @@ export function ObjectsTree({
           className={`tree-node__row${isDragging ? ' tree-node__row--dragging' : ''}${
             isDropTarget ? ' tree-node__row--drop' : ''
           }`}
-          style={{ paddingLeft: `${depth * 14}px` }}
+          style={{ paddingLeft: `${paddingDepth * 14}px` }}
           onClick={() => onSelect(nodeId)}
           onContextMenu={(event) => {
             event.preventDefault()
