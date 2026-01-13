@@ -1,6 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useState,
+} from 'react'
 import type { System, TreeNode } from '../system/types'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
+
+export type ObjectsTreeHandle = {
+  openCreateMenu: (position: { x: number; y: number }) => void
+}
 
 type ObjectsTreeProps = {
   system: System
@@ -25,87 +36,98 @@ function getNodeLabel(node: TreeNode) {
   return node.name
 }
 
-export function ObjectsTree({
-  system,
-  selectedNodeId,
-  onSelect,
-  onToggleVisibility,
-  onRename,
-  onToggleExpanded,
-  onReorderNode,
-  onCreateOrbit,
-  onCreateEquilibrium,
-  onDeleteNode,
-}: ObjectsTreeProps) {
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [draftName, setDraftName] = useState('')
-  const [draggingId, setDraggingId] = useState<string | null>(null)
-  const [dragOverId, setDragOverId] = useState<string | null>(null)
-  const [nodeContextMenu, setNodeContextMenu] = useState<{
-    id: string
-    x: number
-    y: number
-  } | null>(null)
-  const [createMenu, setCreateMenu] = useState<{
-    x: number
-    y: number
-  } | null>(null)
+export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
+  function ObjectsTree(
+    {
+      system,
+      selectedNodeId,
+      onSelect,
+      onToggleVisibility,
+      onRename,
+      onToggleExpanded,
+      onReorderNode,
+      onCreateOrbit,
+      onCreateEquilibrium,
+      onDeleteNode,
+    },
+    ref
+  ) {
+    const [editingId, setEditingId] = useState<string | null>(null)
+    const [draftName, setDraftName] = useState('')
+    const [draggingId, setDraggingId] = useState<string | null>(null)
+    const [dragOverId, setDragOverId] = useState<string | null>(null)
+    const [nodeContextMenu, setNodeContextMenu] = useState<{
+      id: string
+      x: number
+      y: number
+    } | null>(null)
+    const [createMenu, setCreateMenu] = useState<{
+      x: number
+      y: number
+    } | null>(null)
 
-  const rootNodes = useMemo(
-    () => system.rootIds.filter((id) => system.nodes[id]?.kind === 'object'),
-    [system.nodes, system.rootIds]
-  )
-  const childrenByParent = useMemo(() => {
-    const map = new Map<string, string[]>()
-    Object.values(system.nodes).forEach((node) => {
-      if (!node.parentId) return
-      const list = map.get(node.parentId) ?? []
-      list.push(node.id)
-      map.set(node.parentId, list)
-    })
-    return map
-  }, [system.nodes])
+    const rootNodes = useMemo(
+      () => system.rootIds.filter((id) => system.nodes[id]?.kind === 'object'),
+      [system.nodes, system.rootIds]
+    )
+    const childrenByParent = useMemo(() => {
+      const map = new Map<string, string[]>()
+      Object.values(system.nodes).forEach((node) => {
+        if (!node.parentId) return
+        const list = map.get(node.parentId) ?? []
+        list.push(node.id)
+        map.set(node.parentId, list)
+      })
+      return map
+    }, [system.nodes])
 
-  const startRename = (node: TreeNode) => {
-    setEditingId(node.id)
-    setDraftName(node.name)
-  }
-
-  useEffect(() => {
-    if (!nodeContextMenu && !createMenu) return
-    const handlePointerDown = () => {
-      setNodeContextMenu(null)
-      setCreateMenu(null)
+    const startRename = (node: TreeNode) => {
+      setEditingId(node.id)
+      setDraftName(node.name)
     }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+
+    useEffect(() => {
+      if (!nodeContextMenu && !createMenu) return
+      const handlePointerDown = () => {
         setNodeContextMenu(null)
         setCreateMenu(null)
       }
+      const handleKeyDown = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') {
+          setNodeContextMenu(null)
+          setCreateMenu(null)
+        }
+      }
+      const handleBlur = () => {
+        setNodeContextMenu(null)
+        setCreateMenu(null)
+      }
+      window.addEventListener('pointerdown', handlePointerDown)
+      window.addEventListener('keydown', handleKeyDown)
+      window.addEventListener('blur', handleBlur)
+      return () => {
+        window.removeEventListener('pointerdown', handlePointerDown)
+        window.removeEventListener('keydown', handleKeyDown)
+        window.removeEventListener('blur', handleBlur)
+      }
+    }, [nodeContextMenu, createMenu])
+
+    const commitRename = (node: TreeNode) => {
+      const trimmed = draftName.trim()
+      if (trimmed && trimmed !== node.name) {
+        onRename(node.id, trimmed)
+      }
+      setEditingId(null)
     }
-    const handleBlur = () => {
+
+    const openCreateMenu = useCallback((position: { x: number; y: number }) => {
       setNodeContextMenu(null)
-      setCreateMenu(null)
-    }
-    window.addEventListener('pointerdown', handlePointerDown)
-    window.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('blur', handleBlur)
-    return () => {
-      window.removeEventListener('pointerdown', handlePointerDown)
-      window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('blur', handleBlur)
-    }
-  }, [nodeContextMenu, createMenu])
+      setCreateMenu(position)
+    }, [])
 
-  const commitRename = (node: TreeNode) => {
-    const trimmed = draftName.trim()
-    if (trimmed && trimmed !== node.name) {
-      onRename(node.id, trimmed)
-    }
-    setEditingId(null)
-  }
+    useImperativeHandle(ref, () => ({ openCreateMenu }), [openCreateMenu])
 
-  const renderNode = (nodeId: string, depth: number) => {
+    const renderNode = (nodeId: string, depth: number) => {
     const node = system.nodes[nodeId]
     if (!node) return null
     let inferredDepth = 0
@@ -245,89 +267,79 @@ export function ObjectsTree({
         ) : null}
       </div>
     )
-  }
+    }
 
-  return (
-    <div className="objects-tree" data-testid="objects-tree">
-      <div className="objects-tree__toolbar">
-        <button
-          onClick={(event) => {
-            setNodeContextMenu(null)
-            setCreateMenu({ x: event.clientX, y: event.clientY })
-          }}
-          data-testid="create-object-button"
-        >
-          Create Object
-        </button>
-      </div>
-      <div className="objects-tree__list">
-        {rootNodes.length === 0 ? <p className="empty-state">No objects yet.</p> : null}
-        {rootNodes.map((nodeId) => renderNode(nodeId, 0))}
-      </div>
-      {createMenu ? (
-        <div
-          className="context-menu"
-          style={{ left: createMenu.x, top: createMenu.y }}
-          onPointerDown={(event) => event.stopPropagation()}
-          data-testid="create-object-menu"
-        >
-          <button
-            className="context-menu__item"
-            onClick={() => {
-              onCreateOrbit()
-              setCreateMenu(null)
-            }}
-            data-testid="create-orbit"
-          >
-            Orbit
-          </button>
-          <button
-            className="context-menu__item"
-            onClick={() => {
-              onCreateEquilibrium()
-              setCreateMenu(null)
-            }}
-            data-testid="create-equilibrium"
-          >
-            Equilibrium
-          </button>
+    return (
+      <div className="objects-tree" data-testid="objects-tree">
+        <div className="objects-tree__list">
+          {rootNodes.length === 0 ? <p className="empty-state">No objects yet.</p> : null}
+          {rootNodes.map((nodeId) => renderNode(nodeId, 0))}
         </div>
-      ) : null}
-      {nodeContextMenu ? (
-        <div
-          className="context-menu"
-          style={{ left: nodeContextMenu.x, top: nodeContextMenu.y }}
-          onPointerDown={(event) => event.stopPropagation()}
-          data-testid="object-context-menu"
-        >
-          <button
-            className="context-menu__item"
-            onClick={() => {
-              const node = system.nodes[nodeContextMenu.id]
-              if (node) startRename(node)
-              setNodeContextMenu(null)
-            }}
-            data-testid="object-context-rename"
+        {createMenu ? (
+          <div
+            className="context-menu"
+            style={{ left: createMenu.x, top: createMenu.y }}
+            onPointerDown={(event) => event.stopPropagation()}
+            data-testid="create-object-menu"
           >
-            Rename
-          </button>
-          <button
-            className="context-menu__item"
-            onClick={() => {
-              const nodeId = nodeContextMenu.id
-              const node = system.nodes[nodeId]
-              setNodeContextMenu(null)
-              if (!node) return
-              if (confirmDelete({ name: node.name, kind: getDeleteKindLabel(node) })) {
-                onDeleteNode(nodeId)
-              }
-            }}
-            data-testid="object-context-delete"
+            <button
+              className="context-menu__item"
+              onClick={() => {
+                onCreateOrbit()
+                setCreateMenu(null)
+              }}
+              data-testid="create-orbit"
+            >
+              Orbit
+            </button>
+            <button
+              className="context-menu__item"
+              onClick={() => {
+                onCreateEquilibrium()
+                setCreateMenu(null)
+              }}
+              data-testid="create-equilibrium"
+            >
+              Equilibrium
+            </button>
+          </div>
+        ) : null}
+        {nodeContextMenu ? (
+          <div
+            className="context-menu"
+            style={{ left: nodeContextMenu.x, top: nodeContextMenu.y }}
+            onPointerDown={(event) => event.stopPropagation()}
+            data-testid="object-context-menu"
           >
-            Delete
-          </button>
-        </div>
-      ) : null}
-    </div>
-  )
-}
+            <button
+              className="context-menu__item"
+              onClick={() => {
+                const node = system.nodes[nodeContextMenu.id]
+                if (node) startRename(node)
+                setNodeContextMenu(null)
+              }}
+              data-testid="object-context-rename"
+            >
+              Rename
+            </button>
+            <button
+              className="context-menu__item"
+              onClick={() => {
+                const nodeId = nodeContextMenu.id
+                const node = system.nodes[nodeId]
+                setNodeContextMenu(null)
+                if (!node) return
+                if (confirmDelete({ name: node.name, kind: getDeleteKindLabel(node) })) {
+                  onDeleteNode(nodeId)
+                }
+              }}
+              data-testid="object-context-delete"
+            >
+              Delete
+            </button>
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+)

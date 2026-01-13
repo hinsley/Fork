@@ -1020,6 +1020,8 @@ export function InspectorDetailsPanel({
     if (!branch || branchPointIndex === null) return null
     return branch.data.points[branchPointIndex] ?? null
   }, [branch, branchPointIndex])
+  const branchSortedIndex =
+    branchPointIndex !== null ? branchSortedOrder.indexOf(branchPointIndex) : -1
   const limitCycleRenderTargets = system.ui.limitCycleRenderTargets ?? {}
   const limitCycleRenderTarget =
     limitCycle && selectedNodeId ? limitCycleRenderTargets[selectedNodeId] ?? null : null
@@ -4907,16 +4909,25 @@ export function InspectorDetailsPanel({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  if (branchPointIndex === null) return
-                                  const sortedIndex =
-                                    branchSortedOrder.indexOf(branchPointIndex)
-                                  if (sortedIndex <= 0) return
-                                  setBranchPoint(branchSortedOrder[sortedIndex - 1])
+                                  if (branchSortedOrder.length === 0) return
+                                  setBranchPoint(branchSortedOrder[0])
                                 }}
                                 disabled={
                                   branchPointIndex === null ||
-                                  branchSortedOrder.indexOf(branchPointIndex) <= 0
+                                  branchSortedOrder.length === 0 ||
+                                  branchSortedIndex <= 0
                                 }
+                                data-testid="branch-point-least"
+                              >
+                                Least
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (branchSortedIndex <= 0) return
+                                  setBranchPoint(branchSortedOrder[branchSortedIndex - 1])
+                                }}
+                                disabled={branchPointIndex === null || branchSortedIndex <= 0}
                                 data-testid="branch-point-prev"
                               >
                                 Previous
@@ -4924,24 +4935,38 @@ export function InspectorDetailsPanel({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  if (branchPointIndex === null) return
-                                  const sortedIndex =
-                                    branchSortedOrder.indexOf(branchPointIndex)
                                   if (
-                                    sortedIndex < 0 ||
-                                    sortedIndex >= branchSortedOrder.length - 1
+                                    branchSortedIndex < 0 ||
+                                    branchSortedIndex >= branchSortedOrder.length - 1
                                   )
                                     return
-                                  setBranchPoint(branchSortedOrder[sortedIndex + 1])
+                                  setBranchPoint(branchSortedOrder[branchSortedIndex + 1])
                                 }}
                                 disabled={
                                   branchPointIndex === null ||
-                                  branchSortedOrder.indexOf(branchPointIndex) >=
-                                    branchSortedOrder.length - 1
+                                  branchSortedIndex < 0 ||
+                                  branchSortedIndex >= branchSortedOrder.length - 1
                                 }
                                 data-testid="branch-point-next"
                               >
                                 Next
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (branchSortedOrder.length === 0) return
+                                  setBranchPoint(
+                                    branchSortedOrder[branchSortedOrder.length - 1]
+                                  )
+                                }}
+                                disabled={
+                                  branchPointIndex === null ||
+                                  branchSortedOrder.length === 0 ||
+                                  branchSortedIndex >= branchSortedOrder.length - 1
+                                }
+                                data-testid="branch-point-greatest"
+                              >
+                                Greatest
                               </button>
                             </div>
 
@@ -5295,7 +5320,7 @@ export function InspectorDetailsPanel({
 
                     <InspectorDisclosure
                       key={`${selectionKey}-branch-points`}
-                      title="Branch Points"
+                      title="Branch Navigator"
                       testId="branch-points-toggle"
                       defaultOpen={false}
                     >
@@ -5308,16 +5333,25 @@ export function InspectorDetailsPanel({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  if (branchPointIndex === null) return
-                                  const sortedIndex =
-                                    branchSortedOrder.indexOf(branchPointIndex)
-                                  if (sortedIndex <= 0) return
-                                  setBranchPoint(branchSortedOrder[sortedIndex - 1])
+                                  if (branchSortedOrder.length === 0) return
+                                  setBranchPoint(branchSortedOrder[0])
                                 }}
                                 disabled={
                                   branchPointIndex === null ||
-                                  branchSortedOrder.indexOf(branchPointIndex) <= 0
+                                  branchSortedOrder.length === 0 ||
+                                  branchSortedIndex <= 0
                                 }
+                                data-testid="branch-point-least"
+                              >
+                                Least
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (branchSortedIndex <= 0) return
+                                  setBranchPoint(branchSortedOrder[branchSortedIndex - 1])
+                                }}
+                                disabled={branchPointIndex === null || branchSortedIndex <= 0}
                                 data-testid="branch-point-prev"
                               >
                                 Previous
@@ -5325,24 +5359,38 @@ export function InspectorDetailsPanel({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  if (branchPointIndex === null) return
-                                  const sortedIndex =
-                                    branchSortedOrder.indexOf(branchPointIndex)
                                   if (
-                                    sortedIndex < 0 ||
-                                    sortedIndex >= branchSortedOrder.length - 1
+                                    branchSortedIndex < 0 ||
+                                    branchSortedIndex >= branchSortedOrder.length - 1
                                   )
                                     return
-                                  setBranchPoint(branchSortedOrder[sortedIndex + 1])
+                                  setBranchPoint(branchSortedOrder[branchSortedIndex + 1])
                                 }}
                                 disabled={
                                   branchPointIndex === null ||
-                                  branchSortedOrder.indexOf(branchPointIndex) >=
-                                    branchSortedOrder.length - 1
+                                  branchSortedIndex < 0 ||
+                                  branchSortedIndex >= branchSortedOrder.length - 1
                                 }
                                 data-testid="branch-point-next"
                               >
                                 Next
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (branchSortedOrder.length === 0) return
+                                  setBranchPoint(
+                                    branchSortedOrder[branchSortedOrder.length - 1]
+                                  )
+                                }}
+                                disabled={
+                                  branchPointIndex === null ||
+                                  branchSortedOrder.length === 0 ||
+                                  branchSortedIndex >= branchSortedOrder.length - 1
+                                }
+                                data-testid="branch-point-greatest"
+                              >
+                                Greatest
                               </button>
                             </div>
 

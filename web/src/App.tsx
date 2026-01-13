@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { useAppContext } from './state/appContext'
 import { Panel } from './ui/Panel'
-import { ObjectsTree } from './ui/ObjectsTree'
+import { ObjectsTree, type ObjectsTreeHandle } from './ui/ObjectsTree'
 import { InspectorPanel } from './ui/InspectorPanel'
 import { ViewportPanel } from './ui/ViewportPanel'
 import { SystemDialog } from './ui/SystemDialog'
@@ -48,6 +48,7 @@ function App() {
   const dragRef = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(
     null
   )
+  const objectsTreeRef = useRef<ObjectsTreeHandle | null>(null)
 
   useEffect(() => {
     void actions.refreshSystems()
@@ -112,6 +113,10 @@ function App() {
     const names = Object.values(system.objects).map((obj) => obj.name)
     const name = nextObjectName('Equilibrium', names)
     await actions.createEquilibriumObject(name)
+  }
+
+  const openCreateObjectMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
+    objectsTreeRef.current?.openCreateMenu({ x: event.clientX, y: event.clientY })
   }
 
   const createScene = async (targetId?: string | null) => {
@@ -260,8 +265,14 @@ function App() {
               onToggle={() => undefined}
               testId="objects-panel"
               showToggle={false}
+              actions={
+                <button onClick={openCreateObjectMenu} data-testid="create-object-button">
+                  Create Object
+                </button>
+              }
             >
               <ObjectsTree
+                ref={objectsTreeRef}
                 system={system}
                 selectedNodeId={system.ui.selectedNodeId}
                 onSelect={selectNode}

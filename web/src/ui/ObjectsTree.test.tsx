@@ -1,9 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { ObjectsTree } from './ObjectsTree'
+import { ObjectsTree, type ObjectsTreeHandle } from './ObjectsTree'
 import { createDemoSystem, createPeriodDoublingSystem } from '../system/fixtures'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { toggleNodeExpanded } from '../system/model'
 
 describe('ObjectsTree', () => {
@@ -83,20 +83,39 @@ describe('ObjectsTree', () => {
     const { system } = createDemoSystem()
     const onCreateOrbit = vi.fn()
 
-    render(
-      <ObjectsTree
-        system={system}
-        selectedNodeId={null}
-        onSelect={vi.fn()}
-        onToggleVisibility={vi.fn()}
-        onRename={vi.fn()}
-        onToggleExpanded={vi.fn()}
-        onReorderNode={vi.fn()}
-        onCreateOrbit={onCreateOrbit}
-        onCreateEquilibrium={vi.fn()}
-        onDeleteNode={vi.fn()}
-      />
-    )
+    function Wrapper() {
+      const treeRef = useRef<ObjectsTreeHandle | null>(null)
+      return (
+        <>
+          <button
+            onClick={(event) =>
+              treeRef.current?.openCreateMenu({
+                x: event.clientX,
+                y: event.clientY,
+              })
+            }
+            data-testid="create-object-button"
+          >
+            Create Object
+          </button>
+          <ObjectsTree
+            ref={treeRef}
+            system={system}
+            selectedNodeId={null}
+            onSelect={vi.fn()}
+            onToggleVisibility={vi.fn()}
+            onRename={vi.fn()}
+            onToggleExpanded={vi.fn()}
+            onReorderNode={vi.fn()}
+            onCreateOrbit={onCreateOrbit}
+            onCreateEquilibrium={vi.fn()}
+            onDeleteNode={vi.fn()}
+          />
+        </>
+      )
+    }
+
+    render(<Wrapper />)
 
     await user.click(screen.getByTestId('create-object-button'))
     expect(screen.getByTestId('create-object-menu')).toBeInTheDocument()
