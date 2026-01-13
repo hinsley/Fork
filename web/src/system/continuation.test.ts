@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildSortedArrayOrder,
+  computeLimitCycleMetrics,
   ensureBranchIndices,
+  extractLimitCycleProfile,
   extractHopfOmega,
   formatBifurcationLabel,
   formatBifurcationType,
   getBranchParams,
+  interpretLimitCycleStability,
   normalizeBranchEigenvalues,
   normalizeEigenvalueArray,
   serializeBranchDataForWasm,
@@ -262,5 +265,58 @@ describe('continuation helpers', () => {
     expect(formatBifurcationType('FooBar')).toBe('Foo Bar')
     expect(formatBifurcationType('None')).toBe('Unknown')
     expect(formatBifurcationLabel(3, 'Hopf')).toBe('Index 3 - Hopf')
+  })
+
+  it('extracts limit cycle profile points and period', () => {
+    const flatState = [1, 2, 3, 4, 5, 6, 10]
+    const result = extractLimitCycleProfile(flatState, 2, 2, 1)
+
+    expect(result.profilePoints).toEqual([
+      [1, 2],
+      [3, 4],
+      [5, 6],
+    ])
+    expect(result.period).toBe(10)
+  })
+
+  it('computes limit cycle metrics', () => {
+    const metrics = computeLimitCycleMetrics(
+      [
+        [1, 2],
+        [3, 4],
+        [5, 6],
+      ],
+      10
+    )
+
+    expect(metrics.period).toBe(10)
+    expect(metrics.ranges).toEqual([
+      { min: 1, max: 5, range: 4 },
+      { min: 2, max: 6, range: 4 },
+    ])
+    expect(metrics.means).toEqual([3, 4])
+    expect(metrics.rmsAmplitudes[0]).toBeCloseTo(Math.sqrt(8 / 3))
+    expect(metrics.rmsAmplitudes[1]).toBeCloseTo(Math.sqrt(8 / 3))
+  })
+
+  it('interprets limit cycle stability from multipliers', () => {
+    expect(
+      interpretLimitCycleStability([
+        { re: 1, im: 0 },
+        { re: 0.2, im: 0 },
+      ])
+    ).toBe('stable')
+    expect(
+      interpretLimitCycleStability([
+        { re: 1, im: 0 },
+        { re: 1.2, im: 0 },
+      ])
+    ).toBe('unstable (1D)')
+    expect(
+      interpretLimitCycleStability([
+        { re: 1, im: 0 },
+        { re: 1.1, im: 0.2 },
+      ])
+    ).toBe('unstable (torus)')
   })
 })

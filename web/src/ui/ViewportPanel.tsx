@@ -21,10 +21,12 @@ import type {
 import {
   buildSortedArrayOrder,
   ensureBranchIndices,
+  extractLimitCycleProfile,
   formatBifurcationLabel,
   getBranchParams,
 } from '../system/continuation'
 import { resolveClvRender } from '../system/clv'
+import { DEFAULT_RENDER } from '../system/model'
 import {
   EIGENVECTOR_COLOR_PALETTE,
   isRealEigenvalue,
@@ -34,10 +36,12 @@ import {
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
 import { resolvePlotlyBackgroundColor } from '../viewports/plotly/plotlyTheme'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
+import type { BranchPointSelection } from './branchPointSelection'
 
 type ViewportPanelProps = {
   system: System
   selectedNodeId: string | null
+  branchPointSelection?: BranchPointSelection
   theme: 'light' | 'dark'
   onSelectViewport: (id: string) => void
   onSelectObject: (id: string) => void
@@ -69,6 +73,7 @@ type ViewportTileProps = {
   system: System
   entry: ViewportEntry
   selectedNodeId: string | null
+  branchPointSelection?: BranchPointSelection
   mapRange: [number, number] | null
   mapFunctionSamples: MapFunctionSamples | null
   draggingId: string | null
@@ -982,10 +987,52 @@ function resolveAxisValue(
   return Number.isFinite(fallback) ? fallback : null
 }
 
+const LIMIT_CYCLE_BRANCH_TYPES = new Set([
+  'limit_cycle',
+  'pd_curve',
+  'lpc_curve',
+  'ns_curve',
+])
+const DEFAULT_LIMIT_CYCLE_MESH = { ntst: 20, ncol: 4 }
+
+function resolveLimitCycleMesh(
+  branch: ContinuationObject
+): { ntst: number; ncol: number } {
+  if (!LIMIT_CYCLE_BRANCH_TYPES.has(branch.branchType)) {
+    return DEFAULT_LIMIT_CYCLE_MESH
+  }
+  const branchType = branch.data.branch_type
+  if (!branchType || typeof branchType !== 'object') {
+    return DEFAULT_LIMIT_CYCLE_MESH
+  }
+  if ('type' in branchType) {
+    const typeName = branchType.type
+    if (
+      ['LimitCycle', 'PDCurve', 'LPCCurve', 'NSCurve'].includes(typeName) &&
+      'ntst' in branchType &&
+      'ncol' in branchType
+    ) {
+      return {
+        ntst: branchType.ntst ?? DEFAULT_LIMIT_CYCLE_MESH.ntst,
+        ncol: branchType.ncol ?? DEFAULT_LIMIT_CYCLE_MESH.ncol,
+      }
+    }
+  }
+  const legacy = branchType as { LimitCycle?: { ntst?: number; ncol?: number } }
+  if (legacy.LimitCycle) {
+    return {
+      ntst: legacy.LimitCycle.ntst ?? DEFAULT_LIMIT_CYCLE_MESH.ntst,
+      ncol: legacy.LimitCycle.ncol ?? DEFAULT_LIMIT_CYCLE_MESH.ncol,
+    }
+  }
+  return DEFAULT_LIMIT_CYCLE_MESH
+}
+
 function buildSceneTraces(
   system: System,
   scene: Scene,
   selectedNodeId: string | null,
+  branchPointSelection?: BranchPointSelection | null,
   timeSeriesMeta?: TimeSeriesViewportMeta | null,
   mapRange?: [number, number] | null,
   mapFunctionSamples?: MapFunctionSamples | null,
@@ -1320,6 +1367,124 @@ function buildSceneTraces(
       const clvRender = resolveClvRender(node.render?.clv, object.covariantVectors?.dim)
       if (clvRender.enabled) {
         traces.push(...buildClvTraces(nodeId, object, clvRender, plotSize))
+      }
+    }
+  }
+
+  if (branchPointSelection) {
+    const branch = system.branches[branchPointSelection.branchId]
+    const point = branch?.data.points[branchPointSelection.pointIndex]
+    if (branch && point && LIMIT_CYCLE_BRANCH_TYPES.has(branch.branchType)) {
+      const node = system.nodes[branchPointSelection.branchId]
+      const render = node?.render ?? DEFAULT_RENDER
+      const { ntst, ncol } = resolveLimitCycleMesh(branch)
+      const dim = system.config.varNames.length
+      const plotDim = Math.min(dim, 3)
+      const { profilePoints, period } = extractLimitCycleProfile(
+        point.state,
+        dim,
+        ntst,
+        ncol
+      )
+      const usablePoints = profilePoints.filter(
+        (pt) => pt.length >= plotDim && pt.slice(0, plotDim).every(Number.isFinite)
+      )
+      const indices = ensureBranchIndices(branch.data)
+      const logicalIndex = indices[branchPointSelection.pointIndex]
+      const displayIndex = Number.isFinite(logicalIndex)
+        ? logicalIndex
+        : branchPointSelection.pointIndex
+      const traceName = `LC Preview: ${branch.name} @ ${displayIndex}`
+      const lineWidth = render.lineWidth + 1
+      const color = render.color
+
+      if (usablePoints.length >= 2 && plotDim > 0) {
+        if (plotDim >= 3) {
+          const x = usablePoints.map((pt) => pt[0] ?? Number.NaN)
+          const y = usablePoints.map((pt) => pt[1] ?? Number.NaN)
+          const z = usablePoints.map((pt) => pt[2] ?? Number.NaN)
+          traces.push({
+            type: 'scatter3d',
+            mode: 'lines',
+            name: traceName,
+            uid: branchPointSelection.branchId,
+            x,
+            y,
+            z,
+            line: { color, width: lineWidth },
+            showlegend: false,
+          })
+        } else if (plotDim === 2) {
+          const x = usablePoints.map((pt) => pt[0] ?? Number.NaN)
+          const y = usablePoints.map((pt) => pt[1] ?? Number.NaN)
+          traces.push({
+            type: 'scatter',
+            mode: 'lines',
+            name: traceName,
+            uid: branchPointSelection.branchId,
+            x,
+            y,
+            line: { color, width: lineWidth },
+            showlegend: false,
+          })
+        } else if (plotDim === 1) {
+          const timeEnd = Number.isFinite(period)
+            ? period
+            : Math.max(usablePoints.length - 1, 1)
+          const step =
+            usablePoints.length > 1 ? timeEnd / (usablePoints.length - 1) : 1
+          const x = usablePoints.map((_, idx) => idx * step)
+          const y = usablePoints.map((pt) => pt[0] ?? Number.NaN)
+          traces.push({
+            type: 'scatter',
+            mode: 'lines',
+            name: traceName,
+            uid: branchPointSelection.branchId,
+            x,
+            y,
+            line: { color, width: lineWidth },
+            showlegend: false,
+          })
+        }
+      } else if (plotDim > 0) {
+        const fallback = point.state.slice(0, plotDim)
+        if (fallback.length === plotDim && fallback.every(Number.isFinite)) {
+          if (plotDim >= 3) {
+            traces.push({
+              type: 'scatter3d',
+              mode: 'markers',
+              name: traceName,
+              uid: branchPointSelection.branchId,
+              x: [fallback[0]],
+              y: [fallback[1]],
+              z: [fallback[2]],
+              marker: { color, size: render.pointSize + 2 },
+              showlegend: false,
+            })
+          } else if (plotDim === 2) {
+            traces.push({
+              type: 'scatter',
+              mode: 'markers',
+              name: traceName,
+              uid: branchPointSelection.branchId,
+              x: [fallback[0]],
+              y: [fallback[1]],
+              marker: { color, size: render.pointSize + 2 },
+              showlegend: false,
+            })
+          } else if (plotDim === 1) {
+            traces.push({
+              type: 'scatter',
+              mode: 'markers',
+              name: traceName,
+              uid: branchPointSelection.branchId,
+              x: [0],
+              y: [fallback[0]],
+              marker: { color, size: render.pointSize + 2 },
+              showlegend: false,
+            })
+          }
+        }
       }
     }
   }
@@ -1698,6 +1863,7 @@ function ViewportTile({
   system,
   entry,
   selectedNodeId,
+  branchPointSelection,
   mapRange,
   mapFunctionSamples,
   draggingId,
@@ -1861,6 +2027,7 @@ function ViewportTile({
         system,
         scene,
         selectedNodeId,
+        branchPointSelection,
         timeSeriesMeta,
         mapRange,
         mapFunctionSamples,
@@ -1872,6 +2039,7 @@ function ViewportTile({
   }, [
     diagram,
     diagramTraceState,
+    branchPointSelection,
     mapFunctionSamples,
     mapRange,
     plotAreaSize,
@@ -1993,6 +2161,7 @@ function ViewportTile({
 export function ViewportPanel({
   system,
   selectedNodeId,
+  branchPointSelection,
   theme,
   onSelectViewport,
   onSelectObject,
@@ -2283,6 +2452,7 @@ export function ViewportPanel({
                 system={system}
                 entry={entry}
                 selectedNodeId={selectedNodeId}
+                branchPointSelection={branchPointSelection}
                 mapRange={mapRangeValues}
                 mapFunctionSamples={activeMapFunction}
                 draggingId={draggingId}

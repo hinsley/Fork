@@ -11,6 +11,7 @@ import { Toolbar } from './ui/Toolbar'
 import { PerfOverlay } from './ui/PerfOverlay'
 import { isDeterministicMode } from './utils/determinism'
 import { toCliSafeName } from './utils/naming'
+import type { BranchPointSelection } from './ui/branchPointSelection'
 
 const MIN_LEFT_WIDTH = 220
 const MIN_RIGHT_WIDTH = 240
@@ -42,6 +43,8 @@ function App() {
         : null
     return stored === 'dark' ? 'dark' : 'light'
   })
+  const [branchPointSelection, setBranchPointSelection] =
+    useState<BranchPointSelection>(null)
   const dragRef = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(
     null
   )
@@ -206,6 +209,7 @@ function App() {
         system={system}
         selectedNodeId={system?.ui.selectedNodeId ?? null}
         theme={theme}
+        onBranchPointSelect={setBranchPointSelection}
         onClose={closeSystemSettings}
         onRename={actions.renameNode}
         onToggleVisibility={actions.toggleVisibility}
@@ -287,6 +291,7 @@ function App() {
               <ViewportPanel
                 system={system}
                 selectedNodeId={system.ui.selectedNodeId}
+                branchPointSelection={branchPointSelection}
                 theme={theme}
                 onSelectViewport={selectNode}
                 onSelectObject={selectNode}
@@ -325,6 +330,7 @@ function App() {
                 system={system}
                 selectedNodeId={system.ui.selectedNodeId}
                 theme={theme}
+                onBranchPointSelect={setBranchPointSelection}
                 onRename={actions.renameNode}
                 onToggleVisibility={actions.toggleVisibility}
                 onUpdateRender={actions.updateRender}

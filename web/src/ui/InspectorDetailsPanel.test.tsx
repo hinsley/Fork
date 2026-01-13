@@ -727,6 +727,108 @@ describe('InspectorDetailsPanel', () => {
     })
   })
 
+  it('labels limit cycle point details as Floquet Multipliers', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({ name: 'LC Label System' })
+    const configuredSystem = {
+      ...baseSystem,
+      config: {
+        ...baseSystem.config,
+        paramNames: ['mu'],
+        params: [0.2],
+      },
+    }
+    const lcObject: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC Label',
+      systemName: configuredSystem.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit Label' },
+      ntst: 20,
+      ncol: 4,
+      period: 6,
+      state: [0.1, 0.2, 6],
+      parameters: [...configuredSystem.config.params],
+      parameterName: 'mu',
+      paramValue: 0.2,
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(configuredSystem, lcObject)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_label_mu',
+      systemName: configuredSystem.config.name,
+      parameterName: 'mu',
+      parentObject: lcObject.name,
+      startObject: lcObject.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          {
+            state: [0.1, 0.2, 6],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [{ re: 0.5, im: 0.2 }],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: { type: 'LimitCycle', ntst: 20, ncol: 4 },
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-5,
+        max_step_size: 0.1,
+        max_steps: 50,
+        corrector_steps: 4,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: new Date().toISOString(),
+      params: [...configuredSystem.config.params],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+
+    render(
+      <InspectorDetailsPanel
+        system={branchResult.system}
+        selectedNodeId={branchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    expect(screen.getByText('Limit Cycle Overview')).toBeVisible()
+    expect(screen.getByText('Cycle Navigator')).toBeVisible()
+    expect(screen.getByText('Cycle Metrics')).toBeVisible()
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    await user.click(screen.getByTestId('branch-point-details-toggle'))
+
+    expect(screen.getByText('Amplitude (min to max)')).toBeVisible()
+    expect(screen.getByText('Mean & RMS')).toBeVisible()
+    expect(screen.getByText('Floquet Multipliers')).toBeVisible()
+  })
+
   it('creates limit cycle continuation from Hopf with a selected parameter', async () => {
     const user = userEvent.setup()
     const baseSystem = createSystem({ name: 'Hopf LC Param System' })

@@ -15,11 +15,13 @@ import type {
   OrbitLyapunovRequest,
   OrbitRunRequest,
 } from '../state/appState'
+import type { BranchPointSelection } from './branchPointSelection'
 
 type InspectorPanelProps = {
   system: System
   selectedNodeId: string | null
   theme: 'light' | 'dark'
+  onBranchPointSelect?: (selection: BranchPointSelection) => void
   onRename: (id: string, name: string) => void
   onToggleVisibility: (id: string) => void
   onUpdateRender: (id: string, render: Partial<TreeNode['render']>) => void
@@ -53,6 +55,7 @@ export function InspectorPanel({
   system,
   selectedNodeId,
   theme,
+  onBranchPointSelect,
   onRename,
   onToggleVisibility,
   onUpdateRender,
@@ -82,6 +85,7 @@ export function InspectorPanel({
           selectedNodeId={selectedNodeId}
           theme={theme}
           view="selection"
+          onBranchPointSelect={onBranchPointSelect}
           onRename={onRename}
           onToggleVisibility={onToggleVisibility}
           onUpdateRender={onUpdateRender}

@@ -91,15 +91,31 @@ export function createPeriodDoublingSystem(): { system: System } {
     },
   })
 
+  const ntst = 4
+  const ncol = 2
+  const period = 6
+  const profilePointCount = ntst * ncol + 1
+  const buildLimitCycleState = (radius: number) => {
+    const profile: number[] = []
+    for (let i = 0; i < profilePointCount; i += 1) {
+      const theta = (i / (profilePointCount - 1)) * Math.PI * 2
+      profile.push(radius * Math.cos(theta), radius * Math.sin(theta))
+    }
+    profile.push(period)
+    return profile
+  }
+  const baseState = buildLimitCycleState(1)
+  const pdState = buildLimitCycleState(1.25)
+
   const limitCycle: LimitCycleObject = {
     type: 'limit_cycle',
     name: 'LC_PD',
     systemName: system.config.name,
     origin: { type: 'orbit', orbitName: 'Orbit PD' },
-    ntst: 20,
-    ncol: 4,
-    period: 6,
-    state: [0.1, 0.2, 6],
+    ntst,
+    ncol,
+    period,
+    state: baseState,
     parameters: [...system.config.params],
     parameterName: 'mu',
     paramValue: 0.2,
@@ -120,13 +136,13 @@ export function createPeriodDoublingSystem(): { system: System } {
     data: {
       points: [
         {
-          state: [0.1, 0.2, 6],
+          state: baseState,
           param_value: 0.2,
           stability: 'None',
           eigenvalues: [],
         },
         {
-          state: [0.1, 0.2, 6],
+          state: pdState,
           param_value: 0.25,
           stability: 'PeriodDoubling',
           eigenvalues: [{ re: -1, im: 0 }],
@@ -134,7 +150,7 @@ export function createPeriodDoublingSystem(): { system: System } {
       ],
       bifurcations: [1],
       indices: [0, 1],
-      branch_type: { type: 'LimitCycle', ntst: 20, ncol: 4 },
+      branch_type: { type: 'LimitCycle', ntst, ncol },
     },
     settings: {
       step_size: 0.01,

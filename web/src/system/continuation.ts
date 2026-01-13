@@ -73,6 +73,86 @@ export function extractHopfOmega(point: ContinuationPoint): number {
   return Math.abs(bestIm) || 1.0
 }
 
+export type LimitCycleMetrics = {
+  period: number
+  ranges: { min: number; max: number; range: number }[]
+  means: number[]
+  rmsAmplitudes: number[]
+}
+
+export function extractLimitCycleProfile(
+  flatState: number[],
+  dim: number,
+  ntst: number,
+  ncol: number
+): { profilePoints: number[][]; period: number } {
+  const profilePointCount = Math.max(ntst * ncol + 1, 0)
+  const period = flatState[flatState.length - 1]
+  const profilePoints: number[][] = []
+
+  if (dim <= 0 || profilePointCount === 0) {
+    return { profilePoints, period }
+  }
+
+  for (let i = 0; i < profilePointCount; i += 1) {
+    const offset = i * dim
+    profilePoints.push(flatState.slice(offset, offset + dim))
+  }
+
+  return { profilePoints, period }
+}
+
+export function computeLimitCycleMetrics(
+  profilePoints: number[][],
+  period: number
+): LimitCycleMetrics {
+  const dim = profilePoints[0]?.length || 0
+  const n = profilePoints.length
+
+  const ranges: { min: number; max: number; range: number }[] = []
+  const means: number[] = []
+  const rmsAmplitudes: number[] = []
+
+  for (let d = 0; d < dim; d += 1) {
+    const values = profilePoints.map((pt) => pt[d])
+    const min = Math.min(...values)
+    const max = Math.max(...values)
+    const mean = values.reduce((sum, value) => sum + value, 0) / n
+    const rms = Math.sqrt(
+      values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / n
+    )
+
+    ranges.push({ min, max, range: max - min })
+    means.push(mean)
+    rmsAmplitudes.push(rms)
+  }
+
+  return { period, ranges, means, rmsAmplitudes }
+}
+
+export function interpretLimitCycleStability(
+  eigenvalues: ContinuationEigenvalue[] | undefined
+): string {
+  if (!eigenvalues || eigenvalues.length === 0) return 'unknown'
+
+  let unstableCount = 0
+  let hasNeimarkSacker = false
+
+  for (const eig of eigenvalues) {
+    const magnitude = Math.hypot(eig.re, eig.im)
+    if (Math.abs(magnitude - 1.0) < 0.01 && Math.abs(eig.im) < 0.01) continue
+
+    if (magnitude > 1.0 + 1e-6) {
+      unstableCount += 1
+      if (Math.abs(eig.im) > 1e-6) hasNeimarkSacker = true
+    }
+  }
+
+  if (unstableCount === 0) return 'stable'
+  if (hasNeimarkSacker) return 'unstable (torus)'
+  return `unstable (${unstableCount}D)`
+}
+
 export function normalizeBranchEigenvalues(
   data: ContinuationBranchDataInput
 ): ContinuationBranchData {

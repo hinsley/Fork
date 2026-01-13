@@ -15,12 +15,14 @@ import type {
   OrbitLyapunovRequest,
   OrbitRunRequest,
 } from '../state/appState'
+import type { BranchPointSelection } from './branchPointSelection'
 
 type SystemSettingsDialogProps = {
   open: boolean
   system: System | null
   selectedNodeId: string | null
   theme: 'light' | 'dark'
+  onBranchPointSelect?: (selection: BranchPointSelection) => void
   onClose: () => void
   onRename: (id: string, name: string) => void
   onToggleVisibility: (id: string) => void
@@ -56,6 +58,7 @@ export function SystemSettingsDialog({
   system,
   selectedNodeId,
   theme,
+  onBranchPointSelect,
   onClose,
   onRename,
   onToggleVisibility,
@@ -102,9 +105,10 @@ export function SystemSettingsDialog({
         <div className="dialog__section dialog__section--flush">
           <InspectorDetailsPanel
             system={system}
-            selectedNodeId={selectedNodeId}
-            view="system"
-            theme={theme}
+          selectedNodeId={selectedNodeId}
+          view="system"
+          theme={theme}
+          onBranchPointSelect={onBranchPointSelect}
             onRename={onRename}
             onToggleVisibility={onToggleVisibility}
             onUpdateRender={onUpdateRender}
