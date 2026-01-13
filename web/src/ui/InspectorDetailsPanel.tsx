@@ -1291,8 +1291,9 @@ export function InspectorDetailsPanel({
         ? prev.parameterName
         : systemDraft.paramNames[0] ?? ''
       const safeEquilibriumName = toCliSafeName(equilibriumName)
-      const suggestedName = paramName
-        ? `${safeEquilibriumName}_${paramName}`
+      const safeParamName = paramName ? toCliSafeName(paramName) : ''
+      const suggestedName = safeParamName
+        ? `${safeEquilibriumName}_${safeParamName}`
         : safeEquilibriumName
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, parameterName: paramName, name: nextName }
@@ -1344,7 +1345,10 @@ export function InspectorDetailsPanel({
         ? prev.parameterName
         : fallbackParam
       const safeBranchName = toCliSafeName(branchName)
-      const suggestedName = paramName ? `${safeBranchName}_${paramName}` : safeBranchName
+      const safeParamName = paramName ? toCliSafeName(paramName) : ''
+      const suggestedName = safeParamName
+        ? `${safeBranchName}_${safeParamName}`
+        : safeBranchName
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, parameterName: paramName, name: nextName }
     })
@@ -1883,8 +1887,11 @@ export function InspectorDetailsPanel({
     }
 
     const safeEquilibriumName = toCliSafeName(equilibrium.name)
-    const suggestedName = continuationDraft.parameterName
-      ? `${safeEquilibriumName}_${continuationDraft.parameterName}`
+    const safeParamName = continuationDraft.parameterName
+      ? toCliSafeName(continuationDraft.parameterName)
+      : ''
+    const suggestedName = safeParamName
+      ? `${safeEquilibriumName}_${safeParamName}`
       : safeEquilibriumName
     const name = continuationDraft.name.trim() || suggestedName
     if (!name.trim()) {
@@ -1963,8 +1970,11 @@ export function InspectorDetailsPanel({
     }
 
     const safeBranchName = toCliSafeName(branch.name)
-    const suggestedName = branchContinuationDraft.parameterName
-      ? `${safeBranchName}_${branchContinuationDraft.parameterName}`
+    const safeParamName = branchContinuationDraft.parameterName
+      ? toCliSafeName(branchContinuationDraft.parameterName)
+      : ''
+    const suggestedName = safeParamName
+      ? `${safeBranchName}_${safeParamName}`
       : safeBranchName
     const name = branchContinuationDraft.name.trim() || suggestedName
     if (!name.trim()) {
@@ -4180,7 +4190,11 @@ export function InspectorDetailsPanel({
                               name: event.target.value,
                             }))
                           }
-                          placeholder={`${equilibrium.name}_${continuationDraft.parameterName}`}
+                          placeholder={
+                            continuationDraft.parameterName
+                              ? `${toCliSafeName(equilibrium.name)}_${toCliSafeName(continuationDraft.parameterName)}`
+                              : toCliSafeName(equilibrium.name)
+                          }
                           data-testid="equilibrium-branch-name"
                         />
                       </label>
@@ -5111,7 +5125,11 @@ export function InspectorDetailsPanel({
                             name: event.target.value,
                           }))
                         }
-                        placeholder={`${toCliSafeName(branch.name)}_${branchContinuationDraft.parameterName}`}
+                        placeholder={
+                          branchContinuationDraft.parameterName
+                            ? `${toCliSafeName(branch.name)}_${toCliSafeName(branchContinuationDraft.parameterName)}`
+                            : toCliSafeName(branch.name)
+                        }
                         data-testid="branch-from-point-name"
                       />
                     </label>

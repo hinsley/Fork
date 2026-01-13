@@ -568,6 +568,165 @@ describe('InspectorDetailsPanel', () => {
     })
   })
 
+  it('suggests cli-safe branch names for equilibrium continuation', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({ name: 'Eq Name System' })
+    const configuredSystem = {
+      ...baseSystem,
+      config: {
+        ...baseSystem.config,
+        paramNames: ['mu beta'],
+        params: [0.1],
+      },
+    }
+    const eqObject: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq Name',
+      systemName: configuredSystem.config.name,
+      solution: {
+        state: [0, 0],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [],
+      },
+      parameters: [...configuredSystem.config.params],
+    }
+    const { system, nodeId } = addObject(configuredSystem, eqObject)
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('equilibrium-continuation-toggle'))
+    const branchInput = screen.getByTestId('equilibrium-branch-name')
+
+    await waitFor(() => {
+      expect(branchInput).toHaveValue('Eq_Name_mu_beta')
+    })
+  })
+
+  it('suggests cli-safe branch names when continuing from a branch point', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({ name: 'Branch Continue System' })
+    const configuredSystem = {
+      ...baseSystem,
+      config: {
+        ...baseSystem.config,
+        paramNames: ['mu beta', 'kappa'],
+        params: [0.2, 0.3],
+      },
+    }
+    const eqObject: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq Branch',
+      systemName: configuredSystem.config.name,
+      parameters: [...configuredSystem.config.params],
+      solution: {
+        state: [0, 0],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [],
+      },
+    }
+    const added = addObject(configuredSystem, eqObject)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq branch',
+      systemName: configuredSystem.config.name,
+      parameterName: 'mu beta',
+      parentObject: eqObject.name,
+      startObject: eqObject.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          {
+            state: [0, 0],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+      },
+      settings: {
+        step_size: 0.02,
+        min_step_size: 1e-6,
+        max_step_size: 0.1,
+        max_steps: 40,
+        corrector_steps: 4,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: new Date().toISOString(),
+      params: [...configuredSystem.config.params],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+
+    render(
+      <InspectorDetailsPanel
+        system={branchResult.system}
+        selectedNodeId={branchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-continue-toggle'))
+    const branchInput = screen.getByTestId('branch-from-point-name')
+
+    await waitFor(() => {
+      expect(branchInput).toHaveValue('eq_branch_mu_beta')
+    })
+  })
+
   it('creates limit cycle continuation from Hopf with a selected parameter', async () => {
     const user = userEvent.setup()
     const baseSystem = createSystem({ name: 'Hopf LC Param System' })
