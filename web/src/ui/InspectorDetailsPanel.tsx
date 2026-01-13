@@ -4919,7 +4919,7 @@ export function InspectorDetailsPanel({
                                 }
                                 data-testid="branch-point-least"
                               >
-                                Least
+                                Start
                               </button>
                               <button
                                 type="button"
@@ -4966,7 +4966,7 @@ export function InspectorDetailsPanel({
                                 }
                                 data-testid="branch-point-greatest"
                               >
-                                Greatest
+                                End
                               </button>
                             </div>
 
@@ -5343,7 +5343,7 @@ export function InspectorDetailsPanel({
                                 }
                                 data-testid="branch-point-least"
                               >
-                                Least
+                                Start
                               </button>
                               <button
                                 type="button"
@@ -5390,7 +5390,7 @@ export function InspectorDetailsPanel({
                                 }
                                 data-testid="branch-point-greatest"
                               >
-                                Greatest
+                                End
                               </button>
                             </div>
 
