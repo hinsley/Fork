@@ -4905,7 +4905,7 @@ export function InspectorDetailsPanel({
                           <p className="empty-state">No branch points stored yet.</p>
                         ) : (
                           <>
-                            <div className="inspector-row">
+                            <div className="inspector-row inspector-row--nav">
                               <button
                                 type="button"
                                 onClick={() => {
@@ -4971,7 +4971,7 @@ export function InspectorDetailsPanel({
                             </div>
 
                             <label>
-                              Logical index
+                              Point index
                               <div className="inspector-row">
                                 <input
                                   type="number"
@@ -4995,8 +4995,7 @@ export function InspectorDetailsPanel({
                             {branchPointIndex !== null ? (
                               <div className="inspector-data">
                                 <div>
-                                  Selected point: logical {branchIndices[branchPointIndex]} (array{' '}
-                                  {branchPointIndex})
+                                  {`Selected point: ${branchIndices[branchPointIndex]} ([${branchPointIndex}] memaddr)`}
                                 </div>
                                 {selectedBranchPoint ? (
                                   <>
@@ -5329,7 +5328,7 @@ export function InspectorDetailsPanel({
                           <p className="empty-state">No branch points stored yet.</p>
                         ) : (
                           <>
-                            <div className="inspector-row">
+                            <div className="inspector-row inspector-row--nav">
                               <button
                                 type="button"
                                 onClick={() => {
@@ -5395,7 +5394,7 @@ export function InspectorDetailsPanel({
                             </div>
 
                             <label>
-                              Logical index
+                              Point index
                               <div className="inspector-row">
                                 <input
                                   type="number"
@@ -5419,8 +5418,7 @@ export function InspectorDetailsPanel({
                             {branchPointIndex !== null ? (
                               <div className="inspector-data">
                                 <div>
-                                  Selected point: logical {branchIndices[branchPointIndex]} (array{' '}
-                                  {branchPointIndex})
+                                  {`Selected point: ${branchIndices[branchPointIndex]} ([${branchPointIndex}] memaddr)`}
                                 </div>
                                 {selectedBranchPoint ? (
                                   <>

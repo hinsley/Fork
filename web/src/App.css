@@ -740,6 +740,14 @@
   grid-template-columns: 1fr 1fr auto;
 }
 
+.inspector-row--nav {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.inspector-row--nav button {
+  width: 100%;
+}
+
 .field-error {
   color: var(--error);
   font-size: 0.8rem;

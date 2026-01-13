@@ -939,13 +939,13 @@ describe('InspectorDetailsPanel', () => {
     await user.type(input, '1')
     await user.click(screen.getByTestId('branch-point-jump'))
 
-    expect(screen.getByText('Selected point: logical 1 (array 1)')).toBeVisible()
+    expect(screen.getByText('Selected point: 1 ([1] memaddr)')).toBeVisible()
 
     const button = screen.getByTestId('branch-point-render-lc')
     await user.click(button)
 
     await waitFor(() => {
-      expect(screen.getByText('Selected point: logical 1 (array 1)')).toBeVisible()
+      expect(screen.getByText('Selected point: 1 ([1] memaddr)')).toBeVisible()
     })
     await waitFor(() => {
       expect(screen.queryByTestId('branch-point-render-lc')).toBeNull()
