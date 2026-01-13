@@ -153,10 +153,9 @@ export interface LimitCycleObject {
   createdAt: string
 }
 
-export type LimitCycleRenderTarget = {
-  branchId: string
-  pointIndex: number
-}
+export type LimitCycleRenderTarget =
+  | { type: 'object' }
+  | { type: 'branch'; branchId: string; pointIndex: number }
 
 export type AnalysisObject =
   | OrbitObject

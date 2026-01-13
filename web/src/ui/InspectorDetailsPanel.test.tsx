@@ -877,6 +877,7 @@ describe('InspectorDetailsPanel', () => {
     await user.click(button)
 
     expect(onSetLimitCycleRenderTarget).toHaveBeenCalledWith(limitCycleId, {
+      type: 'branch',
       branchId,
       pointIndex: 0,
     })
@@ -894,7 +895,7 @@ describe('InspectorDetailsPanel', () => {
       throw new Error('Missing limit cycle branch fixture data.')
     }
     system.ui.limitCycleRenderTargets = {
-      [limitCycleId]: { branchId, pointIndex: 0 },
+      [limitCycleId]: { type: 'branch', branchId, pointIndex: 0 },
     }
 
     render(
@@ -942,7 +943,7 @@ describe('InspectorDetailsPanel', () => {
       throw new Error('Missing limit cycle branch fixture data.')
     }
     system.ui.limitCycleRenderTargets = {
-      [limitCycleId]: { branchId, pointIndex: 1 },
+      [limitCycleId]: { type: 'branch', branchId, pointIndex: 1 },
     }
 
     render(
@@ -977,6 +978,107 @@ describe('InspectorDetailsPanel', () => {
 
     expect(screen.getByText('Rendered at')).toBeVisible()
     expect(screen.getByText('lc_pd_mu @ 1')).toBeVisible()
+  })
+
+  it('allows restoring the stored limit cycle render target', async () => {
+    const user = userEvent.setup()
+    const { system } = createPeriodDoublingSystem()
+    const branchId = Object.keys(system.branches)[0]
+    const branch = branchId ? system.branches[branchId] : undefined
+    const limitCycleId =
+      branch &&
+      Object.entries(system.objects).find(([, obj]) => obj.name === branch.parentObject)?.[0]
+    if (!branchId || !branch || !limitCycleId) {
+      throw new Error('Missing limit cycle branch fixture data.')
+    }
+    system.ui.limitCycleRenderTargets = {
+      [limitCycleId]: { type: 'branch', branchId, pointIndex: 1 },
+    }
+    const onSetLimitCycleRenderTarget = vi.fn()
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={limitCycleId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onSetLimitCycleRenderTarget={onSetLimitCycleRenderTarget}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    const button = screen.getByTestId('limit-cycle-render-stored')
+    await user.click(button)
+    expect(onSetLimitCycleRenderTarget).toHaveBeenCalledWith(limitCycleId, {
+      type: 'object',
+    })
+  })
+
+  it('hides the restore button when the stored cycle is already rendered', () => {
+    const { system } = createPeriodDoublingSystem()
+    const branchId = Object.keys(system.branches)[0]
+    const branch = branchId ? system.branches[branchId] : undefined
+    const limitCycleId =
+      branch &&
+      Object.entries(system.objects).find(([, obj]) => obj.name === branch.parentObject)?.[0]
+    if (!branchId || !branch || !limitCycleId) {
+      throw new Error('Missing limit cycle branch fixture data.')
+    }
+    system.ui.limitCycleRenderTargets = {
+      [limitCycleId]: { type: 'object' },
+    }
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={limitCycleId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onSetLimitCycleRenderTarget={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    expect(screen.queryByTestId('limit-cycle-render-stored')).toBeNull()
+    expect(screen.getByText('Stored cycle')).toBeVisible()
   })
 
   it('creates limit cycle continuation from Hopf with a selected parameter', async () => {

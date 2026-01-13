@@ -1346,7 +1346,7 @@ function buildSceneTraces(
       let state = object.state
       let ntst = object.ntst
       let ncol = object.ncol
-      if (renderTarget) {
+      if (renderTarget?.type === 'branch') {
         const branch = system.branches[renderTarget.branchId]
         const point = branch?.data.points[renderTarget.pointIndex]
         if (branch && point) {
@@ -1552,7 +1552,7 @@ function buildSceneTraces(
       const renderTarget = objectId ? limitCycleRenderTargets[objectId] : null
       const isCurrentTarget =
         Boolean(
-          renderTarget &&
+          renderTarget?.type === 'branch' &&
             renderTarget.branchId === branchPointSelection.branchId &&
             renderTarget.pointIndex === branchPointSelection.pointIndex
         )

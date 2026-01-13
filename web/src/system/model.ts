@@ -356,7 +356,11 @@ export function removeNode(system: System, nodeId: string): System {
       Object.entries(next.ui.limitCycleRenderTargets).filter(([objectId, target]) => {
         if (removalSet.has(objectId)) return false
         if (!target || typeof target !== 'object') return false
-        const branchId = (target as LimitCycleRenderTarget).branchId
+        const record = target as Record<string, unknown>
+        if (record.type === 'object') {
+          return true
+        }
+        const branchId = typeof record.branchId === 'string' ? record.branchId : null
         if (!branchId) return false
         return !removalSet.has(branchId)
       })
@@ -623,19 +627,24 @@ export function normalizeSystem(system: System): System {
     )
   )
   const limitCycleRenderTargets = nextUi.limitCycleRenderTargets ?? {}
-  nextUi.limitCycleRenderTargets = Object.fromEntries(
-    Object.entries(limitCycleRenderTargets).filter(([objectId, target]) => {
-      if (!next.objects[objectId] || next.objects[objectId]?.type !== 'limit_cycle') {
-        return false
-      }
-      if (!target || typeof target !== 'object') return false
-      const branchId = (target as { branchId?: string }).branchId
-      const pointIndex = (target as { pointIndex?: number }).pointIndex
-      if (!branchId || !next.branches[branchId]) return false
-      if (typeof pointIndex !== 'number' || !Number.isFinite(pointIndex)) return false
-      return pointIndex >= 0
-    })
-  )
+  const normalizedTargets: Record<string, LimitCycleRenderTarget> = {}
+  Object.entries(limitCycleRenderTargets).forEach(([objectId, target]) => {
+    if (!next.objects[objectId] || next.objects[objectId]?.type !== 'limit_cycle') {
+      return
+    }
+    if (!target || typeof target !== 'object') return
+    if ((target as LimitCycleRenderTarget).type === 'object') {
+      normalizedTargets[objectId] = { type: 'object' }
+      return
+    }
+    const branchId = (target as { branchId?: string }).branchId
+    const pointIndex = (target as { pointIndex?: number }).pointIndex
+    if (!branchId || !next.branches[branchId]) return
+    if (typeof pointIndex !== 'number' || !Number.isFinite(pointIndex)) return
+    if (pointIndex < 0) return
+    normalizedTargets[objectId] = { type: 'branch', branchId, pointIndex }
+  })
+  nextUi.limitCycleRenderTargets = normalizedTargets
   next.ui = nextUi
 
   return next as System

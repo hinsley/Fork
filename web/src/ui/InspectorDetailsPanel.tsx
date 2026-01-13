@@ -1022,11 +1022,14 @@ export function InspectorDetailsPanel({
   const limitCycleRenderTargets = system.ui.limitCycleRenderTargets ?? {}
   const limitCycleRenderTarget =
     limitCycle && selectedNodeId ? limitCycleRenderTargets[selectedNodeId] ?? null : null
-  const limitCycleRenderBranch = limitCycleRenderTarget
-    ? system.branches[limitCycleRenderTarget.branchId]
-    : null
+  const limitCycleRenderBranch =
+    limitCycleRenderTarget?.type === 'branch'
+      ? system.branches[limitCycleRenderTarget.branchId]
+      : null
   const limitCycleRenderLabel = useMemo(() => {
-    if (!limitCycleRenderTarget || !limitCycleRenderBranch) return null
+    if (limitCycleRenderTarget?.type !== 'branch' || !limitCycleRenderBranch) {
+      return 'Stored cycle'
+    }
     const indices = ensureBranchIndices(limitCycleRenderBranch.data)
     const logicalIndex = indices[limitCycleRenderTarget.pointIndex]
     const displayIndex = Number.isFinite(logicalIndex)
@@ -1034,6 +1037,8 @@ export function InspectorDetailsPanel({
       : limitCycleRenderTarget.pointIndex
     return `${limitCycleRenderBranch.name} @ ${displayIndex}`
   }, [limitCycleRenderBranch, limitCycleRenderTarget])
+  const isStoredCycleTarget =
+    !limitCycleRenderTarget || limitCycleRenderTarget.type === 'object'
   const limitCycleParentId = useMemo(() => {
     if (!branch || branch.branchType !== 'limit_cycle') return null
     return (
@@ -1047,7 +1052,7 @@ export function InspectorDetailsPanel({
     : null
   const isBranchRenderTarget =
     Boolean(
-      branchRenderTarget &&
+      branchRenderTarget?.type === 'branch' &&
         selectedNodeId &&
         branchPointIndex !== null &&
         branchRenderTarget.branchId === selectedNodeId &&
@@ -2957,13 +2962,22 @@ export function InspectorDetailsPanel({
               data-testid="limit-cycle-render-target"
             >
               <h4 className="inspector-subheading">Rendered at</h4>
-              {limitCycleRenderLabel ? (
-                <div className="inspector-data">{limitCycleRenderLabel}</div>
-              ) : (
-                <p className="empty-state">
-                  No render target set yet. Choose a branch point to render.
-                </p>
-              )}
+              <div className="inspector-data">{limitCycleRenderLabel}</div>
+              {onSetLimitCycleRenderTarget && !isStoredCycleTarget ? (
+                <div className="inspector-row">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      selectedNodeId
+                        ? onSetLimitCycleRenderTarget(selectedNodeId, { type: 'object' })
+                        : null
+                    }
+                    data-testid="limit-cycle-render-stored"
+                  >
+                    Render Stored Cycle
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -4989,6 +5003,7 @@ export function InspectorDetailsPanel({
                                   type="button"
                                   onClick={() =>
                                     onSetLimitCycleRenderTarget(limitCycleParentId, {
+                                      type: 'branch',
                                       branchId: selectedNodeId,
                                       pointIndex: branchPointIndex,
                                     })

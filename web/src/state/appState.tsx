@@ -1389,7 +1389,18 @@ export function AppProvider({
           settings: request.settings,
         }
 
-        const updated = updateBranch(state.system, request.branchId, updatedBranch)
+        let updated = updateBranch(state.system, request.branchId, updatedBranch)
+        if (sourceBranch.branchType === 'limit_cycle' && normalized.points.length > 0) {
+          const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+          if (parentNodeId) {
+            const lastIndex = normalized.points.length - 1
+            updated = updateLimitCycleRenderTarget(updated, parentNodeId, {
+              type: 'branch',
+              branchId: request.branchId,
+              pointIndex: lastIndex,
+            })
+          }
+        }
         const selected = selectNode(updated, request.branchId)
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
@@ -1900,7 +1911,17 @@ export function AppProvider({
         }
 
         const createdBranch = addBranch(added.system, branch, added.nodeId)
-        const selected = selectNode(createdBranch.system, createdBranch.nodeId)
+        const lastIndex = normalizedBranchData.points.length - 1
+        const withTarget = updateLimitCycleRenderTarget(
+          createdBranch.system,
+          added.nodeId,
+          {
+            type: 'branch',
+            branchId: createdBranch.nodeId,
+            pointIndex: lastIndex,
+          }
+        )
+        const selected = selectNode(withTarget, createdBranch.nodeId)
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
@@ -2075,7 +2096,17 @@ export function AppProvider({
         }
 
         const createdBranch = addBranch(added.system, branch, added.nodeId)
-        const selected = selectNode(createdBranch.system, createdBranch.nodeId)
+        const lastIndex = normalizedBranchData.points.length - 1
+        const withTarget = updateLimitCycleRenderTarget(
+          createdBranch.system,
+          added.nodeId,
+          {
+            type: 'branch',
+            branchId: createdBranch.nodeId,
+            pointIndex: lastIndex,
+          }
+        )
+        const selected = selectNode(withTarget, createdBranch.nodeId)
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
@@ -2265,7 +2296,17 @@ export function AppProvider({
         }
 
         const createdBranch = addBranch(added.system, branch, added.nodeId)
-        const selected = selectNode(createdBranch.system, createdBranch.nodeId)
+        const lastIndex = normalizedBranchData.points.length - 1
+        const withTarget = updateLimitCycleRenderTarget(
+          createdBranch.system,
+          added.nodeId,
+          {
+            type: 'branch',
+            branchId: createdBranch.nodeId,
+            pointIndex: lastIndex,
+          }
+        )
+        const selected = selectNode(withTarget, createdBranch.nodeId)
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
@@ -2342,9 +2383,12 @@ export function AppProvider({
           createdAt: new Date().toISOString(),
         }
 
-        const updated = addObject(state.system, obj).system
-        dispatch({ type: 'SET_SYSTEM', system: updated })
-        await store.save(updated)
+        const added = addObject(state.system, obj)
+        const withTarget = updateLimitCycleRenderTarget(added.system, added.nodeId, {
+          type: 'object',
+        })
+        dispatch({ type: 'SET_SYSTEM', system: withTarget })
+        await store.save(withTarget)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         dispatch({ type: 'SET_ERROR', error: message })
