@@ -319,6 +319,293 @@ describe('InspectorDetailsPanel', () => {
     })
   })
 
+  it('creates limit cycle continuation from Hopf with a selected parameter', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({ name: 'Hopf LC Param System' })
+    const configuredSystem = {
+      ...baseSystem,
+      config: {
+        ...baseSystem.config,
+        paramNames: ['mu', 'beta'],
+        params: [-0.1, 0.2],
+      },
+    }
+    const eqObject: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ Hopf',
+      systemName: configuredSystem.config.name,
+      parameters: [...configuredSystem.config.params],
+    }
+    const added = addObject(configuredSystem, eqObject)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_hopf_mu',
+      systemName: configuredSystem.config.name,
+      parameterName: 'mu',
+      parentObject: eqObject.name,
+      startObject: eqObject.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          {
+            state: [0, 0],
+            param_value: 0,
+            stability: 'Hopf',
+            eigenvalues: [
+              { re: 0, im: 1 },
+              { re: 0, im: -1 },
+            ],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+      },
+      settings: {
+        step_size: 0.02,
+        min_step_size: 1e-6,
+        max_step_size: 0.1,
+        max_steps: 40,
+        corrector_steps: 6,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: new Date().toISOString(),
+      params: [...configuredSystem.config.params],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+    const onCreateLimitCycleFromHopf = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <InspectorDetailsPanel
+        system={branchResult.system}
+        selectedNodeId={branchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={onCreateLimitCycleFromHopf}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    await user.click(screen.getByTestId('branch-bifurcation-0'))
+    await user.click(screen.getByTestId('limit-cycle-from-hopf-toggle'))
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-name'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-name'), 'lc_hopf_beta')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-branch-name'))
+    await user.type(
+      screen.getByTestId('limit-cycle-from-hopf-branch-name'),
+      'lc_hopf_beta_branch'
+    )
+    await user.selectOptions(screen.getByTestId('limit-cycle-from-hopf-parameter'), 'beta')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-amplitude'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-amplitude'), '0.1')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-ntst'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-ntst'), '20')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-ncol'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-ncol'), '4')
+    await user.selectOptions(
+      screen.getByTestId('limit-cycle-from-hopf-direction'),
+      'backward'
+    )
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-step-size'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-step-size'), '0.02')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-max-steps'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-max-steps'), '20')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-min-step-size'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-min-step-size'), '1e-6')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-max-step-size'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-max-step-size'), '0.1')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-corrector-steps'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-corrector-steps'), '6')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-corrector-tolerance'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-corrector-tolerance'), '1e-6')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-step-tolerance'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-step-tolerance'), '1e-6')
+    await user.click(screen.getByTestId('limit-cycle-from-hopf-submit'))
+
+    expect(onCreateLimitCycleFromHopf).toHaveBeenCalledWith({
+      branchId: branchResult.nodeId,
+      pointIndex: 0,
+      limitCycleName: 'lc_hopf_beta',
+      branchName: 'lc_hopf_beta_branch',
+      parameterName: 'beta',
+      amplitude: 0.1,
+      ntst: 20,
+      ncol: 4,
+      settings: {
+        step_size: 0.02,
+        max_steps: 20,
+        min_step_size: 1e-6,
+        max_step_size: 0.1,
+        corrector_steps: 6,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      forward: false,
+    })
+  })
+
+  it('creates limit cycle continuation from Hopf curve points', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({ name: 'Hopf Curve LC System' })
+    const configuredSystem = {
+      ...baseSystem,
+      config: {
+        ...baseSystem.config,
+        paramNames: ['p1', 'p2'],
+        params: [-0.2, 0.2],
+      },
+    }
+    const eqObject: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ Hopf Curve',
+      systemName: configuredSystem.config.name,
+      parameters: [...configuredSystem.config.params],
+    }
+    const added = addObject(configuredSystem, eqObject)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'hopf_curve_branch',
+      systemName: configuredSystem.config.name,
+      parameterName: 'p1, p2',
+      parentObject: eqObject.name,
+      startObject: eqObject.name,
+      branchType: 'hopf_curve',
+      data: {
+        points: [
+          {
+            state: [0, 0],
+            param_value: -0.2,
+            param2_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+        branch_type: { type: 'HopfCurve', param1_name: 'p1', param2_name: 'p2' },
+      },
+      settings: {
+        step_size: 0.02,
+        min_step_size: 1e-6,
+        max_step_size: 0.1,
+        max_steps: 20,
+        corrector_steps: 5,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: new Date().toISOString(),
+      params: [...configuredSystem.config.params],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+    const onCreateLimitCycleFromHopf = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <InspectorDetailsPanel
+        system={branchResult.system}
+        selectedNodeId={branchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={onCreateLimitCycleFromHopf}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    await user.click(screen.getByTestId('branch-bifurcation-0'))
+    await user.click(screen.getByTestId('limit-cycle-from-hopf-toggle'))
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-name'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-name'), 'lc_hopf_curve')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-branch-name'))
+    await user.type(
+      screen.getByTestId('limit-cycle-from-hopf-branch-name'),
+      'lc_hopf_curve_branch'
+    )
+    await user.selectOptions(screen.getByTestId('limit-cycle-from-hopf-parameter'), 'p2')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-amplitude'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-amplitude'), '0.05')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-ntst'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-ntst'), '15')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-ncol'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-ncol'), '4')
+    await user.selectOptions(
+      screen.getByTestId('limit-cycle-from-hopf-direction'),
+      'forward'
+    )
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-step-size'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-step-size'), '0.02')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-max-steps'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-max-steps'), '20')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-min-step-size'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-min-step-size'), '1e-6')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-max-step-size'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-max-step-size'), '0.1')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-corrector-steps'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-corrector-steps'), '5')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-corrector-tolerance'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-corrector-tolerance'), '1e-6')
+    await user.clear(screen.getByTestId('limit-cycle-from-hopf-step-tolerance'))
+    await user.type(screen.getByTestId('limit-cycle-from-hopf-step-tolerance'), '1e-6')
+    await user.click(screen.getByTestId('limit-cycle-from-hopf-submit'))
+
+    expect(onCreateLimitCycleFromHopf).toHaveBeenCalledWith({
+      branchId: branchResult.nodeId,
+      pointIndex: 0,
+      limitCycleName: 'lc_hopf_curve',
+      branchName: 'lc_hopf_curve_branch',
+      parameterName: 'p2',
+      amplitude: 0.05,
+      ntst: 15,
+      ncol: 4,
+      settings: {
+        step_size: 0.02,
+        max_steps: 20,
+        min_step_size: 1e-6,
+        max_step_size: 0.1,
+        corrector_steps: 5,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      forward: true,
+    })
+  })
+
   it('branches to period-doubled limit cycles', async () => {
     const user = userEvent.setup()
     const baseSystem = createSystem({ name: 'PD System' })

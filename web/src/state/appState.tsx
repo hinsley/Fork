@@ -249,6 +249,7 @@ export type LimitCyclePDContinuationRequest = {
 export type LimitCycleHopfContinuationRequest = {
   branchId: string
   pointIndex: number
+  parameterName: string
   limitCycleName: string
   branchName: string
   amplitude: number
@@ -1697,8 +1698,13 @@ export function AppProvider({
         if (!sourceBranch) {
           throw new Error('Select a valid branch to continue.')
         }
-        if (sourceBranch.branchType !== 'equilibrium') {
-          throw new Error('Limit cycle continuation is only available for equilibrium branches.')
+        if (
+          sourceBranch.branchType !== 'equilibrium' &&
+          sourceBranch.branchType !== 'hopf_curve'
+        ) {
+          throw new Error(
+            'Limit cycle continuation is only available for equilibrium or Hopf curve branches.'
+          )
         }
 
         const point: ContinuationPoint | undefined =
@@ -1706,7 +1712,7 @@ export function AppProvider({
         if (!point) {
           throw new Error('Select a valid branch point.')
         }
-        if (point.stability !== 'Hopf') {
+        if (sourceBranch.branchType === 'equilibrium' && point.stability !== 'Hopf') {
           throw new Error('Selected point is not a Hopf bifurcation.')
         }
 
@@ -1739,7 +1745,7 @@ export function AppProvider({
           throw new Error('NCOL must be a positive integer.')
         }
 
-        const parameterName = sourceBranch.parameterName
+        const parameterName = request.parameterName
         if (!system.paramNames.includes(parameterName)) {
           throw new Error('Continuation parameter is not defined in this system.')
         }
@@ -1747,17 +1753,51 @@ export function AppProvider({
         const runConfig: SystemConfig = { ...system }
         runConfig.params = getBranchParams(state.system, sourceBranch)
 
-        const paramIndex = system.paramNames.indexOf(parameterName)
-        if (paramIndex >= 0) {
-          runConfig.params[paramIndex] = point.param_value
+        if (sourceBranch.branchType === 'equilibrium') {
+          const sourceParamIndex = system.paramNames.indexOf(sourceBranch.parameterName)
+          if (sourceParamIndex >= 0) {
+            runConfig.params[sourceParamIndex] = point.param_value
+          }
+        } else if (sourceBranch.branchType === 'hopf_curve') {
+          const branchType = sourceBranch.data.branch_type
+          const codim1Params =
+            branchType &&
+            typeof branchType === 'object' &&
+            'param1_name' in branchType &&
+            'param2_name' in branchType
+              ? {
+                  param1: branchType.param1_name,
+                  param2: branchType.param2_name,
+                }
+              : null
+          if (!codim1Params) {
+            throw new Error('Hopf curve parameters are not defined in this branch.')
+          }
+          const param1Index = system.paramNames.indexOf(codim1Params.param1)
+          if (param1Index >= 0) {
+            runConfig.params[param1Index] = point.param_value
+          }
+          const param2Index = system.paramNames.indexOf(codim1Params.param2)
+          if (param2Index >= 0) {
+            if (point.param2_value === undefined) {
+              throw new Error('Hopf curve point is missing the secondary parameter value.')
+            }
+            runConfig.params[param2Index] = point.param2_value
+          }
         }
+
+        const paramIndex = system.paramNames.indexOf(parameterName)
+        if (paramIndex < 0) {
+          throw new Error('Continuation parameter is not defined in this system.')
+        }
+        const paramValue = runConfig.params[paramIndex]
 
         const branchData = await client.runLimitCycleContinuationFromHopf(
           {
             system: runConfig,
             hopfState: point.state,
             parameterName,
-            paramValue: point.param_value,
+            paramValue,
             amplitude: request.amplitude,
             ntst: Math.round(request.ntst),
             ncol: Math.round(request.ncol),
