@@ -55,6 +55,16 @@ export function ObjectsTree({
     () => system.rootIds.filter((id) => system.nodes[id]?.kind === 'object'),
     [system.nodes, system.rootIds]
   )
+  const childrenByParent = useMemo(() => {
+    const map = new Map<string, string[]>()
+    Object.values(system.nodes).forEach((node) => {
+      if (!node.parentId) return
+      const list = map.get(node.parentId) ?? []
+      list.push(node.id)
+      map.set(node.parentId, list)
+    })
+    return map
+  }, [system.nodes])
 
   const startRename = (node: TreeNode) => {
     setEditingId(node.id)
@@ -111,7 +121,13 @@ export function ObjectsTree({
     }
     const paddingDepth = Math.max(depth, inferredDepth)
     const isSelected = nodeId === selectedNodeId
-    const hasChildren = node.children.length > 0
+    const directChildren = node.children.filter((id) => Boolean(system.nodes[id]))
+    const derivedChildren = childrenByParent.get(nodeId) ?? []
+    const childIds =
+      directChildren.length > 0
+        ? [...directChildren, ...derivedChildren.filter((id) => !directChildren.includes(id))]
+        : derivedChildren
+    const hasChildren = childIds.length > 0
     const isEditing = editingId === nodeId
     const isRoot = node.parentId === null
     const isDragging = draggingId === nodeId
@@ -218,7 +234,7 @@ export function ObjectsTree({
         </div>
         {hasChildren && node.expanded ? (
           <div className="tree-node__children">
-            {node.children.map((childId) => renderNode(childId, depth + 1))}
+            {childIds.map((childId) => renderNode(childId, depth + 1))}
           </div>
         ) : null}
       </div>

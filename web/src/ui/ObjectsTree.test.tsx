@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ObjectsTree } from './ObjectsTree'
 import { createDemoSystem, createPeriodDoublingSystem } from '../system/fixtures'
+import { useState } from 'react'
+import { toggleNodeExpanded } from '../system/model'
 
 describe('ObjectsTree', () => {
   it('selects, renames, and toggles visibility', async () => {
@@ -158,5 +160,49 @@ describe('ObjectsTree', () => {
     const branchPadding = Number.parseFloat(branchRow.style.paddingLeft || '0')
 
     expect(branchPadding).toBeGreaterThan(parentPadding)
+  })
+
+  it('collapses and expands state-space objects with children', async () => {
+    const user = userEvent.setup()
+    const { system } = createPeriodDoublingSystem()
+    const branchId = Object.keys(system.branches)[0]
+    const branch = branchId ? system.branches[branchId] : undefined
+    const limitCycleId =
+      branch &&
+      Object.entries(system.objects).find(([, obj]) => obj.name === branch.parentObject)?.[0]
+    if (!branchId || !branch || !limitCycleId) {
+      throw new Error('Missing limit cycle branch fixture data.')
+    }
+
+    function Wrapper() {
+      const [state, setState] = useState(system)
+      return (
+        <ObjectsTree
+          system={state}
+          selectedNodeId={null}
+          onSelect={vi.fn()}
+          onToggleVisibility={vi.fn()}
+          onRename={vi.fn()}
+          onToggleExpanded={(nodeId) => {
+            setState((prev) => toggleNodeExpanded(prev, nodeId))
+          }}
+          onReorderNode={vi.fn()}
+          onCreateOrbit={vi.fn()}
+          onCreateEquilibrium={vi.fn()}
+          onDeleteNode={vi.fn()}
+        />
+      )
+    }
+
+    render(<Wrapper />)
+
+    expect(screen.getByTestId(`object-tree-row-${branchId}`)).toBeInTheDocument()
+
+    const toggle = screen.getByTestId(`node-expand-${limitCycleId}`)
+    await user.click(toggle)
+    expect(screen.queryByTestId(`object-tree-row-${branchId}`)).toBeNull()
+
+    await user.click(toggle)
+    expect(screen.getByTestId(`object-tree-row-${branchId}`)).toBeInTheDocument()
   })
 })
