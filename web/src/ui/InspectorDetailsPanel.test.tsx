@@ -1049,7 +1049,7 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.getByText('lc_pd_mu @ 1')).toBeVisible()
   })
 
-  it('allows restoring the stored limit cycle render target', async () => {
+  it('allows restoring the stored limit cycle render target for orbit-sourced cycles', async () => {
     const user = userEvent.setup()
     const { system } = createPeriodDoublingSystem()
     const branchId = Object.keys(system.branches)[0]
@@ -1096,6 +1096,7 @@ describe('InspectorDetailsPanel', () => {
     )
 
     const button = screen.getByTestId('limit-cycle-render-stored')
+    expect(button).toHaveTextContent('Render @ original parameters')
     await user.click(button)
     expect(onSetLimitCycleRenderTarget).toHaveBeenCalledWith(limitCycleId, {
       type: 'object',
@@ -1148,6 +1149,71 @@ describe('InspectorDetailsPanel', () => {
 
     expect(screen.queryByTestId('limit-cycle-render-stored')).toBeNull()
     expect(screen.getByText('Stored cycle')).toBeVisible()
+  })
+
+  it('hides the stored cycle render button for non-orbit origins', () => {
+    const base = createSystem({ name: 'Hopf Origin Test' })
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Hopf',
+      systemName: base.config.name,
+      origin: {
+        type: 'hopf',
+        equilibriumObjectName: 'Eq_1',
+        equilibriumBranchName: 'eq_branch',
+        pointIndex: 0,
+      },
+      ntst: 10,
+      ncol: 4,
+      period: 6,
+      state: [0, 0, 1, 0, 0, 1, 6],
+      parameters: [...base.config.params],
+      parameterName: base.config.paramNames[0],
+      paramValue: base.config.params[0],
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(base, limitCycle)
+    const system = {
+      ...added.system,
+      ui: {
+        ...added.system.ui,
+        limitCycleRenderTargets: {
+          [added.nodeId]: { type: 'branch' as const, branchId: 'branch_1', pointIndex: 0 },
+        },
+      },
+    }
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={added.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onSetLimitCycleRenderTarget={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    expect(screen.queryByTestId('limit-cycle-render-stored')).toBeNull()
   })
 
   it('creates limit cycle continuation from Hopf with a selected parameter', async () => {

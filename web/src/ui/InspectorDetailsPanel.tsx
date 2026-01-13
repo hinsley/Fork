@@ -1040,6 +1040,7 @@ export function InspectorDetailsPanel({
   }, [limitCycleRenderBranch, limitCycleRenderTarget])
   const isStoredCycleTarget =
     !limitCycleRenderTarget || limitCycleRenderTarget.type === 'object'
+  const canRenderStoredCycle = limitCycle?.origin.type === 'orbit'
   const limitCycleParentId = useMemo(() => {
     if (!branch || branch.branchType !== 'limit_cycle') return null
     return (
@@ -2977,7 +2978,7 @@ export function InspectorDetailsPanel({
             >
               <h4 className="inspector-subheading">Rendered at</h4>
               <div className="inspector-data">{limitCycleRenderLabel}</div>
-              {onSetLimitCycleRenderTarget && !isStoredCycleTarget ? (
+              {onSetLimitCycleRenderTarget && !isStoredCycleTarget && canRenderStoredCycle ? (
                 <div className="inspector-row">
                   <button
                     type="button"
@@ -2988,7 +2989,7 @@ export function InspectorDetailsPanel({
                     }
                     data-testid="limit-cycle-render-stored"
                   >
-                    Render Stored Cycle
+                    Render @ original parameters
                   </button>
                 </div>
               ) : null}
