@@ -177,6 +177,17 @@
   position: relative;
 }
 
+.workspace--resizing {
+  cursor: col-resize;
+}
+
+.workspace--resizing .workspace__left,
+.workspace--resizing .workspace__center,
+.workspace--resizing .workspace__right {
+  pointer-events: none;
+  user-select: none;
+}
+
 .workspace__left,
 .workspace__center,
 .workspace__right {

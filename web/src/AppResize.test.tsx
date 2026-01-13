@@ -35,18 +35,20 @@ describe('App layout', () => {
     const initial = workspace.style.gridTemplateColumns
 
     await act(async () => {
-      fireEvent.pointerDown(splitter, { clientX: 200 })
-      fireEvent.pointerMove(window, { clientX: 260 })
+      fireEvent.pointerDown(splitter, { clientX: 200, pointerId: 1 })
+      fireEvent.pointerMove(splitter, { clientX: 260, pointerId: 1 })
     })
 
     expect(workspace.style.gridTemplateColumns).toBe(initial)
+    expect(workspace).toHaveClass('workspace--resizing')
     expect(screen.getByTestId('splitter-preview')).toBeInTheDocument()
 
     await act(async () => {
-      fireEvent.pointerUp(window)
+      fireEvent.pointerUp(splitter, { pointerId: 1 })
     })
 
     expect(screen.queryByTestId('splitter-preview')).toBeNull()
+    expect(workspace).not.toHaveClass('workspace--resizing')
     expect(workspace.style.gridTemplateColumns).not.toBe(initial)
   })
 })

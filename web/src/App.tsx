@@ -50,6 +50,9 @@ function App() {
     startX: number
     startWidth: number
     currentWidth: number
+    workspaceWidth: number
+    pointerId: number
+    target: HTMLDivElement | null
   } | null>(null)
   const [dragPreview, setDragPreview] = useState<{ offset: number } | null>(null)
   const objectsTreeRef = useRef<ObjectsTreeHandle | null>(null)
@@ -138,58 +141,62 @@ function App() {
     await actions.addBifurcationDiagram(name, targetId)
   }
 
+  const updatePreview = (side: 'left' | 'right', nextWidth: number, workspaceWidth: number) => {
+    const rawOffset =
+      side === 'left' ? nextWidth : workspaceWidth - nextWidth - SPLITTER_WIDTH
+    const offset = Math.min(Math.max(rawOffset, 0), workspaceWidth)
+    setDragPreview({ offset })
+  }
+
+  const handleResizeMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    event.preventDefault()
+    event.stopPropagation()
+    const delta = event.clientX - drag.startX
+    const nextWidth =
+      drag.side === 'left'
+        ? Math.min(MAX_PANEL_WIDTH, Math.max(MIN_LEFT_WIDTH, drag.startWidth + delta))
+        : Math.min(MAX_PANEL_WIDTH, Math.max(MIN_RIGHT_WIDTH, drag.startWidth - delta))
+    drag.currentWidth = nextWidth
+    updatePreview(drag.side, nextWidth, drag.workspaceWidth)
+  }
+
+  const finishResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    event.preventDefault()
+    event.stopPropagation()
+    drag.target?.releasePointerCapture?.(drag.pointerId)
+    if (drag.side === 'left') {
+      actions.updateLayout({ leftWidth: drag.currentWidth })
+    } else {
+      actions.updateLayout({ rightWidth: drag.currentWidth })
+    }
+    dragRef.current = null
+    setDragPreview(null)
+  }
+
   const onPointerDown = (side: 'left' | 'right') => (event: React.PointerEvent) => {
     if (!system) return
     const workspaceRect = workspaceRef.current?.getBoundingClientRect()
     if (!workspaceRect) return
+    event.preventDefault()
+    event.stopPropagation()
     const startWidth = side === 'left' ? system.ui.layout.leftWidth : system.ui.layout.rightWidth
+    const target = event.currentTarget as HTMLDivElement
+    target.setPointerCapture?.(event.pointerId)
     dragRef.current = {
       side,
       startX: event.clientX,
       startWidth,
       currentWidth: startWidth,
+      workspaceWidth: workspaceRect.width,
+      pointerId: event.pointerId,
+      target,
     }
 
-    const updatePreview = (nextWidth: number) => {
-      const rawOffset =
-        side === 'left'
-          ? nextWidth
-          : workspaceRect.width - nextWidth - SPLITTER_WIDTH
-      const offset = Math.min(Math.max(rawOffset, 0), workspaceRect.width)
-      setDragPreview({ offset })
-    }
-
-    updatePreview(startWidth)
-
-    const handleMove = (moveEvent: PointerEvent) => {
-      if (!dragRef.current) return
-      const { startX, startWidth } = dragRef.current
-      const delta = moveEvent.clientX - startX
-      const nextWidth =
-        side === 'left'
-          ? Math.min(MAX_PANEL_WIDTH, Math.max(MIN_LEFT_WIDTH, startWidth + delta))
-          : Math.min(MAX_PANEL_WIDTH, Math.max(MIN_RIGHT_WIDTH, startWidth - delta))
-      dragRef.current.currentWidth = nextWidth
-      updatePreview(nextWidth)
-    }
-
-    const handleUp = () => {
-      if (dragRef.current) {
-        const { currentWidth } = dragRef.current
-        if (side === 'left') {
-          actions.updateLayout({ leftWidth: currentWidth })
-        } else {
-          actions.updateLayout({ rightWidth: currentWidth })
-        }
-      }
-      dragRef.current = null
-      setDragPreview(null)
-      window.removeEventListener('pointermove', handleMove)
-      window.removeEventListener('pointerup', handleUp)
-    }
-
-    window.addEventListener('pointermove', handleMove)
-    window.addEventListener('pointerup', handleUp)
+    updatePreview(side, startWidth, workspaceRect.width)
   }
 
   const gridTemplateColumns = useMemo(() => {
@@ -286,7 +293,7 @@ function App() {
         </main>
       ) : (
         <main
-          className="workspace"
+          className={`workspace${dragPreview ? ' workspace--resizing' : ''}`}
           style={{ gridTemplateColumns }}
           data-testid="workspace"
           ref={workspaceRef}
@@ -322,6 +329,9 @@ function App() {
           <div
             className="splitter splitter--left"
             onPointerDown={onPointerDown('left')}
+            onPointerMove={handleResizeMove}
+            onPointerUp={finishResize}
+            onPointerCancel={finishResize}
             data-testid="splitter-left"
           />
           <div className="workspace__center">
@@ -356,6 +366,9 @@ function App() {
           <div
             className="splitter splitter--right"
             onPointerDown={onPointerDown('right')}
+            onPointerMove={handleResizeMove}
+            onPointerUp={finishResize}
+            onPointerCancel={finishResize}
             data-testid="splitter-right"
           />
           <div className="workspace__right">
