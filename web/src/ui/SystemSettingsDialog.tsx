@@ -22,14 +22,23 @@ import type {
   OrbitLyapunovRequest,
   OrbitRunRequest,
 } from '../state/appState'
-import type { BranchPointSelection } from './branchPointSelection'
+import type {
+  BranchPointSelection,
+  LimitCyclePointSelection,
+  OrbitPointSelection,
+} from './branchPointSelection'
 
 type SystemSettingsDialogProps = {
   open: boolean
   system: System | null
   selectedNodeId: string | null
   theme: 'light' | 'dark'
+  branchPointSelection?: BranchPointSelection
+  orbitPointSelection?: OrbitPointSelection
+  limitCyclePointSelection?: LimitCyclePointSelection
   onBranchPointSelect?: (selection: BranchPointSelection) => void
+  onOrbitPointSelect?: (selection: OrbitPointSelection) => void
+  onLimitCyclePointSelect?: (selection: LimitCyclePointSelection) => void
   onClose: () => void
   onRename: (id: string, name: string) => void
   onToggleVisibility: (id: string) => void
@@ -69,7 +78,12 @@ export function SystemSettingsDialog({
   system,
   selectedNodeId,
   theme,
+  branchPointSelection,
+  orbitPointSelection,
+  limitCyclePointSelection,
   onBranchPointSelect,
+  onOrbitPointSelect,
+  onLimitCyclePointSelect,
   onClose,
   onRename,
   onToggleVisibility,
@@ -120,7 +134,12 @@ export function SystemSettingsDialog({
             selectedNodeId={selectedNodeId}
             view="system"
             theme={theme}
+            branchPointSelection={branchPointSelection}
+            orbitPointSelection={orbitPointSelection}
+            limitCyclePointSelection={limitCyclePointSelection}
             onBranchPointSelect={onBranchPointSelect}
+            onOrbitPointSelect={onOrbitPointSelect}
+            onLimitCyclePointSelect={onLimitCyclePointSelect}
             onRename={onRename}
             onToggleVisibility={onToggleVisibility}
             onUpdateRender={onUpdateRender}

@@ -33,10 +33,14 @@ import {
   resolveEquilibriumEigenspaceIndices,
   resolveEquilibriumEigenvectorRender,
 } from '../system/equilibriumEigenvectors'
-import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
+import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/PlotlyViewport'
 import { resolvePlotlyBackgroundColor } from '../viewports/plotly/plotlyTheme'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
-import type { BranchPointSelection } from './branchPointSelection'
+import type {
+  BranchPointSelection,
+  LimitCyclePointSelection,
+  OrbitPointSelection,
+} from './branchPointSelection'
 
 type ViewportPanelProps = {
   system: System
@@ -45,6 +49,9 @@ type ViewportPanelProps = {
   theme: 'light' | 'dark'
   onSelectViewport: (id: string) => void
   onSelectObject: (id: string) => void
+  onSelectBranchPoint?: (selection: BranchPointSelection) => void
+  onSelectOrbitPoint?: (selection: OrbitPointSelection) => void
+  onSelectLimitCyclePoint?: (selection: LimitCyclePointSelection) => void
   onReorderViewport: (nodeId: string, targetId: string) => void
   onResizeViewport: (id: string, height: number) => void
   onToggleViewport: (id: string) => void
@@ -82,6 +89,9 @@ type ViewportTileProps = {
   setDragOverId: (id: string | null) => void
   onSelectViewport: (id: string) => void
   onSelectObject: (id: string) => void
+  onSelectBranchPoint?: (selection: BranchPointSelection) => void
+  onSelectOrbitPoint?: (selection: OrbitPointSelection) => void
+  onSelectLimitCyclePoint?: (selection: LimitCyclePointSelection) => void
   onReorderViewport: (nodeId: string, targetId: string) => void
   onResizeStart: (id: string, event: React.PointerEvent) => void
   onToggleViewport: (id: string) => void
@@ -100,6 +110,13 @@ type ViewportTileProps = {
 }
 
 type PlotlyRelayoutEvent = Record<string, unknown>
+
+function resolvePointIndex(point: PlotlyPointClick): number | null {
+  if (typeof point.customdata !== 'number' || !Number.isFinite(point.customdata)) {
+    return null
+  }
+  return Math.max(0, Math.round(point.customdata))
+}
 
 type TimeSeriesViewportMeta = {
   yRange?: [number, number] | null
@@ -1058,15 +1075,19 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
   if (!state || state.length === 0 || dim <= 0) return traces
   const plotDim = Math.min(dim, 3)
   const { profilePoints, period } = extractLimitCycleProfile(state, dim, ntst, ncol)
-  const usablePoints = profilePoints.filter(
-    (pt) => pt.length >= plotDim && pt.slice(0, plotDim).every(Number.isFinite)
-  )
+  const usablePoints = profilePoints
+    .map((point, index) => ({ point, index }))
+    .filter(
+      ({ point }) =>
+        point.length >= plotDim && point.slice(0, plotDim).every(Number.isFinite)
+    )
 
   if (usablePoints.length >= 2 && plotDim > 0) {
     if (plotDim >= 3) {
-      const x = usablePoints.map((pt) => pt[0] ?? Number.NaN)
-      const y = usablePoints.map((pt) => pt[1] ?? Number.NaN)
-      const z = usablePoints.map((pt) => pt[2] ?? Number.NaN)
+      const x = usablePoints.map(({ point }) => point[0] ?? Number.NaN)
+      const y = usablePoints.map(({ point }) => point[1] ?? Number.NaN)
+      const z = usablePoints.map(({ point }) => point[2] ?? Number.NaN)
+      const customdata = usablePoints.map(({ index }) => index)
       traces.push({
         type: 'scatter3d',
         mode: 'lines',
@@ -1075,12 +1096,14 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
         x,
         y,
         z,
+        customdata,
         line: { color, width: lineWidth },
         ...(showLegend === undefined ? {} : { showlegend: showLegend }),
       })
     } else if (plotDim === 2) {
-      const x = usablePoints.map((pt) => pt[0] ?? Number.NaN)
-      const y = usablePoints.map((pt) => pt[1] ?? Number.NaN)
+      const x = usablePoints.map(({ point }) => point[0] ?? Number.NaN)
+      const y = usablePoints.map(({ point }) => point[1] ?? Number.NaN)
+      const customdata = usablePoints.map(({ index }) => index)
       traces.push({
         type: 'scatter',
         mode: 'lines',
@@ -1088,6 +1111,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
         uid,
         x,
         y,
+        customdata,
         line: { color, width: lineWidth },
         ...(showLegend === undefined ? {} : { showlegend: showLegend }),
       })
@@ -1097,7 +1121,8 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
         : Math.max(usablePoints.length - 1, 1)
       const step = usablePoints.length > 1 ? timeEnd / (usablePoints.length - 1) : 1
       const x = usablePoints.map((_, idx) => idx * step)
-      const y = usablePoints.map((pt) => pt[0] ?? Number.NaN)
+      const y = usablePoints.map(({ point }) => point[0] ?? Number.NaN)
+      const customdata = usablePoints.map(({ index }) => index)
       traces.push({
         type: 'scatter',
         mode: 'lines',
@@ -1105,6 +1130,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
         uid,
         x,
         y,
+        customdata,
         line: { color, width: lineWidth },
         ...(showLegend === undefined ? {} : { showlegend: showLegend }),
       })
@@ -1124,6 +1150,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
       x: [fallback[0]],
       y: [fallback[1]],
       z: [fallback[2]],
+      customdata: [0],
       marker: { color, size: pointSize },
       ...(showLegend === undefined ? {} : { showlegend: showLegend }),
     })
@@ -1135,6 +1162,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
       uid,
       x: [fallback[0]],
       y: [fallback[1]],
+      customdata: [0],
       marker: { color, size: pointSize },
       ...(showLegend === undefined ? {} : { showlegend: showLegend }),
     })
@@ -1146,6 +1174,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
       uid,
       x: [0],
       y: [fallback[0]],
+      customdata: [0],
       marker: { color, size: pointSize },
       ...(showLegend === undefined ? {} : { showlegend: showLegend }),
     })
@@ -1386,10 +1415,13 @@ function buildSceneTraces(
         const x: number[] = []
         const y: number[] = []
         const z: number[] = []
-        for (const row of rows) {
+        const customdata: number[] = []
+        for (let index = 0; index < rows.length; index += 1) {
+          const row = rows[index]
           x.push(row[1])
           y.push(row[2])
           z.push(row[3])
+          customdata.push(index)
           if (canPlotEigenvectors) {
             updateSceneBounds(sceneBounds, row[1], row[2], row[3])
           }
@@ -1402,6 +1434,7 @@ function buildSceneTraces(
           x,
           y,
           z,
+          customdata,
           marker: {
             color: node.render.color,
             size,
@@ -1410,9 +1443,12 @@ function buildSceneTraces(
       } else if (dimension >= 2) {
         const x: number[] = []
         const y: number[] = []
-        for (const row of rows) {
+        const customdata: number[] = []
+        for (let index = 0; index < rows.length; index += 1) {
+          const row = rows[index]
           x.push(row[1])
           y.push(row[2])
+          customdata.push(index)
           if (canPlotEigenvectors) {
             updateSceneBounds(sceneBounds, row[1], row[2], 0)
           }
@@ -1424,6 +1460,7 @@ function buildSceneTraces(
           uid: nodeId,
           x,
           y,
+          customdata,
           marker: {
             color: node.render.color,
             size,
@@ -1431,10 +1468,13 @@ function buildSceneTraces(
         })
       } else if (isMap1D) {
         const diagonal: number[] = []
-        for (const row of rows) {
+        const customdata: number[] = []
+        for (let index = 0; index < rows.length; index += 1) {
+          const row = rows[index]
           const value = row[1]
           if (typeof value !== 'number' || !Number.isFinite(value)) continue
           diagonal.push(value)
+          customdata.push(index)
         }
         if (diagonal.length > 0) {
           traces.push({
@@ -1444,6 +1484,7 @@ function buildSceneTraces(
             uid: nodeId,
             x: diagonal,
             y: diagonal,
+            customdata,
             marker: {
               color: node.render.color,
               size,
@@ -1472,28 +1513,35 @@ function buildSceneTraces(
       const x: number[] = []
       const y: number[] = []
       const z: number[] = []
+      const customdata: number[] = []
       if (dimension >= 3) {
-        for (const row of rows) {
+        for (let index = 0; index < rows.length; index += 1) {
+          const row = rows[index]
           x.push(row[1])
           y.push(row[2])
           z.push(row[3])
+          customdata.push(index)
           if (canPlotEigenvectors) {
             updateSceneBounds(sceneBounds, row[1], row[2], row[3])
           }
         }
       } else if (dimension >= 2) {
-        for (const row of rows) {
+        for (let index = 0; index < rows.length; index += 1) {
+          const row = rows[index]
           x.push(row[1])
           y.push(row[2])
+          customdata.push(index)
           if (canPlotEigenvectors) {
             updateSceneBounds(sceneBounds, row[1], row[2], 0)
           }
         }
       } else {
-        for (const row of rows) {
+        for (let index = 0; index < rows.length; index += 1) {
+          const row = rows[index]
           const value = row[1]
           x.push(row[0])
           y.push(value)
+          customdata.push(index)
           if (isTimeSeries) {
             minY = Math.min(minY, value)
             maxY = Math.max(maxY, value)
@@ -1510,6 +1558,7 @@ function buildSceneTraces(
           x,
           y,
           z,
+          customdata,
           line: {
             color: node.render.color,
             width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
@@ -1523,6 +1572,7 @@ function buildSceneTraces(
           uid: nodeId,
           x,
           y,
+          customdata,
           line: {
             color: node.render.color,
             width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
@@ -1672,6 +1722,7 @@ function buildDiagramTraces(
     const branchParams = getBranchParams(system, branch)
     const x: number[] = []
     const y: number[] = []
+    const pointIndices: number[] = []
 
     for (const idx of order) {
       const point = branch.data.points[idx]
@@ -1681,6 +1732,7 @@ function buildDiagramTraces(
       if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) continue
       x.push(xValue as number)
       y.push(yValue as number)
+      pointIndices.push(idx)
     }
 
     if (x.length === 0 || y.length === 0) continue
@@ -1697,6 +1749,7 @@ function buildDiagramTraces(
       uid: branchId,
       x,
       y,
+      customdata: pointIndices,
       line: {
         color: node.render.color,
         width: lineWidth,
@@ -1710,6 +1763,7 @@ function buildDiagramTraces(
       uid: branchId,
       x: [x[0]],
       y: [y[0]],
+      customdata: [pointIndices[0]],
       marker: {
         color: node.render.color,
         size: markerSize,
@@ -1726,6 +1780,7 @@ function buildDiagramTraces(
       uid: branchId,
       x: [x[x.length - 1]],
       y: [y[y.length - 1]],
+      customdata: [pointIndices[pointIndices.length - 1]],
       marker: {
         color: node.render.color,
         size: markerSize,
@@ -1739,6 +1794,7 @@ function buildDiagramTraces(
       const bx: number[] = []
       const by: number[] = []
       const labels: string[] = []
+      const bifIndices: number[] = []
       for (const bifIndex of branch.data.bifurcations) {
         const point = branch.data.points[bifIndex]
         if (!point) continue
@@ -1747,6 +1803,7 @@ function buildDiagramTraces(
         if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) continue
         bx.push(xValue as number)
         by.push(yValue as number)
+        bifIndices.push(bifIndex)
         const logicalIndex = indices[bifIndex]
         const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : bifIndex
         labels.push(formatBifurcationLabel(displayIndex, point.stability))
@@ -1759,6 +1816,7 @@ function buildDiagramTraces(
           uid: branchId,
           x: bx,
           y: by,
+          customdata: bifIndices,
           marker: {
             color: node.render.color,
             size: markerSize + 2,
@@ -1966,6 +2024,9 @@ function ViewportTile({
   setDragOverId,
   onSelectViewport,
   onSelectObject,
+  onSelectBranchPoint,
+  onSelectOrbitPoint,
+  onSelectLimitCyclePoint,
   onReorderViewport,
   onResizeStart,
   onToggleViewport,
@@ -2059,6 +2120,50 @@ function ViewportTile({
       }
     },
     [diagram, onUpdateBifurcationDiagram]
+  )
+
+  const handlePointClick = useCallback(
+    (event: PlotlyPointClick) => {
+      const uid = event.uid
+      if (typeof uid === 'string') {
+        onSelectObject(uid)
+      }
+
+      const pointIndex = resolvePointIndex(event)
+      if (pointIndex === null || typeof uid !== 'string') return
+
+      const node = system.nodes[uid]
+      if (!node) return
+
+      if (node.kind === 'branch') {
+        if (!diagram) return
+        onSelectBranchPoint?.({ branchId: uid, pointIndex })
+        return
+      }
+
+      if (node.kind !== 'object') return
+      const object = system.objects[uid]
+      if (!object) return
+
+      if (object.type === 'orbit') {
+        if (pointIndex >= 0 && pointIndex < object.data.length) {
+          onSelectOrbitPoint?.({ orbitId: uid, pointIndex })
+        }
+      } else if (object.type === 'limit_cycle') {
+        if (pointIndex >= 0) {
+          onSelectLimitCyclePoint?.({ limitCycleId: uid, pointIndex })
+        }
+      }
+    },
+    [
+      diagram,
+      onSelectBranchPoint,
+      onSelectLimitCyclePoint,
+      onSelectObject,
+      onSelectOrbitPoint,
+      system.nodes,
+      system.objects,
+    ]
   )
 
   const handleResize = useCallback(
@@ -2236,7 +2341,7 @@ function ViewportTile({
               data={data}
               layout={layout}
               testId={`plotly-viewport-${node.id}`}
-              onPointClick={scene || diagram ? onSelectObject : undefined}
+              onPointClick={scene || diagram ? handlePointClick : undefined}
               onRelayout={scene ? handleSceneRelayout : diagram ? handleDiagramRelayout : undefined}
               onResize={scene ? handleResize : undefined}
             />
@@ -2259,6 +2364,9 @@ export function ViewportPanel({
   theme,
   onSelectViewport,
   onSelectObject,
+  onSelectBranchPoint,
+  onSelectOrbitPoint,
+  onSelectLimitCyclePoint,
   onReorderViewport,
   onResizeViewport,
   onToggleViewport,
@@ -2555,6 +2663,9 @@ export function ViewportPanel({
                 setDragOverId={setDragOverId}
                 onSelectViewport={onSelectViewport}
                 onSelectObject={onSelectObject}
+                onSelectBranchPoint={onSelectBranchPoint}
+                onSelectOrbitPoint={onSelectOrbitPoint}
+                onSelectLimitCyclePoint={onSelectLimitCyclePoint}
                 onReorderViewport={onReorderViewport}
                 onResizeStart={startResize}
                 onToggleViewport={onToggleViewport}

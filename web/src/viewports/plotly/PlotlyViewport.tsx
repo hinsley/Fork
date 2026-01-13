@@ -7,10 +7,25 @@ type PlotlyClickEvent = {
     data?: {
       uid?: string
     }
+    pointIndex?: number
+    pointNumber?: number
+    customdata?: unknown
+    x?: number
+    y?: number
+    z?: number
   }>
 }
 
 type PlotlyRelayoutEvent = Record<string, unknown>
+
+export type PlotlyPointClick = {
+  uid?: string
+  pointIndex?: number
+  customdata?: unknown
+  x?: number
+  y?: number
+  z?: number
+}
 
 type PlotlyEventTarget = HTMLDivElement & {
   on?: {
@@ -26,7 +41,7 @@ type PlotlyEventTarget = HTMLDivElement & {
 
 function bindPlotlyClick(
   node: HTMLDivElement,
-  onPointClickRef: MutableRefObject<((nodeId: string) => void) | undefined>,
+  onPointClickRef: MutableRefObject<((point: PlotlyPointClick) => void) | undefined>,
   clickHandlerRef: MutableRefObject<((event: PlotlyClickEvent) => void) | null>
 ) {
   const target = node as PlotlyEventTarget
@@ -35,10 +50,22 @@ function bindPlotlyClick(
   if (!onPointClickRef.current) return
 
   const handler = (event: PlotlyClickEvent) => {
-    const id = event?.points?.[0]?.data?.uid
-    if (typeof id === 'string') {
-      onPointClickRef.current?.(id)
-    }
+    const point = event?.points?.[0]
+    if (!point) return
+    const pointIndex =
+      typeof point.pointIndex === 'number'
+        ? point.pointIndex
+        : typeof point.pointNumber === 'number'
+          ? point.pointNumber
+          : undefined
+    onPointClickRef.current?.({
+      uid: point.data?.uid,
+      pointIndex,
+      customdata: point.customdata,
+      x: point.x,
+      y: point.y,
+      z: point.z,
+    })
   }
   clickHandlerRef.current = handler
   target.on('plotly_click', handler)
@@ -100,7 +127,7 @@ export function PlotlyViewport({
   data: Data[]
   layout: Partial<Layout>
   testId?: string
-  onPointClick?: (nodeId: string) => void
+  onPointClick?: (point: PlotlyPointClick) => void
   onRelayout?: (event: PlotlyRelayoutEvent) => void
   onResize?: (size: { width: number; height: number }) => void
 }) {

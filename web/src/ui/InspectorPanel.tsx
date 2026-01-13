@@ -22,13 +22,22 @@ import type {
   OrbitLyapunovRequest,
   OrbitRunRequest,
 } from '../state/appState'
-import type { BranchPointSelection } from './branchPointSelection'
+import type {
+  BranchPointSelection,
+  LimitCyclePointSelection,
+  OrbitPointSelection,
+} from './branchPointSelection'
 
 type InspectorPanelProps = {
   system: System
   selectedNodeId: string | null
   theme: 'light' | 'dark'
+  branchPointSelection?: BranchPointSelection
+  orbitPointSelection?: OrbitPointSelection
+  limitCyclePointSelection?: LimitCyclePointSelection
   onBranchPointSelect?: (selection: BranchPointSelection) => void
+  onOrbitPointSelect?: (selection: OrbitPointSelection) => void
+  onLimitCyclePointSelect?: (selection: LimitCyclePointSelection) => void
   onRename: (id: string, name: string) => void
   onToggleVisibility: (id: string) => void
   onUpdateRender: (id: string, render: Partial<TreeNode['render']>) => void
@@ -66,7 +75,12 @@ export function InspectorPanel({
   system,
   selectedNodeId,
   theme,
+  branchPointSelection,
+  orbitPointSelection,
+  limitCyclePointSelection,
   onBranchPointSelect,
+  onOrbitPointSelect,
+  onLimitCyclePointSelect,
   onRename,
   onToggleVisibility,
   onUpdateRender,
@@ -97,7 +111,12 @@ export function InspectorPanel({
           selectedNodeId={selectedNodeId}
           theme={theme}
           view="selection"
+          branchPointSelection={branchPointSelection}
+          orbitPointSelection={orbitPointSelection}
+          limitCyclePointSelection={limitCyclePointSelection}
           onBranchPointSelect={onBranchPointSelect}
+          onOrbitPointSelect={onOrbitPointSelect}
+          onLimitCyclePointSelect={onLimitCyclePointSelect}
           onRename={onRename}
           onToggleVisibility={onToggleVisibility}
           onUpdateRender={onUpdateRender}

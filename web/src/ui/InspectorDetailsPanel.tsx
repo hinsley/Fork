@@ -43,7 +43,11 @@ import type {
   LimitCycleOrbitContinuationRequest,
   LimitCyclePDContinuationRequest,
 } from '../state/appState'
-import type { BranchPointSelection } from './branchPointSelection'
+import type {
+  BranchPointSelection,
+  LimitCyclePointSelection,
+  OrbitPointSelection,
+} from './branchPointSelection'
 import { validateSystemConfig } from '../state/systemValidation'
 import {
   buildSortedArrayOrder,
@@ -63,7 +67,12 @@ type InspectorDetailsPanelProps = {
   selectedNodeId: string | null
   view: 'selection' | 'system'
   theme: 'light' | 'dark'
+  branchPointSelection?: BranchPointSelection
+  orbitPointSelection?: OrbitPointSelection
+  limitCyclePointSelection?: LimitCyclePointSelection
   onBranchPointSelect?: (selection: BranchPointSelection) => void
+  onOrbitPointSelect?: (selection: OrbitPointSelection) => void
+  onLimitCyclePointSelect?: (selection: LimitCyclePointSelection) => void
   onRename: (id: string, name: string) => void
   onToggleVisibility: (id: string) => void
   onUpdateRender: (id: string, render: Partial<TreeNode['render']>) => void
@@ -242,6 +251,65 @@ function adjustArray<T>(values: T[], targetLength: number, fill: () => T): T[] {
   if (values.length === targetLength) return values
   if (values.length > targetLength) return values.slice(0, targetLength)
   return [...values, ...Array.from({ length: targetLength - values.length }, fill)]
+}
+
+const POINT_NUMBER_REGEX = /[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g
+
+function parsePointValues(text: string): number[] {
+  const matches = text.match(POINT_NUMBER_REGEX)
+  if (!matches) return []
+  return matches
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value))
+}
+
+function formatPointValues(values: Array<number | string | null | undefined>): string {
+  const formatted = values.map((value) => {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value.toString() : 'NaN'
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim()
+      return trimmed.length > 0 ? trimmed : 'NaN'
+    }
+    return 'NaN'
+  })
+  return `[${formatted.join(', ')}]`
+}
+
+async function writeClipboardText(value: string): Promise<void> {
+  if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return
+  try {
+    await navigator.clipboard.writeText(value)
+  } catch {
+    return
+  }
+}
+
+async function readClipboardText(): Promise<string | null> {
+  if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) return null
+  try {
+    return await navigator.clipboard.readText()
+  } catch {
+    return null
+  }
+}
+
+function applyPointValues(
+  prev: string[],
+  targetLength: number,
+  values: number[]
+): string[] {
+  const next = adjustArray(prev, targetLength, () => '0')
+  if (values.length === 0) return next
+  const trimmed =
+    values.length >= targetLength ? values.slice(values.length - targetLength) : values
+  trimmed.forEach((value, index) => {
+    if (Number.isFinite(value)) {
+      next[index] = value.toString()
+    }
+  })
+  return next
 }
 
 function formatAxisValue(axis: BifurcationAxis | null): string {
@@ -838,7 +906,12 @@ export function InspectorDetailsPanel({
   selectedNodeId,
   view,
   theme,
+  branchPointSelection,
+  orbitPointSelection,
+  limitCyclePointSelection,
   onBranchPointSelect,
+  onOrbitPointSelect,
+  onLimitCyclePointSelect,
   onRename,
   onToggleVisibility,
   onUpdateRender,
@@ -867,6 +940,14 @@ export function InspectorDetailsPanel({
   const orbit = object?.type === 'orbit' ? object : null
   const equilibrium = object?.type === 'equilibrium' ? object : null
   const limitCycle = object?.type === 'limit_cycle' ? object : null
+  const selectedOrbitPointIndex =
+    orbitPointSelection && orbitPointSelection.orbitId === selectedNodeId
+      ? orbitPointSelection.pointIndex
+      : null
+  const selectedLimitCyclePointIndex =
+    limitCyclePointSelection && limitCyclePointSelection.limitCycleId === selectedNodeId
+      ? limitCyclePointSelection.pointIndex
+      : null
   const selectionKey = selectedNodeId ?? 'none'
   const objectRef = useRef<typeof object>(object)
   const selectionNode = useMemo(() => {
@@ -1148,6 +1229,32 @@ export function InspectorDetailsPanel({
     ? Math.min(orbitPreviewStart + ORBIT_PREVIEW_PAGE_SIZE, orbit.data.length)
     : 0
   const orbitPreviewRows = orbit ? orbit.data.slice(orbitPreviewStart, orbitPreviewEnd) : []
+  const selectedOrbitPoint =
+    orbit &&
+    selectedOrbitPointIndex !== null &&
+    selectedOrbitPointIndex >= 0 &&
+    selectedOrbitPointIndex < orbit.data.length
+      ? orbit.data[selectedOrbitPointIndex]
+      : null
+  const selectedOrbitState = selectedOrbitPoint ? selectedOrbitPoint.slice(1) : null
+  const limitCycleProfilePoints = useMemo(() => {
+    if (!limitCycle) return []
+    const dim = system.config.varNames.length
+    if (dim <= 0) return []
+    const { profilePoints } = extractLimitCycleProfile(
+      limitCycle.state,
+      dim,
+      limitCycle.ntst,
+      limitCycle.ncol
+    )
+    return profilePoints
+  }, [limitCycle, system.config.varNames.length])
+  const selectedLimitCyclePoint =
+    selectedLimitCyclePointIndex !== null &&
+    selectedLimitCyclePointIndex >= 0 &&
+    selectedLimitCyclePointIndex < limitCycleProfilePoints.length
+      ? limitCycleProfilePoints[selectedLimitCyclePointIndex]
+      : null
   const limitCycleMesh = useMemo(() => {
     if (!branch || branch.branchType !== 'limit_cycle') {
       return { ntst: 20, ncol: 4 }
@@ -1527,12 +1634,8 @@ export function InspectorDetailsPanel({
   }, [branchIndices, branchPointIndex, branchSortedOrder, hasBranch, selectedNodeId])
 
   useEffect(() => {
-    if (!onBranchPointSelect) return
-    if (!branch || branch.branchType !== 'limit_cycle' || branchPointIndex === null) {
-      onBranchPointSelect(null)
-      return
-    }
-    if (!selectedNodeId) {
+    if (!onBranchPointSelect || view !== 'selection') return
+    if (!branch || branchPointIndex === null || !selectedNodeId) {
       onBranchPointSelect(null)
       return
     }
@@ -1540,7 +1643,7 @@ export function InspectorDetailsPanel({
       branchId: selectedNodeId,
       pointIndex: branchPointIndex,
     })
-  }, [branch, branchPointIndex, onBranchPointSelect, selectedNodeId])
+  }, [branch, branchPointIndex, onBranchPointSelect, selectedNodeId, view])
 
   const systemConfig = useMemo(() => buildSystemConfig(systemDraft), [systemDraft])
   const systemValidation = useMemo(() => validateSystemConfig(systemConfig), [systemConfig])
@@ -1756,6 +1859,28 @@ export function InspectorDetailsPanel({
     branch?.branchType === 'equilibrium'
       ? buildEigenvaluePlot(branchEigenvalues, plotlyBackground, { showRadiusLines: isDiscreteMap })
       : null
+  const selectedBranchPointParams = useMemo(() => {
+    if (!selectedBranchPoint) return []
+    return systemDraft.paramNames.map((name, index) => {
+      let value = branchParams[index]
+      if (codim1ParamNames) {
+        if (name === codim1ParamNames.param1) {
+          value = selectedBranchPoint.param_value
+        } else if (name === codim1ParamNames.param2) {
+          value = selectedBranchPoint.param2_value ?? branchParams[index]
+        }
+      } else if (index === continuationParamIndex) {
+        value = selectedBranchPoint.param_value
+      }
+      return value ?? Number.NaN
+    })
+  }, [
+    branchParams,
+    codim1ParamNames,
+    continuationParamIndex,
+    selectedBranchPoint,
+    systemDraft.paramNames,
+  ])
 
   const handleApplySystem = async () => {
     setSystemTouched(true)
@@ -1917,14 +2042,26 @@ export function InspectorDetailsPanel({
     await onComputeCovariantLyapunovVectors(request)
   }
 
-  const setOrbitPreviewPageIndex = (page: number) => {
-    if (!orbit || orbit.data.length === 0) return
-    const maxPage = Math.max(orbitPreviewPageCount - 1, 0)
-    const nextPage = Math.min(Math.max(page, 0), maxPage)
-    setOrbitPreviewPage(nextPage)
-    setOrbitPreviewInput((nextPage + 1).toString())
-    setOrbitPreviewError(null)
-  }
+  const setOrbitPreviewPageIndex = useCallback(
+    (page: number) => {
+      if (!orbit || orbit.data.length === 0) return
+      const maxPage = Math.max(orbitPreviewPageCount - 1, 0)
+      const nextPage = Math.min(Math.max(page, 0), maxPage)
+      setOrbitPreviewPage(nextPage)
+      setOrbitPreviewInput((nextPage + 1).toString())
+      setOrbitPreviewError(null)
+    },
+    [orbit, orbitPreviewPageCount]
+  )
+
+  useEffect(() => {
+    if (!orbit || selectedOrbitPointIndex === null) return
+    if (selectedOrbitPointIndex < 0 || selectedOrbitPointIndex >= orbit.data.length) return
+    const targetPage = Math.floor(selectedOrbitPointIndex / ORBIT_PREVIEW_PAGE_SIZE)
+    if (targetPage !== orbitPreviewPage) {
+      setOrbitPreviewPageIndex(targetPage)
+    }
+  }, [orbit, orbitPreviewPage, selectedOrbitPointIndex, setOrbitPreviewPageIndex])
 
   const handleOrbitPreviewJump = () => {
     if (!orbit || orbitPreviewPageCount === 0) return
@@ -1938,6 +2075,58 @@ export function InspectorDetailsPanel({
       return
     }
     setOrbitPreviewPageIndex(target - 1)
+  }
+
+  const handlePasteSystemParams = async () => {
+    const text = await readClipboardText()
+    if (!text) return
+    const values = parsePointValues(text)
+    if (values.length === 0) return
+    setSystemDraft((prev) => ({
+      ...prev,
+      params: applyPointValues(prev.params, prev.paramNames.length, values),
+    }))
+  }
+
+  const handlePasteOrbitState = async () => {
+    const text = await readClipboardText()
+    if (!text) return
+    const values = parsePointValues(text)
+    if (values.length === 0) return
+    setOrbitDraft((prev) => ({
+      ...prev,
+      initialState: applyPointValues(
+        prev.initialState,
+        systemDraft.varNames.length,
+        values
+      ),
+    }))
+  }
+
+  const handlePasteEquilibriumGuess = async () => {
+    const text = await readClipboardText()
+    if (!text) return
+    const values = parsePointValues(text)
+    if (values.length === 0) return
+    setEquilibriumDraft((prev) => ({
+      ...prev,
+      initialGuess: applyPointValues(
+        prev.initialGuess,
+        systemDraft.varNames.length,
+        values
+      ),
+    }))
+  }
+
+  const handlePasteLimitCycleState = async () => {
+    const text = await readClipboardText()
+    if (!text) return
+    const values = parsePointValues(text)
+    if (values.length === 0) return
+    setLimitCycleDraft((prev) => ({
+      ...prev,
+      state: applyPointValues(prev.state, systemDraft.varNames.length, values),
+    }))
   }
 
   const handleSolveEquilibrium = async () => {
@@ -2031,14 +2220,35 @@ export function InspectorDetailsPanel({
     })
   }
 
-  const setBranchPoint = (arrayIndex: number) => {
-    setBranchPointIndex(arrayIndex)
-    const logicalIndex = branchIndices[arrayIndex]
-    setBranchPointInput(
-      typeof logicalIndex === 'number' ? logicalIndex.toString() : ''
-    )
-    setBranchPointError(null)
-  }
+  const setBranchPoint = useCallback(
+    (arrayIndex: number) => {
+      setBranchPointIndex(arrayIndex)
+      const logicalIndex = branchIndices[arrayIndex]
+      setBranchPointInput(
+        typeof logicalIndex === 'number' ? logicalIndex.toString() : ''
+      )
+      setBranchPointError(null)
+    },
+    [branchIndices]
+  )
+
+  useEffect(() => {
+    if (view !== 'selection') return
+    if (!branch || !branchPointSelection || !selectedNodeId) return
+    if (branchPointSelection.branchId !== selectedNodeId) return
+    const targetIndex = branchPointSelection.pointIndex
+    if (targetIndex === branchPointIndex) return
+    if (targetIndex < 0 || targetIndex >= branchIndices.length) return
+    setBranchPoint(targetIndex)
+  }, [
+    branch,
+    branchIndices.length,
+    branchPointIndex,
+    branchPointSelection,
+    setBranchPoint,
+    selectedNodeId,
+    view,
+  ])
 
   const handleJumpToBranchPoint = () => {
     if (!branch) return
@@ -2795,6 +3005,24 @@ export function InspectorDetailsPanel({
           {showSystemErrors && systemValidation.errors.paramNames ? (
             <div className="field-error">{systemValidation.errors.paramNames}</div>
           ) : null}
+          <div className="inspector-inline-actions">
+            <button
+              type="button"
+              className="inspector-inline-button"
+              onClick={() => void writeClipboardText(formatPointValues(systemDraft.params))}
+              disabled={systemDraft.paramNames.length === 0}
+            >
+              Copy values
+            </button>
+            <button
+              type="button"
+              className="inspector-inline-button"
+              onClick={handlePasteSystemParams}
+              disabled={systemDraft.paramNames.length === 0}
+            >
+              Paste values
+            </button>
+          </div>
           <div className="inspector-list">
             {systemDraft.paramNames.map((paramName, index) => (
               <div className="inspector-row inspector-row--param" key={`param-${index}`}>
@@ -3073,7 +3301,20 @@ export function InspectorDetailsPanel({
                   />
                 </div>
                 <div className="inspector-section">
-                  <h4 className="inspector-subheading">Parameters (last run)</h4>
+                  <div className="inspector-subheading-row">
+                    <h4 className="inspector-subheading">Parameters (last run)</h4>
+                    {orbit.parameters && orbit.parameters.length > 0 ? (
+                      <button
+                        type="button"
+                        className="inspector-inline-button"
+                        onClick={() =>
+                          void writeClipboardText(formatPointValues(orbit.parameters ?? []))
+                        }
+                      >
+                        Copy
+                      </button>
+                    ) : null}
+                  </div>
                   {orbit.parameters && orbit.parameters.length > 0 ? (
                     <InspectorMetrics
                       rows={orbit.parameters.map((value, index) => ({
@@ -3141,6 +3382,29 @@ export function InspectorDetailsPanel({
                           Showing {orbitPreviewStart + 1}–{orbitPreviewEnd} of{' '}
                           {orbit.data.length.toLocaleString()}
                         </div>
+                        {selectedOrbitPoint ? (
+                          <div className="inspector-inline-actions">
+                            <span className="inspector-meta">
+                              Selected point #{selectedOrbitPointIndex}{' '}
+                              {selectedOrbitPoint[0] !== undefined
+                                ? `· t=${formatFixed(selectedOrbitPoint[0], 3)}`
+                                : ''}
+                            </span>
+                            {selectedOrbitState ? (
+                              <button
+                                type="button"
+                                className="inspector-inline-button"
+                                onClick={() =>
+                                  void writeClipboardText(
+                                    formatPointValues(selectedOrbitState)
+                                  )
+                                }
+                              >
+                                Copy state
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                       <div
                         className="orbit-preview__table"
@@ -3158,17 +3422,31 @@ export function InspectorDetailsPanel({
                             </tr>
                           </thead>
                           <tbody>
-                            {orbitPreviewRows.map((point, rowIndex) => (
-                              <tr key={`orbit-preview-row-${orbitPreviewStart + rowIndex}`}>
-                                <td>{orbitPreviewStart + rowIndex}</td>
-                                <td>{formatFixed(point[0], 3)}</td>
-                                {orbitPreviewVarNames.map((_, varIndex) => (
-                                  <td key={`orbit-preview-cell-${rowIndex}-${varIndex}`}>
-                                    {formatFixed(point[varIndex + 1] ?? Number.NaN, 4)}
-                                  </td>
-                                ))}
-                              </tr>
-                            ))}
+                            {orbitPreviewRows.map((point, rowIndex) => {
+                              const pointIndex = orbitPreviewStart + rowIndex
+                              const isSelected = pointIndex === selectedOrbitPointIndex
+                              return (
+                                <tr
+                                  key={`orbit-preview-row-${pointIndex}`}
+                                  className={isSelected ? 'is-selected' : undefined}
+                                  onClick={() => {
+                                    if (!onOrbitPointSelect || !selectedNodeId) return
+                                    onOrbitPointSelect({
+                                      orbitId: selectedNodeId,
+                                      pointIndex,
+                                    })
+                                  }}
+                                >
+                                  <td>{pointIndex}</td>
+                                  <td>{formatFixed(point[0], 3)}</td>
+                                  {orbitPreviewVarNames.map((_, varIndex) => (
+                                    <td key={`orbit-preview-cell-${rowIndex}-${varIndex}`}>
+                                      {formatFixed(point[varIndex + 1] ?? Number.NaN, 4)}
+                                    </td>
+                                  ))}
+                                </tr>
+                              )
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -3500,6 +3778,15 @@ export function InspectorDetailsPanel({
                       Apply valid system changes before running orbits.
                     </div>
                   ) : null}
+                  <div className="inspector-inline-actions">
+                    <button
+                      type="button"
+                      className="inspector-inline-button"
+                      onClick={handlePasteOrbitState}
+                    >
+                      Paste state
+                    </button>
+                  </div>
                   <div className="inspector-list">
                     {systemDraft.varNames.map((varName, index) => (
                       <label key={`orbit-ic-${index}`}>
@@ -3590,6 +3877,15 @@ export function InspectorDetailsPanel({
                       data-testid="limit-cycle-period"
                     />
                   </label>
+                  <div className="inspector-inline-actions">
+                    <button
+                      type="button"
+                      className="inspector-inline-button"
+                      onClick={handlePasteLimitCycleState}
+                    >
+                      Paste state
+                    </button>
+                  </div>
                   <div className="inspector-list">
                     {systemDraft.varNames.map((varName, index) => (
                       <label key={`lc-state-${index}`}>
@@ -3933,7 +4229,22 @@ export function InspectorDetailsPanel({
                   />
                 </div>
                 <div className="inspector-section">
-                  <h4 className="inspector-subheading">Coordinates</h4>
+                  <div className="inspector-subheading-row">
+                    <h4 className="inspector-subheading">Coordinates</h4>
+                    {equilibrium.solution ? (
+                      <button
+                        type="button"
+                        className="inspector-inline-button"
+                        onClick={() =>
+                          void writeClipboardText(
+                            formatPointValues(equilibrium.solution?.state ?? [])
+                          )
+                        }
+                      >
+                        Copy
+                      </button>
+                    ) : null}
+                  </div>
                   {equilibrium.solution ? (
                     <InspectorMetrics
                       rows={systemDraft.varNames.map((name, index) => ({
@@ -3946,7 +4257,20 @@ export function InspectorDetailsPanel({
                   )}
                 </div>
                 <div className="inspector-section">
-                  <h4 className="inspector-subheading">Parameters (last solve)</h4>
+                  <div className="inspector-subheading-row">
+                    <h4 className="inspector-subheading">Parameters (last solve)</h4>
+                    {equilibrium.parameters && equilibrium.parameters.length > 0 ? (
+                      <button
+                        type="button"
+                        className="inspector-inline-button"
+                        onClick={() =>
+                          void writeClipboardText(formatPointValues(equilibrium.parameters ?? []))
+                        }
+                      >
+                        Copy
+                      </button>
+                    ) : null}
+                  </div>
                   {equilibrium.parameters && equilibrium.parameters.length > 0 ? (
                     <InspectorMetrics
                       rows={equilibrium.parameters.map((value, index) => ({
@@ -4193,7 +4517,24 @@ export function InspectorDetailsPanel({
                   )}
                 </div>
                 <div className="inspector-section">
-                  <h4 className="inspector-subheading">Cached solver parameters</h4>
+                  <div className="inspector-subheading-row">
+                    <h4 className="inspector-subheading">Cached solver parameters</h4>
+                    {equilibrium.lastSolverParams ? (
+                      <button
+                        type="button"
+                        className="inspector-inline-button"
+                        onClick={() =>
+                          void writeClipboardText(
+                            formatPointValues(
+                              equilibrium.lastSolverParams?.initialGuess ?? []
+                            )
+                          )
+                        }
+                      >
+                        Copy state
+                      </button>
+                    ) : null}
+                  </div>
                   {equilibrium.lastSolverParams ? (
                     <>
                       <InspectorMetrics
@@ -4239,6 +4580,15 @@ export function InspectorDetailsPanel({
                       Apply valid system changes before solving equilibria.
                     </div>
                   ) : null}
+                  <div className="inspector-inline-actions">
+                    <button
+                      type="button"
+                      className="inspector-inline-button"
+                      onClick={handlePasteEquilibriumGuess}
+                    >
+                      Paste state
+                    </button>
+                  </div>
                   <div className="inspector-list">
                     {systemDraft.varNames.map((varName, index) => (
                       <label key={`eq-guess-${index}`}>
@@ -4512,7 +4862,22 @@ export function InspectorDetailsPanel({
                 />
               </div>
               <div className="inspector-section">
-                <h4 className="inspector-subheading">Parameters</h4>
+                <div className="inspector-subheading-row">
+                  <h4 className="inspector-subheading">Parameters</h4>
+                  {limitCycle.parameters && limitCycle.parameters.length > 0 ? (
+                    <button
+                      type="button"
+                      className="inspector-inline-button"
+                      onClick={() =>
+                        void writeClipboardText(
+                          formatPointValues(limitCycle.parameters ?? [])
+                        )
+                      }
+                    >
+                      Copy
+                    </button>
+                  ) : null}
+                </div>
                 {limitCycle.parameters && limitCycle.parameters.length > 0 ? (
                   <InspectorMetrics
                     rows={limitCycle.parameters.map((value, index) => ({
@@ -4525,9 +4890,45 @@ export function InspectorDetailsPanel({
                 )}
               </div>
               <div className="inspector-section">
-                <h4 className="inspector-subheading">State</h4>
+                <div className="inspector-subheading-row">
+                  <h4 className="inspector-subheading">State</h4>
+                  {limitCycle.state.length > 0 ? (
+                    <div className="inspector-subheading-actions">
+                      <button
+                        type="button"
+                        className="inspector-inline-button"
+                        onClick={() =>
+                          void writeClipboardText(
+                            formatPointValues(selectedLimitCyclePoint ?? limitCycle.state)
+                          )
+                        }
+                      >
+                        {selectedLimitCyclePoint ? 'Copy point' : 'Copy state'}
+                      </button>
+                      {selectedLimitCyclePoint && onLimitCyclePointSelect ? (
+                        <button
+                          type="button"
+                          className="inspector-inline-button"
+                          onClick={() => onLimitCyclePointSelect(null)}
+                        >
+                          Clear
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
                 {limitCycle.state.length > 0 ? (
                   <div className="inspector-data">
+                    {selectedLimitCyclePoint ? (
+                      <div>
+                        Selected point {selectedLimitCyclePointIndex}: [
+                        {selectedLimitCyclePoint
+                          .slice(0, Math.min(selectedLimitCyclePoint.length, 8))
+                          .map((value) => formatFixed(value, 4))
+                          .join(', ')}
+                        {selectedLimitCyclePoint.length > 8 ? ', ...' : ''}]
+                      </div>
+                    ) : null}
                     <div>Length: {limitCycle.state.length}</div>
                     <div>
                       Preview: [
@@ -5114,7 +5515,22 @@ export function InspectorDetailsPanel({
                                 },
                               ]}
                             />
-                            <h4 className="inspector-subheading">Parameters</h4>
+                            <div className="inspector-subheading-row">
+                              <h4 className="inspector-subheading">Parameters</h4>
+                              {selectedBranchPointParams.length > 0 ? (
+                                <button
+                                  type="button"
+                                  className="inspector-inline-button"
+                                  onClick={() =>
+                                    void writeClipboardText(
+                                      formatPointValues(selectedBranchPointParams)
+                                    )
+                                  }
+                                >
+                                  Copy
+                                </button>
+                              ) : null}
+                            </div>
                             <InspectorMetrics
                               rows={systemDraft.paramNames.map((name, index) => {
                                 let value = branchParams[index]
@@ -5174,7 +5590,22 @@ export function InspectorDetailsPanel({
                                 )}
                               />
                             ) : null}
-                            <h4 className="inspector-subheading">State snapshot</h4>
+                            <div className="inspector-subheading-row">
+                              <h4 className="inspector-subheading">State snapshot</h4>
+                              {selectedBranchPoint.state.length > 0 ? (
+                                <button
+                                  type="button"
+                                  className="inspector-inline-button"
+                                  onClick={() =>
+                                    void writeClipboardText(
+                                      formatPointValues(selectedBranchPoint.state)
+                                    )
+                                  }
+                                >
+                                  Copy
+                                </button>
+                              ) : null}
+                            </div>
                             <div className="inspector-data">
                               <div>Length: {selectedBranchPoint.state.length}</div>
                               <div>
@@ -5478,7 +5909,22 @@ export function InspectorDetailsPanel({
                                 { label: 'Stability', value: selectedBranchPoint.stability },
                               ]}
                             />
-                            <h4 className="inspector-subheading">Parameters</h4>
+                            <div className="inspector-subheading-row">
+                              <h4 className="inspector-subheading">Parameters</h4>
+                              {selectedBranchPointParams.length > 0 ? (
+                                <button
+                                  type="button"
+                                  className="inspector-inline-button"
+                                  onClick={() =>
+                                    void writeClipboardText(
+                                      formatPointValues(selectedBranchPointParams)
+                                    )
+                                  }
+                                >
+                                  Copy
+                                </button>
+                              ) : null}
+                            </div>
                             <InspectorMetrics
                               rows={systemDraft.paramNames.map((name, index) => {
                                 let value = branchParams[index]
@@ -5498,7 +5944,22 @@ export function InspectorDetailsPanel({
                                 }
                               })}
                             />
-                            <h4 className="inspector-subheading">State</h4>
+                            <div className="inspector-subheading-row">
+                              <h4 className="inspector-subheading">State</h4>
+                              {selectedBranchPoint.state.length > 0 ? (
+                                <button
+                                  type="button"
+                                  className="inspector-inline-button"
+                                  onClick={() =>
+                                    void writeClipboardText(
+                                      formatPointValues(selectedBranchPoint.state)
+                                    )
+                                  }
+                                >
+                                  Copy
+                                </button>
+                              ) : null}
+                            </div>
                             <InspectorMetrics
                               rows={systemDraft.varNames.map((name, index) => ({
                                 label: name || `x${index + 1}`,

@@ -11,7 +11,11 @@ import { Toolbar } from './ui/Toolbar'
 import { PerfOverlay } from './ui/PerfOverlay'
 import { isDeterministicMode } from './utils/determinism'
 import { toCliSafeName } from './utils/naming'
-import type { BranchPointSelection } from './ui/branchPointSelection'
+import type {
+  BranchPointSelection,
+  LimitCyclePointSelection,
+  OrbitPointSelection,
+} from './ui/branchPointSelection'
 
 const MIN_LEFT_WIDTH = 220
 const MIN_RIGHT_WIDTH = 240
@@ -45,6 +49,10 @@ function App() {
   })
   const [branchPointSelection, setBranchPointSelection] =
     useState<BranchPointSelection>(null)
+  const [orbitPointSelection, setOrbitPointSelection] =
+    useState<OrbitPointSelection>(null)
+  const [limitCyclePointSelection, setLimitCyclePointSelection] =
+    useState<LimitCyclePointSelection>(null)
   const dragRef = useRef<{
     side: 'left' | 'right'
     startX: number
@@ -249,7 +257,12 @@ function App() {
         system={system}
         selectedNodeId={system?.ui.selectedNodeId ?? null}
         theme={theme}
+        branchPointSelection={branchPointSelection}
+        orbitPointSelection={orbitPointSelection}
+        limitCyclePointSelection={limitCyclePointSelection}
         onBranchPointSelect={setBranchPointSelection}
+        onOrbitPointSelect={setOrbitPointSelection}
+        onLimitCyclePointSelect={setLimitCyclePointSelection}
         onClose={closeSystemSettings}
         onRename={actions.renameNode}
         onToggleVisibility={actions.toggleVisibility}
@@ -350,6 +363,9 @@ function App() {
                 theme={theme}
                 onSelectViewport={selectNode}
                 onSelectObject={selectNode}
+                onSelectBranchPoint={setBranchPointSelection}
+                onSelectOrbitPoint={setOrbitPointSelection}
+                onSelectLimitCyclePoint={setLimitCyclePointSelection}
                 onReorderViewport={actions.reorderNode}
                 onResizeViewport={actions.updateViewportHeight}
                 onToggleViewport={actions.toggleExpanded}
@@ -388,7 +404,12 @@ function App() {
                 system={system}
                 selectedNodeId={system.ui.selectedNodeId}
                 theme={theme}
+                branchPointSelection={branchPointSelection}
+                orbitPointSelection={orbitPointSelection}
+                limitCyclePointSelection={limitCyclePointSelection}
                 onBranchPointSelect={setBranchPointSelection}
+                onOrbitPointSelect={setOrbitPointSelection}
+                onLimitCyclePointSelect={setLimitCyclePointSelection}
                 onRename={actions.renameNode}
                 onToggleVisibility={actions.toggleVisibility}
                 onUpdateRender={actions.updateRender}
