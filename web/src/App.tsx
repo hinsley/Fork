@@ -216,6 +216,7 @@ function App() {
         onUpdateRender={actions.updateRender}
         onUpdateScene={actions.updateScene}
         onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
+        onSetLimitCycleRenderTarget={actions.setLimitCycleRenderTarget}
         onUpdateSystem={actions.updateSystem}
         onValidateSystem={actions.validateSystem}
         onRunOrbit={actions.runOrbit}
@@ -336,6 +337,7 @@ function App() {
                 onUpdateRender={actions.updateRender}
                 onUpdateScene={actions.updateScene}
                 onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
+                onSetLimitCycleRenderTarget={actions.setLimitCycleRenderTarget}
                 onUpdateSystem={actions.updateSystem}
                 onValidateSystem={actions.validateSystem}
                 onRunOrbit={actions.runOrbit}

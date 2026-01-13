@@ -3,6 +3,7 @@ import type {
   BifurcationAxis,
   BifurcationDiagram,
   ContinuationObject,
+  LimitCycleRenderTarget,
   System,
   SystemLayout,
   SystemUiState,
@@ -34,6 +35,7 @@ const DEFAULT_UI: SystemUiState = {
   selectedNodeId: null,
   layout: DEFAULT_LAYOUT,
   viewportHeights: {},
+  limitCycleRenderTargets: {},
 }
 
 const DEFAULT_SCENE: Scene = {
@@ -349,6 +351,17 @@ export function removeNode(system: System, nodeId: string): System {
       delete next.ui.viewportHeights[id]
     }
   })
+  if (next.ui.limitCycleRenderTargets) {
+    next.ui.limitCycleRenderTargets = Object.fromEntries(
+      Object.entries(next.ui.limitCycleRenderTargets).filter(([objectId, target]) => {
+        if (removalSet.has(objectId)) return false
+        if (!target || typeof target !== 'object') return false
+        const branchId = (target as LimitCycleRenderTarget).branchId
+        if (!branchId) return false
+        return !removalSet.has(branchId)
+      })
+    )
+  }
 
   next.updatedAt = nowIso()
   return next
@@ -374,6 +387,24 @@ export function updateViewportHeights(
 ): System {
   const next = structuredClone(system)
   next.ui.viewportHeights = { ...next.ui.viewportHeights, ...updates }
+  next.updatedAt = nowIso()
+  return next
+}
+
+export function updateLimitCycleRenderTarget(
+  system: System,
+  objectId: string,
+  target: LimitCycleRenderTarget | null
+): System {
+  const next = structuredClone(system)
+  if (!next.ui.limitCycleRenderTargets) {
+    next.ui.limitCycleRenderTargets = {}
+  }
+  if (target) {
+    next.ui.limitCycleRenderTargets[objectId] = target
+  } else {
+    delete next.ui.limitCycleRenderTargets[objectId]
+  }
   next.updatedAt = nowIso()
   return next
 }
@@ -590,6 +621,20 @@ export function normalizeSystem(system: System): System {
     Object.entries(viewportHeights).filter(
       ([id, height]) => Boolean(next.nodes[id]) && Number.isFinite(height) && height > 0
     )
+  )
+  const limitCycleRenderTargets = nextUi.limitCycleRenderTargets ?? {}
+  nextUi.limitCycleRenderTargets = Object.fromEntries(
+    Object.entries(limitCycleRenderTargets).filter(([objectId, target]) => {
+      if (!next.objects[objectId] || next.objects[objectId]?.type !== 'limit_cycle') {
+        return false
+      }
+      if (!target || typeof target !== 'object') return false
+      const branchId = (target as { branchId?: string }).branchId
+      const pointIndex = (target as { pointIndex?: number }).pointIndex
+      if (!branchId || !next.branches[branchId]) return false
+      if (typeof pointIndex !== 'number' || !Number.isFinite(pointIndex)) return false
+      return pointIndex >= 0
+    })
   )
   next.ui = nextUi
 

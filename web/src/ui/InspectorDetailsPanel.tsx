@@ -10,6 +10,7 @@ import type {
   EquilibriumEigenvectorRenderStyle,
   EquilibriumObject,
   LimitCycleOrigin,
+  LimitCycleRenderTarget,
   OrbitObject,
   Scene,
   System,
@@ -70,6 +71,10 @@ type InspectorDetailsPanelProps = {
   onUpdateBifurcationDiagram: (
     id: string,
     update: Partial<Omit<BifurcationDiagram, 'id' | 'name'>>
+  ) => void
+  onSetLimitCycleRenderTarget?: (
+    objectId: string,
+    target: LimitCycleRenderTarget | null
   ) => void
   onUpdateSystem: (system: SystemConfig) => Promise<void>
   onValidateSystem: (system: SystemConfig, opts?: { signal?: AbortSignal }) => Promise<{
@@ -839,6 +844,7 @@ export function InspectorDetailsPanel({
   onUpdateRender,
   onUpdateScene,
   onUpdateBifurcationDiagram,
+  onSetLimitCycleRenderTarget,
   onUpdateSystem,
   onValidateSystem,
   onRunOrbit,
@@ -1013,6 +1019,40 @@ export function InspectorDetailsPanel({
     if (!branch || branchPointIndex === null) return null
     return branch.data.points[branchPointIndex] ?? null
   }, [branch, branchPointIndex])
+  const limitCycleRenderTargets = system.ui.limitCycleRenderTargets ?? {}
+  const limitCycleRenderTarget =
+    limitCycle && selectedNodeId ? limitCycleRenderTargets[selectedNodeId] ?? null : null
+  const limitCycleRenderBranch = limitCycleRenderTarget
+    ? system.branches[limitCycleRenderTarget.branchId]
+    : null
+  const limitCycleRenderLabel = useMemo(() => {
+    if (!limitCycleRenderTarget || !limitCycleRenderBranch) return null
+    const indices = ensureBranchIndices(limitCycleRenderBranch.data)
+    const logicalIndex = indices[limitCycleRenderTarget.pointIndex]
+    const displayIndex = Number.isFinite(logicalIndex)
+      ? logicalIndex
+      : limitCycleRenderTarget.pointIndex
+    return `${limitCycleRenderBranch.name} @ ${displayIndex}`
+  }, [limitCycleRenderBranch, limitCycleRenderTarget])
+  const limitCycleParentId = useMemo(() => {
+    if (!branch || branch.branchType !== 'limit_cycle') return null
+    return (
+      Object.entries(system.objects).find(
+        ([, obj]) => obj.type === 'limit_cycle' && obj.name === branch.parentObject
+      )?.[0] ?? null
+    )
+  }, [branch, system.objects])
+  const branchRenderTarget = limitCycleParentId
+    ? limitCycleRenderTargets[limitCycleParentId] ?? null
+    : null
+  const isBranchRenderTarget =
+    Boolean(
+      branchRenderTarget &&
+        selectedNodeId &&
+        branchPointIndex !== null &&
+        branchRenderTarget.branchId === selectedNodeId &&
+        branchRenderTarget.pointIndex === branchPointIndex
+    )
 
   const [systemDraft, setSystemDraft] = useState<SystemDraft>(() =>
     makeSystemDraft(system.config)
@@ -2908,6 +2948,22 @@ export function InspectorDetailsPanel({
               >
                 {nodeVisibility ? 'Visible' : 'Hidden'}
               </button>
+            </div>
+          ) : null}
+
+          {limitCycle ? (
+            <div
+              className="inspector-section"
+              data-testid="limit-cycle-render-target"
+            >
+              <h4 className="inspector-subheading">Rendered at</h4>
+              {limitCycleRenderLabel ? (
+                <div className="inspector-data">{limitCycleRenderLabel}</div>
+              ) : (
+                <p className="empty-state">
+                  No render target set yet. Choose a branch point to render.
+                </p>
+              )}
             </div>
           ) : null}
 
@@ -4920,6 +4976,27 @@ export function InspectorDetailsPanel({
                                     </div>
                                   </>
                                 ) : null}
+                              </div>
+                            ) : null}
+
+                            {branchPointIndex !== null &&
+                            selectedNodeId &&
+                            limitCycleParentId &&
+                            onSetLimitCycleRenderTarget &&
+                            !isBranchRenderTarget ? (
+                              <div className="inspector-row">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onSetLimitCycleRenderTarget(limitCycleParentId, {
+                                      branchId: selectedNodeId,
+                                      pointIndex: branchPointIndex,
+                                    })
+                                  }
+                                  data-testid="branch-point-render-lc"
+                                >
+                                  Render LC Here
+                                </button>
                               </div>
                             ) : null}
 

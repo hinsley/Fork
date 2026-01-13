@@ -1,5 +1,12 @@
 import { InspectorDetailsPanel } from './InspectorDetailsPanel'
-import type { BifurcationDiagram, Scene, System, SystemConfig, TreeNode } from '../system/types'
+import type {
+  BifurcationDiagram,
+  LimitCycleRenderTarget,
+  Scene,
+  System,
+  SystemConfig,
+  TreeNode,
+} from '../system/types'
 import type {
   BranchContinuationRequest,
   BranchExtensionRequest,
@@ -31,6 +38,10 @@ type SystemSettingsDialogProps = {
   onUpdateBifurcationDiagram: (
     id: string,
     update: Partial<Omit<BifurcationDiagram, 'id' | 'name'>>
+  ) => void
+  onSetLimitCycleRenderTarget?: (
+    objectId: string,
+    target: LimitCycleRenderTarget | null
   ) => void
   onUpdateSystem: (system: SystemConfig) => Promise<void>
   onValidateSystem: (system: SystemConfig, opts?: { signal?: AbortSignal }) => Promise<{
@@ -65,6 +76,7 @@ export function SystemSettingsDialog({
   onUpdateRender,
   onUpdateScene,
   onUpdateBifurcationDiagram,
+  onSetLimitCycleRenderTarget,
   onUpdateSystem,
   onValidateSystem,
   onRunOrbit,
@@ -105,15 +117,16 @@ export function SystemSettingsDialog({
         <div className="dialog__section dialog__section--flush">
           <InspectorDetailsPanel
             system={system}
-          selectedNodeId={selectedNodeId}
-          view="system"
-          theme={theme}
-          onBranchPointSelect={onBranchPointSelect}
+            selectedNodeId={selectedNodeId}
+            view="system"
+            theme={theme}
+            onBranchPointSelect={onBranchPointSelect}
             onRename={onRename}
             onToggleVisibility={onToggleVisibility}
             onUpdateRender={onUpdateRender}
             onUpdateScene={onUpdateScene}
             onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
+            onSetLimitCycleRenderTarget={onSetLimitCycleRenderTarget}
             onUpdateSystem={onUpdateSystem}
             onValidateSystem={onValidateSystem}
             onRunOrbit={onRunOrbit}

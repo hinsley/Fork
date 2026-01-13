@@ -1028,6 +1028,139 @@ function resolveLimitCycleMesh(
   return DEFAULT_LIMIT_CYCLE_MESH
 }
 
+type LimitCycleTraceConfig = {
+  state: number[]
+  dim: number
+  ntst: number
+  ncol: number
+  name: string
+  uid: string
+  color: string
+  lineWidth: number
+  pointSize: number
+  showLegend?: boolean
+}
+
+function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
+  const {
+    state,
+    dim,
+    ntst,
+    ncol,
+    name,
+    uid,
+    color,
+    lineWidth,
+    pointSize,
+    showLegend,
+  } = config
+  const traces: Data[] = []
+  if (!state || state.length === 0 || dim <= 0) return traces
+  const plotDim = Math.min(dim, 3)
+  const { profilePoints, period } = extractLimitCycleProfile(state, dim, ntst, ncol)
+  const usablePoints = profilePoints.filter(
+    (pt) => pt.length >= plotDim && pt.slice(0, plotDim).every(Number.isFinite)
+  )
+
+  if (usablePoints.length >= 2 && plotDim > 0) {
+    if (plotDim >= 3) {
+      const x = usablePoints.map((pt) => pt[0] ?? Number.NaN)
+      const y = usablePoints.map((pt) => pt[1] ?? Number.NaN)
+      const z = usablePoints.map((pt) => pt[2] ?? Number.NaN)
+      traces.push({
+        type: 'scatter3d',
+        mode: 'lines',
+        name,
+        uid,
+        x,
+        y,
+        z,
+        line: { color, width: lineWidth },
+        ...(showLegend === undefined ? {} : { showlegend: showLegend }),
+      })
+    } else if (plotDim === 2) {
+      const x = usablePoints.map((pt) => pt[0] ?? Number.NaN)
+      const y = usablePoints.map((pt) => pt[1] ?? Number.NaN)
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        name,
+        uid,
+        x,
+        y,
+        line: { color, width: lineWidth },
+        ...(showLegend === undefined ? {} : { showlegend: showLegend }),
+      })
+    } else if (plotDim === 1) {
+      const timeEnd = Number.isFinite(period)
+        ? period
+        : Math.max(usablePoints.length - 1, 1)
+      const step = usablePoints.length > 1 ? timeEnd / (usablePoints.length - 1) : 1
+      const x = usablePoints.map((_, idx) => idx * step)
+      const y = usablePoints.map((pt) => pt[0] ?? Number.NaN)
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        name,
+        uid,
+        x,
+        y,
+        line: { color, width: lineWidth },
+        ...(showLegend === undefined ? {} : { showlegend: showLegend }),
+      })
+    }
+    return traces
+  }
+
+  if (plotDim <= 0) return traces
+  const fallback = state.slice(0, plotDim)
+  if (fallback.length !== plotDim || !fallback.every(Number.isFinite)) return traces
+  if (plotDim >= 3) {
+    traces.push({
+      type: 'scatter3d',
+      mode: 'markers',
+      name,
+      uid,
+      x: [fallback[0]],
+      y: [fallback[1]],
+      z: [fallback[2]],
+      marker: { color, size: pointSize },
+      ...(showLegend === undefined ? {} : { showlegend: showLegend }),
+    })
+  } else if (plotDim === 2) {
+    traces.push({
+      type: 'scatter',
+      mode: 'markers',
+      name,
+      uid,
+      x: [fallback[0]],
+      y: [fallback[1]],
+      marker: { color, size: pointSize },
+      ...(showLegend === undefined ? {} : { showlegend: showLegend }),
+    })
+  } else if (plotDim === 1) {
+    traces.push({
+      type: 'scatter',
+      mode: 'markers',
+      name,
+      uid,
+      x: [0],
+      y: [fallback[0]],
+      marker: { color, size: pointSize },
+      ...(showLegend === undefined ? {} : { showlegend: showLegend }),
+    })
+  }
+  return traces
+}
+
+function buildObjectNameIndex(system: System): Map<string, string> {
+  const map = new Map<string, string>()
+  Object.entries(system.objects).forEach(([id, obj]) => {
+    map.set(obj.name, id)
+  })
+  return map
+}
+
 function buildSceneTraces(
   system: System,
   scene: Scene,
@@ -1039,6 +1172,8 @@ function buildSceneTraces(
   plotSize?: PlotSize | null
 ): Data[] {
   const traces: Data[] = []
+  const limitCycleRenderTargets = system.ui.limitCycleRenderTargets ?? {}
+  const objectNameIndex = buildObjectNameIndex(system)
   const isMap = system.config.type === 'map'
   const isTimeSeries = system.config.varNames.length === 1 && !isMap
   const isMap1D = isMap && system.config.varNames.length === 1
@@ -1202,6 +1337,39 @@ function buildSceneTraces(
           },
         })
       }
+      continue
+    }
+
+    if (object.type === 'limit_cycle') {
+      const highlight = nodeId === selectedNodeId
+      const renderTarget = limitCycleRenderTargets[nodeId] ?? null
+      let state = object.state
+      let ntst = object.ntst
+      let ncol = object.ncol
+      if (renderTarget) {
+        const branch = system.branches[renderTarget.branchId]
+        const point = branch?.data.points[renderTarget.pointIndex]
+        if (branch && point) {
+          const mesh = resolveLimitCycleMesh(branch)
+          state = point.state
+          ntst = mesh.ntst
+          ncol = mesh.ncol
+        }
+      }
+      const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
+      traces.push(
+        ...buildLimitCycleTraces({
+          state,
+          dim: system.config.varNames.length,
+          ntst,
+          ncol,
+          name: object.name,
+          uid: nodeId,
+          color: node.render.color,
+          lineWidth,
+          pointSize: node.render.pointSize + (highlight ? 2 : 0),
+        })
+      )
       continue
     }
 
@@ -1375,116 +1543,42 @@ function buildSceneTraces(
     const branch = system.branches[branchPointSelection.branchId]
     const point = branch?.data.points[branchPointSelection.pointIndex]
     if (branch && point && LIMIT_CYCLE_BRANCH_TYPES.has(branch.branchType)) {
-      const node = system.nodes[branchPointSelection.branchId]
-      const render = node?.render ?? DEFAULT_RENDER
-      const { ntst, ncol } = resolveLimitCycleMesh(branch)
-      const dim = system.config.varNames.length
-      const plotDim = Math.min(dim, 3)
-      const { profilePoints, period } = extractLimitCycleProfile(
-        point.state,
-        dim,
-        ntst,
-        ncol
-      )
-      const usablePoints = profilePoints.filter(
-        (pt) => pt.length >= plotDim && pt.slice(0, plotDim).every(Number.isFinite)
-      )
-      const indices = ensureBranchIndices(branch.data)
-      const logicalIndex = indices[branchPointSelection.pointIndex]
-      const displayIndex = Number.isFinite(logicalIndex)
-        ? logicalIndex
-        : branchPointSelection.pointIndex
-      const traceName = `LC Preview: ${branch.name} @ ${displayIndex}`
-      const lineWidth = render.lineWidth + 1
-      const color = render.color
-
-      if (usablePoints.length >= 2 && plotDim > 0) {
-        if (plotDim >= 3) {
-          const x = usablePoints.map((pt) => pt[0] ?? Number.NaN)
-          const y = usablePoints.map((pt) => pt[1] ?? Number.NaN)
-          const z = usablePoints.map((pt) => pt[2] ?? Number.NaN)
-          traces.push({
-            type: 'scatter3d',
-            mode: 'lines',
+      const objectId = objectNameIndex.get(branch.parentObject) ?? null
+      const objectNode = objectId ? system.nodes[objectId] : null
+      const render = {
+        ...DEFAULT_RENDER,
+        ...(objectNode?.render ?? system.nodes[branchPointSelection.branchId]?.render ?? {}),
+      }
+      const renderTarget = objectId ? limitCycleRenderTargets[objectId] : null
+      const isCurrentTarget =
+        Boolean(
+          renderTarget &&
+            renderTarget.branchId === branchPointSelection.branchId &&
+            renderTarget.pointIndex === branchPointSelection.pointIndex
+        )
+      if (!isCurrentTarget) {
+        const { ntst, ncol } = resolveLimitCycleMesh(branch)
+        const dim = system.config.varNames.length
+        const indices = ensureBranchIndices(branch.data)
+        const logicalIndex = indices[branchPointSelection.pointIndex]
+        const displayIndex = Number.isFinite(logicalIndex)
+          ? logicalIndex
+          : branchPointSelection.pointIndex
+        const traceName = `LC Preview: ${branch.name} @ ${displayIndex}`
+        traces.push(
+          ...buildLimitCycleTraces({
+            state: point.state,
+            dim,
+            ntst,
+            ncol,
             name: traceName,
             uid: branchPointSelection.branchId,
-            x,
-            y,
-            z,
-            line: { color, width: lineWidth },
-            showlegend: false,
+            color: render.color,
+            lineWidth: render.lineWidth + 1,
+            pointSize: render.pointSize + 2,
+            showLegend: false,
           })
-        } else if (plotDim === 2) {
-          const x = usablePoints.map((pt) => pt[0] ?? Number.NaN)
-          const y = usablePoints.map((pt) => pt[1] ?? Number.NaN)
-          traces.push({
-            type: 'scatter',
-            mode: 'lines',
-            name: traceName,
-            uid: branchPointSelection.branchId,
-            x,
-            y,
-            line: { color, width: lineWidth },
-            showlegend: false,
-          })
-        } else if (plotDim === 1) {
-          const timeEnd = Number.isFinite(period)
-            ? period
-            : Math.max(usablePoints.length - 1, 1)
-          const step =
-            usablePoints.length > 1 ? timeEnd / (usablePoints.length - 1) : 1
-          const x = usablePoints.map((_, idx) => idx * step)
-          const y = usablePoints.map((pt) => pt[0] ?? Number.NaN)
-          traces.push({
-            type: 'scatter',
-            mode: 'lines',
-            name: traceName,
-            uid: branchPointSelection.branchId,
-            x,
-            y,
-            line: { color, width: lineWidth },
-            showlegend: false,
-          })
-        }
-      } else if (plotDim > 0) {
-        const fallback = point.state.slice(0, plotDim)
-        if (fallback.length === plotDim && fallback.every(Number.isFinite)) {
-          if (plotDim >= 3) {
-            traces.push({
-              type: 'scatter3d',
-              mode: 'markers',
-              name: traceName,
-              uid: branchPointSelection.branchId,
-              x: [fallback[0]],
-              y: [fallback[1]],
-              z: [fallback[2]],
-              marker: { color, size: render.pointSize + 2 },
-              showlegend: false,
-            })
-          } else if (plotDim === 2) {
-            traces.push({
-              type: 'scatter',
-              mode: 'markers',
-              name: traceName,
-              uid: branchPointSelection.branchId,
-              x: [fallback[0]],
-              y: [fallback[1]],
-              marker: { color, size: render.pointSize + 2 },
-              showlegend: false,
-            })
-          } else if (plotDim === 1) {
-            traces.push({
-              type: 'scatter',
-              mode: 'markers',
-              name: traceName,
-              uid: branchPointSelection.branchId,
-              x: [0],
-              y: [fallback[0]],
-              marker: { color, size: render.pointSize + 2 },
-              showlegend: false,
-            })
-          }
-        }
+        )
       }
     }
   }

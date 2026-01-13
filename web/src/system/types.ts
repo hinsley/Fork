@@ -153,6 +153,11 @@ export interface LimitCycleObject {
   createdAt: string
 }
 
+export type LimitCycleRenderTarget = {
+  branchId: string
+  pointIndex: number
+}
+
 export type AnalysisObject =
   | OrbitObject
   | EquilibriumObject
@@ -258,6 +263,7 @@ export interface SystemUiState {
   selectedNodeId: string | null
   layout: SystemLayout
   viewportHeights: Record<string, number>
+  limitCycleRenderTargets?: Record<string, LimitCycleRenderTarget>
 }
 
 export interface System {

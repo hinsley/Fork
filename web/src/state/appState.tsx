@@ -19,6 +19,7 @@ import type {
   CovariantLyapunovData,
   EquilibriumObject,
   EquilibriumSolverParams,
+  LimitCycleRenderTarget,
   LimitCycleObject,
   OrbitObject,
   System,
@@ -41,6 +42,7 @@ import {
   toggleNodeExpanded,
   toggleNodeVisibility,
   updateBifurcationDiagram,
+  updateLimitCycleRenderTarget,
   updateLayout,
   updateViewportHeights,
   updateNodeRender,
@@ -330,6 +332,10 @@ type AppActions = {
   updateBifurcationDiagram: (
     diagramId: string,
     update: Partial<Omit<BifurcationDiagram, 'id' | 'name'>>
+  ) => void
+  setLimitCycleRenderTarget: (
+    objectId: string,
+    target: LimitCycleRenderTarget | null
   ) => void
   deleteNode: (nodeId: string) => Promise<void>
   createOrbitObject: (name: string) => Promise<string | null>
@@ -621,6 +627,16 @@ export function AppProvider({
     (nodeId: string, render: Partial<TreeNode['render']>) => {
       if (!state.system) return
       const system = updateNodeRender(state.system, nodeId, render)
+      dispatch({ type: 'SET_SYSTEM', system })
+      scheduleUiSave(system)
+    },
+    [scheduleUiSave, state.system]
+  )
+
+  const setLimitCycleRenderTargetAction = useCallback(
+    (objectId: string, target: LimitCycleRenderTarget | null) => {
+      if (!state.system) return
+      const system = updateLimitCycleRenderTarget(state.system, objectId, target)
       dispatch({ type: 'SET_SYSTEM', system })
       scheduleUiSave(system)
     },
@@ -2429,6 +2445,7 @@ export function AppProvider({
       updateRender: updateRenderAction,
       updateScene: updateSceneAction,
       updateBifurcationDiagram: updateBifurcationDiagramAction,
+      setLimitCycleRenderTarget: setLimitCycleRenderTargetAction,
       deleteNode: deleteNodeAction,
       createOrbitObject,
       createEquilibriumObject,
@@ -2488,6 +2505,7 @@ export function AppProvider({
       updateRenderAction,
       updateSceneAction,
       updateBifurcationDiagramAction,
+      setLimitCycleRenderTargetAction,
       deleteNodeAction,
       addSceneAction,
       importSystem,
