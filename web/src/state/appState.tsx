@@ -223,6 +223,18 @@ export type LimitCycleCreateRequest = {
   parameterName?: string
 }
 
+export type LimitCycleHopfContinuationRequest = {
+  branchId: string
+  pointIndex: number
+  limitCycleName: string
+  branchName: string
+  amplitude: number
+  ntst: number
+  ncol: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
 
 type AppState = {
   system: System | null
@@ -312,6 +324,7 @@ type AppActions = {
   createFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   createHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
   createLimitCycleObject: (request: LimitCycleCreateRequest) => Promise<void>
+  createLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
   addScene: (name: string, targetId?: string | null) => Promise<void>
   addBifurcationDiagram: (name: string, targetId?: string | null) => Promise<void>
   importSystem: (file: File) => Promise<void>
@@ -1640,6 +1653,186 @@ export function AppProvider({
     [client, state.system, store]
   )
 
+  const createLimitCycleFromHopf = useCallback(
+    async (request: LimitCycleHopfContinuationRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (system.type === 'map') {
+          throw new Error('Limit cycles require a flow system.')
+        }
+
+        const sourceBranch = state.system.branches[request.branchId]
+        if (!sourceBranch) {
+          throw new Error('Select a valid branch to continue.')
+        }
+        if (sourceBranch.branchType !== 'equilibrium') {
+          throw new Error('Limit cycle continuation is only available for equilibrium branches.')
+        }
+
+        const point: ContinuationPoint | undefined =
+          sourceBranch.data.points[request.pointIndex]
+        if (!point) {
+          throw new Error('Select a valid branch point.')
+        }
+        if (point.stability !== 'Hopf') {
+          throw new Error('Selected point is not a Hopf bifurcation.')
+        }
+
+        const limitCycleName = request.limitCycleName.trim()
+        const limitCycleNameError = validateObjectName(limitCycleName, 'Limit cycle')
+        if (limitCycleNameError) {
+          throw new Error(limitCycleNameError)
+        }
+        const existingNames = Object.values(state.system.objects).map((obj) => obj.name)
+        if (existingNames.includes(limitCycleName)) {
+          throw new Error(`Object "${limitCycleName}" already exists.`)
+        }
+
+        const branchName = request.branchName.trim()
+        const branchNameError = validateBranchName(branchName)
+        if (branchNameError) {
+          throw new Error(branchNameError)
+        }
+        if (branchNameExists(state.system, limitCycleName, branchName)) {
+          throw new Error(`Branch "${branchName}" already exists.`)
+        }
+
+        if (!Number.isFinite(request.amplitude) || request.amplitude <= 0) {
+          throw new Error('Amplitude must be a positive number.')
+        }
+        if (!Number.isFinite(request.ntst) || request.ntst <= 0) {
+          throw new Error('NTST must be a positive integer.')
+        }
+        if (!Number.isFinite(request.ncol) || request.ncol <= 0) {
+          throw new Error('NCOL must be a positive integer.')
+        }
+
+        const parameterName = sourceBranch.parameterName
+        if (!system.paramNames.includes(parameterName)) {
+          throw new Error('Continuation parameter is not defined in this system.')
+        }
+
+        const runConfig: SystemConfig = { ...system }
+        runConfig.params = getBranchParams(state.system, sourceBranch)
+
+        const paramIndex = system.paramNames.indexOf(parameterName)
+        if (paramIndex >= 0) {
+          runConfig.params[paramIndex] = point.param_value
+        }
+
+        const branchData = await client.runLimitCycleContinuationFromHopf(
+          {
+            system: runConfig,
+            hopfState: point.state,
+            parameterName,
+            paramValue: point.param_value,
+            amplitude: request.amplitude,
+            ntst: Math.round(request.ntst),
+            ncol: Math.round(request.ncol),
+            settings: request.settings,
+            forward: request.forward,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Limit Cycle', progress },
+              }),
+          }
+        )
+
+        if (branchData.points.length <= 1) {
+          throw new Error(
+            'Limit cycle continuation stopped at the seed point. Try a smaller step size or adjust parameters.'
+          )
+        }
+
+        const indices =
+          branchData.indices && branchData.indices.length === branchData.points.length
+            ? branchData.indices
+            : branchData.points.map((_, index) => index)
+
+        const normalizedBranchData = normalizeBranchEigenvalues({
+          ...branchData,
+          indices,
+          branch_type:
+            branchData.branch_type ?? {
+              type: 'LimitCycle' as const,
+              ntst: Math.round(request.ntst),
+              ncol: Math.round(request.ncol),
+            },
+        })
+
+        const firstPoint = normalizedBranchData.points[0]
+        if (!firstPoint || firstPoint.state.length === 0) {
+          throw new Error('Limit cycle continuation did not return a valid initial state.')
+        }
+
+        const period = firstPoint.state[firstPoint.state.length - 1]
+        if (!Number.isFinite(period) || period <= 0) {
+          throw new Error('Limit cycle continuation returned an invalid period.')
+        }
+
+        const logicalIndex =
+          sourceBranch.data.indices?.[request.pointIndex] ?? request.pointIndex
+
+        const lcObj: LimitCycleObject = {
+          type: 'limit_cycle',
+          name: limitCycleName,
+          systemName: system.name,
+          origin: {
+            type: 'hopf',
+            equilibriumObjectName: sourceBranch.parentObject,
+            equilibriumBranchName: sourceBranch.name,
+            pointIndex: logicalIndex,
+          },
+          ntst: Math.round(request.ntst),
+          ncol: Math.round(request.ncol),
+          period,
+          state: firstPoint.state,
+          parameters: [...runConfig.params],
+          parameterName,
+          paramValue: firstPoint.param_value,
+          createdAt: new Date().toISOString(),
+        }
+
+        const added = addObject(state.system, lcObj)
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name: branchName,
+          systemName: system.name,
+          parameterName,
+          parentObject: limitCycleName,
+          startObject: limitCycleName,
+          branchType: 'limit_cycle',
+          data: normalizedBranchData,
+          settings: request.settings,
+          timestamp: new Date().toISOString(),
+          params: [...runConfig.params],
+        }
+
+        const createdBranch = addBranch(added.system, branch, added.nodeId)
+        const selected = selectNode(createdBranch.system, createdBranch.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
   const createLimitCycleObject = useCallback(
     async (request: LimitCycleCreateRequest) => {
       if (!state.system) return
@@ -1820,6 +2013,7 @@ export function AppProvider({
       createFoldCurveFromPoint,
       createHopfCurveFromPoint,
       createLimitCycleObject,
+      createLimitCycleFromHopf,
       addScene: addSceneAction,
       addBifurcationDiagram: addBifurcationDiagramAction,
       importSystem,
@@ -1839,6 +2033,7 @@ export function AppProvider({
       extendBranch,
       createFoldCurveFromPoint,
       createHopfCurveFromPoint,
+      createLimitCycleFromHopf,
       addBifurcationDiagramAction,
       createSystemAction,
       deleteSystem,

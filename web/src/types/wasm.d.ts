@@ -4,5 +4,6 @@ declare module '@fork-wasm' {
   export const WasmEquilibriumRunner: unknown
   export const WasmFoldCurveRunner: unknown
   export const WasmHopfCurveRunner: unknown
+  export const WasmLimitCycleRunner: unknown
   export default init
 }

@@ -97,6 +97,9 @@ beforeAll(async () => {
       compute_covariant_lyapunov_vectors() {
         return { dimension: 2, checkpoints: 1, times: [0], vectors: [] }
       }
+      init_lc_from_hopf() {
+        return {}
+      }
     }
 
     class MockWasmEquilibriumRunner {
@@ -154,6 +157,7 @@ beforeAll(async () => {
       WasmEquilibriumRunner: MockWasmEquilibriumRunner,
       WasmFoldCurveRunner: MockContinuationRunner,
       WasmHopfCurveRunner: MockContinuationRunner,
+      WasmLimitCycleRunner: MockContinuationRunner,
       WasmContinuationExtensionRunner: MockContinuationRunner,
       WasmCodim1CurveExtensionRunner: MockContinuationRunner,
     }

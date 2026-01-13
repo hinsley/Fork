@@ -38,6 +38,7 @@ import type {
   OrbitCovariantLyapunovRequest,
   OrbitLyapunovRequest,
   OrbitRunRequest,
+  LimitCycleHopfContinuationRequest,
 } from '../state/appState'
 import { validateSystemConfig } from '../state/systemValidation'
 import {
@@ -79,6 +80,7 @@ type InspectorDetailsPanelProps = {
   onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
+  onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
 }
 
 type SystemDraft = {
@@ -122,6 +124,22 @@ type LimitCycleDraft = {
   ntst: string
   ncol: string
   parameterName: string
+}
+
+type LimitCycleFromHopfDraft = {
+  limitCycleName: string
+  branchName: string
+  amplitude: string
+  ntst: string
+  ncol: string
+  stepSize: string
+  maxSteps: string
+  minStepSize: string
+  maxStepSize: string
+  correctorSteps: string
+  correctorTolerance: string
+  stepTolerance: string
+  forward: boolean
 }
 
 type ContinuationDraft = {
@@ -507,6 +525,24 @@ function makeLimitCycleDraft(system: SystemConfig, orbit?: OrbitObject): LimitCy
   }
 }
 
+function makeLimitCycleFromHopfDraft(): LimitCycleFromHopfDraft {
+  return {
+    limitCycleName: '',
+    branchName: '',
+    amplitude: '0.1',
+    ntst: '20',
+    ncol: '4',
+    stepSize: '0.01',
+    maxSteps: '50',
+    minStepSize: '1e-5',
+    maxStepSize: '0.1',
+    correctorSteps: '10',
+    correctorTolerance: '1e-6',
+    stepTolerance: '1e-6',
+    forward: true,
+  }
+}
+
 function makeContinuationDraft(system: SystemConfig): ContinuationDraft {
   return {
     name: '',
@@ -724,6 +760,7 @@ export function InspectorDetailsPanel({
   onExtendBranch,
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
+  onCreateLimitCycleFromHopf,
 }: InspectorDetailsPanelProps) {
   const node = selectedNodeId ? system.nodes[selectedNodeId] : null
   const object = selectedNodeId ? system.objects[selectedNodeId] : undefined
@@ -921,6 +958,9 @@ export function InspectorDetailsPanel({
     makeLimitCycleDraft(system.config)
   )
   const [limitCycleError, setLimitCycleError] = useState<string | null>(null)
+  const [limitCycleFromHopfDraft, setLimitCycleFromHopfDraft] =
+    useState<LimitCycleFromHopfDraft>(() => makeLimitCycleFromHopfDraft())
+  const [limitCycleFromHopfError, setLimitCycleFromHopfError] = useState<string | null>(null)
   const [foldCurveDraft, setFoldCurveDraft] = useState<Codim1CurveDraft>(() =>
     makeCodim1CurveDraft(system.config)
   )
@@ -1142,12 +1182,29 @@ export function InspectorDetailsPanel({
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, param2Name, name: nextName }
     })
+    setLimitCycleFromHopfDraft((prev) => {
+      const safeBranchName = toCliSafeName(branchName)
+      const suggestedLimitCycleName = `lc_hopf_${safeBranchName}`
+      const limitCycleName =
+        prev.limitCycleName.trim().length > 0 ? prev.limitCycleName : suggestedLimitCycleName
+      const suggestedBranchName = branchParameterName
+        ? `${limitCycleName}_${branchParameterName}`
+        : limitCycleName
+      const branchNameValue =
+        prev.branchName.trim().length > 0 ? prev.branchName : suggestedBranchName
+      return {
+        ...prev,
+        limitCycleName,
+        branchName: branchNameValue,
+      }
+    })
     setBranchExtensionDraft(makeBranchExtensionDraft(stableSystemConfigRef.current, branch))
     setBranchContinuationError(null)
     setBranchExtensionError(null)
     setBranchPointError(null)
     setFoldCurveError(null)
     setHopfCurveError(null)
+    setLimitCycleFromHopfError(null)
   }, [branch, branchName, branchParameterName, systemDraft.paramNames])
 
   useEffect(() => {
@@ -1865,6 +1922,107 @@ export function InspectorDetailsPanel({
       param2Name: hopfCurveDraft.param2Name,
       settings,
       forward: hopfCurveDraft.forward,
+    })
+  }
+
+  const handleCreateLimitCycleFromHopf = async () => {
+    if (runDisabled) {
+      setLimitCycleFromHopfError('Apply valid system settings before continuing.')
+      return
+    }
+    if (systemDraft.type === 'map') {
+      setLimitCycleFromHopfError('Limit cycles require a flow system.')
+      return
+    }
+    if (!branch || !selectedNodeId) {
+      setLimitCycleFromHopfError('Select a branch to continue.')
+      return
+    }
+    if (branch.branchType !== 'equilibrium') {
+      setLimitCycleFromHopfError(
+        'Limit cycle continuation is only available for equilibrium branches.'
+      )
+      return
+    }
+    if (!selectedBranchPoint || branchPointIndex === null) {
+      setLimitCycleFromHopfError('Select a branch point to continue from.')
+      return
+    }
+    if (selectedBranchPoint.stability !== 'Hopf') {
+      setLimitCycleFromHopfError('Select a Hopf bifurcation point to continue.')
+      return
+    }
+    if (!branchParameterName || !systemDraft.paramNames.includes(branchParameterName)) {
+      setLimitCycleFromHopfError('Continuation parameter is not defined in this system.')
+      return
+    }
+
+    const limitCycleName = limitCycleFromHopfDraft.limitCycleName.trim()
+    if (!limitCycleName) {
+      setLimitCycleFromHopfError('Limit cycle name is required.')
+      return
+    }
+    if (!isCliSafeName(limitCycleName)) {
+      setLimitCycleFromHopfError('Limit cycle names must be alphanumeric with underscores only.')
+      return
+    }
+
+    const branchName = limitCycleFromHopfDraft.branchName.trim()
+    if (!branchName) {
+      setLimitCycleFromHopfError('Branch name is required.')
+      return
+    }
+    if (!isCliSafeName(branchName)) {
+      setLimitCycleFromHopfError('Branch names must be alphanumeric with underscores only.')
+      return
+    }
+
+    const amplitude = parseNumber(limitCycleFromHopfDraft.amplitude)
+    if (amplitude === null || amplitude <= 0) {
+      setLimitCycleFromHopfError('Amplitude must be a positive number.')
+      return
+    }
+
+    const ntst = parseInteger(limitCycleFromHopfDraft.ntst)
+    if (ntst === null || ntst <= 0) {
+      setLimitCycleFromHopfError('NTST must be a positive integer.')
+      return
+    }
+
+    const ncol = parseInteger(limitCycleFromHopfDraft.ncol)
+    if (ncol === null || ncol <= 0) {
+      setLimitCycleFromHopfError('NCOL must be a positive integer.')
+      return
+    }
+
+    const { settings, error } = buildContinuationSettings({
+      name: '',
+      parameterName: branchParameterName,
+      stepSize: limitCycleFromHopfDraft.stepSize,
+      maxSteps: limitCycleFromHopfDraft.maxSteps,
+      minStepSize: limitCycleFromHopfDraft.minStepSize,
+      maxStepSize: limitCycleFromHopfDraft.maxStepSize,
+      correctorSteps: limitCycleFromHopfDraft.correctorSteps,
+      correctorTolerance: limitCycleFromHopfDraft.correctorTolerance,
+      stepTolerance: limitCycleFromHopfDraft.stepTolerance,
+      forward: limitCycleFromHopfDraft.forward,
+    })
+    if (!settings) {
+      setLimitCycleFromHopfError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setLimitCycleFromHopfError(null)
+    await onCreateLimitCycleFromHopf({
+      branchId: selectedNodeId,
+      pointIndex: branchPointIndex,
+      limitCycleName,
+      branchName,
+      amplitude,
+      ntst,
+      ncol,
+      settings,
+      forward: limitCycleFromHopfDraft.forward,
     })
   }
 
@@ -4836,6 +4994,241 @@ export function InspectorDetailsPanel({
                       <p className="empty-state">
                         Select a Fold or Hopf point to continue a codim-1 curve.
                       </p>
+                    )}
+                  </div>
+                </InspectorDisclosure>
+
+                <InspectorDisclosure
+                  key={`${selectionKey}-limit-cycle-hopf`}
+                  title="Limit Cycle from Hopf"
+                  testId="limit-cycle-from-hopf-toggle"
+                  defaultOpen={false}
+                >
+                  <div className="inspector-section">
+                    {branch.branchType !== 'equilibrium' ? (
+                      <p className="empty-state">
+                        Limit cycle continuation is only available for equilibrium branches.
+                      </p>
+                    ) : null}
+                    {systemDraft.type === 'map' ? (
+                      <p className="empty-state">Limit cycles require a flow system.</p>
+                    ) : null}
+                    {runDisabled ? (
+                      <div className="field-warning">
+                        Apply valid system changes before continuing.
+                      </div>
+                    ) : null}
+                    {!selectedBranchPoint ? (
+                      <p className="empty-state">Select a branch point to continue.</p>
+                    ) : selectedBranchPoint.stability !== 'Hopf' ? (
+                      <p className="empty-state">
+                        Select a Hopf bifurcation point to continue a limit cycle.
+                      </p>
+                    ) : (
+                      <>
+                        <label>
+                          Limit cycle name
+                          <input
+                            value={limitCycleFromHopfDraft.limitCycleName}
+                            onChange={(event) =>
+                              setLimitCycleFromHopfDraft((prev) => ({
+                                ...prev,
+                                limitCycleName: event.target.value,
+                              }))
+                            }
+                            placeholder={`lc_hopf_${toCliSafeName(branch.name)}`}
+                            data-testid="limit-cycle-from-hopf-name"
+                          />
+                        </label>
+                        <label>
+                          Branch name
+                          <input
+                            value={limitCycleFromHopfDraft.branchName}
+                            onChange={(event) =>
+                              setLimitCycleFromHopfDraft((prev) => ({
+                                ...prev,
+                                branchName: event.target.value,
+                              }))
+                            }
+                            placeholder={`${limitCycleFromHopfDraft.limitCycleName || `lc_hopf_${toCliSafeName(branch.name)}`}_${branchParameterName}`}
+                            data-testid="limit-cycle-from-hopf-branch-name"
+                          />
+                        </label>
+                        <label>
+                          Continuation parameter
+                          <input value={branchParameterName} disabled data-testid="limit-cycle-from-hopf-parameter" />
+                        </label>
+                        <label>
+                          Initial amplitude
+                          <input
+                            type="number"
+                            value={limitCycleFromHopfDraft.amplitude}
+                            onChange={(event) =>
+                              setLimitCycleFromHopfDraft((prev) => ({
+                                ...prev,
+                                amplitude: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-hopf-amplitude"
+                          />
+                        </label>
+                        <label>
+                          NTST
+                          <input
+                            type="number"
+                            value={limitCycleFromHopfDraft.ntst}
+                            onChange={(event) =>
+                              setLimitCycleFromHopfDraft((prev) => ({
+                                ...prev,
+                                ntst: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-hopf-ntst"
+                          />
+                        </label>
+                        <label>
+                          NCOL
+                          <input
+                            type="number"
+                            value={limitCycleFromHopfDraft.ncol}
+                            onChange={(event) =>
+                              setLimitCycleFromHopfDraft((prev) => ({
+                                ...prev,
+                                ncol: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-hopf-ncol"
+                          />
+                        </label>
+                        <label>
+                          Direction
+                          <select
+                            value={limitCycleFromHopfDraft.forward ? 'forward' : 'backward'}
+                            onChange={(event) =>
+                              setLimitCycleFromHopfDraft((prev) => ({
+                                ...prev,
+                                forward: event.target.value === 'forward',
+                              }))
+                            }
+                            data-testid="limit-cycle-from-hopf-direction"
+                          >
+                            <option value="forward">Forward (Increasing Param)</option>
+                            <option value="backward">Backward (Decreasing Param)</option>
+                          </select>
+                        </label>
+                        <label>
+                          Initial step size
+                          <input
+                            type="number"
+                            value={limitCycleFromHopfDraft.stepSize}
+                            onChange={(event) =>
+                              setLimitCycleFromHopfDraft((prev) => ({
+                                ...prev,
+                                stepSize: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-hopf-step-size"
+                          />
+                        </label>
+                        <label>
+                          Max points
+                          <input
+                            type="number"
+                            value={limitCycleFromHopfDraft.maxSteps}
+                            onChange={(event) =>
+                              setLimitCycleFromHopfDraft((prev) => ({
+                                ...prev,
+                                maxSteps: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-hopf-max-steps"
+                          />
+                        </label>
+                        <label>
+                          Min step size
+                          <input
+                            type="number"
+                            value={limitCycleFromHopfDraft.minStepSize}
+                            onChange={(event) =>
+                              setLimitCycleFromHopfDraft((prev) => ({
+                                ...prev,
+                                minStepSize: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-hopf-min-step-size"
+                          />
+                        </label>
+                        <label>
+                          Max step size
+                          <input
+                            type="number"
+                            value={limitCycleFromHopfDraft.maxStepSize}
+                            onChange={(event) =>
+                              setLimitCycleFromHopfDraft((prev) => ({
+                                ...prev,
+                                maxStepSize: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-hopf-max-step-size"
+                          />
+                        </label>
+                        <label>
+                          Corrector steps
+                          <input
+                            type="number"
+                            value={limitCycleFromHopfDraft.correctorSteps}
+                            onChange={(event) =>
+                              setLimitCycleFromHopfDraft((prev) => ({
+                                ...prev,
+                                correctorSteps: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-hopf-corrector-steps"
+                          />
+                        </label>
+                        <label>
+                          Corrector tolerance
+                          <input
+                            type="number"
+                            value={limitCycleFromHopfDraft.correctorTolerance}
+                            onChange={(event) =>
+                              setLimitCycleFromHopfDraft((prev) => ({
+                                ...prev,
+                                correctorTolerance: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-hopf-corrector-tolerance"
+                          />
+                        </label>
+                        <label>
+                          Step tolerance
+                          <input
+                            type="number"
+                            value={limitCycleFromHopfDraft.stepTolerance}
+                            onChange={(event) =>
+                              setLimitCycleFromHopfDraft((prev) => ({
+                                ...prev,
+                                stepTolerance: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-hopf-step-tolerance"
+                          />
+                        </label>
+                        {limitCycleFromHopfError ? (
+                          <div className="field-error">{limitCycleFromHopfError}</div>
+                        ) : null}
+                        <button
+                          onClick={handleCreateLimitCycleFromHopf}
+                          disabled={
+                            runDisabled ||
+                            !selectedBranchPoint ||
+                            branch.branchType !== 'equilibrium'
+                          }
+                          data-testid="limit-cycle-from-hopf-submit"
+                        >
+                          Continue Limit Cycle
+                        </button>
+                      </>
                     )}
                   </div>
                 </InspectorDisclosure>

@@ -156,6 +156,20 @@ export type HopfCurveContinuationRequest = {
   forward: boolean
 }
 
+export type LimitCycleContinuationFromHopfRequest = {
+  system: SystemConfig
+  hopfState: number[]
+  parameterName: string
+  paramValue: number
+  amplitude: number
+  ntst: number
+  ncol: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type LimitCycleContinuationResult = ContinuationBranchData
+
 export interface ForkCoreClient {
   simulateOrbit(
     request: SimulateOrbitRequest,
@@ -193,6 +207,10 @@ export interface ForkCoreClient {
     request: HopfCurveContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<Codim1CurveBranch>
+  runLimitCycleContinuationFromHopf(
+    request: LimitCycleContinuationFromHopfRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<LimitCycleContinuationResult>
   validateSystem(
     request: ValidateSystemRequest,
     opts?: { signal?: AbortSignal }

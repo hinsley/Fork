@@ -47,6 +47,7 @@ describe('SystemSettingsDialog', () => {
         onExtendBranch={vi.fn(() => Promise.resolve())}
         onCreateFoldCurveFromPoint={vi.fn(() => Promise.resolve())}
         onCreateHopfCurveFromPoint={vi.fn(() => Promise.resolve())}
+        onCreateLimitCycleFromHopf={vi.fn(() => Promise.resolve())}
       />
     )
 
@@ -78,6 +79,7 @@ describe('SystemSettingsDialog', () => {
     const onExtendBranch = vi.fn(() => Promise.resolve())
     const onCreateFoldCurveFromPoint = vi.fn(() => Promise.resolve())
     const onCreateHopfCurveFromPoint = vi.fn(() => Promise.resolve())
+    const onCreateLimitCycleFromHopf = vi.fn(() => Promise.resolve())
 
     render(
       <SystemSettingsDialog
@@ -103,6 +105,7 @@ describe('SystemSettingsDialog', () => {
         onExtendBranch={onExtendBranch}
         onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
         onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
+        onCreateLimitCycleFromHopf={onCreateLimitCycleFromHopf}
       />
     )
 
@@ -130,6 +133,7 @@ describe('SystemSettingsDialog', () => {
     expect(capturedProps?.onExtendBranch).toBe(onExtendBranch)
     expect(capturedProps?.onCreateFoldCurveFromPoint).toBe(onCreateFoldCurveFromPoint)
     expect(capturedProps?.onCreateHopfCurveFromPoint).toBe(onCreateHopfCurveFromPoint)
+    expect(capturedProps?.onCreateLimitCycleFromHopf).toBe(onCreateLimitCycleFromHopf)
   })
 
   it('returns null when open without a system', () => {
@@ -157,6 +161,7 @@ describe('SystemSettingsDialog', () => {
         onExtendBranch={vi.fn(() => Promise.resolve())}
         onCreateFoldCurveFromPoint={vi.fn(() => Promise.resolve())}
         onCreateHopfCurveFromPoint={vi.fn(() => Promise.resolve())}
+        onCreateLimitCycleFromHopf={vi.fn(() => Promise.resolve())}
       />
     )
 
@@ -189,6 +194,7 @@ describe('SystemSettingsDialog', () => {
         onExtendBranch={vi.fn(() => Promise.resolve())}
         onCreateFoldCurveFromPoint={vi.fn(() => Promise.resolve())}
         onCreateHopfCurveFromPoint={vi.fn(() => Promise.resolve())}
+        onCreateLimitCycleFromHopf={vi.fn(() => Promise.resolve())}
       />
     )
 

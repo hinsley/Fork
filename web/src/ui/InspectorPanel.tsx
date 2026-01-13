@@ -8,6 +8,7 @@ import type {
   FoldCurveContinuationRequest,
   HopfCurveContinuationRequest,
   LimitCycleCreateRequest,
+  LimitCycleHopfContinuationRequest,
   OrbitCovariantLyapunovRequest,
   OrbitLyapunovRequest,
   OrbitRunRequest,
@@ -41,6 +42,7 @@ type InspectorPanelProps = {
   onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
+  onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
 }
 
 export function InspectorPanel({
@@ -64,6 +66,7 @@ export function InspectorPanel({
   onExtendBranch,
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
+  onCreateLimitCycleFromHopf,
 }: InspectorPanelProps) {
   return (
     <div className="inspector">
@@ -90,6 +93,7 @@ export function InspectorPanel({
           onExtendBranch={onExtendBranch}
           onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
           onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
+          onCreateLimitCycleFromHopf={onCreateLimitCycleFromHopf}
         />
       </div>
     </div>

@@ -26,6 +26,7 @@ describe('InspectorDetailsPanel', () => {
     const onExtendBranch = vi.fn().mockResolvedValue(undefined)
     const onCreateFoldCurveFromPoint = vi.fn().mockResolvedValue(undefined)
     const onCreateHopfCurveFromPoint = vi.fn().mockResolvedValue(undefined)
+    const onCreateLimitCycleFromHopf = vi.fn().mockResolvedValue(undefined)
 
     function Wrapper() {
       const [state, setState] = useState(system)
@@ -64,6 +65,7 @@ describe('InspectorDetailsPanel', () => {
           onExtendBranch={onExtendBranch}
           onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
           onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
+          onCreateLimitCycleFromHopf={onCreateLimitCycleFromHopf}
         />
       )
     }
@@ -113,6 +115,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -156,6 +159,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -241,6 +245,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -321,6 +326,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
       />
     )
 

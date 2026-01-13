@@ -7,6 +7,8 @@ import type {
   ContinuationExtensionResult,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
+  LimitCycleContinuationFromHopfRequest,
+  LimitCycleContinuationResult,
   CovariantLyapunovRequest,
   CovariantLyapunovResponse,
   FoldCurveContinuationRequest,
@@ -32,6 +34,11 @@ type WorkerRequest =
   | { id: string; kind: 'runContinuationExtension'; payload: ContinuationExtensionRequest }
   | { id: string; kind: 'runFoldCurveContinuation'; payload: FoldCurveContinuationRequest }
   | { id: string; kind: 'runHopfCurveContinuation'; payload: HopfCurveContinuationRequest }
+  | {
+      id: string
+      kind: 'runLimitCycleContinuationFromHopf'
+      payload: LimitCycleContinuationFromHopfRequest
+    }
   | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
   | { id: string; kind: 'cancel' }
 
@@ -51,6 +58,7 @@ type WorkerResponse =
         | EquilibriumContinuationResult
         | ContinuationExtensionResult
         | Codim1CurveBranch
+        | LimitCycleContinuationResult
     }
   | { id: string; ok: false; error: string; aborted?: boolean }
   | WorkerProgress
@@ -90,6 +98,14 @@ type WasmModule = {
       forwardTransient: number,
       backwardTransient: number
     ) => CovariantLyapunovResponse
+    init_lc_from_hopf: (
+      hopfState: Float64Array,
+      parameterName: string,
+      paramValue: number,
+      amplitude: number,
+      ntst: number,
+      ncol: number
+    ) => unknown
   }
   WasmEquilibriumRunner: new (
     equations: string[],
@@ -142,6 +158,21 @@ type WasmModule = {
     run_steps: (batchSize: number) => ContinuationProgress
     get_progress: () => ContinuationProgress
     get_result: () => Codim1CurveBranch
+  }
+  WasmLimitCycleRunner: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    systemType: string,
+    setup: unknown,
+    parameterName: string,
+    settings: Record<string, number>,
+    forward: boolean
+  ) => {
+    run_steps: (batchSize: number) => ContinuationProgress
+    get_progress: () => ContinuationProgress
+    get_result: () => LimitCycleContinuationResult
   }
   WasmContinuationExtensionRunner: new (
     equations: string[],
@@ -520,6 +551,57 @@ async function runHopfCurveContinuation(
   return runner.get_result()
 }
 
+async function runLimitCycleContinuationFromHopf(
+  request: LimitCycleContinuationFromHopfRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<LimitCycleContinuationResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+
+  const setup = system.init_lc_from_hopf(
+    new Float64Array(request.hopfState),
+    request.parameterName,
+    request.paramValue,
+    request.amplitude,
+    request.ntst,
+    request.ncol
+  )
+
+  const settings: Record<string, number> = { ...request.settings }
+  const runner = new wasm.WasmLimitCycleRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.type,
+    setup,
+    request.parameterName,
+    settings,
+    request.forward
+  )
+
+  let progress = runner.get_progress()
+  onProgress(progress)
+
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+
+  return runner.get_result()
+}
+
 function abortIfNeeded(signal: AbortSignal) {
   if (signal.aborted) {
     const error = new Error('cancelled')
@@ -685,6 +767,24 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     if (message.kind === 'runHopfCurveContinuation') {
       const result = await runHopfCurveContinuation(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runLimitCycleContinuationFromHopf') {
+      const result = await runLimitCycleContinuationFromHopf(
         message.payload,
         controller.signal,
         (progress) => {

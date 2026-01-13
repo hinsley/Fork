@@ -224,6 +224,7 @@ function App() {
         onExtendBranch={actions.extendBranch}
         onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
         onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
+        onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
       />
 
       {error ? (
@@ -339,6 +340,7 @@ function App() {
                 onExtendBranch={actions.extendBranch}
                 onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
                 onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
+                onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
               />
             </Panel>
           </div>
