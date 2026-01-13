@@ -35,7 +35,7 @@ Fork is a 4-part monorepo: a Rust core, WASM bindings, a Node.js CLI, and a web 
 Rust and WebAssembly were chosen so the performance-critical numerical kernels and automatic differentiation live in one place, and the browser and CLI run identical continuation logic without a separate JavaScript reimplementation.
 
 ## Bifurcations by codimension
-A checkmark denotes that support for the bifurcation type has been implemented.
+A checkmark denotes that support for the bifurcation type has been implemented. Codim-2 support currently means detection on codim-1 curves (not full codim-2 continuation).
 
 ### Maps
 - Codimension 0
@@ -63,9 +63,14 @@ A checkmark denotes that support for the bifurcation type has been implemented.
     - [X] Saddle-Node of Periodic Orbits (LPC: Limit Point of Cycles)
 - Codimension 2
     - [ ] Bautin Point / Generalized Andronov-Hopf
-    - [ ] Bogdanov-Takens
+    - [X] Bogdanov-Takens
     - [ ] Saddle-to-Saddle-Focus
-    - [ ] Zero-Hopf
+    - [X] Zero-Hopf
+    - [X] Double Hopf
+    - [X] Resonance 1:1 (Neimark-Sacker)
+    - [X] Resonance 1:2 (Neimark-Sacker)
+    - [X] Resonance 1:3 (Neimark-Sacker)
+    - [X] Resonance 1:4 (Neimark-Sacker)
     - [ ] Shilnikov-Hopf
 
 ## Rendering
