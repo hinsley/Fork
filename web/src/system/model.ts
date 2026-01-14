@@ -12,6 +12,7 @@ import type {
   TreeNode,
 } from './types'
 import { makeStableId as makeId, nowIso } from '../utils/determinism'
+import { resolveSceneAxisSelection } from './sceneAxes'
 
 const DEFAULT_SYSTEM: SystemConfig = {
   name: 'Untitled System',
@@ -47,6 +48,7 @@ const DEFAULT_SCENE: Scene = {
     up: { x: 0, y: 0, z: 1 },
   },
   axisRanges: {},
+  axisVariables: null,
   selectedNodeIds: [],
   display: 'all',
 }
@@ -167,6 +169,7 @@ export function addBranch(
 export function addScene(system: System, name: string): { system: System; nodeId: string } {
   const next = structuredClone(system)
   const sceneId = makeId('scene')
+  const axisVariables = resolveSceneAxisSelection(next.config.varNames, null)
   const node = createTreeNode({
     id: sceneId,
     name,
@@ -181,6 +184,7 @@ export function addScene(system: System, name: string): { system: System; nodeId
     name,
     camera: structuredClone(DEFAULT_SCENE.camera),
     axisRanges: structuredClone(DEFAULT_SCENE.axisRanges),
+    axisVariables: axisVariables ?? null,
     selectedNodeIds: [],
     display: 'all',
   })
@@ -489,12 +493,16 @@ export function normalizeSystem(system: System): System {
   if (!next.scenes) {
     next.scenes = [structuredClone(DEFAULT_SCENE)]
   }
-  next.scenes = next.scenes.map((scene) => ({
-    ...scene,
-    selectedNodeIds: scene.selectedNodeIds ?? [],
-    display: scene.display ?? 'all',
-    axisRanges: scene.axisRanges ?? {},
-  }))
+  next.scenes = next.scenes.map((scene) => {
+    const axisVariables = resolveSceneAxisSelection(next.config.varNames, scene.axisVariables)
+    return {
+      ...scene,
+      selectedNodeIds: scene.selectedNodeIds ?? [],
+      display: scene.display ?? 'all',
+      axisRanges: scene.axisRanges ?? {},
+      axisVariables: axisVariables ?? null,
+    }
+  })
 
   if (!next.bifurcationDiagrams) {
     next.bifurcationDiagrams = []

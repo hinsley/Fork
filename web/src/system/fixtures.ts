@@ -1,4 +1,4 @@
-import { addBranch, addObject, createSystem } from './model'
+import { addBranch, addObject, addScene, createSystem } from './model'
 import { nowIso } from '../utils/determinism'
 import type {
   ContinuationObject,
@@ -168,5 +168,40 @@ export function createPeriodDoublingSystem(): { system: System } {
   const branchResult = addBranch(system, branch, added.nodeId)
   system = branchResult.system
 
+  return { system }
+}
+
+export function createAxisPickerSystem(): { system: System } {
+  let system = createSystem({
+    name: 'Axis Picker Fixture',
+    config: {
+      name: 'Axis Picker Fixture',
+      equations: ['y', '-x', 'w', 'x - z'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z', 'w'],
+      solver: 'rk4',
+      type: 'flow',
+    },
+  })
+
+  const orbit: OrbitObject = {
+    type: 'orbit',
+    name: 'Orbit Axes',
+    systemName: system.config.name,
+    data: [
+      [0, 0, 1, 2, 3],
+      [0.1, 0.2, 1.1, 2.1, 3.1],
+      [0.2, 0.4, 1.2, 2.2, 3.2],
+    ],
+    t_start: 0,
+    t_end: 0.2,
+    dt: 0.1,
+  }
+
+  const added = addObject(system, orbit)
+  system = added.system
+  system = addScene(system, 'Scene A').system
+  system = addScene(system, 'Scene B').system
   return { system }
 }

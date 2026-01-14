@@ -33,6 +33,7 @@ import {
   resolveEquilibriumEigenspaceIndices,
   resolveEquilibriumEigenvectorRender,
 } from '../system/equilibriumEigenvectors'
+import { resolveSceneAxisIndices, resolveSceneAxisSelection } from '../system/sceneAxes'
 import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/PlotlyViewport'
 import { resolvePlotlyBackgroundColor } from '../viewports/plotly/plotlyTheme'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
@@ -248,6 +249,7 @@ function buildClvTraces(
   nodeId: string,
   orbit: OrbitObject,
   clv: ClvRenderStyle,
+  axisIndices: [number, number, number] | null,
   plotSize?: PlotSize | null
 ): Data[] {
   const covariant = orbit.covariantVectors
@@ -259,6 +261,16 @@ function buildClvTraces(
   if (clv.vectorIndices.length === 0) return []
 
   const use3d = plotDim >= 3
+  const fallbackAxes: [number, number, number] = [0, 1, 2]
+  const axes =
+    use3d &&
+    axisIndices &&
+    axisIndices.every((index) => index >= 0 && index < orbitDim)
+      ? axisIndices
+      : fallbackAxes
+  const axisX = axes[0]
+  const axisY = axes[1]
+  const axisZ = axes[2]
   const orbitTimes: number[] = []
   const orbitStates: Array<[number, number, number]> = []
   let minX = Number.POSITIVE_INFINITY
@@ -270,9 +282,9 @@ function buildClvTraces(
 
   for (const row of orbit.data) {
     if (row.length < (use3d ? 4 : 3)) continue
-    const x = row[1]
-    const y = row[2]
-    const z = use3d ? row[3] : 0
+    const x = row[axisX + 1]
+    const y = row[axisY + 1]
+    const z = use3d ? row[axisZ + 1] : 0
     orbitTimes.push(row[0])
     orbitStates.push([x, y, z])
     minX = Math.min(minX, x)
@@ -332,9 +344,9 @@ function buildClvTraces(
       const vectorsAtStep = covariant.vectors[idx]
       if (!vectorsAtStep || !vectorsAtStep[vectorIndex]) continue
       const vec = vectorsAtStep[vectorIndex]
-      const vx = vec[0]
-      const vy = vec[1]
-      const vz = use3d ? vec[2] : 0
+      const vx = vec[axisX]
+      const vy = vec[axisY]
+      const vz = use3d ? vec[axisZ] : 0
       if (!Number.isFinite(vx) || !Number.isFinite(vy) || (use3d && !Number.isFinite(vz))) {
         continue
       }
@@ -476,6 +488,7 @@ type PendingEigenvector = {
   discRadiusScale: number
   discThickness: number
   highlight: boolean
+  axisIndices: [number, number, number] | null
 }
 
 function updateSceneBounds(bounds: SceneBounds, x: number, y: number, z?: number) {
@@ -497,9 +510,18 @@ function buildEquilibriumEigenvectorTraces(
   if (entry.state.length < 2 || entry.eigenpairs.length === 0) return []
   const plotDim = entry.state.length >= 3 ? 3 : 2
   const use3d = plotDim === 3
-  const stateX = entry.state[0]
-  const stateY = entry.state[1]
-  const stateZ = use3d ? entry.state[2] : 0
+  const fallbackAxes: [number, number, number] = [0, 1, 2]
+  const axes =
+    entry.axisIndices &&
+    entry.axisIndices.every((index) => index >= 0 && index < entry.state.length)
+      ? entry.axisIndices
+      : fallbackAxes
+  const axisX = axes[0]
+  const axisY = axes[1]
+  const axisZ = axes[2]
+  const stateX = entry.state[axisX]
+  const stateY = entry.state[axisY]
+  const stateZ = use3d ? entry.state[axisZ] : 0
   if (!Number.isFinite(stateX) || !Number.isFinite(stateY) || (use3d && !Number.isFinite(stateZ))) {
     return []
   }
@@ -707,9 +729,10 @@ function buildEquilibriumEigenvectorTraces(
   entry.vectorIndices.forEach((vectorIndex, colorIndex) => {
     const pair = entry.eigenpairs[vectorIndex]
     if (!pair) return
-    if (pair.vector.length < plotDim) return
-    const real = pair.vector.slice(0, plotDim).map((component) => component.re)
-    const imag = pair.vector.slice(0, plotDim).map((component) => component.im)
+    const axisOrder = use3d ? [axisX, axisY, axisZ] : [axisX, axisY]
+    if (axisOrder.some((index) => index >= pair.vector.length)) return
+    const real = axisOrder.map((index) => pair.vector[index]?.re ?? Number.NaN)
+    const imag = axisOrder.map((index) => pair.vector[index]?.im ?? Number.NaN)
     if (!real.every(Number.isFinite) || !imag.every(Number.isFinite)) return
     const paletteIndex = vectorIndex % EIGENVECTOR_COLOR_PALETTE.length
     const color = entry.colors[colorIndex] ?? EIGENVECTOR_COLOR_PALETTE[paletteIndex]
@@ -1057,6 +1080,7 @@ type LimitCycleTraceConfig = {
   lineWidth: number
   pointSize: number
   showLegend?: boolean
+  axisIndices?: [number, number, number] | null
 }
 
 function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
@@ -1071,23 +1095,31 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
     lineWidth,
     pointSize,
     showLegend,
+    axisIndices,
   } = config
   const traces: Data[] = []
   if (!state || state.length === 0 || dim <= 0) return traces
   const plotDim = Math.min(dim, 3)
   const { profilePoints, period } = extractLimitCycleProfile(state, dim, ntst, ncol)
+  const fallbackAxes: [number, number, number] = [0, 1, 2]
+  const axes =
+    axisIndices && axisIndices.every((index) => index >= 0 && index < dim)
+      ? axisIndices
+      : fallbackAxes
+  const axisOrder = plotDim >= 3 ? axes : plotDim === 2 ? [0, 1] : [0]
   const usablePoints = profilePoints
-    .map((point, index) => ({ point, index }))
-    .filter(
-      ({ point }) =>
-        point.length >= plotDim && point.slice(0, plotDim).every(Number.isFinite)
-    )
+    .map((point, index) => ({
+      point,
+      index,
+      coords: axisOrder.map((axis) => point[axis]),
+    }))
+    .filter(({ coords }) => coords.length === plotDim && coords.every(Number.isFinite))
 
   if (usablePoints.length >= 2 && plotDim > 0) {
     if (plotDim >= 3) {
-      const x = usablePoints.map(({ point }) => point[0] ?? Number.NaN)
-      const y = usablePoints.map(({ point }) => point[1] ?? Number.NaN)
-      const z = usablePoints.map(({ point }) => point[2] ?? Number.NaN)
+      const x = usablePoints.map(({ coords }) => coords[0] ?? Number.NaN)
+      const y = usablePoints.map(({ coords }) => coords[1] ?? Number.NaN)
+      const z = usablePoints.map(({ coords }) => coords[2] ?? Number.NaN)
       const customdata = usablePoints.map(({ index }) => index)
       traces.push({
         type: 'scatter3d',
@@ -1102,8 +1134,8 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
         ...(showLegend === undefined ? {} : { showlegend: showLegend }),
       })
     } else if (plotDim === 2) {
-      const x = usablePoints.map(({ point }) => point[0] ?? Number.NaN)
-      const y = usablePoints.map(({ point }) => point[1] ?? Number.NaN)
+      const x = usablePoints.map(({ coords }) => coords[0] ?? Number.NaN)
+      const y = usablePoints.map(({ coords }) => coords[1] ?? Number.NaN)
       const customdata = usablePoints.map(({ index }) => index)
       traces.push({
         type: 'scatter',
@@ -1122,7 +1154,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
         : Math.max(usablePoints.length - 1, 1)
       const step = usablePoints.length > 1 ? timeEnd / (usablePoints.length - 1) : 1
       const x = usablePoints.map((_, idx) => idx * step)
-      const y = usablePoints.map(({ point }) => point[0] ?? Number.NaN)
+      const y = usablePoints.map(({ coords }) => coords[0] ?? Number.NaN)
       const customdata = usablePoints.map(({ index }) => index)
       traces.push({
         type: 'scatter',
@@ -1140,7 +1172,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
   }
 
   if (plotDim <= 0) return traces
-  const fallback = state.slice(0, plotDim)
+  const fallback = axisOrder.map((axis) => state[axis])
   if (fallback.length !== plotDim || !fallback.every(Number.isFinite)) return traces
   if (plotDim >= 3) {
     traces.push({
@@ -1193,7 +1225,8 @@ function buildObjectNameIndex(system: System): Map<string, string> {
 
 function buildLimitCyclePreviewTraces(
   system: System,
-  selection: BranchPointSelection | null
+  selection: BranchPointSelection | null,
+  axisIndices: [number, number, number] | null
 ): Data[] {
   if (!selection) return EMPTY_TRACES
   const branch = system.branches[selection.branchId]
@@ -1235,6 +1268,7 @@ function buildLimitCyclePreviewTraces(
     lineWidth: render.lineWidth + 1,
     pointSize: render.pointSize + 2,
     showLegend: false,
+    axisIndices,
   })
 }
 
@@ -1252,6 +1286,20 @@ function buildSceneTraces(
   const isMap = system.config.type === 'map'
   const isTimeSeries = system.config.varNames.length === 1 && !isMap
   const isMap1D = isMap && system.config.varNames.length === 1
+  const sceneAxisIndices = resolveSceneAxisIndices(
+    system.config.varNames,
+    scene.axisVariables
+  )
+  const sceneAxes =
+    sceneAxisIndices &&
+    sceneAxisIndices.every(
+      (index) => index >= 0 && index < system.config.varNames.length
+    )
+      ? sceneAxisIndices
+      : null
+  const axisX = sceneAxes?.[0] ?? 0
+  const axisY = sceneAxes?.[1] ?? 1
+  const axisZ = sceneAxes?.[2] ?? 2
   const manualSelection = scene.selectedNodeIds ?? []
   const candidateIds =
     manualSelection.length > 0
@@ -1320,7 +1368,10 @@ function buildSceneTraces(
       const highlight = nodeId === selectedNodeId
       const size = highlight ? node.render.pointSize + 2 : node.render.pointSize
       if (canPlotEigenvectors && dimension >= 2) {
-        updateSceneBounds(sceneBounds, state[0], state[1], dimension >= 3 ? state[2] : 0)
+        const eigenX = dimension >= 3 ? state[axisX] : state[0]
+        const eigenY = dimension >= 3 ? state[axisY] : state[1]
+        const eigenZ = dimension >= 3 ? state[axisZ] : 0
+        updateSceneBounds(sceneBounds, eigenX, eigenY, eigenZ)
         const eigenpairs = object.solution.eigenpairs ?? []
         const eigenspaceIndices = resolveEquilibriumEigenspaceIndices(eigenpairs)
         const eigenvectorRender = resolveEquilibriumEigenvectorRender(
@@ -1343,18 +1394,22 @@ function buildSceneTraces(
             discRadiusScale: eigenvectorRender.discRadiusScale,
             discThickness: eigenvectorRender.discThickness,
             highlight,
+            axisIndices: sceneAxes,
           })
         }
       }
       if (dimension >= 3) {
+        const stateX = state[axisX]
+        const stateY = state[axisY]
+        const stateZ = state[axisZ]
         traces.push({
           type: 'scatter3d',
           mode: 'markers',
           name: object.name,
           uid: nodeId,
-          x: [state[0]],
-          y: [state[1]],
-          z: [state[2]],
+          x: [stateX],
+          y: [stateY],
+          z: [stateZ],
           marker: {
             color: node.render.color,
             size,
@@ -1443,6 +1498,7 @@ function buildSceneTraces(
           color: node.render.color,
           lineWidth,
           pointSize: node.render.pointSize + (highlight ? 2 : 0),
+          axisIndices: sceneAxes,
         })
       )
       continue
@@ -1452,7 +1508,7 @@ function buildSceneTraces(
 
     const rows = object.data
     if (rows.length === 0) continue
-    // Use the first three state components for 3D systems to match CLI state-space views.
+    // Use the scene-selected axes for 3D systems (fallback to the first three variables).
     const dimension = rows[0].length - 1
     const highlight = nodeId === selectedNodeId
     if (isMap) {
@@ -1464,12 +1520,15 @@ function buildSceneTraces(
         const customdata: number[] = []
         for (let index = 0; index < rows.length; index += 1) {
           const row = rows[index]
-          x.push(row[1])
-          y.push(row[2])
-          z.push(row[3])
+          const valueX = row[axisX + 1]
+          const valueY = row[axisY + 1]
+          const valueZ = row[axisZ + 1]
+          x.push(valueX)
+          y.push(valueY)
+          z.push(valueZ)
           customdata.push(index)
           if (canPlotEigenvectors) {
-            updateSceneBounds(sceneBounds, row[1], row[2], row[3])
+            updateSceneBounds(sceneBounds, valueX, valueY, valueZ)
           }
         }
         traces.push({
@@ -1563,12 +1622,15 @@ function buildSceneTraces(
       if (dimension >= 3) {
         for (let index = 0; index < rows.length; index += 1) {
           const row = rows[index]
-          x.push(row[1])
-          y.push(row[2])
-          z.push(row[3])
+          const valueX = row[axisX + 1]
+          const valueY = row[axisY + 1]
+          const valueZ = row[axisZ + 1]
+          x.push(valueX)
+          y.push(valueY)
+          z.push(valueZ)
           customdata.push(index)
           if (canPlotEigenvectors) {
-            updateSceneBounds(sceneBounds, row[1], row[2], row[3])
+            updateSceneBounds(sceneBounds, valueX, valueY, valueZ)
           }
         }
       } else if (dimension >= 2) {
@@ -1630,7 +1692,15 @@ function buildSceneTraces(
     if (dimension >= 2 && system.config.varNames.length >= 2) {
       const clvRender = resolveClvRender(node.render?.clv, object.covariantVectors?.dim)
       if (clvRender.enabled) {
-        traces.push(...buildClvTraces(nodeId, object, clvRender, plotSize))
+        traces.push(
+          ...buildClvTraces(
+            nodeId,
+            object,
+            clvRender,
+            sceneAxes,
+            plotSize
+          )
+        )
       }
     }
   }
@@ -1853,23 +1923,29 @@ function buildSceneLayout(
   } satisfies Partial<Layout>
 
   const varNames = system.config.varNames
+  const axisSelection = resolveSceneAxisSelection(varNames, scene.axisVariables)
+  const axisLabels = axisSelection ?? {
+    x: varNames[0] ?? 'x',
+    y: varNames[1] ?? 'y',
+    z: varNames[2] ?? 'z',
+  }
   const panMode = varNames.length === 2 ? { dragmode: 'pan' as const } : {}
   if (varNames.length >= 3) {
     return {
       ...base,
       scene: {
         xaxis: {
-          title: { text: varNames[0] ?? 'x', font: { color: PLOTLY_TEXT_COLOR } },
+          title: { text: axisLabels.x, font: { color: PLOTLY_TEXT_COLOR } },
           tickfont: { color: PLOTLY_TEXT_COLOR },
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
         yaxis: {
-          title: { text: varNames[1] ?? 'y', font: { color: PLOTLY_TEXT_COLOR } },
+          title: { text: axisLabels.y, font: { color: PLOTLY_TEXT_COLOR } },
           tickfont: { color: PLOTLY_TEXT_COLOR },
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
         zaxis: {
-          title: { text: varNames[2] ?? 'z', font: { color: PLOTLY_TEXT_COLOR } },
+          title: { text: axisLabels.z, font: { color: PLOTLY_TEXT_COLOR } },
           tickfont: { color: PLOTLY_TEXT_COLOR },
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
@@ -2245,7 +2321,15 @@ function ViewportTile({
 
   const limitCyclePreviewTraces = useMemo(() => {
     if (!scene) return EMPTY_TRACES
-    return buildLimitCyclePreviewTraces(system, branchPointSelection ?? null)
+    const axisIndices = resolveSceneAxisIndices(
+      system.config.varNames,
+      scene.axisVariables
+    )
+    return buildLimitCyclePreviewTraces(
+      system,
+      branchPointSelection ?? null,
+      axisIndices
+    )
   }, [branchPointSelection, scene, system])
 
   const data = useMemo(() => {

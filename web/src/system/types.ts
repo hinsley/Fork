@@ -221,6 +221,12 @@ export type AxisRanges = {
   z?: AxisRange | null
 }
 
+export type SceneAxisVariables = {
+  x: string
+  y: string
+  z: string
+}
+
 export interface Scene {
   id: string
   name: string
@@ -230,6 +236,7 @@ export interface Scene {
     up: { x: number; y: number; z: number }
   }
   axisRanges: AxisRanges
+  axisVariables?: SceneAxisVariables | null
   selectedNodeIds: string[]
   display: 'all' | 'selection'
 }
