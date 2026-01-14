@@ -114,7 +114,8 @@ function bindPlotlyRelayout(
   node: HTMLDivElement,
   onRelayoutRef: MutableRefObject<((event: PlotlyRelayoutEvent) => void) | undefined>,
   relayoutHandlerRef: MutableRefObject<((event: PlotlyRelayoutEvent) => void) | null>,
-  ignoreRef?: MutableRefObject<boolean>
+  ignoreRef?: MutableRefObject<boolean>,
+  interactionRef?: MutableRefObject<boolean>
 ) {
   const target = node as PlotlyEventTarget
   if (!target.on) return
@@ -123,6 +124,7 @@ function bindPlotlyRelayout(
 
   const handler = (event: PlotlyRelayoutEvent) => {
     if (ignoreRef?.current) return
+    if (interactionRef && !interactionRef.current) return
     onRelayoutRef.current?.(event)
   }
   relayoutHandlerRef.current = handler
@@ -167,6 +169,8 @@ export function PlotlyViewport({
   const clickHandlerRef = useRef<((event: PlotlyClickEvent) => void) | null>(null)
   const relayoutHandlerRef = useRef<((event: PlotlyRelayoutEvent) => void) | null>(null)
   const renderInFlightRef = useRef(false)
+  const interactionRef = useRef(false)
+  const interactionTimeoutRef = useRef<number | null>(null)
   const pointerIdRef = useRef<number | null>(null)
   const dragFrameRef = useRef<number | null>(null)
   const lastRelayoutRef = useRef<PlotlyRelayoutEvent | null>(null)
@@ -201,7 +205,13 @@ export function PlotlyViewport({
         if (controller.signal.aborted) return
         setLoading(false)
         bindPlotlyClick(node, onPointClickRef, clickHandlerRef)
-        bindPlotlyRelayout(node, onRelayoutRef, relayoutHandlerRef, renderInFlightRef)
+        bindPlotlyRelayout(
+          node,
+          onRelayoutRef,
+          relayoutHandlerRef,
+          renderInFlightRef,
+          interactionRef
+        )
       } catch (err) {
         if (controller.signal.aborted) return
         const message = err instanceof Error ? err.message : String(err)
@@ -224,6 +234,16 @@ export function PlotlyViewport({
     const handlePointerDown = (event: PointerEvent) => {
       pointerIdRef.current = event.pointerId
       lastRelayoutRef.current = null
+    }
+
+    const handleWheel = () => {
+      interactionRef.current = true
+      if (interactionTimeoutRef.current) {
+        window.clearTimeout(interactionTimeoutRef.current)
+      }
+      interactionTimeoutRef.current = window.setTimeout(() => {
+        interactionRef.current = false
+      }, 200)
     }
 
     const captureLayout = () => {
@@ -263,17 +283,22 @@ export function PlotlyViewport({
     }
 
     node.addEventListener('pointerdown', handlePointerDown)
+    node.addEventListener('wheel', handleWheel, { passive: true })
     window.addEventListener('pointermove', handlePointerMove)
     window.addEventListener('pointerup', handlePointerUp)
     window.addEventListener('pointercancel', handlePointerUp)
 
     return () => {
       node.removeEventListener('pointerdown', handlePointerDown)
+      node.removeEventListener('wheel', handleWheel)
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
       window.removeEventListener('pointercancel', handlePointerUp)
       if (dragFrameRef.current) {
         cancelAnimationFrame(dragFrameRef.current)
+      }
+      if (interactionTimeoutRef.current) {
+        window.clearTimeout(interactionTimeoutRef.current)
       }
     }
   }, [])
