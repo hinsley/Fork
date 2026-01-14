@@ -824,6 +824,30 @@ function resolveCodim1ParamNames(
   return null
 }
 
+function resolveBranchPointParams(
+  paramNames: string[],
+  baseParams: number[],
+  branch: ContinuationObject,
+  point: ContinuationPoint
+): number[] {
+  if (paramNames.length === 0) return []
+  const codim1ParamNames = resolveCodim1ParamNames(branch)
+  const continuationParamIndex = paramNames.indexOf(branch.parameterName)
+  return paramNames.map((name, index) => {
+    let value = baseParams[index]
+    if (codim1ParamNames) {
+      if (name === codim1ParamNames.param1) {
+        value = point.param_value
+      } else if (name === codim1ParamNames.param2) {
+        value = point.param2_value ?? baseParams[index]
+      }
+    } else if (index === continuationParamIndex) {
+      value = point.param_value
+    }
+    return value ?? Number.NaN
+  })
+}
+
 function makeCodim1CurveDraft(system: SystemConfig): Codim1CurveDraft {
   return {
     name: '',
@@ -1200,6 +1224,12 @@ export function InspectorDetailsPanel({
     limitCycleRenderTarget?.type === 'branch'
       ? system.branches[limitCycleRenderTarget.branchId]
       : null
+  const limitCycleRenderPoint = useMemo(() => {
+    if (limitCycleRenderTarget?.type !== 'branch' || !limitCycleRenderBranch) {
+      return null
+    }
+    return limitCycleRenderBranch.data.points[limitCycleRenderTarget.pointIndex] ?? null
+  }, [limitCycleRenderBranch, limitCycleRenderTarget])
   const limitCycleRenderLabel = useMemo(() => {
     if (limitCycleRenderTarget?.type !== 'branch' || !limitCycleRenderBranch) {
       return 'Stored cycle'
@@ -1995,27 +2025,50 @@ export function InspectorDetailsPanel({
     })
   }, [branch?.branchType, branchEigenvalues, isDiscreteMap, plotlyBackground])
   const selectedBranchPointParams = useMemo(() => {
-    if (!selectedBranchPoint) return []
-    return systemDraft.paramNames.map((name, index) => {
-      let value = branchParams[index]
-      if (codim1ParamNames) {
-        if (name === codim1ParamNames.param1) {
-          value = selectedBranchPoint.param_value
-        } else if (name === codim1ParamNames.param2) {
-          value = selectedBranchPoint.param2_value ?? branchParams[index]
-        }
-      } else if (index === continuationParamIndex) {
-        value = selectedBranchPoint.param_value
-      }
-      return value ?? Number.NaN
-    })
+    if (!branch || !selectedBranchPoint) return []
+    return resolveBranchPointParams(
+      systemDraft.paramNames,
+      branchParams,
+      branch,
+      selectedBranchPoint
+    )
   }, [
+    branch,
     branchParams,
-    codim1ParamNames,
-    continuationParamIndex,
     selectedBranchPoint,
     systemDraft.paramNames,
   ])
+  const limitCycleRenderData = useMemo(() => {
+    if (!limitCycleRenderPoint || !limitCycleRenderBranch) return null
+    const baseParams = getBranchParams(system, limitCycleRenderBranch)
+    const params = resolveBranchPointParams(
+      systemDraft.paramNames,
+      baseParams,
+      limitCycleRenderBranch,
+      limitCycleRenderPoint
+    )
+    const multipliers = normalizeEigenvalueArray(limitCycleRenderPoint.eigenvalues)
+    const parameterName =
+      limitCycle?.parameterName || limitCycleRenderBranch.parameterName
+    const paramIndex = parameterName
+      ? systemDraft.paramNames.indexOf(parameterName)
+      : -1
+    const paramValue =
+      paramIndex >= 0 ? params[paramIndex] : limitCycleRenderPoint.param_value
+    return { params, multipliers, paramValue }
+  }, [
+    limitCycle?.parameterName,
+    limitCycleRenderBranch,
+    limitCycleRenderPoint,
+    system,
+    systemDraft.paramNames,
+  ])
+  const limitCycleDisplayParams =
+    limitCycleRenderData?.params ?? limitCycle?.parameters ?? []
+  const limitCycleDisplayParamValue =
+    limitCycleRenderData?.paramValue ?? limitCycle?.paramValue
+  const limitCycleDisplayMultipliers =
+    limitCycleRenderData?.multipliers ?? limitCycle?.floquetMultipliers ?? []
 
   const handleApplySystem = async () => {
     setSystemTouched(true)
@@ -4934,8 +4987,8 @@ export function InspectorDetailsPanel({
                     {
                       label: 'Parameter value',
                       value:
-                        limitCycle.paramValue !== undefined
-                          ? formatNumber(limitCycle.paramValue, 6)
+                        limitCycleDisplayParamValue !== undefined
+                          ? formatNumber(limitCycleDisplayParamValue, 6)
                           : 'n/a',
                     },
                     { label: 'Origin', value: formatLimitCycleOrigin(limitCycle.origin) },
@@ -4946,23 +4999,21 @@ export function InspectorDetailsPanel({
               <div className="inspector-section">
                 <div className="inspector-subheading-row">
                   <h4 className="inspector-subheading">Parameters</h4>
-                  {limitCycle.parameters && limitCycle.parameters.length > 0 ? (
+                  {limitCycleDisplayParams.length > 0 ? (
                     <button
                       type="button"
                       className="inspector-inline-button"
                       onClick={() =>
-                        void writeClipboardText(
-                          formatPointValues(limitCycle.parameters ?? [])
-                        )
+                        void writeClipboardText(formatPointValues(limitCycleDisplayParams))
                       }
                     >
                       Copy
                     </button>
                   ) : null}
                 </div>
-                {limitCycle.parameters && limitCycle.parameters.length > 0 ? (
+                {limitCycleDisplayParams.length > 0 ? (
                   <InspectorMetrics
-                    rows={limitCycle.parameters.map((value, index) => ({
+                    rows={limitCycleDisplayParams.map((value, index) => ({
                       label: systemDraft.paramNames[index] || `p${index + 1}`,
                       value: formatNumber(value, 6),
                     }))}
@@ -5027,9 +5078,9 @@ export function InspectorDetailsPanel({
               </div>
               <div className="inspector-section">
                 <h4 className="inspector-subheading">Floquet multipliers</h4>
-                {limitCycle.floquetMultipliers && limitCycle.floquetMultipliers.length > 0 ? (
+                {limitCycleDisplayMultipliers.length > 0 ? (
                   <InspectorMetrics
-                    rows={limitCycle.floquetMultipliers.map((value, index) => ({
+                    rows={limitCycleDisplayMultipliers.map((value, index) => ({
                       label: `Multiplier ${index + 1}`,
                       value: formatComplexValue(value),
                     }))}

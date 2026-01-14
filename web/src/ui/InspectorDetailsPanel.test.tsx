@@ -1049,6 +1049,67 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.getByText('lc_pd_mu @ 1')).toBeVisible()
   })
 
+  it('uses render target parameters for limit cycle inspector data', async () => {
+    const user = userEvent.setup()
+    const { system } = createPeriodDoublingSystem()
+    const branchId = Object.keys(system.branches)[0]
+    const branch = branchId ? system.branches[branchId] : undefined
+    const limitCycleId =
+      branch &&
+      Object.entries(system.objects).find(([, obj]) => obj.name === branch.parentObject)?.[0]
+    if (!branchId || !branch || !limitCycleId) {
+      throw new Error('Missing limit cycle branch fixture data.')
+    }
+
+    const limitCycle = system.objects[limitCycleId] as LimitCycleObject
+    system.objects[limitCycleId] = {
+      ...limitCycle,
+      parameters: [9],
+      paramValue: 9,
+      floquetMultipliers: [{ re: 0.1, im: 0.2 }],
+    }
+    system.ui.limitCycleRenderTargets = {
+      [limitCycleId]: { type: 'branch', branchId, pointIndex: 1 },
+    }
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={limitCycleId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onSetLimitCycleRenderTarget={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByTestId('limit-cycle-data-toggle'))
+
+    expect(screen.getAllByText('0.250000')[0]).toBeVisible()
+    expect(screen.queryByText('9.00000')).toBeNull()
+    expect(screen.getByText('-1.0000 + 0.0000i')).toBeVisible()
+    expect(screen.queryByText('0.1000 + 0.2000i')).toBeNull()
+  })
+
   it('allows restoring the stored limit cycle render target for orbit-sourced cycles', async () => {
     const user = userEvent.setup()
     const { system } = createPeriodDoublingSystem()
