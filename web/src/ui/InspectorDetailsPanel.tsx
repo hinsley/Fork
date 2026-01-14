@@ -347,6 +347,89 @@ function InspectorMetrics({ rows }: { rows: InspectorMetricRow[] }) {
   )
 }
 
+type StateTableProps = {
+  title: string
+  varNames: string[]
+  values: string[]
+  onChange: (next: string[]) => void
+  onCopy: () => void
+  onPaste: () => void
+  testIdPrefix?: string
+}
+
+function StateTable({
+  title,
+  varNames,
+  values,
+  onChange,
+  onCopy,
+  onPaste,
+  testIdPrefix,
+}: StateTableProps) {
+  const resolvedValues = adjustArray(values, varNames.length, () => '0')
+  const hasVars = varNames.length > 0
+  return (
+    <div className="state-table">
+      <div className="state-table__header">
+        <span className="state-table__title">{title}</span>
+        <div className="state-table__actions">
+          <button
+            type="button"
+            className="inspector-inline-button"
+            onClick={onCopy}
+            disabled={!hasVars}
+          >
+            Copy
+          </button>
+          <button
+            type="button"
+            className="inspector-inline-button"
+            onClick={onPaste}
+            disabled={!hasVars}
+          >
+            Paste
+          </button>
+        </div>
+      </div>
+      {hasVars ? (
+        <div className="state-table__wrap" role="region" aria-label={title}>
+          <table className="state-table__grid">
+            <thead>
+              <tr>
+                {varNames.map((name, index) => (
+                  <th key={`state-head-${index}`}>{name || `x${index + 1}`}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                {resolvedValues.map((value, index) => (
+                  <td key={`state-cell-${index}`}>
+                    <input
+                      type="number"
+                      step="any"
+                      className="state-table__input"
+                      value={value ?? ''}
+                      onChange={(event) => {
+                        const next = [...resolvedValues]
+                        next[index] = event.target.value
+                        onChange(next)
+                      }}
+                      data-testid={testIdPrefix ? `${testIdPrefix}-${index}` : undefined}
+                    />
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="empty-state">No state variables defined yet.</p>
+      )}
+    </div>
+  )
+}
+
 function InspectorDisclosure({
   title,
   defaultOpen = false,
@@ -3778,38 +3861,19 @@ export function InspectorDetailsPanel({
                       Apply valid system changes before running orbits.
                     </div>
                   ) : null}
-                  <div className="inspector-inline-actions">
-                    <button
-                      type="button"
-                      className="inspector-inline-button"
-                      onClick={handlePasteOrbitState}
-                    >
-                      Paste state
-                    </button>
-                  </div>
-                  <div className="inspector-list">
-                    {systemDraft.varNames.map((varName, index) => (
-                      <label key={`orbit-ic-${index}`}>
-                        Initial {varName}
-                        <input
-                          type="number"
-                          value={orbitDraft.initialState[index] ?? '0'}
-                          onChange={(event) =>
-                            setOrbitDraft((prev) => {
-                              const next = adjustArray(
-                                prev.initialState,
-                                systemDraft.varNames.length,
-                                () => '0'
-                              )
-                              next[index] = event.target.value
-                              return { ...prev, initialState: next }
-                            })
-                          }
-                          data-testid={`orbit-run-ic-${index}`}
-                        />
-                      </label>
-                    ))}
-                  </div>
+                  <StateTable
+                    title="Initial state"
+                    varNames={systemDraft.varNames}
+                    values={orbitDraft.initialState}
+                    onChange={(next) =>
+                      setOrbitDraft((prev) => ({ ...prev, initialState: next }))
+                    }
+                    onCopy={() =>
+                      void writeClipboardText(formatPointValues(orbitDraft.initialState))
+                    }
+                    onPaste={handlePasteOrbitState}
+                    testIdPrefix="orbit-run-ic"
+                  />
                   <label>
                     {systemDraft.type === 'map' ? 'Iterations' : 'Duration'}
                     <input
@@ -3877,38 +3941,19 @@ export function InspectorDetailsPanel({
                       data-testid="limit-cycle-period"
                     />
                   </label>
-                  <div className="inspector-inline-actions">
-                    <button
-                      type="button"
-                      className="inspector-inline-button"
-                      onClick={handlePasteLimitCycleState}
-                    >
-                      Paste state
-                    </button>
-                  </div>
-                  <div className="inspector-list">
-                    {systemDraft.varNames.map((varName, index) => (
-                      <label key={`lc-state-${index}`}>
-                        State {varName}
-                        <input
-                          type="number"
-                          value={limitCycleDraft.state[index] ?? '0'}
-                          onChange={(event) =>
-                            setLimitCycleDraft((prev) => {
-                              const next = adjustArray(
-                                prev.state,
-                                systemDraft.varNames.length,
-                                () => '0'
-                              )
-                              next[index] = event.target.value
-                              return { ...prev, state: next }
-                            })
-                          }
-                          data-testid={`limit-cycle-state-${index}`}
-                        />
-                      </label>
-                    ))}
-                  </div>
+                  <StateTable
+                    title="State vector"
+                    varNames={systemDraft.varNames}
+                    values={limitCycleDraft.state}
+                    onChange={(next) =>
+                      setLimitCycleDraft((prev) => ({ ...prev, state: next }))
+                    }
+                    onCopy={() =>
+                      void writeClipboardText(formatPointValues(limitCycleDraft.state))
+                    }
+                    onPaste={handlePasteLimitCycleState}
+                    testIdPrefix="limit-cycle-state"
+                  />
                   <label>
                     NTST
                     <input
@@ -4580,38 +4625,21 @@ export function InspectorDetailsPanel({
                       Apply valid system changes before solving equilibria.
                     </div>
                   ) : null}
-                  <div className="inspector-inline-actions">
-                    <button
-                      type="button"
-                      className="inspector-inline-button"
-                      onClick={handlePasteEquilibriumGuess}
-                    >
-                      Paste state
-                    </button>
-                  </div>
-                  <div className="inspector-list">
-                    {systemDraft.varNames.map((varName, index) => (
-                      <label key={`eq-guess-${index}`}>
-                        Initial {varName}
-                        <input
-                          type="number"
-                          value={equilibriumDraft.initialGuess[index] ?? '0'}
-                          onChange={(event) =>
-                            setEquilibriumDraft((prev) => {
-                              const next = adjustArray(
-                                prev.initialGuess,
-                                systemDraft.varNames.length,
-                                () => '0'
-                              )
-                              next[index] = event.target.value
-                              return { ...prev, initialGuess: next }
-                            })
-                          }
-                          data-testid={`equilibrium-solve-guess-${index}`}
-                        />
-                      </label>
-                    ))}
-                  </div>
+                  <StateTable
+                    title="Initial state"
+                    varNames={systemDraft.varNames}
+                    values={equilibriumDraft.initialGuess}
+                    onChange={(next) =>
+                      setEquilibriumDraft((prev) => ({ ...prev, initialGuess: next }))
+                    }
+                    onCopy={() =>
+                      void writeClipboardText(
+                        formatPointValues(equilibriumDraft.initialGuess)
+                      )
+                    }
+                    onPaste={handlePasteEquilibriumGuess}
+                    testIdPrefix="equilibrium-solve-guess"
+                  />
                   <label>
                     Max steps
                     <input
