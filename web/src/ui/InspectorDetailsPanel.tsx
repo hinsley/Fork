@@ -4018,6 +4018,7 @@ export function InspectorDetailsPanel({
                       }
                       data-testid="limit-cycle-ntst"
                     />
+                    <span className="field-help">Mesh intervals along the cycle.</span>
                   </label>
                   <label>
                     NCOL
@@ -4029,6 +4030,7 @@ export function InspectorDetailsPanel({
                       }
                       data-testid="limit-cycle-ncol"
                     />
+                    <span className="field-help">Collocation points per mesh interval.</span>
                   </label>
                   {systemDraft.paramNames.length > 0 ? (
                     <label>
@@ -4162,6 +4164,7 @@ export function InspectorDetailsPanel({
                           }
                           data-testid="limit-cycle-from-orbit-ntst"
                         />
+                        <span className="field-help">Mesh intervals along the cycle.</span>
                       </label>
                       <label>
                         NCOL
@@ -4176,6 +4179,7 @@ export function InspectorDetailsPanel({
                           }
                           data-testid="limit-cycle-from-orbit-ncol"
                         />
+                        <span className="field-help">Collocation points per mesh interval.</span>
                       </label>
                       <label>
                         Direction
@@ -7025,6 +7029,7 @@ export function InspectorDetailsPanel({
                             }
                             data-testid="limit-cycle-from-hopf-ntst"
                           />
+                          <span className="field-help">Mesh intervals along the cycle.</span>
                         </label>
                         <label>
                           NCOL
@@ -7039,6 +7044,7 @@ export function InspectorDetailsPanel({
                             }
                             data-testid="limit-cycle-from-hopf-ncol"
                           />
+                          <span className="field-help">Collocation points per mesh interval.</span>
                         </label>
                         <label>
                           Direction
@@ -7260,6 +7266,9 @@ export function InspectorDetailsPanel({
                             disabled
                             data-testid="limit-cycle-from-pd-ntst"
                           />
+                          <span className="field-help">
+                            Mesh intervals along the cycle (doubled from the parent branch).
+                          </span>
                         </label>
                         <label>
                           NCOL
@@ -7274,6 +7283,7 @@ export function InspectorDetailsPanel({
                             }
                             data-testid="limit-cycle-from-pd-ncol"
                           />
+                          <span className="field-help">Collocation points per mesh interval.</span>
                         </label>
                         <label>
                           Direction

@@ -888,6 +888,12 @@
   font-size: 0.8rem;
 }
 
+.field-help {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
+
 .field-warning {
   color: var(--warning);
   font-size: 0.8rem;
