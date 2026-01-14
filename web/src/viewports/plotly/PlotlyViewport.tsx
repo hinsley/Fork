@@ -39,6 +39,31 @@ type PlotlyEventTarget = HTMLDivElement & {
   removeAllListeners?: (event: 'plotly_click' | 'plotly_relayout') => void
 }
 
+function buildRelayoutFromLayout(layout: unknown): PlotlyRelayoutEvent {
+  if (!layout || typeof layout !== 'object') return {}
+  const record = layout as {
+    scene?: { camera?: unknown; _scene?: { camera?: unknown } }
+    xaxis?: { range?: unknown }
+    yaxis?: { range?: unknown }
+  }
+  const event: PlotlyRelayoutEvent = {}
+  const camera = record.scene?._scene?.camera ?? record.scene?.camera
+  if (camera) {
+    event['scene.camera'] = camera
+  }
+  if (Array.isArray(record.xaxis?.range)) {
+    event['xaxis.range'] = record.xaxis.range
+  }
+  if (Array.isArray(record.yaxis?.range)) {
+    event['yaxis.range'] = record.yaxis.range
+  }
+  return event
+}
+
+function hasRelayoutPayload(event: PlotlyRelayoutEvent): boolean {
+  return Object.keys(event).length > 0
+}
+
 function bindPlotlyClick(
   node: HTMLDivElement,
   onPointClickRef: MutableRefObject<((point: PlotlyPointClick) => void) | undefined>,
@@ -139,6 +164,9 @@ export function PlotlyViewport({
   const onResizeRef = useRef(onResize)
   const clickHandlerRef = useRef<((event: PlotlyClickEvent) => void) | null>(null)
   const relayoutHandlerRef = useRef<((event: PlotlyRelayoutEvent) => void) | null>(null)
+  const pointerIdRef = useRef<number | null>(null)
+  const dragFrameRef = useRef<number | null>(null)
+  const lastRelayoutRef = useRef<PlotlyRelayoutEvent | null>(null)
 
   useEffect(() => {
     onPointClickRef.current = onPointClick
@@ -182,6 +210,66 @@ export function PlotlyViewport({
       controller.abort()
     }
   }, [data, layout])
+
+  useEffect(() => {
+    const node = containerRef.current
+    if (!node) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      pointerIdRef.current = event.pointerId
+      lastRelayoutRef.current = null
+    }
+
+    const captureLayout = () => {
+      const currentLayout = (node as { _fullLayout?: unknown; layout?: unknown })._fullLayout
+        ?? (node as { _fullLayout?: unknown; layout?: unknown }).layout
+      const relayout = buildRelayoutFromLayout(currentLayout)
+      if (hasRelayoutPayload(relayout)) {
+        lastRelayoutRef.current = relayout
+      }
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (pointerIdRef.current === null) return
+      if (event.pointerId !== pointerIdRef.current) return
+      if (dragFrameRef.current) return
+      dragFrameRef.current = requestAnimationFrame(() => {
+        dragFrameRef.current = null
+        captureLayout()
+      })
+    }
+
+    const handlePointerUp = (event: PointerEvent) => {
+      if (pointerIdRef.current === null) return
+      if (event.pointerId !== pointerIdRef.current) return
+      pointerIdRef.current = null
+      if (!onRelayoutRef.current) return
+      if (dragFrameRef.current) {
+        cancelAnimationFrame(dragFrameRef.current)
+        dragFrameRef.current = null
+      }
+      captureLayout()
+      const relayout = lastRelayoutRef.current ?? {}
+      if (hasRelayoutPayload(relayout)) {
+        onRelayoutRef.current?.(relayout)
+      }
+    }
+
+    node.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
+
+    return () => {
+      node.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
+      if (dragFrameRef.current) {
+        cancelAnimationFrame(dragFrameRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const node = containerRef.current
