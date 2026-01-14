@@ -3,6 +3,7 @@ use super::{
     continue_with_problem, extend_branch_with_problem, BifurcationType, ContinuationBranch,
     ContinuationPoint, ContinuationSettings,
 };
+use super::util::{hopf_test_function, neutral_saddle_test_function};
 use crate::autodiff::Dual;
 use crate::equation_engine::EquationSystem;
 use crate::equilibrium::{compute_jacobian, compute_system_jacobian, SystemKind};
@@ -202,41 +203,6 @@ fn compute_eigenvalues(mat: &DMatrix<f64>) -> Result<Vec<Complex<f64>>> {
 
     let eigen = mat.clone().complex_eigenvalues();
     Ok(eigen.iter().cloned().collect())
-}
-
-fn hopf_test_function(eigenvalues: &[Complex<f64>]) -> Complex<f64> {
-    let mut product = Complex::new(1.0, 0.0);
-    for i in 0..eigenvalues.len() {
-        for j in (i + 1)..eigenvalues.len() {
-            product *= eigenvalues[i] + eigenvalues[j];
-        }
-    }
-    product
-}
-
-fn neutral_saddle_test_function(eigenvalues: &[Complex<f64>]) -> f64 {
-    const IMAG_EPS: f64 = 1e-8;
-    let mut product = 1.0;
-    let mut found_pair = false;
-
-    for i in 0..eigenvalues.len() {
-        if eigenvalues[i].im.abs() >= IMAG_EPS {
-            continue;
-        }
-        for j in (i + 1)..eigenvalues.len() {
-            if eigenvalues[j].im.abs() >= IMAG_EPS {
-                continue;
-            }
-            found_pair = true;
-            product *= eigenvalues[i].re + eigenvalues[j].re;
-        }
-    }
-
-    if found_pair {
-        product
-    } else {
-        1.0
-    }
 }
 
 #[cfg(test)]

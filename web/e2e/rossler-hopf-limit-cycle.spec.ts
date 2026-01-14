@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { createHarness } from './harness'
 
-test('rossler hopf to limit cycle continuation reports missing eigenpair', async ({ page }) => {
+test('rossler hopf to limit cycle continuation rejects neutral saddle', async ({ page }) => {
   test.setTimeout(180_000)
 
   const harness = createHarness(page)
@@ -35,15 +35,10 @@ test('rossler hopf to limit cycle continuation reports missing eigenpair', async
   await page.getByTestId('branch-points-toggle').click()
   await page.getByTestId('branch-point-input').fill('63')
   await page.getByTestId('branch-point-jump').click()
-  await expect(page.getByText('Stability: Hopf')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('Stability: NeutralSaddle')).toBeVisible({ timeout: 20_000 })
 
   await page.getByTestId('limit-cycle-from-hopf-toggle').click()
-  await page.getByTestId('limit-cycle-from-hopf-name').fill('lc_rossler_hopf')
-  await page.getByTestId('limit-cycle-from-hopf-branch-name').fill('lc_rossler_hopf_branch')
-  await page.getByTestId('limit-cycle-from-hopf-parameter').selectOption('a')
-  await page.getByTestId('limit-cycle-from-hopf-submit').click()
-
-  await expect(page.getByRole('alert')).toContainText(
-    'Failed to initialize limit cycle: Could not locate Hopf eigenpair'
-  )
+  await expect(
+    page.getByText('Select a Hopf bifurcation point to continue a limit cycle.')
+  ).toBeVisible()
 })

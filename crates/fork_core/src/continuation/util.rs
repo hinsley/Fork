@@ -143,16 +143,36 @@ pub fn compute_eigenvalues(mat: &DMatrix<f64>) -> Result<Vec<Complex<f64>>> {
     Ok(eigen.iter().cloned().collect())
 }
 
-/// Hopf test function: product of pairwise eigenvalue sums.
-/// Zero crossing indicates a Hopf bifurcation.
+/// Hopf test function: product of sums for conjugate eigenpairs.
+/// Zero crossing of the real part indicates a Hopf bifurcation.
 pub fn hopf_test_function(eigenvalues: &[Complex<f64>]) -> Complex<f64> {
+    const IMAG_EPS: f64 = 1e-8;
     let mut product = Complex::new(1.0, 0.0);
+    let mut found_pair = false;
+
     for i in 0..eigenvalues.len() {
+        let eig_i = eigenvalues[i];
+        if eig_i.im.abs() < IMAG_EPS {
+            continue;
+        }
         for j in (i + 1)..eigenvalues.len() {
-            product *= eigenvalues[i] + eigenvalues[j];
+            let eig_j = eigenvalues[j];
+            if eig_j.im.abs() < IMAG_EPS {
+                continue;
+            }
+            if eig_i.im.signum() == eig_j.im.signum() {
+                continue;
+            }
+            found_pair = true;
+            product *= eig_i + eig_j;
         }
     }
-    product
+
+    if found_pair {
+        product
+    } else {
+        Complex::new(1.0, 0.0)
+    }
 }
 
 /// Neutral saddle test function: product of pairwise real eigenvalue sums.
@@ -226,7 +246,7 @@ mod tests_additional {
     fn hopf_test_function_zero_for_canceling_pair() {
         let eigenvalues = vec![Complex::new(1.0, 0.0), Complex::new(-1.0, 0.0)];
         let value = hopf_test_function(&eigenvalues);
-        assert!(value.norm() < 1e-12);
+        assert!((value.re - 1.0).abs() < 1e-12);
     }
 
     #[test]
@@ -325,7 +345,7 @@ mod tests {
 
     #[test]
     fn hopf_test_function_zero_crossing() {
-        let eigenvalues = vec![Complex::new(1.0, 0.0), Complex::new(-1.0, 0.0)];
+        let eigenvalues = vec![Complex::new(0.0, 1.0), Complex::new(0.0, -1.0)];
         let value = hopf_test_function(&eigenvalues);
         assert!(value.norm() < 1e-12);
     }

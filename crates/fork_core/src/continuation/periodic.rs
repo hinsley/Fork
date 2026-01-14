@@ -120,6 +120,28 @@ impl LimitCycleSetup {
     }
 }
 
+fn select_hopf_pair(eigenvalues: &[Complex<f64>]) -> Option<(usize, usize)> {
+    if eigenvalues.len() < 2 {
+        return None;
+    }
+    let mut best_idx1 = 0usize;
+    let mut best_idx2 = 1usize;
+    let mut best_sum = f64::INFINITY;
+    for j in 0..eigenvalues.len() - 1 {
+        let base = eigenvalues[j];
+        for k in (j + 1)..eigenvalues.len() {
+            let sum = base + eigenvalues[k];
+            let value = sum.norm();
+            if value < best_sum {
+                best_sum = value;
+                best_idx1 = j;
+                best_idx2 = k;
+            }
+        }
+    }
+    Some((best_idx1, best_idx2))
+}
+
 pub fn limit_cycle_setup_from_hopf(
     system: &mut EquationSystem,
     param_index: usize,
@@ -147,22 +169,19 @@ pub fn limit_cycle_setup_from_hopf(
     let mat = DMatrix::from_row_slice(dim, dim, &jac);
     let eigenvalues = mat.clone().complex_eigenvalues();
 
-    let mut hopf_idx = None;
-    let mut best_freq = 0.0;
-    for (idx, val) in eigenvalues.iter().enumerate() {
-        if val.im <= 0.0 {
-            continue;
-        }
-        if val.re.abs() > 1e-6 {
-            continue;
-        }
-        if val.im > best_freq {
-            best_freq = val.im;
-            hopf_idx = Some(idx);
-        }
+    // Match MatCont's init_H_LC.m: pick eigenpair with smallest sum (closest conjugates).
+    let (idx1, idx2) = select_hopf_pair(eigenvalues.as_slice())
+        .ok_or_else(|| anyhow!("Could not locate Hopf eigenpair"))?;
+    let eig1 = eigenvalues[idx1];
+    let eig2 = eigenvalues[idx2];
+    if eig1.im.abs() <= 1e-12 && eig2.im.abs() <= 1e-12 {
+        bail!("Neutral saddle");
     }
-    let idx = hopf_idx.ok_or_else(|| anyhow!("Could not locate Hopf eigenpair"))?;
-    let lambda = eigenvalues[idx];
+    let omega = eig1.im.abs().max(eig2.im.abs());
+    if omega <= 0.0 {
+        bail!("Neutral saddle");
+    }
+    let lambda = eig1;
     let eigenvector = compute_complex_eigenvector(&mat, lambda)?;
 
     // Orthogonalize real and imaginary parts as in MatCont's init_H_LC.m
@@ -207,7 +226,7 @@ pub fn limit_cycle_setup_from_hopf(
     let phase_direction: Vec<f64> = imag_part.iter().map(|v| v / norm_imag).collect();
     let phase_anchor = hopf_state.to_vec();
 
-    let period = 2.0 * PI / lambda.im;
+    let period = 2.0 * PI / omega;
     let coeffs = CollocationCoefficients::new(degree)?;
     let mut mesh_states = Vec::with_capacity(mesh_points);
     let mut stage_states = Vec::with_capacity(mesh_points);

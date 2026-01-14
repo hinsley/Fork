@@ -269,7 +269,7 @@ mod problem_tests {
         let diagnostics = problem.diagnostics(&aug_state).expect("diagnostics");
         let values = diagnostics.test_values;
         assert!((values.fold - 6.0).abs() < 1e-12);
-        assert!((values.hopf - 5.0).abs() < 1e-12);
+        assert!((values.hopf - 1.0).abs() < 1e-12);
         assert!((values.neutral_saddle - 5.0).abs() < 1e-12);
 
         let mut eigenvalues: Vec<f64> = diagnostics.eigenvalues.iter().map(|v| v.re).collect();
