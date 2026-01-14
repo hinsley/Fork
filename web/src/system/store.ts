@@ -6,6 +6,7 @@ export interface SystemStore {
   save(system: System): Promise<void>
   saveUi(system: System): Promise<void>
   remove(id: string): Promise<void>
+  clear(): Promise<void>
 }
 
 export class MemorySystemStore implements SystemStore {
@@ -50,5 +51,9 @@ export class MemorySystemStore implements SystemStore {
 
   async remove(id: string): Promise<void> {
     this.systems.delete(id)
+  }
+
+  async clear(): Promise<void> {
+    this.systems.clear()
   }
 }

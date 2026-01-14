@@ -90,6 +90,20 @@
   color: #fff;
 }
 
+.settings-reset {
+  border-color: var(--error);
+  background: var(--error);
+  color: #fff;
+  width: 100%;
+  text-align: center;
+}
+
+.settings-reset:hover {
+  border-color: var(--error);
+  background: var(--error);
+  filter: brightness(0.95);
+}
+
 .toolbar__actions button,
 .objects-tree__toolbar button,
 .panel__actions button,

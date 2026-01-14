@@ -13,6 +13,7 @@ type ToolbarProps = {
   onOpenSystems: () => void
   theme: 'light' | 'dark'
   onThemeChange: (theme: 'light' | 'dark') => void
+  onResetFork: () => void
 }
 
 export function Toolbar({
@@ -22,9 +23,12 @@ export function Toolbar({
   onOpenSystems,
   theme,
   onThemeChange,
+  onResetFork,
 }: ToolbarProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsRef = useRef<HTMLDivElement | null>(null)
+  const resetMessage =
+    'Are you absolutely 100% sure you want to completely reset everything in Fork? This will delete all systems and any data you have stored. Make sure to export any systems with data you want to preserve.'
 
   useEffect(() => {
     const handlePointer = (event: PointerEvent) => {
@@ -87,6 +91,19 @@ export function Toolbar({
                     Dark
                   </button>
                 </div>
+              </div>
+              <div className="settings-row">
+                <button
+                  className="settings-reset"
+                  onClick={() => {
+                    if (!window.confirm(resetMessage)) return
+                    setSettingsOpen(false)
+                    onResetFork()
+                  }}
+                  data-testid="reset-fork"
+                >
+                  Reset Fork
+                </button>
               </div>
             </div>
           ) : null}

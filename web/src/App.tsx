@@ -231,6 +231,7 @@ function App() {
         onOpenSystems={openSystemsDialog}
         theme={theme}
         onThemeChange={setTheme}
+        onResetFork={actions.resetFork}
       />
 
       <SystemDialog

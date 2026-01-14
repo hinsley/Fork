@@ -127,4 +127,14 @@ export class OpfsSystemStore implements SystemStore {
     const systemsDir = await getSystemsDirectory()
     await systemsDir.removeEntry(id, { recursive: true })
   }
+
+  async clear(): Promise<void> {
+    const systemsDir = await getSystemsDirectory(false).catch(() => null)
+    if (!systemsDir) return
+    const removals: Promise<void>[] = []
+    for await (const entry of systemsDir.values()) {
+      removals.push(systemsDir.removeEntry(entry.name, { recursive: true }))
+    }
+    await Promise.all(removals)
+  }
 }

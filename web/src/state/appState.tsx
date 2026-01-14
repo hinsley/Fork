@@ -314,6 +314,7 @@ type AppActions = {
   saveSystem: () => Promise<void>
   exportSystem: (id: string) => Promise<void>
   deleteSystem: (id: string) => Promise<void>
+  resetFork: () => Promise<void>
   updateSystem: (system: SystemConfig) => Promise<void>
   validateSystem: (
     system: SystemConfig,
@@ -505,6 +506,29 @@ export function AppProvider({
     },
     [refreshSystems, store]
   )
+
+  const resetFork = useCallback(async () => {
+    dispatch({ type: 'SET_BUSY', busy: true })
+    try {
+      await store.clear()
+      if (
+        typeof window !== 'undefined' &&
+        'localStorage' in window &&
+        typeof window.localStorage.clear === 'function'
+      ) {
+        window.localStorage.clear()
+      }
+      dispatch({ type: 'SET_SYSTEM', system: null })
+      dispatch({ type: 'SET_SYSTEMS', systems: [] })
+      if (typeof window !== 'undefined') {
+        window.location.reload()
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      dispatch({ type: 'SET_ERROR', error: message })
+      dispatch({ type: 'SET_BUSY', busy: false })
+    }
+  }, [store])
 
   const updateSystemAction = useCallback(
     async (config: SystemConfig) => {
@@ -2476,6 +2500,7 @@ export function AppProvider({
       saveSystem,
       exportSystem,
       deleteSystem,
+      resetFork,
       updateSystem: updateSystemAction,
       validateSystem: validateSystemAction,
       selectNode: selectNodeAction,
@@ -2532,6 +2557,7 @@ export function AppProvider({
       addBifurcationDiagramAction,
       createSystemAction,
       deleteSystem,
+      resetFork,
       openSystem,
       refreshSystems,
       renameNodeAction,
