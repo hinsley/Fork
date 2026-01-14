@@ -236,15 +236,21 @@ export function serializeBranchDataForWasm(
 }
 
 export function ensureBranchIndices(data: ContinuationBranchData): number[] {
-  if (data.indices && data.indices.length === data.points.length) {
-    return data.indices
-  }
-  return data.points.map((_, index) => index)
+  const raw =
+    data.indices && data.indices.length === data.points.length
+      ? Array.from(data.indices)
+      : data.points.map((_, index) => index)
+  return raw.map((value, index) =>
+    Number.isFinite(value) ? Number(value) : index
+  )
 }
 
 export function buildSortedArrayOrder(indices: number[]): number[] {
   return indices
-    .map((logicalIdx, arrayIdx) => ({ logicalIdx, arrayIdx }))
+    .map((logicalIdx, arrayIdx) => ({
+      logicalIdx: Number.isFinite(logicalIdx) ? logicalIdx : arrayIdx,
+      arrayIdx,
+    }))
     .sort((a, b) => a.logicalIdx - b.logicalIdx)
     .map((entry) => entry.arrayIdx)
 }

@@ -1713,7 +1713,15 @@ export function InspectorDetailsPanel({
       prevBranchIdRef.current = branchId
       return
     }
-    const initialIndex = branchSortedOrder[0]
+    const renderTargetIndex =
+      branchRenderTarget?.type === 'branch' && branchRenderTarget.branchId === branchId
+        ? branchRenderTarget.pointIndex
+        : null
+    const renderTargetValid =
+      renderTargetIndex !== null &&
+      renderTargetIndex >= 0 &&
+      renderTargetIndex < branchIndices.length
+    const initialIndex = renderTargetValid ? renderTargetIndex : branchSortedOrder[0]
     setBranchPointIndex(initialIndex)
     const logicalIndex = branchIndices[initialIndex]
     setBranchPointInput(
@@ -1721,7 +1729,14 @@ export function InspectorDetailsPanel({
     )
     setBranchPointError(null)
     prevBranchIdRef.current = branchId
-  }, [branchIndices, branchPointIndex, branchSortedOrder, hasBranch, selectedNodeId])
+  }, [
+    branchIndices,
+    branchPointIndex,
+    branchRenderTarget,
+    branchSortedOrder,
+    hasBranch,
+    selectedNodeId,
+  ])
 
   useEffect(() => {
     branchPointIndexRef.current = branchPointIndex
