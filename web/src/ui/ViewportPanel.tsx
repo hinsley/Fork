@@ -137,6 +137,7 @@ const COBWEB_FUNCTION_COLOR = '#6f7a89'
 const MAP_FUNCTION_SAMPLE_COUNT = 256
 const PLOTLY_TEXT_COLOR = 'var(--text)'
 const PLOTLY_MUTED_TEXT_COLOR = 'var(--text-muted)'
+const EMPTY_TRACES: Data[] = []
 
 function interpolateOrbitState(
   times: number[],
@@ -1190,11 +1191,57 @@ function buildObjectNameIndex(system: System): Map<string, string> {
   return map
 }
 
+function buildLimitCyclePreviewTraces(
+  system: System,
+  selection: BranchPointSelection | null
+): Data[] {
+  if (!selection) return EMPTY_TRACES
+  const branch = system.branches[selection.branchId]
+  const point = branch?.data.points[selection.pointIndex]
+  if (!branch || !point || !LIMIT_CYCLE_BRANCH_TYPES.has(branch.branchType)) {
+    return EMPTY_TRACES
+  }
+  const objectNameIndex = buildObjectNameIndex(system)
+  const objectId = objectNameIndex.get(branch.parentObject) ?? null
+  const objectNode = objectId ? system.nodes[objectId] : null
+  const render = {
+    ...DEFAULT_RENDER,
+    ...(objectNode?.render ?? system.nodes[selection.branchId]?.render ?? {}),
+  }
+  const renderTarget = objectId
+    ? system.ui.limitCycleRenderTargets?.[objectId] ?? null
+    : null
+  const isCurrentTarget =
+    Boolean(
+      renderTarget?.type === 'branch' &&
+        renderTarget.branchId === selection.branchId &&
+        renderTarget.pointIndex === selection.pointIndex
+    )
+  if (isCurrentTarget) return EMPTY_TRACES
+  const { ntst, ncol } = resolveLimitCycleMesh(branch)
+  const dim = system.config.varNames.length
+  const indices = ensureBranchIndices(branch.data)
+  const logicalIndex = indices[selection.pointIndex]
+  const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : selection.pointIndex
+  const traceName = `LC Preview: ${branch.name} @ ${displayIndex}`
+  return buildLimitCycleTraces({
+    state: point.state,
+    dim,
+    ntst,
+    ncol,
+    name: traceName,
+    uid: selection.branchId,
+    color: render.color,
+    lineWidth: render.lineWidth + 1,
+    pointSize: render.pointSize + 2,
+    showLegend: false,
+  })
+}
+
 function buildSceneTraces(
   system: System,
   scene: Scene,
   selectedNodeId: string | null,
-  branchPointSelection?: BranchPointSelection | null,
   timeSeriesMeta?: TimeSeriesViewportMeta | null,
   mapRange?: [number, number] | null,
   mapFunctionSamples?: MapFunctionSamples | null,
@@ -1202,7 +1249,6 @@ function buildSceneTraces(
 ): Data[] {
   const traces: Data[] = []
   const limitCycleRenderTargets = system.ui.limitCycleRenderTargets ?? {}
-  const objectNameIndex = buildObjectNameIndex(system)
   const isMap = system.config.type === 'map'
   const isTimeSeries = system.config.varNames.length === 1 && !isMap
   const isMap1D = isMap && system.config.varNames.length === 1
@@ -1585,50 +1631,6 @@ function buildSceneTraces(
       const clvRender = resolveClvRender(node.render?.clv, object.covariantVectors?.dim)
       if (clvRender.enabled) {
         traces.push(...buildClvTraces(nodeId, object, clvRender, plotSize))
-      }
-    }
-  }
-
-  if (branchPointSelection) {
-    const branch = system.branches[branchPointSelection.branchId]
-    const point = branch?.data.points[branchPointSelection.pointIndex]
-    if (branch && point && LIMIT_CYCLE_BRANCH_TYPES.has(branch.branchType)) {
-      const objectId = objectNameIndex.get(branch.parentObject) ?? null
-      const objectNode = objectId ? system.nodes[objectId] : null
-      const render = {
-        ...DEFAULT_RENDER,
-        ...(objectNode?.render ?? system.nodes[branchPointSelection.branchId]?.render ?? {}),
-      }
-      const renderTarget = objectId ? limitCycleRenderTargets[objectId] : null
-      const isCurrentTarget =
-        Boolean(
-          renderTarget?.type === 'branch' &&
-            renderTarget.branchId === branchPointSelection.branchId &&
-            renderTarget.pointIndex === branchPointSelection.pointIndex
-        )
-      if (!isCurrentTarget) {
-        const { ntst, ncol } = resolveLimitCycleMesh(branch)
-        const dim = system.config.varNames.length
-        const indices = ensureBranchIndices(branch.data)
-        const logicalIndex = indices[branchPointSelection.pointIndex]
-        const displayIndex = Number.isFinite(logicalIndex)
-          ? logicalIndex
-          : branchPointSelection.pointIndex
-        const traceName = `LC Preview: ${branch.name} @ ${displayIndex}`
-        traces.push(
-          ...buildLimitCycleTraces({
-            state: point.state,
-            dim,
-            ntst,
-            ncol,
-            name: traceName,
-            uid: branchPointSelection.branchId,
-            color: render.color,
-            lineWidth: render.lineWidth + 1,
-            pointSize: render.pointSize + 2,
-            showLegend: false,
-          })
-        )
       }
     }
   }
@@ -2220,25 +2222,18 @@ function ViewportTile({
     }
   }, [layout.margin, plotSize])
 
-  const data = useMemo(() => {
-    if (scene) {
-      return buildSceneTraces(
-        system,
-        scene,
-        selectedNodeId,
-        branchPointSelection,
-        timeSeriesMeta,
-        mapRange,
-        mapFunctionSamples,
-        plotAreaSize
-      )
-    }
-    if (diagram) return diagramTraceState?.traces ?? []
-    return []
+  const sceneTraces = useMemo(() => {
+    if (!scene) return EMPTY_TRACES
+    return buildSceneTraces(
+      system,
+      scene,
+      selectedNodeId,
+      timeSeriesMeta,
+      mapRange,
+      mapFunctionSamples,
+      plotAreaSize
+    )
   }, [
-    diagram,
-    diagramTraceState,
-    branchPointSelection,
     mapFunctionSamples,
     mapRange,
     plotAreaSize,
@@ -2246,6 +2241,26 @@ function ViewportTile({
     selectedNodeId,
     system,
     timeSeriesMeta,
+  ])
+
+  const limitCyclePreviewTraces = useMemo(() => {
+    if (!scene) return EMPTY_TRACES
+    return buildLimitCyclePreviewTraces(system, branchPointSelection ?? null)
+  }, [branchPointSelection, scene, system])
+
+  const data = useMemo(() => {
+    if (scene) {
+      if (limitCyclePreviewTraces.length === 0) return sceneTraces
+      return [...sceneTraces, ...limitCyclePreviewTraces]
+    }
+    if (diagram) return diagramTraceState?.traces ?? EMPTY_TRACES
+    return EMPTY_TRACES
+  }, [
+    diagram,
+    diagramTraceState,
+    limitCyclePreviewTraces,
+    scene,
+    sceneTraces,
   ])
 
   const label = scene ? 'State Space' : 'Bifurcation Diagram'
