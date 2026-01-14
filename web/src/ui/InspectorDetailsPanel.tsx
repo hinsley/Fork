@@ -1233,6 +1233,18 @@ export function InspectorDetailsPanel({
         branchRenderTarget.branchId === selectedNodeId &&
         branchRenderTarget.pointIndex === branchPointIndex
     )
+  const selectionDebugEnabled = useMemo(() => {
+    if (typeof window === 'undefined') return false
+    const params = new URLSearchParams(window.location.search)
+    return params.has('debugSelection')
+  }, [])
+  const logSelectionDebug = useCallback(
+    (label: string, payload: Record<string, unknown>) => {
+      if (!selectionDebugEnabled) return
+      console.debug(`[SelectionDebug] ${label}`, payload)
+    },
+    [selectionDebugEnabled]
+  )
 
   const [systemDraft, setSystemDraft] = useState<SystemDraft>(() =>
     makeSystemDraft(system.config)
@@ -1693,12 +1705,21 @@ export function InspectorDetailsPanel({
   useEffect(() => {
     const branchId = hasBranch ? selectedNodeId : null
     if (!hasBranch) {
+      logSelectionDebug('branchPointInit:clear-no-branch', {
+        branchId,
+        selectedNodeId,
+      })
       prevBranchIdRef.current = branchId
       setBranchPointIndex(null)
       setBranchPointInput('')
       return
     }
     if (branchSortedOrder.length === 0) {
+      logSelectionDebug('branchPointInit:clear-empty-branch', {
+        branchId,
+        selectedNodeId,
+        branchIndicesLength: branchIndices.length,
+      })
       prevBranchIdRef.current = branchId
       setBranchPointIndex(null)
       setBranchPointInput('')
@@ -1710,6 +1731,12 @@ export function InspectorDetailsPanel({
       branchPointIndex >= 0 &&
       branchPointIndex < branchIndices.length
     if (!branchChanged && hasValidIndex) {
+      logSelectionDebug('branchPointInit:keep', {
+        branchId,
+        selectedNodeId,
+        branchPointIndex,
+        logicalIndex: branchIndices[branchPointIndex],
+      })
       prevBranchIdRef.current = branchId
       return
     }
@@ -1722,6 +1749,19 @@ export function InspectorDetailsPanel({
       renderTargetIndex >= 0 &&
       renderTargetIndex < branchIndices.length
     const initialIndex = renderTargetValid ? renderTargetIndex : branchSortedOrder[0]
+    logSelectionDebug('branchPointInit:set', {
+      branchId,
+      selectedNodeId,
+      prevBranchId: prevBranchIdRef.current,
+      branchChanged,
+      branchPointIndex,
+      initialIndex,
+      renderTargetIndex,
+      renderTargetValid,
+      branchIndicesLength: branchIndices.length,
+      branchSortedOrderStart: branchSortedOrder[0],
+      branchSortedOrderEnd: branchSortedOrder[branchSortedOrder.length - 1],
+    })
     setBranchPointIndex(initialIndex)
     const logicalIndex = branchIndices[initialIndex]
     setBranchPointInput(
@@ -1735,17 +1775,37 @@ export function InspectorDetailsPanel({
     branchRenderTarget,
     branchSortedOrder,
     hasBranch,
+    logSelectionDebug,
     selectedNodeId,
   ])
 
   useEffect(() => {
     branchPointIndexRef.current = branchPointIndex
-  }, [branchPointIndex])
+    logSelectionDebug('branchPointIndex:update', {
+      branchPointIndex,
+      logicalIndex:
+        branchPointIndex !== null ? branchIndices[branchPointIndex] : null,
+      selectedNodeId,
+      branchPointSelection,
+    })
+  }, [
+    branchIndices,
+    branchPointIndex,
+    branchPointSelection,
+    logSelectionDebug,
+    selectedNodeId,
+  ])
 
   useEffect(() => {
     if (!onBranchPointSelect || view !== 'selection') return
     if (!branch || branchPointIndex === null || !selectedNodeId) {
       if (branchPointSelection !== null) {
+        logSelectionDebug('branchPointSelect:clear', {
+          branchPointSelection,
+          selectedNodeId,
+          branchPointIndex,
+          branchId: branch?.name ?? null,
+        })
         onBranchPointSelect(null)
       }
       return
@@ -1755,16 +1815,30 @@ export function InspectorDetailsPanel({
       branchPointSelection.branchId === selectedNodeId &&
       branchPointSelection.pointIndex === branchPointIndex
     ) {
+      logSelectionDebug('branchPointSelect:skip', {
+        branchPointSelection,
+        selectedNodeId,
+        branchPointIndex,
+        logicalIndex: branchIndices[branchPointIndex],
+      })
       return
     }
+    logSelectionDebug('branchPointSelect:set', {
+      selectedNodeId,
+      branchPointIndex,
+      logicalIndex: branchIndices[branchPointIndex],
+      branchPointSelection,
+    })
     onBranchPointSelect({
       branchId: selectedNodeId,
       pointIndex: branchPointIndex,
     })
   }, [
     branch,
+    branchIndices,
     branchPointIndex,
     branchPointSelection,
+    logSelectionDebug,
     onBranchPointSelect,
     selectedNodeId,
     view,
@@ -2370,11 +2444,20 @@ export function InspectorDetailsPanel({
     const targetIndex = branchPointSelection.pointIndex
     if (targetIndex === branchPointIndexRef.current) return
     if (targetIndex < 0 || targetIndex >= branchIndices.length) return
+    logSelectionDebug('branchPointSelection:apply', {
+      selectedNodeId,
+      targetIndex,
+      currentIndex: branchPointIndexRef.current,
+      logicalIndex: branchIndices[targetIndex],
+      branchIndicesLength: branchIndices.length,
+      branchPointSelection,
+    })
     setBranchPoint(targetIndex)
   }, [
     branch,
-    branchIndices.length,
+    branchIndices,
     branchPointSelection,
+    logSelectionDebug,
     setBranchPoint,
     selectedNodeId,
     view,
