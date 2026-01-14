@@ -564,6 +564,7 @@ export function AppProvider({
   const selectNodeAction = useCallback(
     (nodeId: string | null) => {
       if (!state.system) return
+      if (state.system.ui.selectedNodeId === nodeId) return
       const system = selectNode(state.system, nodeId)
       dispatch({ type: 'SET_SYSTEM', system })
     },

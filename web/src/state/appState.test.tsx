@@ -73,6 +73,37 @@ function withParam(system: System, name: string, value: number): System {
   }
 }
 
+describe('appState selection', () => {
+  it('does not update the system when selecting the same node twice', async () => {
+    const base = createSystem({ name: 'Select Test' })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_1',
+      systemName: base.config.name,
+      data: [[0, 0, 0, 0]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+      parameters: [...base.config.params],
+    }
+    const { system, nodeId } = addObject(base, orbit)
+    const { getContext } = setupApp(system)
+
+    await act(async () => {
+      getContext().actions.selectNode(nodeId)
+    })
+
+    const firstSystem = getContext().state.system
+
+    await act(async () => {
+      getContext().actions.selectNode(nodeId)
+    })
+
+    const secondSystem = getContext().state.system
+    expect(secondSystem).toBe(firstSystem)
+  })
+})
+
 describe('appState limit cycle render targets', () => {
   it('defaults to the stored cycle when creating a stable limit cycle object', async () => {
     const base = createSystem({ name: 'Stable LC' })
