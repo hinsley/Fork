@@ -1078,6 +1078,43 @@ function resolveLimitCycleMesh(
   return DEFAULT_LIMIT_CYCLE_MESH
 }
 
+type LimitCycleEnvelope = { min: number; max: number }
+
+function resolveLimitCycleEnvelope(
+  system: System,
+  branch: ContinuationObject,
+  point: ContinuationPoint,
+  axis: BifurcationAxis
+): LimitCycleEnvelope | null {
+  if (axis.kind !== 'state') return null
+  const index = system.config.varNames.indexOf(axis.name)
+  if (index < 0) return null
+  const dim = system.config.varNames.length
+  if (dim <= 0) return null
+  const { ntst, ncol } = resolveLimitCycleMesh(branch)
+  const { profilePoints } = extractLimitCycleProfile(point.state, dim, ntst, ncol)
+  let min = Number.POSITIVE_INFINITY
+  let max = Number.NEGATIVE_INFINITY
+
+  if (profilePoints.length > 0) {
+    for (const profilePoint of profilePoints) {
+      const value = profilePoint[index]
+      if (!Number.isFinite(value)) continue
+      min = Math.min(min, value)
+      max = Math.max(max, value)
+    }
+  } else {
+    const value = point.state[index]
+    if (Number.isFinite(value)) {
+      min = value
+      max = value
+    }
+  }
+
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null
+  return { min, max }
+}
+
 type LimitCycleTraceConfig = {
   state: number[]
   dim: number
@@ -1804,6 +1841,156 @@ function buildDiagramTraces(
     const x: number[] = []
     const y: number[] = []
     const pointIndices: number[] = []
+    const hasMixedAxes = xAxis.kind !== yAxis.kind
+    const isLimitCycleBranch = LIMIT_CYCLE_BRANCH_TYPES.has(branch.branchType)
+
+    if (hasMixedAxes && isLimitCycleBranch) {
+      const parameterAxis = xAxis.kind === 'parameter' ? xAxis : yAxis
+      const stateAxis = xAxis.kind === 'state' ? xAxis : yAxis
+      const xMin: number[] = []
+      const yMin: number[] = []
+      const xMax: number[] = []
+      const yMax: number[] = []
+      const envelopePoints = new Map<
+        number,
+        { xMin: number; yMin: number; xMax: number; yMax: number }
+      >()
+
+      for (const idx of order) {
+        const point = branch.data.points[idx]
+        if (!point) continue
+        const paramValue = resolveAxisValue(system, branch, point, parameterAxis, branchParams)
+        const envelope = resolveLimitCycleEnvelope(system, branch, point, stateAxis)
+        if (paramValue === null || !Number.isFinite(paramValue) || !envelope) continue
+        const { min, max } = envelope
+        const values =
+          xAxis.kind === 'parameter'
+            ? { xMin: paramValue, yMin: min, xMax: paramValue, yMax: max }
+            : { xMin: min, yMin: paramValue, xMax: max, yMax: paramValue }
+        if (
+          !Number.isFinite(values.xMin) ||
+          !Number.isFinite(values.yMin) ||
+          !Number.isFinite(values.xMax) ||
+          !Number.isFinite(values.yMax)
+        ) {
+          continue
+        }
+        xMin.push(values.xMin)
+        yMin.push(values.yMin)
+        xMax.push(values.xMax)
+        yMax.push(values.yMax)
+        pointIndices.push(idx)
+        envelopePoints.set(idx, values)
+      }
+
+      if (xMax.length === 0 || yMax.length === 0) continue
+      hasData = true
+
+      const highlight = branchId === selectedNodeId
+      const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
+      const markerSize = highlight ? node.render.pointSize + 2 : node.render.pointSize
+
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        name: branch.name,
+        uid: branchId,
+        x: xMax,
+        y: yMax,
+        customdata: pointIndices,
+        line: {
+          color: node.render.color,
+          width: lineWidth,
+        },
+      })
+
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        name: `${branch.name} min`,
+        uid: branchId,
+        x: xMin,
+        y: yMin,
+        customdata: pointIndices,
+        line: {
+          color: node.render.color,
+          width: lineWidth,
+        },
+        showlegend: false,
+      })
+
+      traces.push({
+        type: 'scatter',
+        mode: 'markers',
+        name: `${branch.name} start`,
+        uid: branchId,
+        x: [xMax[0]],
+        y: [yMax[0]],
+        customdata: [pointIndices[0]],
+        marker: {
+          color: node.render.color,
+          size: markerSize,
+          symbol: 'triangle-up',
+        },
+        showlegend: false,
+        hovertemplate: 'Start<extra></extra>',
+      })
+
+      traces.push({
+        type: 'scatter',
+        mode: 'markers',
+        name: `${branch.name} end`,
+        uid: branchId,
+        x: [xMax[xMax.length - 1]],
+        y: [yMax[yMax.length - 1]],
+        customdata: [pointIndices[pointIndices.length - 1]],
+        marker: {
+          color: node.render.color,
+          size: markerSize,
+          symbol: 'triangle-down',
+        },
+        showlegend: false,
+        hovertemplate: 'End<extra></extra>',
+      })
+
+      if (branch.data.bifurcations && branch.data.bifurcations.length > 0) {
+        const bx: number[] = []
+        const by: number[] = []
+        const labels: string[] = []
+        const bifIndices: number[] = []
+        for (const bifIndex of branch.data.bifurcations) {
+          const point = branch.data.points[bifIndex]
+          const envelope = envelopePoints.get(bifIndex)
+          if (!point || !envelope) continue
+          bx.push(envelope.xMax)
+          by.push(envelope.yMax)
+          bifIndices.push(bifIndex)
+          const logicalIndex = indices[bifIndex]
+          const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : bifIndex
+          labels.push(formatBifurcationLabel(displayIndex, point.stability))
+        }
+        if (bx.length > 0) {
+          traces.push({
+            type: 'scatter',
+            mode: 'markers',
+            name: `${branch.name} bifurcations`,
+            uid: branchId,
+            x: bx,
+            y: by,
+            customdata: bifIndices,
+            marker: {
+              color: node.render.color,
+              size: markerSize + 2,
+              symbol: 'diamond',
+            },
+            text: labels,
+            showlegend: false,
+            hovertemplate: '%{text}<extra></extra>',
+          })
+        }
+      }
+      continue
+    }
 
     for (const idx of order) {
       const point = branch.data.points[idx]
