@@ -90,20 +90,6 @@
   color: #fff;
 }
 
-.settings-reset {
-  border-color: var(--danger);
-  background: var(--danger);
-  color: #fff;
-  width: 100%;
-  text-align: center;
-}
-
-.settings-reset:hover {
-  border-color: var(--danger);
-  background: var(--danger);
-  filter: brightness(0.95);
-}
-
 .toolbar__actions button,
 .objects-tree__toolbar button,
 .panel__actions button,
@@ -129,6 +115,20 @@
 .empty-card button:hover {
   border-color: var(--accent);
   background: var(--button-bg-hover);
+}
+
+.toolbar__settings-panel .settings-reset {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+  width: 100%;
+  text-align: center;
+}
+
+.toolbar__settings-panel .settings-reset:hover {
+  border-color: var(--danger);
+  background: var(--danger);
+  filter: brightness(0.95);
 }
 
 .toolbar__status {
