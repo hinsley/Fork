@@ -1262,56 +1262,6 @@ export function InspectorDetailsPanel({
       view,
     ]
   )
-  const syncBranchPointSelection = useCallback(
-    (arrayIndex: number | null) => {
-      if (!onBranchPointSelect || view !== 'selection') return
-      if (!branch || arrayIndex === null || !selectedNodeId) {
-        if (branchPointSelection !== null) {
-          logSelectionDebug('branchPointSelect:clear', {
-            branchPointSelection,
-            selectedNodeId,
-            branchPointIndex: arrayIndex,
-            branchId: branch?.name ?? null,
-          })
-          onBranchPointSelect(null)
-        }
-        return
-      }
-      if (
-        branchPointSelection &&
-        branchPointSelection.branchId === selectedNodeId &&
-        branchPointSelection.pointIndex === arrayIndex
-      ) {
-        logSelectionDebug('branchPointSelect:skip', {
-          branchPointSelection,
-          selectedNodeId,
-          branchPointIndex: arrayIndex,
-          logicalIndex: branchIndices[arrayIndex],
-        })
-        return
-      }
-      logSelectionDebug('branchPointSelect:set', {
-        selectedNodeId,
-        branchPointIndex: arrayIndex,
-        logicalIndex: branchIndices[arrayIndex],
-        branchPointSelection,
-      })
-      onBranchPointSelect({
-        branchId: selectedNodeId,
-        pointIndex: arrayIndex,
-      })
-    },
-    [
-      branch,
-      branchIndices,
-      branchPointSelection,
-      logSelectionDebug,
-      onBranchPointSelect,
-      selectedNodeId,
-      view,
-    ]
-  )
-
   const [systemDraft, setSystemDraft] = useState<SystemDraft>(() =>
     makeSystemDraft(system.config)
   )
