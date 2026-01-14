@@ -1745,14 +1745,30 @@ export function InspectorDetailsPanel({
   useEffect(() => {
     if (!onBranchPointSelect || view !== 'selection') return
     if (!branch || branchPointIndex === null || !selectedNodeId) {
-      onBranchPointSelect(null)
+      if (branchPointSelection !== null) {
+        onBranchPointSelect(null)
+      }
+      return
+    }
+    if (
+      branchPointSelection &&
+      branchPointSelection.branchId === selectedNodeId &&
+      branchPointSelection.pointIndex === branchPointIndex
+    ) {
       return
     }
     onBranchPointSelect({
       branchId: selectedNodeId,
       pointIndex: branchPointIndex,
     })
-  }, [branch, branchPointIndex, onBranchPointSelect, selectedNodeId, view])
+  }, [
+    branch,
+    branchPointIndex,
+    branchPointSelection,
+    onBranchPointSelect,
+    selectedNodeId,
+    view,
+  ])
 
   const systemConfig = useMemo(() => buildSystemConfig(systemDraft), [systemDraft])
   const systemValidation = useMemo(() => validateSystemConfig(systemConfig), [systemConfig])
