@@ -511,19 +511,20 @@ function summarizeEigenvalues(point: ContinuationPoint, branchType?: string): st
 function buildEigenvaluePlot(
   eigenvalues: ComplexValue[] | null | undefined,
   plotlyBackground: string,
-  options?: { showRadiusLines?: boolean }
+  options?: { showRadiusLines?: boolean; showUnitCircle?: boolean }
 ) {
   if (!eigenvalues || eigenvalues.length === 0) return null
+  const showUnitCircle = options?.showUnitCircle ?? false
   const x = eigenvalues.map((value) => value.re)
   const y = eigenvalues.map((value) => value.im)
   const finiteX = x.filter((value) => Number.isFinite(value))
   const finiteY = y.filter((value) => Number.isFinite(value))
   const safeX = finiteX.length > 0 ? finiteX : [0]
   const safeY = finiteY.length > 0 ? finiteY : [0]
-  const minX = Math.min(...safeX, 0)
-  const maxX = Math.max(...safeX, 0)
-  const minY = Math.min(...safeY, 0)
-  const maxY = Math.max(...safeY, 0)
+  const minX = showUnitCircle ? Math.min(...safeX, -1, 0) : Math.min(...safeX, 0)
+  const maxX = showUnitCircle ? Math.max(...safeX, 1, 0) : Math.max(...safeX, 0)
+  const minY = showUnitCircle ? Math.min(...safeY, -1, 0) : Math.min(...safeY, 0)
+  const maxY = showUnitCircle ? Math.max(...safeY, 1, 0) : Math.max(...safeY, 0)
   const spanX = maxX - minX
   const spanY = maxY - minY
   const span = Math.max(spanX, spanY) || 1
@@ -547,7 +548,21 @@ function buildEigenvaluePlot(
             showlegend: false,
           }))
       : []
+  const unitCircle: Data[] = showUnitCircle
+    ? [
+        {
+          x: Array.from({ length: 129 }, (_, idx) => Math.cos((idx / 128) * 2 * Math.PI)),
+          y: Array.from({ length: 129 }, (_, idx) => Math.sin((idx / 128) * 2 * Math.PI)),
+          mode: 'lines',
+          type: 'scatter',
+          line: { color: 'rgba(120,120,120,0.45)', width: 1 },
+          hoverinfo: 'skip',
+          showlegend: false,
+        },
+      ]
+    : []
   const data: Data[] = [
+    ...unitCircle,
     ...radiusLines,
     {
       x,
@@ -1822,7 +1837,6 @@ export function InspectorDetailsPanel({
       showRadiusLines: isDiscreteMap,
     })
   }, [equilibrium?.solution?.eigenpairs, isDiscreteMap, plotlyBackground])
-
   useEffect(() => {
     if (!systemDirty && !systemTouched) {
       setWasmEquationErrors([])
@@ -2024,6 +2038,13 @@ export function InspectorDetailsPanel({
       showRadiusLines: isDiscreteMap,
     })
   }, [branch?.branchType, branchEigenvalues, isDiscreteMap, plotlyBackground])
+  const branchMultiplierPlot = useMemo(() => {
+    if (branch?.branchType !== 'limit_cycle') return null
+    if (branchEigenvalues.length === 0) return null
+    return buildEigenvaluePlot(branchEigenvalues, plotlyBackground, {
+      showUnitCircle: true,
+    })
+  }, [branch?.branchType, branchEigenvalues, plotlyBackground])
   const selectedBranchPointParams = useMemo(() => {
     if (!branch || !selectedBranchPoint) return []
     return resolveBranchPointParams(
@@ -2069,6 +2090,12 @@ export function InspectorDetailsPanel({
     limitCycleRenderData?.paramValue ?? limitCycle?.paramValue
   const limitCycleDisplayMultipliers =
     limitCycleRenderData?.multipliers ?? limitCycle?.floquetMultipliers ?? []
+  const limitCycleMultiplierPlot = useMemo(() => {
+    if (limitCycleDisplayMultipliers.length === 0) return null
+    return buildEigenvaluePlot(limitCycleDisplayMultipliers, plotlyBackground, {
+      showUnitCircle: true,
+    })
+  }, [limitCycleDisplayMultipliers, plotlyBackground])
 
   const handleApplySystem = async () => {
     setSystemTouched(true)
@@ -5079,12 +5106,23 @@ export function InspectorDetailsPanel({
               <div className="inspector-section">
                 <h4 className="inspector-subheading">Floquet multipliers</h4>
                 {limitCycleDisplayMultipliers.length > 0 ? (
-                  <InspectorMetrics
-                    rows={limitCycleDisplayMultipliers.map((value, index) => ({
-                      label: `Multiplier ${index + 1}`,
-                      value: formatComplexValue(value),
-                    }))}
-                  />
+                  <div className="inspector-list">
+                    {limitCycleMultiplierPlot ? (
+                      <div className="inspector-plot">
+                        <PlotlyViewport
+                          data={limitCycleMultiplierPlot.data}
+                          layout={limitCycleMultiplierPlot.layout}
+                          testId="limit-cycle-multiplier-plot"
+                        />
+                      </div>
+                    ) : null}
+                    <InspectorMetrics
+                      rows={limitCycleDisplayMultipliers.map((value, index) => ({
+                        label: `Multiplier ${index + 1}`,
+                        value: formatComplexValue(value),
+                      }))}
+                    />
+                  </div>
                 ) : (
                   <p className="empty-state">Floquet multipliers not computed yet.</p>
                 )}
@@ -5845,11 +5883,11 @@ export function InspectorDetailsPanel({
                             <h4 className="inspector-subheading">Floquet Multipliers</h4>
                             {branchEigenvalues.length > 0 ? (
                               <div className="inspector-list">
-                                {branchEigenPlot ? (
+                                {branchMultiplierPlot ? (
                                   <div className="inspector-plot">
                                     <PlotlyViewport
-                                      data={branchEigenPlot.data}
-                                      layout={branchEigenPlot.layout}
+                                      data={branchMultiplierPlot.data}
+                                      layout={branchMultiplierPlot.layout}
                                       testId="branch-eigenvalue-plot"
                                     />
                                   </div>

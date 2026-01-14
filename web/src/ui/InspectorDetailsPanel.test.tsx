@@ -828,6 +828,7 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.getByText('Amplitude (min to max)')).toBeVisible()
     expect(screen.getByText('Mean & RMS')).toBeVisible()
     expect(screen.getByText('Floquet Multipliers')).toBeVisible()
+    expect(screen.getByTestId('branch-eigenvalue-plot')).toBeVisible()
   })
 
   it('sets limit cycle render targets from the cycle navigator', async () => {
@@ -1275,6 +1276,59 @@ describe('InspectorDetailsPanel', () => {
     )
 
     expect(screen.queryByTestId('limit-cycle-render-stored')).toBeNull()
+  })
+
+  it('renders a multipliers plot for limit cycle objects', () => {
+    const base = createSystem({ name: 'LC Plot System' })
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Plot',
+      systemName: base.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_Plot' },
+      ntst: 10,
+      ncol: 4,
+      period: 5,
+      state: [0, 0, 5],
+      parameters: [...base.config.params],
+      floquetMultipliers: [
+        { re: 0.5, im: 0.2 },
+        { re: 1.1, im: 0 },
+      ],
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(base, limitCycle)
+
+    render(
+      <InspectorDetailsPanel
+        system={added.system}
+        selectedNodeId={added.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId('limit-cycle-data-toggle'))
+    expect(screen.getByTestId('limit-cycle-multiplier-plot')).toBeVisible()
   })
 
   it('creates limit cycle continuation from Hopf with a selected parameter', async () => {
