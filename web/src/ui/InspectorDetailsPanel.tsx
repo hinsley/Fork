@@ -1935,13 +1935,19 @@ export function InspectorDetailsPanel({
     (branch?.branchType === 'equilibrium'
       ? selectedBranchPoint.stability === 'Hopf'
       : true)
-  const branchEigenvalues = selectedBranchPoint
-    ? normalizeEigenvalueArray(selectedBranchPoint.eigenvalues)
-    : []
-  const branchEigenPlot =
-    branch?.branchType === 'equilibrium'
-      ? buildEigenvaluePlot(branchEigenvalues, plotlyBackground, { showRadiusLines: isDiscreteMap })
-      : null
+  const branchEigenvalues = useMemo(
+    () =>
+      selectedBranchPoint
+        ? normalizeEigenvalueArray(selectedBranchPoint.eigenvalues)
+        : [],
+    [selectedBranchPoint]
+  )
+  const branchEigenPlot = useMemo(() => {
+    if (branch?.branchType !== 'equilibrium') return null
+    return buildEigenvaluePlot(branchEigenvalues, plotlyBackground, {
+      showRadiusLines: isDiscreteMap,
+    })
+  }, [branch?.branchType, branchEigenvalues, isDiscreteMap, plotlyBackground])
   const selectedBranchPointParams = useMemo(() => {
     if (!selectedBranchPoint) return []
     return systemDraft.paramNames.map((name, index) => {

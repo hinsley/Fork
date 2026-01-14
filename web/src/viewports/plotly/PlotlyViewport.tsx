@@ -113,7 +113,8 @@ function clearPlotlyClick(
 function bindPlotlyRelayout(
   node: HTMLDivElement,
   onRelayoutRef: MutableRefObject<((event: PlotlyRelayoutEvent) => void) | undefined>,
-  relayoutHandlerRef: MutableRefObject<((event: PlotlyRelayoutEvent) => void) | null>
+  relayoutHandlerRef: MutableRefObject<((event: PlotlyRelayoutEvent) => void) | null>,
+  ignoreRef?: MutableRefObject<boolean>
 ) {
   const target = node as PlotlyEventTarget
   if (!target.on) return
@@ -121,6 +122,7 @@ function bindPlotlyRelayout(
   if (!onRelayoutRef.current) return
 
   const handler = (event: PlotlyRelayoutEvent) => {
+    if (ignoreRef?.current) return
     onRelayoutRef.current?.(event)
   }
   relayoutHandlerRef.current = handler
@@ -164,6 +166,7 @@ export function PlotlyViewport({
   const onResizeRef = useRef(onResize)
   const clickHandlerRef = useRef<((event: PlotlyClickEvent) => void) | null>(null)
   const relayoutHandlerRef = useRef<((event: PlotlyRelayoutEvent) => void) | null>(null)
+  const renderInFlightRef = useRef(false)
   const pointerIdRef = useRef<number | null>(null)
   const dragFrameRef = useRef<number | null>(null)
   const lastRelayoutRef = useRef<PlotlyRelayoutEvent | null>(null)
@@ -190,6 +193,7 @@ export function PlotlyViewport({
     const controller = new AbortController()
     const runRender = async () => {
       if (controller.signal.aborted) return
+      renderInFlightRef.current = true
       setError(null)
       setLoading(!isPlotlyLoaded())
       try {
@@ -197,12 +201,14 @@ export function PlotlyViewport({
         if (controller.signal.aborted) return
         setLoading(false)
         bindPlotlyClick(node, onPointClickRef, clickHandlerRef)
-        bindPlotlyRelayout(node, onRelayoutRef, relayoutHandlerRef)
+        bindPlotlyRelayout(node, onRelayoutRef, relayoutHandlerRef, renderInFlightRef)
       } catch (err) {
         if (controller.signal.aborted) return
         const message = err instanceof Error ? err.message : String(err)
         setError(message)
         setLoading(false)
+      } finally {
+        renderInFlightRef.current = false
       }
     }
     void runRender()
@@ -244,6 +250,7 @@ export function PlotlyViewport({
       if (event.pointerId !== pointerIdRef.current) return
       pointerIdRef.current = null
       if (!onRelayoutRef.current) return
+      if (renderInFlightRef.current) return
       if (dragFrameRef.current) {
         cancelAnimationFrame(dragFrameRef.current)
         dragFrameRef.current = null
