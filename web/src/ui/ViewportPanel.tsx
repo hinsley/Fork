@@ -951,6 +951,24 @@ function collectVisibleObjectIds(system: System): string[] {
   return ids
 }
 
+function collectVisibleBranchIds(system: System): string[] {
+  const ids: string[] = []
+  const stack = [...system.rootIds]
+  while (stack.length > 0) {
+    const nodeId = stack.pop()
+    if (!nodeId) continue
+    const node = system.nodes[nodeId]
+    if (!node) continue
+    if (node.children.length > 0) {
+      stack.push(...node.children)
+    }
+    if (node.kind !== 'branch' || !node.visibility) continue
+    if (!system.branches[nodeId]) continue
+    ids.push(nodeId)
+  }
+  return ids
+}
+
 function collectMap1DRange(system: System): [number, number] | null {
   let min = Number.POSITIVE_INFINITY
   let max = Number.NEGATIVE_INFINITY
@@ -1838,7 +1856,16 @@ function buildDiagramTraces(
   const xAxis = diagram.xAxis
   const yAxis = diagram.yAxis
   const hasAxes = Boolean(xAxis && yAxis)
-  const hasBranches = diagram.selectedBranchIds.length > 0
+  const selectedBranchIds = diagram.selectedBranchIds ?? []
+  const candidateBranchIds =
+    selectedBranchIds.length > 0
+      ? selectedBranchIds
+      : collectVisibleBranchIds(system)
+  const branchIds = candidateBranchIds.filter((branchId) => {
+    const node = system.nodes[branchId]
+    return Boolean(node?.visibility && system.branches[branchId])
+  })
+  const hasBranches = branchIds.length > 0
   const xTitle = axisTitle(xAxis)
   const yTitle = axisTitle(yAxis)
 
@@ -1847,7 +1874,7 @@ function buildDiagramTraces(
   }
 
   let hasData = false
-  for (const branchId of diagram.selectedBranchIds) {
+  for (const branchId of branchIds) {
     const branch = system.branches[branchId]
     const node = system.nodes[branchId]
     if (!branch || !node || !node.visibility) continue
@@ -2249,7 +2276,7 @@ function buildDiagramLayout(
   if (!hasAxes) {
     message = 'Select axes to configure this diagram.'
   } else if (!hasBranches) {
-    message = 'Select branches to configure this diagram.'
+    message = 'No visible branches available for this diagram.'
   } else if (!hasData) {
     message = 'No bifurcation data available for the selected axes.'
   }

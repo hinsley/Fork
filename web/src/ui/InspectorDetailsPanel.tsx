@@ -1911,16 +1911,20 @@ export function InspectorDetailsPanel({
 
     if (diagram) {
       const branchCount = diagram.selectedBranchIds.length
+      const detail =
+        branchCount > 0
+          ? `${branchCount} branch${branchCount === 1 ? '' : 'es'} enabled`
+          : branchEntries.length > 0
+            ? 'All visible branches'
+            : 'No branches available'
       return {
         label: 'Bifurcation',
-        detail: branchCount
-          ? `${branchCount} branch${branchCount === 1 ? '' : 'es'} enabled`
-          : 'No branches enabled',
+        detail,
       }
     }
 
     return null
-  }, [branch, diagram, object, scene])
+  }, [branch, branchEntries.length, diagram, object, scene])
 
   const limitCycleNameSuggestion = useMemo(() => {
     const names = Object.values(system.objects).map((obj) => obj.name)
@@ -5285,7 +5289,10 @@ export function InspectorDetailsPanel({
                   </div>
                 ) : (
                   <p className="empty-state">
-                    No objects selected yet. Use the list below to add objects to this scene.
+                    {scene.display === 'selection'
+                      ? 'No objects selected yet. Showing the current selection by default.'
+                      : 'No objects selected yet. Showing all visible objects by default.'}{' '}
+                    Use the list below to add objects to this scene.
                   </p>
                 )}
                 {sceneFilteredObjects.length > 0 ? (
@@ -5416,8 +5423,8 @@ export function InspectorDetailsPanel({
                     </div>
                   ) : (
                     <p className="empty-state">
-                      No branches selected yet. Use the list below to add branches to this
-                      diagram.
+                      No branches selected yet. Showing all visible branches by default. Use
+                      the list below to add branches to this diagram.
                     </p>
                   )}
                   {diagramFilteredBranches.length > 0 ? (
