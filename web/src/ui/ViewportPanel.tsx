@@ -1,4 +1,12 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import type { Data, Layout } from 'plotly.js'
 import type {
   AxisRange,
@@ -37,6 +45,7 @@ import { resolveSceneAxisIndices, resolveSceneAxisSelection } from '../system/sc
 import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/PlotlyViewport'
 import { resolvePlotlyBackgroundColor } from '../viewports/plotly/plotlyTheme'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
+import { clampMenuX } from './contextMenu'
 import type {
   BranchPointSelection,
   LimitCyclePointSelection,
@@ -2486,11 +2495,13 @@ export function ViewportPanel({
     y: number
     targetId: string | null
   } | null>(null)
+  const createMenuRef = useRef<HTMLDivElement | null>(null)
   const [nodeContextMenu, setNodeContextMenu] = useState<{
     id: string
     x: number
     y: number
   } | null>(null)
+  const nodeContextMenuRef = useRef<HTMLDivElement | null>(null)
   const [mapFunctionSamples, setMapFunctionSamples] = useState<MapFunctionSamples | null>(null)
   const viewportHeights = system.ui.viewportHeights
   const tileRefs = useRef(new Map<string, HTMLDivElement | null>())
@@ -2616,6 +2627,24 @@ export function ViewportPanel({
     }
   }, [createMenu, nodeContextMenu])
 
+  useLayoutEffect(() => {
+    if (!createMenu || !createMenuRef.current) return
+    const rect = createMenuRef.current.getBoundingClientRect()
+    if (!rect.width) return
+    const clampedX = clampMenuX(createMenu.x, rect.width)
+    if (clampedX === createMenu.x) return
+    setCreateMenu((prev) => (prev ? { ...prev, x: clampedX } : prev))
+  }, [createMenu])
+
+  useLayoutEffect(() => {
+    if (!nodeContextMenu || !nodeContextMenuRef.current) return
+    const rect = nodeContextMenuRef.current.getBoundingClientRect()
+    if (!rect.width) return
+    const clampedX = clampMenuX(nodeContextMenu.x, rect.width)
+    if (clampedX === nodeContextMenu.x) return
+    setNodeContextMenu((prev) => (prev ? { ...prev, x: clampedX } : prev))
+  }, [nodeContextMenu])
+
   const openCreateMenu = (event: React.MouseEvent, targetId: string | null) => {
     event.preventDefault()
     event.stopPropagation()
@@ -2686,6 +2715,7 @@ export function ViewportPanel({
       className="context-menu"
       style={{ left: createMenu.x, top: createMenu.y }}
       onPointerDown={(event) => event.stopPropagation()}
+      ref={createMenuRef}
       data-testid="viewport-create-menu"
     >
       <button
@@ -2797,6 +2827,7 @@ export function ViewportPanel({
           className="context-menu"
           style={{ left: nodeContextMenu.x, top: nodeContextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
+          ref={nodeContextMenuRef}
           data-testid="viewport-context-menu"
         >
           <button

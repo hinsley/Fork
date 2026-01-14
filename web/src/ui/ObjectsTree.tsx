@@ -3,11 +3,14 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 import type { System, TreeNode } from '../system/types'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
+import { clampMenuX } from './contextMenu'
 
 export type ObjectsTreeHandle = {
   openCreateMenu: (position: { x: number; y: number }) => void
@@ -65,6 +68,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       x: number
       y: number
     } | null>(null)
+    const createMenuRef = useRef<HTMLDivElement | null>(null)
+    const nodeContextMenuRef = useRef<HTMLDivElement | null>(null)
 
     const rootNodes = useMemo(
       () => system.rootIds.filter((id) => system.nodes[id]?.kind === 'object'),
@@ -111,6 +116,24 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         window.removeEventListener('blur', handleBlur)
       }
     }, [nodeContextMenu, createMenu])
+
+    useLayoutEffect(() => {
+      if (!createMenu || !createMenuRef.current) return
+      const rect = createMenuRef.current.getBoundingClientRect()
+      if (!rect.width) return
+      const clampedX = clampMenuX(createMenu.x, rect.width)
+      if (clampedX === createMenu.x) return
+      setCreateMenu((prev) => (prev ? { ...prev, x: clampedX } : prev))
+    }, [createMenu])
+
+    useLayoutEffect(() => {
+      if (!nodeContextMenu || !nodeContextMenuRef.current) return
+      const rect = nodeContextMenuRef.current.getBoundingClientRect()
+      if (!rect.width) return
+      const clampedX = clampMenuX(nodeContextMenu.x, rect.width)
+      if (clampedX === nodeContextMenu.x) return
+      setNodeContextMenu((prev) => (prev ? { ...prev, x: clampedX } : prev))
+    }, [nodeContextMenu])
 
     const commitRename = (node: TreeNode) => {
       const trimmed = draftName.trim()
@@ -280,6 +303,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
             className="context-menu"
             style={{ left: createMenu.x, top: createMenu.y }}
             onPointerDown={(event) => event.stopPropagation()}
+            ref={createMenuRef}
             data-testid="create-object-menu"
           >
             <button
@@ -309,6 +333,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
             className="context-menu"
             style={{ left: nodeContextMenu.x, top: nodeContextMenu.y }}
             onPointerDown={(event) => event.stopPropagation()}
+            ref={nodeContextMenuRef}
             data-testid="object-context-menu"
           >
             <button
