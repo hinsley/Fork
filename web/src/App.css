@@ -91,16 +91,16 @@
 }
 
 .settings-reset {
-  border-color: var(--error);
-  background: var(--error);
+  border-color: var(--danger);
+  background: var(--danger);
   color: #fff;
   width: 100%;
   text-align: center;
 }
 
 .settings-reset:hover {
-  border-color: var(--error);
-  background: var(--error);
+  border-color: var(--danger);
+  background: var(--danger);
   filter: brightness(0.95);
 }
 
