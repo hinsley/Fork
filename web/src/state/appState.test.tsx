@@ -105,66 +105,6 @@ describe('appState selection', () => {
 })
 
 describe('appState limit cycle render targets', () => {
-  it('defaults to the stored cycle when creating a stable limit cycle object', async () => {
-    const base = createSystem({ name: 'Stable LC' })
-    const configured = withParam(base, 'mu', 0.2)
-    const orbit: OrbitObject = {
-      type: 'orbit',
-      name: 'Orbit Seed',
-      systemName: configured.config.name,
-      data: [[0, 0, 1]],
-      t_start: 0,
-      t_end: 0,
-      dt: 0.1,
-      parameters: [...configured.config.params],
-    }
-    const { system, nodeId: orbitId } = addObject(configured, orbit)
-    const client = new MockForkCoreClient(0)
-    client.runLimitCycleContinuationFromOrbit = async (request) => {
-      const state = new Array(request.system.varNames.length + 1).fill(0)
-      state[state.length - 1] = 2
-      return normalizeBranchEigenvalues({
-        points: [
-          {
-            state,
-            param_value: request.paramValue,
-            stability: 'None',
-            eigenvalues: [],
-          },
-          {
-            state,
-            param_value: request.paramValue + request.settings.step_size,
-            stability: 'None',
-            eigenvalues: [],
-          },
-        ],
-        bifurcations: [],
-        indices: [0, 1],
-        branch_type: { type: 'LimitCycle', ntst: request.ntst, ncol: request.ncol },
-      })
-    }
-    const { getContext } = setupApp(system, client)
-
-    await act(async () => {
-      await getContext().actions.createLimitCycleObject({
-        originOrbitId: orbitId,
-        name: 'LC_Stable',
-        state: [0.1, 0.2],
-        period: 3.5,
-        ntst: 12,
-        ncol: 4,
-        parameterName: 'mu',
-      })
-    })
-
-    await waitFor(() => {
-      const next = getContext().state.system
-      expect(next).not.toBeNull()
-      const lcId = findObjectIdByName(next!, 'LC_Stable')
-      expect(next!.ui.limitCycleRenderTargets?.[lcId]).toEqual({ type: 'object' })
-    })
-  })
-
   it('uses the last computed point after continuing from an orbit', async () => {
     const base = createSystem({ name: 'Orbit LC' })
     const configured = withParam(base, 'mu', 0.1)

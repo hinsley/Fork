@@ -28,7 +28,6 @@ describe('InspectorDetailsPanel', () => {
     const onValidateSystem = vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })
     const onRunOrbit = vi.fn().mockResolvedValue(undefined)
     const onSolveEquilibrium = vi.fn().mockResolvedValue(undefined)
-    const onCreateLimitCycle = vi.fn().mockResolvedValue(undefined)
     const onCreateEquilibriumBranch = vi.fn().mockResolvedValue(undefined)
     const onCreateBranchFromPoint = vi.fn().mockResolvedValue(undefined)
     const onExtendBranch = vi.fn().mockResolvedValue(undefined)
@@ -67,7 +66,6 @@ describe('InspectorDetailsPanel', () => {
           onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
           onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
           onSolveEquilibrium={onSolveEquilibrium}
-          onCreateLimitCycle={onCreateLimitCycle}
           onCreateEquilibriumBranch={onCreateEquilibriumBranch}
           onCreateBranchFromPoint={onCreateBranchFromPoint}
           onExtendBranch={onExtendBranch}
@@ -119,7 +117,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -142,11 +139,10 @@ describe('InspectorDetailsPanel', () => {
     )
   })
 
-  it('runs orbit and creates limit cycle requests', async () => {
+  it('runs orbit requests', async () => {
     const user = userEvent.setup()
     const { system, objectNodeId } = createDemoSystem()
     const onRunOrbit = vi.fn().mockResolvedValue(undefined)
-    const onCreateLimitCycle = vi.fn().mockResolvedValue(undefined)
 
     render(
       <InspectorDetailsPanel
@@ -165,16 +161,15 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={onCreateLimitCycle}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
-      onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
-      onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
-      onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
-      onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
-      onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
-    />
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
     )
 
     await user.click(screen.getByTestId('orbit-run-toggle'))
@@ -194,28 +189,6 @@ describe('InspectorDetailsPanel', () => {
       initialState: [1, 2],
       duration: 10,
       dt: 0.5,
-    })
-
-    await user.click(screen.getByTestId('limit-cycle-toggle'))
-    await user.clear(screen.getByTestId('limit-cycle-name'))
-    await user.type(screen.getByTestId('limit-cycle-name'), 'LC_Q')
-    await user.clear(screen.getByTestId('limit-cycle-period'))
-    await user.type(screen.getByTestId('limit-cycle-period'), '6')
-    await user.clear(screen.getByTestId('limit-cycle-state-0'))
-    await user.type(screen.getByTestId('limit-cycle-state-0'), '0.1')
-    await user.clear(screen.getByTestId('limit-cycle-state-1'))
-    await user.type(screen.getByTestId('limit-cycle-state-1'), '0.2')
-
-    await user.click(screen.getByTestId('limit-cycle-submit'))
-
-    expect(onCreateLimitCycle).toHaveBeenCalledWith({
-      name: 'LC_Q',
-      originOrbitId: objectNodeId,
-      period: 6,
-      state: [0.1, 0.2],
-      ntst: 50,
-      ncol: 4,
-      parameterName: undefined,
     })
   })
 
@@ -249,7 +222,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -261,7 +233,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('limit-cycle-from-orbit-toggle'))
+    await user.click(screen.getByTestId('limit-cycle-toggle'))
     await user.clear(screen.getByTestId('limit-cycle-from-orbit-name'))
     await user.type(screen.getByTestId('limit-cycle-from-orbit-name'), 'lc_orbit')
     await user.clear(screen.getByTestId('limit-cycle-from-orbit-branch-name'))
@@ -349,7 +321,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -361,7 +332,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('limit-cycle-from-orbit-toggle'))
+    await user.click(screen.getByTestId('limit-cycle-toggle'))
     const branchInput = screen.getByTestId('limit-cycle-from-orbit-branch-name')
 
     await waitFor(() => {
@@ -441,7 +412,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -547,7 +517,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -612,7 +581,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -708,7 +676,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -806,7 +773,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -861,7 +827,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -916,7 +881,6 @@ describe('InspectorDetailsPanel', () => {
           onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
           onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
           onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-          onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
           onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
           onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
           onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -985,7 +949,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -1033,7 +996,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -1090,7 +1052,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -1145,7 +1106,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -1197,7 +1157,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -1263,7 +1222,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -1315,7 +1273,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -1404,7 +1361,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -1547,7 +1503,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -1703,7 +1658,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -1800,7 +1754,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={onSolveEquilibrium}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
@@ -1883,7 +1836,6 @@ describe('InspectorDetailsPanel', () => {
         onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
         onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
         onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
-        onCreateLimitCycle={vi.fn().mockResolvedValue(undefined)}
         onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}

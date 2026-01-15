@@ -215,16 +215,6 @@ export type HopfCurveContinuationRequest = {
   forward: boolean
 }
 
-export type LimitCycleCreateRequest = {
-  name: string
-  originOrbitId: string
-  period: number
-  state: number[]
-  ntst: number
-  ncol: number
-  parameterName?: string
-}
-
 export type LimitCycleOrbitContinuationRequest = {
   orbitId: string
   limitCycleName: string
@@ -354,7 +344,6 @@ type AppActions = {
   extendBranch: (request: BranchExtensionRequest) => Promise<void>
   createFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   createHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
-  createLimitCycleObject: (request: LimitCycleCreateRequest) => Promise<void>
   createLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
   createLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
   createLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
@@ -2345,85 +2334,6 @@ export function AppProvider({
     [client, state.system, store]
   )
 
-  const createLimitCycleObject = useCallback(
-    async (request: LimitCycleCreateRequest) => {
-      if (!state.system) return
-      dispatch({ type: 'SET_BUSY', busy: true })
-      try {
-        const system = state.system.config
-        const validation = validateSystemConfig(system)
-        if (!validation.valid) {
-          throw new Error('System settings are invalid.')
-        }
-        if (system.type === 'map') {
-          throw new Error('Limit cycles require a flow system.')
-        }
-        const trimmedName = request.name.trim()
-        const nameError = validateObjectName(trimmedName, 'Limit cycle')
-        if (nameError) {
-          throw new Error(nameError)
-        }
-        const existingNames = Object.values(state.system.objects).map((obj) => obj.name)
-        if (existingNames.includes(trimmedName)) {
-          throw new Error(`Object "${trimmedName}" already exists.`)
-        }
-        const orbit = state.system.objects[request.originOrbitId]
-        if (!orbit || orbit.type !== 'orbit') {
-          throw new Error('Select a valid orbit for limit cycle initialization.')
-        }
-        if (request.state.length !== system.varNames.length) {
-          throw new Error('Limit cycle state dimension mismatch.')
-        }
-        if (request.state.some((value) => !Number.isFinite(value))) {
-          throw new Error('Limit cycle state values must be numeric.')
-        }
-        if (!Number.isFinite(request.period) || request.period <= 0) {
-          throw new Error('Period must be a positive number.')
-        }
-        if (!Number.isFinite(request.ntst) || request.ntst <= 0) {
-          throw new Error('NTST must be a positive number.')
-        }
-        if (!Number.isFinite(request.ncol) || request.ncol <= 0) {
-          throw new Error('NCOL must be a positive number.')
-        }
-
-        const paramName = request.parameterName
-        const paramIndex = paramName ? system.paramNames.indexOf(paramName) : -1
-        const paramValue = paramIndex >= 0 ? system.params[paramIndex] : undefined
-
-        const lcState = [...request.state, request.period]
-
-        const obj: LimitCycleObject = {
-          type: 'limit_cycle',
-          name: trimmedName,
-          systemName: system.name,
-          origin: { type: 'orbit', orbitName: orbit.name },
-          ntst: Math.round(request.ntst),
-          ncol: Math.round(request.ncol),
-          period: request.period,
-          state: lcState,
-          parameters: [...system.params],
-          parameterName: paramIndex >= 0 ? paramName : undefined,
-          paramValue,
-          createdAt: new Date().toISOString(),
-        }
-
-        const added = addObject(state.system, obj)
-        const withTarget = updateLimitCycleRenderTarget(added.system, added.nodeId, {
-          type: 'object',
-        })
-        dispatch({ type: 'SET_SYSTEM', system: withTarget })
-        await store.save(withTarget)
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        dispatch({ type: 'SET_ERROR', error: message })
-      } finally {
-        dispatch({ type: 'SET_BUSY', busy: false })
-      }
-    },
-    [state.system, store]
-  )
-
   const addSceneAction = useCallback(
     async (name: string, targetId?: string | null) => {
       if (!state.system) return
@@ -2529,7 +2439,6 @@ export function AppProvider({
       extendBranch,
       createFoldCurveFromPoint,
       createHopfCurveFromPoint,
-      createLimitCycleObject,
       createLimitCycleFromOrbit,
       createLimitCycleFromHopf,
       createLimitCycleFromPD,
@@ -2540,7 +2449,6 @@ export function AppProvider({
     }),
     [
       createEquilibriumObject,
-      createLimitCycleObject,
       createOrbitObject,
       runOrbit,
       sampleMap1DFunction,

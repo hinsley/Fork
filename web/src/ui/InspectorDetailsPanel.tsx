@@ -33,7 +33,6 @@ import type {
   BranchContinuationRequest,
   BranchExtensionRequest,
   EquilibriumContinuationRequest,
-  LimitCycleCreateRequest,
   EquilibriumSolveRequest,
   FoldCurveContinuationRequest,
   HopfCurveContinuationRequest,
@@ -96,7 +95,6 @@ type InspectorDetailsPanelProps = {
   onComputeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
   onComputeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
   onSolveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
-  onCreateLimitCycle: (request: LimitCycleCreateRequest) => Promise<void>
   onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   onCreateBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
   onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
@@ -139,15 +137,6 @@ type EquilibriumSolveDraft = {
   initialGuess: string[]
   maxSteps: string
   dampingFactor: string
-}
-
-type LimitCycleDraft = {
-  name: string
-  period: string
-  state: string[]
-  ntst: string
-  ncol: string
-  parameterName: string
 }
 
 type LimitCycleFromOrbitDraft = {
@@ -236,17 +225,6 @@ type BranchEntry = {
 const FLOW_SOLVERS = ['rk4', 'tsit5']
 const MAP_SOLVERS = ['discrete']
 const ORBIT_PREVIEW_PAGE_SIZE = 10
-
-function nextName(prefix: string, existing: string[]) {
-  const base = toCliSafeName(prefix)
-  let index = 1
-  let name = `${base}_${index}`
-  while (existing.includes(name)) {
-    index += 1
-    name = `${base}_${index}`
-  }
-  return name
-}
 
 function adjustArray<T>(values: T[], targetLength: number, fill: () => T): T[] {
   if (values.length === targetLength) return values
@@ -724,21 +702,6 @@ function makeEquilibriumSolveDraft(
   }
 }
 
-function makeLimitCycleDraft(system: SystemConfig, orbit?: OrbitObject): LimitCycleDraft {
-  const hasData = Boolean(orbit && orbit.data.length > 0)
-  const lastRow = hasData ? orbit!.data[orbit!.data.length - 1] : null
-  const state = lastRow ? lastRow.slice(1).map((value) => value.toString()) : []
-  const period = hasData ? orbit!.t_end - orbit!.t_start : 1
-  return {
-    name: '',
-    period: (period > 0 ? period : 1).toString(),
-    state: adjustArray(state, system.varNames.length, () => '0'),
-    ntst: '50',
-    ncol: '4',
-    parameterName: system.paramNames[0] ?? '',
-  }
-}
-
 function makeLimitCycleFromOrbitDraft(system: SystemConfig): LimitCycleFromOrbitDraft {
   return {
     limitCycleName: '',
@@ -1047,7 +1010,6 @@ export function InspectorDetailsPanel({
   onComputeLyapunovExponents,
   onComputeCovariantLyapunovVectors,
   onSolveEquilibrium,
-  onCreateLimitCycle,
   onCreateEquilibriumBranch,
   onCreateBranchFromPoint,
   onExtendBranch,
@@ -1340,11 +1302,6 @@ export function InspectorDetailsPanel({
     makeContinuationDraft(system.config)
   )
   const [continuationError, setContinuationError] = useState<string | null>(null)
-
-  const [limitCycleDraft, setLimitCycleDraft] = useState<LimitCycleDraft>(() =>
-    makeLimitCycleDraft(system.config)
-  )
-  const [limitCycleError, setLimitCycleError] = useState<string | null>(null)
   const [limitCycleFromOrbitDraft, setLimitCycleFromOrbitDraft] =
     useState<LimitCycleFromOrbitDraft>(() => makeLimitCycleFromOrbitDraft(system.config))
   const [limitCycleFromOrbitError, setLimitCycleFromOrbitError] = useState<string | null>(
@@ -1507,10 +1464,6 @@ export function InspectorDetailsPanel({
       ...prev,
       initialGuess: adjustArray(prev.initialGuess, systemDraft.varNames.length, () => '0'),
     }))
-    setLimitCycleDraft((prev) => ({
-      ...prev,
-      state: adjustArray(prev.state, systemDraft.varNames.length, () => '0'),
-    }))
   }, [systemDraft.varNames.length])
 
   useEffect(() => {
@@ -1520,19 +1473,6 @@ export function InspectorDetailsPanel({
       setSystemDraft((prev) => ({ ...prev, solver: 'rk4' }))
     }
   }, [systemDraft.type, systemDraft.solver])
-
-  useEffect(() => {
-    setLimitCycleDraft((prev) => {
-      if (systemDraft.paramNames.length === 0) {
-        if (!prev.parameterName) return prev
-        return { ...prev, parameterName: '' }
-      }
-      if (systemDraft.paramNames.includes(prev.parameterName)) {
-        return prev
-      }
-      return { ...prev, parameterName: systemDraft.paramNames[0] }
-    })
-  }, [systemDraft.paramNames])
 
   useEffect(() => {
     setContinuationDraft((prev) => {
@@ -1605,10 +1545,6 @@ export function InspectorDetailsPanel({
       setOrbitDraft(makeOrbitRunDraft(stableSystemConfig, current))
       setLyapunovDraft(makeLyapunovDraft())
       setCovariantDraft(makeCovariantLyapunovDraft())
-      setLimitCycleDraft((prev) => ({
-        ...makeLimitCycleDraft(stableSystemConfig, current),
-        name: prev.name,
-      }))
       setLimitCycleFromOrbitDraft((prev) => ({
         ...makeLimitCycleFromOrbitDraft(stableSystemConfig),
         limitCycleName: prev.limitCycleName,
@@ -1620,7 +1556,6 @@ export function InspectorDetailsPanel({
       setOrbitError(null)
       setLyapunovError(null)
       setCovariantError(null)
-      setLimitCycleError(null)
       setLimitCycleFromOrbitError(null)
     }
     if (current.type === 'equilibrium') {
@@ -1925,11 +1860,6 @@ export function InspectorDetailsPanel({
 
     return null
   }, [branch, branchEntries.length, diagram, object, scene])
-
-  const limitCycleNameSuggestion = useMemo(() => {
-    const names = Object.values(system.objects).map((obj) => obj.name)
-    return nextName('Limit Cycle', names)
-  }, [system.objects])
 
   const limitCycleFromOrbitNameSuggestion = useMemo(() => {
     if (!orbit) return 'lc_orbit'
@@ -2340,17 +2270,6 @@ export function InspectorDetailsPanel({
         systemDraft.varNames.length,
         values
       ),
-    }))
-  }
-
-  const handlePasteLimitCycleState = async () => {
-    const text = await readClipboardText()
-    if (!text) return
-    const values = parsePointValues(text)
-    if (values.length === 0) return
-    setLimitCycleDraft((prev) => ({
-      ...prev,
-      state: applyPointValues(prev.state, systemDraft.varNames.length, values),
     }))
   }
 
@@ -3001,60 +2920,6 @@ export function InspectorDetailsPanel({
       settings,
       forward: limitCycleFromOrbitDraft.forward,
     })
-  }
-
-  const handleCreateLimitCycle = async () => {
-    if (runDisabled) {
-      setLimitCycleError('Apply valid system settings before creating objects.')
-      return
-    }
-    if (systemDraft.type === 'map') {
-      setLimitCycleError('Limit cycles require a flow system.')
-      return
-    }
-    if (!object || object.type !== 'orbit' || !selectedNodeId) {
-      setLimitCycleError('Select an orbit to initialize from.')
-      return
-    }
-    const name = limitCycleDraft.name.trim() || limitCycleNameSuggestion
-    if (!isCliSafeName(name)) {
-      setLimitCycleError('Limit cycle names must be alphanumeric with underscores only.')
-      return
-    }
-    const period = parseNumber(limitCycleDraft.period)
-    const ntst = parseNumber(limitCycleDraft.ntst)
-    const ncol = parseNumber(limitCycleDraft.ncol)
-    const state = limitCycleDraft.state.map((value) => parseNumber(value))
-
-    if (period === null || period <= 0) {
-      setLimitCycleError('Period must be a positive number.')
-      return
-    }
-    if (ntst === null || ntst <= 0) {
-      setLimitCycleError('NTST must be a positive number.')
-      return
-    }
-    if (ncol === null || ncol <= 0) {
-      setLimitCycleError('NCOL must be a positive number.')
-      return
-    }
-    if (state.some((value) => value === null)) {
-      setLimitCycleError('State values must be numeric.')
-      return
-    }
-
-    setLimitCycleError(null)
-    const request: LimitCycleCreateRequest = {
-      name,
-      originOrbitId: selectedNodeId,
-      period,
-      state: state.map((value) => value ?? 0),
-      ntst,
-      ncol,
-      parameterName: limitCycleDraft.parameterName.trim() || undefined,
-    }
-    await onCreateLimitCycle(request)
-    setLimitCycleDraft((prev) => ({ ...prev, name: '' }))
   }
 
   const renderSystemErrors = () => {
@@ -4054,113 +3919,13 @@ export function InspectorDetailsPanel({
               </InspectorDisclosure>
 
               <InspectorDisclosure
-                key={`${selectionKey}-limit-cycle-create`}
+                key={`${selectionKey}-limit-cycle`}
                 title="Limit Cycle"
                 testId="limit-cycle-toggle"
                 defaultOpen={false}
               >
                 <div className="inspector-section">
-                  {systemDraft.type === 'map' ? (
-                    <p className="empty-state">Limit cycles are only supported for flow systems.</p>
-                  ) : null}
-                  <label>
-                    Name
-                    <input
-                      value={limitCycleDraft.name}
-                      onChange={(event) =>
-                        setLimitCycleDraft((prev) => ({ ...prev, name: event.target.value }))
-                      }
-                      placeholder={limitCycleNameSuggestion}
-                      data-testid="limit-cycle-name"
-                    />
-                  </label>
-                  <label>
-                    Period
-                    <input
-                      type="number"
-                      value={limitCycleDraft.period}
-                      onChange={(event) =>
-                        setLimitCycleDraft((prev) => ({ ...prev, period: event.target.value }))
-                      }
-                      data-testid="limit-cycle-period"
-                    />
-                  </label>
-                  <StateTable
-                    title="State vector"
-                    varNames={systemDraft.varNames}
-                    values={limitCycleDraft.state}
-                    onChange={(next) =>
-                      setLimitCycleDraft((prev) => ({ ...prev, state: next }))
-                    }
-                    onCopy={() =>
-                      void writeClipboardText(formatPointValues(limitCycleDraft.state))
-                    }
-                    onPaste={handlePasteLimitCycleState}
-                    testIdPrefix="limit-cycle-state"
-                  />
-                  <label>
-                    NTST
-                    <input
-                      type="number"
-                      value={limitCycleDraft.ntst}
-                      onChange={(event) =>
-                        setLimitCycleDraft((prev) => ({ ...prev, ntst: event.target.value }))
-                      }
-                      data-testid="limit-cycle-ntst"
-                    />
-                    <span className="field-help">Mesh intervals along the cycle.</span>
-                  </label>
-                  <label>
-                    NCOL
-                    <input
-                      type="number"
-                      value={limitCycleDraft.ncol}
-                      onChange={(event) =>
-                        setLimitCycleDraft((prev) => ({ ...prev, ncol: event.target.value }))
-                      }
-                      data-testid="limit-cycle-ncol"
-                    />
-                    <span className="field-help">Collocation points per mesh interval.</span>
-                  </label>
-                  {systemDraft.paramNames.length > 0 ? (
-                    <label>
-                      Continuation parameter
-                      <select
-                        value={limitCycleDraft.parameterName}
-                        onChange={(event) =>
-                          setLimitCycleDraft((prev) => ({
-                            ...prev,
-                            parameterName: event.target.value,
-                          }))
-                        }
-                        data-testid="limit-cycle-parameter"
-                      >
-                        {systemDraft.paramNames.map((name) => (
-                          <option key={name} value={name}>
-                            {name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-                  {limitCycleError ? <div className="field-error">{limitCycleError}</div> : null}
-                  <button
-                    onClick={handleCreateLimitCycle}
-                    disabled={runDisabled}
-                    data-testid="limit-cycle-submit"
-                  >
-                    Create Limit Cycle
-                  </button>
-                </div>
-              </InspectorDisclosure>
-
-              <InspectorDisclosure
-                key={`${selectionKey}-limit-cycle-orbit`}
-                title="Limit Cycle from Orbit"
-                testId="limit-cycle-from-orbit-toggle"
-                defaultOpen={false}
-              >
-                <div className="inspector-section">
+                  <h4 className="inspector-subheading">Continue from Orbit</h4>
                   {systemDraft.type === 'map' ? (
                     <p className="empty-state">Limit cycles require a flow system.</p>
                   ) : null}

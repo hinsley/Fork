@@ -41,7 +41,6 @@ describe('SystemSettingsDialog', () => {
         onComputeLyapunovExponents={vi.fn(() => Promise.resolve())}
         onComputeCovariantLyapunovVectors={vi.fn(() => Promise.resolve())}
         onSolveEquilibrium={vi.fn(() => Promise.resolve())}
-        onCreateLimitCycle={vi.fn(() => Promise.resolve())}
         onCreateEquilibriumBranch={vi.fn(() => Promise.resolve())}
         onCreateBranchFromPoint={vi.fn(() => Promise.resolve())}
         onExtendBranch={vi.fn(() => Promise.resolve())}
@@ -75,7 +74,6 @@ describe('SystemSettingsDialog', () => {
     const onComputeLyapunovExponents = vi.fn(() => Promise.resolve())
     const onComputeCovariantLyapunovVectors = vi.fn(() => Promise.resolve())
     const onSolveEquilibrium = vi.fn(() => Promise.resolve())
-    const onCreateLimitCycle = vi.fn(() => Promise.resolve())
     const onCreateEquilibriumBranch = vi.fn(() => Promise.resolve())
     const onCreateBranchFromPoint = vi.fn(() => Promise.resolve())
     const onExtendBranch = vi.fn(() => Promise.resolve())
@@ -103,7 +101,6 @@ describe('SystemSettingsDialog', () => {
         onComputeLyapunovExponents={onComputeLyapunovExponents}
         onComputeCovariantLyapunovVectors={onComputeCovariantLyapunovVectors}
         onSolveEquilibrium={onSolveEquilibrium}
-        onCreateLimitCycle={onCreateLimitCycle}
         onCreateEquilibriumBranch={onCreateEquilibriumBranch}
         onCreateBranchFromPoint={onCreateBranchFromPoint}
         onExtendBranch={onExtendBranch}
@@ -133,7 +130,6 @@ describe('SystemSettingsDialog', () => {
       onComputeCovariantLyapunovVectors
     )
     expect(capturedProps?.onSolveEquilibrium).toBe(onSolveEquilibrium)
-    expect(capturedProps?.onCreateLimitCycle).toBe(onCreateLimitCycle)
     expect(capturedProps?.onCreateEquilibriumBranch).toBe(onCreateEquilibriumBranch)
     expect(capturedProps?.onCreateBranchFromPoint).toBe(onCreateBranchFromPoint)
     expect(capturedProps?.onExtendBranch).toBe(onExtendBranch)
@@ -163,7 +159,6 @@ describe('SystemSettingsDialog', () => {
         onComputeLyapunovExponents={vi.fn(() => Promise.resolve())}
         onComputeCovariantLyapunovVectors={vi.fn(() => Promise.resolve())}
         onSolveEquilibrium={vi.fn(() => Promise.resolve())}
-        onCreateLimitCycle={vi.fn(() => Promise.resolve())}
         onCreateEquilibriumBranch={vi.fn(() => Promise.resolve())}
         onCreateBranchFromPoint={vi.fn(() => Promise.resolve())}
         onExtendBranch={vi.fn(() => Promise.resolve())}
@@ -198,7 +193,6 @@ describe('SystemSettingsDialog', () => {
         onComputeLyapunovExponents={vi.fn(() => Promise.resolve())}
         onComputeCovariantLyapunovVectors={vi.fn(() => Promise.resolve())}
         onSolveEquilibrium={vi.fn(() => Promise.resolve())}
-        onCreateLimitCycle={vi.fn(() => Promise.resolve())}
         onCreateEquilibriumBranch={vi.fn(() => Promise.resolve())}
         onCreateBranchFromPoint={vi.fn(() => Promise.resolve())}
         onExtendBranch={vi.fn(() => Promise.resolve())}

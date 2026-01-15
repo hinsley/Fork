@@ -14,7 +14,6 @@ import type {
   EquilibriumSolveRequest,
   FoldCurveContinuationRequest,
   HopfCurveContinuationRequest,
-  LimitCycleCreateRequest,
   LimitCycleHopfContinuationRequest,
   LimitCycleOrbitContinuationRequest,
   LimitCyclePDContinuationRequest,
@@ -60,7 +59,6 @@ type InspectorPanelProps = {
   onComputeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
   onComputeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
   onSolveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
-  onCreateLimitCycle: (request: LimitCycleCreateRequest) => Promise<void>
   onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   onCreateBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
   onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
@@ -93,7 +91,6 @@ export function InspectorPanel({
   onComputeLyapunovExponents,
   onComputeCovariantLyapunovVectors,
   onSolveEquilibrium,
-  onCreateLimitCycle,
   onCreateEquilibriumBranch,
   onCreateBranchFromPoint,
   onExtendBranch,
@@ -129,7 +126,6 @@ export function InspectorPanel({
           onComputeLyapunovExponents={onComputeLyapunovExponents}
           onComputeCovariantLyapunovVectors={onComputeCovariantLyapunovVectors}
           onSolveEquilibrium={onSolveEquilibrium}
-          onCreateLimitCycle={onCreateLimitCycle}
           onCreateEquilibriumBranch={onCreateEquilibriumBranch}
           onCreateBranchFromPoint={onCreateBranchFromPoint}
           onExtendBranch={onExtendBranch}

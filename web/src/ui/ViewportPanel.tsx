@@ -2380,66 +2380,6 @@ function ViewportTile({
   const plotHeight =
     timeSeriesState.sceneId === activeSceneId ? timeSeriesState.height : null
 
-  const handleSceneRelayout = useCallback(
-    (event: PlotlyRelayoutEvent) => {
-      if (!scene) return
-      const updates: Partial<Omit<Scene, 'id' | 'name'>> = {}
-      const nextCamera = readSceneCamera(event, scene.camera)
-      if (nextCamera && !isSameCamera(nextCamera, scene.camera)) {
-        updates.camera = nextCamera
-      }
-
-      if (system.config.varNames.length < 3) {
-        const nextRanges = mergeAxisRanges(
-          scene.axisRanges,
-          readAxisRange(event, 'xaxis'),
-          readAxisRange(event, 'yaxis')
-        )
-        if (nextRanges) {
-          updates.axisRanges = nextRanges
-        }
-      }
-
-      if (system.config.varNames.length === 1 && system.config.type !== 'map') {
-        const nextRange = readAxisRange(event, 'yaxis')
-        if (nextRange !== undefined) {
-          const sceneId = scene.id
-          setTimeSeriesState((prev) => {
-            if (prev.sceneId !== sceneId) {
-              return { sceneId, range: nextRange ?? null, height: null }
-            }
-            if (nextRange === null) {
-              return prev.range === null ? prev : { ...prev, range: null }
-            }
-            if (prev.range && prev.range[0] === nextRange[0] && prev.range[1] === nextRange[1]) {
-              return prev
-            }
-            return { ...prev, range: nextRange }
-          })
-        }
-      }
-
-      if (Object.keys(updates).length > 0) {
-        onUpdateScene(scene.id, updates)
-      }
-    },
-    [onUpdateScene, scene, system.config.type, system.config.varNames.length]
-  )
-
-  const handleDiagramRelayout = useCallback(
-    (event: PlotlyRelayoutEvent) => {
-      if (!diagram) return
-      const nextRanges = mergeAxisRanges(
-        diagram.axisRanges,
-        readAxisRange(event, 'xaxis'),
-        readAxisRange(event, 'yaxis')
-      )
-      if (nextRanges) {
-        onUpdateBifurcationDiagram(diagram.id, { axisRanges: nextRanges })
-      }
-    },
-    [diagram, onUpdateBifurcationDiagram]
-  )
 
   const handlePointClick = useCallback(
     (event: PlotlyPointClick) => {

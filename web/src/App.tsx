@@ -277,7 +277,6 @@ function App() {
         onComputeLyapunovExponents={actions.computeLyapunovExponents}
         onComputeCovariantLyapunovVectors={actions.computeCovariantLyapunovVectors}
         onSolveEquilibrium={actions.solveEquilibrium}
-        onCreateLimitCycle={actions.createLimitCycleObject}
         onCreateEquilibriumBranch={actions.createEquilibriumBranch}
         onCreateBranchFromPoint={actions.createBranchFromPoint}
         onExtendBranch={actions.extendBranch}
@@ -423,7 +422,6 @@ function App() {
                 onComputeLyapunovExponents={actions.computeLyapunovExponents}
                 onComputeCovariantLyapunovVectors={actions.computeCovariantLyapunovVectors}
                 onSolveEquilibrium={actions.solveEquilibrium}
-                onCreateLimitCycle={actions.createLimitCycleObject}
                 onCreateEquilibriumBranch={actions.createEquilibriumBranch}
                 onCreateBranchFromPoint={actions.createBranchFromPoint}
                 onExtendBranch={actions.extendBranch}

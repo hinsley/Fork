@@ -40,7 +40,7 @@ test('continue limit cycle from orbit data', async ({ page }) => {
 
   await expect(page.getByText('No orbit samples stored yet.')).toHaveCount(0)
 
-  await page.getByTestId('limit-cycle-from-orbit-toggle').click()
+  await page.getByTestId('limit-cycle-toggle').click()
   await page.getByTestId('limit-cycle-from-orbit-name').fill('lc_orbit_mu')
   await page.getByTestId('limit-cycle-from-orbit-branch-name').fill('lc_orbit_branch')
   await page.getByTestId('limit-cycle-from-orbit-parameter').selectOption('mu')
