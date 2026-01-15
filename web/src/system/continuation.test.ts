@@ -279,6 +279,26 @@ describe('continuation helpers', () => {
     expect(result.period).toBe(10)
   })
 
+  it('extracts a mesh-first collocation profile', () => {
+    const flatState = [0, 10, 1, 2, 11, 12, 5]
+    const result = extractLimitCycleProfile(flatState, 1, 2, 2, {
+      layout: 'mesh-first',
+    })
+
+    expect(result.profilePoints).toEqual([[0], [1], [2], [10], [11], [12], [0]])
+    expect(result.period).toBe(5)
+  })
+
+  it('extracts a stage-first collocation profile', () => {
+    const flatState = [1, 11, 0, 10, 0, 7]
+    const result = extractLimitCycleProfile(flatState, 1, 2, 1, {
+      layout: 'stage-first',
+    })
+
+    expect(result.profilePoints).toEqual([[0], [1], [10], [11], [0]])
+    expect(result.period).toBe(7)
+  })
+
   it('computes limit cycle metrics', () => {
     const metrics = computeLimitCycleMetrics(
       [

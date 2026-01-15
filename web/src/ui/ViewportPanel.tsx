@@ -32,6 +32,7 @@ import {
   extractLimitCycleProfile,
   formatBifurcationLabel,
   getBranchParams,
+  type LimitCycleProfileLayout,
 } from '../system/continuation'
 import { resolveClvRender } from '../system/clv'
 import { DEFAULT_RENDER } from '../system/model'
@@ -1115,6 +1116,15 @@ function resolveLimitCycleEnvelope(
   return { min, max }
 }
 
+function resolveLimitCycleLayout(
+  branchType: ContinuationObject['branchType']
+): LimitCycleProfileLayout {
+  if (branchType === 'lpc_curve' || branchType === 'ns_curve') {
+    return 'stage-first'
+  }
+  return 'mesh-first'
+}
+
 type LimitCycleTraceConfig = {
   state: number[]
   dim: number
@@ -1125,6 +1135,7 @@ type LimitCycleTraceConfig = {
   color: string
   lineWidth: number
   pointSize: number
+  layout?: LimitCycleProfileLayout
   showLegend?: boolean
   axisIndices?: [number, number, number] | null
 }
@@ -1140,13 +1151,16 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
     color,
     lineWidth,
     pointSize,
+    layout,
     showLegend,
     axisIndices,
   } = config
   const traces: Data[] = []
   if (!state || state.length === 0 || dim <= 0) return traces
   const plotDim = Math.min(dim, 3)
-  const { profilePoints, period } = extractLimitCycleProfile(state, dim, ntst, ncol)
+  const { profilePoints, period } = extractLimitCycleProfile(state, dim, ntst, ncol, {
+    layout,
+  })
   const fallbackAxes: [number, number, number] = [0, 1, 2]
   const axes =
     axisIndices && axisIndices.every((index) => index >= 0 && index < dim)
@@ -1313,6 +1327,7 @@ function buildLimitCyclePreviewTraces(
     color: render.color,
     lineWidth: render.lineWidth + 1,
     pointSize: render.pointSize + 2,
+    layout: resolveLimitCycleLayout(branch.branchType),
     showLegend: false,
     axisIndices,
   })
@@ -1522,6 +1537,7 @@ function buildSceneTraces(
       let state = object.state
       let ntst = object.ntst
       let ncol = object.ncol
+      let layout: LimitCycleProfileLayout = 'mesh-first'
       if (renderTarget?.type === 'branch') {
         const branch = system.branches[renderTarget.branchId]
         const point = branch?.data.points[renderTarget.pointIndex]
@@ -1530,6 +1546,7 @@ function buildSceneTraces(
           state = point.state
           ntst = mesh.ntst
           ncol = mesh.ncol
+          layout = resolveLimitCycleLayout(branch.branchType)
         }
       }
       const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
@@ -1544,6 +1561,7 @@ function buildSceneTraces(
           color: node.render.color,
           lineWidth,
           pointSize: node.render.pointSize + (highlight ? 2 : 0),
+          layout,
           axisIndices: sceneAxes,
         })
       )

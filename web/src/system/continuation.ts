@@ -80,23 +80,78 @@ export type LimitCycleMetrics = {
   rmsAmplitudes: number[]
 }
 
+export type LimitCycleProfileLayout = 'mesh-first' | 'stage-first'
+
 export function extractLimitCycleProfile(
   flatState: number[],
   dim: number,
   ntst: number,
-  ncol: number
+  ncol: number,
+  options?: { layout?: LimitCycleProfileLayout }
 ): { profilePoints: number[][]; period: number } {
-  const profilePointCount = Math.max(ntst * ncol + 1, 0)
-  const period = flatState[flatState.length - 1]
+  const period = flatState.length > 0 ? flatState[flatState.length - 1] : Number.NaN
   const profilePoints: number[][] = []
-
-  if (dim <= 0 || profilePointCount === 0) {
+  if (dim <= 0) {
     return { profilePoints, period }
   }
 
-  for (let i = 0; i < profilePointCount; i += 1) {
-    const offset = i * dim
-    profilePoints.push(flatState.slice(offset, offset + dim))
+  const rawState = flatState.slice(0, Math.max(flatState.length - 1, 0))
+  if (rawState.length === dim) {
+    return { profilePoints: [rawState], period }
+  }
+
+  const stageCount = Math.max(ntst * ncol, 0)
+  const implicitMeshCount = Math.max(ntst, 0)
+  const explicitMeshCount = Math.max(ntst + 1, 0)
+  const implicitLen = (stageCount + implicitMeshCount) * dim
+  const explicitLen = (stageCount + explicitMeshCount) * dim
+  if (rawState.length === implicitLen || rawState.length === explicitLen) {
+    const meshCount = rawState.length === explicitLen ? explicitMeshCount : implicitMeshCount
+    const layout = options?.layout ?? 'mesh-first'
+    const meshStart = layout === 'mesh-first' ? 0 : stageCount * dim
+    const stageStart = layout === 'mesh-first' ? meshCount * dim : 0
+    const meshSlice = rawState.slice(meshStart, meshStart + meshCount * dim)
+    const stageSlice = rawState.slice(stageStart, stageStart + stageCount * dim)
+    const meshPoints: number[][] = []
+    const stagePoints: number[][] = []
+
+    for (let i = 0; i < meshCount; i += 1) {
+      const offset = i * dim
+      meshPoints.push(meshSlice.slice(offset, offset + dim))
+    }
+    for (let i = 0; i < stageCount; i += 1) {
+      const offset = i * dim
+      stagePoints.push(stageSlice.slice(offset, offset + dim))
+    }
+
+    if (meshPoints.length > 0) {
+      profilePoints.push(meshPoints[0])
+    }
+    for (let interval = 0; interval < ntst; interval += 1) {
+      const stageOffset = interval * ncol
+      for (let stage = 0; stage < ncol; stage += 1) {
+        const point = stagePoints[stageOffset + stage]
+        if (point) {
+          profilePoints.push(point)
+        }
+      }
+      const nextMesh =
+        interval + 1 < meshPoints.length ? meshPoints[interval + 1] : meshPoints[0]
+      if (nextMesh) {
+        profilePoints.push(nextMesh)
+      }
+    }
+
+    return { profilePoints, period }
+  }
+
+  const profilePointCount = Math.max(ntst * ncol + 1, 0)
+  const profileLen = profilePointCount * dim
+  if (profilePointCount > 0 && rawState.length === profileLen) {
+    for (let i = 0; i < profilePointCount; i += 1) {
+      const offset = i * dim
+      profilePoints.push(rawState.slice(offset, offset + dim))
+    }
   }
 
   return { profilePoints, period }

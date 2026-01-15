@@ -1408,7 +1408,8 @@ export function InspectorDetailsPanel({
       limitCycle.state,
       dim,
       limitCycle.ntst,
-      limitCycle.ncol
+      limitCycle.ncol,
+      { layout: 'mesh-first' }
     )
     return profilePoints
   }, [limitCycle, system.config.varNames.length])
@@ -1439,7 +1440,8 @@ export function InspectorDetailsPanel({
       selectedBranchPoint.state,
       dim,
       limitCycleMesh.ntst,
-      limitCycleMesh.ncol
+      limitCycleMesh.ncol,
+      { layout: 'mesh-first' }
     )
     if (profilePoints.length === 0) return null
     const metrics = computeLimitCycleMetrics(profilePoints, period)
