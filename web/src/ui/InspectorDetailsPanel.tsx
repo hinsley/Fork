@@ -2094,8 +2094,12 @@ export function InspectorDetailsPanel({
     limitCycleRenderData?.params ?? limitCycle?.parameters ?? []
   const limitCycleDisplayParamValue =
     limitCycleRenderData?.paramValue ?? limitCycle?.paramValue
-  const limitCycleDisplayMultipliers =
-    limitCycleRenderData?.multipliers ?? limitCycle?.floquetMultipliers ?? []
+  const limitCycleDisplayMultipliers = useMemo(() => {
+    if (limitCycleRenderData?.multipliers) {
+      return limitCycleRenderData.multipliers
+    }
+    return limitCycle?.floquetMultipliers ?? []
+  }, [limitCycle?.floquetMultipliers, limitCycleRenderData])
   const limitCycleMultiplierPlot = useMemo(() => {
     if (limitCycleDisplayMultipliers.length === 0) return null
     return buildEigenvaluePlot(limitCycleDisplayMultipliers, plotlyBackground, {
