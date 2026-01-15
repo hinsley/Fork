@@ -14,6 +14,7 @@ type PlotlyModule = {
     }
   ) => Promise<void>
   purge: (container: HTMLElement) => void
+  relayout?: (container: HTMLElement, update: Record<string, unknown>) => Promise<void> | void
   Plots?: {
     resize: (container: HTMLElement) => Promise<void> | void
   }
@@ -32,6 +33,9 @@ async function loadPlotly(): Promise<PlotlyModule> {
   if (!plotlyPromise) {
     plotlyPromise = import('plotly.js-dist-min').then((mod) => {
       plotlyModule = unwrapPlotly(mod)
+      if (typeof window !== 'undefined') {
+        ;(window as unknown as { Plotly?: PlotlyModule }).Plotly = plotlyModule
+      }
       return plotlyModule
     })
   }
@@ -67,6 +71,13 @@ export async function resizePlot(container: HTMLElement) {
   const Plotly = await loadPlotly()
   if (Plotly.Plots?.resize) {
     await Plotly.Plots.resize(container)
+  }
+}
+
+export async function relayoutPlot(container: HTMLElement, update: Record<string, unknown>) {
+  const Plotly = await loadPlotly()
+  if (Plotly.relayout) {
+    await Plotly.relayout(container, update)
   }
 }
 

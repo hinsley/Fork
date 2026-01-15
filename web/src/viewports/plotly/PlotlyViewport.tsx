@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type MutableRefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import type { Layout, Data } from 'plotly.js'
-import { isPlotlyLoaded, preloadPlotly, purgePlot, renderPlot, resizePlot } from './plotlyAdapter'
+import { isPlotlyLoaded, preloadPlotly, purgePlot, renderPlot } from './plotlyAdapter'
+import { usePlotViewport, type PlotlyRelayoutEvent } from './usePlotViewport'
 
 type PlotlyClickEvent = {
   points?: Array<{
@@ -15,8 +16,6 @@ type PlotlyClickEvent = {
     z?: number
   }>
 }
-
-type PlotlyRelayoutEvent = Record<string, unknown>
 
 export type PlotlyPointClick = {
   uid?: string
@@ -37,31 +36,6 @@ type PlotlyEventTarget = HTMLDivElement & {
     (event: 'plotly_relayout', handler: (event: PlotlyRelayoutEvent) => void): void
   }
   removeAllListeners?: (event: 'plotly_click' | 'plotly_relayout') => void
-}
-
-function buildRelayoutFromLayout(layout: unknown): PlotlyRelayoutEvent {
-  if (!layout || typeof layout !== 'object') return {}
-  const record = layout as {
-    scene?: { camera?: unknown; _scene?: { camera?: unknown } }
-    xaxis?: { range?: unknown }
-    yaxis?: { range?: unknown }
-  }
-  const event: PlotlyRelayoutEvent = {}
-  const camera = record.scene?._scene?.camera ?? record.scene?.camera
-  if (camera) {
-    event['scene.camera'] = camera
-  }
-  if (Array.isArray(record.xaxis?.range)) {
-    event['xaxis.range'] = record.xaxis.range
-  }
-  if (Array.isArray(record.yaxis?.range)) {
-    event['yaxis.range'] = record.yaxis.range
-  }
-  return event
-}
-
-function hasRelayoutPayload(event: PlotlyRelayoutEvent): boolean {
-  return Object.keys(event).length > 0
 }
 
 function bindPlotlyClick(
@@ -114,8 +88,7 @@ function bindPlotlyRelayout(
   node: HTMLDivElement,
   onRelayoutRef: MutableRefObject<((event: PlotlyRelayoutEvent) => void) | undefined>,
   relayoutHandlerRef: MutableRefObject<((event: PlotlyRelayoutEvent) => void) | null>,
-  ignoreRef?: MutableRefObject<boolean>,
-  interactionRef?: MutableRefObject<boolean>
+  ignoreRef?: MutableRefObject<boolean>
 ) {
   const target = node as PlotlyEventTarget
   if (!target.on) return
@@ -124,7 +97,6 @@ function bindPlotlyRelayout(
 
   const handler = (event: PlotlyRelayoutEvent) => {
     if (ignoreRef?.current) return
-    if (interactionRef && !interactionRef.current) return
     onRelayoutRef.current?.(event)
   }
   relayoutHandlerRef.current = handler
@@ -146,34 +118,49 @@ function clearPlotlyRelayout(
 }
 
 export function PlotlyViewport({
+  plotId,
   data,
   layout,
+  viewRevision = 0,
+  persistView = false,
+  initialView = null,
   testId = 'plotly-viewport',
   onPointClick,
-  onRelayout,
   onResize,
 }: {
+  plotId: string
   data: Data[]
   layout: Partial<Layout>
+  viewRevision?: number | string
+  persistView?: boolean
+  initialView?: PlotlyRelayoutEvent | null
   testId?: string
   onPointClick?: (point: PlotlyPointClick) => void
-  onRelayout?: (event: PlotlyRelayoutEvent) => void
   onResize?: (size: { width: number; height: number }) => void
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [loading, setLoading] = useState(!isPlotlyLoaded())
   const [error, setError] = useState<string | null>(null)
   const onPointClickRef = useRef(onPointClick)
-  const onRelayoutRef = useRef(onRelayout)
-  const onResizeRef = useRef(onResize)
+  const onRelayoutRef = useRef<((event: PlotlyRelayoutEvent) => void) | undefined>(undefined)
+  const onPlotReadyRef = useRef<((node: HTMLDivElement) => void) | undefined>(undefined)
   const clickHandlerRef = useRef<((event: PlotlyClickEvent) => void) | null>(null)
   const relayoutHandlerRef = useRef<((event: PlotlyRelayoutEvent) => void) | null>(null)
   const renderInFlightRef = useRef(false)
-  const interactionRef = useRef(false)
-  const interactionTimeoutRef = useRef<number | null>(null)
-  const pointerIdRef = useRef<number | null>(null)
-  const dragFrameRef = useRef<number | null>(null)
-  const lastRelayoutRef = useRef<PlotlyRelayoutEvent | null>(null)
+  const { uirevision, onRelayout, onPlotReady } = usePlotViewport(plotId, {
+    containerRef,
+    viewRevision,
+    persistView,
+    initialView,
+    onResize,
+  })
+  const layoutWithUirevision = useMemo(() => {
+    const nextLayout: Partial<Layout> = { ...layout, uirevision }
+    if (layout.scene) {
+      nextLayout.scene = { ...layout.scene, uirevision }
+    }
+    return nextLayout
+  }, [layout, uirevision])
 
   useEffect(() => {
     onPointClickRef.current = onPointClick
@@ -184,8 +171,8 @@ export function PlotlyViewport({
   }, [onRelayout])
 
   useEffect(() => {
-    onResizeRef.current = onResize
-  }, [onResize])
+    onPlotReadyRef.current = onPlotReady
+  }, [onPlotReady])
 
   useEffect(() => {
     preloadPlotly()
@@ -201,17 +188,12 @@ export function PlotlyViewport({
       setError(null)
       setLoading(!isPlotlyLoaded())
       try {
-        await renderPlot(node, data, layout, { signal: controller.signal })
+        await renderPlot(node, data, layoutWithUirevision, { signal: controller.signal })
         if (controller.signal.aborted) return
         setLoading(false)
         bindPlotlyClick(node, onPointClickRef, clickHandlerRef)
-        bindPlotlyRelayout(
-          node,
-          onRelayoutRef,
-          relayoutHandlerRef,
-          renderInFlightRef,
-          interactionRef
-        )
+        bindPlotlyRelayout(node, onRelayoutRef, relayoutHandlerRef, renderInFlightRef)
+        onPlotReadyRef.current?.(node)
       } catch (err) {
         if (controller.signal.aborted) return
         const message = err instanceof Error ? err.message : String(err)
@@ -225,104 +207,7 @@ export function PlotlyViewport({
     return () => {
       controller.abort()
     }
-  }, [data, layout])
-
-  useEffect(() => {
-    const node = containerRef.current
-    if (!node) return
-
-    const handlePointerDown = (event: PointerEvent) => {
-      pointerIdRef.current = event.pointerId
-      lastRelayoutRef.current = null
-    }
-
-    const handleWheel = () => {
-      interactionRef.current = true
-      if (interactionTimeoutRef.current) {
-        window.clearTimeout(interactionTimeoutRef.current)
-      }
-      interactionTimeoutRef.current = window.setTimeout(() => {
-        interactionRef.current = false
-      }, 200)
-    }
-
-    const captureLayout = () => {
-      const currentLayout = (node as { _fullLayout?: unknown; layout?: unknown })._fullLayout
-        ?? (node as { _fullLayout?: unknown; layout?: unknown }).layout
-      const relayout = buildRelayoutFromLayout(currentLayout)
-      if (hasRelayoutPayload(relayout)) {
-        lastRelayoutRef.current = relayout
-      }
-    }
-
-    const handlePointerMove = (event: PointerEvent) => {
-      if (pointerIdRef.current === null) return
-      if (event.pointerId !== pointerIdRef.current) return
-      if (dragFrameRef.current) return
-      dragFrameRef.current = requestAnimationFrame(() => {
-        dragFrameRef.current = null
-        captureLayout()
-      })
-    }
-
-    const handlePointerUp = (event: PointerEvent) => {
-      if (pointerIdRef.current === null) return
-      if (event.pointerId !== pointerIdRef.current) return
-      pointerIdRef.current = null
-      if (!onRelayoutRef.current) return
-      if (renderInFlightRef.current) return
-      if (dragFrameRef.current) {
-        cancelAnimationFrame(dragFrameRef.current)
-        dragFrameRef.current = null
-      }
-      captureLayout()
-      const relayout = lastRelayoutRef.current ?? {}
-      if (hasRelayoutPayload(relayout)) {
-        onRelayoutRef.current?.(relayout)
-      }
-    }
-
-    node.addEventListener('pointerdown', handlePointerDown)
-    node.addEventListener('wheel', handleWheel, { passive: true })
-    window.addEventListener('pointermove', handlePointerMove)
-    window.addEventListener('pointerup', handlePointerUp)
-    window.addEventListener('pointercancel', handlePointerUp)
-
-    return () => {
-      node.removeEventListener('pointerdown', handlePointerDown)
-      node.removeEventListener('wheel', handleWheel)
-      window.removeEventListener('pointermove', handlePointerMove)
-      window.removeEventListener('pointerup', handlePointerUp)
-      window.removeEventListener('pointercancel', handlePointerUp)
-      if (dragFrameRef.current) {
-        cancelAnimationFrame(dragFrameRef.current)
-      }
-      if (interactionTimeoutRef.current) {
-        window.clearTimeout(interactionTimeoutRef.current)
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    const node = containerRef.current
-    if (!node || typeof ResizeObserver === 'undefined') return
-    let frame = 0
-    const observer = new ResizeObserver(() => {
-      if (frame) cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => {
-        void resizePlot(node)
-        if (onResizeRef.current) {
-          const rect = node.getBoundingClientRect()
-          onResizeRef.current({ width: rect.width, height: rect.height })
-        }
-      })
-    })
-    observer.observe(node)
-    return () => {
-      if (frame) cancelAnimationFrame(frame)
-      observer.disconnect()
-    }
-  }, [])
+  }, [data, layoutWithUirevision])
 
   useEffect(() => {
     const node = containerRef.current

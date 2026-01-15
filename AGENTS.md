@@ -34,6 +34,7 @@ Fork is a monorepo with a Rust/WASM core and a web/CLI interface.
 
 ## Agent-Specific Instructions
 If you touch `crates/fork_core`, `crates/fork_wasm`, or `cli`, you must rebuild WASM (`wasm-pack build --target nodejs`) and validate behavior interactively in the CLI.
+Update `web/docs/plotly-injections.md` whenever Plotly touchpoints are added or removed.
 
 ## Landing the Plane (Session Completion)
 

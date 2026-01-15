@@ -373,8 +373,6 @@ function App() {
                 onCreateBifurcation={createBifurcation}
                 onRenameViewport={actions.renameNode}
                 onDeleteViewport={actions.deleteNode}
-                onUpdateScene={actions.updateScene}
-                onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
                 onSampleMap1DFunction={actions.sampleMap1DFunction}
               />
             </Panel>

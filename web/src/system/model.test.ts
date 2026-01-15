@@ -1,12 +1,18 @@
 import { describe, it, expect } from 'vitest'
 import {
   addObject,
+  addBifurcationDiagram,
+  addScene,
   createSystem,
   moveNode,
+  normalizeSystem,
   reorderNode,
   renameNode,
   selectNode,
   toggleNodeVisibility,
+  updateBifurcationDiagram,
+  updateNodeRender,
+  updateScene,
   updateSystem,
 } from './model'
 import type { OrbitObject } from './types'
@@ -122,5 +128,45 @@ describe('system model', () => {
     expect(updated.name).toBe('Renamed')
     expect(updated.config.name).toBe('Renamed')
     expect(updated.objects[nodeId].systemName).toBe('Renamed')
+  })
+
+  it('normalizes missing viewRevision fields for viewports', () => {
+    const system = createSystem({ name: 'Legacy' })
+    const { system: withScene } = addScene(system, 'Scene')
+    const { system: withDiagram } = addBifurcationDiagram(withScene, 'Diagram')
+    const legacy = structuredClone(withDiagram) as typeof withDiagram & {
+      scenes: Array<{ viewRevision?: number }>
+      bifurcationDiagrams: Array<{ viewRevision?: number }>
+    }
+    legacy.scenes[0].viewRevision = undefined
+    legacy.bifurcationDiagrams[0].viewRevision = undefined
+
+    const normalized = normalizeSystem(legacy)
+
+    expect(normalized.scenes[0].viewRevision).toBe(0)
+    expect(normalized.bifurcationDiagrams[0].viewRevision).toBe(0)
+  })
+
+  it('keeps viewRevision stable across non-view updates', () => {
+    let system = createSystem({ name: 'View Revision' })
+    const sceneResult = addScene(system, 'Scene')
+    const diagramResult = addBifurcationDiagram(sceneResult.system, 'Diagram')
+    system = updateScene(diagramResult.system, sceneResult.nodeId, { viewRevision: 3 })
+    system = updateBifurcationDiagram(system, diagramResult.nodeId, { viewRevision: 5 })
+
+    const rendered = updateNodeRender(system, sceneResult.nodeId, { lineWidth: 4 })
+    const selected = selectNode(rendered, sceneResult.nodeId)
+    const diagramUpdated = updateBifurcationDiagram(selected, diagramResult.nodeId, {
+      selectedBranchIds: ['branch-1'],
+    })
+
+    expect(
+      diagramUpdated.scenes.find((scene) => scene.id === sceneResult.nodeId)?.viewRevision
+    ).toBe(3)
+    expect(
+      diagramUpdated.bifurcationDiagrams.find(
+        (diagram) => diagram.id === diagramResult.nodeId
+      )?.viewRevision
+    ).toBe(5)
   })
 })

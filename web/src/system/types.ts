@@ -236,6 +236,7 @@ export interface Scene {
     up: { x: number; y: number; z: number }
   }
   axisRanges: AxisRanges
+  viewRevision: number
   axisVariables?: SceneAxisVariables | null
   selectedNodeIds: string[]
   display: 'all' | 'selection'
@@ -248,6 +249,7 @@ export interface BifurcationDiagram {
   xAxis: BifurcationAxis | null
   yAxis: BifurcationAxis | null
   axisRanges: AxisRanges
+  viewRevision: number
 }
 
 export type BifurcationAxisKind = 'parameter' | 'state'

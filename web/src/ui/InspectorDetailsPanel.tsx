@@ -4390,6 +4390,7 @@ export function InspectorDetailsPanel({
                       {equilibriumEigenPlot ? (
                         <div className="inspector-plot">
                           <PlotlyViewport
+                            plotId="equilibrium-eigenvalue-plot"
                             data={equilibriumEigenPlot.data}
                             layout={equilibriumEigenPlot.layout}
                             testId="equilibrium-eigenvalue-plot"
@@ -4889,6 +4890,7 @@ export function InspectorDetailsPanel({
                     {limitCycleMultiplierPlot ? (
                       <div className="inspector-plot">
                         <PlotlyViewport
+                          plotId="limit-cycle-multiplier-plot"
                           data={limitCycleMultiplierPlot.data}
                           layout={limitCycleMultiplierPlot.layout}
                           testId="limit-cycle-multiplier-plot"
@@ -5668,6 +5670,7 @@ export function InspectorDetailsPanel({
                                 {branchMultiplierPlot ? (
                                   <div className="inspector-plot">
                                     <PlotlyViewport
+                                      plotId="branch-multiplier-plot"
                                       data={branchMultiplierPlot.data}
                                       layout={branchMultiplierPlot.layout}
                                       testId="branch-eigenvalue-plot"
@@ -6020,6 +6023,7 @@ export function InspectorDetailsPanel({
                                 {branchEigenPlot ? (
                                   <div className="inspector-plot">
                                     <PlotlyViewport
+                                      plotId="branch-eigenvalue-plot"
                                       data={branchEigenPlot.data}
                                       layout={branchEigenPlot.layout}
                                       testId="branch-eigenvalue-plot"
