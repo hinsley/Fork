@@ -255,7 +255,9 @@ mod problem_tests {
         let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Flow, 0);
 
         let result: anyhow::Result<()> =
-            problem.with_param(5.0, |_system| anyhow::bail!("fail"));
+            problem.with_param(5.0, |_system| -> anyhow::Result<()> {
+                anyhow::bail!("fail")
+            });
         assert!(result.is_err());
         assert!((problem.system.params[0] - 2.0).abs() < 1e-12);
     }
