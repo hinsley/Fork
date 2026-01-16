@@ -134,12 +134,9 @@ describe('system model', () => {
     const system = createSystem({ name: 'Legacy' })
     const { system: withScene } = addScene(system, 'Scene')
     const { system: withDiagram } = addBifurcationDiagram(withScene, 'Diagram')
-    const legacy = structuredClone(withDiagram) as typeof withDiagram & {
-      scenes: Array<{ viewRevision?: number }>
-      bifurcationDiagrams: Array<{ viewRevision?: number }>
-    }
-    legacy.scenes[0].viewRevision = undefined
-    legacy.bifurcationDiagrams[0].viewRevision = undefined
+    const legacy = structuredClone(withDiagram) as typeof withDiagram
+    delete (legacy.scenes[0] as { viewRevision?: number }).viewRevision
+    delete (legacy.bifurcationDiagrams[0] as { viewRevision?: number }).viewRevision
 
     const normalized = normalizeSystem(legacy)
 

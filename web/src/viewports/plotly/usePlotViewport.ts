@@ -4,7 +4,7 @@ import { relayoutPlot, resizePlot } from './plotlyAdapter'
 export type PlotlyRelayoutEvent = Record<string, unknown>
 
 type PlotViewportOptions = {
-  containerRef: React.RefObject<HTMLDivElement>
+  containerRef: React.RefObject<HTMLDivElement | null>
   viewRevision?: number | string
   persistView?: boolean
   snapshotDebounceMs?: number
@@ -21,7 +21,7 @@ type PlotViewportState = {
 const SNAPSHOT_STORE = new Map<string, PlotlyRelayoutEvent>()
 const DEFAULT_SNAPSHOT_DEBOUNCE_MS = 160
 
-function hasSnapshot(snapshot: PlotlyRelayoutEvent | null): boolean {
+function hasSnapshot(snapshot: PlotlyRelayoutEvent | null): snapshot is PlotlyRelayoutEvent {
   return Boolean(snapshot && Object.keys(snapshot).length > 0)
 }
 
@@ -82,7 +82,7 @@ export function usePlotViewport(plotId: string, options: PlotViewportOptions): P
 
   useEffect(() => {
     initialViewRef.current = initialView
-  }, [snapshotKey])
+  }, [initialView, snapshotKey])
 
   useEffect(() => {
     restoredRef.current = false

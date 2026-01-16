@@ -2077,7 +2077,6 @@ function buildSceneBaseLayout(
 }
 
 function buildDiagramBaseLayout(
-  diagram: BifurcationDiagram,
   traceState: DiagramTraceState | null,
   plotlyBackground: string
 ): Partial<Layout> {
@@ -2312,23 +2311,18 @@ function ViewportTile({
     return null
   }, [diagram, scene, system])
 
-  const varNamesKey = system.config.varNames.join('|')
-  const sceneAxisKey = scene?.axisVariables
-    ? `${scene.axisVariables.x}|${scene.axisVariables.y}|${scene.axisVariables.z}`
-    : 'default'
   const layout = useMemo(() => {
     if (scene) return buildSceneBaseLayout(system.config, scene.axisVariables, plotlyBackground)
-    if (diagram) return buildDiagramBaseLayout(diagram, diagramTraceState, plotlyBackground)
+    if (diagram) return buildDiagramBaseLayout(diagramTraceState, plotlyBackground)
     const fallbackAxisVariables = system.scenes[0]?.axisVariables ?? null
     return buildSceneBaseLayout(system.config, fallbackAxisVariables, plotlyBackground)
   }, [
     diagram,
     diagramTraceState,
     plotlyBackground,
-    scene?.id,
-    sceneAxisKey,
-    system.config.type,
-    varNamesKey,
+    scene,
+    system.config,
+    system.scenes,
   ])
 
   const plotAreaSize = useMemo(() => {

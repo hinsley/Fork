@@ -157,7 +157,10 @@ export function PlotlyViewport({
   const layoutWithUirevision = useMemo(() => {
     const nextLayout: Partial<Layout> = { ...layout, uirevision }
     if (layout.scene) {
-      nextLayout.scene = { ...layout.scene, uirevision }
+      nextLayout.scene = {
+        ...layout.scene,
+        uirevision,
+      } as Partial<Layout['scene']> & { uirevision?: string }
     }
     return nextLayout
   }, [layout, uirevision])
