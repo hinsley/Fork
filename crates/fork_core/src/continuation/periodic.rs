@@ -1907,4 +1907,163 @@ mod tests {
                 "Continuation moved backward! Initial mu: {}, Final mu: {}", 
                 branch.points[0].param_value, last_point.param_value);
     }
+
+    fn pd_test_system(mu: f64) -> EquationSystem {
+        // Base limit cycle: x' = -y + x*(1 - r^2), y' = x + y*(1 - r^2)
+        let mut ops0 = Vec::new();
+        ops0.push(OpCode::LoadVar(0)); // x
+        ops0.push(OpCode::LoadConst(1.0));
+        ops0.push(OpCode::LoadVar(0)); // x
+        ops0.push(OpCode::LoadVar(0)); // x
+        ops0.push(OpCode::Mul);        // x^2
+        ops0.push(OpCode::LoadVar(1)); // y
+        ops0.push(OpCode::LoadVar(1)); // y
+        ops0.push(OpCode::Mul);        // y^2
+        ops0.push(OpCode::Add);        // x^2 + y^2
+        ops0.push(OpCode::Sub);        // 1 - r^2
+        ops0.push(OpCode::Mul);        // x*(1 - r^2)
+        ops0.push(OpCode::LoadVar(1)); // y
+        ops0.push(OpCode::Sub);        // x*(1 - r^2) - y
+
+        let mut ops1 = Vec::new();
+        ops1.push(OpCode::LoadVar(1)); // y
+        ops1.push(OpCode::LoadConst(1.0));
+        ops1.push(OpCode::LoadVar(0)); // x
+        ops1.push(OpCode::LoadVar(0)); // x
+        ops1.push(OpCode::Mul);        // x^2
+        ops1.push(OpCode::LoadVar(1)); // y
+        ops1.push(OpCode::LoadVar(1)); // y
+        ops1.push(OpCode::Mul);        // y^2
+        ops1.push(OpCode::Add);        // x^2 + y^2
+        ops1.push(OpCode::Sub);        // 1 - r^2
+        ops1.push(OpCode::Mul);        // y*(1 - r^2)
+        ops1.push(OpCode::LoadVar(0)); // x
+        ops1.push(OpCode::Add);        // y*(1 - r^2) + x
+
+        // Transverse subsystem with PD multiplier at mu=0 (omega = 0.5)
+        let mut ops2 = Vec::new();
+        ops2.push(OpCode::LoadParam(0)); // mu
+        ops2.push(OpCode::LoadVar(2));   // z1
+        ops2.push(OpCode::Mul);          // mu*z1
+        ops2.push(OpCode::LoadConst(0.5));
+        ops2.push(OpCode::LoadVar(3));   // z2
+        ops2.push(OpCode::Mul);          // 0.5*z2
+        ops2.push(OpCode::Sub);          // mu*z1 - 0.5*z2
+        ops2.push(OpCode::LoadVar(2));   // z1
+        ops2.push(OpCode::LoadVar(2));   // z1
+        ops2.push(OpCode::Mul);          // z1^2
+        ops2.push(OpCode::LoadVar(3));   // z2
+        ops2.push(OpCode::LoadVar(3));   // z2
+        ops2.push(OpCode::Mul);          // z2^2
+        ops2.push(OpCode::Add);          // z1^2 + z2^2
+        ops2.push(OpCode::LoadVar(2));   // z1
+        ops2.push(OpCode::Mul);          // (z1^2 + z2^2) * z1
+        ops2.push(OpCode::Sub);          // mu*z1 - 0.5*z2 - r_z^2*z1
+
+        let mut ops3 = Vec::new();
+        ops3.push(OpCode::LoadConst(0.5));
+        ops3.push(OpCode::LoadVar(2));   // z1
+        ops3.push(OpCode::Mul);          // 0.5*z1
+        ops3.push(OpCode::LoadParam(0)); // mu
+        ops3.push(OpCode::LoadVar(3));   // z2
+        ops3.push(OpCode::Mul);          // mu*z2
+        ops3.push(OpCode::Add);          // 0.5*z1 + mu*z2
+        ops3.push(OpCode::LoadVar(2));   // z1
+        ops3.push(OpCode::LoadVar(2));   // z1
+        ops3.push(OpCode::Mul);          // z1^2
+        ops3.push(OpCode::LoadVar(3));   // z2
+        ops3.push(OpCode::LoadVar(3));   // z2
+        ops3.push(OpCode::Mul);          // z2^2
+        ops3.push(OpCode::Add);          // z1^2 + z2^2
+        ops3.push(OpCode::LoadVar(3));   // z2
+        ops3.push(OpCode::Mul);          // (z1^2 + z2^2) * z2
+        ops3.push(OpCode::Sub);          // 0.5*z1 + mu*z2 - r_z^2*z2
+
+        let equations = vec![
+            Bytecode { ops: ops0 },
+            Bytecode { ops: ops1 },
+            Bytecode { ops: ops2 },
+            Bytecode { ops: ops3 },
+        ];
+        EquationSystem::new(equations, vec![mu])
+    }
+
+    #[test]
+    fn test_pd_branch_is_period_doubled() {
+        let ntst = 10;
+        let ncol = 3;
+        let base_period = 2.0 * PI;
+        let amplitude = 0.1;
+        let mut system = pd_test_system(0.0);
+
+        let mut mesh_states = Vec::with_capacity(ntst);
+        for i in 0..ntst {
+            let t = base_period * (i as f64) / (ntst as f64);
+            mesh_states.push(vec![t.cos(), t.sin(), 0.0, 0.0]);
+        }
+        let coeffs = CollocationCoefficients::new(ncol).expect("coeffs should build");
+        let stage_states = build_stage_states_from_mesh(4, ntst, ncol, &coeffs.nodes, &mesh_states);
+        let lc_state = flatten_collocation_state(&mesh_states, &stage_states, base_period);
+
+        let setup = limit_cycle_setup_from_pd(
+            &mut system,
+            0,
+            &lc_state,
+            0.0,
+            ntst,
+            ncol,
+            amplitude,
+        ).expect("PD setup should succeed");
+
+        let settings = ContinuationSettings {
+            step_size: 0.05,
+            min_step_size: 1e-4,
+            max_step_size: 0.1,
+            max_steps: 3,
+            corrector_steps: 5,
+            corrector_tolerance: 1e-6,
+            step_tolerance: 1e-6,
+        };
+
+        let branch = continue_limit_cycle_collocation(
+            &mut system,
+            0,
+            setup.collocation_config(),
+            setup.guess,
+            settings,
+            true,
+        ).expect("PD continuation should succeed");
+
+        assert!(branch.points.len() > 1, "PD continuation should advance beyond the seed point");
+
+        let (mesh_points, collocation_degree) = match branch.branch_type {
+            BranchType::LimitCycle { ntst, ncol } => (ntst, ncol),
+            _ => panic!("Expected limit cycle branch"),
+        };
+        assert_eq!(mesh_points % 2, 0, "Doubled mesh should have even point count");
+
+        let target_point = branch.points.iter()
+            .rev()
+            .find(|point| point.param_value.abs() > 1e-4)
+            .expect("Continuation did not move away from PD point");
+
+        let dim = system.equations.len();
+        let mesh_data_len = mesh_points * dim;
+        let stage_data_len = mesh_points * collocation_degree * dim;
+        let expected_len = mesh_data_len + stage_data_len + 1;
+        assert_eq!(target_point.state.len(), expected_len, "Unexpected state length");
+
+        let half_idx = mesh_points / 2;
+        let state0 = &target_point.state[0..dim];
+        let state_half = &target_point.state[half_idx * dim..(half_idx + 1) * dim];
+
+        let z_dist = ((state_half[2] - state0[2]).powi(2)
+            + (state_half[3] - state0[3]).powi(2)).sqrt();
+
+        assert!(
+            z_dist > 1e-2,
+            "Period-doubled branch should not return near initial condition at half period; z_dist={}",
+            z_dist
+        );
+    }
 }
