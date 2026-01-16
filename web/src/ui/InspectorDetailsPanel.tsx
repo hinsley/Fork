@@ -772,6 +772,12 @@ function makeContinuationDraft(system: SystemConfig): ContinuationDraft {
   }
 }
 
+function buildSuggestedBranchName(baseName: string, parameterName: string): string {
+  const safeBaseName = toCliSafeName(baseName)
+  const safeParamName = parameterName ? toCliSafeName(parameterName) : ''
+  return safeParamName ? `${safeBaseName}_${safeParamName}` : safeBaseName
+}
+
 function makeBranchExtensionDraft(
   system: SystemConfig,
   branch?: ContinuationObject | null
@@ -3977,12 +3983,29 @@ export function InspectorDetailsPanel({
                         Continuation parameter
                         <select
                           value={limitCycleFromOrbitDraft.parameterName}
-                          onChange={(event) =>
-                            setLimitCycleFromOrbitDraft((prev) => ({
-                              ...prev,
-                              parameterName: event.target.value,
-                            }))
-                          }
+                          onChange={(event) => {
+                            const nextParameterName = event.target.value
+                            setLimitCycleFromOrbitDraft((prev) => {
+                              const baseName =
+                                prev.limitCycleName.trim() || limitCycleFromOrbitNameSuggestion
+                              const prevSuggestedName = buildSuggestedBranchName(
+                                baseName,
+                                prev.parameterName
+                              )
+                              const nextSuggestedName = buildSuggestedBranchName(
+                                baseName,
+                                nextParameterName
+                              )
+                              const shouldUpdateName = prev.branchName === prevSuggestedName
+                              return {
+                                ...prev,
+                                parameterName: nextParameterName,
+                                branchName: shouldUpdateName
+                                  ? nextSuggestedName
+                                  : prev.branchName,
+                              }
+                            })
+                          }}
                           data-testid="limit-cycle-from-orbit-parameter"
                         >
                           {systemDraft.paramNames.map((name) => (
@@ -4631,12 +4654,25 @@ export function InspectorDetailsPanel({
                         Continuation parameter
                         <select
                           value={continuationDraft.parameterName}
-                          onChange={(event) =>
-                            setContinuationDraft((prev) => ({
-                              ...prev,
-                              parameterName: event.target.value,
-                            }))
-                          }
+                          onChange={(event) => {
+                            const nextParameterName = event.target.value
+                            setContinuationDraft((prev) => {
+                              const prevSuggestedName = buildSuggestedBranchName(
+                                equilibrium.name,
+                                prev.parameterName
+                              )
+                              const nextSuggestedName = buildSuggestedBranchName(
+                                equilibrium.name,
+                                nextParameterName
+                              )
+                              const shouldUpdateName = prev.name === prevSuggestedName
+                              return {
+                                ...prev,
+                                parameterName: nextParameterName,
+                                name: shouldUpdateName ? nextSuggestedName : prev.name,
+                              }
+                            })
+                          }}
                           data-testid="equilibrium-branch-parameter"
                         >
                           {systemDraft.paramNames.map((name) => (
@@ -6247,12 +6283,25 @@ export function InspectorDetailsPanel({
                       Continuation parameter
                       <select
                         value={branchContinuationDraft.parameterName}
-                        onChange={(event) =>
-                          setBranchContinuationDraft((prev) => ({
-                            ...prev,
-                            parameterName: event.target.value,
-                          }))
-                        }
+                        onChange={(event) => {
+                          const nextParameterName = event.target.value
+                          setBranchContinuationDraft((prev) => {
+                            const prevSuggestedName = buildSuggestedBranchName(
+                              branch.name,
+                              prev.parameterName
+                            )
+                            const nextSuggestedName = buildSuggestedBranchName(
+                              branch.name,
+                              nextParameterName
+                            )
+                            const shouldUpdateName = prev.name === prevSuggestedName
+                            return {
+                              ...prev,
+                              parameterName: nextParameterName,
+                              name: shouldUpdateName ? nextSuggestedName : prev.name,
+                            }
+                          })
+                        }}
                         data-testid="branch-from-point-parameter"
                       >
                         {systemDraft.paramNames.map((name) => (
@@ -6856,16 +6905,34 @@ export function InspectorDetailsPanel({
                         </label>
                         <label>
                           Continuation parameter
-                          <select
-                            value={limitCycleFromHopfDraft.parameterName}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
+                        <select
+                          value={limitCycleFromHopfDraft.parameterName}
+                          onChange={(event) => {
+                            const nextParameterName = event.target.value
+                            setLimitCycleFromHopfDraft((prev) => {
+                              const baseName =
+                                prev.limitCycleName.trim() ||
+                                `lc_hopf_${toCliSafeName(branch.name)}`
+                              const prevSuggestedName = buildSuggestedBranchName(
+                                baseName,
+                                prev.parameterName
+                              )
+                              const nextSuggestedName = buildSuggestedBranchName(
+                                baseName,
+                                nextParameterName
+                              )
+                              const shouldUpdateName = prev.branchName === prevSuggestedName
+                              return {
                                 ...prev,
-                                parameterName: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-parameter"
-                          >
+                                parameterName: nextParameterName,
+                                branchName: shouldUpdateName
+                                  ? nextSuggestedName
+                                  : prev.branchName,
+                              }
+                            })
+                          }}
+                          data-testid="limit-cycle-from-hopf-parameter"
+                        >
                             {systemDraft.paramNames.map((name) => (
                               <option key={name} value={name}>
                                 {name}
