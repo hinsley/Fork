@@ -3272,7 +3272,6 @@ export function InspectorDetailsPanel({
       <div className="inspector-panel" data-testid="inspector-panel-body">
         {selectionNode ? (
           <div className="inspector-group">
-            <div className="inspector-group__summary">Selection</div>
             <div className="inspector-section">
               <label>
                 Name
