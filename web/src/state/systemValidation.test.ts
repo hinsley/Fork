@@ -26,12 +26,12 @@ describe('validateSystemConfig', () => {
     expect(result.warnings).toHaveLength(0)
   })
 
-  it('warns when the name is not CLI-safe', () => {
+  it('rejects names that are not CLI-safe', () => {
     const result = validateSystemConfig(buildConfig({ name: 'Not Safe' }))
 
-    expect(result.valid).toBe(true)
-    expect(result.warnings).toContain(
-      'System name is not CLI-safe; use alphanumerics and underscores for parity.'
+    expect(result.valid).toBe(false)
+    expect(result.errors.name).toBe(
+      'System name must contain only letters, numbers, and underscores.'
     )
   })
 

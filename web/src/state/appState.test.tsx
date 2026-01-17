@@ -75,7 +75,7 @@ function withParam(system: System, name: string, value: number): System {
 
 describe('appState selection', () => {
   it('does not update the system when selecting the same node twice', async () => {
-    const base = createSystem({ name: 'Select Test' })
+    const base = createSystem({ name: 'Select_Test' })
     const orbit: OrbitObject = {
       type: 'orbit',
       name: 'Orbit_1',
@@ -106,7 +106,7 @@ describe('appState selection', () => {
 
 describe('appState limit cycle render targets', () => {
   it('uses the last computed point after continuing from an orbit', async () => {
-    const base = createSystem({ name: 'Orbit LC' })
+    const base = createSystem({ name: 'Orbit_LC' })
     const configured = withParam(base, 'mu', 0.1)
     const orbit: OrbitObject = {
       type: 'orbit',
@@ -179,7 +179,7 @@ describe('appState limit cycle render targets', () => {
   })
 
   it('uses the last computed point after continuing from Hopf', async () => {
-    const base = createSystem({ name: 'Hopf LC' })
+    const base = createSystem({ name: 'Hopf_LC' })
     const configured = withParam(base, 'mu', 0.0)
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',

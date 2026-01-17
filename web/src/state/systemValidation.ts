@@ -1,6 +1,6 @@
 import type { SystemConfig } from '../system/types'
+import { isCliSafeName } from '../utils/naming'
 
-const CLI_SAFE_NAME = /^[a-zA-Z0-9_]+$/
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 
 export type SystemValidation = {
@@ -16,14 +16,21 @@ export type SystemValidation = {
   warnings: string[]
 }
 
+export const validateSystemName = (name: string): string | null => {
+  if (!name.trim()) return 'System name is required.'
+  if (!isCliSafeName(name)) {
+    return 'System name must contain only letters, numbers, and underscores.'
+  }
+  return null
+}
+
 export const validateSystemConfig = (system: SystemConfig): SystemValidation => {
   const errors: SystemValidation['errors'] = {}
   const warnings: string[] = []
 
-  if (!system.name.trim()) {
-    errors.name = 'System name is required.'
-  } else if (!CLI_SAFE_NAME.test(system.name)) {
-    warnings.push('System name is not CLI-safe; use alphanumerics and underscores for parity.')
+  const nameError = validateSystemName(system.name)
+  if (nameError) {
+    errors.name = nameError
   }
 
   if (system.varNames.some((name) => name.trim().length === 0)) {

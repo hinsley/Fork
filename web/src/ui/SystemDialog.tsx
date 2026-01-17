@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { SystemSummary } from '../system/types'
+import { validateSystemName } from '../state/systemValidation'
 import { confirmDelete } from './confirmDelete'
 
 type SystemDialogProps = {
@@ -23,7 +24,15 @@ export function SystemDialog({
   onImportSystem,
   onClose,
 }: SystemDialogProps) {
-  const [name, setName] = useState('New System')
+  const [name, setName] = useState('NewSystem')
+  const [nameError, setNameError] = useState<string | null>(null)
+
+  const handleCreate = () => {
+    const error = validateSystemName(name)
+    setNameError(error)
+    if (error) return
+    onCreateSystem(name)
+  }
 
   if (!open) return null
 
@@ -41,13 +50,21 @@ export function SystemDialog({
           <div className="dialog__row">
             <input
               value={name}
-              onChange={(event) => setName(event.target.value)}
+              onChange={(event) => {
+                const nextName = event.target.value
+                setName(nextName)
+                if (nameError) {
+                  setNameError(validateSystemName(nextName))
+                }
+              }}
               data-testid="system-name-input"
+              aria-invalid={Boolean(nameError)}
             />
-            <button onClick={() => onCreateSystem(name)} data-testid="create-system">
+            <button onClick={handleCreate} data-testid="create-system">
               Create
             </button>
           </div>
+          {nameError ? <div className="field-error">{nameError}</div> : null}
         </section>
         <section className="dialog__section">
           <h3>Open Existing</h3>

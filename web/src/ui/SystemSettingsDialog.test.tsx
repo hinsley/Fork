@@ -21,7 +21,7 @@ describe('SystemSettingsDialog', () => {
   it('renders when open and calls onClose', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()
-    const system = createSystem({ name: 'Test System' })
+    const system = createSystem({ name: 'Test_System' })
 
     render(
       <SystemSettingsDialog
@@ -60,7 +60,7 @@ describe('SystemSettingsDialog', () => {
   })
 
   it('passes props through to InspectorDetailsPanel', () => {
-    const system = createSystem({ name: 'Test System' })
+    const system = createSystem({ name: 'Test_System' })
     const onRename = vi.fn()
     const onToggleVisibility = vi.fn()
     const onUpdateRender = vi.fn()
@@ -174,7 +174,7 @@ describe('SystemSettingsDialog', () => {
   })
 
   it('returns null when closed', () => {
-    const system = createSystem({ name: 'Test System' })
+    const system = createSystem({ name: 'Test_System' })
     render(
       <SystemSettingsDialog
         open={false}

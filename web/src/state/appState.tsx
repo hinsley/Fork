@@ -60,7 +60,7 @@ import {
 } from '../system/continuation'
 import { downloadSystem, readSystemFile } from '../system/importExport'
 import { AppContext } from './appContext'
-import { validateSystemConfig } from './systemValidation'
+import { validateSystemConfig, validateSystemName } from './systemValidation'
 import { isCliSafeName } from '../utils/naming'
 
 function findObjectIdByName(system: System, name: string): string | null {
@@ -435,6 +435,11 @@ export function AppProvider({
 
   const createSystemAction = useCallback(
     async (name: string) => {
+      const nameError = validateSystemName(name)
+      if (nameError) {
+        dispatch({ type: 'SET_ERROR', error: nameError })
+        return
+      }
       dispatch({ type: 'SET_BUSY', busy: true })
       try {
         const system = createSystem({ name })

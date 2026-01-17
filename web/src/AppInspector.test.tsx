@@ -8,7 +8,7 @@ import { MockForkCoreClient } from './compute/mockClient'
 
 describe('App inspector', () => {
   it('persists bifurcation axis changes from the inspector', async () => {
-    let system = createSystem({ name: 'Diagram Inspector' })
+    let system = createSystem({ name: 'Diagram_Inspector' })
     const diagramResult = addBifurcationDiagram(system, 'Diagram 1')
     system = selectNode(diagramResult.system, diagramResult.nodeId)
 

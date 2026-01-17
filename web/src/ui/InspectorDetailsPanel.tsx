@@ -1768,7 +1768,7 @@ export function InspectorDetailsPanel({
     () => !isSystemEqual(systemConfig, system.config),
     [system.config, systemConfig]
   )
-  const showSystemErrors = systemTouched || systemDirty
+  const showSystemErrors = systemTouched || systemDirty || !systemValidation.valid
   const hasWasmErrors = wasmEquationErrors.some((entry) => entry)
   const runDisabled = systemDirty || !systemValidation.valid || hasWasmErrors
   const isDiscreteMap = systemDraft.type === 'map'

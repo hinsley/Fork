@@ -130,12 +130,12 @@ describe('InspectorDetailsPanel', () => {
 
     const nameInput = screen.getByTestId('system-name')
     await user.clear(nameInput)
-    await user.type(nameInput, 'New System')
+    await user.type(nameInput, 'NewSystem')
 
     await user.click(screen.getByTestId('system-apply'))
 
     expect(onUpdateSystem).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'New System' })
+      expect.objectContaining({ name: 'NewSystem' })
     )
   })
 
@@ -342,7 +342,7 @@ describe('InspectorDetailsPanel', () => {
 
   it('suggests cli-safe branch names for hopf limit cycle continuation', async () => {
     const user = userEvent.setup()
-    const baseSystem = createSystem({ name: 'Hopf Name System' })
+    const baseSystem = createSystem({ name: 'Hopf_Name_System' })
     const configuredSystem = {
       ...baseSystem,
       config: {
@@ -435,7 +435,7 @@ describe('InspectorDetailsPanel', () => {
 
   it('suggests cli-safe branch names for PD limit cycle continuation', async () => {
     const user = userEvent.setup()
-    const baseSystem = createSystem({ name: 'PD Name System' })
+    const baseSystem = createSystem({ name: 'PD_Name_System' })
     const configuredSystem = {
       ...baseSystem,
       config: {
@@ -540,7 +540,7 @@ describe('InspectorDetailsPanel', () => {
 
   it('suggests cli-safe branch names for equilibrium continuation', async () => {
     const user = userEvent.setup()
-    const baseSystem = createSystem({ name: 'Eq Name System' })
+    const baseSystem = createSystem({ name: 'Eq_Name_System' })
     const configuredSystem = {
       ...baseSystem,
       config: {
@@ -602,7 +602,7 @@ describe('InspectorDetailsPanel', () => {
 
   it('updates the default equilibrium continuation name when the parameter changes', async () => {
     const user = userEvent.setup()
-    const baseSystem = createSystem({ name: 'Eq Param System' })
+    const baseSystem = createSystem({ name: 'Eq_Param_System' })
     const configuredSystem = {
       ...baseSystem,
       config: {
@@ -671,7 +671,7 @@ describe('InspectorDetailsPanel', () => {
 
   it('preserves edited equilibrium continuation names when the parameter changes', async () => {
     const user = userEvent.setup()
-    const baseSystem = createSystem({ name: 'Eq Param Edit System' })
+    const baseSystem = createSystem({ name: 'Eq_Param_Edit_System' })
     const configuredSystem = {
       ...baseSystem,
       config: {
@@ -743,7 +743,7 @@ describe('InspectorDetailsPanel', () => {
 
   it('suggests cli-safe branch names when continuing from a branch point', async () => {
     const user = userEvent.setup()
-    const baseSystem = createSystem({ name: 'Branch Continue System' })
+    const baseSystem = createSystem({ name: 'Branch_Continue_System' })
     const configuredSystem = {
       ...baseSystem,
       config: {
@@ -838,7 +838,7 @@ describe('InspectorDetailsPanel', () => {
 
   it('labels limit cycle point details as Floquet Multipliers', async () => {
     const user = userEvent.setup()
-    const baseSystem = createSystem({ name: 'LC Label System' })
+    const baseSystem = createSystem({ name: 'LC_Label_System' })
     const configuredSystem = {
       ...baseSystem,
       config: {
@@ -1314,7 +1314,7 @@ describe('InspectorDetailsPanel', () => {
   })
 
   it('hides the stored cycle render button for non-orbit origins', () => {
-    const base = createSystem({ name: 'Hopf Origin Test' })
+    const base = createSystem({ name: 'Hopf_Origin_Test' })
     const limitCycle: LimitCycleObject = {
       type: 'limit_cycle',
       name: 'LC_Hopf',
@@ -1378,7 +1378,7 @@ describe('InspectorDetailsPanel', () => {
   })
 
   it('renders a multipliers plot for limit cycle objects', () => {
-    const base = createSystem({ name: 'LC Plot System' })
+    const base = createSystem({ name: 'LC_Plot_System' })
     const limitCycle: LimitCycleObject = {
       type: 'limit_cycle',
       name: 'LC_Plot',
@@ -1431,7 +1431,7 @@ describe('InspectorDetailsPanel', () => {
 
   it('creates limit cycle continuation from Hopf with a selected parameter', async () => {
     const user = userEvent.setup()
-    const baseSystem = createSystem({ name: 'Hopf LC Param System' })
+    const baseSystem = createSystem({ name: 'Hopf_LC_Param_System' })
     const configuredSystem = {
       ...baseSystem,
       config: {
@@ -1574,7 +1574,7 @@ describe('InspectorDetailsPanel', () => {
 
   it('creates limit cycle continuation from Hopf curve points', async () => {
     const user = userEvent.setup()
-    const baseSystem = createSystem({ name: 'Hopf Curve LC System' })
+    const baseSystem = createSystem({ name: 'Hopf_Curve_LC_System' })
     const configuredSystem = {
       ...baseSystem,
       config: {
@@ -1716,7 +1716,7 @@ describe('InspectorDetailsPanel', () => {
 
   it('branches to period-doubled limit cycles', async () => {
     const user = userEvent.setup()
-    const baseSystem = createSystem({ name: 'PD System' })
+    const baseSystem = createSystem({ name: 'PD_System' })
     const configuredSystem = {
       ...baseSystem,
       config: {
@@ -1863,7 +1863,7 @@ describe('InspectorDetailsPanel', () => {
 
   it('solves equilibrium requests', async () => {
     const user = userEvent.setup()
-    const baseSystem = createSystem({ name: 'Test System' })
+    const baseSystem = createSystem({ name: 'Test_System' })
     const eqObject: EquilibriumObject = {
       type: 'equilibrium',
       name: 'EQ 1',
@@ -1928,7 +1928,7 @@ describe('InspectorDetailsPanel', () => {
 
   it('toggles equilibrium eigenvector plotting', async () => {
     const user = userEvent.setup()
-    const baseSystem = createSystem({ name: 'Eigenvector System' })
+    const baseSystem = createSystem({ name: 'Eigenvector_System' })
     const eqObject: EquilibriumObject = {
       type: 'equilibrium',
       name: 'EQ Eigen',

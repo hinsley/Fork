@@ -145,7 +145,7 @@ describe('system model', () => {
   })
 
   it('keeps viewRevision stable across non-view updates', () => {
-    let system = createSystem({ name: 'View Revision' })
+    let system = createSystem({ name: 'View_Revision' })
     const sceneResult = addScene(system, 'Scene')
     const diagramResult = addBifurcationDiagram(sceneResult.system, 'Diagram')
     system = updateScene(diagramResult.system, sceneResult.nodeId, { viewRevision: 3 })

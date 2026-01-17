@@ -42,9 +42,9 @@ describe('SystemDialog', () => {
 
     const nameInput = screen.getByTestId('system-name-input')
     await user.clear(nameInput)
-    await user.type(nameInput, 'My System')
+    await user.type(nameInput, 'My_System')
     await user.click(screen.getByTestId('create-system'))
-    expect(onCreateSystem).toHaveBeenCalledWith('My System')
+    expect(onCreateSystem).toHaveBeenCalledWith('My_System')
 
     await user.click(screen.getByRole('button', { name: 'System A' }))
     expect(onOpenSystem).toHaveBeenCalledWith('sys-1')
@@ -82,7 +82,41 @@ describe('SystemDialog', () => {
     expect(screen.getByText('No saved systems yet.')).toBeInTheDocument()
 
     await user.click(screen.getByTestId('create-system'))
-    expect(onCreateSystem).toHaveBeenCalledWith('New System')
+    expect(onCreateSystem).toHaveBeenCalledWith('NewSystem')
+  })
+
+  it('rejects invalid system names', async () => {
+    const user = userEvent.setup()
+    const onCreateSystem = vi.fn()
+
+    render(
+      <SystemDialog
+        open
+        systems={[]}
+        onOpenSystem={vi.fn()}
+        onExportSystem={vi.fn()}
+        onCreateSystem={onCreateSystem}
+        onDeleteSystem={vi.fn()}
+        onImportSystem={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+
+    const nameInput = screen.getByTestId('system-name-input')
+    await user.clear(nameInput)
+    await user.type(nameInput, 'Bad Name')
+    await user.click(screen.getByTestId('create-system'))
+
+    expect(onCreateSystem).not.toHaveBeenCalled()
+    expect(
+      screen.getByText('System name must contain only letters, numbers, and underscores.')
+    ).toBeInTheDocument()
+
+    await user.clear(nameInput)
+    await user.type(nameInput, 'Good_Name')
+    await user.click(screen.getByTestId('create-system'))
+
+    expect(onCreateSystem).toHaveBeenCalledWith('Good_Name')
   })
 
   it('does not delete when confirmation is canceled', async () => {

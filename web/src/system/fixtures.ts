@@ -13,7 +13,7 @@ export function createDemoSystem(): {
   objectNodeId: string
   branchNodeId: string
 } {
-  let system = createSystem({ name: 'Demo System' })
+  let system = createSystem({ name: 'Demo_System' })
   const defaultSettings: ContinuationSettings = {
     step_size: 0.01,
     min_step_size: 1e-5,
@@ -79,9 +79,9 @@ export function createDemoSystem(): {
 
 export function createPeriodDoublingSystem(): { system: System } {
   let system = createSystem({
-    name: 'Period Doubling Fixture',
+    name: 'Period_Doubling_Fixture',
     config: {
-      name: 'Period Doubling Fixture',
+      name: 'Period_Doubling_Fixture',
       equations: ['y', '-x'],
       params: [0.2],
       paramNames: ['mu'],
@@ -173,9 +173,9 @@ export function createPeriodDoublingSystem(): { system: System } {
 
 export function createAxisPickerSystem(): { system: System } {
   let system = createSystem({
-    name: 'Axis Picker Fixture',
+    name: 'Axis_Picker_Fixture',
     config: {
-      name: 'Axis Picker Fixture',
+      name: 'Axis_Picker_Fixture',
       equations: ['y', '-x', 'w', 'x - z'],
       params: [],
       paramNames: [],

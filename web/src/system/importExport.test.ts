@@ -22,7 +22,7 @@ describe('system import/export', () => {
   })
 
   it('downloads a system bundle as JSON', () => {
-    const system = createSystem({ name: 'My System' })
+    const system = createSystem({ name: 'My_System' })
     if (!('createObjectURL' in URL)) {
       Object.defineProperty(URL, 'createObjectURL', {
         value: () => '',

@@ -52,7 +52,7 @@ describe('ViewportPanel view state wiring', () => {
   })
 
   it('omits axis ranges from 2D layouts but seeds initialView', () => {
-    let system = createSystem({ name: '2D System' })
+    let system = createSystem({ name: '2D_System' })
     const sceneResult = addScene(system, 'Scene 1')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
       axisRanges: { x: [-2, 2], y: [1, 3] },
@@ -79,7 +79,7 @@ describe('ViewportPanel view state wiring', () => {
   })
 
   it('marks autorange when a stored axis range is null', () => {
-    let system = createSystem({ name: 'Auto System' })
+    let system = createSystem({ name: 'Auto_System' })
     const sceneResult = addScene(system, 'Scene Auto')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
       axisRanges: { x: null, y: [0, 2] },
@@ -106,7 +106,7 @@ describe('ViewportPanel view state wiring', () => {
       solver: 'rk4',
       type: 'flow',
     }
-    let system = createSystem({ name: '3D System', config })
+    let system = createSystem({ name: '3D_System', config })
     const sceneResult = addScene(system, 'Scene 3D')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
       camera: {
@@ -142,7 +142,7 @@ describe('ViewportPanel view state wiring', () => {
       solver: 'rk4',
       type: 'flow',
     }
-    let system = createSystem({ name: '3D Missing Camera', config })
+    let system = createSystem({ name: '3D_Missing_Camera', config })
     const sceneResult = addScene(system, 'Scene 3D')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
       camera: undefined as unknown as Scene['camera'],
@@ -157,7 +157,7 @@ describe('ViewportPanel view state wiring', () => {
   })
 
   it('omits diagram ranges from layout but seeds initialView', () => {
-    let system = createSystem({ name: 'Diagram System' })
+    let system = createSystem({ name: 'Diagram_System' })
     const diagramResult = addBifurcationDiagram(system, 'Diagram 1')
     system = updateBifurcationDiagram(diagramResult.system, diagramResult.nodeId, {
       axisRanges: { x: [-3, 3], y: [2, 4] },
