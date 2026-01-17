@@ -6,7 +6,7 @@ test('objects tree wraps long names without horizontal overflow', async ({ page 
 
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: true })
-  await harness.createSystem('Objects Wrap Test')
+  await harness.createSystem('Objects_Wrap_Test')
   await harness.createOrbit()
 
   const orbitLabel = page

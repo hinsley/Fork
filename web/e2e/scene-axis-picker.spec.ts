@@ -4,7 +4,7 @@ import { createHarness } from './harness'
 test('scene axis picker is per scene for high-dimensional systems', async ({ page }) => {
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: true, fixture: 'axis-picker' })
-  await harness.openSystem('Axis Picker Fixture')
+  await harness.openSystem('Axis_Picker_Fixture')
 
   await page
     .locator('[data-testid^="viewport-header-"]')
@@ -54,7 +54,7 @@ test('scene axis picker hides for systems with fewer than four variables', async
 }) => {
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: true, fixture: 'demo' })
-  await harness.openSystem('Demo System')
+  await harness.openSystem('Demo_System')
 
   await harness.createScene()
   await page.locator('[data-testid^="viewport-header-"]').first().click()

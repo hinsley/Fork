@@ -7,7 +7,7 @@ test('continue limit cycle from orbit data', async ({ page }) => {
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: false })
 
-  await harness.createSystem('Orbit LC E2E')
+  await harness.createSystem('Orbit_LC_E2E')
 
   await page.getByTestId('open-system-settings').click()
   await page.getByTestId('system-add-parameter').click()

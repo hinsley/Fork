@@ -5,7 +5,7 @@ test('system to viewport smoke', async ({ page }) => {
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: true })
 
-  await harness.createSystem('Smoke System')
+  await harness.createSystem('Smoke_System')
   await harness.createScene()
 
   await harness.createOrbit()
@@ -26,12 +26,12 @@ test('system to viewport smoke', async ({ page }) => {
 
   await page.getByTestId('open-system-settings').click()
   const systemNameInput = harness.systemNameInput()
-  await expect(systemNameInput).toHaveValue(/Smoke System/i)
+  await expect(systemNameInput).toHaveValue(/Smoke_System/i)
   await page.getByTestId('close-system-settings').click()
 
   await page.getByTestId('open-systems').click()
-  await page.getByRole('button', { name: 'Smoke System', exact: true }).click()
+  await page.getByRole('button', { name: 'Smoke_System', exact: true }).click()
   await page.getByTestId('open-system-settings').click()
-  await expect(systemNameInput).toHaveValue(/Smoke System/i)
+  await expect(systemNameInput).toHaveValue(/Smoke_System/i)
   await page.getByTestId('close-system-settings').click()
 })

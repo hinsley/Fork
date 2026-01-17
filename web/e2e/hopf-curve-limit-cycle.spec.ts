@@ -7,7 +7,7 @@ test('continue limit cycle from a hopf-curve branch point', async ({ page }) => 
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: false })
 
-  await harness.createSystem('Hopf Curve LC E2E')
+  await harness.createSystem('Hopf_Curve_LC_E2E')
 
   await page.getByTestId('open-system-settings').click()
   await page.getByTestId('system-add-parameter').click()

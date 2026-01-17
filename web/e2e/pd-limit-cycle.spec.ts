@@ -7,7 +7,7 @@ test('branch to a period-doubled limit cycle', async ({ page }) => {
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: true, fixture: 'pd' })
 
-  await harness.openSystem('Period Doubling Fixture')
+  await harness.openSystem('Period_Doubling_Fixture')
   await harness.selectTreeNode('Branch: lc_pd_mu')
 
   await page.getByTestId('branch-points-toggle').click()

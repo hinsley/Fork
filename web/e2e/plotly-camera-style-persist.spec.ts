@@ -448,7 +448,6 @@ test('3D camera persists across style updates', async ({ page }) => {
     (perfDeltaFirst?.newPlotCalls ?? 0) > 0 ||
     (perfDeltaSecond?.newPlotCalls ?? 0) > 0
   if (shouldLog) {
-    // eslint-disable-next-line no-console
     console.log('plotly-camera-diag', {
       isConnected,
       plotIdentityBefore,

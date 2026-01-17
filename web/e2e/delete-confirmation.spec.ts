@@ -20,7 +20,7 @@ test('system delete asks for confirmation', async ({ page }) => {
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: true })
 
-  const systemName = 'Confirm Delete System'
+  const systemName = 'Confirm_Delete_System'
   await harness.createSystem(systemName)
 
   await page.getByTestId('open-systems').click()
@@ -41,7 +41,7 @@ test('object delete asks for confirmation', async ({ page }) => {
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: true })
 
-  await harness.createSystem('Object Delete Confirm')
+  await harness.createSystem('Object_Delete_Confirm')
   await harness.createOrbit()
 
   const objectRow = page
@@ -68,7 +68,7 @@ test('viewport delete asks for confirmation', async ({ page }) => {
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: true })
 
-  await harness.createSystem('Viewport Delete Confirm')
+  await harness.createSystem('Viewport_Delete_Confirm')
   await harness.createScene()
 
   const viewportHeader = page.locator('[data-testid^="viewport-header-"]').first()

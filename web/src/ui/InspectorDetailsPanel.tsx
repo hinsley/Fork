@@ -3568,190 +3568,11 @@ export function InspectorDetailsPanel({
                     <p className="empty-state">No orbit samples stored yet.</p>
                   )}
                 </div>
-                <div className="inspector-section">
-                  <h4 className="inspector-subheading">Lyapunov exponents</h4>
-                  {orbit.lyapunovExponents && orbit.lyapunovExponents.length > 0 ? (
-                    <>
-                      <InspectorMetrics
-                        rows={[
-                          ...orbit.lyapunovExponents.map((value, index) => ({
-                            label: `λ${index + 1}`,
-                            value: formatFixed(value, 6),
-                          })),
-                          ...(lyapunovDimension !== null
-                            ? [
-                                {
-                                  label: 'Lyapunov dimension',
-                                  value: formatNumber(lyapunovDimension, 6),
-                                },
-                              ]
-                            : []),
-                        ]}
-                      />
-                    </>
-                  ) : (
-                    <p className="empty-state">Lyapunov exponents not computed yet.</p>
-                  )}
-                </div>
-                <div className="inspector-section">
-                  <h4 className="inspector-subheading">Covariant Lyapunov vectors</h4>
-                  {orbit.covariantVectors && orbit.covariantVectors.vectors.length > 0 ? (
-                    <>
-                      <InspectorMetrics
-                        rows={[
-                          {
-                            label: 'Checkpoints',
-                            value: orbit.covariantVectors.vectors.length.toLocaleString(),
-                          },
-                          { label: 'Dimension', value: orbit.covariantVectors.dim },
-                          {
-                            label: 'Time span',
-                            value:
-                              orbit.covariantVectors.times.length > 0
-                                ? `${formatFixed(orbit.covariantVectors.times[0], 3)} to ${formatFixed(
-                                    orbit.covariantVectors.times[
-                                      orbit.covariantVectors.times.length - 1
-                                    ],
-                                    3
-                                  )}`
-                                : 'n/a',
-                          },
-                        ]}
-                      />
-                      {orbit.covariantVectors.vectors[0] ? (
-                        <div className="inspector-data">
-                          {orbit.covariantVectors.vectors[0].map((vec, index) => (
-                            <div key={`clv-${index}`}>
-                              v{index + 1}: [{vec.map((value) => formatFixed(value, 4)).join(', ')}
-                              ]
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                    </>
-                  ) : (
-                    <p className="empty-state">Covariant Lyapunov vectors not computed yet.</p>
-                  )}
-                </div>
-              </InspectorDisclosure>
-
-              <InspectorDisclosure
-                key={`${selectionKey}-clv-plot`}
-                title="CLV Plotting"
-                testId="clv-plot-toggle"
-                defaultOpen={false}
-              >
-                <div className="inspector-section">
-                  {!clvHasData ? (
-                    <p className="empty-state">Covariant vectors not computed yet.</p>
-                  ) : null}
-                  {clvNeeds2d ? (
-                    <div className="field-warning">
-                      CLV plotting requires at least two state variables.
-                    </div>
-                  ) : null}
-                  <label>
-                    Show CLV vectors
-                    <input
-                      type="checkbox"
-                      checked={clvRender.enabled}
-                      onChange={(event) => updateClvRender({ enabled: event.target.checked })}
-                      data-testid="clv-plot-enabled"
-                    />
-                  </label>
-                  <label>
-                    Stride (plot every Nth checkpoint)
-                    <input
-                      type="number"
-                      min={1}
-                      value={clvRender.stride}
-                      onChange={(event) =>
-                        updateClvRender({ stride: Number(event.target.value) })
-                      }
-                      data-testid="clv-plot-stride"
-                    />
-                  </label>
-                  <label>
-                    Arrow length (fraction of orbit size)
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      value={clvRender.lengthScale}
-                      onChange={(event) =>
-                        updateClvRender({ lengthScale: Number(event.target.value) })
-                      }
-                      data-testid="clv-plot-length"
-                    />
-                  </label>
-                  <label>
-                    Arrowhead scale
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.1}
-                      value={clvRender.headScale}
-                      onChange={(event) =>
-                        updateClvRender({ headScale: Number(event.target.value) })
-                      }
-                      data-testid="clv-plot-head-scale"
-                    />
-                  </label>
-                  <label>
-                    Arrow thickness (px)
-                    <input
-                      type="number"
-                      min={0.5}
-                      step={0.5}
-                      value={clvRender.thickness}
-                      onChange={(event) =>
-                        updateClvRender({ thickness: Number(event.target.value) })
-                      }
-                      data-testid="clv-plot-thickness"
-                    />
-                  </label>
-                </div>
-                <div className="inspector-section">
-                  <h4 className="inspector-subheading">Vector colors</h4>
-                  {clvIndices.length > 0 ? (
-                    <div className="inspector-list">
-                      {clvIndices.map((index, idx) => {
-                        const visible = clvVisibleSet.has(index)
-                        return (
-                          <div className="clv-control-row" key={`clv-color-${index}`}>
-                            <span className="clv-control-row__label">CLV {index + 1}</span>
-                            <input
-                              type="checkbox"
-                              checked={visible}
-                              onChange={(event) =>
-                                handleClvVisibilityChange(index, event.target.checked)
-                              }
-                              aria-label={`Show CLV ${index + 1}`}
-                              data-testid={`clv-plot-show-${index}`}
-                            />
-                            <input
-                              type="color"
-                              value={clvColors[idx]}
-                              onChange={(event) =>
-                                handleClvColorChange(index, event.target.value)
-                              }
-                              disabled={!visible}
-                              aria-label={`CLV ${index + 1} color`}
-                              data-testid={`clv-plot-color-${index}`}
-                            />
-                          </div>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    <p className="empty-state">Covariant vectors not computed yet.</p>
-                  )}
-                </div>
               </InspectorDisclosure>
 
               <InspectorDisclosure
                 key={`${selectionKey}-oseledets`}
-                title="Oseledets Solver"
+                title="Lyapunov Analysis"
                 testId="oseledets-toggle"
                 defaultOpen={false}
               >
@@ -3765,6 +3586,26 @@ export function InspectorDetailsPanel({
                     <p className="empty-state">Run an orbit to enable Lyapunov analysis.</p>
                   ) : null}
                   <h4 className="inspector-subheading">Lyapunov exponents</h4>
+                  {orbit.lyapunovExponents && orbit.lyapunovExponents.length > 0 ? (
+                    <InspectorMetrics
+                      rows={[
+                        ...orbit.lyapunovExponents.map((value, index) => ({
+                          label: `λ${index + 1}`,
+                          value: formatFixed(value, 6),
+                        })),
+                        ...(lyapunovDimension !== null
+                          ? [
+                              {
+                                label: 'Lyapunov dimension',
+                                value: formatNumber(lyapunovDimension, 6),
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
+                  ) : (
+                    <p className="empty-state">Lyapunov exponents not computed yet.</p>
+                  )}
                   <label>
                     {systemDraft.type === 'map'
                       ? 'Transient iterations to discard'
@@ -3806,6 +3647,43 @@ export function InspectorDetailsPanel({
                 </div>
                 <div className="inspector-section">
                   <h4 className="inspector-subheading">Covariant Lyapunov vectors</h4>
+                  {orbit.covariantVectors && orbit.covariantVectors.vectors.length > 0 ? (
+                    <>
+                      <InspectorMetrics
+                        rows={[
+                          {
+                            label: 'Checkpoints',
+                            value: orbit.covariantVectors.vectors.length.toLocaleString(),
+                          },
+                          { label: 'Dimension', value: orbit.covariantVectors.dim },
+                          {
+                            label: 'Time span',
+                            value:
+                              orbit.covariantVectors.times.length > 0
+                                ? `${formatFixed(orbit.covariantVectors.times[0], 3)} to ${formatFixed(
+                                    orbit.covariantVectors.times[
+                                      orbit.covariantVectors.times.length - 1
+                                    ],
+                                    3
+                                  )}`
+                                : 'n/a',
+                          },
+                        ]}
+                      />
+                      {orbit.covariantVectors.vectors[0] ? (
+                        <div className="inspector-data">
+                          {orbit.covariantVectors.vectors[0].map((vec, index) => (
+                            <div key={`clv-${index}`}>
+                              v{index + 1}: [{vec.map((value) => formatFixed(value, 4)).join(', ')}
+                              ]
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="empty-state">Covariant Lyapunov vectors not computed yet.</p>
+                  )}
                   <label>
                     {systemDraft.type === 'map'
                       ? 'Transient iterations to discard'
@@ -3877,6 +3755,120 @@ export function InspectorDetailsPanel({
                     Compute Covariant Vectors
                   </button>
                 </div>
+                {clvHasData ? (
+                  <InspectorDisclosure
+                    key={`${selectionKey}-clv-plot`}
+                    title="CLV Plotting"
+                    testId="clv-plot-toggle"
+                    defaultOpen={false}
+                  >
+                    <div className="inspector-section">
+                      {clvNeeds2d ? (
+                        <div className="field-warning">
+                          CLV plotting requires at least two state variables.
+                        </div>
+                      ) : null}
+                      <label>
+                        Show CLV vectors
+                        <input
+                          type="checkbox"
+                          checked={clvRender.enabled}
+                          onChange={(event) =>
+                            updateClvRender({ enabled: event.target.checked })
+                          }
+                          data-testid="clv-plot-enabled"
+                        />
+                      </label>
+                      <label>
+                        Stride (plot every Nth checkpoint)
+                        <input
+                          type="number"
+                          min={1}
+                          value={clvRender.stride}
+                          onChange={(event) =>
+                            updateClvRender({ stride: Number(event.target.value) })
+                          }
+                          data-testid="clv-plot-stride"
+                        />
+                      </label>
+                      <label>
+                        Arrow length (fraction of orbit size)
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          value={clvRender.lengthScale}
+                          onChange={(event) =>
+                            updateClvRender({ lengthScale: Number(event.target.value) })
+                          }
+                          data-testid="clv-plot-length"
+                        />
+                      </label>
+                      <label>
+                        Arrowhead scale
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.1}
+                          value={clvRender.headScale}
+                          onChange={(event) =>
+                            updateClvRender({ headScale: Number(event.target.value) })
+                          }
+                          data-testid="clv-plot-head-scale"
+                        />
+                      </label>
+                      <label>
+                        Arrow thickness (px)
+                        <input
+                          type="number"
+                          min={0.5}
+                          step={0.5}
+                          value={clvRender.thickness}
+                          onChange={(event) =>
+                            updateClvRender({ thickness: Number(event.target.value) })
+                          }
+                          data-testid="clv-plot-thickness"
+                        />
+                      </label>
+                    </div>
+                    <div className="inspector-section">
+                      <h4 className="inspector-subheading">Vector colors</h4>
+                      {clvIndices.length > 0 ? (
+                        <div className="inspector-list">
+                          {clvIndices.map((index, idx) => {
+                            const visible = clvVisibleSet.has(index)
+                            return (
+                              <div className="clv-control-row" key={`clv-color-${index}`}>
+                                <span className="clv-control-row__label">CLV {index + 1}</span>
+                                <input
+                                  type="checkbox"
+                                  checked={visible}
+                                  onChange={(event) =>
+                                    handleClvVisibilityChange(index, event.target.checked)
+                                  }
+                                  aria-label={`Show CLV ${index + 1}`}
+                                  data-testid={`clv-plot-show-${index}`}
+                                />
+                                <input
+                                  type="color"
+                                  value={clvColors[idx]}
+                                  onChange={(event) =>
+                                    handleClvColorChange(index, event.target.value)
+                                  }
+                                  disabled={!visible}
+                                  aria-label={`CLV ${index + 1} color`}
+                                  data-testid={`clv-plot-color-${index}`}
+                                />
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <p className="empty-state">Covariant vectors not computed yet.</p>
+                      )}
+                    </div>
+                  </InspectorDisclosure>
+                ) : null}
               </InspectorDisclosure>
 
               <InspectorDisclosure

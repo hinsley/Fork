@@ -7,7 +7,7 @@ test('splitter drag does not interact with plotly or select text', async ({ page
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: true })
 
-  await harness.createSystem('Splitter Drag Test')
+  await harness.createSystem('Splitter_Drag_Test')
   await harness.createScene()
 
   await harness.createOrbit()

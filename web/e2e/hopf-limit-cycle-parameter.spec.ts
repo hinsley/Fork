@@ -7,7 +7,7 @@ test('continue limit cycle from Hopf along a selected parameter', async ({ page 
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: false })
 
-  await harness.createSystem('Hopf LC Param E2E')
+  await harness.createSystem('Hopf_LC_Param_E2E')
 
   await page.getByTestId('open-system-settings').click()
   await page.getByTestId('system-add-parameter').click()

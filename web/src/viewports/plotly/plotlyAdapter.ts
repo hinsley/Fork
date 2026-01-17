@@ -117,7 +117,6 @@ function isGuardDebugEnabled() {
 function logGuard(message: string, payload: Record<string, unknown>) {
   if (!isGuardDebugEnabled()) return
   if (typeof console === 'undefined') return
-  // eslint-disable-next-line no-console
   console.log('plotly-camera-guard', message, payload)
 }
 

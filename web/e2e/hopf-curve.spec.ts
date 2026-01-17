@@ -7,7 +7,7 @@ test('continue hopf curve from detected hopf point', async ({ page }) => {
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: false })
 
-  await harness.createSystem('Hopf E2E')
+  await harness.createSystem('Hopf_E2E')
 
   await page.getByTestId('open-system-settings').click()
   await page.getByTestId('system-add-parameter').click()

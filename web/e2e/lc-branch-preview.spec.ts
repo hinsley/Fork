@@ -17,7 +17,7 @@ test('branch point navigation previews limit cycles in state space', async ({ pa
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: true, fixture: 'pd' })
 
-  await harness.openSystem('Period Doubling Fixture')
+  await harness.openSystem('Period_Doubling_Fixture')
   await harness.createScene()
 
   await harness.selectTreeNode('Branch: lc_pd_mu')
@@ -54,7 +54,7 @@ test('rendering a limit cycle persists after leaving branch selection', async ({
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: true, fixture: 'pd' })
 
-  await harness.openSystem('Period Doubling Fixture')
+  await harness.openSystem('Period_Doubling_Fixture')
   await harness.createScene()
 
   await harness.selectTreeNode('Branch: lc_pd_mu')
@@ -81,7 +81,7 @@ test('limit cycle rendering uses the limit cycle object color', async ({ page })
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: true, fixture: 'pd' })
 
-  await harness.openSystem('Period Doubling Fixture')
+  await harness.openSystem('Period_Doubling_Fixture')
   await harness.createScene()
 
   await harness.selectTreeNode('Branch: lc_pd_mu')
