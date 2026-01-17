@@ -1,6 +1,7 @@
 import type { Layout, Data } from 'plotly.js'
 
 type PlotlyModule = {
+  relayout?: (container: HTMLElement, update: Record<string, unknown>) => MaybePromise<void>
   react: (
     container: HTMLElement,
     data: Data[],
@@ -13,11 +14,9 @@ type PlotlyModule = {
       doubleClick: boolean
     }
   ) => Promise<void>
-  relayout?: (container: HTMLElement, update: Record<string, unknown>) => Promise<void>
   purge: (container: HTMLElement) => void
-  relayout?: (container: HTMLElement, update: Record<string, unknown>) => Promise<void> | void
   Plots?: {
-    resize: (container: HTMLElement) => Promise<void> | void
+    resize: (container: HTMLElement) => MaybePromise<void>
   }
 }
 
@@ -26,6 +25,8 @@ let plotlyPromise: Promise<PlotlyModule> | null = null
 
 type CameraVector = { x: number; y: number; z: number }
 type CameraSpec = { eye: CameraVector; up?: CameraVector; center?: CameraVector }
+type MaybePromise<T> = T | Promise<T>
+type ArrayLike3 = { 0: unknown; 1: unknown; 2: unknown; length: number }
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
@@ -44,17 +45,35 @@ function vectorShape(value: unknown): string {
   return typeof value
 }
 
+function isArrayLike3(value: unknown): value is ArrayLike3 {
+  if (!value || typeof value !== 'object') return false
+  if (Array.isArray(value)) return value.length >= 3
+  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(value)) {
+    const length = (value as { length?: number }).length
+    return typeof length === 'number' && length >= 3
+  }
+  const obj = value as Record<string, unknown>
+  if (!('length' in obj)) return false
+  const length = obj.length
+  return (
+    typeof length === 'number' &&
+    length >= 3 &&
+    '0' in obj &&
+    '1' in obj &&
+    '2' in obj
+  )
+}
+
 function toVector(value: unknown): CameraVector | null {
   if (!value || typeof value !== 'object') return null
   const obj = value as Record<string, unknown>
   if (isFiniteNumber(obj.x) && isFiniteNumber(obj.y) && isFiniteNumber(obj.z)) {
     return { x: obj.x, y: obj.y, z: obj.z }
   }
-  if ('0' in obj || '1' in obj || '2' in obj) {
-    const arrayLike = obj as ArrayLike<unknown>
-    const x = arrayLike[0]
-    const y = arrayLike[1]
-    const z = arrayLike[2]
+  if (isArrayLike3(value)) {
+    const x = value[0]
+    const y = value[1]
+    const z = value[2]
     if (isFiniteNumber(x) && isFiniteNumber(y) && isFiniteNumber(z)) {
       return { x, y, z }
     }
@@ -165,7 +184,7 @@ export async function renderPlot(
   let layoutToRender = layout
   if (shouldPreserveCamera) {
     try {
-      const nextLayout: Partial<Layout> = { ...layout }
+      const nextLayout: Partial<Layout> & Record<string, unknown> = { ...layout }
       let injected = false
       for (const key of sceneKeys) {
         const source = layout[key as keyof Layout]
@@ -185,7 +204,7 @@ export async function renderPlot(
         })
         if (!spec) continue
         const sceneLayout = { ...(source as Record<string, unknown>), camera: spec }
-        nextLayout[key as keyof Layout] = sceneLayout as Layout[keyof Layout]
+        nextLayout[key] = sceneLayout
         injected = true
       }
       if (injected) {
