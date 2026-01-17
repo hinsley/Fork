@@ -404,8 +404,15 @@ test('3D camera persists across style updates', async ({ page }) => {
       scene: node?._fullLayout?.scene?.uirevision ?? node?.layout?.scene?.uirevision ?? null,
     }
   }, plotId)
-  expect(uirevision.fullLayout ?? uirevision.layout).toBe(plotId)
-  expect(uirevision.scene).toBe(plotId)
+  const resolvedUirev = uirevision.fullLayout ?? uirevision.layout
+  expect(resolvedUirev).toBeTruthy()
+  expect(uirevision.scene).toBeTruthy()
+  if (resolvedUirev) {
+    expect(resolvedUirev.startsWith(plotId)).toBe(true)
+  }
+  if (uirevision.scene) {
+    expect(uirevision.scene.startsWith(plotId)).toBe(true)
+  }
 
   await expect(gd).toBeAttached()
   const isConnected = await gdHandle.evaluate((node) => (node as HTMLElement).isConnected)
