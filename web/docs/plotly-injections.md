@@ -12,6 +12,14 @@ behavior.
   `Plotly.react()` on every `data`/`layout` change (forced rerender). It passes
   a config that changes defaults: `displaylogo: false`, `displayModeBar: true`,
   `responsive: true`, `scrollZoom: true`, `doubleClick: false`.
+- `web/src/viewports/plotly/plotlyAdapter.ts`: wraps `Plotly.react()`,
+  `Plotly.newPlot()`, and `Plotly.Plots.resize()` with test-only perf counters
+  when `window.__E2E__` is enabled.
+- `web/src/viewports/plotly/plotlyAdapter.ts`: injects the current 3D camera
+  into `Plotly.react()` when `uirevision` is stable and the incoming layout does
+  not specify a camera. The guard only uses a validated camera spec (no model
+  persistence, no continuous injection) to prevent the first style update from
+  resetting the camera.
 - `web/src/viewports/plotly/plotlyAdapter.ts`: `relayoutPlot()` wraps
   `Plotly.relayout()` for one-time view restores.
 - `web/src/viewports/plotly/PlotlyViewport.tsx`: `preloadPlotly()` is invoked on

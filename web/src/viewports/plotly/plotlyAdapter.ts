@@ -13,6 +13,7 @@ type PlotlyModule = {
       doubleClick: boolean
     }
   ) => Promise<void>
+  relayout?: (container: HTMLElement, update: Record<string, unknown>) => Promise<void>
   purge: (container: HTMLElement) => void
   relayout?: (container: HTMLElement, update: Record<string, unknown>) => Promise<void> | void
   Plots?: {
@@ -22,6 +23,84 @@ type PlotlyModule = {
 
 let plotlyModule: PlotlyModule | null = null
 let plotlyPromise: Promise<PlotlyModule> | null = null
+
+type CameraVector = { x: number; y: number; z: number }
+type CameraSpec = { eye: CameraVector; up?: CameraVector; center?: CameraVector }
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function vectorShape(value: unknown): string {
+  if (!value) return 'missing'
+  if (Array.isArray(value)) return 'array'
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    if (isFiniteNumber(obj.x) && isFiniteNumber(obj.y) && isFiniteNumber(obj.z)) {
+      return 'object'
+    }
+    if ('0' in obj || '1' in obj || '2' in obj) return 'array-like'
+  }
+  return typeof value
+}
+
+function toVector(value: unknown): CameraVector | null {
+  if (!value || typeof value !== 'object') return null
+  const obj = value as Record<string, unknown>
+  if (isFiniteNumber(obj.x) && isFiniteNumber(obj.y) && isFiniteNumber(obj.z)) {
+    return { x: obj.x, y: obj.y, z: obj.z }
+  }
+  if ('0' in obj || '1' in obj || '2' in obj) {
+    const arrayLike = obj as ArrayLike<unknown>
+    const x = arrayLike[0]
+    const y = arrayLike[1]
+    const z = arrayLike[2]
+    if (isFiniteNumber(x) && isFiniteNumber(y) && isFiniteNumber(z)) {
+      return { x, y, z }
+    }
+  }
+  return null
+}
+
+function toCameraSpec(camera: unknown): CameraSpec | null {
+  if (!camera || typeof camera !== 'object') return null
+  const obj = camera as Record<string, unknown>
+  const eye = toVector(obj.eye)
+  if (!eye) return null
+  const up = toVector(obj.up)
+  const center = toVector(obj.center)
+  const spec: CameraSpec = { eye }
+  if (up) spec.up = up
+  if (center) spec.center = center
+  return spec
+}
+
+function cameraShape(camera: unknown) {
+  if (!camera || typeof camera !== 'object') {
+    return { present: false }
+  }
+  const obj = camera as Record<string, unknown>
+  return {
+    present: true,
+    eye: vectorShape(obj.eye),
+    up: vectorShape(obj.up),
+    center: vectorShape(obj.center),
+  }
+}
+
+function isGuardDebugEnabled() {
+  if (typeof window === 'undefined') return false
+  const win = window as { __E2E__?: boolean }
+  if (win.__E2E__) return true
+  return typeof process !== 'undefined' && process.env?.NODE_ENV === 'test'
+}
+
+function logGuard(message: string, payload: Record<string, unknown>) {
+  if (!isGuardDebugEnabled()) return
+  if (typeof console === 'undefined') return
+  // eslint-disable-next-line no-console
+  console.log('plotly-camera-guard', message, payload)
+}
 
 function unwrapPlotly(mod: unknown): PlotlyModule {
   const candidate = (mod as { default?: PlotlyModule }).default ?? mod
@@ -58,7 +137,66 @@ export async function renderPlot(
 ) {
   const Plotly = await loadPlotly()
   if (opts?.signal?.aborted) return
-  await Plotly.react(container, data, layout, {
+  const sceneKeys = Object.keys(layout).filter((key) => key.startsWith('scene'))
+  const hasScene = sceneKeys.length > 0
+  const layoutHasCamera = sceneKeys.some((key) => {
+    const value = layout[key as keyof Layout]
+    if (!value || typeof value !== 'object') return false
+    return 'camera' in (value as Record<string, unknown>)
+  })
+  const layoutUirevision =
+    typeof layout.uirevision === 'string' || typeof layout.uirevision === 'number'
+      ? String(layout.uirevision)
+      : null
+  const existingUirevision = (() => {
+    const candidate = container as HTMLElement & {
+      layout?: { uirevision?: string | number }
+      _fullLayout?: { uirevision?: string | number }
+    }
+    const value = candidate.layout?.uirevision ?? candidate._fullLayout?.uirevision
+    if (typeof value === 'string' || typeof value === 'number') return String(value)
+    return null
+  })()
+  // Plotly.react can reset 3D camera on the first style update even when uirevision is stable.
+  // Guard by injecting a valid pre-react camera spec when uirevision matches and layout omits
+  // camera. This avoids model persistence or continuous camera injection; remove if Plotly changes.
+  const shouldPreserveCamera =
+    hasScene && !layoutHasCamera && layoutUirevision && existingUirevision === layoutUirevision
+  let layoutToRender = layout
+  if (shouldPreserveCamera) {
+    try {
+      const nextLayout: Partial<Layout> = { ...layout }
+      let injected = false
+      for (const key of sceneKeys) {
+        const source = layout[key as keyof Layout]
+        if (!source || typeof source !== 'object') continue
+        const candidate = container as HTMLElement & {
+          _fullLayout?: Record<string, unknown>
+        }
+        const scene = candidate._fullLayout?.[key] as
+          | { camera?: Record<string, unknown>; _scene?: { camera?: Record<string, unknown> } }
+          | undefined
+        const camera = scene?._scene?.camera ?? scene?.camera ?? null
+        const spec = toCameraSpec(camera)
+        logGuard('inject', {
+          sceneKey: key,
+          camera: cameraShape(camera),
+          valid: Boolean(spec),
+        })
+        if (!spec) continue
+        const sceneLayout = { ...(source as Record<string, unknown>), camera: spec }
+        nextLayout[key as keyof Layout] = sceneLayout as Layout[keyof Layout]
+        injected = true
+      }
+      if (injected) {
+        layoutToRender = nextLayout
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.stack ?? err.message : String(err)
+      logGuard('inject-error', { error: message })
+    }
+  }
+  await Plotly.react(container, data, layoutToRender, {
     displaylogo: false,
     displayModeBar: true,
     responsive: true,
