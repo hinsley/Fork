@@ -9,7 +9,7 @@ import {
   updateBifurcationDiagram,
   updateScene,
 } from '../system/model'
-import type { SystemConfig } from '../system/types'
+import type { Scene, SystemConfig } from '../system/types'
 
 type PlotlyProps = {
   plotId: string
@@ -130,6 +130,30 @@ describe('ViewportPanel view state wiring', () => {
         up: { x: 0, y: 0, z: 1 },
       },
     })
+  })
+
+  it('does not throw when a 3D scene is missing a camera', () => {
+    const config: SystemConfig = {
+      name: '3D System',
+      equations: ['x', 'y', 'z'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: '3D Missing Camera', config })
+    const sceneResult = addScene(system, 'Scene 3D')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      camera: undefined as unknown as Scene['camera'],
+      viewRevision: 1,
+    })
+
+    expect(() => renderPanel(system)).not.toThrow()
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    expect(props?.initialView).toBeNull()
   })
 
   it('omits diagram ranges from layout but seeds initialView', () => {

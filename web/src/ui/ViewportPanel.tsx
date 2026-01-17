@@ -2155,13 +2155,35 @@ function appendAxisRangeSnapshot(
   }
 }
 
+type PlotlyCameraSpec = {
+  eye: { x: number; y: number; z: number }
+  center: { x: number; y: number; z: number }
+  up: { x: number; y: number; z: number }
+}
+
+function isVector3(value: unknown): value is { x: number; y: number; z: number } {
+  if (!value || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  return (
+    Number.isFinite(record.x) && Number.isFinite(record.y) && Number.isFinite(record.z)
+  )
+}
+
+function isCameraSpec(camera: unknown): camera is PlotlyCameraSpec {
+  if (!camera || typeof camera !== 'object') return false
+  const record = camera as Record<string, unknown>
+  return isVector3(record.eye) && isVector3(record.center) && isVector3(record.up)
+}
+
 function buildSceneInitialView(system: System, scene: Scene): PlotlyRelayoutEvent | null {
   const snapshot: PlotlyRelayoutEvent = {}
   if (system.config.varNames.length >= 3) {
-    snapshot['scene.camera'] = {
-      eye: { ...scene.camera.eye },
-      center: { ...scene.camera.center },
-      up: { ...scene.camera.up },
+    if (isCameraSpec(scene.camera)) {
+      snapshot['scene.camera'] = {
+        eye: { ...scene.camera.eye },
+        center: { ...scene.camera.center },
+        up: { ...scene.camera.up },
+      }
     }
   } else {
     appendAxisRangeSnapshot(snapshot, 'xaxis', scene.axisRanges.x)
