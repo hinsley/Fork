@@ -413,23 +413,32 @@ function StateTable({
 function InspectorDisclosure({
   title,
   defaultOpen = false,
+  open,
+  onOpenChange,
   children,
   testId,
 }: {
   title: string
   defaultOpen?: boolean
+  open?: boolean
+  onOpenChange?: (nextOpen: boolean) => void
   children: ReactNode
   testId?: string
 }) {
-  const [open, setOpen] = useState(defaultOpen)
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen)
+  const resolvedOpen = typeof open === 'boolean' ? open : uncontrolledOpen
 
   return (
     <details
       className="inspector-disclosure"
-      open={open}
-      onToggle={(event) =>
-        setOpen((event.currentTarget as HTMLDetailsElement).open)
-      }
+      open={resolvedOpen}
+      onToggle={(event) => {
+        const nextOpen = (event.currentTarget as HTMLDetailsElement).open
+        if (typeof open !== 'boolean') {
+          setUncontrolledOpen(nextOpen)
+        }
+        onOpenChange?.(nextOpen)
+      }}
     >
       <summary className="inspector-disclosure__summary" data-testid={testId}>
         {title}
@@ -1193,7 +1202,9 @@ export function InspectorDetailsPanel({
   const systemConfigKey = useMemo(() => buildSystemConfigKey(system.config), [system.config])
   const stableSystemConfigRef = useRef(system.config)
   const prevBranchIdRef = useRef<string | null>(null)
+  const internalBranchPointSelectionRef = useRef(false)
   const [branchPointIndex, setBranchPointIndex] = useState<number | null>(null)
+  const [branchNavigatorOpen, setBranchNavigatorOpen] = useState(false)
   const branchPointIndexRef = useRef<number | null>(null)
   const selectedBranchPoint = useMemo(() => {
     if (!branch || branchPointIndex === null) return null
@@ -1252,6 +1263,7 @@ export function InspectorDetailsPanel({
       if (!onBranchPointSelect || view !== 'selection') return
       if (!branch || arrayIndex === null || !selectedNodeId) {
         if (branchPointSelection !== null) {
+          internalBranchPointSelectionRef.current = true
           onBranchPointSelect(null)
         }
         return
@@ -1263,6 +1275,7 @@ export function InspectorDetailsPanel({
       ) {
         return
       }
+      internalBranchPointSelectionRef.current = true
       onBranchPointSelect({
         branchId: selectedNodeId,
         pointIndex: arrayIndex,
@@ -1762,6 +1775,10 @@ export function InspectorDetailsPanel({
   useEffect(() => {
     branchPointIndexRef.current = branchPointIndex
   }, [branchPointIndex])
+
+  useEffect(() => {
+    setBranchNavigatorOpen(false)
+  }, [selectionKey])
 
   const systemConfig = useMemo(() => buildSystemConfig(systemDraft), [systemDraft])
   const systemValidation = useMemo(() => validateSystemConfig(systemConfig), [systemConfig])
@@ -2387,9 +2404,14 @@ export function InspectorDetailsPanel({
   )
 
   useEffect(() => {
+    const isInternalSelection = internalBranchPointSelectionRef.current
+    internalBranchPointSelectionRef.current = false
     if (view !== 'selection') return
     if (!branch || !branchPointSelection || !selectedNodeId) return
     if (branchPointSelection.branchId !== selectedNodeId) return
+    if (!isInternalSelection) {
+      setBranchNavigatorOpen(true)
+    }
     const targetIndex = branchPointSelection.pointIndex
     if (targetIndex === branchPointIndexRef.current) return
     if (targetIndex < 0 || targetIndex >= branchIndices.length) return
@@ -2400,6 +2422,7 @@ export function InspectorDetailsPanel({
     branchPointSelection,
     setBranchPoint,
     selectedNodeId,
+    setBranchNavigatorOpen,
     view,
   ])
 
@@ -5409,6 +5432,8 @@ export function InspectorDetailsPanel({
                       title="Branch Navigator"
                       testId="branch-points-toggle"
                       defaultOpen={false}
+                      open={branchNavigatorOpen}
+                      onOpenChange={setBranchNavigatorOpen}
                     >
                       <div className="inspector-section">
                         {branch.data.points.length === 0 ? (
@@ -5863,6 +5888,8 @@ export function InspectorDetailsPanel({
                       title="Branch Navigator"
                       testId="branch-points-toggle"
                       defaultOpen={false}
+                      open={branchNavigatorOpen}
+                      onOpenChange={setBranchNavigatorOpen}
                     >
                       <div className="inspector-section">
                         {branch.data.points.length === 0 ? (
