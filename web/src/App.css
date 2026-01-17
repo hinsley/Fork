@@ -391,6 +391,33 @@
   color: var(--text-muted);
 }
 
+.tree-node__visibility {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.tree-node__visibility::before {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--node-color, var(--panel-muted));
+  border: 1px solid var(--panel-muted);
+  box-sizing: border-box;
+  opacity: 0.6;
+}
+
+.tree-node__visibility[data-visible='true']::before {
+  opacity: 1;
+  border-color: #000;
+}
+
+
 .tree-node__spacer {
   display: inline-block;
   width: 14px;

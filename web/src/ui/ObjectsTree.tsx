@@ -8,7 +8,9 @@ import {
   useRef,
   useState,
 } from 'react'
+import type { CSSProperties } from 'react'
 import type { System, TreeNode } from '../system/types'
+import { DEFAULT_RENDER } from '../system/model'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
 import { clampMenuX } from './contextMenu'
 
@@ -174,6 +176,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         : derivedChildren
     const hasChildren = childIds.length > 0
     const isEditing = editingId === nodeId
+    const nodeColor = node.render?.color ?? DEFAULT_RENDER.color
+    const visibilityStyle = { '--node-color': nodeColor } as CSSProperties
     const isRoot = node.parentId === null
     const isDragging = draggingId === nodeId
     const isDropTarget = isRoot && dragOverId === nodeId && draggingId !== node.id
@@ -234,11 +238,11 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
               event.stopPropagation()
               onToggleVisibility(nodeId)
             }}
+            style={visibilityStyle}
+            data-visible={node.visibility ? 'true' : 'false'}
             aria-label={node.visibility ? 'Hide node' : 'Show node'}
             data-testid={`node-visibility-${nodeId}`}
-          >
-            {node.visibility ? '●' : '○'}
-          </button>
+          />
           <button
             className="tree-node__label"
             onClick={(event) => {
