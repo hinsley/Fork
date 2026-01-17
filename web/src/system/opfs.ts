@@ -15,8 +15,17 @@ const SYSTEMS_DIR = 'fork-systems'
 const SYSTEM_FILE = 'system.json'
 const UI_FILE = 'ui.json'
 
+export function supportsOpfs(): boolean {
+  if (typeof window === 'undefined') return false
+  if (!('storage' in navigator) || !('getDirectory' in navigator.storage)) return false
+  const handle = (globalThis as {
+    FileSystemFileHandle?: { prototype?: { createWritable?: unknown } }
+  }).FileSystemFileHandle
+  return typeof handle?.prototype?.createWritable === 'function'
+}
+
 async function getRootDirectory() {
-  if (!('storage' in navigator) || !('getDirectory' in navigator.storage)) {
+  if (!supportsOpfs()) {
     throw new Error('OPFS not supported in this browser')
   }
   return await navigator.storage.getDirectory()

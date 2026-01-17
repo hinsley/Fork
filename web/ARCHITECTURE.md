@@ -54,7 +54,10 @@ existing CLI surface area and the Rust/WASM core.
 
 ### System Model + Persistence
 - `src/system/`: system schema, object tree ops, branch ops, migrations.
-- `src/system/opfs.ts`: OPFS persistence helpers, import/export bundling.
+- `src/system/opfs.ts`: OPFS persistence helpers, import/export bundling; Chromium-only File System
+  Access API, so Safari/Firefox require a feature-detected IndexedDB fallback (memory if needed).
+- `src/system/indexedDb.ts`: IndexedDB persistence fallback for non-Chromium browsers.
+- `src/system/storeFactory.ts`: runtime store selection across OPFS, IndexedDB, and memory.
 - `src/system/fixtures.ts`: deterministic fixtures for tests.
 
 ### WASM Bridge + Compute

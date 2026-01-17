@@ -35,6 +35,9 @@ Fork is a monorepo with a Rust/WASM core and a web/CLI interface.
 ## Agent-Specific Instructions
 If you touch `crates/fork_core`, `crates/fork_wasm`, or `cli`, you must rebuild WASM (`wasm-pack build --target nodejs`) and validate behavior interactively in the CLI.
 Update `web/docs/plotly-injections.md` whenever Plotly touchpoints are added or removed.
+OPFS is Chromium-only (Safari/Firefox lack `FileSystemFileHandle.createWritable`), so any work that
+touches web persistence, import/export, or file handles must feature-detect OPFS and provide/verify
+the IndexedDB fallback (memory if IndexedDB is unavailable); do not assume OPFS in tests or docs.
 
 ## Landing the Plane (Session Completion)
 

@@ -21,6 +21,23 @@ References:
 
 ---
 
+### 2026-01-17: Treat OPFS as Chromium-only persistence
+Context:
+The web app uses OPFS (File System Access API) for `system.json` and `ui.json`, but Safari and
+Firefox do not implement `FileSystemFileHandle.createWritable` in stable builds.
+Decision:
+Treat OPFS as a Chromium-only storage backend and always gate it behind capability checks
+(`navigator.storage.getDirectory` + `FileSystemFileHandle.createWritable`). Use IndexedDB as the
+persistent fallback for non-Chromium browsers (memory fallback if IndexedDB fails).
+Why:
+Avoid runtime crashes while keeping persistence reliable across browsers.
+Impact:
+Any new persistence work must feature-detect OPFS and never assume `createWritable` exists.
+Docs and tests should call out the IndexedDB fallback path.
+References:
+`web/src/system/opfs.ts`, `web/src/system/indexedDb.ts`, `web/src/system/storeFactory.ts`,
+`web/src/main.tsx`, `web/ARCHITECTURE.md`
+
 ### 2026-01-10: Build web WASM during deploy
 Context:
 Committing `pkg-web` kept hosted builds simple but added binary churn to the repo.

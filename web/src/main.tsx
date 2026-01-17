@@ -3,8 +3,8 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App'
 import { AppProvider } from './state/appState'
-import { OpfsSystemStore } from './system/opfs'
 import { MemorySystemStore, type SystemStore } from './system/store'
+import { createBrowserSystemStore } from './system/storeFactory'
 import {
   createAxisPickerSystem,
   createDemoSystem,
@@ -84,7 +84,7 @@ async function bootstrap() {
     }
   }
 
-  let store = deterministic ? new MemorySystemStore() : new OpfsSystemStore()
+  let store = await createBrowserSystemStore(deterministic)
   if (fixture === 'demo') {
     const memory = new MemorySystemStore()
     const { system } = createDemoSystem()
