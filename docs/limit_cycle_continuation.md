@@ -1,6 +1,7 @@
 # Limit Cycle Continuation
 
-This document describes how Fork implements limit cycle continuation, including initialization from both Hopf bifurcations and orbit data, the underlying numerical methods, and troubleshooting guidance.
+This document describes how Fork implements limit cycle continuation, including initialization from Hopf bifurcations, orbit data, and period-doubling points, the underlying numerical methods, and troubleshooting guidance.
+Note: This document has not been fully human-reviewed; treat it as guidance and verify against current behavior.
 
 ## Table of Contents
 
@@ -22,10 +23,10 @@ This document describes how Fork implements limit cycle continuation, including 
 
 ## Overview
 
-Fork supports two methods for initiating limit cycle continuation:
+Fork supports three methods for initiating limit cycle continuation:
 
+1. **From Hopf Bifurcation**: Start from a Hopf point on an equilibrium or Hopf-curve branch; Fork builds a small-amplitude cycle from the Hopf eigenvector.
 2. **From Orbit Data**: If you have an orbit that converges to a stable limit cycle (e.g., from numerical integration), Fork can extract one period and use it to initialize limit cycle continuation.
-
 3. **From Period-Doubling (PD) Bifurcation**: When a limit cycle undergoes a period-doubling bifurcation, a new limit cycle family emerges with double the period. Fork can branch from a detected PD point to this new family.
 
 ### Key Concepts
@@ -44,18 +45,23 @@ Fork supports two methods for initiating limit cycle continuation:
 First, perform equilibrium continuation to find Hopf bifurcation points:
 
 ```
-System Menu → Continuation → Create New Branch → [select equilibrium] → [configure]
+System Menu → Objects → [select equilibrium] → Branches → Create New Branch → [configure]
 ```
 
 Fork automatically detects Hopf bifurcations (marked with "Hopf" stability in the branch viewer).
 
 ### Step 2: Start Limit Cycle from Hopf
 
-Select a Hopf point and choose "Start Limit Cycle from Hopf":
+Select a Hopf point and choose "Initiate Limit Cycle Continuation":
 
 ```
-Continuation Menu → [select branch] → Inspect Branch Points → [select Hopf point]
-→ Start Limit Cycle from Hopf
+Branches → [select branch] → Inspect Branch Points → [select Hopf point]
+→ Initiate Limit Cycle Continuation
+```
+
+Web UI:
+```
+Inspector → Limit Cycle from Hopf → [select Hopf point] → Continue Limit Cycle
 ```
 
 ### Step 3: Configure LC Continuation
@@ -69,7 +75,10 @@ You'll be prompted for:
 | ncol | 4 | Collocation points per interval |
 | Direction | forward | Continue in positive or negative parameter direction |
 | Step size | 0.01 | Initial continuation step size |
-| Max steps | 100 | Maximum continuation steps |
+| Max points | 50 | Maximum continuation steps |
+
+Additional settings (min/max step size, corrector steps, corrector tolerance, step tolerance) are
+available in the CLI configuration menu and the web Inspector for tighter control.
 
 ### Step 4: View Results
 
@@ -83,6 +92,17 @@ If a Period-Doubling (PD) bifurcation is detected (Floquet multiplier crosses -1
 1. Inspect the branch points and find the point marked "PeriodDoubling".
 2. Select the point and choose "Branch to Period-Doubled Limit Cycle".
 3. Configure the perturbation amplitude (default 0.01) and run continuation.
+
+CLI path:
+```
+Branches → [select limit cycle branch] → Inspect Branch Points → [select PD point]
+→ Branch to Period-Doubled Limit Cycle
+```
+
+Web UI:
+```
+Inspector → Limit Cycle from PD → [select Period Doubling point] → Continue Limit Cycle
+```
 
 ---
 
@@ -117,8 +137,8 @@ System Menu → Objects → Create New Object → Orbit
 #### Step 2: Create Limit Cycle Branch
 
 ```
-System Menu → Continuation → Create New Branch → Limit Cycle Branch
-→ [select orbit] → [configure]
+System Menu → Objects → [select orbit] → Create Limit Cycle Object (from this orbit)
+→ [configure]
 ```
 
 #### Step 3: Configure Parameters
@@ -128,8 +148,17 @@ System Menu → Continuation → Create New Branch → Limit Cycle Branch
 | Cycle detection tolerance | 0.1 | Max distance to consider a "return" to reference point |
 | ntst | 20 | Number of mesh intervals |
 | ncol | 4 | Collocation points per interval |
+| Step size | 0.01 | Initial continuation step size |
 | Direction | forward | Parameter direction |
 | Max points | 50 | Continuation steps |
+
+Additional settings (min/max step size, corrector steps, corrector tolerance, step tolerance) are
+available in the CLI configuration menu and the web Inspector.
+
+Web UI:
+```
+Inspector → Limit Cycle → Continue from Orbit
+```
 
 ### Implementation Details
 
@@ -759,8 +788,13 @@ Period-doubling (PD) branching allows you to follow the cascaded route to chaos 
 ### CLI Workflow
 
 ```
-Continuation Menu → [select LC branch] → Inspect Branch Points → [select PD point]
+Branches → [select LC branch] → Inspect Branch Points → [select PD point]
 → Branch to Period-Doubled Limit Cycle
+```
+
+Web UI:
+```
+Inspector → Limit Cycle from PD → [select Period Doubling point] → Continue Limit Cycle
 ```
 
 ### Numerical Implementation
@@ -771,7 +805,7 @@ The PD branching algorithm follows the approach in MatCont's `init_PD_LC2.m`:
 
 At a PD point, the monodromy matrix $M$ has an eigenvalue of -1 (the period-doubling multiplier). We first compute the corresponding eigenvector $v$:
 $$(M + I)v = 0$$
-where $I$ is the identity matrix. $v$ represents the direction in state space into which the orbit begins to "wobble" before spliting into a doubled period.
+where $I$ is the identity matrix. $v$ represents the direction in state space into which the orbit begins to "wobble" before splitting into a doubled period.
 
 #### 2. Doubled-Period Guess Construction
 
