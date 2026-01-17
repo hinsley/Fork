@@ -9,6 +9,7 @@ import type {
   ContinuationPoint,
   EquilibriumEigenvectorRenderStyle,
   EquilibriumObject,
+  LineStyle,
   LimitCycleOrigin,
   LimitCycleRenderTarget,
   OrbitObject,
@@ -3349,6 +3350,24 @@ export function InspectorDetailsPanel({
                   data-testid="inspector-line-width"
                 />
               </label>
+              {selectionNode.kind === 'branch' ? (
+                <label>
+                  Line Style
+                  <select
+                    value={nodeRender.lineStyle}
+                    onChange={(event) =>
+                      onUpdateRender(selectionNode.id, {
+                        lineStyle: event.target.value as LineStyle,
+                      })
+                    }
+                    data-testid="inspector-line-style"
+                  >
+                    <option value="solid">Solid</option>
+                    <option value="dashed">Dashed</option>
+                    <option value="dotted">Dotted</option>
+                  </select>
+                </label>
+              ) : null}
               <label>
                 Point Size
                 <input

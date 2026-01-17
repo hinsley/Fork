@@ -193,9 +193,12 @@ export interface EquilibriumEigenvectorRenderStyle {
   discThickness: number
 }
 
+export type LineStyle = 'solid' | 'dashed' | 'dotted'
+
 export interface RenderStyle {
   color: string
   lineWidth: number
+  lineStyle: LineStyle
   pointSize: number
   clv?: ClvRenderStyle
   equilibriumEigenvectors?: EquilibriumEigenvectorRenderStyle

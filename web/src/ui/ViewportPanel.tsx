@@ -16,6 +16,7 @@ import type {
   ContinuationObject,
   ContinuationPoint,
   EquilibriumEigenPair,
+  LineStyle,
   OrbitObject,
   SceneAxisVariables,
   SystemConfig,
@@ -117,6 +118,16 @@ function resolvePointIndex(point: PlotlyPointClick): number | null {
     return null
   }
   return Math.max(0, Math.round(point.customdata))
+}
+
+const LINE_STYLE_DASH: Record<LineStyle, 'solid' | 'dash' | 'dot'> = {
+  solid: 'solid',
+  dashed: 'dash',
+  dotted: 'dot',
+}
+
+function resolveLineDash(lineStyle: LineStyle | undefined): 'solid' | 'dash' | 'dot' {
+  return LINE_STYLE_DASH[lineStyle ?? 'solid']
 }
 
 type TimeSeriesViewportMeta = {
@@ -1770,6 +1781,7 @@ function buildDiagramTraces(
       const highlight = branchId === selectedNodeId
       const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
       const markerSize = highlight ? node.render.pointSize + 2 : node.render.pointSize
+      const lineDash = resolveLineDash(node.render.lineStyle)
 
       traces.push({
         type: 'scatter',
@@ -1782,6 +1794,7 @@ function buildDiagramTraces(
         line: {
           color: node.render.color,
           width: lineWidth,
+          dash: lineDash,
         },
       })
 
@@ -1796,6 +1809,7 @@ function buildDiagramTraces(
         line: {
           color: node.render.color,
           width: lineWidth,
+          dash: lineDash,
         },
         showlegend: false,
       })
@@ -1890,6 +1904,7 @@ function buildDiagramTraces(
     const highlight = branchId === selectedNodeId
     const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
     const markerSize = highlight ? node.render.pointSize + 2 : node.render.pointSize
+    const lineDash = resolveLineDash(node.render.lineStyle)
 
     traces.push({
       type: 'scatter',
@@ -1902,6 +1917,7 @@ function buildDiagramTraces(
       line: {
         color: node.render.color,
         width: lineWidth,
+        dash: lineDash,
       },
     })
 

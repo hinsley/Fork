@@ -4,6 +4,7 @@ import type {
   BifurcationDiagram,
   ContinuationObject,
   LimitCycleRenderTarget,
+  RenderStyle,
   System,
   SystemLayout,
   SystemUiState,
@@ -54,9 +55,10 @@ const DEFAULT_SCENE: Scene = {
   display: 'all',
 }
 
-export const DEFAULT_RENDER = {
+export const DEFAULT_RENDER: RenderStyle = {
   color: '#e06c3f',
   lineWidth: 2,
+  lineStyle: 'solid',
   pointSize: 4,
 }
 
