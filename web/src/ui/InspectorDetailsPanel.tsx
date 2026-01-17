@@ -3429,7 +3429,15 @@ export function InspectorDetailsPanel({
                   {orbit.data.length > 0 ? (
                     <div className="orbit-preview">
                       <div className="orbit-preview__controls">
-                        <div className="inspector-row">
+                        <div className="inspector-row inspector-row--nav">
+                          <button
+                            type="button"
+                            onClick={() => setOrbitPreviewPageIndex(0)}
+                            disabled={orbitPreviewPage <= 0}
+                            data-testid="orbit-preview-start"
+                          >
+                            Start
+                          </button>
                           <button
                             type="button"
                             onClick={() => setOrbitPreviewPageIndex(orbitPreviewPage - 1)}
@@ -3446,10 +3454,18 @@ export function InspectorDetailsPanel({
                           >
                             Next
                           </button>
-                          <span className="orbit-preview__page">
-                            Page {orbitPreviewPage + 1} of {orbitPreviewPageCount}
-                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setOrbitPreviewPageIndex(orbitPreviewPageCount - 1)}
+                            disabled={orbitPreviewPage >= orbitPreviewPageCount - 1}
+                            data-testid="orbit-preview-end"
+                          >
+                            End
+                          </button>
                         </div>
+                        <span className="orbit-preview__page">
+                          Page {orbitPreviewPage + 1} of {orbitPreviewPageCount}
+                        </span>
                         <label>
                           Jump to page
                           <div className="inspector-row orbit-preview__jump">
