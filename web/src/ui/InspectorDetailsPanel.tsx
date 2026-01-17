@@ -5295,7 +5295,7 @@ export function InspectorDetailsPanel({
                   <>
                     <InspectorDisclosure
                       key={`${selectionKey}-lc-summary`}
-                      title="Limit Cycle Overview"
+                      title="Branch Summary"
                       testId="branch-summary-toggle"
                     >
                       <div className="inspector-section">
@@ -5395,7 +5395,7 @@ export function InspectorDetailsPanel({
 
                     <InspectorDisclosure
                       key={`${selectionKey}-branch-points`}
-                      title="Cycle Navigator"
+                      title="Branch Navigator"
                       testId="branch-points-toggle"
                       defaultOpen={false}
                     >
@@ -5586,7 +5586,7 @@ export function InspectorDetailsPanel({
 
                     <InspectorDisclosure
                       key={`${selectionKey}-branch-point-details`}
-                      title="Cycle Metrics"
+                      title="Point Details"
                       testId="branch-point-details-toggle"
                     >
                       <div className="inspector-section">

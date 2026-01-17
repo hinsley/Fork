@@ -925,9 +925,9 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    expect(screen.getByText('Limit Cycle Overview')).toBeVisible()
-    expect(screen.getByText('Cycle Navigator')).toBeVisible()
-    expect(screen.getByText('Cycle Metrics')).toBeVisible()
+    expect(screen.getByText('Branch Summary')).toBeVisible()
+    expect(screen.getByText('Branch Navigator')).toBeVisible()
+    expect(screen.getByText('Point Details')).toBeVisible()
 
     await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-point-details-toggle'))
