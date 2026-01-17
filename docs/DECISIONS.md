@@ -33,7 +33,9 @@ Why:
 Avoid runtime crashes while keeping persistence reliable across browsers.
 Impact:
 Any new persistence work must feature-detect OPFS and never assume `createWritable` exists.
-Docs and tests should call out the IndexedDB fallback path.
+Docs and tests should call out the IndexedDB fallback path. IndexedDB quotas vary by browser/device
+and can be evicted under storage pressure, so persistence code should handle quota errors and avoid
+assuming unlimited storage.
 References:
 `web/src/system/opfs.ts`, `web/src/system/indexedDb.ts`, `web/src/system/storeFactory.ts`,
 `web/src/main.tsx`, `web/ARCHITECTURE.md`
