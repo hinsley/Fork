@@ -63,8 +63,9 @@ function openDatabase(dbName: string): Promise<IDBDatabase> {
 }
 
 async function getAllRecords(store: IDBObjectStore): Promise<StoredSystemRecord[]> {
-  if ('getAll' in store) {
-    return requestToPromise(store.getAll() as IDBRequest<StoredSystemRecord[]>)
+  const maybeGetAll = (store as { getAll?: () => IDBRequest<StoredSystemRecord[]> }).getAll
+  if (maybeGetAll) {
+    return requestToPromise(maybeGetAll.call(store))
   }
   return new Promise((resolve, reject) => {
     const records: StoredSystemRecord[] = []
@@ -102,8 +103,10 @@ export function supportsIndexedDb(): boolean {
 
 export class IdbSystemStore implements SystemStore {
   private dbPromise: Promise<IDBDatabase>
+  private options: IdbStoreOptions
 
-  constructor(private options: IdbStoreOptions = {}) {
+  constructor(options: IdbStoreOptions = {}) {
+    this.options = options
     this.dbPromise = openDatabase(this.options.dbName ?? DEFAULT_DB_NAME)
   }
 
