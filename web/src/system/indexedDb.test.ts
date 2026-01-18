@@ -1,97 +1,89 @@
 import { describe, expect, it } from 'vitest'
-import { IdbSystemStore } from './indexedDb'
-import { createAxisPickerSystem, createDemoSystem } from './fixtures'
+import { IndexedDbSystemStore } from './indexedDb'
+import { createSystem, updateLayout, updateSystem } from './model'
 
-let dbCounter = 0
-
-async function createStore() {
-  dbCounter += 1
-  return await IdbSystemStore.create({ dbName: `fork-test-${dbCounter}` })
+async function createLegacyDb(name: string, version = 1): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open(name, version)
+    request.onupgradeneeded = () => {
+      const db = request.result
+      if (!db.objectStoreNames.contains('systems')) {
+        db.createObjectStore('systems', { keyPath: 'id' })
+      }
+    }
+    request.onsuccess = () => {
+      request.result.close()
+      resolve()
+    }
+    request.onerror = () =>
+      reject(request.error ?? new Error('Failed to open legacy IndexedDB'))
+  })
 }
 
-describe('IdbSystemStore', () => {
-  it('saves and loads systems', async () => {
-    const store = await createStore()
-    const { system } = createDemoSystem()
-
-    await store.save(system)
-    const loaded = await store.load(system.id)
-
-    expect(loaded).toEqual(system)
-    await store.close()
+async function deleteDb(name: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(name)
+    request.onsuccess = () => resolve()
+    request.onerror = () =>
+      reject(request.error ?? new Error('Failed to delete IndexedDB'))
   })
+}
 
-  it('updates UI snapshots without overwriting core data', async () => {
-    const store = await createStore()
-    const { system } = createDemoSystem()
+function makeStore() {
+  const nonce = Math.random().toString(16).slice(2)
+  return new IndexedDbSystemStore({ name: `fork-test-${Date.now()}-${nonce}` })
+}
 
-    await store.save(system)
-
-    const updated = {
-      ...system,
-      updatedAt: '2024-01-02T00:00:00.000Z',
-      ui: {
-        ...system.ui,
-        layout: {
-          ...system.ui.layout,
-          leftWidth: system.ui.layout.leftWidth + 10,
-        },
-      },
+describe('IndexedDbSystemStore', () => {
+  it('upgrades legacy databases without breaking persistence', async () => {
+    const name = `fork-legacy-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    await createLegacyDb(name)
+    const store = new IndexedDbSystemStore({ name })
+    try {
+      const systems = await store.list()
+      expect(systems).toEqual([])
+    } finally {
+      await store.clear()
+      await deleteDb(name)
     }
-
-    await store.saveUi(updated)
-    const loaded = await store.load(system.id)
-
-    expect(loaded.ui.layout.leftWidth).toBe(updated.ui.layout.leftWidth)
-    expect(loaded.config).toEqual(system.config)
-    await store.close()
   })
 
-  it('lists systems by latest update time', async () => {
-    const store = await createStore()
-    const { system: first } = createDemoSystem()
-    const { system: second } = createAxisPickerSystem()
-
-    first.updatedAt = '2024-01-01T00:00:00.000Z'
-    second.updatedAt = '2024-01-02T00:00:00.000Z'
-
-    await store.save(first)
-    await store.save(second)
-
-    const updatedFirst = {
-      ...first,
-      updatedAt: '2024-01-03T00:00:00.000Z',
-      ui: {
-        ...first.ui,
-        layout: {
-          ...first.ui.layout,
-          rightWidth: first.ui.layout.rightWidth + 15,
-        },
-      },
+  it('recreates databases when a newer schema version exists', async () => {
+    const name = `fork-version-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    await createLegacyDb(name, 5)
+    const store = new IndexedDbSystemStore({ name })
+    const system = createSystem({ name: 'IndexedDB_Recreate' })
+    try {
+      await store.save(system)
+      const loaded = await store.load(system.id)
+      expect(loaded.name).toBe('IndexedDB_Recreate')
+      const summaries = await store.list()
+      expect(summaries).toHaveLength(1)
+    } finally {
+      await store.clear()
+      await deleteDb(name)
     }
-
-    await store.saveUi(updatedFirst)
-    const list = await store.list()
-
-    expect(list[0].id).toBe(first.id)
-    expect(list[0].updatedAt).toBe(updatedFirst.updatedAt)
-    expect(list[1].id).toBe(second.id)
-    await store.close()
   })
 
-  it('removes systems and clears storage', async () => {
-    const store = await createStore()
-    const { system: first } = createDemoSystem()
-    const { system: second } = createAxisPickerSystem()
+  it('keeps data when saveUi runs after a newer data save', async () => {
+    const store = makeStore()
+    try {
+      const base = createSystem({ name: 'IndexedDB_System' })
+      await store.save(base)
 
-    await store.save(first)
-    await store.save(second)
+      const updated = updateSystem(base, { ...base.config, name: 'IndexedDB_System_Updated' })
+      await store.save(updated)
 
-    await store.remove(first.id)
-    expect(await store.list()).toHaveLength(1)
+      const uiOnly = updateLayout(base, {
+        leftWidth: base.ui.layout.leftWidth + 20,
+      })
+      await store.saveUi(uiOnly)
 
-    await store.clear()
-    expect(await store.list()).toHaveLength(0)
-    await store.close()
+      const loaded = await store.load(base.id)
+      expect(loaded.name).toBe('IndexedDB_System_Updated')
+      expect(loaded.ui.layout.leftWidth).toBe(uiOnly.ui.layout.leftWidth)
+    } finally {
+      await store.clear()
+    }
   })
 })

@@ -2121,6 +2121,43 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct LinearRelationProblem;
+
+    impl ContinuationProblem for LinearRelationProblem {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
+            out[0] = aug_state[1] - aug_state[0];
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, _aug_state: &DVector<f64>) -> Result<DMatrix<f64>> {
+            Ok(DMatrix::from_row_slice(1, 2, &[-1.0, 1.0]))
+        }
+
+        fn diagnostics(&mut self, _aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
+            Ok(PointDiagnostics {
+                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+                eigenvalues: Vec::new(),
+            })
+        }
+    }
+
+    fn constant_settings(max_steps: usize) -> ContinuationSettings {
+        ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 0.1,
+            max_step_size: 0.1,
+            max_steps,
+            corrector_steps: 2,
+            corrector_tolerance: 1e-6,
+            step_tolerance: 1e-6,
+        }
+    }
+
     #[test]
     fn test_runner_indices_ignore_tangent_sign_flips() {
         let settings = ContinuationSettings {
@@ -2194,5 +2231,75 @@ mod tests {
 
         assert_eq!(extended.points.len(), 3);
         assert_eq!(extended.indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_extend_branch_matches_longer_continuation() {
+        let initial_point = ContinuationPoint {
+            state: vec![0.0],
+            param_value: 0.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+        };
+
+        let mut full_problem = LinearRelationProblem::default();
+        let full_branch = continue_with_problem(
+            &mut full_problem,
+            initial_point.clone(),
+            constant_settings(4),
+            true,
+        )
+        .expect("full continuation");
+
+        let mut short_problem = LinearRelationProblem::default();
+        let short_branch = continue_with_problem(
+            &mut short_problem,
+            initial_point,
+            constant_settings(2),
+            true,
+        )
+        .expect("short continuation");
+
+        let mut extend_problem = LinearRelationProblem::default();
+        let extended_branch = extend_branch_with_problem(
+            &mut extend_problem,
+            short_branch,
+            constant_settings(2),
+            true,
+        )
+        .expect("extended continuation");
+
+        assert_eq!(extended_branch.points.len(), full_branch.points.len());
+        assert_eq!(extended_branch.indices, full_branch.indices);
+
+        for (idx, (extended, full)) in extended_branch
+            .points
+            .iter()
+            .zip(full_branch.points.iter())
+            .enumerate()
+        {
+            let param_delta = (extended.param_value - full.param_value).abs();
+            assert!(
+                param_delta < 1e-10,
+                "param mismatch at point {}: {} vs {}",
+                idx,
+                extended.param_value,
+                full.param_value
+            );
+            assert_eq!(extended.state.len(), full.state.len());
+            for (state_idx, (lhs, rhs)) in
+                extended.state.iter().zip(full.state.iter()).enumerate()
+            {
+                let state_delta = (lhs - rhs).abs();
+                assert!(
+                    state_delta < 1e-10,
+                    "state mismatch at point {} idx {}: {} vs {}",
+                    idx,
+                    state_idx,
+                    lhs,
+                    rhs
+                );
+            }
+        }
     }
 }

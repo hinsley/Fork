@@ -1,28 +1,24 @@
-import type { System, SystemSummary, SystemUiSnapshot } from './types'
+import type { System, SystemData, SystemSummary, SystemUiSnapshot } from './types'
 import type { SystemStore } from './store'
 import {
-  deserializeSystemData,
-  deserializeSystemUi,
+  SYSTEM_DATA_SCHEMA_VERSION,
+  SYSTEM_UI_SCHEMA_VERSION,
   mergeSystem,
   serializeSystemData,
   serializeSystemUi,
-  type LegacySystemBundle,
   type SystemDataBundle,
   type SystemUiBundle,
 } from './serialization'
 
 const DEFAULT_DB_NAME = 'fork-systems'
-const DB_VERSION = 1
-const STORE_NAME = 'systems'
+const DEFAULT_DB_VERSION = 2
+const DATA_STORE = 'system-data'
+const UI_STORE = 'system-ui'
+const LEGACY_STORE = 'systems'
 
-type StoredSystemRecord = {
-  id: string
-  data: SystemDataBundle | LegacySystemBundle
-  ui?: SystemUiBundle
-}
-
-type IdbStoreOptions = {
-  dbName?: string
+type StoreConfig = {
+  name?: string
+  version?: number
 }
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
@@ -32,63 +28,61 @@ function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   })
 }
 
+function deleteDatabase(name: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(name)
+    request.onsuccess = () => resolve()
+    request.onerror = () =>
+      reject(request.error ?? new Error('Failed to delete IndexedDB'))
+  })
+}
+
 function transactionDone(transaction: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve()
-    transaction.onerror = () =>
-      reject(transaction.error ?? new Error('IndexedDB transaction failed'))
     transaction.onabort = () =>
       reject(transaction.error ?? new Error('IndexedDB transaction aborted'))
+    transaction.onerror = () =>
+      reject(transaction.error ?? new Error('IndexedDB transaction failed'))
   })
 }
 
-function openDatabase(dbName: string): Promise<IDBDatabase> {
+function isVersionError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const name = (error as { name?: unknown }).name
+  return name === 'VersionError'
+}
+
+function openDatabaseOnce(name: string, version: number): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(dbName, DB_VERSION)
+    const request = indexedDB.open(name, version)
     request.onupgradeneeded = () => {
       const db = request.result
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: 'id' })
+      if (db.objectStoreNames.contains(LEGACY_STORE)) {
+        db.deleteObjectStore(LEGACY_STORE)
+      }
+      if (!db.objectStoreNames.contains(DATA_STORE)) {
+        db.createObjectStore(DATA_STORE)
+      }
+      if (!db.objectStoreNames.contains(UI_STORE)) {
+        db.createObjectStore(UI_STORE)
       }
     }
-    request.onerror = () => reject(request.error ?? new Error('IndexedDB open failed'))
-    request.onsuccess = () => {
-      const db = request.result
-      db.onversionchange = () => {
-        db.close()
-      }
-      resolve(db)
-    }
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () =>
+      reject(request.error ?? new Error('Failed to open IndexedDB'))
   })
 }
 
-async function getAllRecords(store: IDBObjectStore): Promise<StoredSystemRecord[]> {
-  const maybeGetAll = (store as { getAll?: () => IDBRequest<StoredSystemRecord[]> }).getAll
-  if (maybeGetAll) {
-    return requestToPromise(maybeGetAll.call(store))
-  }
-  return new Promise((resolve, reject) => {
-    const records: StoredSystemRecord[] = []
-    const request = store.openCursor()
-    request.onerror = () => reject(request.error ?? new Error('IndexedDB cursor failed'))
-    request.onsuccess = () => {
-      const cursor = request.result
-      if (!cursor) {
-        resolve(records)
-        return
-      }
-      records.push(cursor.value as StoredSystemRecord)
-      cursor.continue()
-    }
-  })
-}
-
-function safeDeserializeUi(bundle?: SystemUiBundle): SystemUiSnapshot | null {
-  if (!bundle) return null
+async function openDatabase(name: string, version: number): Promise<IDBDatabase> {
   try {
-    return deserializeSystemUi(bundle)
-  } catch {
-    return null
+    return await openDatabaseOnce(name, version)
+  } catch (error) {
+    if (!isVersionError(error)) {
+      throw error
+    }
+    await deleteDatabase(name)
+    return await openDatabaseOnce(name, version)
   }
 }
 
@@ -97,119 +91,159 @@ function latestIso(primary: string, secondary?: string) {
   return primary.localeCompare(secondary) >= 0 ? primary : secondary
 }
 
-export function supportsIndexedDb(): boolean {
-  return typeof indexedDB !== 'undefined'
+function requireSystemDataBundle(bundle: unknown): SystemData {
+  if (!bundle || typeof bundle !== 'object') {
+    throw new Error('Invalid system data bundle.')
+  }
+  const record = bundle as SystemDataBundle
+  if (record.schemaVersion !== SYSTEM_DATA_SCHEMA_VERSION) {
+    throw new Error(`Unsupported system schema version: ${record.schemaVersion}`)
+  }
+  if (!record.system || typeof record.system !== 'object') {
+    throw new Error('Invalid system data bundle.')
+  }
+  return structuredClone(record.system)
 }
 
-export class IdbSystemStore implements SystemStore {
-  private dbPromise: Promise<IDBDatabase>
-  private options: IdbStoreOptions
-
-  constructor(options: IdbStoreOptions = {}) {
-    this.options = options
-    this.dbPromise = openDatabase(this.options.dbName ?? DEFAULT_DB_NAME)
+function requireSystemUiBundle(bundle: unknown): SystemUiSnapshot {
+  if (!bundle || typeof bundle !== 'object') {
+    throw new Error('Invalid system UI bundle.')
   }
+  const record = bundle as SystemUiBundle
+  if (record.schemaVersion !== SYSTEM_UI_SCHEMA_VERSION) {
+    throw new Error(`Unsupported system UI schema version: ${record.schemaVersion}`)
+  }
+  if (!record.ui || typeof record.ui !== 'object') {
+    throw new Error('Invalid system UI bundle.')
+  }
+  return structuredClone(record.ui)
+}
 
-  static async create(options?: IdbStoreOptions): Promise<IdbSystemStore> {
-    const store = new IdbSystemStore(options)
-    await store.dbPromise
-    return store
+async function readAll<T>(
+  store: IDBObjectStore
+): Promise<{ keys: string[]; values: T[] }> {
+  const [keys, values] = await Promise.all([
+    requestToPromise(store.getAllKeys()),
+    requestToPromise(store.getAll()),
+  ])
+  return {
+    keys: keys.map((key) => String(key)),
+    values: values as T[],
+  }
+}
+
+export class IndexedDbSystemStore implements SystemStore {
+  private dbName: string
+  private dbVersion: number
+
+  constructor(config: StoreConfig = {}) {
+    this.dbName = config.name ?? DEFAULT_DB_NAME
+    this.dbVersion = config.version ?? DEFAULT_DB_VERSION
   }
 
   async list(): Promise<SystemSummary[]> {
-    const db = await this.dbPromise
-    const transaction = db.transaction(STORE_NAME, 'readonly')
-    const store = transaction.objectStore(STORE_NAME)
-    const records = await getAllRecords(store)
-    await transactionDone(transaction)
+    const db = await openDatabase(this.dbName, this.dbVersion)
+    try {
+      const transaction = db.transaction([DATA_STORE, UI_STORE], 'readonly')
+      const dataStore = transaction.objectStore(DATA_STORE)
+      const uiStore = transaction.objectStore(UI_STORE)
+      const [dataEntries, uiEntries] = await Promise.all([
+        readAll<SystemDataBundle>(dataStore),
+        readAll<SystemUiBundle>(uiStore),
+      ])
+      await transactionDone(transaction)
 
-    const summaries: SystemSummary[] = []
-    for (const record of records) {
-      try {
-        const { data, ui: legacyUi } = deserializeSystemData(record.data)
-        const ui = safeDeserializeUi(record.ui) ?? legacyUi
-        summaries.push({
+      const uiById = new Map<string, SystemUiSnapshot>()
+      uiEntries.keys.forEach((key, index) => {
+        uiById.set(key, requireSystemUiBundle(uiEntries.values[index]))
+      })
+
+      const summaries = dataEntries.keys.map((key, index) => {
+        const data = requireSystemDataBundle(dataEntries.values[index])
+        const ui = uiById.get(key)
+        return {
           id: data.id,
           name: data.name,
           updatedAt: latestIso(data.updatedAt, ui?.updatedAt),
           type: data.config.type,
-        })
-      } catch {
-        continue
-      }
-    }
+        }
+      })
 
-    return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    } finally {
+      db.close()
+    }
   }
 
   async load(id: string): Promise<System> {
-    const record = await this.getRecord(id)
-    if (!record) {
-      throw new Error(`System "${id}" not found`)
+    const db = await openDatabase(this.dbName, this.dbVersion)
+    try {
+      const transaction = db.transaction([DATA_STORE, UI_STORE], 'readonly')
+      const dataStore = transaction.objectStore(DATA_STORE)
+      const uiStore = transaction.objectStore(UI_STORE)
+      const dataBundle = await requestToPromise(dataStore.get(id))
+      const uiBundle = await requestToPromise(uiStore.get(id))
+      await transactionDone(transaction)
+
+      if (!dataBundle) {
+        throw new Error(`System "${id}" not found`)
+      }
+
+      const data = requireSystemDataBundle(dataBundle)
+      const ui = uiBundle ? requireSystemUiBundle(uiBundle) : undefined
+      return mergeSystem(data, ui)
+    } finally {
+      db.close()
     }
-    const { data, ui: legacyUi } = deserializeSystemData(record.data)
-    const ui = safeDeserializeUi(record.ui) ?? legacyUi
-    return mergeSystem(data, ui ?? undefined)
   }
 
   async save(system: System): Promise<void> {
-    const record: StoredSystemRecord = {
-      id: system.id,
-      data: serializeSystemData(system),
-      ui: serializeSystemUi(system),
+    const db = await openDatabase(this.dbName, this.dbVersion)
+    try {
+      const transaction = db.transaction([DATA_STORE, UI_STORE], 'readwrite')
+      const dataStore = transaction.objectStore(DATA_STORE)
+      const uiStore = transaction.objectStore(UI_STORE)
+      dataStore.put(serializeSystemData(system), system.id)
+      uiStore.put(serializeSystemUi(system), system.id)
+      await transactionDone(transaction)
+    } finally {
+      db.close()
     }
-    await this.putRecord(record)
   }
 
   async saveUi(system: System): Promise<void> {
-    const existing = await this.getRecord(system.id)
-    const record: StoredSystemRecord = existing
-      ? { ...existing, ui: serializeSystemUi(system) }
-      : {
-          id: system.id,
-          data: serializeSystemData(system),
-          ui: serializeSystemUi(system),
-        }
-    await this.putRecord(record)
+    const db = await openDatabase(this.dbName, this.dbVersion)
+    try {
+      const transaction = db.transaction(UI_STORE, 'readwrite')
+      const uiStore = transaction.objectStore(UI_STORE)
+      uiStore.put(serializeSystemUi(system), system.id)
+      await transactionDone(transaction)
+    } finally {
+      db.close()
+    }
   }
 
   async remove(id: string): Promise<void> {
-    const db = await this.dbPromise
-    const transaction = db.transaction(STORE_NAME, 'readwrite')
-    const store = transaction.objectStore(STORE_NAME)
-    store.delete(id)
-    await transactionDone(transaction)
+    const db = await openDatabase(this.dbName, this.dbVersion)
+    try {
+      const transaction = db.transaction([DATA_STORE, UI_STORE], 'readwrite')
+      transaction.objectStore(DATA_STORE).delete(id)
+      transaction.objectStore(UI_STORE).delete(id)
+      await transactionDone(transaction)
+    } finally {
+      db.close()
+    }
   }
 
   async clear(): Promise<void> {
-    const db = await this.dbPromise
-    const transaction = db.transaction(STORE_NAME, 'readwrite')
-    const store = transaction.objectStore(STORE_NAME)
-    store.clear()
-    await transactionDone(transaction)
-  }
-
-  async close(): Promise<void> {
-    const db = await this.dbPromise
-    db.close()
-  }
-
-  private async getRecord(id: string): Promise<StoredSystemRecord | undefined> {
-    const db = await this.dbPromise
-    const transaction = db.transaction(STORE_NAME, 'readonly')
-    const store = transaction.objectStore(STORE_NAME)
-    const record = await requestToPromise(
-      store.get(id) as IDBRequest<StoredSystemRecord | undefined>
-    )
-    await transactionDone(transaction)
-    return record
-  }
-
-  private async putRecord(record: StoredSystemRecord): Promise<void> {
-    const db = await this.dbPromise
-    const transaction = db.transaction(STORE_NAME, 'readwrite')
-    const store = transaction.objectStore(STORE_NAME)
-    store.put(record)
-    await transactionDone(transaction)
+    const db = await openDatabase(this.dbName, this.dbVersion)
+    try {
+      const transaction = db.transaction([DATA_STORE, UI_STORE], 'readwrite')
+      transaction.objectStore(DATA_STORE).clear()
+      transaction.objectStore(UI_STORE).clear()
+      await transactionDone(transaction)
+    } finally {
+      db.close()
+    }
   }
 }

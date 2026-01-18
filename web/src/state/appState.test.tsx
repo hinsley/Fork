@@ -26,11 +26,20 @@ const continuationSettings: ContinuationSettings = {
   step_tolerance: 1e-6,
 }
 
-function setupApp(initialSystem: System, clientOverride?: MockForkCoreClient) {
+function setupApp(
+  initialSystem: System,
+  clientOverride?: MockForkCoreClient,
+  initialError?: string | null
+) {
   const store = new MemorySystemStore()
   const client = clientOverride ?? new MockForkCoreClient(0)
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <AppProvider store={store} client={client} initialSystem={initialSystem}>
+    <AppProvider
+      store={store}
+      client={client}
+      initialSystem={initialSystem}
+      initialError={initialError}
+    >
       {children}
     </AppProvider>
   )
@@ -72,6 +81,14 @@ function withParam(system: System, name: string, value: number): System {
     },
   }
 }
+
+describe('appState initialization', () => {
+  it('supports initial error messaging', () => {
+    const base = createSystem({ name: 'Init_Error' })
+    const { getContext } = setupApp(base, undefined, 'Storage unavailable.')
+    expect(getContext().state.error).toBe('Storage unavailable.')
+  })
+})
 
 describe('appState selection', () => {
   it('does not update the system when selecting the same node twice', async () => {
@@ -306,5 +323,101 @@ describe('appState limit cycle render targets', () => {
         pointIndex: lastIndex,
       })
     })
+  })
+})
+
+describe('appState Lyapunov analysis parameters', () => {
+  function makeOrbit(parameters?: number[]): OrbitObject {
+    return {
+      type: 'orbit',
+      name: 'Lyapunov Orbit',
+      systemName: 'Lyapunov_System',
+      data: [
+        [0, 0, 0],
+        [0.1, 0.1, 0.1],
+        [0.2, 0.2, 0.2],
+      ],
+      t_start: 0,
+      t_end: 0.2,
+      dt: 0.1,
+      parameters,
+    }
+  }
+
+  it('uses recorded orbit parameters for Lyapunov exponents', async () => {
+    const base = createSystem({ name: 'Lyapunov_System' })
+    const configured = withParam(base, 'mu', 2)
+    const orbit = makeOrbit([1])
+    const { system, nodeId: orbitId } = addObject(configured, orbit)
+    const client = new MockForkCoreClient(0)
+    let capturedParams: number[] | null = null
+    client.computeLyapunovExponents = async (request) => {
+      capturedParams = [...request.system.params]
+      return request.system.varNames.map(() => -0.1)
+    }
+    const { getContext } = setupApp(system, client)
+
+    await act(async () => {
+      await getContext().actions.computeLyapunovExponents({
+        orbitId,
+        transient: 0,
+        qrStride: 1,
+      })
+    })
+
+    expect(capturedParams).toEqual([1])
+  })
+
+  it('uses recorded orbit parameters for covariant Lyapunov vectors', async () => {
+    const base = createSystem({ name: 'Lyapunov_System' })
+    const configured = withParam(base, 'mu', 2)
+    const orbit = makeOrbit([1])
+    const { system, nodeId: orbitId } = addObject(configured, orbit)
+    const client = new MockForkCoreClient(0)
+    let capturedParams: number[] | null = null
+    client.computeCovariantLyapunovVectors = async (request) => {
+      capturedParams = [...request.system.params]
+      const dimension = request.system.varNames.length
+      return {
+        dimension,
+        checkpoints: 1,
+        times: [request.startTime],
+        vectors: new Array(dimension * dimension).fill(0),
+      }
+    }
+    const { getContext } = setupApp(system, client)
+
+    await act(async () => {
+      await getContext().actions.computeCovariantLyapunovVectors({
+        orbitId,
+        transient: 0,
+        forward: 0,
+        backward: 0,
+        qrStride: 1,
+      })
+    })
+
+    expect(capturedParams).toEqual([1])
+  })
+
+  it('rejects Lyapunov analysis when orbit parameters are missing', async () => {
+    const base = createSystem({ name: 'Lyapunov_System' })
+    const configured = withParam(base, 'mu', 2)
+    const orbit = makeOrbit(undefined)
+    const { system, nodeId: orbitId } = addObject(configured, orbit)
+    const client = new MockForkCoreClient(0)
+    const { getContext } = setupApp(system, client)
+
+    await act(async () => {
+      await getContext().actions.computeLyapunovExponents({
+        orbitId,
+        transient: 0,
+        qrStride: 1,
+      })
+    })
+
+    expect(getContext().state.error).toBe(
+      'Orbit parameters are unavailable. Run the orbit again to compute Lyapunov data.'
+    )
   })
 })

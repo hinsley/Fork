@@ -4,45 +4,16 @@ import './index.css'
 import App from './App'
 import { AppProvider } from './state/appState'
 import { MemorySystemStore, type SystemStore } from './system/store'
-import { createBrowserSystemStore } from './system/storeFactory'
 import {
   createAxisPickerSystem,
   createDemoSystem,
   createPeriodDoublingSystem,
 } from './system/fixtures'
-import { createDefaultSystems } from './system/defaultSystems'
+import { createBrowserSystemStore } from './system/storeFactory'
 import { WasmForkCoreClient } from './compute/wasmClient'
 import { MockForkCoreClient } from './compute/mockClient'
 import { JobQueue } from './compute/jobQueue'
 import { enableDeterministicMode } from './utils/determinism'
-
-const DEFAULT_SYSTEMS_SEEDED_KEY = 'fork-default-systems-seeded'
-
-function hasSeededDefaultSystems(): boolean {
-  if (typeof window === 'undefined') return false
-  if (!('localStorage' in window)) return false
-  if (typeof window.localStorage.getItem !== 'function') return false
-  return window.localStorage.getItem(DEFAULT_SYSTEMS_SEEDED_KEY) === '1'
-}
-
-function markDefaultSystemsSeeded() {
-  if (typeof window === 'undefined') return
-  if (!('localStorage' in window)) return
-  if (typeof window.localStorage.setItem !== 'function') return
-  window.localStorage.setItem(DEFAULT_SYSTEMS_SEEDED_KEY, '1')
-}
-
-async function seedDefaultSystems(store: SystemStore) {
-  if (hasSeededDefaultSystems()) return
-  const existing = await store.list()
-  if (existing.length === 0) {
-    const defaults = createDefaultSystems()
-    for (const system of defaults) {
-      await store.save(system)
-    }
-  }
-  markDefaultSystemsSeeded()
-}
 
 function registerServiceWorker(deterministic: boolean) {
   if (deterministic) return
@@ -84,27 +55,30 @@ async function bootstrap() {
     }
   }
 
-  let store = await createBrowserSystemStore(deterministic)
+  let store: SystemStore
+  let initialError: string | null = null
   if (fixture === 'demo') {
     const memory = new MemorySystemStore()
     const { system } = createDemoSystem()
     await memory.save(system)
     store = memory
-  }
-  if (fixture === 'pd') {
+  } else if (fixture === 'pd') {
     const memory = new MemorySystemStore()
     const { system } = createPeriodDoublingSystem()
     await memory.save(system)
     store = memory
-  }
-  if (fixture === 'axis-picker') {
+  } else if (fixture === 'axis-picker') {
     const memory = new MemorySystemStore()
     const { system } = createAxisPickerSystem()
     await memory.save(system)
     store = memory
-  }
-  if (!fixture) {
-    await seedDefaultSystems(store)
+  } else {
+    const selection = await createBrowserSystemStore({
+      deterministic,
+      warnOnMemory: !deterministic,
+    })
+    store = selection.store
+    initialError = selection.warning
   }
 
   const queue = new JobQueue((timing) => {
@@ -118,7 +92,7 @@ async function bootstrap() {
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <AppProvider store={store} client={client}>
+      <AppProvider store={store} client={client} initialError={initialError}>
         <App />
       </AppProvider>
     </StrictMode>

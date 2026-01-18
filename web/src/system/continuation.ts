@@ -231,38 +231,24 @@ function serializeEigenvalueArray(raw: EigenvalueInput[] | undefined): Eigenvalu
   })
 }
 
-function normalizeLimitCycleBranchType(
+function requireLimitCycleBranchType(
   branchType: ContinuationBranchData['branch_type'] | undefined
-): ContinuationBranchData['branch_type'] {
-  const fallback = { type: 'LimitCycle', ntst: 20, ncol: 4 } as const
-  if (!branchType) return fallback
-
-  const branchTypeValue = branchType as unknown
-  if (typeof branchTypeValue === 'string') {
-    return fallback
+): { type: 'LimitCycle'; ntst: number; ncol: number } {
+  if (
+    !branchType ||
+    typeof branchType !== 'object' ||
+    !('type' in branchType) ||
+    branchType.type !== 'LimitCycle'
+  ) {
+    throw new Error('Limit cycle branch is missing branch_type metadata.')
   }
 
-  if ('type' in branchType) {
-    if (branchType.type === 'LimitCycle') {
-      return {
-        type: 'LimitCycle',
-        ntst: branchType.ntst ?? fallback.ntst,
-        ncol: branchType.ncol ?? fallback.ncol,
-      }
-    }
-    return fallback
+  const { ntst, ncol } = branchType
+  if (!Number.isInteger(ntst) || ntst <= 0 || !Number.isInteger(ncol) || ncol <= 0) {
+    throw new Error('Limit cycle branch has invalid mesh settings.')
   }
 
-  const legacy = branchType as { LimitCycle?: { ntst?: number; ncol?: number } }
-  if (legacy.LimitCycle) {
-    return {
-      type: 'LimitCycle',
-      ntst: legacy.LimitCycle.ntst ?? fallback.ntst,
-      ncol: legacy.LimitCycle.ncol ?? fallback.ncol,
-    }
-  }
-
-  return fallback
+  return { type: 'LimitCycle', ntst, ncol }
 }
 
 export function serializeBranchDataForWasm(
@@ -280,7 +266,7 @@ export function serializeBranchDataForWasm(
 
   let branchType = data.branch_type
   if (branch.branchType === 'limit_cycle') {
-    branchType = normalizeLimitCycleBranchType(data.branch_type)
+    branchType = requireLimitCycleBranchType(data.branch_type)
   }
 
   return {

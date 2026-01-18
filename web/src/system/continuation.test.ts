@@ -153,7 +153,7 @@ describe('continuation helpers', () => {
           },
         ],
         indices: [12],
-        branch_type: { LimitCycle: { ntst: 10 } } as unknown as ContinuationObject['data']['branch_type'],
+        branch_type: { type: 'LimitCycle', ntst: 10, ncol: 4 },
       },
     }
 
@@ -179,19 +179,18 @@ describe('continuation helpers', () => {
     expect(serialized.indices).toEqual([5, 6])
   })
 
-  it('normalizes limit-cycle branch metadata defaults', () => {
+  it('rejects missing limit-cycle branch metadata', () => {
     const branch: ContinuationObject = {
       ...baseBranch,
       branchType: 'limit_cycle',
       data: {
         ...baseBranch.data,
-        branch_type: 'LimitCycle' as unknown as ContinuationObject['data']['branch_type'],
       },
     }
 
-    const serialized = serializeBranchDataForWasm(branch)
-
-    expect(serialized.branch_type).toEqual({ type: 'LimitCycle', ntst: 20, ncol: 4 })
+    expect(() => serializeBranchDataForWasm(branch)).toThrow(
+      'Limit cycle branch is missing branch_type metadata.'
+    )
   })
 
   it('keeps explicit limit-cycle settings', () => {

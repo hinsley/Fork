@@ -142,6 +142,19 @@ function reshapeCovariantVectors(
   }
 }
 
+function requireOrbitRunConfig(system: SystemConfig, orbit: OrbitObject): SystemConfig {
+  if (!orbit.parameters || orbit.parameters.length !== system.params.length) {
+    throw new Error(
+      'Orbit parameters are unavailable. Run the orbit again to compute Lyapunov data.'
+    )
+  }
+  // Use parameters recorded with the trajectory to avoid analyzing a different system.
+  return {
+    ...system,
+    params: [...orbit.parameters],
+  }
+}
+
 export type ContinuationProgressState = {
   label: string
   progress: ContinuationProgress
@@ -365,18 +378,21 @@ export function AppProvider({
   client,
   initialSystem,
   initialSystems,
+  initialError,
   children,
 }: {
   store: SystemStore
   client: ForkCoreClient
   initialSystem?: System | null
   initialSystems?: SystemSummary[]
+  initialError?: string | null
   children: React.ReactNode
 }) {
   const [state, dispatch] = useReducer(reducer, {
     ...initialState,
     system: initialSystem ?? initialState.system,
     systems: initialSystems ?? initialState.systems,
+    error: initialError ?? initialState.error,
   })
 
   const uiSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -868,13 +884,14 @@ export function AppProvider({
         if (!orbit.data || orbit.data.length < 2) {
           throw new Error('Run an orbit before computing Lyapunov exponents.')
         }
+        const runConfig = requireOrbitRunConfig(system, orbit)
 
         const duration = orbit.t_end - orbit.t_start
         if (!Number.isFinite(duration) || duration <= 0) {
           throw new Error('Orbit has no duration to analyze.')
         }
 
-        const dt = orbit.dt || (system.type === 'map' ? 1 : 0.01)
+        const dt = orbit.dt || (runConfig.type === 'map' ? 1 : 0.01)
         if (!Number.isFinite(dt) || dt <= 0) {
           throw new Error('Invalid step size detected for this orbit.')
         }
@@ -906,10 +923,6 @@ export function AppProvider({
         const startState = orbit.data[startIndex].slice(1)
         const startTime = orbit.data[startIndex][0]
 
-        const runConfig: SystemConfig = {
-          ...system,
-          params: resolveObjectParams(system, orbit.customParameters),
-        }
         const payload: CoreLyapunovExponentsRequest = {
           system: runConfig,
           startState,
@@ -951,13 +964,14 @@ export function AppProvider({
         if (!orbit.data || orbit.data.length < 2) {
           throw new Error('Run an orbit before computing covariant vectors.')
         }
+        const runConfig = requireOrbitRunConfig(system, orbit)
 
         const duration = orbit.t_end - orbit.t_start
         if (!Number.isFinite(duration) || duration <= 0) {
           throw new Error('Orbit has no duration to analyze.')
         }
 
-        const dt = orbit.dt || (system.type === 'map' ? 1 : 0.01)
+        const dt = orbit.dt || (runConfig.type === 'map' ? 1 : 0.01)
         if (!Number.isFinite(dt) || dt <= 0) {
           throw new Error('Invalid step size detected for this orbit.')
         }
@@ -1023,10 +1037,6 @@ export function AppProvider({
         const startState = orbit.data[startIndex].slice(1)
         const startTime = orbit.data[startIndex][0]
 
-        const runConfig: SystemConfig = {
-          ...system,
-          params: resolveObjectParams(system, orbit.customParameters),
-        }
         const payload: CoreCovariantLyapunovRequest = {
           system: runConfig,
           startState,
