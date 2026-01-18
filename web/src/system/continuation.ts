@@ -5,6 +5,7 @@ import type {
   ContinuationPoint,
   System,
 } from './types'
+import { isValidParameterSet } from './parameters'
 
 type EigenvalueWire = [number, number]
 
@@ -311,15 +312,17 @@ export function buildSortedArrayOrder(indices: number[]): number[] {
 }
 
 export function getBranchParams(system: System, branch: ContinuationObject): number[] {
-  if (branch.params && branch.params.length === system.config.params.length) {
+  if (isValidParameterSet(system.config.params, branch.params)) {
     return [...branch.params]
   }
   const parent = Object.values(system.objects).find(
     (obj) => obj.name === branch.parentObject
   )
-  const params = parent && 'parameters' in parent ? parent.parameters : undefined
-  if (Array.isArray(params) && params.length === system.config.params.length) {
-    return [...params]
+  if (isValidParameterSet(system.config.params, parent?.customParameters)) {
+    return [...parent.customParameters]
+  }
+  if (isValidParameterSet(system.config.params, parent?.parameters)) {
+    return [...parent.parameters]
   }
   return [...system.config.params]
 }

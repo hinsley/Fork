@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { ObjectsTree, type ObjectsTreeHandle } from './ObjectsTree'
 import { createDemoSystem, createPeriodDoublingSystem } from '../system/fixtures'
 import { useRef, useState } from 'react'
-import { toggleNodeExpanded } from '../system/model'
+import { addObject, createSystem, toggleNodeExpanded } from '../system/model'
+import type { OrbitObject } from '../system/types'
 
 describe('ObjectsTree', () => {
   it('selects, renames, and toggles visibility', async () => {
@@ -43,6 +44,49 @@ describe('ObjectsTree', () => {
     await user.clear(input)
     await user.type(input, 'Orbit Z{enter}')
     expect(onRename).toHaveBeenCalledWith(objectNodeId, 'Orbit Z')
+  })
+
+  it('shows a custom parameters tag for overridden objects', () => {
+    const system = createSystem({
+      name: 'Custom_Params',
+      config: {
+        name: 'Custom_Params',
+        equations: ['y', '-x'],
+        params: [0.1],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Custom',
+      systemName: system.config.name,
+      data: [],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+      customParameters: [0.5],
+    }
+    const { system: next, nodeId } = addObject(system, orbit)
+
+    render(
+      <ObjectsTree
+        system={next}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={vi.fn()}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    expect(screen.getByTestId(`object-tree-custom-${nodeId}`)).toBeInTheDocument()
   })
 
   it('opens a context menu and deletes a node', async () => {

@@ -13,7 +13,12 @@ import {
   updateLimitCycleRenderTarget,
   updateNodeRender,
 } from '../system/model'
-import type { ContinuationObject, EquilibriumObject, LimitCycleObject } from '../system/types'
+import type {
+  ContinuationObject,
+  EquilibriumObject,
+  LimitCycleObject,
+  OrbitObject,
+} from '../system/types'
 
 describe('InspectorDetailsPanel', () => {
   it('binds name and render fields', async () => {
@@ -130,6 +135,72 @@ describe('InspectorDetailsPanel', () => {
     const lineStyle = screen.getByTestId('inspector-line-style')
     await user.selectOptions(lineStyle, 'dashed')
     expect(onUpdateRender).toHaveBeenLastCalledWith(branchNodeId, { lineStyle: 'dashed' })
+  })
+
+  it('applies parameter overrides for selected objects', async () => {
+    const user = userEvent.setup()
+    const system = createSystem({
+      name: 'Param_Override',
+      config: {
+        name: 'Param_Override',
+        equations: ['y', '-x'],
+        params: [0.1, 0.2],
+        paramNames: ['mu', 'beta'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Override',
+      systemName: system.config.name,
+      data: [],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+    }
+    const { system: next, nodeId } = addObject(system, orbit)
+    const onUpdateObjectParams = vi.fn()
+
+    render(
+      <InspectorDetailsPanel
+        system={next}
+        selectedNodeId={nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateObjectParams={onUpdateObjectParams}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('parameters-toggle'))
+    await user.clear(screen.getByTestId('param-override-0'))
+    await user.type(screen.getByTestId('param-override-0'), '1.2')
+    await user.clear(screen.getByTestId('param-override-1'))
+    await user.type(screen.getByTestId('param-override-1'), '3.4')
+
+    await waitFor(() =>
+      expect(onUpdateObjectParams).toHaveBeenLastCalledWith(nodeId, [1.2, 3.4])
+    )
   })
 
   it('applies system changes from the editor', async () => {

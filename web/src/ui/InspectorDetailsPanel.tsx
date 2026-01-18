@@ -77,6 +77,7 @@ type InspectorDetailsPanelProps = {
   onRename: (id: string, name: string) => void
   onToggleVisibility: (id: string) => void
   onUpdateRender: (id: string, render: Partial<TreeNode['render']>) => void
+  onUpdateObjectParams?: (id: string, params: number[] | null) => void
   onUpdateScene: (id: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
   onUpdateBifurcationDiagram: (
     id: string,
@@ -334,6 +335,7 @@ type StateTableProps = {
   onChange: (next: string[]) => void
   onCopy: () => void
   onPaste: () => void
+  emptyMessage?: string
   testIdPrefix?: string
 }
 
@@ -344,6 +346,7 @@ function StateTable({
   onChange,
   onCopy,
   onPaste,
+  emptyMessage,
   testIdPrefix,
 }: StateTableProps) {
   const resolvedValues = adjustArray(values, varNames.length, () => '0')
@@ -404,7 +407,9 @@ function StateTable({
           </table>
         </div>
       ) : (
-        <p className="empty-state">No state variables defined yet.</p>
+        <p className="empty-state">
+          {emptyMessage ?? 'No state variables defined yet.'}
+        </p>
       )}
     </div>
   )
@@ -712,6 +717,18 @@ function makeEquilibriumSolveDraft(
   }
 }
 
+function makeParamOverrideDraft(
+  system: SystemConfig,
+  object?: OrbitObject | EquilibriumObject | LimitCycleObject | null
+): string[] {
+  const fallback = system.params.map((value) => value.toString())
+  const customParams =
+    object?.customParameters && object.customParameters.length === system.params.length
+      ? object.customParameters.map((value) => value.toString())
+      : fallback
+  return adjustArray(customParams, system.paramNames.length, () => '0')
+}
+
 function makeLimitCycleFromOrbitDraft(system: SystemConfig): LimitCycleFromOrbitDraft {
   return {
     limitCycleName: '',
@@ -1017,6 +1034,7 @@ export function InspectorDetailsPanel({
   onRename,
   onToggleVisibility,
   onUpdateRender,
+  onUpdateObjectParams = () => {},
   onUpdateScene,
   onUpdateBifurcationDiagram,
   onSetLimitCycleRenderTarget,
@@ -1041,6 +1059,7 @@ export function InspectorDetailsPanel({
   const orbit = object?.type === 'orbit' ? object : null
   const equilibrium = object?.type === 'equilibrium' ? object : null
   const limitCycle = object?.type === 'limit_cycle' ? object : null
+  const paramOverrideTarget = orbit || equilibrium || limitCycle
   const selectedOrbitPointIndex =
     orbitPointSelection && orbitPointSelection.orbitId === selectedNodeId
       ? orbitPointSelection.pointIndex
@@ -1317,6 +1336,10 @@ export function InspectorDetailsPanel({
     makeEquilibriumSolveDraft(system.config)
   )
   const [equilibriumError, setEquilibriumError] = useState<string | null>(null)
+  const [paramOverrideDraft, setParamOverrideDraft] = useState<string[]>(() =>
+    makeParamOverrideDraft(system.config, paramOverrideTarget)
+  )
+  const [paramOverrideError, setParamOverrideError] = useState<string | null>(null)
 
   const [continuationDraft, setContinuationDraft] = useState<ContinuationDraft>(() =>
     makeContinuationDraft(system.config)
@@ -1484,7 +1507,10 @@ export function InspectorDetailsPanel({
       ...prev,
       initialGuess: adjustArray(prev.initialGuess, systemDraft.varNames.length, () => '0'),
     }))
-  }, [systemDraft.varNames.length])
+    setParamOverrideDraft((prev) =>
+      adjustArray(prev, systemDraft.paramNames.length, () => '0')
+    )
+  }, [systemDraft.paramNames.length, systemDraft.varNames.length])
 
   useEffect(() => {
     if (systemDraft.type === 'map') {
@@ -1561,6 +1587,14 @@ export function InspectorDetailsPanel({
     const current = objectRef.current
     if (!current) return
     const stableSystemConfig = stableSystemConfigRef.current
+    if (
+      current.type === 'orbit' ||
+      current.type === 'equilibrium' ||
+      current.type === 'limit_cycle'
+    ) {
+      setParamOverrideDraft(makeParamOverrideDraft(stableSystemConfig, current))
+      setParamOverrideError(null)
+    }
     if (current.type === 'orbit') {
       setOrbitDraft(makeOrbitRunDraft(stableSystemConfig, current))
       setLyapunovDraft(makeLyapunovDraft())
@@ -1884,6 +1918,8 @@ export function InspectorDetailsPanel({
 
     return null
   }, [branch, branchEntries.length, diagram, object, scene])
+
+  const hasParamOverride = Array.isArray(paramOverrideTarget?.customParameters)
 
   const limitCycleFromOrbitNameSuggestion = useMemo(() => {
     if (!orbit) return 'lc_orbit'
@@ -2267,6 +2303,38 @@ export function InspectorDetailsPanel({
     }))
   }
 
+  const handleParamOverrideChange = useCallback(
+    (next: string[]) => {
+      setParamOverrideDraft(next)
+      if (!paramOverrideTarget || !selectedNodeId) return
+      if (systemDraft.paramNames.length === 0) {
+        setParamOverrideError('Add parameters to create an override.')
+        return
+      }
+      const values = next.map((value) => parseNumber(value))
+      if (values.some((value) => value === null)) {
+        setParamOverrideError('Parameter values must be numeric.')
+        return
+      }
+      setParamOverrideError(null)
+      onUpdateObjectParams(
+        selectedNodeId,
+        values.map((value) => value ?? 0)
+      )
+    },
+    [onUpdateObjectParams, paramOverrideTarget, selectedNodeId, systemDraft.paramNames.length]
+  )
+
+  const handlePasteParamOverride = async () => {
+    const text = await readClipboardText()
+    if (!text) return
+    const values = parsePointValues(text)
+    if (values.length === 0) return
+    handleParamOverrideChange(
+      applyPointValues(paramOverrideDraft, systemDraft.paramNames.length, values)
+    )
+  }
+
   const handlePasteOrbitState = async () => {
     const text = await readClipboardText()
     if (!text) return
@@ -2295,6 +2363,19 @@ export function InspectorDetailsPanel({
         values
       ),
     }))
+  }
+
+  const handleClearParamOverride = () => {
+    if (!paramOverrideTarget || !selectedNodeId) return
+    setParamOverrideError(null)
+    onUpdateObjectParams(selectedNodeId, null)
+    setParamOverrideDraft(
+      adjustArray(
+        systemDraft.params.map((value) => value.toString()),
+        systemDraft.paramNames.length,
+        () => '0'
+      )
+    )
   }
 
   const handleSolveEquilibrium = async () => {
@@ -3307,7 +3388,7 @@ export function InspectorDetailsPanel({
               </label>
               <div className="inspector-meta">
                 <span>{selectionNode.objectType ?? selectionNode.kind}</span>
-                {summary ? <span>{summary.detail}</span> : null}
+                {summary?.detail ? <span>{summary.detail}</span> : null}
               </div>
             </div>
 
@@ -3405,6 +3486,42 @@ export function InspectorDetailsPanel({
                 />
               </label>
             </div>
+          ) : null}
+
+          {paramOverrideTarget ? (
+            <InspectorDisclosure
+              key={`${selectionKey}-parameters`}
+              title="Parameters"
+              testId="parameters-toggle"
+            >
+              <div className="inspector-section" data-testid="param-override-section">
+                <StateTable
+                  title="Parameter values"
+                  varNames={systemDraft.paramNames}
+                  values={paramOverrideDraft}
+                  onChange={handleParamOverrideChange}
+                  onCopy={() => void writeClipboardText(formatPointValues(paramOverrideDraft))}
+                  onPaste={handlePasteParamOverride}
+                  emptyMessage="No parameters defined yet."
+                  testIdPrefix="param-override"
+                />
+                {hasParamOverride ? (
+                  <div className="inspector-inline-actions">
+                    <button
+                      type="button"
+                      className="inspector-inline-button"
+                      onClick={handleClearParamOverride}
+                      data-testid="param-override-clear"
+                    >
+                      Restore default parameters
+                    </button>
+                  </div>
+                ) : null}
+                {paramOverrideError ? (
+                  <div className="field-error">{paramOverrideError}</div>
+                ) : null}
+              </div>
+            </InspectorDisclosure>
           ) : null}
 
           {orbit ? (

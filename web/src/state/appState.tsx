@@ -58,6 +58,7 @@ import {
   normalizeBranchEigenvalues,
   serializeBranchDataForWasm,
 } from '../system/continuation'
+import { resolveObjectParams } from '../system/parameters'
 import { downloadSystem, readSystemFile } from '../system/importExport'
 import { AppContext } from './appContext'
 import { validateSystemConfig, validateSystemName } from './systemValidation'
@@ -319,6 +320,7 @@ type AppActions = {
   updateLayout: (layout: Partial<System['ui']['layout']>) => void
   updateViewportHeight: (nodeId: string, height: number) => void
   updateRender: (nodeId: string, render: Partial<TreeNode['render']>) => void
+  updateObjectParams: (nodeId: string, params: number[] | null) => void
   updateScene: (sceneId: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
   updateBifurcationDiagram: (
     diagramId: string,
@@ -652,6 +654,27 @@ export function AppProvider({
     [scheduleUiSave, state.system]
   )
 
+  const updateObjectParamsAction = useCallback(
+    (nodeId: string, params: number[] | null) => {
+      if (!state.system) return
+      if (params) {
+        const expected = state.system.config.params.length
+        const hasInvalid =
+          params.length !== expected || params.some((value) => !Number.isFinite(value))
+        if (hasInvalid) {
+          dispatch({ type: 'SET_ERROR', error: 'Parameter override is invalid.' })
+          return
+        }
+      }
+      const system = updateObject(state.system, nodeId, {
+        customParameters: params ? [...params] : undefined,
+      })
+      dispatch({ type: 'SET_SYSTEM', system })
+      scheduleSystemSave(system)
+    },
+    [scheduleSystemSave, state.system]
+  )
+
   const setLimitCycleRenderTargetAction = useCallback(
     (objectId: string, target: LimitCycleRenderTarget | null) => {
       if (!state.system) return
@@ -782,8 +805,12 @@ export function AppProvider({
             ? Math.max(1, Math.ceil(request.duration))
             : Math.max(1, Math.ceil(request.duration / dt))
 
+        const runConfig: SystemConfig = {
+          ...system,
+          params: resolveObjectParams(system, orbit.customParameters),
+        }
         const result = await client.simulateOrbit({
-          system,
+          system: runConfig,
           initialState: request.initialState,
           steps,
           dt,
@@ -794,7 +821,7 @@ export function AppProvider({
           t_start: result.t_start,
           t_end: result.t_end,
           dt: result.dt,
-          parameters: [...system.params],
+          parameters: [...runConfig.params],
         })
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.save(updated)
@@ -879,8 +906,12 @@ export function AppProvider({
         const startState = orbit.data[startIndex].slice(1)
         const startTime = orbit.data[startIndex][0]
 
+        const runConfig: SystemConfig = {
+          ...system,
+          params: resolveObjectParams(system, orbit.customParameters),
+        }
         const payload: CoreLyapunovExponentsRequest = {
-          system,
+          system: runConfig,
           startState,
           startTime,
           steps,
@@ -992,8 +1023,12 @@ export function AppProvider({
         const startState = orbit.data[startIndex].slice(1)
         const startTime = orbit.data[startIndex][0]
 
+        const runConfig: SystemConfig = {
+          ...system,
+          params: resolveObjectParams(system, orbit.customParameters),
+        }
         const payload: CoreCovariantLyapunovRequest = {
-          system,
+          system: runConfig,
           startState,
           startTime,
           windowSteps,
@@ -1110,8 +1145,12 @@ export function AppProvider({
           dampingFactor: request.dampingFactor,
         }
 
+        const runConfig: SystemConfig = {
+          ...system,
+          params: resolveObjectParams(system, equilibrium.customParameters),
+        }
         const result = await client.solveEquilibrium({
-          system,
+          system: runConfig,
           initialGuess: solverParams.initialGuess,
           maxSteps: solverParams.maxSteps,
           dampingFactor: solverParams.dampingFactor,
@@ -1123,7 +1162,7 @@ export function AppProvider({
 
         const updated = updateObject(state.system, request.equilibriumId, {
           solution: result,
-          parameters: [...system.params],
+          parameters: [...runConfig.params],
           lastSolverParams: solverParams,
           lastRun: runSummary,
         })
@@ -1183,12 +1222,9 @@ export function AppProvider({
           throw new Error('Select a valid continuation parameter.')
         }
 
-        const runConfig: SystemConfig = { ...system }
-        if (
-          equilibrium.parameters &&
-          equilibrium.parameters.length === system.params.length
-        ) {
-          runConfig.params = [...equilibrium.parameters]
+        const runConfig: SystemConfig = {
+          ...system,
+          params: resolveObjectParams(system, equilibrium.customParameters),
         }
 
         const branchData = await client.runEquilibriumContinuation(
@@ -2015,9 +2051,9 @@ export function AppProvider({
           throw new Error('Continuation parameter is not defined in this system.')
         }
 
-        const runConfig: SystemConfig = { ...system }
-        if (orbit.parameters && orbit.parameters.length === system.params.length) {
-          runConfig.params = [...orbit.parameters]
+        const runConfig: SystemConfig = {
+          ...system,
+          params: resolveObjectParams(system, orbit.customParameters),
         }
 
         const paramIndex = system.paramNames.indexOf(parameterName)
@@ -2428,6 +2464,7 @@ export function AppProvider({
       updateLayout: updateLayoutAction,
       updateViewportHeight: updateViewportHeightAction,
       updateRender: updateRenderAction,
+      updateObjectParams: updateObjectParamsAction,
       updateScene: updateSceneAction,
       updateBifurcationDiagram: updateBifurcationDiagramAction,
       setLimitCycleRenderTarget: setLimitCycleRenderTargetAction,
@@ -2487,6 +2524,7 @@ export function AppProvider({
       updateLayoutAction,
       updateViewportHeightAction,
       updateRenderAction,
+      updateObjectParamsAction,
       updateSceneAction,
       updateBifurcationDiagramAction,
       setLimitCycleRenderTargetAction,

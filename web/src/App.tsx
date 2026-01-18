@@ -268,6 +268,7 @@ function App() {
         onRename={actions.renameNode}
         onToggleVisibility={actions.toggleVisibility}
         onUpdateRender={actions.updateRender}
+        onUpdateObjectParams={actions.updateObjectParams}
         onUpdateScene={actions.updateScene}
         onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
         onSetLimitCycleRenderTarget={actions.setLimitCycleRenderTarget}
@@ -411,6 +412,7 @@ function App() {
                 onRename={actions.renameNode}
                 onToggleVisibility={actions.toggleVisibility}
                 onUpdateRender={actions.updateRender}
+                onUpdateObjectParams={actions.updateObjectParams}
                 onUpdateScene={actions.updateScene}
                 onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
                 onSetLimitCycleRenderTarget={actions.setLimitCycleRenderTarget}

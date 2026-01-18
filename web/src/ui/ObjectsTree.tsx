@@ -11,6 +11,7 @@ import {
 import type { CSSProperties } from 'react'
 import type { System, TreeNode } from '../system/types'
 import { DEFAULT_RENDER } from '../system/model'
+import { hasCustomObjectParams } from '../system/parameters'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
 import { clampMenuX } from './contextMenu'
 
@@ -263,7 +264,21 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
                 data-testid={`node-rename-input-${nodeId}`}
               />
             ) : (
-              getNodeLabel(node)
+              <span className="tree-node__label-content">
+                <span className="tree-node__label-text">{getNodeLabel(node)}</span>
+                {system.objects[nodeId] &&
+                hasCustomObjectParams(
+                  system.config,
+                  system.objects[nodeId].customParameters
+                ) ? (
+                  <span
+                    className="tree-node__tag"
+                    data-testid={`object-tree-custom-${nodeId}`}
+                  >
+                    custom
+                  </span>
+                ) : null}
+              </span>
             )}
           </button>
           {isRoot ? (

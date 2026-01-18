@@ -33,6 +33,7 @@ describe('SystemSettingsDialog', () => {
         onRename={vi.fn()}
         onToggleVisibility={vi.fn()}
         onUpdateRender={vi.fn()}
+        onUpdateObjectParams={vi.fn()}
         onUpdateScene={vi.fn()}
         onUpdateBifurcationDiagram={vi.fn()}
         onUpdateSystem={vi.fn(() => Promise.resolve())}
@@ -64,6 +65,7 @@ describe('SystemSettingsDialog', () => {
     const onRename = vi.fn()
     const onToggleVisibility = vi.fn()
     const onUpdateRender = vi.fn()
+    const onUpdateObjectParams = vi.fn()
     const onUpdateScene = vi.fn()
     const onUpdateBifurcationDiagram = vi.fn()
     const onUpdateSystem = vi.fn(() => Promise.resolve())
@@ -93,6 +95,7 @@ describe('SystemSettingsDialog', () => {
         onRename={onRename}
         onToggleVisibility={onToggleVisibility}
         onUpdateRender={onUpdateRender}
+        onUpdateObjectParams={onUpdateObjectParams}
         onUpdateScene={onUpdateScene}
         onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
         onUpdateSystem={onUpdateSystem}
@@ -120,6 +123,7 @@ describe('SystemSettingsDialog', () => {
     expect(capturedProps?.onRename).toBe(onRename)
     expect(capturedProps?.onToggleVisibility).toBe(onToggleVisibility)
     expect(capturedProps?.onUpdateRender).toBe(onUpdateRender)
+    expect(capturedProps?.onUpdateObjectParams).toBe(onUpdateObjectParams)
     expect(capturedProps?.onUpdateScene).toBe(onUpdateScene)
     expect(capturedProps?.onUpdateBifurcationDiagram).toBe(onUpdateBifurcationDiagram)
     expect(capturedProps?.onUpdateSystem).toBe(onUpdateSystem)

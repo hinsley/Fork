@@ -19,6 +19,7 @@ export interface OrbitObject {
   lyapunovExponents?: number[]
   covariantVectors?: CovariantLyapunovData
   parameters?: number[]
+  customParameters?: number[]
 }
 
 export interface ComplexValue {
@@ -60,6 +61,7 @@ export interface EquilibriumObject {
   lastSolverParams?: EquilibriumSolverParams
   lastRun?: EquilibriumRunSummary
   parameters?: number[]
+  customParameters?: number[]
 }
 
 export interface ContinuationEigenvalue {
@@ -147,6 +149,7 @@ export interface LimitCycleObject {
   period: number
   state: number[]
   parameters?: number[]
+  customParameters?: number[]
   parameterName?: string
   paramValue?: number
   floquetMultipliers?: ContinuationEigenvalue[]

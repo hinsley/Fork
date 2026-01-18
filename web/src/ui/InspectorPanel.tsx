@@ -40,6 +40,7 @@ type InspectorPanelProps = {
   onRename: (id: string, name: string) => void
   onToggleVisibility: (id: string) => void
   onUpdateRender: (id: string, render: Partial<TreeNode['render']>) => void
+  onUpdateObjectParams: (id: string, params: number[] | null) => void
   onUpdateScene: (id: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
   onUpdateBifurcationDiagram: (
     id: string,
@@ -82,6 +83,7 @@ export function InspectorPanel({
   onRename,
   onToggleVisibility,
   onUpdateRender,
+  onUpdateObjectParams,
   onUpdateScene,
   onUpdateBifurcationDiagram,
   onSetLimitCycleRenderTarget,
@@ -117,6 +119,7 @@ export function InspectorPanel({
           onRename={onRename}
           onToggleVisibility={onToggleVisibility}
           onUpdateRender={onUpdateRender}
+          onUpdateObjectParams={onUpdateObjectParams}
           onUpdateScene={onUpdateScene}
           onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
           onSetLimitCycleRenderTarget={onSetLimitCycleRenderTarget}

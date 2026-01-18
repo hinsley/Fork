@@ -369,6 +369,26 @@
   word-break: break-all;
 }
 
+.tree-node__label-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tree-node__label-text {
+  min-width: 0;
+}
+
+.tree-node__tag {
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .tree-node__label input {
   width: 100%;
   min-width: 0;
