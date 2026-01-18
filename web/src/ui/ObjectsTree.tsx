@@ -182,6 +182,9 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const isRoot = node.parentId === null
     const isDragging = draggingId === nodeId
     const isDropTarget = isRoot && dragOverId === nodeId && draggingId !== node.id
+    const object = system.objects[nodeId]
+    const customParameters =
+      object && object.type !== 'continuation' ? object.customParameters : null
 
     return (
       <div key={nodeId} className="tree-node">
@@ -266,11 +269,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
             ) : (
               <span className="tree-node__label-content">
                 <span className="tree-node__label-text">{getNodeLabel(node)}</span>
-                {system.objects[nodeId] &&
-                hasCustomObjectParams(
-                  system.config,
-                  system.objects[nodeId].customParameters
-                ) ? (
+                {hasCustomObjectParams(system.config, customParameters) ? (
                   <span
                     className="tree-node__tag"
                     data-testid={`object-tree-custom-${nodeId}`}

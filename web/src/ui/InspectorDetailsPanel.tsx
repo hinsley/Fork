@@ -10,6 +10,7 @@ import type {
   EquilibriumEigenvectorRenderStyle,
   EquilibriumObject,
   LineStyle,
+  LimitCycleObject,
   LimitCycleOrigin,
   LimitCycleRenderTarget,
   OrbitObject,

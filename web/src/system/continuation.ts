@@ -318,11 +318,13 @@ export function getBranchParams(system: System, branch: ContinuationObject): num
   const parent = Object.values(system.objects).find(
     (obj) => obj.name === branch.parentObject
   )
-  if (isValidParameterSet(system.config.params, parent?.customParameters)) {
-    return [...parent.customParameters]
-  }
-  if (isValidParameterSet(system.config.params, parent?.parameters)) {
-    return [...parent.parameters]
+  if (parent && parent.type !== 'continuation') {
+    if (isValidParameterSet(system.config.params, parent.customParameters)) {
+      return [...parent.customParameters]
+    }
+    if (isValidParameterSet(system.config.params, parent.parameters)) {
+      return [...parent.parameters]
+    }
   }
   return [...system.config.params]
 }

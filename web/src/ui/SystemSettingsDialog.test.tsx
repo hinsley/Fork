@@ -155,6 +155,7 @@ describe('SystemSettingsDialog', () => {
         onRename={vi.fn()}
         onToggleVisibility={vi.fn()}
         onUpdateRender={vi.fn()}
+        onUpdateObjectParams={vi.fn()}
         onUpdateScene={vi.fn()}
         onUpdateBifurcationDiagram={vi.fn()}
         onUpdateSystem={vi.fn(() => Promise.resolve())}
@@ -189,6 +190,7 @@ describe('SystemSettingsDialog', () => {
         onRename={vi.fn()}
         onToggleVisibility={vi.fn()}
         onUpdateRender={vi.fn()}
+        onUpdateObjectParams={vi.fn()}
         onUpdateScene={vi.fn()}
         onUpdateBifurcationDiagram={vi.fn()}
         onUpdateSystem={vi.fn(() => Promise.resolve())}
