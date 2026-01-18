@@ -603,11 +603,6 @@ function buildEquilibriumEigenvectorTraces(
   }
   const subtractScaled = (vec: number[], basis: number[], scale: number) =>
     vec.map((value, index) => value - (basis[index] ?? 0) * scale)
-  const cross = (a: number[], b: number[]) => [
-    (a[1] ?? 0) * (b[2] ?? 0) - (a[2] ?? 0) * (b[1] ?? 0),
-    (a[2] ?? 0) * (b[0] ?? 0) - (a[0] ?? 0) * (b[2] ?? 0),
-    (a[0] ?? 0) * (b[1] ?? 0) - (a[1] ?? 0) * (b[0] ?? 0),
-  ]
   const orthonormalize = (a: number[], b: number[]) => {
     const normA = norm(a)
     const normB = norm(b)
@@ -617,18 +612,8 @@ function buildEquilibriumEigenvectorTraces(
     const u = normalize(primary)
     if (!u) return null
     const projection = dot(secondary, u)
-    let vRaw = subtractScaled(secondary, u, projection)
-    let v = normalize(vRaw)
-    if (!v) {
-      if (plotDim === 2) {
-        vRaw = [-u[1], u[0]]
-        v = normalize(vRaw)
-      } else {
-        const axis = Math.abs(u[2] ?? 0) < 0.9 ? [0, 0, 1] : [0, 1, 0]
-        vRaw = cross(u, axis)
-        v = normalize(vRaw)
-      }
-    }
+    const vRaw = subtractScaled(secondary, u, projection)
+    const v = normalize(vRaw)
     if (!v) return null
     return { u, v }
   }
@@ -737,6 +722,25 @@ function buildEquilibriumEigenvectorTraces(
     }
   }
 
+  const resolveEigenlineDirection = (real: number[], imag: number[]) => {
+    if (!Number.isFinite(lineLength) || lineLength <= 0) return null
+    const realNorm = use3d
+      ? norm(real)
+      : Math.sqrt((real[0] * scaleX) ** 2 + (real[1] * scaleY) ** 2)
+    const imagNorm = use3d
+      ? norm(imag)
+      : Math.sqrt((imag[0] * scaleX) ** 2 + (imag[1] * scaleY) ** 2)
+    const useReal = realNorm >= imagNorm
+    const components = useReal ? real : imag
+    const componentNorm = useReal ? realNorm : imagNorm
+    if (!Number.isFinite(componentNorm) || componentNorm <= 0) return null
+    return {
+      ux: components[0] / componentNorm,
+      uy: components[1] / componentNorm,
+      uz: use3d ? (components[2] ?? 0) / componentNorm : 0,
+    }
+  }
+
   entry.vectorIndices.forEach((vectorIndex, colorIndex) => {
     const pair = entry.eigenpairs[vectorIndex]
     if (!pair) return
@@ -749,30 +753,24 @@ function buildEquilibriumEigenvectorTraces(
     const color = entry.colors[colorIndex] ?? EIGENVECTOR_COLOR_PALETTE[paletteIndex]
 
     if (!isRealEigenvalue(pair.value)) {
-      if (discRadius <= 0) return
-      const basis = orthonormalize(real, imag)
-      if (basis) {
-        pushDisc(basis.u, basis.v, color)
+      if (discRadius > 0) {
+        const basis = orthonormalize(real, imag)
+        if (basis) {
+          pushDisc(basis.u, basis.v, color)
+        } else {
+          const direction = resolveEigenlineDirection(real, imag)
+          if (direction) {
+            pushLine(direction.ux, direction.uy, direction.uz, color)
+          }
+        }
       }
       return
     }
 
-    if (!Number.isFinite(lineLength) || lineLength <= 0) return
-
-    const realNorm = use3d
-      ? norm(real)
-      : Math.sqrt((real[0] * scaleX) ** 2 + (real[1] * scaleY) ** 2)
-    const imagNorm = use3d
-      ? norm(imag)
-      : Math.sqrt((imag[0] * scaleX) ** 2 + (imag[1] * scaleY) ** 2)
-    const useReal = realNorm >= imagNorm
-    const components = useReal ? real : imag
-    const componentNorm = useReal ? realNorm : imagNorm
-    if (!Number.isFinite(componentNorm) || componentNorm <= 0) return
-    const ux = components[0] / componentNorm
-    const uy = components[1] / componentNorm
-    const uz = use3d ? (components[2] ?? 0) / componentNorm : 0
-    pushLine(ux, uy, uz, color)
+    const direction = resolveEigenlineDirection(real, imag)
+    if (direction) {
+      pushLine(direction.ux, direction.uy, direction.uz, color)
+    }
   })
 
   return traces
