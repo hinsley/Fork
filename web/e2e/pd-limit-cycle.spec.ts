@@ -10,7 +10,7 @@ test('branch to a period-doubled limit cycle', async ({ page }) => {
   await harness.openSystem('Period_Doubling_Fixture')
   await harness.selectTreeNode('Branch: lc_pd_mu')
 
-  await page.getByTestId('branch-points-toggle').click()
+  await harness.openDisclosure('branch-points-toggle')
   await page.getByTestId('branch-bifurcation-1').click()
 
   await page.getByTestId('limit-cycle-from-pd-toggle').click()

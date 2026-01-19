@@ -32,7 +32,7 @@ test('rossler hopf to limit cycle continuation rejects neutral saddle', async ({
   })
   await harness.selectTreeNode(eqBranchLabel)
 
-  await page.getByTestId('branch-points-toggle').click()
+  await harness.openDisclosure('branch-points-toggle')
   await page.getByTestId('branch-point-input').fill('63')
   await page.getByTestId('branch-point-jump').click()
   await expect(page.getByText('Stability: NeutralSaddle')).toBeVisible({ timeout: 20_000 })

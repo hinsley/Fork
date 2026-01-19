@@ -56,7 +56,7 @@ test('continue hopf curve from detected hopf point', async ({ page }) => {
   })
   await harness.selectTreeNode(eqBranchLabel)
 
-  await page.getByTestId('branch-points-toggle').click()
+  await harness.openDisclosure('branch-points-toggle')
   const bifurcationButton = page.locator('[data-testid^="branch-bifurcation-"]').first()
   await expect(bifurcationButton).toBeVisible({ timeout: 20_000 })
   await bifurcationButton.click()

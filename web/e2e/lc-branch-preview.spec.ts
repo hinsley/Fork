@@ -21,7 +21,7 @@ test('branch point navigation previews limit cycles in state space', async ({ pa
   await harness.createScene()
 
   await harness.selectTreeNode('Branch: lc_pd_mu')
-  await page.getByTestId('branch-points-toggle').click()
+  await harness.openDisclosure('branch-points-toggle')
 
   await page.waitForFunction(() => {
     const node = document.querySelector('[data-testid^="plotly-viewport-"]') as
@@ -58,7 +58,7 @@ test('rendering a limit cycle persists after leaving branch selection', async ({
   await harness.createScene()
 
   await harness.selectTreeNode('Branch: lc_pd_mu')
-  await page.getByTestId('branch-points-toggle').click()
+  await harness.openDisclosure('branch-points-toggle')
   await page.getByTestId('branch-point-render-lc').click()
 
   await harness.selectTreeNode('LC_PD (limit cycle)')
@@ -85,7 +85,7 @@ test('limit cycle rendering uses the limit cycle object color', async ({ page })
   await harness.createScene()
 
   await harness.selectTreeNode('Branch: lc_pd_mu')
-  await page.getByTestId('branch-points-toggle').click()
+  await harness.openDisclosure('branch-points-toggle')
   await page.getByTestId('branch-point-render-lc').click()
   await page.getByTestId('inspector-color').fill('#0000ff')
 

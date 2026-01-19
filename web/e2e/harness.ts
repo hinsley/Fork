@@ -1,4 +1,4 @@
-import type { Locator, Page } from '@playwright/test'
+import { expect, type Locator, type Page } from '@playwright/test'
 
 export type HarnessLaunchOptions = {
   deterministic?: boolean
@@ -22,11 +22,15 @@ export class ForkHarness {
 
   private async openSystemsDialog() {
     if ((await this.page.getByRole('dialog').count()) > 0) return
-    const openButton =
-      (await this.page.getByTestId('open-systems').count()) > 0
-        ? this.page.getByTestId('open-systems')
-        : this.page.getByTestId('open-systems-empty')
-    await openButton.click()
+    await this.page.waitForSelector(
+      '[data-testid="open-systems"], [data-testid="open-systems-empty"]',
+      { state: 'visible' }
+    )
+    if (await this.page.getByTestId('open-systems').isVisible()) {
+      await this.page.getByTestId('open-systems').click()
+    } else {
+      await this.page.getByTestId('open-systems-empty').click()
+    }
     await this.page.getByRole('dialog').waitFor()
   }
 
@@ -60,6 +64,16 @@ export class ForkHarness {
     await this.page.getByTestId('viewport-insert-empty').click()
     await this.page.getByTestId('viewport-create-scene').click()
     await this.page.getByTestId('viewport-workspace').waitFor()
+  }
+
+  async openDisclosure(testId: string) {
+    const summary = this.page.getByTestId(testId)
+    await summary.waitFor({ state: 'visible' })
+    const details = summary.locator('..')
+    const isOpen = await details.evaluate((node) => (node as HTMLDetailsElement).open)
+    if (isOpen) return
+    await summary.click()
+    await expect(details).toHaveJSProperty('open', true)
   }
 
   async createOrbit() {

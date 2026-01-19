@@ -52,7 +52,7 @@ test('rossler hopf curve continuation', async ({ page }) => {
   })
   await harness.selectTreeNode(eqBranchLabel)
 
-  await page.getByTestId('branch-points-toggle').click()
+  await harness.openDisclosure('branch-points-toggle')
   const bifurcations = page.locator('[data-testid^="branch-bifurcation-"]')
   await expect(bifurcations.first()).toBeVisible({ timeout: 20_000 })
   const bifCount = await bifurcations.count()

@@ -56,7 +56,7 @@ test('continue limit cycle from a hopf-curve branch point', async ({ page }) => 
   })
   await harness.selectTreeNode(eqBranchLabel)
 
-  await page.getByTestId('branch-points-toggle').click()
+  await harness.openDisclosure('branch-points-toggle')
   const bifurcationButton = page.locator('[data-testid^="branch-bifurcation-"]').first()
   await expect(bifurcationButton).toBeVisible({ timeout: 20_000 })
   await bifurcationButton.click()
@@ -81,7 +81,7 @@ test('continue limit cycle from a hopf-curve branch point', async ({ page }) => 
   await harness.selectTreeNode(hopfCurveLabel)
   await expect(page.getByText(/hopf curve · (?:[2-9]|\d{2,}) points/i)).toBeVisible()
 
-  await page.getByTestId('branch-points-toggle').click()
+  await harness.openDisclosure('branch-points-toggle')
   await page.getByTestId('branch-point-input').fill('0')
   await page.getByTestId('branch-point-jump').click()
 
