@@ -272,8 +272,13 @@ describe('forkCoreWorker', () => {
     const response = workerScope.postMessage.mock.calls
       .map(([payload]) => payload as { ok?: boolean; result?: { points: unknown[] } })
       .find((payload) => payload.ok === true)
-    expect(response).toBeTruthy()
+    if (!response) {
+      throw new Error('Expected an ok response for limit cycle continuation.')
+    }
     expect(response.ok).toBe(true)
+    if (!response.result) {
+      throw new Error('Expected a continuation result payload.')
+    }
     expect(response.result.points).toEqual([])
   })
 

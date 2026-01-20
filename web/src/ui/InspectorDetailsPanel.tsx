@@ -1317,11 +1317,11 @@ export function InspectorDetailsPanel({
           const fromObject =
             equilibrium?.lastSolverParams?.mapIterations ??
             equilibrium?.solution?.cycle_points?.length
-          if (Number.isFinite(fromObject)) {
+          if (typeof fromObject === 'number' && Number.isFinite(fromObject)) {
             return Math.max(1, Math.trunc(fromObject))
           }
           const parsed = parseNumber(equilibriumDraft.mapIterations)
-          return Number.isFinite(parsed) ? Math.max(1, Math.trunc(parsed)) : 1
+          return parsed !== null ? Math.max(1, Math.trunc(parsed)) : 1
         })()
       : undefined
   const equilibriumLabel = formatEquilibriumLabel(systemDraft.type, {
