@@ -95,6 +95,7 @@ export class WasmBridge {
     createEquilibriumContinuationRunner(
         equilibriumState: number[],
         parameterName: string,
+        mapIterations: number,
         settings: any,
         forward: boolean
     ): EquilibriumContinuationRunner {
@@ -106,6 +107,7 @@ export class WasmBridge {
             this.config.paramNames,
             this.config.varNames,
             this.config.type || "flow",
+            mapIterations,
             new Float64Array(equilibriumState),
             parameterName,
             settings,
@@ -137,6 +139,7 @@ export class WasmBridge {
     createContinuationExtensionRunner(
         branchData: ContinuationBranchData,
         parameterName: string,
+        mapIterations: number,
         settings: any,
         forward: boolean
     ): ContinuationRunner {
@@ -153,6 +156,7 @@ export class WasmBridge {
             this.config.paramNames,
             this.config.varNames,
             this.config.type || "flow",
+            mapIterations,
             branchData,
             parameterName,
             settings,
@@ -166,6 +170,7 @@ export class WasmBridge {
         param1Value: number,
         param2Name: string,
         param2Value: number,
+        mapIterations: number,
         settings: any,
         forward: boolean
     ): Codim1CurveRunner {
@@ -177,6 +182,7 @@ export class WasmBridge {
             this.config.paramNames,
             this.config.varNames,
             this.config.type || "flow",
+            mapIterations,
             new Float64Array(foldState),
             param1Name,
             param1Value,
@@ -194,6 +200,7 @@ export class WasmBridge {
         param1Value: number,
         param2Name: string,
         param2Value: number,
+        mapIterations: number,
         settings: any,
         forward: boolean
     ): Codim1CurveRunner {
@@ -205,6 +212,7 @@ export class WasmBridge {
             this.config.paramNames,
             this.config.varNames,
             this.config.type || "flow",
+            mapIterations,
             new Float64Array(hopfState),
             hopfOmega,
             param1Name,
@@ -367,7 +375,8 @@ export class WasmBridge {
     createEquilibriumSolverRunner(
         initialGuess: number[],
         maxSteps: number,
-        dampingFactor: number
+        dampingFactor: number,
+        mapIterations: number
     ): EquilibriumSolverRunner {
         if (!wasmModule) throw new Error("WASM module not loaded");
 
@@ -377,6 +386,7 @@ export class WasmBridge {
             this.config.paramNames,
             this.config.varNames,
             this.config.type || "flow",
+            mapIterations,
             new Float64Array(initialGuess),
             maxSteps,
             dampingFactor
@@ -407,11 +417,12 @@ export class WasmBridge {
         return Array.from(this.instance.compute_jacobian());
     }
 
-    solve_equilibrium(initialGuess: number[], maxSteps: number, dampingFactor: number): EquilibriumSolution {
+    solve_equilibrium(initialGuess: number[], maxSteps: number, dampingFactor: number, mapIterations: number): EquilibriumSolution {
         const result = this.instance.solve_equilibrium(
             new Float64Array(initialGuess),
             maxSteps,
-            dampingFactor
+            dampingFactor,
+            mapIterations
         );
         return result as EquilibriumSolution;
     }
@@ -456,12 +467,14 @@ export class WasmBridge {
     compute_continuation(
         equilibriumState: number[],
         parameterName: string,
+        mapIterations: number,
         settings: any,
         forward: boolean
     ): ContinuationBranchData {
         return this.instance.compute_continuation(
             new Float64Array(equilibriumState),
             parameterName,
+            mapIterations,
             settings,
             forward
         ) as ContinuationBranchData;
@@ -470,6 +483,7 @@ export class WasmBridge {
     extend_continuation(
         branchData: any,
         parameterName: string,
+        mapIterations: number,
         settings: any,
         forward: boolean
     ): ContinuationBranchData {
@@ -504,6 +518,7 @@ export class WasmBridge {
         return this.instance.extend_continuation(
             normalizedBranch,
             parameterName,
+            mapIterations,
             settings,
             forward
         ) as ContinuationBranchData;
@@ -545,10 +560,11 @@ export class WasmBridge {
         ) as LimitCycleBranchResponse;
     }
 
-    computeEigenvalues(state: number[], parameterName: string, paramValue: number): ContinuationEigenvalue[] {
+    computeEigenvalues(state: number[], parameterName: string, mapIterations: number, paramValue: number): ContinuationEigenvalue[] {
         const raw = this.instance.compute_equilibrium_eigenvalues(
             new Float64Array(state),
             parameterName,
+            mapIterations,
             paramValue
         );
         return normalizeEigenvalues(raw);

@@ -10,6 +10,7 @@ use super::BifurcationType;
 pub struct PointDiagnostics {
     pub test_values: TestFunctionValues,
     pub eigenvalues: Vec<Complex<f64>>,
+    pub cycle_points: Option<Vec<Vec<f64>>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -87,4 +88,3 @@ pub trait ContinuationProblem {
         Ok(()) // Default no-op
     }
 }
-

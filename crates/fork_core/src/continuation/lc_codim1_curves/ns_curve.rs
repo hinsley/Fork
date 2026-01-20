@@ -239,7 +239,7 @@ impl<'a> NSCurveProblem<'a> {
         let n = jac.nrows();
         
         // The NS Jacobian is augmented with rotation: J * J + k * I
-        // For the bordered system, we use a simplified approach similar to MATCONT
+        // For the bordered system, we use a simplified approach aligned with the standard formulation
         
         // Build bordered matrix [J, ψ1, ψ2; φ1', 0, 0; φ2', 0, 0]
         // But for NS, the Jacobian itself is modified to include the rotation term
@@ -517,6 +517,7 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
         Ok(PointDiagnostics {
             test_values: TestFunctionValues::limit_cycle(1.0, 1.0, 1.0),
             eigenvalues: multipliers,
+            cycle_points: None,
         })
     }
 

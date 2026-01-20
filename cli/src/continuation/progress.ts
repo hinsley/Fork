@@ -50,6 +50,7 @@ export function runEquilibriumContinuationWithProgress(
   bridge: WasmBridge,
   equilibriumState: number[],
   parameterName: string,
+  mapIterations: number,
   settings: any,
   forward: boolean,
   label: string
@@ -57,6 +58,7 @@ export function runEquilibriumContinuationWithProgress(
   const runner = bridge.createEquilibriumContinuationRunner(
     equilibriumState,
     parameterName,
+    mapIterations,
     settings,
     forward
   );
@@ -92,6 +94,7 @@ export function runContinuationExtensionWithProgress(
   bridge: WasmBridge,
   branchData: ContinuationBranchData,
   parameterName: string,
+  mapIterations: number,
   settings: any,
   forward: boolean,
   label: string
@@ -99,6 +102,7 @@ export function runContinuationExtensionWithProgress(
   const runner = bridge.createContinuationExtensionRunner(
     branchData,
     parameterName,
+    mapIterations,
     settings,
     forward
   );
@@ -116,6 +120,7 @@ export function runFoldCurveWithProgress(
   param1Value: number,
   param2Name: string,
   param2Value: number,
+  mapIterations: number,
   settings: any,
   forward: boolean,
   label: string
@@ -126,6 +131,7 @@ export function runFoldCurveWithProgress(
     param1Value,
     param2Name,
     param2Value,
+    mapIterations,
     settings,
     forward
   );
@@ -144,6 +150,7 @@ export function runHopfCurveWithProgress(
   param1Value: number,
   param2Name: string,
   param2Value: number,
+  mapIterations: number,
   settings: any,
   forward: boolean,
   label: string
@@ -155,6 +162,7 @@ export function runHopfCurveWithProgress(
     param1Value,
     param2Name,
     param2Value,
+    mapIterations,
     settings,
     forward
   );

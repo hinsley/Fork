@@ -1,15 +1,16 @@
-import { render } from '@testing-library/react'
+import { render, waitFor } from '@testing-library/react'
 import type { Layout } from 'plotly.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ViewportPanel } from './ViewportPanel'
 import {
+  addObject,
   addBifurcationDiagram,
   addScene,
   createSystem,
   updateBifurcationDiagram,
   updateScene,
 } from '../system/model'
-import type { Scene, SystemConfig } from '../system/types'
+import type { EquilibriumObject, Scene, SystemConfig } from '../system/types'
 
 type PlotlyProps = {
   plotId: string
@@ -175,5 +176,134 @@ describe('ViewportPanel view state wiring', () => {
       'xaxis.range': [-3, 3],
       'yaxis.range': [2, 4],
     })
+  })
+
+  it('expands 1D map sampling range to include cycle points', async () => {
+    const config: SystemConfig = {
+      name: 'Logistic_Map',
+      equations: ['r * x * (1 - x)'],
+      params: [2.5],
+      paramNames: ['r'],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    let system = createSystem({ name: 'Map_System', config })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Cycle_FP',
+      systemName: config.name,
+      solution: {
+        state: [0.3],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [1],
+        eigenpairs: [],
+        cycle_points: [
+          [0.3],
+          [0.9],
+        ],
+      },
+    }
+    system = addObject(system, equilibrium).system
+    const onSampleMap1DFunction = vi.fn().mockResolvedValue({ x: [], y: [] })
+
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        theme="light"
+        onSelectViewport={vi.fn()}
+        onSelectObject={vi.fn()}
+        onReorderViewport={vi.fn()}
+        onResizeViewport={vi.fn()}
+        onToggleViewport={vi.fn()}
+        onCreateScene={vi.fn()}
+        onCreateBifurcation={vi.fn()}
+        onRenameViewport={vi.fn()}
+        onDeleteViewport={vi.fn()}
+        onSampleMap1DFunction={onSampleMap1DFunction}
+      />
+    )
+
+    await waitFor(() => expect(onSampleMap1DFunction).toHaveBeenCalled())
+    const [request] = onSampleMap1DFunction.mock.calls[0]
+    expect(request.min).toBeCloseTo(0.3)
+    expect(request.max).toBeCloseTo(0.9)
+  })
+
+  it('retries map sampling after a failed request when range stays the same', async () => {
+    const config: SystemConfig = {
+      name: 'Logistic_Map',
+      equations: ['r * x * (1 - x)'],
+      params: [2.5],
+      paramNames: ['r'],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    let system = createSystem({ name: 'Map_System', config })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Cycle_FP',
+      systemName: config.name,
+      solution: {
+        state: [0.3],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [1],
+        eigenpairs: [],
+        cycle_points: [[0.3]],
+      },
+    }
+    system = addObject(system, equilibrium).system
+    const onSampleMap1DFunction = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('sample failed'))
+      .mockResolvedValueOnce({ x: [], y: [] })
+
+    const { rerender } = render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        theme="light"
+        onSelectViewport={vi.fn()}
+        onSelectObject={vi.fn()}
+        onReorderViewport={vi.fn()}
+        onResizeViewport={vi.fn()}
+        onToggleViewport={vi.fn()}
+        onCreateScene={vi.fn()}
+        onCreateBifurcation={vi.fn()}
+        onRenameViewport={vi.fn()}
+        onDeleteViewport={vi.fn()}
+        onSampleMap1DFunction={onSampleMap1DFunction}
+      />
+    )
+
+    await waitFor(() => expect(onSampleMap1DFunction).toHaveBeenCalledTimes(1))
+    const firstPromise = onSampleMap1DFunction.mock.results[0]?.value
+    if (firstPromise) {
+      await firstPromise.catch(() => {})
+    }
+
+    rerender(
+      <ViewportPanel
+        system={structuredClone(system)}
+        selectedNodeId={null}
+        theme="light"
+        onSelectViewport={vi.fn()}
+        onSelectObject={vi.fn()}
+        onReorderViewport={vi.fn()}
+        onResizeViewport={vi.fn()}
+        onToggleViewport={vi.fn()}
+        onCreateScene={vi.fn()}
+        onCreateBifurcation={vi.fn()}
+        onRenameViewport={vi.fn()}
+        onDeleteViewport={vi.fn()}
+        onSampleMap1DFunction={onSampleMap1DFunction}
+      />
+    )
+
+    await waitFor(() => expect(onSampleMap1DFunction).toHaveBeenCalledTimes(2))
   })
 })

@@ -153,6 +153,7 @@ impl WasmCodim1CurveExtensionRunner {
         param_names: Vec<String>,
         var_names: Vec<String>,
         system_type: &str,
+        map_iterations: u32,
         branch_val: JsValue,
         _parameter_name: &str,
         settings_val: JsValue,
@@ -232,7 +233,7 @@ impl WasmCodim1CurveExtensionRunner {
 
         let mut system = build_system(equations, params, &param_names, &var_names)?;
         let kind = match system_type {
-            "map" => SystemKind::Map,
+            "map" => SystemKind::Map { iterations: map_iterations as usize },
             _ => SystemKind::Flow,
         };
 
@@ -296,6 +297,7 @@ impl WasmCodim1CurveExtensionRunner {
                     param_value: endpoint.param_value,
                     stability: fork_core::continuation::BifurcationType::None,
                     eigenvalues: endpoint.eigenvalues.clone(),
+                    cycle_points: None,
                 };
 
                 let runner = ContinuationRunner::new_with_tangent(
@@ -381,6 +383,7 @@ impl WasmCodim1CurveExtensionRunner {
                     param_value: endpoint.param_value,
                     stability: fork_core::continuation::BifurcationType::None,
                     eigenvalues: endpoint.eigenvalues.clone(),
+                    cycle_points: None,
                 };
 
                 let runner = ContinuationRunner::new_with_tangent(
@@ -462,6 +465,7 @@ impl WasmCodim1CurveExtensionRunner {
                     param_value: endpoint.param_value,
                     stability: fork_core::continuation::BifurcationType::None,
                     eigenvalues: endpoint.eigenvalues.clone(),
+                    cycle_points: None,
                 };
 
                 let runner = ContinuationRunner::new_with_tangent(
@@ -541,6 +545,7 @@ impl WasmCodim1CurveExtensionRunner {
                     param_value: endpoint.param_value,
                     stability: fork_core::continuation::BifurcationType::None,
                     eigenvalues: endpoint.eigenvalues.clone(),
+                    cycle_points: None,
                 };
 
                 let runner = ContinuationRunner::new_with_tangent(
@@ -625,6 +630,7 @@ impl WasmCodim1CurveExtensionRunner {
                     param_value: endpoint.param_value,
                     stability: fork_core::continuation::BifurcationType::None,
                     eigenvalues: endpoint.eigenvalues.clone(),
+                    cycle_points: None,
                 };
 
                 let runner = ContinuationRunner::new_with_tangent(

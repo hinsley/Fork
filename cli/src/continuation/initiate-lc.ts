@@ -22,6 +22,7 @@ import { printSuccess, printError, printInfo } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
 import { isValidName, getBranchParams } from './utils';
 import { runLimitCycleContinuationWithProgress } from './progress';
+import { formatEquilibriumLabel } from '../labels';
 
 /**
  * Initiates limit cycle continuation from a Hopf bifurcation point.
@@ -46,6 +47,11 @@ export async function initiateLCFromHopf(
   hopfPointIndex: number
 ): Promise<ContinuationObject | null> {
   const sysConfig = Storage.loadSystem(sysName);
+  if (sysConfig.type === 'map') {
+    printError('Limit cycle continuation from Hopf is only available for flow systems.');
+    return null;
+  }
+  const equilibriumLabelLower = formatEquilibriumLabel(sysConfig.type, { lowercase: true });
 
   // Configuration defaults.
   let limitCycleObjectName = `lc_hopf_${branch.name}`;
@@ -118,7 +124,7 @@ export async function initiateLCFromHopf(
       edit: async () => {
         const { value } = await inquirer.prompt({
           name: 'value',
-          message: 'Initial amplitude (perturbation from equilibrium):',
+          message: `Initial amplitude (perturbation from ${equilibriumLabelLower}):`,
           default: amplitudeInput
         });
         amplitudeInput = value;

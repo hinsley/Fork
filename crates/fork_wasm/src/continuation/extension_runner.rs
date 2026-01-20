@@ -47,6 +47,7 @@ impl WasmContinuationExtensionRunner {
         param_names: Vec<String>,
         var_names: Vec<String>,
         system_type: &str,
+        map_iterations: u32,
         branch_val: JsValue,
         parameter_name: &str,
         settings_val: JsValue,
@@ -128,7 +129,9 @@ impl WasmContinuationExtensionRunner {
         let runner_kind = match &merge.branch.branch_type {
             BranchType::Equilibrium => {
                 let kind = match system_type {
-                    "map" => SystemKind::Map,
+                    "map" => SystemKind::Map {
+                        iterations: map_iterations as usize,
+                    },
                     _ => SystemKind::Flow,
                 };
 
@@ -188,6 +191,7 @@ impl WasmContinuationExtensionRunner {
                     param_value: endpoint.param_value,
                     stability: endpoint.stability.clone(),
                     eigenvalues: endpoint.eigenvalues.clone(),
+                    cycle_points: endpoint.cycle_points.clone(),
                 };
 
                 let mut runner = ContinuationRunner::new_with_tangent(
@@ -309,6 +313,7 @@ impl WasmContinuationExtensionRunner {
                     param_value: endpoint.param_value,
                     stability: endpoint.stability.clone(),
                     eigenvalues: endpoint.eigenvalues.clone(),
+                    cycle_points: endpoint.cycle_points.clone(),
                 };
 
                 // SAFETY: The problem borrows the boxed system allocation, which lives
@@ -463,6 +468,7 @@ mod tests {
                 param_value: 0.0,
                 stability: BifurcationType::None,
                 eigenvalues: Vec::new(),
+                cycle_points: None,
             }],
             bifurcations: Vec::new(),
             indices: Vec::new(),
@@ -500,12 +506,14 @@ mod tests {
                     param_value: 1.0,
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
+                    cycle_points: None,
                 },
                 ContinuationPoint {
                     state: vec![1.1],
                     param_value: 1.1,
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
+                    cycle_points: None,
                 },
             ],
             bifurcations: Vec::new(),

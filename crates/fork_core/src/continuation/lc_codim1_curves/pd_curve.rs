@@ -41,7 +41,7 @@ pub struct PDCurveProblem<'a> {
     /// Collocation coefficients
     coeffs: CollocationCoefficients,
     /// Phase condition: upoldp = T * f(u) for integral phase condition
-    /// Updated after each step (MATCONT pattern)
+    /// Updated after each step (standard pattern)
     upoldp: Vec<f64>,
     /// Reference phase integral: ∫ <u_init, upoldp> dt computed at initialization
     /// Subtracted from phase condition to ensure it's zero at starting point
@@ -81,7 +81,7 @@ impl<'a> PDCurveProblem<'a> {
         let work_f = vec![0.0; stage_count * dim];
         let work_j = vec![0.0; stage_count * dim * dim];
         
-        // Compute initial upoldp = T * f(u) at each mesh point (MATCONT pattern)
+        // Compute initial upoldp = T * f(u) at each mesh point (standard pattern)
         // This is used for the integral phase condition: ∫ <u, upoldp> dt = 0
         let mesh_start = stage_count * dim;
         let mut upoldp = vec![0.0; (ntst + 1) * dim];
@@ -673,7 +673,7 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
         out[phase_row + 1] = g;
         
         // Explicit periodic boundary condition: u_ntst - u_0 = 0
-        // This is PERIODIC (not antiperiodic!) as per MATCONT pattern
+        // This is PERIODIC (not antiperiodic!) to match the phase condition
         let bc_row = phase_row + 2;
         let mesh0 = self.mesh_slice(aug_slice, 0);
         let mesh_ntst = self.mesh_slice(aug_slice, self.ntst);
@@ -756,6 +756,7 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
         Ok(PointDiagnostics {
             test_values: TestFunctionValues::limit_cycle(1.0, 1.0, 1.0),
             eigenvalues: multipliers,
+            cycle_points: None,
         })
     }
 
@@ -766,7 +767,7 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
         // it invalidates phase_ref (which was computed with the initial upoldp)
         // and causes the phase condition to become non-zero at converged points.
         //
-        // This is how MATCONT handles the integral phase condition - keep the
+        // This is how the integral phase condition is handled - keep the
         // reference direction fixed throughout the continuation.
         
         // Update border vectors using the antiperiodic Jacobian

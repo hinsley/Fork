@@ -94,6 +94,7 @@ export async function initiateFoldCurve(
   foldPointIndex: number
 ): Promise<ContinuationObject | null> {
   const sysConfig = Storage.loadSystem(sysName);
+  const mapIterations = sysConfig.type === 'map' ? branch.mapIterations ?? 1 : 1;
   const paramNames = sysConfig.paramNames;
 
   if (paramNames.length < 2) {
@@ -295,6 +296,7 @@ export async function initiateFoldCurve(
       param1Value,
       param2Name,
       param2Value,
+      mapIterations,
       continuationSettings,
       directionForward,
       'Fold Curve'
@@ -348,7 +350,8 @@ export async function initiateFoldCurve(
       data: branchData,
       settings: continuationSettings,
       timestamp: new Date().toISOString(),
-      params: [...runConfig.params]
+      params: [...runConfig.params],
+      mapIterations: sysConfig.type === 'map' ? mapIterations : undefined
     };
 
     // Save the branch
@@ -382,6 +385,7 @@ export async function initiateHopfCurve(
   hopfPointIndex: number
 ): Promise<ContinuationObject | null> {
   const sysConfig = Storage.loadSystem(sysName);
+  const mapIterations = sysConfig.type === 'map' ? branch.mapIterations ?? 1 : 1;
   const paramNames = sysConfig.paramNames;
 
   if (paramNames.length < 2) {
@@ -597,6 +601,7 @@ export async function initiateHopfCurve(
       param1Value,
       param2Name,
       param2Value,
+      mapIterations,
       continuationSettings,
       directionForward,
       'Hopf Curve'
@@ -663,7 +668,8 @@ export async function initiateHopfCurve(
       data: branchData,
       settings: continuationSettings,
       timestamp: new Date().toISOString(),
-      params: [...runConfig.params]
+      params: [...runConfig.params],
+      mapIterations: sysConfig.type === 'map' ? mapIterations : undefined
     };
 
     // Save the branch
@@ -1247,7 +1253,7 @@ export async function initiatePDCurve(
       data: branchData,
       settings: continuationSettings,
       timestamp: new Date().toISOString(),
-      params: [...runConfig.params]
+      params: [...runConfig.params],
     };
 
     Storage.saveBranch(sysName, branch.parentObject, newBranch);  // Save under LC object
@@ -1544,7 +1550,7 @@ export async function initiateNSCurve(
       data: branchData,
       settings: continuationSettings,
       timestamp: new Date().toISOString(),
-      params: [...runConfig.params]
+      params: [...runConfig.params],
     };
 
     Storage.saveBranch(sysName, branch.parentObject, newBranch);

@@ -38,6 +38,8 @@ pub struct ContinuationPoint {
     pub stability: BifurcationType,
     #[serde(default)]
     pub eigenvalues: Vec<Complex<f64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cycle_points: Option<Vec<Vec<f64>>>,
 }
 
 /// Type of continuation branch.

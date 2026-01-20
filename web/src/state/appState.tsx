@@ -60,6 +60,7 @@ import {
 } from '../system/continuation'
 import { resolveObjectParams } from '../system/parameters'
 import { downloadSystem, readSystemFile } from '../system/importExport'
+import { formatEquilibriumLabel } from '../system/labels'
 import { AppContext } from './appContext'
 import { validateSystemConfig, validateSystemName } from './systemValidation'
 import { isCliSafeName } from '../utils/naming'
@@ -91,14 +92,14 @@ function validateObjectName(name: string, label: string): string | null {
   return null
 }
 
-function getNodeLabel(node: TreeNode | undefined): string {
+function getNodeLabel(node: TreeNode | undefined, systemType: SystemConfig['type']): string {
   if (!node) return 'Item'
   if (node.kind === 'branch') return 'Branch'
   if (node.kind === 'scene') return 'Scene'
   if (node.kind === 'diagram') return 'Bifurcation diagram'
   if (node.kind === 'object') {
     if (node.objectType === 'orbit') return 'Orbit'
-    if (node.objectType === 'equilibrium') return 'Equilibrium'
+    if (node.objectType === 'equilibrium') return formatEquilibriumLabel(systemType)
     if (node.objectType === 'limit_cycle') return 'Limit cycle'
     return 'Object'
   }
@@ -186,12 +187,14 @@ export type EquilibriumSolveRequest = {
   initialGuess: number[]
   maxSteps: number
   dampingFactor: number
+  mapIterations?: number
 }
 
 export type EquilibriumContinuationRequest = {
   equilibriumId: string
   name: string
   parameterName: string
+  mapIterations?: number
   settings: ContinuationSettings
   forward: boolean
 }
@@ -588,7 +591,10 @@ export function AppProvider({
       if (!state.system) return
       const trimmedName = name.trim()
       const node = state.system.nodes[nodeId]
-      const nameError = validateObjectName(trimmedName, getNodeLabel(node))
+      const nameError = validateObjectName(
+        trimmedName,
+        getNodeLabel(node, state.system.config.type)
+      )
       if (nameError) {
         dispatch({ type: 'SET_ERROR', error: nameError })
         return
@@ -1077,7 +1083,10 @@ export function AppProvider({
           throw new Error('System settings are invalid.')
         }
         const trimmedName = name.trim()
-        const nameError = validateObjectName(trimmedName, 'Equilibrium')
+        const nameError = validateObjectName(
+          trimmedName,
+          formatEquilibriumLabel(system.type)
+        )
         if (nameError) {
           throw new Error(nameError)
         }
@@ -1090,6 +1099,7 @@ export function AppProvider({
           initialGuess: system.varNames.map(() => 0),
           maxSteps: 25,
           dampingFactor: 1,
+          mapIterations: system.type === 'map' ? 1 : undefined,
         }
 
         const obj: EquilibriumObject = {
@@ -1120,12 +1130,15 @@ export function AppProvider({
       if (!state.system) return
       dispatch({ type: 'SET_BUSY', busy: true })
       const system = state.system.config
+      const equilibriumLabelLower = formatEquilibriumLabel(system.type, { lowercase: true })
       const runSummary = {
         timestamp: new Date().toISOString(),
         success: false,
         residual_norm: undefined as number | undefined,
         iterations: undefined as number | undefined,
       }
+
+      let mapIterations: number | undefined
 
       try {
         const validation = validateSystemConfig(system)
@@ -1134,7 +1147,7 @@ export function AppProvider({
         }
         const equilibrium = state.system.objects[request.equilibriumId]
         if (!equilibrium || equilibrium.type !== 'equilibrium') {
-          throw new Error('Select a valid equilibrium to solve.')
+          throw new Error(`Select a valid ${equilibriumLabelLower} to solve.`)
         }
         if (request.initialGuess.length !== system.varNames.length) {
           throw new Error('Initial guess dimension mismatch.')
@@ -1149,10 +1162,24 @@ export function AppProvider({
           throw new Error('Damping factor must be a positive number.')
         }
 
+        if (system.type === 'map') {
+          const iterations =
+            request.mapIterations ?? equilibrium.lastSolverParams?.mapIterations ?? 1
+          if (
+            !Number.isFinite(iterations) ||
+            iterations <= 0 ||
+            !Number.isInteger(iterations)
+          ) {
+            throw new Error('Cycle length must be a positive integer.')
+          }
+          mapIterations = iterations
+        }
+
         const solverParams: EquilibriumSolverParams = {
           initialGuess: request.initialGuess,
           maxSteps: request.maxSteps,
           dampingFactor: request.dampingFactor,
+          mapIterations,
         }
 
         const runConfig: SystemConfig = {
@@ -1164,6 +1191,7 @@ export function AppProvider({
           initialGuess: solverParams.initialGuess,
           maxSteps: solverParams.maxSteps,
           dampingFactor: solverParams.dampingFactor,
+          mapIterations: solverParams.mapIterations,
         })
 
         runSummary.success = true
@@ -1187,6 +1215,7 @@ export function AppProvider({
             initialGuess: request.initialGuess,
             maxSteps: request.maxSteps,
             dampingFactor: request.dampingFactor,
+            mapIterations,
           },
         })
         dispatch({ type: 'SET_SYSTEM', system: updated })
@@ -1205,6 +1234,8 @@ export function AppProvider({
       dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
       try {
         const system = state.system.config
+        const equilibriumLabel = formatEquilibriumLabel(system.type)
+        const equilibriumLabelLower = formatEquilibriumLabel(system.type, { lowercase: true })
         const validation = validateSystemConfig(system)
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
@@ -1214,10 +1245,10 @@ export function AppProvider({
         }
         const equilibrium = state.system.objects[request.equilibriumId]
         if (!equilibrium || equilibrium.type !== 'equilibrium') {
-          throw new Error('Select a valid equilibrium to continue.')
+          throw new Error(`Select a valid ${equilibriumLabelLower} to continue.`)
         }
         if (!equilibrium.solution) {
-          throw new Error('Solve the equilibrium before continuing.')
+          throw new Error(`Solve the ${equilibriumLabelLower} before continuing.`)
         }
 
         const name = request.name.trim()
@@ -1232,6 +1263,20 @@ export function AppProvider({
           throw new Error('Select a valid continuation parameter.')
         }
 
+        let mapIterations: number | undefined
+        if (system.type === 'map') {
+          const iterations =
+            request.mapIterations ?? equilibrium.lastSolverParams?.mapIterations ?? 1
+          if (
+            !Number.isFinite(iterations) ||
+            iterations <= 0 ||
+            !Number.isInteger(iterations)
+          ) {
+            throw new Error('Cycle length must be a positive integer.')
+          }
+          mapIterations = iterations
+        }
+
         const runConfig: SystemConfig = {
           ...system,
           params: resolveObjectParams(system, equilibrium.customParameters),
@@ -1242,6 +1287,7 @@ export function AppProvider({
             system: runConfig,
             equilibriumState: equilibrium.solution.state,
             parameterName: request.parameterName,
+            mapIterations,
             settings: request.settings,
             forward: request.forward,
           },
@@ -1249,7 +1295,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Equilibrium continuation', progress },
+                progress: { label: `${equilibriumLabel} continuation`, progress },
               }),
           }
         )
@@ -1267,11 +1313,12 @@ export function AppProvider({
           settings: request.settings,
           timestamp: new Date().toISOString(),
           params: [...runConfig.params],
+          mapIterations,
         }
 
         const parentNodeId = findObjectIdByName(state.system, equilibrium.name)
         if (!parentNodeId) {
-          throw new Error('Unable to locate the parent equilibrium in the tree.')
+          throw new Error(`Unable to locate the parent ${equilibriumLabelLower} in the tree.`)
         }
 
         const created = addBranch(state.system, branch, parentNodeId)
@@ -1296,6 +1343,8 @@ export function AppProvider({
       dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
       try {
         const system = state.system.config
+        const equilibriumLabel = formatEquilibriumLabel(system.type)
+        const equilibriumLabelLower = formatEquilibriumLabel(system.type, { lowercase: true })
         const validation = validateSystemConfig(system)
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
@@ -1309,7 +1358,9 @@ export function AppProvider({
           throw new Error('Select a valid branch to continue.')
         }
         if (sourceBranch.branchType !== 'equilibrium') {
-          throw new Error('Branch continuation is only available for equilibrium branches.')
+          throw new Error(
+            `Branch continuation is only available for ${equilibriumLabelLower} branches.`
+          )
         }
 
         const point: ContinuationPoint | undefined =
@@ -1330,6 +1381,19 @@ export function AppProvider({
           throw new Error('Select a valid continuation parameter.')
         }
 
+        let mapIterations: number | undefined
+        if (system.type === 'map') {
+          const iterations = sourceBranch.mapIterations ?? 1
+          if (
+            !Number.isFinite(iterations) ||
+            iterations <= 0 ||
+            !Number.isInteger(iterations)
+          ) {
+            throw new Error('Cycle length must be a positive integer.')
+          }
+          mapIterations = iterations
+        }
+
         const runConfig: SystemConfig = { ...system }
         runConfig.params = getBranchParams(state.system, sourceBranch)
 
@@ -1343,6 +1407,7 @@ export function AppProvider({
             system: runConfig,
             equilibriumState: point.state,
             parameterName: request.parameterName,
+            mapIterations,
             settings: request.settings,
             forward: request.forward,
           },
@@ -1350,7 +1415,7 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Equilibrium continuation', progress },
+                progress: { label: `${equilibriumLabel} continuation`, progress },
               }),
           }
         )
@@ -1368,11 +1433,12 @@ export function AppProvider({
           settings: request.settings,
           timestamp: new Date().toISOString(),
           params: [...runConfig.params],
+          mapIterations,
         }
 
         const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
         if (!parentNodeId) {
-          throw new Error('Unable to locate the parent equilibrium in the tree.')
+          throw new Error(`Unable to locate the parent ${equilibriumLabelLower} in the tree.`)
         }
 
         const created = addBranch(state.system, branch, parentNodeId)
@@ -1397,6 +1463,7 @@ export function AppProvider({
       dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
       try {
         const system = state.system.config
+        const equilibriumLabelLower = formatEquilibriumLabel(system.type, { lowercase: true })
         const validation = validateSystemConfig(system)
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
@@ -1418,7 +1485,7 @@ export function AppProvider({
           ].includes(sourceBranch.branchType)
         ) {
           throw new Error(
-            'Branch extension is only available for equilibrium, limit cycle, or bifurcation curve branches.'
+            `Branch extension is only available for ${equilibriumLabelLower}, limit cycle, or bifurcation curve branches.`
           )
         }
         if (!sourceBranch.data.points.length) {
@@ -1428,6 +1495,12 @@ export function AppProvider({
         const runConfig: SystemConfig = { ...system }
         runConfig.params = getBranchParams(state.system, sourceBranch)
 
+        const mapIterations =
+          system.type === 'map' &&
+          ['equilibrium', 'fold_curve', 'hopf_curve'].includes(sourceBranch.branchType)
+            ? sourceBranch.mapIterations ?? 1
+            : undefined
+
         const branchData = serializeBranchDataForWasm(sourceBranch)
 
         const updatedData = await client.runContinuationExtension(
@@ -1435,6 +1508,7 @@ export function AppProvider({
             system: runConfig,
             branchData,
             parameterName: sourceBranch.parameterName,
+            mapIterations,
             settings: request.settings,
             forward: request.forward,
           },
@@ -1487,6 +1561,7 @@ export function AppProvider({
       dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
       try {
         const system = state.system.config
+        const equilibriumLabelLower = formatEquilibriumLabel(system.type, { lowercase: true })
         const validation = validateSystemConfig(system)
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
@@ -1500,7 +1575,9 @@ export function AppProvider({
           throw new Error('Select a valid branch to continue.')
         }
         if (sourceBranch.branchType !== 'equilibrium') {
-          throw new Error('Fold curve continuation is only available for equilibrium branches.')
+          throw new Error(
+            `Fold curve continuation is only available for ${equilibriumLabelLower} branches.`
+          )
         }
 
         const point: ContinuationPoint | undefined =
@@ -1548,6 +1625,9 @@ export function AppProvider({
         }
         const param2Value = runConfig.params[param2Idx]
 
+        const mapIterations =
+          system.type === 'map' ? sourceBranch.mapIterations ?? 1 : undefined
+
         const curveData = await client.runFoldCurveContinuation(
           {
             system: runConfig,
@@ -1556,6 +1636,7 @@ export function AppProvider({
             param1Value: point.param_value,
             param2Name,
             param2Value,
+            mapIterations,
             settings: request.settings,
             forward: request.forward,
           },
@@ -1602,11 +1683,12 @@ export function AppProvider({
           settings: request.settings,
           timestamp: new Date().toISOString(),
           params: [...runConfig.params],
+          mapIterations,
         }
 
         const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
         if (!parentNodeId) {
-          throw new Error('Unable to locate the parent equilibrium in the tree.')
+          throw new Error(`Unable to locate the parent ${equilibriumLabelLower} in the tree.`)
         }
 
         const created = addBranch(state.system, branch, parentNodeId)
@@ -1631,6 +1713,7 @@ export function AppProvider({
       dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
       try {
         const system = state.system.config
+        const equilibriumLabelLower = formatEquilibriumLabel(system.type, { lowercase: true })
         const validation = validateSystemConfig(system)
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
@@ -1644,7 +1727,9 @@ export function AppProvider({
           throw new Error('Select a valid branch to continue.')
         }
         if (sourceBranch.branchType !== 'equilibrium') {
-          throw new Error('Hopf curve continuation is only available for equilibrium branches.')
+          throw new Error(
+            `Hopf curve continuation is only available for ${equilibriumLabelLower} branches.`
+          )
         }
 
         const point: ContinuationPoint | undefined =
@@ -1692,6 +1777,8 @@ export function AppProvider({
         }
         const param2Value = runConfig.params[param2Idx]
         const hopfOmega = extractHopfOmega(point)
+        const mapIterations =
+          system.type === 'map' ? sourceBranch.mapIterations ?? 1 : undefined
 
         const curveData = await client.runHopfCurveContinuation(
           {
@@ -1702,6 +1789,7 @@ export function AppProvider({
             param1Value: point.param_value,
             param2Name,
             param2Value,
+            mapIterations,
             settings: request.settings,
             forward: request.forward,
           },
@@ -1749,11 +1837,12 @@ export function AppProvider({
           settings: request.settings,
           timestamp: new Date().toISOString(),
           params: [...runConfig.params],
+          mapIterations,
         }
 
         const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
         if (!parentNodeId) {
-          throw new Error('Unable to locate the parent equilibrium in the tree.')
+          throw new Error(`Unable to locate the parent ${equilibriumLabelLower} in the tree.`)
         }
 
         const created = addBranch(state.system, branch, parentNodeId)
@@ -1778,6 +1867,7 @@ export function AppProvider({
       dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
       try {
         const system = state.system.config
+        const equilibriumLabelLower = formatEquilibriumLabel(system.type, { lowercase: true })
         const validation = validateSystemConfig(system)
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
@@ -1795,7 +1885,7 @@ export function AppProvider({
           sourceBranch.branchType !== 'hopf_curve'
         ) {
           throw new Error(
-            'Limit cycle continuation is only available for equilibrium or Hopf curve branches.'
+            `Limit cycle continuation is only available for ${equilibriumLabelLower} or Hopf curve branches.`
           )
         }
 
@@ -2011,10 +2101,6 @@ export function AppProvider({
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
         }
-        if (system.type === 'map') {
-          throw new Error('Limit cycles require a flow system.')
-        }
-
         const orbit = state.system.objects[request.orbitId]
         if (!orbit || orbit.type !== 'orbit') {
           throw new Error('Select a valid orbit for limit cycle continuation.')

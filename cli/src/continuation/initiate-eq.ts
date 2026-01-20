@@ -21,6 +21,7 @@ import { printSuccess, printError, printInfo } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
 import { isValidName, getBranchParams } from './utils';
 import { runEquilibriumContinuationWithProgress } from './progress';
+import { formatEquilibriumLabel } from '../labels';
 
 /**
  * Initiates a new equilibrium continuation branch from a point on an existing branch.
@@ -45,6 +46,9 @@ export async function initiateEquilibriumBranchFromPoint(
   point: ContinuationPoint
 ): Promise<ContinuationObject | null> {
   const sysConfig = Storage.loadSystem(sysName);
+  const equilibriumLabel = formatEquilibriumLabel(sysConfig.type, {
+    mapIterations: sourceBranch.mapIterations,
+  });
   const parentObject = sourceBranch.parentObject;
 
   if (sysConfig.paramNames.length === 0) {
@@ -234,7 +238,10 @@ export async function initiateEquilibriumBranchFromPoint(
   ];
 
   while (true) {
-    const result = await runConfigMenu('Create Equilibrium Branch from Point', entries);
+    const result = await runConfigMenu(
+      `Create ${equilibriumLabel} Branch from Point`,
+      entries
+    );
     if (result === 'back') {
       return null;
     }
@@ -277,11 +284,15 @@ export async function initiateEquilibriumBranchFromPoint(
     }
 
     const bridge = new WasmBridge(runConfig);
+    const mapIterations = sysConfig.type === 'map'
+      ? sourceBranch.mapIterations ?? 1
+      : 1;
     const branchData = normalizeBranchEigenvalues(
       runEquilibriumContinuationWithProgress(
         bridge,
         point.state,
         selectedParamName,
+        mapIterations,
         continuationSettings,
         directionForward,
         'Continuation'
@@ -299,7 +310,8 @@ export async function initiateEquilibriumBranchFromPoint(
       data: branchData,
       settings: continuationSettings,
       timestamp: new Date().toISOString(),
-      params: [...runConfig.params]  // Store full parameter snapshot
+      params: [...runConfig.params],  // Store full parameter snapshot
+      mapIterations: sysConfig.type === 'map' ? mapIterations : undefined
     };
 
     Storage.saveBranch(sysName, parentObject, newBranch);

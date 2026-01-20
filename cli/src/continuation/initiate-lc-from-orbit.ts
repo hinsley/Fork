@@ -56,11 +56,6 @@ export async function initiateLCFromOrbit(
     return null;
   }
 
-  if (sysConfig.type === 'map') {
-    printError("Limit cycle continuation is only available for flow (ODE) systems.");
-    return null;
-  }
-
   // Configuration defaults
   let limitCycleObjectName = `lc_${orbit.name}`;
   let branchName = '';

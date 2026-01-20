@@ -1,12 +1,16 @@
 //! Shared continuation helpers.
 
-use fork_core::autodiff::Dual;
 use fork_core::continuation::{
     compute_eigenvalues, hopf_test_function, neutral_saddle_test_function,
     ContinuationProblem, PointDiagnostics, TestFunctionValues,
 };
+use fork_core::continuation::util::{
+    neimark_sacker_test_function, period_doubling_test_function,
+};
 use fork_core::equation_engine::EquationSystem;
-use fork_core::equilibrium::SystemKind;
+use fork_core::equilibrium::{
+    compute_param_jacobian, compute_system_jacobian, evaluate_equilibrium_residual, SystemKind,
+};
 use fork_core::traits::DynamicalSystem;
 use nalgebra::{DMatrix, DVector};
 
@@ -53,16 +57,7 @@ impl ContinuationProblem for OwnedEquilibriumContinuationProblem {
         let kind = self.kind;
 
         self.with_param(param, |system| {
-            match kind {
-                SystemKind::Flow => system.apply(0.0, &state, out.as_mut_slice()),
-                SystemKind::Map => {
-                    system.apply(0.0, &state, out.as_mut_slice());
-                    for i in 0..out.len() {
-                        out[i] -= state[i];
-                    }
-                }
-            }
-            Ok(())
+            evaluate_equilibrium_residual(system, kind, &state, out.as_mut_slice())
         })?;
 
         Ok(())
@@ -78,10 +73,9 @@ impl ContinuationProblem for OwnedEquilibriumContinuationProblem {
         let mut j_ext = DMatrix::zeros(dim, dim + 1);
 
         self.with_param(param, |system| {
-            let mut f_dual = vec![Dual::new(0.0, 0.0); dim];
-            system.evaluate_dual_wrt_param(&state, param_index, &mut f_dual);
+            let param_jac = compute_param_jacobian(system, kind, &state, param_index)?;
             for i in 0..dim {
-                j_ext[(i, 0)] = f_dual[i].eps;
+                j_ext[(i, 0)] = param_jac[i];
             }
 
             let jac_x = fork_core::equilibrium::compute_jacobian(system, kind, &state)?;
@@ -103,14 +97,32 @@ impl ContinuationProblem for OwnedEquilibriumContinuationProblem {
         let state: Vec<f64> = aug_state.rows(1, dim).iter().cloned().collect();
         let kind = self.kind;
 
-        let mat = self.with_param(param, |system| {
-            let jac = fork_core::equilibrium::compute_jacobian(system, kind, &state)?;
-            Ok(DMatrix::from_row_slice(dim, dim, &jac))
+        let iterations = kind.map_iterations();
+        let (residual_mat, eigen_mat, cycle_points) = self.with_param(param, |system| {
+            let system_jac = compute_system_jacobian(system, kind, &state)?;
+            let mut residual_jac = system_jac.clone();
+            if kind.is_map() {
+                for i in 0..dim {
+                    residual_jac[i * dim + i] -= 1.0;
+                }
+            }
+            let residual_mat = DMatrix::from_row_slice(dim, dim, &residual_jac);
+            let eigen_mat = if kind.is_map() {
+                DMatrix::from_row_slice(dim, dim, &system_jac)
+            } else {
+                residual_mat.clone()
+            };
+            let cycle_points = if kind.is_map() && iterations > 1 {
+                Some(compute_map_cycle_points(system, &state, iterations))
+            } else {
+                None
+            };
+            Ok((residual_mat, eigen_mat, cycle_points))
         })?;
 
-        let fold = mat.determinant();
-        let eigenvalues = compute_eigenvalues(&mat)?;
-        let (hopf, neutral) = if matches!(kind, SystemKind::Flow) && dim >= 2 {
+        let fold = residual_mat.determinant();
+        let eigenvalues = compute_eigenvalues(&eigen_mat)?;
+        let (hopf, neutral) = if kind.is_flow() && dim >= 2 {
             (
                 hopf_test_function(&eigenvalues).re,
                 neutral_saddle_test_function(&eigenvalues),
@@ -119,11 +131,39 @@ impl ContinuationProblem for OwnedEquilibriumContinuationProblem {
             (0.0, 0.0)
         };
 
+        let mut test_values = TestFunctionValues::equilibrium(fold, hopf, neutral);
+        if kind.is_map() {
+            test_values.period_doubling = period_doubling_test_function(&eigenvalues);
+            test_values.neimark_sacker = neimark_sacker_test_function(&eigenvalues);
+        }
+
         Ok(PointDiagnostics {
-            test_values: TestFunctionValues::equilibrium(fold, hopf, neutral),
+            test_values,
             eigenvalues,
+            cycle_points,
         })
     }
+}
+
+fn compute_map_cycle_points(
+    system: &EquationSystem,
+    state: &[f64],
+    iterations: usize,
+) -> Vec<Vec<f64>> {
+    if iterations == 0 {
+        return Vec::new();
+    }
+    let dim = system.equations.len();
+    let mut points = Vec::with_capacity(iterations);
+    let mut current = state.to_vec();
+    let mut next = vec![0.0; dim];
+    points.push(current.clone());
+    for _ in 1..iterations {
+        system.apply(0.0, &current, &mut next);
+        std::mem::swap(&mut current, &mut next);
+        points.push(current.clone());
+    }
+    points
 }
 
 pub(crate) fn compute_tangent_from_problem<P: ContinuationProblem>(
@@ -237,7 +277,7 @@ mod problem_tests {
     #[test]
     fn equilibrium_problem_residual_map_restores_param() {
         let system = build_linear_system(1.0);
-        let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Map, 0);
+        let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Map { iterations: 1 }, 0);
 
         let aug_state = DVector::from_vec(vec![2.0, 3.0]);
         let mut residual = DVector::zeros(1);
@@ -245,7 +285,8 @@ mod problem_tests {
         problem
             .residual(&aug_state, &mut residual)
             .expect("residual");
-        assert!((residual[0] - 3.0).abs() < 1e-12);
+        let expected = aug_state[0] * aug_state[1] - aug_state[1];
+        assert!((residual[0] - expected).abs() < 1e-12);
         assert!((problem.system.params[0] - 1.0).abs() < 1e-12);
     }
 
@@ -284,20 +325,51 @@ mod problem_tests {
     #[test]
     fn equilibrium_problem_diagnostics_map_zeroes_hopf_and_neutral() {
         let system = build_two_param_system(2.0, 3.0);
-        let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Map, 0);
+        let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Map { iterations: 1 }, 0);
         let aug_state = DVector::from_vec(vec![2.0, 0.5, -0.25]);
 
         let diagnostics = problem.diagnostics(&aug_state).expect("diagnostics");
         let values = diagnostics.test_values;
         assert!((values.fold - 2.0).abs() < 1e-12);
+        assert!((values.period_doubling - 12.0).abs() < 1e-12);
         assert_eq!(values.hopf, 0.0);
         assert_eq!(values.neutral_saddle, 0.0);
 
         let mut eigenvalues: Vec<f64> = diagnostics.eigenvalues.iter().map(|v| v.re).collect();
         eigenvalues.sort_by(|a, b| a.partial_cmp(b).unwrap());
         assert_eq!(eigenvalues.len(), 2);
-        assert!((eigenvalues[0] - 1.0).abs() < 1e-12);
-        assert!((eigenvalues[1] - 2.0).abs() < 1e-12);
+        assert!((eigenvalues[0] - 2.0).abs() < 1e-12);
+        assert!((eigenvalues[1] - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn equilibrium_problem_diagnostics_map_neimark_sacker_crosses_unit_circle() {
+        let equations = vec![
+            "a * x - 0.5 * y".to_string(),
+            "0.5 * x + a * y".to_string(),
+        ];
+        let params = vec![0.5];
+        let param_names = vec!["a".to_string()];
+        let var_names = vec!["x".to_string(), "y".to_string()];
+        let system = build_system(equations, params, &param_names, &var_names)
+            .expect("system");
+        let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Map { iterations: 1 }, 0);
+
+        let aug_inside = DVector::from_vec(vec![0.5, 0.0, 0.0]);
+        let inside = problem.diagnostics(&aug_inside).expect("diagnostics");
+        assert!(
+            inside.test_values.neimark_sacker < 0.0,
+            "expected inside-unit-circle test to be negative, got {}",
+            inside.test_values.neimark_sacker
+        );
+
+        let aug_outside = DVector::from_vec(vec![1.1, 0.0, 0.0]);
+        let outside = problem.diagnostics(&aug_outside).expect("diagnostics");
+        assert!(
+            outside.test_values.neimark_sacker > 0.0,
+            "expected outside-unit-circle test to be positive, got {}",
+            outside.test_values.neimark_sacker
+        );
     }
 
     #[test]
@@ -352,6 +424,7 @@ mod tangent_tests {
             Ok(PointDiagnostics {
                 test_values: TestFunctionValues::equilibrium(0.0, 0.0, 0.0),
                 eigenvalues: Vec::new(),
+                cycle_points: None,
             })
         }
     }

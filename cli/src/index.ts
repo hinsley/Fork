@@ -17,6 +17,11 @@ import {
 } from './types';
 import { WasmBridge, CovariantLyapunovResponse } from './wasm';
 import { runAnalysisWithProgress, runEquilibriumSolveWithProgress } from './progress';
+import {
+    formatBranchTypeLabel,
+    formatEquilibriumLabel,
+    formatObjectTypeLabel
+} from './labels';
 
 import { createEquilibriumBranchForObject, createLimitCycleBranchForObject } from './continuation/create';
 import { extendBranch } from './continuation/extend';
@@ -501,6 +506,8 @@ async function objectsListMenu(sysName: string) {
             continue;
         }
 
+        const sysConfig = Storage.loadSystem(sysName);
+        const equilibriumLabel = formatEquilibriumLabel(sysConfig.type);
         const objects = Storage.listObjects(sysName);
         const choices = [];
 
@@ -511,7 +518,10 @@ async function objectsListMenu(sysName: string) {
             objects.forEach(name => {
                 const obj = Storage.loadObject(sysName, name);
                 if (obj.type === 'continuation') return; // Filter out continuation branches
-                choices.push({ name: `${name} (${obj.type})`, value: name });
+                choices.push({
+                    name: `${name} (${formatObjectTypeLabel(sysConfig.type, obj)})`,
+                    value: name
+                });
             });
         }
 
@@ -535,7 +545,7 @@ async function objectsListMenu(sysName: string) {
                 message: 'Select Object Type:',
                 choices: [
                     { name: 'Orbit', value: 'Orbit' },
-                    { name: 'Equilibrium', value: 'Equilibrium' },
+                    { name: equilibriumLabel, value: 'Equilibrium' },
                     new inquirer.Separator(),
                     { name: 'Back', value: 'Back' }
                 ],
@@ -719,9 +729,10 @@ async function createOrbit(sysName: string): Promise<NavigationRequest | void> {
 
 async function createEquilibrium(sysName: string): Promise<NavigationRequest | void> {
     const sysConfig = Storage.loadSystem(sysName);
+    const equilibriumLabel = formatEquilibriumLabel(sysConfig.type);
     const { name } = await inquirer.prompt({
         name: 'name',
-        message: 'Name for this Equilibrium Object:',
+        message: `Name for this ${equilibriumLabel} Object:`,
         validate: isValidName
     });
 
@@ -733,7 +744,8 @@ async function createEquilibrium(sysName: string): Promise<NavigationRequest | v
     const defaultParams: EquilibriumSolverParams = {
         initialGuess: sysConfig.varNames.map(() => 0),
         maxSteps: 25,
-        dampingFactor: 1
+        dampingFactor: 1,
+        mapIterations: sysConfig.type === 'map' ? 1 : undefined
     };
 
     const eq: EquilibriumObject = {
@@ -745,7 +757,7 @@ async function createEquilibrium(sysName: string): Promise<NavigationRequest | v
     };
 
     Storage.saveObject(sysName, eq);
-    console.log(chalk.green(`Equilibrium ${name} created.`));
+    console.log(chalk.green(`${equilibriumLabel} ${name} created.`));
 
     return await manageEquilibrium(sysName, eq);
 }
@@ -789,7 +801,9 @@ async function manageBranch(
             branch = Storage.loadBranch(sysName, branch.parentObject, branch.name) as ContinuationObject;
         }
 
-        printHeader(branch.name, `${branch.branchType} continuation`);
+        const sysConfig = Storage.loadSystem(sysName);
+        const branchTypeLabel = formatBranchTypeLabel(sysConfig.type, branch);
+        printHeader(branch.name, `${branchTypeLabel} continuation`);
         printField('Parent object', branch.parentObject);
         printField('Parameter', branch.parameterName);
         printField('Points', branch.data.points.length.toLocaleString());
@@ -897,6 +911,8 @@ async function equilibriumBranchesMenu(
             if (nav) return nav;
         }
 
+        const sysConfig = Storage.loadSystem(sysName);
+        const equilibriumLabel = formatEquilibriumLabel(sysConfig.type);
         const branchNames = Storage.listBranches(sysName, obj.name);
         const branches = branchNames
             .map(name => Storage.loadBranch(sysName, obj.name, name))
@@ -922,7 +938,7 @@ async function equilibriumBranchesMenu(
         const { selection } = await inquirer.prompt({
             type: 'rawlist',
             name: 'selection',
-            message: `Branches (Equilibrium: ${obj.name})`,
+            message: `Branches (${equilibriumLabel}: ${obj.name})`,
             choices,
             pageSize: MENU_PAGE_SIZE
         });
@@ -1830,7 +1846,17 @@ async function manageEquilibrium(
             continue;
         }
 
-        printHeader(obj.name, 'equilibrium');
+        const sysConfig = Storage.loadSystem(sysName);
+        const equilibriumMapIterations = resolveEquilibriumMapIterations(obj);
+        const equilibriumLabel = formatEquilibriumLabel(sysConfig.type, {
+            mapIterations: equilibriumMapIterations
+        });
+        const equilibriumLabelLower = formatEquilibriumLabel(sysConfig.type, {
+            lowercase: true,
+            mapIterations: equilibriumMapIterations
+        });
+
+        printHeader(obj.name, equilibriumLabelLower);
         printField('System', obj.systemName);
         if (obj.parameters) {
             printArray('Parameters', obj.parameters);
@@ -1845,7 +1871,7 @@ async function manageEquilibrium(
             message: 'Object Actions',
             choices: [
                 { name: 'Inspect Data', value: 'Inspect Data' },
-                { name: 'Equilibrium Solver', value: 'Equilibrium Solver' },
+                { name: `${equilibriumLabel} Solver`, value: 'Equilibrium Solver' },
                 { name: 'Branches', value: 'Branches' },
                 new inquirer.Separator(),
                 { name: 'Rename Object', value: 'Rename Object' },
@@ -1904,14 +1930,12 @@ async function manageEquilibrium(
         }
 
         if (action === 'Inspect Data') {
-            const sysConfig = Storage.loadSystem(sysName);
             updateEquilibriumMetadata(sysName, obj, sysConfig);
             await inspectEquilibriumData(sysName, obj, sysConfig);
             continue;
         }
 
         if (action === 'Equilibrium Solver') {
-            const sysConfig = Storage.loadSystem(sysName);
             updateEquilibriumMetadata(sysName, obj, sysConfig);
             const converged = await executeEquilibriumSolver(sysName, obj, sysConfig);
             if (converged) {
@@ -1927,6 +1951,14 @@ async function executeEquilibriumSolver(
     obj: EquilibriumObject,
     sysConfig: SystemConfig
 ): Promise<boolean> {
+    const equilibriumMapIterations = resolveEquilibriumMapIterations(obj);
+    const equilibriumLabel = formatEquilibriumLabel(sysConfig.type, {
+        mapIterations: equilibriumMapIterations
+    });
+    const equilibriumLabelLower = formatEquilibriumLabel(sysConfig.type, {
+        lowercase: true,
+        mapIterations: equilibriumMapIterations
+    });
     const defaultGuessSource =
         obj.lastSolverParams?.initialGuess ??
         obj.solution?.state ??
@@ -1942,8 +1974,12 @@ async function executeEquilibriumSolver(
 
     const defaultMaxSteps = obj.lastSolverParams?.maxSteps ?? 25;
     const defaultDamping = obj.lastSolverParams?.dampingFactor ?? 1;
+    const defaultMapIterations = sysConfig.type === 'map'
+        ? obj.lastSolverParams?.mapIterations ?? 1
+        : 1;
     let maxStepsInput = defaultMaxSteps.toString();
     let dampingInput = defaultDamping.toString();
+    let mapIterationsInput = defaultMapIterations.toString();
 
     const solverEntries: ConfigEntry[] = [
         ...sysConfig.varNames.map((varName, idx) => ({
@@ -1985,6 +2021,30 @@ async function executeEquilibriumSolver(
                 maxStepsInput = value;
             }
         },
+        ...(sysConfig.type === 'map'
+            ? [
+                {
+                    id: 'mapIterations',
+                    label: 'Cycle length',
+                    getDisplay: () => formatUnset(mapIterationsInput),
+                    edit: async () => {
+                        const { value } = await inquirer.prompt({
+                            name: 'value',
+                            message: 'Cycle length:',
+                            default: mapIterationsInput,
+                            validate: (input: string) => {
+                                const parsed = parseInt(input, 10);
+                                if (!Number.isFinite(parsed) || parsed <= 0) {
+                                    return 'Enter a positive integer.';
+                                }
+                                return true;
+                            }
+                        });
+                        mapIterationsInput = value;
+                    }
+                }
+            ]
+            : []),
         {
             id: 'damping',
             label: 'Damping factor',
@@ -2008,7 +2068,10 @@ async function executeEquilibriumSolver(
         }
     ];
 
-    const solverMenuResult = await runConfigMenu('Equilibrium Solver Parameters', solverEntries);
+    const solverMenuResult = await runConfigMenu(
+        `${equilibriumLabel} Solver Parameters`,
+        solverEntries
+    );
     if (solverMenuResult === 'back') {
         return false;
     }
@@ -2022,17 +2085,22 @@ async function executeEquilibriumSolver(
 
     const maxSteps = Math.max(parseIntOrDefault(maxStepsInput, defaultMaxSteps), 1);
     const damping = parseFloatOrDefault(dampingInput, defaultDamping);
+    const mapIterations = sysConfig.type === 'map'
+        ? Math.max(parseIntOrDefault(mapIterationsInput, defaultMapIterations), 1)
+        : undefined;
 
     const solverParams: EquilibriumSolverParams = {
         initialGuess: [...initialGuess],
         maxSteps,
-        dampingFactor: damping > 0 ? damping : defaultDamping
+        dampingFactor: damping > 0 ? damping : defaultDamping,
+        mapIterations
     };
 
     obj.lastSolverParams = {
         initialGuess: [...solverParams.initialGuess],
         maxSteps: solverParams.maxSteps,
-        dampingFactor: solverParams.dampingFactor
+        dampingFactor: solverParams.dampingFactor,
+        mapIterations: solverParams.mapIterations
     };
 
     const runRecord: EquilibriumRunSummary = {
@@ -2041,24 +2109,27 @@ async function executeEquilibriumSolver(
     };
 
     try {
-        console.log(chalk.cyan("Running equilibrium solver..."));
+        console.log(chalk.cyan(`Running ${equilibriumLabelLower} solver...`));
         const bridge = new WasmBridge(sysConfig);
+        const mapIterationsValue =
+            sysConfig.type === 'map' ? solverParams.mapIterations ?? 1 : 1;
         const runner = bridge.createEquilibriumSolverRunner(
             solverParams.initialGuess,
             solverParams.maxSteps,
-            solverParams.dampingFactor
+            solverParams.dampingFactor,
+            mapIterationsValue
         );
-        const result = runEquilibriumSolveWithProgress(runner, 'Equilibrium');
+        const result = runEquilibriumSolveWithProgress(runner, equilibriumLabel);
 
         obj.solution = result;
         obj.parameters = [...sysConfig.params];
         runRecord.success = true;
         runRecord.residual_norm = result.residual_norm;
         runRecord.iterations = result.iterations;
-        console.log(chalk.green("Equilibrium found and saved."));
+        console.log(chalk.green(`${equilibriumLabel} found and saved.`));
     } catch (err) {
         const message = err instanceof Error ? err.message : `${err}`;
-        console.error(chalk.red("Equilibrium solve failed:"), message);
+        console.error(chalk.red(`${equilibriumLabel} solve failed:`), message);
     } finally {
         obj.lastRun = runRecord;
         Storage.saveObject(sysName, obj);
@@ -2078,11 +2149,19 @@ async function inspectEquilibriumData(
 }
 
 function renderEquilibriumData(obj: EquilibriumObject, sysConfig: SystemConfig) {
+    const equilibriumMapIterations = resolveEquilibriumMapIterations(obj);
+    const equilibriumLabel = formatEquilibriumLabel(sysConfig.type, {
+        mapIterations: equilibriumMapIterations
+    });
+    const equilibriumLabelLower = formatEquilibriumLabel(sysConfig.type, {
+        lowercase: true,
+        mapIterations: equilibriumMapIterations
+    });
     console.log('');
-    console.log(chalk.yellow('Equilibrium Summary'));
+    console.log(chalk.yellow(`${equilibriumLabel} Summary`));
 
     if (!obj.solution) {
-        console.log('  No stored equilibrium solution yet.');
+        console.log(`  No stored ${equilibriumLabelLower} solution yet.`);
     } else {
         console.log(chalk.cyan('  Coordinates:'));
         sysConfig.varNames.forEach((name, idx) => {
@@ -2138,6 +2217,10 @@ function renderEquilibriumData(obj: EquilibriumObject, sysConfig: SystemConfig) 
         console.log('');
         console.log(chalk.yellow('Cached Solver Parameters'));
         console.log(`  Steps   : ${obj.lastSolverParams.maxSteps}`);
+        if (sysConfig.type === 'map') {
+            const iterations = obj.lastSolverParams.mapIterations ?? 1;
+            console.log(`  Cycle length: ${iterations}`);
+        }
         console.log(`  Damping : ${obj.lastSolverParams.dampingFactor}`);
         const guessPreview = obj.lastSolverParams.initialGuess
             .map((val, idx) => `${sysConfig.varNames[idx] || `x${idx + 1}`}:${val.toPrecision(4)}`)
@@ -2153,6 +2236,10 @@ function formatComplexValue(value: ComplexValue): string {
     const imAbs = Math.abs(value.im).toFixed(4);
     const sign = value.im >= 0 ? '+' : '-';
     return `${re} ${sign} ${imAbs}i`;
+}
+
+function resolveEquilibriumMapIterations(obj: EquilibriumObject): number | undefined {
+    return obj.lastSolverParams?.mapIterations ?? obj.solution?.cycle_points?.length;
 }
 
 function updateEquilibriumMetadata(

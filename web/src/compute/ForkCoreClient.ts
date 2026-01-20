@@ -83,6 +83,7 @@ export type SolveEquilibriumRequest = {
   initialGuess: number[]
   maxSteps: number
   dampingFactor: number
+  mapIterations?: number
 }
 
 export type SolveEquilibriumResult = EquilibriumSolution
@@ -91,6 +92,7 @@ export type EquilibriumContinuationRequest = {
   system: SystemConfig
   equilibriumState: number[]
   parameterName: string
+  mapIterations?: number
   settings: ContinuationSettings
   forward: boolean
 }
@@ -109,6 +111,7 @@ export type ContinuationExtensionRequest = {
   system: SystemConfig
   branchData: ContinuationBranchData | ContinuationBranchDataWire
   parameterName: string
+  mapIterations?: number
   settings: ContinuationSettings
   forward: boolean
 }
@@ -140,6 +143,7 @@ export type FoldCurveContinuationRequest = {
   param1Value: number
   param2Name: string
   param2Value: number
+  mapIterations?: number
   settings: ContinuationSettings
   forward: boolean
 }
@@ -152,6 +156,7 @@ export type HopfCurveContinuationRequest = {
   param1Value: number
   param2Name: string
   param2Value: number
+  mapIterations?: number
   settings: ContinuationSettings
   forward: boolean
 }

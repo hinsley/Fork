@@ -12,6 +12,7 @@ import type { CSSProperties } from 'react'
 import type { System, TreeNode } from '../system/types'
 import { DEFAULT_RENDER } from '../system/model'
 import { hasCustomObjectParams } from '../system/parameters'
+import { formatEquilibriumLabel } from '../system/labels'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
 import { clampMenuX } from './contextMenu'
 
@@ -32,9 +33,28 @@ type ObjectsTreeProps = {
   onDeleteNode: (id: string) => void
 }
 
-function getNodeLabel(node: TreeNode) {
+function getNodeLabel(node: TreeNode, system: System) {
   if (node.kind === 'branch') return `Branch: ${node.name}`
-  if (node.objectType === 'equilibrium') return `${node.name} (equilibrium)`
+  if (node.objectType === 'equilibrium') {
+    const object = system.objects[node.id]
+    const mapIterations =
+      system.config.type === 'map' && object?.type === 'equilibrium'
+        ? object.lastSolverParams?.mapIterations ??
+          object.solution?.cycle_points?.length
+        : undefined
+    const cycleIterations =
+      typeof mapIterations === 'number' && Number.isFinite(mapIterations)
+        ? Math.max(1, Math.trunc(mapIterations))
+        : null
+    const equilibriumLabel =
+      system.config.type === 'map' && cycleIterations === 1
+        ? 'fixed point'
+        : formatEquilibriumLabel(system.config.type, {
+            lowercase: true,
+            mapIterations,
+          })
+    return `${node.name} (${equilibriumLabel})`
+  }
   if (node.objectType === 'limit_cycle') return `${node.name} (limit cycle)`
   if (node.objectType === 'orbit') return `${node.name} (orbit)`
   if (node.kind === 'scene') return `${node.name} (scene)`
@@ -73,6 +93,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     } | null>(null)
     const createMenuRef = useRef<HTMLDivElement | null>(null)
     const nodeContextMenuRef = useRef<HTMLDivElement | null>(null)
+    const equilibriumLabel = formatEquilibriumLabel(system.config.type)
 
     const rootNodes = useMemo(
       () => system.rootIds.filter((id) => system.nodes[id]?.kind === 'object'),
@@ -268,7 +289,9 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
               />
             ) : (
               <span className="tree-node__label-content">
-                <span className="tree-node__label-text">{getNodeLabel(node)}</span>
+                <span className="tree-node__label-text">
+                  {getNodeLabel(node, system)}
+                </span>
                 {hasCustomObjectParams(system.config, customParameters) ? (
                   <span
                     className="tree-node__tag"
@@ -342,7 +365,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
               }}
               data-testid="create-equilibrium"
             >
-              Equilibrium
+              {equilibriumLabel}
             </button>
           </div>
         ) : null}
@@ -372,7 +395,12 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
                 const node = system.nodes[nodeId]
                 setNodeContextMenu(null)
                 if (!node) return
-                if (confirmDelete({ name: node.name, kind: getDeleteKindLabel(node) })) {
+                if (
+                  confirmDelete({
+                    name: node.name,
+                    kind: getDeleteKindLabel(node, system),
+                  })
+                ) {
                   onDeleteNode(nodeId)
                 }
               }}

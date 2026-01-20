@@ -831,10 +831,18 @@ function collectMap1DRange(system: System): [number, number] | null {
       continue
     }
     if (object.type === 'equilibrium') {
-      const value = object.solution?.state?.[0]
-      if (typeof value !== 'number' || !Number.isFinite(value)) continue
-      min = Math.min(min, value)
-      max = Math.max(max, value)
+      const solution = object.solution
+      if (!solution) continue
+      const cyclePoints =
+        solution.cycle_points && solution.cycle_points.length > 0
+          ? solution.cycle_points
+          : [solution.state]
+      for (const point of cyclePoints) {
+        const value = point?.[0]
+        if (typeof value !== 'number' || !Number.isFinite(value)) continue
+        min = Math.min(min, value)
+        max = Math.max(max, value)
+      }
       continue
     }
     if (object.type === 'limit_cycle') {
@@ -1291,11 +1299,27 @@ function buildSceneTraces(
       const dimension = state.length
       const highlight = nodeId === selectedNodeId
       const size = highlight ? node.render.pointSize + 2 : node.render.pointSize
+      const cycleStates =
+        isMap && object.solution?.cycle_points?.length
+          ? object.solution.cycle_points
+          : [state]
+      const hasCyclePoints = isMap && cycleStates.length > 1
+      const representativeState = cycleStates[0] ?? state
+      const cycleTailStates = hasCyclePoints ? cycleStates.slice(1) : []
       if (canPlotEigenvectors && dimension >= 2) {
         const eigenX = dimension >= 3 ? state[axisX] : state[0]
         const eigenY = dimension >= 3 ? state[axisY] : state[1]
         const eigenZ = dimension >= 3 ? state[axisZ] : 0
         updateSceneBounds(sceneBounds, eigenX, eigenY, eigenZ)
+        if (hasCyclePoints) {
+          const axisIndices = dimension >= 3 ? [axisX, axisY, axisZ] : [0, 1, 0]
+          for (const cycleState of cycleTailStates) {
+            const valueX = cycleState[axisIndices[0]]
+            const valueY = cycleState[axisIndices[1]]
+            const valueZ = dimension >= 3 ? cycleState[axisIndices[2]] : 0
+            updateSceneBounds(sceneBounds, valueX, valueY, valueZ)
+          }
+        }
         const eigenpairs = object.solution.eigenpairs ?? []
         const eigenspaceIndices = resolveEquilibriumEigenspaceIndices(eigenpairs)
         const eigenvectorRender = resolveEquilibriumEigenvectorRender(
@@ -1323,48 +1347,166 @@ function buildSceneTraces(
         }
       }
       if (dimension >= 3) {
-        const stateX = state[axisX]
-        const stateY = state[axisY]
-        const stateZ = state[axisZ]
-        traces.push({
-          type: 'scatter3d',
-          mode: 'markers',
-          name: object.name,
-          uid: nodeId,
-          x: [stateX],
-          y: [stateY],
-          z: [stateZ],
-          marker: {
-            color: node.render.color,
-            size,
-          },
-        })
+        const repX = representativeState[axisX]
+        const repY = representativeState[axisY]
+        const repZ = representativeState[axisZ]
+        if (hasCyclePoints) {
+          const cycleX: number[] = []
+          const cycleY: number[] = []
+          const cycleZ: number[] = []
+          for (const cycleState of cycleTailStates) {
+            cycleX.push(cycleState[axisX])
+            cycleY.push(cycleState[axisY])
+            cycleZ.push(cycleState[axisZ])
+          }
+          if (cycleX.length > 0) {
+            traces.push({
+              type: 'scatter3d',
+              mode: 'markers',
+              name: object.name,
+              uid: nodeId,
+              x: cycleX,
+              y: cycleY,
+              z: cycleZ,
+              marker: {
+                color: node.render.color,
+                size,
+              },
+            })
+          }
+          traces.push({
+            type: 'scatter3d',
+            mode: 'markers',
+            name: `${object.name} representative`,
+            uid: nodeId,
+            x: [repX],
+            y: [repY],
+            z: [repZ],
+            marker: {
+              color: node.render.color,
+              size: size + 1,
+              symbol: 'diamond',
+            },
+            showlegend: false,
+          })
+        } else {
+          traces.push({
+            type: 'scatter3d',
+            mode: 'markers',
+            name: object.name,
+            uid: nodeId,
+            x: [repX],
+            y: [repY],
+            z: [repZ],
+            marker: {
+              color: node.render.color,
+              size,
+            },
+          })
+        }
       } else if (dimension >= 2) {
-        traces.push({
-          type: 'scatter',
-          mode: 'markers',
-          name: object.name,
-          uid: nodeId,
-          x: [state[0]],
-          y: [state[1]],
-          marker: {
-            color: node.render.color,
-            size,
-          },
-        })
+        const repX = representativeState[0]
+        const repY = representativeState[1]
+        if (hasCyclePoints) {
+          const cycleX: number[] = []
+          const cycleY: number[] = []
+          for (const cycleState of cycleTailStates) {
+            cycleX.push(cycleState[0])
+            cycleY.push(cycleState[1])
+          }
+          if (cycleX.length > 0) {
+            traces.push({
+              type: 'scatter',
+              mode: 'markers',
+              name: object.name,
+              uid: nodeId,
+              x: cycleX,
+              y: cycleY,
+              marker: {
+                color: node.render.color,
+                size,
+              },
+            })
+          }
+          traces.push({
+            type: 'scatter',
+            mode: 'markers',
+            name: `${object.name} representative`,
+            uid: nodeId,
+            x: [repX],
+            y: [repY],
+            marker: {
+              color: node.render.color,
+              size: size + 1,
+              symbol: 'diamond',
+            },
+            showlegend: false,
+          })
+        } else {
+          traces.push({
+            type: 'scatter',
+            mode: 'markers',
+            name: object.name,
+            uid: nodeId,
+            x: [repX],
+            y: [repY],
+            marker: {
+              color: node.render.color,
+              size,
+            },
+          })
+        }
       } else if (isMap1D) {
-        traces.push({
-          type: 'scatter',
-          mode: 'markers',
-          name: object.name,
-          uid: nodeId,
-          x: [state[0]],
-          y: [state[0]],
-          marker: {
-            color: node.render.color,
-            size,
-          },
-        })
+        const repValue = representativeState[0]
+        if (hasCyclePoints) {
+          const diagonal: number[] = []
+          for (const cycleState of cycleTailStates) {
+            const value = cycleState[0]
+            if (typeof value !== 'number' || !Number.isFinite(value)) continue
+            diagonal.push(value)
+          }
+          if (diagonal.length > 0) {
+            traces.push({
+              type: 'scatter',
+              mode: 'markers',
+              name: object.name,
+              uid: nodeId,
+              x: diagonal,
+              y: diagonal,
+              marker: {
+                color: node.render.color,
+                size,
+              },
+            })
+          }
+          traces.push({
+            type: 'scatter',
+            mode: 'markers',
+            name: `${object.name} representative`,
+            uid: nodeId,
+            x: [repValue],
+            y: [repValue],
+            marker: {
+              color: node.render.color,
+              size: size + 1,
+              symbol: 'diamond',
+            },
+            showlegend: false,
+          })
+        } else {
+          traces.push({
+            type: 'scatter',
+            mode: 'markers',
+            name: object.name,
+            uid: nodeId,
+            x: [repValue],
+            y: [repValue],
+            marker: {
+              color: node.render.color,
+              size,
+            },
+          })
+        }
       } else if (isTimeSeries && timeRange && timeRange[0] !== timeRange[1]) {
         pendingEquilibria.push({
           nodeId,
@@ -1719,6 +1861,167 @@ function buildDiagramTraces(
   }
 
   let hasData = false
+  const appendMultiLineMarkers = (
+    branchId: string,
+    branch: ContinuationObject,
+    indices: number[],
+    pointIndices: number[],
+    lines: Array<{ x: Array<number | null>; y: Array<number | null> }>,
+    markerSize: number,
+    color: string
+  ) => {
+    if (lines.length === 0) return
+
+    const positionByIndex = new Map<number, number>()
+    for (let position = 0; position < pointIndices.length; position += 1) {
+      positionByIndex.set(pointIndices[position], position)
+    }
+
+    const startX: number[] = []
+    const startY: number[] = []
+    const startIndices: number[] = []
+    const endX: number[] = []
+    const endY: number[] = []
+    const endIndices: number[] = []
+
+    for (const line of lines) {
+      let firstIndex: number | null = null
+      let lastIndex: number | null = null
+      for (let i = 0; i < line.x.length; i += 1) {
+        const xValue = line.x[i]
+        const yValue = line.y[i]
+        if (
+          typeof xValue === 'number' &&
+          Number.isFinite(xValue) &&
+          typeof yValue === 'number' &&
+          Number.isFinite(yValue)
+        ) {
+          firstIndex = i
+          break
+        }
+      }
+      for (let i = line.x.length - 1; i >= 0; i -= 1) {
+        const xValue = line.x[i]
+        const yValue = line.y[i]
+        if (
+          typeof xValue === 'number' &&
+          Number.isFinite(xValue) &&
+          typeof yValue === 'number' &&
+          Number.isFinite(yValue)
+        ) {
+          lastIndex = i
+          break
+        }
+      }
+      if (firstIndex !== null) {
+        const xValue = line.x[firstIndex]
+        const yValue = line.y[firstIndex]
+        if (typeof xValue === 'number' && typeof yValue === 'number') {
+          startX.push(xValue)
+          startY.push(yValue)
+          startIndices.push(pointIndices[firstIndex] ?? firstIndex)
+        }
+      }
+      if (lastIndex !== null) {
+        const xValue = line.x[lastIndex]
+        const yValue = line.y[lastIndex]
+        if (typeof xValue === 'number' && typeof yValue === 'number') {
+          endX.push(xValue)
+          endY.push(yValue)
+          endIndices.push(pointIndices[lastIndex] ?? lastIndex)
+        }
+      }
+    }
+
+    if (startX.length > 0) {
+      traces.push({
+        type: 'scatter',
+        mode: 'markers',
+        name: `${branch.name} start`,
+        uid: branchId,
+        x: startX,
+        y: startY,
+        customdata: startIndices,
+        marker: {
+          color,
+          size: markerSize,
+          symbol: 'triangle-up',
+        },
+        showlegend: false,
+        hovertemplate: 'Start<extra></extra>',
+      })
+    }
+
+    if (endX.length > 0) {
+      traces.push({
+        type: 'scatter',
+        mode: 'markers',
+        name: `${branch.name} end`,
+        uid: branchId,
+        x: endX,
+        y: endY,
+        customdata: endIndices,
+        marker: {
+          color,
+          size: markerSize,
+          symbol: 'triangle-down',
+        },
+        showlegend: false,
+        hovertemplate: 'End<extra></extra>',
+      })
+    }
+
+    if (branch.data.bifurcations && branch.data.bifurcations.length > 0) {
+      const bx: number[] = []
+      const by: number[] = []
+      const labels: string[] = []
+      const bifIndices: number[] = []
+      for (const bifIndex of branch.data.bifurcations) {
+        const point = branch.data.points[bifIndex]
+        const position = positionByIndex.get(bifIndex)
+        if (!point || position === undefined) continue
+        const logicalIndex = indices[bifIndex]
+        const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : bifIndex
+        const label = formatBifurcationLabel(displayIndex, point.stability)
+        for (const line of lines) {
+          const xValue = line.x[position]
+          const yValue = line.y[position]
+          if (
+            typeof xValue !== 'number' ||
+            !Number.isFinite(xValue) ||
+            typeof yValue !== 'number' ||
+            !Number.isFinite(yValue)
+          ) {
+            continue
+          }
+          bx.push(xValue)
+          by.push(yValue)
+          labels.push(label)
+          bifIndices.push(bifIndex)
+        }
+      }
+      if (bx.length > 0) {
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: `${branch.name} bifurcations`,
+          uid: branchId,
+          x: bx,
+          y: by,
+          customdata: bifIndices,
+          marker: {
+            color,
+            size: markerSize + 2,
+            symbol: 'diamond',
+          },
+          text: labels,
+          showlegend: false,
+          hovertemplate: '%{text}<extra></extra>',
+        })
+      }
+    }
+  }
+
   for (const branchId of branchIds) {
     const branch = system.branches[branchId]
     const node = system.nodes[branchId]
@@ -1733,6 +2036,27 @@ function buildDiagramTraces(
     const pointIndices: number[] = []
     const hasMixedAxes = xAxis.kind !== yAxis.kind
     const isLimitCycleBranch = LIMIT_CYCLE_BRANCH_TYPES.has(branch.branchType)
+    const isStateAxisPair = xAxis.kind === 'state' && yAxis.kind === 'state'
+    const isStateParamPair =
+      (xAxis.kind === 'state' && yAxis.kind === 'parameter') ||
+      (xAxis.kind === 'parameter' && yAxis.kind === 'state')
+    const mapIterations = branch.mapIterations ?? 1
+    const useCyclePoints =
+      isStateAxisPair &&
+      system.config.type === 'map' &&
+      branch.branchType === 'equilibrium' &&
+      mapIterations > 1
+    const useMixedCyclePoints =
+      isStateParamPair &&
+      system.config.type === 'map' &&
+      branch.branchType === 'equilibrium' &&
+      mapIterations > 1
+    const stateAxisIndices = isStateAxisPair
+      ? [
+          system.config.varNames.indexOf(xAxis.name),
+          system.config.varNames.indexOf(yAxis.name),
+        ]
+      : null
 
     if (hasMixedAxes && isLimitCycleBranch) {
       const parameterAxis = xAxis.kind === 'parameter' ? xAxis : yAxis
@@ -1741,10 +2065,6 @@ function buildDiagramTraces(
       const yMin: number[] = []
       const xMax: number[] = []
       const yMax: number[] = []
-      const envelopePoints = new Map<
-        number,
-        { xMin: number; yMin: number; xMax: number; yMax: number }
-      >()
 
       for (const idx of order) {
         const point = branch.data.points[idx]
@@ -1770,7 +2090,6 @@ function buildDiagramTraces(
         xMax.push(values.xMax)
         yMax.push(values.yMax)
         pointIndices.push(idx)
-        envelopePoints.set(idx, values)
       }
 
       if (xMax.length === 0 || yMax.length === 0) continue
@@ -1812,13 +2131,221 @@ function buildDiagramTraces(
         showlegend: false,
       })
 
+      appendMultiLineMarkers(
+        branchId,
+        branch,
+        indices,
+        pointIndices,
+        [
+          { x: xMax, y: yMax },
+          { x: xMin, y: yMin },
+        ],
+        markerSize,
+        node.render.color
+      )
+      continue
+    }
+
+    if (useMixedCyclePoints) {
+      const stateAxis = xAxis.kind === 'state' ? xAxis : yAxis
+      const paramAxis = xAxis.kind === 'parameter' ? xAxis : yAxis
+      const stateIndex = system.config.varNames.indexOf(stateAxis.name)
+      if (stateIndex < 0) continue
+
+      const cycleLines = new Map<number, { x: Array<number | null>; y: Array<number | null> }>()
+      for (const idx of order) {
+        const point = branch.data.points[idx]
+        if (!point) continue
+        const paramValue = resolveAxisValue(system, branch, point, paramAxis, branchParams)
+        if (paramValue === null || !Number.isFinite(paramValue)) continue
+        const cycleStates =
+          point.cycle_points && point.cycle_points.length > 0
+            ? point.cycle_points
+            : [point.state]
+        const representative = cycleStates[0] ?? point.state
+        const repStateValue = representative[stateIndex]
+        if (!Number.isFinite(repStateValue)) continue
+        const repX = xAxis.kind === 'parameter' ? paramValue : repStateValue
+        const repY = yAxis.kind === 'parameter' ? paramValue : repStateValue
+        if (!Number.isFinite(repX) || !Number.isFinite(repY)) continue
+        const pointPosition = x.length
+        for (const line of cycleLines.values()) {
+          line.x.push(null)
+          line.y.push(null)
+        }
+
+        for (let cycleIndex = 1; cycleIndex < cycleStates.length; cycleIndex += 1) {
+          const cycleState = cycleStates[cycleIndex]
+          const cycleStateValue = cycleState[stateIndex]
+          if (!Number.isFinite(cycleStateValue)) continue
+          const valueX = xAxis.kind === 'parameter' ? paramValue : cycleStateValue
+          const valueY = yAxis.kind === 'parameter' ? paramValue : cycleStateValue
+          if (!Number.isFinite(valueX) || !Number.isFinite(valueY)) continue
+          const line = cycleLines.get(cycleIndex)
+          if (line) {
+            line.x[pointPosition] = valueX
+            line.y[pointPosition] = valueY
+          } else {
+            const seed = {
+              x: Array(pointPosition).fill(null),
+              y: Array(pointPosition).fill(null),
+            }
+            seed.x.push(valueX)
+            seed.y.push(valueY)
+            cycleLines.set(cycleIndex, seed)
+          }
+        }
+
+        x.push(repX)
+        y.push(repY)
+        pointIndices.push(idx)
+      }
+
+      if (x.length === 0 || y.length === 0) continue
+      hasData = true
+
+      const highlight = branchId === selectedNodeId
+      const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
+      const markerSize = highlight ? node.render.pointSize + 2 : node.render.pointSize
+      const lineDash = resolveLineDash(node.render.lineStyle)
+
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        name: branch.name,
+        uid: branchId,
+        x,
+        y,
+        customdata: pointIndices,
+        line: {
+          color: node.render.color,
+          width: lineWidth,
+          dash: lineDash,
+        },
+      })
+
+      for (const [cycleIndex, line] of cycleLines.entries()) {
+        const hasValues = line.x.some(
+          (value) => typeof value === 'number' && Number.isFinite(value)
+        )
+        if (!hasValues) continue
+        traces.push({
+          type: 'scatter',
+          mode: 'lines',
+          name: `${branch.name} cycle ${cycleIndex + 1}`,
+          uid: branchId,
+          x: line.x,
+          y: line.y,
+          customdata: pointIndices,
+          line: {
+            color: node.render.color,
+            width: lineWidth,
+            dash: lineDash,
+          },
+          showlegend: false,
+          connectgaps: false,
+        })
+      }
+
+      appendMultiLineMarkers(
+        branchId,
+        branch,
+        indices,
+        pointIndices,
+        [{ x, y }, ...Array.from(cycleLines.values())],
+        markerSize,
+        node.render.color
+      )
+      continue
+    }
+
+    if (
+      useCyclePoints &&
+      stateAxisIndices &&
+      stateAxisIndices[0] >= 0 &&
+      stateAxisIndices[1] >= 0
+    ) {
+      const axisX = stateAxisIndices[0]
+      const axisY = stateAxisIndices[1]
+      const cycleX: number[] = []
+      const cycleY: number[] = []
+      const cycleIndices: number[] = []
+      const repPoints = new Map<number, { x: number; y: number }>()
+
+      for (const idx of order) {
+        const point = branch.data.points[idx]
+        if (!point) continue
+        const cycleStates =
+          point.cycle_points && point.cycle_points.length > 0
+            ? point.cycle_points
+            : [point.state]
+        const representative = cycleStates[0] ?? point.state
+        const repX = representative[axisX]
+        const repY = representative[axisY]
+        if (!Number.isFinite(repX) || !Number.isFinite(repY)) continue
+        x.push(repX)
+        y.push(repY)
+        pointIndices.push(idx)
+        repPoints.set(idx, { x: repX, y: repY })
+
+        for (let cycleIndex = 1; cycleIndex < cycleStates.length; cycleIndex += 1) {
+          const cycleState = cycleStates[cycleIndex]
+          const valueX = cycleState[axisX]
+          const valueY = cycleState[axisY]
+          if (!Number.isFinite(valueX) || !Number.isFinite(valueY)) continue
+          cycleX.push(valueX)
+          cycleY.push(valueY)
+          cycleIndices.push(idx)
+        }
+      }
+
+      if (x.length === 0 || y.length === 0) continue
+      hasData = true
+
+      const highlight = branchId === selectedNodeId
+      const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
+      const markerSize = highlight ? node.render.pointSize + 2 : node.render.pointSize
+      const lineDash = resolveLineDash(node.render.lineStyle)
+
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        name: branch.name,
+        uid: branchId,
+        x,
+        y,
+        customdata: pointIndices,
+        line: {
+          color: node.render.color,
+          width: lineWidth,
+          dash: lineDash,
+        },
+      })
+
+      if (cycleX.length > 0) {
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: `${branch.name} cycle`,
+          uid: branchId,
+          x: cycleX,
+          y: cycleY,
+          customdata: cycleIndices,
+          marker: {
+            color: node.render.color,
+            size: markerSize,
+          },
+          showlegend: false,
+        })
+      }
+
       traces.push({
         type: 'scatter',
         mode: 'markers',
         name: `${branch.name} start`,
         uid: branchId,
-        x: [xMax[0]],
-        y: [yMax[0]],
+        x: [x[0]],
+        y: [y[0]],
         customdata: [pointIndices[0]],
         marker: {
           color: node.render.color,
@@ -1834,8 +2361,8 @@ function buildDiagramTraces(
         mode: 'markers',
         name: `${branch.name} end`,
         uid: branchId,
-        x: [xMax[xMax.length - 1]],
-        y: [yMax[yMax.length - 1]],
+        x: [x[x.length - 1]],
+        y: [y[y.length - 1]],
         customdata: [pointIndices[pointIndices.length - 1]],
         marker: {
           color: node.render.color,
@@ -1853,10 +2380,12 @@ function buildDiagramTraces(
         const bifIndices: number[] = []
         for (const bifIndex of branch.data.bifurcations) {
           const point = branch.data.points[bifIndex]
-          const envelope = envelopePoints.get(bifIndex)
-          if (!point || !envelope) continue
-          bx.push(envelope.xMax)
-          by.push(envelope.yMax)
+          const repPoint = repPoints.get(bifIndex)
+          if (!point || !repPoint) continue
+          const { x: xValue, y: yValue } = repPoint
+          if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) continue
+          bx.push(xValue)
+          by.push(yValue)
           bifIndices.push(bifIndex)
           const logicalIndex = indices[bifIndex]
           const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : bifIndex
@@ -2579,6 +3108,7 @@ export function ViewportPanel({
     id: string
   } | null>(null)
   const mapRequestKeyRef = useRef<string | null>(null)
+  const mapKeyRef = useRef<string | null>(null)
   const plotlyBackground = resolvePlotlyBackgroundColor(theme)
 
   const viewports = useMemo(() => {
@@ -2630,15 +3160,24 @@ export function ViewportPanel({
   const mapKey = mapConfigJson && mapRangeKey ? `${mapConfigJson}|${mapRangeKey}` : null
   const activeMapFunction =
     mapFunctionSamples && mapFunctionSamples.key === mapKey ? mapFunctionSamples : null
+  const hasMapSamples = Boolean(activeMapFunction)
 
   useEffect(() => {
+    mapKeyRef.current = mapKey
+  }, [mapKey])
+
+  useEffect(() => {
+    let disposed = false
     if (!isMap1D || !mapKey || !mapConfig || !mapRangeValues || !onSampleMap1DFunction) {
       mapRequestKeyRef.current = null
       return
     }
+    if (hasMapSamples) return
     if (mapRequestKeyRef.current === mapKey) return
 
-    mapRequestKeyRef.current = mapKey
+    const requestKey = mapKey
+    mapRequestKeyRef.current = requestKey
+    mapKeyRef.current = requestKey
     const controller = new AbortController()
     const request: SampleMap1DFunctionRequest = {
       system: mapConfig,
@@ -2649,24 +3188,43 @@ export function ViewportPanel({
 
     onSampleMap1DFunction(request, { signal: controller.signal })
       .then((result) => {
-        if (controller.signal.aborted || mapRequestKeyRef.current !== mapKey) return
+        if (disposed) return
+        if (mapKeyRef.current !== requestKey) return
         setMapFunctionSamples({
-          key: mapKey,
+          key: requestKey,
           range: mapRangeValues,
           x: result.x,
           y: result.y,
         })
       })
       .catch((err) => {
-        if (controller.signal.aborted) return
         if (err instanceof Error && err.name === 'AbortError') return
+        if (disposed) return
+        if (mapKeyRef.current !== requestKey) return
         setMapFunctionSamples(null)
+      })
+      .finally(() => {
+        if (mapRequestKeyRef.current === requestKey) {
+          mapRequestKeyRef.current = null
+        }
       })
 
     return () => {
+      disposed = true
       controller.abort()
+      if (mapRequestKeyRef.current === requestKey) {
+        mapRequestKeyRef.current = null
+      }
     }
-  }, [isMap1D, mapConfig, mapKey, mapRangeValues, onSampleMap1DFunction])
+  }, [
+    hasMapSamples,
+    isMap1D,
+    mapConfig,
+    mapKey,
+    mapRangeValues,
+    onSampleMap1DFunction,
+    system,
+  ])
 
   useEffect(() => {
     if (!createMenu && !nodeContextMenu) return
@@ -2914,7 +3472,12 @@ export function ViewportPanel({
               const node = system.nodes[nodeId]
               setNodeContextMenu(null)
               if (!node) return
-              if (confirmDelete({ name: node.name, kind: getDeleteKindLabel(node) })) {
+              if (
+                confirmDelete({
+                  name: node.name,
+                  kind: getDeleteKindLabel(node, system),
+                })
+              ) {
                 onDeleteViewport(nodeId)
               }
             }}

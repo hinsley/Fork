@@ -11,7 +11,7 @@ use fork_core::continuation::{
     BranchType, Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType, Codim2BifurcationType,
     ContinuationBranch, ContinuationSettings, LimitCycleSetup, StepResult,
     FoldCurveProblem, HopfCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
-    CollocationConfig,
+    CollocationConfig, OrbitTimeMode,
 };
 use fork_core::continuation::codim1_curves::estimate_hopf_kappa_from_jacobian;
 use fork_core::equilibrium::{compute_jacobian, SystemKind};
@@ -27,6 +27,7 @@ impl WasmSystem {
         &mut self,
         equilibrium_state: Vec<f64>,
         parameter_name: &str,
+        map_iterations: u32,
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
@@ -35,7 +36,7 @@ impl WasmSystem {
 
         let kind = match self.system_type {
             SystemType::Flow => SystemKind::Flow,
-            SystemType::Map => SystemKind::Map,
+            SystemType::Map => SystemKind::Map { iterations: map_iterations as usize },
         };
 
         let param_index = *self.system.param_map.get(parameter_name)
@@ -58,6 +59,7 @@ impl WasmSystem {
         &mut self,
         branch_val: JsValue,
         parameter_name: &str,
+        map_iterations: u32,
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
@@ -92,7 +94,7 @@ impl WasmSystem {
             BranchType::Equilibrium => {
                 let kind = match self.system_type {
                     SystemType::Flow => SystemKind::Flow,
-                    SystemType::Map => SystemKind::Map,
+                    SystemType::Map => SystemKind::Map { iterations: map_iterations as usize },
                 };
                 core_extend_branch(
                     &mut self.system,
@@ -153,11 +155,12 @@ impl WasmSystem {
         &mut self,
         state: Vec<f64>,
         parameter_name: &str,
+        map_iterations: u32,
         param_value: f64,
     ) -> Result<JsValue, JsValue> {
         let kind = match self.system_type {
             SystemType::Flow => SystemKind::Flow,
-            SystemType::Map => SystemKind::Map,
+            SystemType::Map => SystemKind::Map { iterations: map_iterations as usize },
         };
 
         let param_index = *self
@@ -248,6 +251,11 @@ impl WasmSystem {
             .map(|i| orbit_states_flat[i * dim..(i + 1) * dim].to_vec())
             .collect();
 
+        let time_mode = match self.system_type {
+            SystemType::Flow => OrbitTimeMode::Continuous,
+            SystemType::Map => OrbitTimeMode::Discrete,
+        };
+
         let setup = limit_cycle_setup_from_orbit(
             &orbit_times,
             &orbit_states,
@@ -255,6 +263,7 @@ impl WasmSystem {
             ntst as usize,
             ncol as usize,
             tolerance,
+            time_mode,
         )
         .map_err(|e| {
             JsValue::from_str(&format!(
@@ -353,6 +362,7 @@ impl WasmSystem {
         param1_value: f64,
         param2_name: &str,
         param2_value: f64,
+        map_iterations: u32,
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
@@ -361,7 +371,7 @@ impl WasmSystem {
 
         let kind = match self.system_type {
             SystemType::Flow => SystemKind::Flow,
-            SystemType::Map => SystemKind::Map,
+            SystemType::Map => SystemKind::Map { iterations: map_iterations as usize },
         };
 
         let param1_index = *self.system.param_map.get(param1_name)
@@ -400,6 +410,7 @@ impl WasmSystem {
             param_value: param1_value,
             stability: fork_core::continuation::BifurcationType::Fold,
             eigenvalues: vec![],
+            cycle_points: None,
         };
 
         // Run continuation
@@ -469,6 +480,7 @@ impl WasmSystem {
         param1_value: f64,
         param2_name: &str,
         param2_value: f64,
+        map_iterations: u32,
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
@@ -477,7 +489,7 @@ impl WasmSystem {
 
         let kind = match self.system_type {
             SystemType::Flow => SystemKind::Flow,
-            SystemType::Map => SystemKind::Map,
+            SystemType::Map => SystemKind::Map { iterations: map_iterations as usize },
         };
 
         let param1_index = *self.system.param_map.get(param1_name)
@@ -530,6 +542,7 @@ impl WasmSystem {
             param_value: param1_value,
             stability: fork_core::continuation::BifurcationType::Hopf,
             eigenvalues: vec![],
+            cycle_points: None,
         };
 
         // Run continuation
@@ -670,6 +683,7 @@ impl WasmSystem {
             param_value: param1_value,
             stability: fork_core::continuation::BifurcationType::CycleFold,
             eigenvalues: vec![],
+            cycle_points: None,
         };
 
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
@@ -798,6 +812,7 @@ impl WasmSystem {
             param_value: param1_value,
             stability: fork_core::continuation::BifurcationType::PeriodDoubling,
             eigenvalues: vec![],
+            cycle_points: None,
         };
 
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
@@ -921,6 +936,7 @@ impl WasmSystem {
             param_value: param1_value,
             stability: fork_core::continuation::BifurcationType::NeimarkSacker,
             eigenvalues: vec![],
+            cycle_points: None,
         };
 
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
@@ -985,6 +1001,7 @@ impl WasmSystem {
         &mut self,
         equilibrium_state: Vec<f64>,
         parameter_name: &str,
+        map_iterations: u32,
         settings_val: JsValue,
         forward: bool,
         _batch_size: u32,
@@ -998,7 +1015,7 @@ impl WasmSystem {
 
         let kind = match self.system_type {
             SystemType::Flow => SystemKind::Flow,
-            SystemType::Map => SystemKind::Map,
+            SystemType::Map => SystemKind::Map { iterations: map_iterations as usize },
         };
 
         let param_index = *self.system.param_map.get(parameter_name)

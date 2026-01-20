@@ -519,7 +519,7 @@ impl<'a> ContinuationProblem for HopfCurveProblem<'a> {
         self.with_params(p1, p2, |system| {
             match kind {
                 SystemKind::Flow => system.apply(0.0, &state, &mut f_out),
-                SystemKind::Map => {
+                SystemKind::Map { .. } => {
                     system.apply(0.0, &state, &mut f_out);
                     for i in 0..n {
                         f_out[i] -= state[i];
@@ -672,6 +672,7 @@ impl<'a> ContinuationProblem for HopfCurveProblem<'a> {
         Ok(PointDiagnostics {
             test_values: TestFunctionValues::equilibrium(1.0, hopf, 1.0),
             eigenvalues,
+            cycle_points: None,
         })
     }
 
@@ -977,6 +978,7 @@ mod tests {
             param_value: hopf_point.param_value,
             stability: BifurcationType::Hopf,
             eigenvalues: hopf_point.eigenvalues.clone(),
+            cycle_points: None,
         };
 
         let curve_settings = ContinuationSettings {

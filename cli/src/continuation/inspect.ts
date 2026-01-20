@@ -27,7 +27,8 @@ import {
   formatArray,
   summarizeEigenvalues
 } from './utils';
-import { initiateLCFromHopf, initiateLCBranchFromPoint, initiateLCFromPD } from './initiate-lc';
+import { formatEquilibriumLabel } from '../labels';
+import { initiateLCBranchFromPoint, initiateLCFromPD } from './initiate-lc';
 import { initiateEquilibriumBranchFromPoint } from './initiate-eq';
 import { initiateFoldCurve, initiateHopfCurve, initiateLPCCurve, initiatePDCurve, initiateNSCurve } from './initiate-codim1';
 import { printProgress, printProgressComplete } from '../format';
@@ -368,10 +369,16 @@ export async function hydrateEigenvalues(sysName: string, branch: ContinuationOb
   const runConfig = { ...sysConfig };
   runConfig.params = getBranchParams(sysName, branch, sysConfig);
   const bridge = new WasmBridge(runConfig);
+  const mapIterations = sysConfig.type === 'map' ? branch.mapIterations ?? 1 : 1;
 
   missingIndices.forEach((idx, position) => {
     const pt = branch.data.points[idx];
-    pt.eigenvalues = bridge.computeEigenvalues(pt.state, branch.parameterName, pt.param_value);
+    pt.eigenvalues = bridge.computeEigenvalues(
+      pt.state,
+      branch.parameterName,
+      mapIterations,
+      pt.param_value
+    );
     const current = position + 1;
     if (current % updateInterval === 0 || current === total) {
       printProgress(current, total, 'Hydrating eigenvalues');
@@ -416,7 +423,7 @@ export async function inspectBranch(
  * For limit cycle points: shows period, Floquet multipliers, amplitude ranges, means.
  * 
  * Offers context-sensitive actions:
- * - Equilibrium: create new branch, initiate LC from Hopf
+ * - Equilibrium: create new branch or continue codim-1 curves
  * - Limit cycle: create new LC branch with different parameter
  * 
  * @param sysName - Name of the dynamical system
@@ -446,6 +453,9 @@ export async function showPointDetails(
 
   // Show all parameters, highlighting the continuation parameter
   const sysConfig = Storage.loadSystem(sysName);
+  const equilibriumLabel = formatEquilibriumLabel(sysConfig.type, {
+    mapIterations: branch.mapIterations,
+  });
   const paramNames = sysConfig.paramNames;
 
   // Build current parameter values from branch.params (if available) + point.param_value for continuation param
@@ -573,11 +583,10 @@ export async function showPointDetails(
 
   if (branchType === 'equilibrium') {
     // For equilibrium branches, always offer to create a new equilibrium branch
-    choices.push({ name: 'Create New Equilibrium Branch', value: 'NEW_EQ_BRANCH' });
+    choices.push({ name: `Create New ${equilibriumLabel} Branch`, value: 'NEW_EQ_BRANCH' });
 
-    // For Hopf points, also offer limit cycle continuation and Hopf curve continuation
+    // For Hopf points, offer Hopf curve continuation
     if (pt.stability === 'Hopf') {
-      choices.push({ name: 'Initiate Limit Cycle Continuation', value: 'INITIATE_LC' });
       choices.push({ name: 'Continue Hopf Curve (2-parameter)', value: 'CONTINUE_HOPF_CURVE' });
     }
 
@@ -621,17 +630,6 @@ export async function showPointDetails(
 
   if (action === 'NEW_EQ_BRANCH') {
     const newBranch = await initiateEquilibriumBranchFromPoint(sysName, branch, pt);
-    if (!newBranch) return 'BACK';
-    return {
-      kind: 'OPEN_BRANCH',
-      objectName: newBranch.parentObject,
-      branchName: newBranch.name,
-      autoInspect: true,
-    };
-  }
-
-  if (action === 'INITIATE_LC') {
-    const newBranch = await initiateLCFromHopf(sysName, branch, pt, logicalIdx);
     if (!newBranch) return 'BACK';
     return {
       kind: 'OPEN_BRANCH',

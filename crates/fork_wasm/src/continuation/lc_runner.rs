@@ -142,6 +142,7 @@ impl WasmLimitCycleRunner {
             param_value: setup.guess.param_value,
             stability: fork_core::continuation::BifurcationType::None,
             eigenvalues: Vec::new(),
+            cycle_points: None,
         };
 
         let mut boxed_system = Box::new(system);

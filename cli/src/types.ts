@@ -37,12 +37,14 @@ export interface EquilibriumSolution {
   iterations: number;
   jacobian: number[];
   eigenpairs: EquilibriumEigenPair[];
+  cycle_points?: number[][];
 }
 
 export interface EquilibriumSolverParams {
   initialGuess: number[];
   maxSteps: number;
   dampingFactor: number;
+  mapIterations?: number;
 }
 
 export interface EquilibriumRunSummary {
@@ -73,6 +75,7 @@ export interface ContinuationPoint {
   param2_value?: number;  // Second parameter value for 2-param branches
   stability: "None" | "Fold" | "Hopf" | "NeutralSaddle" | "CycleFold" | "PeriodDoubling" | "NeimarkSacker" | string;
   eigenvalues?: ContinuationEigenvalue[];
+  cycle_points?: number[][];
   auxiliary?: number;  // Extra data like κ for Hopf curves
 }
 
@@ -115,6 +118,7 @@ export interface ContinuationObject {
   settings: any; // Store settings used
   timestamp: string;
   params?: number[];  // Full parameter snapshot at branch creation
+  mapIterations?: number;
 }
 
 export type LimitCycleOrigin =

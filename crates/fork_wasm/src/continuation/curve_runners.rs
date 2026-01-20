@@ -33,6 +33,7 @@ impl WasmFoldCurveRunner {
         param_names: Vec<String>,
         var_names: Vec<String>,
         system_type: &str,
+        map_iterations: u32,
         fold_state: Vec<f64>,
         param1_name: &str,
         param1_value: f64,
@@ -48,7 +49,7 @@ impl WasmFoldCurveRunner {
 
         let mut system = build_system(equations, params, &param_names, &var_names)?;
         let kind = match system_type {
-            "map" => SystemKind::Map,
+            "map" => SystemKind::Map { iterations: map_iterations as usize },
             _ => SystemKind::Flow,
         };
 
@@ -88,6 +89,7 @@ impl WasmFoldCurveRunner {
             param_value: param1_value,
             stability: fork_core::continuation::BifurcationType::Fold,
             eigenvalues: vec![],
+            cycle_points: None,
         };
 
         let runner = ContinuationRunner::new(problem, initial_point, settings, forward)
@@ -261,6 +263,7 @@ mod tests {
             vec!["a".to_string(), "b".to_string()],
             vec!["x".to_string()],
             "flow",
+            1,
             vec![0.0],
             "a",
             1.0,
@@ -297,6 +300,7 @@ mod tests {
             vec!["a".to_string(), "b".to_string()],
             vec!["x".to_string(), "y".to_string()],
             "flow",
+            1,
             vec![0.0, 0.0],
             hopf_omega,
             "a",
@@ -376,6 +380,7 @@ impl WasmHopfCurveRunner {
         param_names: Vec<String>,
         var_names: Vec<String>,
         system_type: &str,
+        map_iterations: u32,
         hopf_state: Vec<f64>,
         hopf_omega: f64,
         param1_name: &str,
@@ -392,7 +397,7 @@ impl WasmHopfCurveRunner {
 
         let mut system = build_system(equations, params, &param_names, &var_names)?;
         let kind = match system_type {
-            "map" => SystemKind::Map,
+            "map" => SystemKind::Map { iterations: map_iterations as usize },
             _ => SystemKind::Flow,
         };
 
@@ -446,6 +451,7 @@ impl WasmHopfCurveRunner {
             param_value: param1_value,
             stability: fork_core::continuation::BifurcationType::Hopf,
             eigenvalues: vec![],
+            cycle_points: None,
         };
 
         let runner = ContinuationRunner::new(problem, initial_point, settings, forward)
@@ -647,6 +653,7 @@ impl WasmLPCCurveRunner {
             param_value: param1_value,
             stability: fork_core::continuation::BifurcationType::CycleFold,
             eigenvalues: vec![],
+            cycle_points: None,
         };
 
         let runner = ContinuationRunner::new(problem, initial_point, settings, forward)
@@ -843,6 +850,7 @@ impl WasmPDCurveRunner {
             param_value: param1_value,
             stability: fork_core::continuation::BifurcationType::PeriodDoubling,
             eigenvalues: vec![],
+            cycle_points: None,
         };
 
         let runner = ContinuationRunner::new(problem, initial_point, settings, forward)
@@ -1041,6 +1049,7 @@ impl WasmNSCurveRunner {
             param_value: param1_value,
             stability: fork_core::continuation::BifurcationType::NeimarkSacker,
             eigenvalues: vec![],
+            cycle_points: None,
         };
 
         let runner = ContinuationRunner::new(problem, initial_point, settings, forward)

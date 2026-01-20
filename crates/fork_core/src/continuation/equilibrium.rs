@@ -3,11 +3,15 @@ use super::{
     continue_with_problem, extend_branch_with_problem, BifurcationType, ContinuationBranch,
     ContinuationPoint, ContinuationSettings,
 };
-use super::util::{hopf_test_function, neutral_saddle_test_function};
-use crate::autodiff::Dual;
+use super::util::{
+    hopf_test_function, neimark_sacker_test_function, neutral_saddle_test_function,
+    period_doubling_test_function,
+};
 use crate::equation_engine::EquationSystem;
-use crate::equilibrium::{compute_jacobian, compute_system_jacobian, SystemKind};
-use crate::traits::DynamicalSystem;
+use crate::equilibrium::{
+    compute_jacobian, compute_map_cycle_points, compute_param_jacobian, compute_system_jacobian,
+    evaluate_equilibrium_residual, SystemKind,
+};
 use anyhow::{bail, Result};
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex;
@@ -55,8 +59,7 @@ impl<'a> ContinuationProblem for EquilibriumContinuationProblem<'a> {
         let kind = self.kind;
 
         self.with_param(param, |system| {
-            evaluate_residual(system, kind, &state, out.as_mut_slice());
-            Ok(())
+            evaluate_equilibrium_residual(system, kind, &state, out.as_mut_slice())
         })?;
 
         Ok(())
@@ -72,10 +75,9 @@ impl<'a> ContinuationProblem for EquilibriumContinuationProblem<'a> {
         let mut j_ext = DMatrix::zeros(dim, dim + 1);
 
         self.with_param(param, |system| {
-            let mut f_dual = vec![Dual::new(0.0, 0.0); dim];
-            system.evaluate_dual_wrt_param(&state, param_index, &mut f_dual);
+            let param_jac = compute_param_jacobian(system, kind, &state, param_index)?;
             for i in 0..dim {
-                j_ext[(i, 0)] = f_dual[i].eps;
+                j_ext[(i, 0)] = param_jac[i];
             }
 
             let jac_x = compute_jacobian(system, kind, &state)?;
@@ -96,21 +98,27 @@ impl<'a> ContinuationProblem for EquilibriumContinuationProblem<'a> {
         let state: Vec<f64> = aug_state.rows(1, dim).iter().cloned().collect();
         let kind = self.kind;
 
-        let (residual_mat, eigen_mat) = self.with_param(param, |system| {
-            let system_jac = compute_system_jacobian(system, &state)?;
+        let iterations = kind.map_iterations();
+        let (residual_mat, eigen_mat, cycle_points) = self.with_param(param, |system| {
+            let system_jac = compute_system_jacobian(system, kind, &state)?;
             let mut residual_jac = system_jac.clone();
-            if matches!(kind, SystemKind::Map) {
+            if kind.is_map() {
                 for i in 0..dim {
                     residual_jac[i * dim + i] -= 1.0;
                 }
             }
             let residual_mat = DMatrix::from_row_slice(dim, dim, &residual_jac);
-            let eigen_mat = if matches!(kind, SystemKind::Map) {
+            let eigen_mat = if kind.is_map() {
                 DMatrix::from_row_slice(dim, dim, &system_jac)
             } else {
                 residual_mat.clone()
             };
-            Ok((residual_mat, eigen_mat))
+            let cycle_points = if kind.is_map() && iterations > 1 {
+                Some(compute_map_cycle_points(system, &state, iterations))
+            } else {
+                None
+            };
+            Ok((residual_mat, eigen_mat, cycle_points))
         })?;
 
         let fold = residual_mat.determinant();
@@ -124,9 +132,16 @@ impl<'a> ContinuationProblem for EquilibriumContinuationProblem<'a> {
             (0.0, 0.0)
         };
 
+        let mut test_values = TestFunctionValues::equilibrium(fold, hopf, neutral);
+        if self.kind.is_map() {
+            test_values.period_doubling = period_doubling_test_function(&eigenvalues);
+            test_values.neimark_sacker = neimark_sacker_test_function(&eigenvalues);
+        }
+
         Ok(PointDiagnostics {
-            test_values: TestFunctionValues::equilibrium(fold, hopf, neutral),
+            test_values,
             eigenvalues,
+            cycle_points,
         })
     }
 }
@@ -150,6 +165,7 @@ pub fn continue_parameter(
         param_value,
         stability: BifurcationType::None,
         eigenvalues: Vec::new(),
+        cycle_points: None,
     };
 
     continue_with_problem(&mut problem, initial_point, settings, forward)
@@ -184,18 +200,6 @@ pub fn compute_eigenvalues_for_state(
     Ok(diagnostics.eigenvalues)
 }
 
-fn evaluate_residual(system: &EquationSystem, kind: SystemKind, state: &[f64], out: &mut [f64]) {
-    match kind {
-        SystemKind::Flow => system.apply(0.0, state, out),
-        SystemKind::Map => {
-            system.apply(0.0, state, out);
-            for i in 0..out.len() {
-                out[i] -= state[i];
-            }
-        }
-    }
-}
-
 fn compute_eigenvalues(mat: &DMatrix<f64>) -> Result<Vec<Complex<f64>>> {
     if mat.nrows() == 0 {
         return Ok(Vec::new());
@@ -208,7 +212,8 @@ fn compute_eigenvalues(mat: &DMatrix<f64>) -> Result<Vec<Complex<f64>>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
+    use crate::equation_engine::{parse, Bytecode, Compiler, EquationSystem, OpCode};
+    use crate::equilibrium::{solve_equilibrium, NewtonSettings};
 
     #[test]
     fn test_palc_simple_fold() {
@@ -307,5 +312,198 @@ mod tests {
         
         assert_eq!(bif_point.stability, BifurcationType::Hopf);
         assert!(bif_point.param_value.abs() < 1e-3, "Hopf point {} too far from 0", bif_point.param_value);
+    }
+
+    #[test]
+    fn test_map_neimark_sacker_detection() {
+        let omega = 0.5;
+
+        let mut ops0 = Vec::new();
+        ops0.push(OpCode::LoadParam(0));
+        ops0.push(OpCode::LoadVar(0));
+        ops0.push(OpCode::Mul);
+        ops0.push(OpCode::LoadConst(omega));
+        ops0.push(OpCode::LoadVar(1));
+        ops0.push(OpCode::Mul);
+        ops0.push(OpCode::Sub);
+
+        let mut ops1 = Vec::new();
+        ops1.push(OpCode::LoadConst(omega));
+        ops1.push(OpCode::LoadVar(0));
+        ops1.push(OpCode::Mul);
+        ops1.push(OpCode::LoadParam(0));
+        ops1.push(OpCode::LoadVar(1));
+        ops1.push(OpCode::Mul);
+        ops1.push(OpCode::Add);
+
+        let equations = vec![Bytecode { ops: ops0 }, Bytecode { ops: ops1 }];
+        let mut system = EquationSystem::new(equations, vec![0.5]);
+        let mut problem =
+            EquilibriumContinuationProblem::new(&mut system, SystemKind::Map { iterations: 1 }, 0);
+
+        let aug_inside = DVector::from_vec(vec![0.5, 0.0, 0.0]);
+        let inside = problem.diagnostics(&aug_inside).expect("diagnostics");
+        assert!(
+            inside.test_values.neimark_sacker < 0.0,
+            "expected inside-unit-circle test to be negative, got {}",
+            inside.test_values.neimark_sacker
+        );
+
+        let aug_outside = DVector::from_vec(vec![1.1, 0.0, 0.0]);
+        let outside = problem.diagnostics(&aug_outside).expect("diagnostics");
+        assert!(
+            outside.test_values.neimark_sacker > 0.0,
+            "expected outside-unit-circle test to be positive, got {}",
+            outside.test_values.neimark_sacker
+        );
+    }
+
+    #[test]
+    fn test_map_period_doubling_detection() {
+        let mut ops = Vec::new();
+        ops.push(OpCode::LoadParam(0));
+        ops.push(OpCode::LoadVar(0));
+        ops.push(OpCode::Mul);
+
+        let equations = vec![Bytecode { ops }];
+        let mut system = EquationSystem::new(equations, vec![-0.5]);
+        let mut problem =
+            EquilibriumContinuationProblem::new(&mut system, SystemKind::Map { iterations: 1 }, 0);
+
+        let aug_inside = DVector::from_vec(vec![-0.5, 0.0]);
+        let inside = problem.diagnostics(&aug_inside).expect("diagnostics");
+        assert!(
+            inside.test_values.period_doubling > 0.0,
+            "expected PD test to be positive before crossing, got {}",
+            inside.test_values.period_doubling
+        );
+
+        let aug_outside = DVector::from_vec(vec![-1.5, 0.0]);
+        let outside = problem.diagnostics(&aug_outside).expect("diagnostics");
+        assert!(
+            outside.test_values.period_doubling < 0.0,
+            "expected PD test to be negative after crossing, got {}",
+            outside.test_values.period_doubling
+        );
+    }
+
+    #[test]
+    fn test_map_neimark_sacker_not_duplicated() {
+        let omega = 0.5;
+
+        let mut ops0 = Vec::new();
+        ops0.push(OpCode::LoadParam(0));
+        ops0.push(OpCode::LoadVar(0));
+        ops0.push(OpCode::Mul);
+        ops0.push(OpCode::LoadConst(omega));
+        ops0.push(OpCode::LoadVar(1));
+        ops0.push(OpCode::Mul);
+        ops0.push(OpCode::Sub);
+
+        let mut ops1 = Vec::new();
+        ops1.push(OpCode::LoadConst(omega));
+        ops1.push(OpCode::LoadVar(0));
+        ops1.push(OpCode::Mul);
+        ops1.push(OpCode::LoadParam(0));
+        ops1.push(OpCode::LoadVar(1));
+        ops1.push(OpCode::Mul);
+        ops1.push(OpCode::Add);
+
+        let equations = vec![Bytecode { ops: ops0 }, Bytecode { ops: ops1 }];
+        let mut system = EquationSystem::new(equations, vec![0.5]);
+
+        let settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-6,
+            max_step_size: 0.2,
+            max_steps: 30,
+            corrector_steps: 5,
+            corrector_tolerance: 1e-8,
+            step_tolerance: 1e-8,
+        };
+
+        let branch = continue_parameter(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0, 0.0],
+            0,
+            settings,
+            true,
+        )
+        .expect("continuation should succeed");
+
+        let ns_indices: Vec<usize> = branch
+            .bifurcations
+            .iter()
+            .copied()
+            .filter(|&idx| branch.points[idx].stability == BifurcationType::NeimarkSacker)
+            .collect();
+
+        assert_eq!(
+            ns_indices.len(),
+            1,
+            "expected single Neimark-Sacker detection, got indices {ns_indices:?}"
+        );
+    }
+
+    #[test]
+    fn test_logistic_map_period_doubling_detection() {
+        let equation = "r * x * (1 - x)";
+        let param_names = vec!["r".to_string()];
+        let var_names = vec!["x".to_string()];
+        let compiler = Compiler::new(&var_names, &param_names);
+        let expr = parse(equation).expect("logistic map equation should parse");
+        let bytecode = compiler.compile(&expr);
+
+        let mut system = EquationSystem::new(vec![bytecode], vec![2.5]);
+        system.set_maps(compiler.param_map, compiler.var_map);
+
+        let equilibrium = solve_equilibrium(
+            &system,
+            SystemKind::Map { iterations: 1 },
+            &[1.0],
+            NewtonSettings::default(),
+        )
+        .expect("logistic map fixed point should converge");
+
+        let settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-6,
+            max_step_size: 0.2,
+            max_steps: 30,
+            corrector_steps: 5,
+            corrector_tolerance: 1e-8,
+            step_tolerance: 1e-8,
+        };
+
+        let branch = continue_parameter(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &equilibrium.state,
+            0,
+            settings,
+            true,
+        )
+        .expect("continuation should succeed");
+
+        let pd_indices: Vec<usize> = branch
+            .bifurcations
+            .iter()
+            .copied()
+            .filter(|&idx| branch.points[idx].stability == BifurcationType::PeriodDoubling)
+            .collect();
+
+        assert_eq!(
+            pd_indices.len(),
+            1,
+            "expected single PD detection, got indices {pd_indices:?}"
+        );
+
+        let pd_param = branch.points[pd_indices[0]].param_value;
+        assert!(
+            (pd_param - 3.0).abs() < 1e-2,
+            "expected PD near r=3, got r={}",
+            pd_param
+        );
     }
 }

@@ -1,6 +1,6 @@
 # Limit Cycle Continuation
 
-This document describes how Fork implements limit cycle continuation, including initialization from Hopf bifurcations, orbit data, and period-doubling points, the underlying numerical methods, and troubleshooting guidance.
+This document describes how Fork implements limit cycle continuation, including initialization from orbit data and period-doubling points, the underlying numerical methods, and troubleshooting guidance.
 Note: This document has not been fully human-reviewed; treat it as guidance and verify against current behavior.
 
 ## Table of Contents
@@ -23,11 +23,12 @@ Note: This document has not been fully human-reviewed; treat it as guidance and 
 
 ## Overview
 
-Fork supports three methods for initiating limit cycle continuation:
+Fork supports two methods for initiating limit cycle continuation:
 
-1. **From Hopf Bifurcation**: Start from a Hopf point on an equilibrium or Hopf-curve branch; Fork builds a small-amplitude cycle from the Hopf eigenvector.
-2. **From Orbit Data**: If you have an orbit that converges to a stable limit cycle (e.g., from numerical integration), Fork can extract one period and use it to initialize limit cycle continuation.
-3. **From Period-Doubling (PD) Bifurcation**: When a limit cycle undergoes a period-doubling bifurcation, a new limit cycle family emerges with double the period. Fork can branch from a detected PD point to this new family.
+1. **From Orbit Data**: If you have an orbit that converges to a stable limit cycle (e.g., from numerical integration), Fork can extract one period and use it to initialize limit cycle continuation.
+2. **From Period-Doubling (PD) Bifurcation**: When a limit cycle undergoes a period-doubling bifurcation, a new limit cycle family emerges with double the period. Fork can branch from a detected PD point to this new family.
+
+Note: Hopf-based initialization exists in the core but is not currently exposed in the UI or CLI.
 
 ### Key Concepts
 
@@ -40,37 +41,27 @@ Fork supports three methods for initiating limit cycle continuation:
 
 ## CLI Workflow
 
-### Step 1: Run Equilibrium Continuation
+### Step 1: Start Limit Cycle from Orbit
 
-First, perform equilibrium continuation to find Hopf bifurcation points:
+If you have an orbit that converges to a stable limit cycle, use it to seed continuation.
 
+CLI path:
 ```
-System Menu → Objects → [select equilibrium] → Branches → Create New Branch → [configure]
-```
-
-Fork automatically detects Hopf bifurcations (marked with "Hopf" stability in the branch viewer).
-
-### Step 2: Start Limit Cycle from Hopf
-
-Select a Hopf point and choose "Initiate Limit Cycle Continuation":
-
-```
-Branches → [select branch] → Inspect Branch Points → [select Hopf point]
-→ Initiate Limit Cycle Continuation
+System Menu → Branches → Create New Branch → Limit Cycle Branch → [select orbit]
 ```
 
 Web UI:
 ```
-Inspector → Limit Cycle from Hopf → [select Hopf point] → Continue Limit Cycle
+Inspector → Limit Cycle from Orbit → [select orbit] → Continue Limit Cycle
 ```
 
-### Step 3: Configure LC Continuation
+### Step 2: Configure LC Continuation
 
 You'll be prompted for:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| Amplitude | 0.1 | Initial amplitude of limit cycle guess |
+| Cycle tolerance | 0.1 | Orbit recurrence tolerance for detecting a cycle |
 | ntst | 20 | Number of mesh intervals |
 | ncol | 4 | Collocation points per interval |
 | Direction | forward | Continue in positive or negative parameter direction |
@@ -80,13 +71,13 @@ You'll be prompted for:
 Additional settings (min/max step size, corrector steps, corrector tolerance, step tolerance) are
 available in the CLI configuration menu and the web Inspector for tighter control.
 
-### Step 4: View Results
+### Step 3: View Results
 
 After continuation completes, you can inspect the limit cycle branch:
 - Each point contains the full limit cycle profile
 - Eigenvalues (Floquet multipliers) indicate stability
 - Use the plotting script to visualize all cycles together
-### Step 5: Branch to Double Period (PD only)
+### Step 4: Branch to Double Period (PD only)
 
 If a Period-Doubling (PD) bifurcation is detected (Floquet multiplier crosses -1):
 1. Inspect the branch points and find the point marked "PeriodDoubling".
@@ -157,12 +148,12 @@ available in the CLI configuration menu and the web Inspector.
 
 Web UI:
 ```
-Inspector → Limit Cycle → Continue from Orbit
+Inspector → Limit Cycle from Orbit → Continue Limit Cycle
 ```
 
 ### Implementation Details
 
-The orbit-to-LC algorithm follows [MatCont's `initOrbLC.m`](https://matcont.ugent.be/) approach:
+The orbit-to-LC algorithm follows the steps below:
 
 #### 1. Reference Point Selection
 
@@ -327,7 +318,7 @@ r² ≈ -μ / l₁
 
 ### Eigenvector-Based Initialization
 
-Fork uses the complex eigenvector q to construct an initial limit cycle guess, following the approach in MatCont's `init_H_LC.m`.
+Fork uses the complex eigenvector q to construct an initial limit cycle guess using the Hopf normal form approximation.
 
 #### Step 1: Eigenvector Rotation
 
@@ -634,12 +625,12 @@ For each interval i:
 
 The final matrix M is the monodromy, and its eigenvalues are the Floquet multipliers.
 
-### Comparison with MATCONT's Approach
+### Comparison with Global S-matrix Approach
 
-MATCONT uses a **global S-matrix reduction** algorithm:
+Some implementations use a **global S-matrix reduction** algorithm:
 
-| Aspect | Fork (Sequential) | MATCONT (Global S-matrix) |
-|--------|-------------------|---------------------------|
+| Aspect | Fork (Sequential) | Global S-matrix |
+|--------|-------------------|-----------------|
 | **Build phase** | Chain T_i matrices one interval at a time | Build full (ntst×dim) × ((ntst+1)×dim) S-matrix |
 | **Elimination** | Sequential dim×dim solves | Banded Gaussian elimination with pivoting |
 | **Memory** | O(dim²) working memory | O(ntst × dim²) for S-matrix |
@@ -649,11 +640,11 @@ MATCONT uses a **global S-matrix reduction** algorithm:
 Both approaches are **mathematically equivalent** and extract the same monodromy eigenvalues. The primary differences are:
 
 1. **Memory efficiency**: Sequential approach avoids allocating the full S-matrix
-2. **BVP compatibility**: Sequential approach naturally handles implicit periodicity; MATCONT requires explicit boundary variables
+2. **BVP compatibility**: Sequential approach naturally handles implicit periodicity; explicit-boundary methods introduce an extra endpoint variable
 
-### Why Not Use MATCONT's Exact Approach?
+### Why Not Use the Full S-matrix Reduction?
 
-Fork's BVP uses **implicit periodicity**: the last continuity equation wraps x_{ntst} back to x₀, meaning both endpoints share the same Jacobian column. MATCONT's algorithm assumes **explicit periodicity**: x_{ntst} is a separate variable with an explicit boundary equation x₀ - x_{ntst} = 0.
+Fork's BVP uses **implicit periodicity**: the last continuity equation wraps x_{ntst} back to x₀, meaning both endpoints share the same Jacobian column. Full S-matrix formulations typically assume **explicit periodicity**: x_{ntst} is a separate variable with an explicit boundary equation x₀ - x_{ntst} = 0.
 
 The sequential approach correctly handles implicit periodicity by using modular indexing:
 ```rust
@@ -799,7 +790,7 @@ Inspector → Limit Cycle from PD → [select Period Doubling point] → Continu
 
 ### Numerical Implementation
 
-The PD branching algorithm follows the approach in MatCont's `init_PD_LC2.m`:
+The PD branching algorithm follows the steps below:
 
 #### 1. PD Eigenvector Computation
 

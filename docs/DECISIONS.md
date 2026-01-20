@@ -21,6 +21,103 @@ References:
 
 ---
 
+### 2026-01-20: Accept 1D map samples after StrictMode effect cleanup
+Context:
+In React StrictMode, effects run and clean up immediately on first mount. The initial map sampling
+request can be aborted in cleanup, but the worker can still resolve with a usable result. A global
+mounted flag made us drop that completion forever, leaving the map graph blank until another UI
+change retriggered sampling.
+Decision:
+Use a per-effect disposed flag and the current map key to ignore only truly stale results; accept
+the first completed sample if the map key still matches, even if the initial effect cleanup ran.
+Why:
+Avoids a permanent "no samples" state on initial load while still guarding against out-of-date
+responses when the map configuration changes.
+Impact:
+1D map graphs render on first load; subsequent range/config changes still discard stale samples.
+References:
+`web/src/ui/ViewportPanel.tsx`
+
+### 2026-01-23: Store cycle points for map fixed-point solutions
+Context:
+Map fixed points can represent cycles via F^k(x) - x, but the UI needed the full orbit to render
+all cycle points and show them in data tables.
+Decision:
+When solving or continuing map fixed points with mapIterations > 1, compute cycle_points by
+iterating the map starting from the representative state and store the full list on the result.
+The first point remains the representative for rendering and line traces.
+Why:
+Avoids re-running the map in the UI and keeps cycle rendering/inspection consistent across scenes
+and bifurcation diagrams.
+Impact:
+Map fixed-point solutions optionally include cycle_points; flows are unchanged. UI renders cycle
+tail points as circles with a diamond representative and shows a cycle table in the inspector.
+References:
+`crates/fork_core/src/equilibrium.rs`, `crates/fork_core/src/continuation/equilibrium.rs`,
+`crates/fork_core/src/continuation/problem.rs`, `crates/fork_core/src/continuation/types.rs`,
+`crates/fork_wasm/src/continuation/shared.rs`, `web/src/ui/ViewportPanel.tsx`,
+`web/src/ui/InspectorDetailsPanel.tsx`
+
+### 2026-01-22: Continue from corrected step after bifurcation refinement
+Context:
+Refined bifurcation points can land on either side of the sign change, causing repeated detections
+on subsequent steps even when the branch progresses past the crossing.
+Decision:
+Keep the refined point for the recorded bifurcation, but advance the continuation state from the
+post-corrected step point (not the refined point) whenever a bifurcation is detected.
+Why:
+Avoids duplicate bifurcations while still storing the refined location for reporting and plotting.
+Impact:
+Continuation proceeds smoothly past bifurcations without repeated sign-change hits.
+References:
+`crates/fork_core/src/continuation.rs`
+
+### 2026-01-21: Map period-doubling test uses determinant-style product
+Context:
+Map equilibrium continuation needed PD detection that stays well-defined when eigenvalues are
+complex conjugate pairs.
+Decision:
+Compute the PD test as the product of (mu + 1) over real eigenvalues and |mu + 1|^2 for each complex
+conjugate pair (equivalently det(J + I) for the map Jacobian).
+Why:
+This preserves the sign change at mu = -1 without introducing artificial zeros when the spectrum
+is purely complex.
+Impact:
+Map fixed-point continuation uses a determinant-style PD test value with positive complex-pair
+contributions.
+References:
+`crates/fork_core/src/continuation/util.rs`, `crates/fork_core/src/continuation/equilibrium.rs`,
+`crates/fork_wasm/src/continuation/shared.rs`
+
+### 2026-01-20: Map fixed points use cycle length in equilibrium solves
+Context:
+Map fixed points can represent cycles by solving F^k(x) - x, but we had no way to set k.
+Decision:
+Store mapIterations on map equilibrium solver params and continuation branches, and pass it through
+core/wasm with a default of 1 when omitted.
+Why:
+Keeps fixed points and cycles unified in the same object type without changing flow behavior.
+Impact:
+Map solves and continuations iterate the map and Jacobians; legacy data fall back to 1.
+References:
+`crates/fork_core/src/equilibrium.rs`, `crates/fork_core/src/continuation/equilibrium.rs`,
+`crates/fork_wasm/src/equilibrium.rs`, `web/src/state/appState.tsx`, `cli/src/index.ts`
+
+### 2026-01-19: Neimark-Sacker test returns 0 without complex pairs
+Context:
+Map equilibrium continuation could falsely flag an NS at the first step when the starting Jacobian
+had only real (e.g., zero) eigenvalues but the next step introduced a complex pair inside the unit
+circle. The sign-change detector treated the missing-complex case as positive.
+Decision:
+Make the NS test function return 0.0 when no complex conjugate pairs exist, so sign-change detection
+only triggers when both sides of a step have complex pairs.
+Why:
+Prevents false NS detections at the start of a branch without adding per-step guards.
+Impact:
+NS detection ignores steps where complex pairs are absent; true NS crossings still change sign.
+References:
+`crates/fork_core/src/continuation/util.rs`, `crates/fork_core/src/continuation/equilibrium.rs`
+
 ### 2026-01-17: Treat OPFS as Chromium-only persistence
 Context:
 The web app uses OPFS (File System Access API) for `system.json` and `ui.json`, but Safari and

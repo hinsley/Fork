@@ -92,7 +92,8 @@ type WasmModule = {
     solve_equilibrium: (
       initialGuess: number[],
       maxSteps: number,
-      dampingFactor: number
+      dampingFactor: number,
+      mapIterations: number
     ) => SolveEquilibriumResult
     compute_lyapunov_exponents: (
       startState: Float64Array,
@@ -141,6 +142,7 @@ type WasmModule = {
     paramNames: string[],
     varNames: string[],
     systemType: string,
+    mapIterations: number,
     equilibriumState: Float64Array,
     parameterName: string,
     settings: Record<string, number>,
@@ -156,6 +158,7 @@ type WasmModule = {
     paramNames: string[],
     varNames: string[],
     systemType: string,
+    mapIterations: number,
     foldState: Float64Array,
     param1Name: string,
     param1Value: number,
@@ -174,6 +177,7 @@ type WasmModule = {
     paramNames: string[],
     varNames: string[],
     systemType: string,
+    mapIterations: number,
     hopfState: Float64Array,
     hopfOmega: number,
     param1Name: string,
@@ -208,6 +212,7 @@ type WasmModule = {
     paramNames: string[],
     varNames: string[],
     systemType: string,
+    mapIterations: number,
     branchData: ContinuationExtensionRequest['branchData'],
     parameterName: string,
     settings: Record<string, number>,
@@ -223,6 +228,7 @@ type WasmModule = {
     paramNames: string[],
     varNames: string[],
     systemType: string,
+    mapIterations: number,
     branchData: ContinuationExtensionRequest['branchData'],
     parameterName: string,
     settings: Record<string, number>,
@@ -400,10 +406,13 @@ async function runSolveEquilibrium(
     request.system.type
   )
   abortIfNeeded(signal)
+  const mapIterations =
+    request.system.type === 'map' ? request.mapIterations ?? 1 : 1
   return system.solve_equilibrium(
     request.initialGuess,
     request.maxSteps,
-    request.dampingFactor
+    request.dampingFactor,
+    mapIterations
   )
 }
 
@@ -422,12 +431,15 @@ async function runEquilibriumContinuation(
   abortIfNeeded(signal)
   const wasm = await loadWasm()
   const settings: Record<string, number> = { ...request.settings }
+  const mapIterations =
+    request.system.type === 'map' ? request.mapIterations ?? 1 : 1
   const runner = new wasm.WasmEquilibriumRunner(
     request.system.equations,
     new Float64Array(request.system.params),
     request.system.paramNames,
     request.system.varNames,
     request.system.type,
+    mapIterations,
     new Float64Array(request.equilibriumState),
     request.parameterName,
     settings,
@@ -469,6 +481,8 @@ async function runContinuationExtension(
   abortIfNeeded(signal)
   const wasm = await loadWasm()
   const settings: Record<string, number> = { ...request.settings }
+  const mapIterations =
+    request.system.type === 'map' ? request.mapIterations ?? 1 : 1
   const runner = isCodim1BranchType(request.branchData.branch_type)
     ? new wasm.WasmCodim1CurveExtensionRunner(
         request.system.equations,
@@ -476,6 +490,7 @@ async function runContinuationExtension(
         request.system.paramNames,
         request.system.varNames,
         request.system.type,
+        mapIterations,
         request.branchData,
         request.parameterName,
         settings,
@@ -487,6 +502,7 @@ async function runContinuationExtension(
         request.system.paramNames,
         request.system.varNames,
         request.system.type,
+        mapIterations,
         request.branchData,
         request.parameterName,
         settings,
@@ -514,12 +530,15 @@ async function runFoldCurveContinuation(
   abortIfNeeded(signal)
   const wasm = await loadWasm()
   const settings: Record<string, number> = { ...request.settings }
+  const mapIterations =
+    request.system.type === 'map' ? request.mapIterations ?? 1 : 1
   const runner = new wasm.WasmFoldCurveRunner(
     request.system.equations,
     new Float64Array(request.system.params),
     request.system.paramNames,
     request.system.varNames,
     request.system.type,
+    mapIterations,
     new Float64Array(request.foldState),
     request.param1Name,
     request.param1Value,
@@ -550,12 +569,15 @@ async function runHopfCurveContinuation(
   abortIfNeeded(signal)
   const wasm = await loadWasm()
   const settings: Record<string, number> = { ...request.settings }
+  const mapIterations =
+    request.system.type === 'map' ? request.mapIterations ?? 1 : 1
   const runner = new wasm.WasmHopfCurveRunner(
     request.system.equations,
     new Float64Array(request.system.params),
     request.system.paramNames,
     request.system.varNames,
     request.system.type,
+    mapIterations,
     new Float64Array(request.hopfState),
     request.hopfOmega,
     request.param1Name,

@@ -14,7 +14,6 @@ import type {
   EquilibriumSolveRequest,
   FoldCurveContinuationRequest,
   HopfCurveContinuationRequest,
-  LimitCycleHopfContinuationRequest,
   LimitCycleOrbitContinuationRequest,
   LimitCyclePDContinuationRequest,
   OrbitCovariantLyapunovRequest,
@@ -67,7 +66,6 @@ type SystemSettingsDialogProps = {
   onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
-  onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
   onCreateLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
   onCreateLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
 }
@@ -102,7 +100,6 @@ export function SystemSettingsDialog({
   onExtendBranch,
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
-  onCreateLimitCycleFromHopf,
   onCreateLimitCycleFromOrbit,
   onCreateLimitCycleFromPD,
 }: SystemSettingsDialogProps) {
@@ -157,7 +154,6 @@ export function SystemSettingsDialog({
             onExtendBranch={onExtendBranch}
             onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
             onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
-            onCreateLimitCycleFromHopf={onCreateLimitCycleFromHopf}
             onCreateLimitCycleFromOrbit={onCreateLimitCycleFromOrbit}
             onCreateLimitCycleFromPD={onCreateLimitCycleFromPD}
           />

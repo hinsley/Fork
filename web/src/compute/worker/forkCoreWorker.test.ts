@@ -14,6 +14,8 @@ const workerScope: WorkerScope = {
 const wasmState = {
   throwMode: 'none' as 'none' | 'validate' | 'abort',
   lastRunStepsArg: null as number | null,
+  lastSystemType: null as string | null,
+  lastLimitCycleRunnerSystemType: null as string | null,
   initPromise: Promise.resolve() as Promise<void>,
   initResolver: null as null | (() => void),
 }
@@ -52,7 +54,10 @@ beforeAll(async () => {
       private state = new Float64Array([0])
       private t = 0
 
-      constructor(equations: string[]) {
+      constructor(...args: unknown[]) {
+        const systemType = args[5]
+        wasmState.lastSystemType = typeof systemType === 'string' ? systemType : null
+        const equations = (args[0] as string[]) ?? []
         if (wasmState.throwMode === 'abort') {
           const error = new Error('cancelled')
           error.name = 'AbortError'
@@ -157,13 +162,22 @@ beforeAll(async () => {
       }
     }
 
+    class MockLimitCycleRunner extends MockContinuationRunner {
+      constructor(...args: unknown[]) {
+        super()
+        const systemType = args[4]
+        wasmState.lastLimitCycleRunnerSystemType =
+          typeof systemType === 'string' ? systemType : null
+      }
+    }
+
     return {
       default: vi.fn(() => wasmState.initPromise ?? Promise.resolve()),
       WasmSystem: MockWasmSystem,
       WasmEquilibriumRunner: MockWasmEquilibriumRunner,
       WasmFoldCurveRunner: MockContinuationRunner,
       WasmHopfCurveRunner: MockContinuationRunner,
-      WasmLimitCycleRunner: MockContinuationRunner,
+      WasmLimitCycleRunner: MockLimitCycleRunner,
       WasmContinuationExtensionRunner: MockContinuationRunner,
       WasmCodim1CurveExtensionRunner: MockContinuationRunner,
     }
@@ -180,6 +194,8 @@ beforeEach(() => {
   workerScope.postMessage.mockClear()
   wasmState.throwMode = 'none'
   wasmState.lastRunStepsArg = null
+  wasmState.lastSystemType = null
+  wasmState.lastLimitCycleRunnerSystemType = null
   wasmState.initPromise = Promise.resolve()
   wasmState.initResolver = null
 })
@@ -222,6 +238,43 @@ describe('forkCoreWorker', () => {
       ok: true,
       result: { points: [], bifurcations: [], indices: [] },
     })
+  })
+
+  it('runs limit cycle continuation from orbit for map systems', async () => {
+    const handler = requireHandler()
+    const message = {
+      id: 'job-lc-orbit-map',
+      kind: 'runLimitCycleContinuationFromOrbit',
+      payload: {
+        system: {
+          ...baseSystem,
+          type: 'map',
+          solver: 'discrete',
+          paramNames: ['r'],
+          params: [3.2],
+        },
+        orbitTimes: [0, 1, 2],
+        orbitStates: [[0.1], [0.2], [0.1]],
+        parameterName: 'r',
+        paramValue: 3.2,
+        tolerance: 0.1,
+        ntst: 10,
+        ncol: 4,
+        settings: continuationSettings,
+        forward: true,
+      },
+    }
+
+    await handler({ data: message } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(wasmState.lastSystemType).toBe('map')
+    expect(wasmState.lastLimitCycleRunnerSystemType).toBe('map')
+    const response = workerScope.postMessage.mock.calls
+      .map(([payload]) => payload as { ok?: boolean; result?: { points: unknown[] } })
+      .find((payload) => payload.ok === true)
+    expect(response).toBeTruthy()
+    expect(response.ok).toBe(true)
+    expect(response.result.points).toEqual([])
   })
 
   it('simulates orbits and returns time series data', async () => {

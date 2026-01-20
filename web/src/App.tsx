@@ -11,6 +11,7 @@ import { Toolbar } from './ui/Toolbar'
 import { PerfOverlay } from './ui/PerfOverlay'
 import { isDeterministicMode } from './utils/determinism'
 import { toCliSafeName } from './utils/naming'
+import { formatEquilibriumLabel } from './system/labels'
 import type {
   BranchPointSelection,
   LimitCyclePointSelection,
@@ -127,7 +128,7 @@ function App() {
   const createEquilibrium = async () => {
     if (!system) return
     const names = Object.values(system.objects).map((obj) => obj.name)
-    const name = nextObjectName('Equilibrium', names)
+    const name = nextObjectName(formatEquilibriumLabel(system.config.type), names)
     await actions.createEquilibriumObject(name)
   }
 
@@ -283,7 +284,6 @@ function App() {
         onExtendBranch={actions.extendBranch}
         onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
         onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
-        onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
         onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
         onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
       />
@@ -427,8 +427,7 @@ function App() {
                 onExtendBranch={actions.extendBranch}
                 onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
                 onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
-                onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
-                onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
+                        onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
                 onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
               />
             </Panel>

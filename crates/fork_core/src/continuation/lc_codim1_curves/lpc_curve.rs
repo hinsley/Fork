@@ -450,6 +450,7 @@ impl<'a> ContinuationProblem for LPCCurveProblem<'a> {
         Ok(PointDiagnostics {
             test_values: TestFunctionValues::limit_cycle(1.0, 1.0, 1.0),
             eigenvalues: multipliers,
+            cycle_points: None,
         })
     }
 

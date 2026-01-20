@@ -29,6 +29,7 @@ import {
   resolveEquilibriumEigenvectorRender,
 } from '../system/equilibriumEigenvectors'
 import { resolveSceneAxisSelection } from '../system/sceneAxes'
+import { formatEquilibriumLabel } from '../system/labels'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
 import { resolvePlotlyBackgroundColor } from '../viewports/plotly/plotlyTheme'
 import type {
@@ -41,7 +42,6 @@ import type {
   OrbitCovariantLyapunovRequest,
   OrbitLyapunovRequest,
   OrbitRunRequest,
-  LimitCycleHopfContinuationRequest,
   LimitCycleOrbitContinuationRequest,
   LimitCyclePDContinuationRequest,
 } from '../state/appState'
@@ -103,7 +103,6 @@ type InspectorDetailsPanelProps = {
   onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
-  onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
   onCreateLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
   onCreateLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
 }
@@ -140,6 +139,7 @@ type EquilibriumSolveDraft = {
   initialGuess: string[]
   maxSteps: string
   dampingFactor: string
+  mapIterations: string
 }
 
 type LimitCycleFromOrbitDraft = {
@@ -147,23 +147,6 @@ type LimitCycleFromOrbitDraft = {
   branchName: string
   parameterName: string
   tolerance: string
-  ntst: string
-  ncol: string
-  stepSize: string
-  maxSteps: string
-  minStepSize: string
-  maxStepSize: string
-  correctorSteps: string
-  correctorTolerance: string
-  stepTolerance: string
-  forward: boolean
-}
-
-type LimitCycleFromHopfDraft = {
-  limitCycleName: string
-  branchName: string
-  parameterName: string
-  amplitude: string
   ntst: string
   ncol: string
   stepSize: string
@@ -487,7 +470,13 @@ function formatNumberSafe(value: number | undefined): string {
   return formatNumber(value)
 }
 
-function formatBranchType(branch: ContinuationObject): string {
+function formatBranchType(
+  branch: ContinuationObject,
+  systemType: SystemConfig['type']
+): string {
+  if (branch.branchType === 'equilibrium') {
+    return formatEquilibriumLabel(systemType)
+  }
   return branch.branchType.replace('_', ' ')
 }
 
@@ -707,6 +696,10 @@ function makeEquilibriumSolveDraft(
     system.varNames.map(() => 0)
   const defaultMaxSteps = equilibrium?.lastSolverParams?.maxSteps ?? 25
   const defaultDamping = equilibrium?.lastSolverParams?.dampingFactor ?? 1
+  const defaultMapIterations =
+    system.type === 'map'
+      ? equilibrium?.lastSolverParams?.mapIterations ?? 1
+      : 1
   return {
     initialGuess: adjustArray(
       defaultGuess.map((value) => value.toString()),
@@ -715,6 +708,7 @@ function makeEquilibriumSolveDraft(
     ),
     maxSteps: defaultMaxSteps.toString(),
     dampingFactor: defaultDamping.toString(),
+    mapIterations: defaultMapIterations.toString(),
   }
 }
 
@@ -736,25 +730,6 @@ function makeLimitCycleFromOrbitDraft(system: SystemConfig): LimitCycleFromOrbit
     branchName: '',
     parameterName: system.paramNames[0] ?? '',
     tolerance: '0.1',
-    ntst: '20',
-    ncol: '4',
-    stepSize: '0.01',
-    maxSteps: '50',
-    minStepSize: '1e-5',
-    maxStepSize: '0.1',
-    correctorSteps: '10',
-    correctorTolerance: '1e-6',
-    stepTolerance: '1e-6',
-    forward: true,
-  }
-}
-
-function makeLimitCycleFromHopfDraft(system: SystemConfig): LimitCycleFromHopfDraft {
-  return {
-    limitCycleName: '',
-    branchName: '',
-    parameterName: system.paramNames[0] ?? '',
-    amplitude: '0.1',
     ntst: '20',
     ncol: '4',
     stepSize: '0.01',
@@ -1050,7 +1025,6 @@ export function InspectorDetailsPanel({
   onExtendBranch,
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
-  onCreateLimitCycleFromHopf,
   onCreateLimitCycleFromOrbit,
   onCreateLimitCycleFromPD,
 }: InspectorDetailsPanelProps) {
@@ -1176,12 +1150,12 @@ export function InspectorDetailsPanel({
       .map(([id, entry]) => ({
         id,
         name: entry.name,
-        type: formatBranchType(entry),
+        type: formatBranchType(entry, system.config.type),
         points: entry.data.points.length,
         visible: system.nodes[id]?.visibility ?? true,
       }))
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [system.branches, system.nodes])
+  }, [system.branches, system.nodes, system.config.type])
   const objectEntries = useMemo(() => {
     return Object.entries(system.objects)
       .map(([id, obj]) => {
@@ -1337,6 +1311,31 @@ export function InspectorDetailsPanel({
     makeEquilibriumSolveDraft(system.config)
   )
   const [equilibriumError, setEquilibriumError] = useState<string | null>(null)
+  const equilibriumMapIterations =
+    systemDraft.type === 'map'
+      ? (() => {
+          const fromObject =
+            equilibrium?.lastSolverParams?.mapIterations ??
+            equilibrium?.solution?.cycle_points?.length
+          if (Number.isFinite(fromObject)) {
+            return Math.max(1, Math.trunc(fromObject))
+          }
+          const parsed = parseNumber(equilibriumDraft.mapIterations)
+          return Number.isFinite(parsed) ? Math.max(1, Math.trunc(parsed)) : 1
+        })()
+      : undefined
+  const equilibriumLabel = formatEquilibriumLabel(systemDraft.type, {
+    mapIterations: equilibriumMapIterations,
+  })
+  const equilibriumLabelLower = formatEquilibriumLabel(systemDraft.type, {
+    lowercase: true,
+    mapIterations: equilibriumMapIterations,
+  })
+  const equilibriumLabelPluralLower = formatEquilibriumLabel(systemDraft.type, {
+    lowercase: true,
+    plural: true,
+    mapIterations: equilibriumMapIterations,
+  })
   const [paramOverrideDraft, setParamOverrideDraft] = useState<string[]>(() =>
     makeParamOverrideDraft(system.config, paramOverrideTarget)
   )
@@ -1351,9 +1350,6 @@ export function InspectorDetailsPanel({
   const [limitCycleFromOrbitError, setLimitCycleFromOrbitError] = useState<string | null>(
     null
   )
-  const [limitCycleFromHopfDraft, setLimitCycleFromHopfDraft] =
-    useState<LimitCycleFromHopfDraft>(() => makeLimitCycleFromHopfDraft(system.config))
-  const [limitCycleFromHopfError, setLimitCycleFromHopfError] = useState<string | null>(null)
   const [limitCycleFromPDDraft, setLimitCycleFromPDDraft] = useState<LimitCycleFromPDDraft>(
     () => makeLimitCycleFromPDDraft()
   )
@@ -1542,16 +1538,6 @@ export function InspectorDetailsPanel({
       }
       return { ...prev, parameterName: systemDraft.paramNames[0] ?? '' }
     })
-    setLimitCycleFromHopfDraft((prev) => {
-      if (systemDraft.paramNames.length === 0) {
-        if (!prev.parameterName) return prev
-        return { ...prev, parameterName: '' }
-      }
-      if (systemDraft.paramNames.includes(prev.parameterName)) {
-        return prev
-      }
-      return { ...prev, parameterName: systemDraft.paramNames[0] ?? '' }
-    })
     setBranchContinuationDraft((prev) => {
       if (systemDraft.paramNames.length === 0) {
         if (!prev.parameterName) return prev
@@ -1671,20 +1657,6 @@ export function InspectorDetailsPanel({
       systemDraft.paramNames.find((name) => name !== branchParameterName) ??
       systemDraft.paramNames[0] ??
       ''
-    const hopfCodim1Params = resolveCodim1ParamNames(branch)
-    const hopfDefaultParam =
-      branch?.branchType === 'equilibrium' &&
-      systemDraft.paramNames.includes(branch.parameterName)
-        ? branch.parameterName
-        : branch?.branchType === 'hopf_curve' &&
-            hopfCodim1Params &&
-            systemDraft.paramNames.includes(hopfCodim1Params.param1)
-          ? hopfCodim1Params.param1
-          : branch?.branchType === 'hopf_curve' &&
-              hopfCodim1Params &&
-              systemDraft.paramNames.includes(hopfCodim1Params.param2)
-            ? hopfCodim1Params.param2
-            : systemDraft.paramNames[0] ?? ''
     setBranchContinuationDraft((prev) => {
       const paramName = systemDraft.paramNames.includes(prev.parameterName)
         ? prev.parameterName
@@ -1719,28 +1691,6 @@ export function InspectorDetailsPanel({
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, param2Name, name: nextName }
     })
-    setLimitCycleFromHopfDraft((prev) => {
-      const safeBranchName = toCliSafeName(branchName)
-      const suggestedLimitCycleName = `lc_hopf_${safeBranchName}`
-      const limitCycleName =
-        prev.limitCycleName.trim().length > 0 ? prev.limitCycleName : suggestedLimitCycleName
-      const paramName = systemDraft.paramNames.includes(prev.parameterName)
-        ? prev.parameterName
-        : hopfDefaultParam
-      const safeLimitCycleName = toCliSafeName(limitCycleName)
-      const safeParamName = paramName ? toCliSafeName(paramName) : ''
-      const suggestedBranchName = safeParamName
-        ? `${safeLimitCycleName}_${safeParamName}`
-        : safeLimitCycleName
-      const branchNameValue =
-        prev.branchName.trim().length > 0 ? prev.branchName : suggestedBranchName
-      return {
-        ...prev,
-        limitCycleName,
-        branchName: branchNameValue,
-        parameterName: paramName,
-      }
-    })
     setLimitCycleFromPDDraft((prev) => ({
       ...prev,
       ncol: limitCycleMesh.ncol.toString(),
@@ -1751,7 +1701,6 @@ export function InspectorDetailsPanel({
     setBranchPointError(null)
     setFoldCurveError(null)
     setHopfCurveError(null)
-    setLimitCycleFromHopfError(null)
     setLimitCycleFromPDError(null)
   }, [branch, branchName, branchParameterName, limitCycleMesh.ncol, systemDraft.paramNames])
 
@@ -1825,6 +1774,12 @@ export function InspectorDetailsPanel({
   const hasWasmErrors = wasmEquationErrors.some((entry) => entry)
   const runDisabled = systemDirty || !systemValidation.valid || hasWasmErrors
   const isDiscreteMap = systemDraft.type === 'map'
+  const equilibriumCyclePoints =
+    isDiscreteMap && equilibrium?.solution?.state
+      ? equilibrium.solution.cycle_points && equilibrium.solution.cycle_points.length > 0
+        ? equilibrium.solution.cycle_points
+        : [equilibrium.solution.state]
+      : null
   const plotlyBackground = resolvePlotlyBackgroundColor(theme)
   const equilibriumEigenPlot = useMemo(() => {
     const eigenpairs = equilibrium?.solution?.eigenpairs
@@ -1876,7 +1831,7 @@ export function InspectorDetailsPanel({
       }
       if (object.type === 'equilibrium') {
         return {
-          label: 'Equilibrium',
+          label: equilibriumLabel,
           detail: object.solution ? 'Solved' : 'Not solved',
         }
       }
@@ -1892,7 +1847,7 @@ export function InspectorDetailsPanel({
     if (branch) {
       return {
         label: 'Branch',
-        detail: `${formatBranchType(branch)} · ${branch.data.points.length} points`,
+        detail: `${formatBranchType(branch, systemDraft.type)} · ${branch.data.points.length} points`,
       }
     }
 
@@ -1918,7 +1873,7 @@ export function InspectorDetailsPanel({
     }
 
     return null
-  }, [branch, branchEntries.length, diagram, object, scene])
+  }, [branch, branchEntries.length, diagram, equilibriumLabel, object, scene, systemDraft.type])
 
   const hasParamOverride = Array.isArray(paramOverrideTarget?.customParameters)
 
@@ -1939,16 +1894,6 @@ export function InspectorDetailsPanel({
     limitCycleFromOrbitDraft.parameterName,
     limitCycleFromOrbitNameSuggestion,
   ])
-
-  const limitCycleFromHopfBranchSuggestion = useMemo(() => {
-    if (!branch) return ''
-    const baseName =
-      limitCycleFromHopfDraft.limitCycleName.trim() || `lc_hopf_${toCliSafeName(branch.name)}`
-    const paramName = limitCycleFromHopfDraft.parameterName
-    const safeBaseName = toCliSafeName(baseName)
-    const safeParamName = paramName ? toCliSafeName(paramName) : ''
-    return safeParamName ? `${safeBaseName}_${safeParamName}` : safeBaseName
-  }, [branch, limitCycleFromHopfDraft.limitCycleName, limitCycleFromHopfDraft.parameterName])
 
   const sceneSelectedIds = useMemo(
     () => scene?.selectedNodeIds ?? [],
@@ -2015,13 +1960,6 @@ export function InspectorDetailsPanel({
   const branchStartPoint = branchStartIndex !== undefined ? branch?.data.points[branchStartIndex] : null
   const branchEndPoint = branchEndIndex !== undefined ? branch?.data.points[branchEndIndex] : null
   const hopfOmega = selectedBranchPoint ? extractHopfOmega(selectedBranchPoint) : null
-  const isHopfSourceBranch =
-    branch?.branchType === 'equilibrium' || branch?.branchType === 'hopf_curve'
-  const isHopfPointSelected =
-    !!selectedBranchPoint &&
-    (branch?.branchType === 'equilibrium'
-      ? selectedBranchPoint.stability === 'Hopf'
-      : true)
   const branchEigenvalues = useMemo(
     () =>
       selectedBranchPoint
@@ -2381,15 +2319,16 @@ export function InspectorDetailsPanel({
 
   const handleSolveEquilibrium = async () => {
     if (runDisabled) {
-      setEquilibriumError('Apply valid system settings before solving equilibria.')
+      setEquilibriumError(`Apply valid system settings before solving ${equilibriumLabelPluralLower}.`)
       return
     }
     if (!object || object.type !== 'equilibrium' || !selectedNodeId) {
-      setEquilibriumError('Select an equilibrium to solve.')
+      setEquilibriumError(`Select the ${equilibriumLabelLower} to solve.`)
       return
     }
     const maxSteps = parseNumber(equilibriumDraft.maxSteps)
     const dampingFactor = parseNumber(equilibriumDraft.dampingFactor)
+    const mapIterations = parseNumber(equilibriumDraft.mapIterations)
     const initialGuess = equilibriumDraft.initialGuess.map((value) => parseNumber(value))
 
     if (maxSteps === null || maxSteps <= 0) {
@@ -2399,6 +2338,16 @@ export function InspectorDetailsPanel({
     if (dampingFactor === null || dampingFactor <= 0) {
       setEquilibriumError('Damping factor must be a positive number.')
       return
+    }
+    if (systemDraft.type === 'map') {
+      if (
+        mapIterations === null ||
+        mapIterations <= 0 ||
+        !Number.isInteger(mapIterations)
+      ) {
+        setEquilibriumError('Cycle length must be a positive integer.')
+        return
+      }
     }
     if (initialGuess.some((value) => value === null)) {
       setEquilibriumError('Initial guess values must be numeric.')
@@ -2411,6 +2360,7 @@ export function InspectorDetailsPanel({
       initialGuess: initialGuess.map((value) => value ?? 0),
       maxSteps,
       dampingFactor,
+      ...(systemDraft.type === 'map' ? { mapIterations: mapIterations ?? 1 } : {}),
     }
     await onSolveEquilibrium(request)
   }
@@ -2421,11 +2371,11 @@ export function InspectorDetailsPanel({
       return
     }
     if (!equilibrium || !selectedNodeId) {
-      setContinuationError('Select an equilibrium to continue.')
+      setContinuationError(`Select the ${equilibriumLabelLower} to continue.`)
       return
     }
     if (!equilibrium.solution) {
-      setContinuationError('Solve the equilibrium before continuing.')
+      setContinuationError(`Solve the ${equilibriumLabelLower} before continuing.`)
       return
     }
     if (systemDraft.paramNames.length === 0) {
@@ -2533,7 +2483,7 @@ export function InspectorDetailsPanel({
       return
     }
     if (branch.branchType !== 'equilibrium') {
-      setBranchContinuationError('Continuation is only available for equilibrium branches.')
+      setBranchContinuationError(`Continuation is only available for ${equilibriumLabelLower} branches.`)
       return
     }
     if (!selectedBranchPoint || branchPointIndex === null) {
@@ -2594,7 +2544,7 @@ export function InspectorDetailsPanel({
     }
     if (!canExtendBranch) {
       setBranchExtensionError(
-        'Branch extension is only available for equilibrium, limit cycle, or bifurcation curve branches.'
+        `Branch extension is only available for ${equilibriumLabelLower}, limit cycle, or bifurcation curve branches.`
       )
       return
     }
@@ -2623,7 +2573,7 @@ export function InspectorDetailsPanel({
       return
     }
     if (branch.branchType !== 'equilibrium') {
-      setFoldCurveError('Fold curve continuation is only available for equilibrium branches.')
+      setFoldCurveError(`Fold curve continuation is only available for ${equilibriumLabelLower} branches.`)
       return
     }
     if (!selectedBranchPoint || branchPointIndex === null) {
@@ -2686,7 +2636,7 @@ export function InspectorDetailsPanel({
       return
     }
     if (branch.branchType !== 'equilibrium') {
-      setHopfCurveError('Hopf curve continuation is only available for equilibrium branches.')
+      setHopfCurveError(`Hopf curve continuation is only available for ${equilibriumLabelLower} branches.`)
       return
     }
     if (!selectedBranchPoint || branchPointIndex === null) {
@@ -2739,107 +2689,6 @@ export function InspectorDetailsPanel({
     })
   }
 
-  const handleCreateLimitCycleFromHopf = async () => {
-    if (runDisabled) {
-      setLimitCycleFromHopfError('Apply valid system settings before continuing.')
-      return
-    }
-    if (systemDraft.type === 'map') {
-      setLimitCycleFromHopfError('Limit cycles require a flow system.')
-      return
-    }
-    if (!branch || !selectedNodeId) {
-      setLimitCycleFromHopfError('Select a branch to continue.')
-      return
-    }
-    if (!isHopfSourceBranch) {
-      setLimitCycleFromHopfError(
-        'Limit cycle continuation is only available for equilibrium or Hopf curve branches.'
-      )
-      return
-    }
-    if (!selectedBranchPoint || branchPointIndex === null) {
-      setLimitCycleFromHopfError('Select a branch point to continue from.')
-      return
-    }
-    if (branch.branchType === 'equilibrium' && selectedBranchPoint.stability !== 'Hopf') {
-      setLimitCycleFromHopfError('Select a Hopf bifurcation point to continue.')
-      return
-    }
-    if (!systemDraft.paramNames.includes(limitCycleFromHopfDraft.parameterName)) {
-      setLimitCycleFromHopfError('Continuation parameter is not defined in this system.')
-      return
-    }
-
-    const limitCycleName = limitCycleFromHopfDraft.limitCycleName.trim()
-    if (!limitCycleName) {
-      setLimitCycleFromHopfError('Limit cycle name is required.')
-      return
-    }
-    if (!isCliSafeName(limitCycleName)) {
-      setLimitCycleFromHopfError('Limit cycle names must be alphanumeric with underscores only.')
-      return
-    }
-
-    const branchName = limitCycleFromHopfDraft.branchName.trim()
-    if (!branchName) {
-      setLimitCycleFromHopfError('Branch name is required.')
-      return
-    }
-    if (!isCliSafeName(branchName)) {
-      setLimitCycleFromHopfError('Branch names must be alphanumeric with underscores only.')
-      return
-    }
-
-    const amplitude = parseNumber(limitCycleFromHopfDraft.amplitude)
-    if (amplitude === null || amplitude <= 0) {
-      setLimitCycleFromHopfError('Amplitude must be a positive number.')
-      return
-    }
-
-    const ntst = parseInteger(limitCycleFromHopfDraft.ntst)
-    if (ntst === null || ntst <= 0) {
-      setLimitCycleFromHopfError('NTST must be a positive integer.')
-      return
-    }
-
-    const ncol = parseInteger(limitCycleFromHopfDraft.ncol)
-    if (ncol === null || ncol <= 0) {
-      setLimitCycleFromHopfError('NCOL must be a positive integer.')
-      return
-    }
-
-    const { settings, error } = buildContinuationSettings({
-      name: '',
-      parameterName: limitCycleFromHopfDraft.parameterName,
-      stepSize: limitCycleFromHopfDraft.stepSize,
-      maxSteps: limitCycleFromHopfDraft.maxSteps,
-      minStepSize: limitCycleFromHopfDraft.minStepSize,
-      maxStepSize: limitCycleFromHopfDraft.maxStepSize,
-      correctorSteps: limitCycleFromHopfDraft.correctorSteps,
-      correctorTolerance: limitCycleFromHopfDraft.correctorTolerance,
-      stepTolerance: limitCycleFromHopfDraft.stepTolerance,
-      forward: limitCycleFromHopfDraft.forward,
-    })
-    if (!settings) {
-      setLimitCycleFromHopfError(error ?? 'Invalid continuation settings.')
-      return
-    }
-
-    setLimitCycleFromHopfError(null)
-    await onCreateLimitCycleFromHopf({
-      branchId: selectedNodeId,
-      pointIndex: branchPointIndex,
-      parameterName: limitCycleFromHopfDraft.parameterName,
-      limitCycleName,
-      branchName,
-      amplitude,
-      ntst,
-      ncol,
-      settings,
-      forward: limitCycleFromHopfDraft.forward,
-    })
-  }
 
   const handleCreateLimitCycleFromPD = async () => {
     if (runDisabled) {
@@ -4365,7 +4214,7 @@ export function InspectorDetailsPanel({
             <>
               <InspectorDisclosure
                 key={`${selectionKey}-equilibrium-data`}
-                title="Equilibrium Data"
+                title={`${equilibriumLabel} Data`}
                 testId="equilibrium-data-toggle"
               >
                 <div className="inspector-section">
@@ -4401,9 +4250,67 @@ export function InspectorDetailsPanel({
                       }))}
                     />
                   ) : (
-                    <p className="empty-state">No stored equilibrium solution yet.</p>
+                    <p className="empty-state">{`No stored ${equilibriumLabelLower} solution yet.`}</p>
                   )}
                 </div>
+                {isDiscreteMap ? (
+                  <div className="inspector-section">
+                    <div className="inspector-subheading-row">
+                      <h4 className="inspector-subheading">Cycle points</h4>
+                      {equilibriumCyclePoints && equilibriumCyclePoints.length > 0 ? (
+                        <button
+                          type="button"
+                          className="inspector-inline-button"
+                          onClick={() =>
+                            void writeClipboardText(
+                              equilibriumCyclePoints
+                                .map((point) => formatPointValues(point))
+                                .join('\n')
+                            )
+                          }
+                        >
+                          Copy
+                        </button>
+                      ) : null}
+                    </div>
+                    {equilibriumCyclePoints && equilibriumCyclePoints.length > 0 ? (
+                      <div
+                        className="orbit-preview__table"
+                        role="region"
+                        aria-label="Cycle point data"
+                      >
+                        <table className="orbit-preview__table-grid">
+                          <thead>
+                            <tr>
+                              <th>#</th>
+                              {systemDraft.varNames.map((name, index) => (
+                                <th key={`equilibrium-cycle-col-${index}`}>
+                                  {name || `x${index + 1}`}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {equilibriumCyclePoints.map((point, rowIndex) => (
+                              <tr key={`equilibrium-cycle-row-${rowIndex}`}>
+                                <td>{rowIndex}</td>
+                                {systemDraft.varNames.map((_, varIndex) => (
+                                  <td
+                                    key={`equilibrium-cycle-cell-${rowIndex}-${varIndex}`}
+                                  >
+                                    {formatFixed(point[varIndex] ?? Number.NaN, 4)}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="empty-state">No cycle points stored yet.</p>
+                    )}
+                  </div>
+                ) : null}
                 <div className="inspector-section">
                   <div className="inspector-subheading-row">
                     <h4 className="inspector-subheading">Parameters (last solve)</h4>
@@ -4688,6 +4595,14 @@ export function InspectorDetailsPanel({
                     <>
                       <InspectorMetrics
                         rows={[
+                          ...(systemDraft.type === 'map'
+                            ? [
+                                {
+                                  label: 'Cycle length',
+                                  value: equilibrium.lastSolverParams.mapIterations ?? 1,
+                                },
+                              ]
+                            : []),
                           {
                             label: 'Max steps',
                             value: equilibrium.lastSolverParams.maxSteps,
@@ -4719,14 +4634,14 @@ export function InspectorDetailsPanel({
 
               <InspectorDisclosure
                 key={`${selectionKey}-equilibrium-solver`}
-                title="Equilibrium Solver"
+                title={`${equilibriumLabel} Solver`}
                 testId="equilibrium-solver-toggle"
                 defaultOpen={false}
               >
                 <div className="inspector-section">
                   {runDisabled ? (
                     <div className="field-warning">
-                      Apply valid system changes before solving equilibria.
+                      {`Apply valid system changes before solving ${equilibriumLabelPluralLower}.`}
                     </div>
                   ) : null}
                   <StateTable
@@ -4769,20 +4684,36 @@ export function InspectorDetailsPanel({
                       data-testid="equilibrium-solve-damping"
                     />
                   </label>
+                  {systemDraft.type === 'map' ? (
+                    <label>
+                      Cycle length
+                      <input
+                        type="number"
+                        value={equilibriumDraft.mapIterations}
+                        onChange={(event) =>
+                          setEquilibriumDraft((prev) => ({
+                            ...prev,
+                            mapIterations: event.target.value,
+                          }))
+                        }
+                        data-testid="equilibrium-solve-cycle-length"
+                      />
+                    </label>
+                  ) : null}
                   {equilibriumError ? <div className="field-error">{equilibriumError}</div> : null}
                   <button
                     onClick={handleSolveEquilibrium}
                     disabled={runDisabled}
                     data-testid="equilibrium-solve-submit"
                   >
-                    Solve Equilibrium
+                    Solve {equilibriumLabel}
                   </button>
                 </div>
               </InspectorDisclosure>
 
               <InspectorDisclosure
                 key={`${selectionKey}-equilibrium-continuation`}
-                title="Equilibrium Continuation"
+                title={`${equilibriumLabel} Continuation`}
                 testId="equilibrium-continuation-toggle"
                 defaultOpen={false}
               >
@@ -4796,7 +4727,7 @@ export function InspectorDetailsPanel({
                     <p className="empty-state">Add parameters to enable continuation.</p>
                   ) : null}
                   {!equilibrium.solution ? (
-                    <p className="empty-state">Solve the equilibrium to continue it.</p>
+                    <p className="empty-state">{`Solve the ${equilibriumLabelLower} to continue it.`}</p>
                   ) : (
                     <>
                       <label>
@@ -5453,7 +5384,7 @@ export function InspectorDetailsPanel({
                       <div className="inspector-section">
                         <InspectorMetrics
                           rows={[
-                            { label: 'Type', value: formatBranchType(branch) },
+                            { label: 'Type', value: formatBranchType(branch, systemDraft.type) },
                             { label: 'Parent', value: branch.parentObject },
                             { label: 'Start', value: branch.startObject },
                             { label: 'Continuation param', value: branch.parameterName },
@@ -5913,7 +5844,7 @@ export function InspectorDetailsPanel({
                       <div className="inspector-section">
                         <InspectorMetrics
                           rows={[
-                            { label: 'Type', value: formatBranchType(branch) },
+                            { label: 'Type', value: formatBranchType(branch, systemDraft.type) },
                             { label: 'Parent', value: branch.parentObject },
                             { label: 'Start', value: branch.startObject },
                             { label: 'Continuation param', value: branch.parameterName },
@@ -6269,7 +6200,7 @@ export function InspectorDetailsPanel({
                   <div className="inspector-section">
                     {!canExtendBranch ? (
                       <p className="empty-state">
-                        Branch extension is only available for equilibrium, limit cycle, or bifurcation curve branches.
+                        {`Branch extension is only available for ${equilibriumLabelLower}, limit cycle, or bifurcation curve branches.`}
                       </p>
                     ) : null}
                     {runDisabled ? (
@@ -6421,7 +6352,7 @@ export function InspectorDetailsPanel({
                   <div className="inspector-section">
                     {branch.branchType !== 'equilibrium' ? (
                       <p className="empty-state">
-                        Continuation from points is only available for equilibrium branches.
+                        {`Continuation from points is only available for ${equilibriumLabelLower} branches.`}
                       </p>
                     ) : null}
                     {runDisabled ? (
@@ -6623,7 +6554,7 @@ export function InspectorDetailsPanel({
                   <div className="inspector-section">
                     {branch.branchType !== 'equilibrium' ? (
                       <p className="empty-state">
-                        Codim-1 curve continuation is only available for equilibrium branches.
+                        {`Codim-1 curve continuation is only available for ${equilibriumLabelLower} branches.`}
                       </p>
                     ) : null}
                     {runDisabled ? (
@@ -7008,284 +6939,6 @@ export function InspectorDetailsPanel({
                       <p className="empty-state">
                         Select a Fold or Hopf point to continue a codim-1 curve.
                       </p>
-                    )}
-                  </div>
-                </InspectorDisclosure>
-
-                <InspectorDisclosure
-                  key={`${selectionKey}-limit-cycle-hopf`}
-                  title="Limit Cycle from Hopf"
-                  testId="limit-cycle-from-hopf-toggle"
-                  defaultOpen={false}
-                >
-                  <div className="inspector-section">
-                    {!isHopfSourceBranch ? (
-                      <p className="empty-state">
-                        Limit cycle continuation is only available for equilibrium or Hopf curve
-                        branches.
-                      </p>
-                    ) : null}
-                    {systemDraft.type === 'map' ? (
-                      <p className="empty-state">Limit cycles require a flow system.</p>
-                    ) : null}
-                    {systemDraft.paramNames.length === 0 ? (
-                      <p className="empty-state">Add a parameter before continuing.</p>
-                    ) : null}
-                    {runDisabled ? (
-                      <div className="field-warning">
-                        Apply valid system changes before continuing.
-                      </div>
-                    ) : null}
-                    {!isHopfSourceBranch ||
-                    systemDraft.type === 'map' ||
-                    systemDraft.paramNames.length === 0 ? null : !selectedBranchPoint ? (
-                      <p className="empty-state">Select a branch point to continue.</p>
-                    ) : !isHopfPointSelected ? (
-                      <p className="empty-state">
-                        Select a Hopf bifurcation point to continue a limit cycle.
-                      </p>
-                    ) : (
-                      <>
-                        <label>
-                          Limit cycle name
-                          <input
-                            value={limitCycleFromHopfDraft.limitCycleName}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                limitCycleName: event.target.value,
-                              }))
-                            }
-                            placeholder={`lc_hopf_${toCliSafeName(branch.name)}`}
-                            data-testid="limit-cycle-from-hopf-name"
-                          />
-                        </label>
-                        <label>
-                          Branch name
-                          <input
-                            value={limitCycleFromHopfDraft.branchName}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                branchName: event.target.value,
-                              }))
-                            }
-                            placeholder={limitCycleFromHopfBranchSuggestion}
-                            data-testid="limit-cycle-from-hopf-branch-name"
-                          />
-                        </label>
-                        <label>
-                          Continuation parameter
-                        <select
-                          value={limitCycleFromHopfDraft.parameterName}
-                          onChange={(event) => {
-                            const nextParameterName = event.target.value
-                            setLimitCycleFromHopfDraft((prev) => {
-                              const baseName =
-                                prev.limitCycleName.trim() ||
-                                `lc_hopf_${toCliSafeName(branch.name)}`
-                              const prevSuggestedName = buildSuggestedBranchName(
-                                baseName,
-                                prev.parameterName
-                              )
-                              const nextSuggestedName = buildSuggestedBranchName(
-                                baseName,
-                                nextParameterName
-                              )
-                              const shouldUpdateName = prev.branchName === prevSuggestedName
-                              return {
-                                ...prev,
-                                parameterName: nextParameterName,
-                                branchName: shouldUpdateName
-                                  ? nextSuggestedName
-                                  : prev.branchName,
-                              }
-                            })
-                          }}
-                          data-testid="limit-cycle-from-hopf-parameter"
-                        >
-                            {systemDraft.paramNames.map((name) => (
-                              <option key={name} value={name}>
-                                {name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Initial amplitude
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.amplitude}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                amplitude: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-amplitude"
-                          />
-                        </label>
-                        <label>
-                          NTST
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.ntst}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                ntst: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-ntst"
-                          />
-                          <span className="field-help">Mesh intervals along the cycle.</span>
-                        </label>
-                        <label>
-                          NCOL
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.ncol}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                ncol: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-ncol"
-                          />
-                          <span className="field-help">Collocation points per mesh interval.</span>
-                        </label>
-                        <label>
-                          Direction
-                          <select
-                            value={limitCycleFromHopfDraft.forward ? 'forward' : 'backward'}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                forward: event.target.value === 'forward',
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-direction"
-                          >
-                            <option value="forward">Forward (Increasing Param)</option>
-                            <option value="backward">Backward (Decreasing Param)</option>
-                          </select>
-                        </label>
-                        <label>
-                          Initial step size
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.stepSize}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                stepSize: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-step-size"
-                          />
-                        </label>
-                        <label>
-                          Max points
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.maxSteps}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                maxSteps: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-max-steps"
-                          />
-                        </label>
-                        <label>
-                          Min step size
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.minStepSize}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                minStepSize: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-min-step-size"
-                          />
-                        </label>
-                        <label>
-                          Max step size
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.maxStepSize}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                maxStepSize: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-max-step-size"
-                          />
-                        </label>
-                        <label>
-                          Corrector steps
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.correctorSteps}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                correctorSteps: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-corrector-steps"
-                          />
-                        </label>
-                        <label>
-                          Corrector tolerance
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.correctorTolerance}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                correctorTolerance: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-corrector-tolerance"
-                          />
-                        </label>
-                        <label>
-                          Step tolerance
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.stepTolerance}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                stepTolerance: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-step-tolerance"
-                          />
-                        </label>
-                        {limitCycleFromHopfError ? (
-                          <div className="field-error">{limitCycleFromHopfError}</div>
-                        ) : null}
-                        <button
-                          onClick={handleCreateLimitCycleFromHopf}
-                          disabled={
-                            runDisabled ||
-                            !selectedBranchPoint ||
-                            !isHopfSourceBranch ||
-                            !isHopfPointSelected ||
-                            systemDraft.paramNames.length === 0
-                          }
-                          data-testid="limit-cycle-from-hopf-submit"
-                        >
-                          Continue Limit Cycle
-                        </button>
-                      </>
                     )}
                   </div>
                 </InspectorDisclosure>

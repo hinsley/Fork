@@ -124,6 +124,7 @@ export async function extendBranch(
     const runConfig = { ...sysConfig };
     runConfig.params = getBranchParams(sysName, branch, sysConfig);
     const bridge = new WasmBridge(runConfig);
+    const mapIterations = sysConfig.type === 'map' ? branch.mapIterations ?? 1 : 1;
 
     // If indices are missing, fill them (migration)
     if (!branch.data.indices) {
@@ -165,6 +166,7 @@ export async function extendBranch(
       bridge,
       branchDataToPass,
       branch.parameterName,
+      mapIterations,
       continuationSettings,
       directionForward,
       'Extension'

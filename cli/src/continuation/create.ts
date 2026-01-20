@@ -14,6 +14,7 @@ import {
   LimitCycleObject,
   OrbitObject
 } from '../types';
+import { formatEquilibriumLabel } from '../labels';
 import { NavigationRequest } from '../navigation';
 import {
   ConfigEntry,
@@ -38,12 +39,14 @@ import { runEquilibriumContinuationWithProgress, runLimitCycleContinuationWithPr
  * @param sysName - Name of the dynamical system
  */
 export async function createBranch(sysName: string) {
+  const sysConfig = Storage.loadSystem(sysName);
+  const equilibriumLabel = formatEquilibriumLabel(sysConfig.type);
   const { branchType } = await inquirer.prompt({
     type: 'rawlist',
     name: 'branchType',
     message: 'Select Branch Type:',
     choices: [
-      { name: 'Equilibrium Branch', value: 'equilibrium' },
+      { name: `${equilibriumLabel} Branch`, value: 'equilibrium' },
       { name: 'Limit Cycle Branch', value: 'limit_cycle' },
       new inquirer.Separator(),
       { name: 'Back', value: 'back' }
@@ -70,9 +73,20 @@ export async function createEquilibriumBranchForObject(
   eqObj: EquilibriumObject
 ): Promise<NavigationRequest | void> {
   const sysConfig = Storage.loadSystem(sysName);
+  const equilibriumMapIterations =
+    eqObj.lastSolverParams?.mapIterations ?? eqObj.solution?.cycle_points?.length;
+  const equilibriumLabel = formatEquilibriumLabel(sysConfig.type, {
+    mapIterations: equilibriumMapIterations,
+  });
+  const equilibriumLabelLower = formatEquilibriumLabel(sysConfig.type, {
+    lowercase: true,
+    mapIterations: equilibriumMapIterations,
+  });
 
   if (!eqObj.solution) {
-    console.log(chalk.red("This equilibrium object has no solution. Solve it first."));
+    console.log(
+      chalk.red(`This ${equilibriumLabelLower} object has no solution. Solve it first.`)
+    );
     return;
   }
 
@@ -255,7 +269,10 @@ export async function createEquilibriumBranchForObject(
   ];
 
   while (true) {
-    const result = await runConfigMenu(`Create Continuation Branch (Equilibrium: ${eqObj.name})`, entries);
+    const result = await runConfigMenu(
+      `Create Continuation Branch (${equilibriumLabel}: ${eqObj.name})`,
+      entries
+    );
     if (result === 'back') {
       return;
     }
@@ -297,12 +314,16 @@ export async function createEquilibriumBranchForObject(
     }
 
     const bridge = new WasmBridge(runConfig);
+    const mapIterations = sysConfig.type === 'map'
+      ? eqObj.lastSolverParams?.mapIterations ?? 1
+      : 1;
 
     const branchData = normalizeBranchEigenvalues(
       runEquilibriumContinuationWithProgress(
         bridge,
         eqObj.solution.state,
         selectedParamName,
+        mapIterations,
         continuationSettings,
         directionForward,
         'Continuation'
@@ -321,6 +342,7 @@ export async function createEquilibriumBranchForObject(
       settings: continuationSettings,
       timestamp: new Date().toISOString(),
       params: [...runConfig.params],
+      mapIterations: sysConfig.type === 'map' ? mapIterations : undefined,
     };
 
     Storage.saveBranch(sysName, eqObj.name, branch);
@@ -342,11 +364,6 @@ export async function createLimitCycleBranchForObject(
   lcObj: LimitCycleObject
 ): Promise<NavigationRequest | void> {
   const sysConfig = Storage.loadSystem(sysName);
-
-  if (sysConfig.type === 'map') {
-    console.log(chalk.red("Limit cycle continuation is only available for flow (ODE) systems."));
-    return;
-  }
 
   if (sysConfig.paramNames.length === 0) {
     console.log(chalk.red("System has no parameters to continue. Add at least one parameter first."));
@@ -653,11 +670,6 @@ export async function createLimitCycleBranchForObject(
 async function createLimitCycleBranch(sysName: string) {
   const sysConfig = Storage.loadSystem(sysName);
 
-  if (sysConfig.type === 'map') {
-    console.log(chalk.red("Limit cycle continuation is only available for flow (ODE) systems."));
-    return;
-  }
-
   const orbits = Storage.listObjects(sysName)
     .map(name => Storage.loadObject(sysName, name))
     .filter((obj): obj is OrbitObject => obj.type === 'orbit');
@@ -708,13 +720,19 @@ async function createLimitCycleBranch(sysName: string) {
  */
 async function createEquilibriumBranch(sysName: string) {
   const sysConfig = Storage.loadSystem(sysName);
+  const equilibriumLabel = formatEquilibriumLabel(sysConfig.type);
+  const equilibriumLabelLower = formatEquilibriumLabel(sysConfig.type, { lowercase: true });
 
   const objects = Storage.listObjects(sysName)
     .map(name => Storage.loadObject(sysName, name))
     .filter((obj): obj is EquilibriumObject => obj.type === 'equilibrium' && !!obj.solution);
 
   if (objects.length === 0) {
-    console.log(chalk.red("No converged equilibrium objects found. Create and solve an equilibrium first."));
+    const emptyMessage =
+      sysConfig.type === 'map'
+        ? `No converged ${equilibriumLabelLower} objects found. Create and solve a ${equilibriumLabelLower} first.`
+        : 'No converged equilibrium objects found. Create and solve an equilibrium first.';
+    console.log(chalk.red(emptyMessage));
     return;
   }
 
@@ -742,14 +760,14 @@ async function createEquilibriumBranch(sysName: string) {
   const entries: ConfigEntry[] = [
     {
       id: 'equilibrium',
-      label: 'Starting equilibrium',
+      label: `Starting ${equilibriumLabelLower}`,
       section: 'Branch Settings',
       getDisplay: () => selectedEqName || '(required)',
       edit: async () => {
         const { value } = await inquirer.prompt({
           type: 'rawlist',
           name: 'value',
-          message: 'Select Starting Equilibrium:',
+          message: `Select Starting ${equilibriumLabel}:`,
           choices: objects.map(o => ({
             name: `${o.name} (${o.solution ? 'solved' : 'unsolved'})`,
             value: o.name
@@ -946,7 +964,7 @@ async function createEquilibriumBranch(sysName: string) {
     }
 
     if (!selectedEqName) {
-      console.error(chalk.red('Please select a starting equilibrium.'));
+      console.error(chalk.red(`Please select a starting ${equilibriumLabelLower}.`));
       continue;
     }
 
@@ -970,7 +988,7 @@ async function createEquilibriumBranch(sysName: string) {
 
   const eqObj = objects.find(o => o.name === selectedEqName);
   if (!eqObj) {
-    console.error(chalk.red('Selected equilibrium could not be found. Aborting.'));
+    console.error(chalk.red(`Selected ${equilibriumLabelLower} could not be found. Aborting.`));
     return;
   }
 
@@ -997,11 +1015,15 @@ async function createEquilibriumBranch(sysName: string) {
     }
 
     const bridge = new WasmBridge(runConfig);
+    const mapIterations = sysConfig.type === 'map'
+      ? eqObj.lastSolverParams?.mapIterations ?? 1
+      : 1;
     const branchData = normalizeBranchEigenvalues(
       runEquilibriumContinuationWithProgress(
         bridge,
         eqObj.solution!.state,
         selectedParamName,
+        mapIterations,
         continuationSettings,
         forward,
         'Continuation'
@@ -1019,7 +1041,8 @@ async function createEquilibriumBranch(sysName: string) {
       data: branchData,
       settings: continuationSettings,
       timestamp: new Date().toISOString(),
-      params: [...runConfig.params]  // Store full parameter snapshot
+      params: [...runConfig.params],  // Store full parameter snapshot
+      mapIterations: sysConfig.type === 'map' ? mapIterations : undefined
     };
 
     Storage.saveBranch(sysName, selectedEqName, branch);

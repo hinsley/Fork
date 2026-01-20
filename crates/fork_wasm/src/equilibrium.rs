@@ -1,12 +1,13 @@
 //! Equilibrium solver runner and helpers.
 
 use crate::system::{build_system, SystemType, WasmSystem};
+use fork_core::traits::DynamicalSystem;
 use fork_core::equilibrium::{
-    compute_system_jacobian, solve_equilibrium as core_equilibrium_solver, EigenPair,
-    EquilibriumResult, NewtonSettings, SystemKind,
+    compute_system_jacobian, evaluate_equilibrium_residual,
+    solve_equilibrium as core_equilibrium_solver, EigenPair, EquilibriumResult, NewtonSettings,
+    SystemKind,
 };
 use fork_core::equation_engine::EquationSystem;
-use fork_core::traits::DynamicalSystem;
 use nalgebra::linalg::SVD;
 use nalgebra::{Complex, DMatrix, DVector};
 use serde::Serialize;
@@ -20,6 +21,7 @@ impl WasmSystem {
         initial_guess: Vec<f64>,
         max_steps: u32,
         damping: f64,
+        map_iterations: u32,
     ) -> Result<JsValue, JsValue> {
         let settings = NewtonSettings {
             max_steps: max_steps as usize,
@@ -29,7 +31,9 @@ impl WasmSystem {
 
         let kind = match self.system_type {
             SystemType::Flow => SystemKind::Flow,
-            SystemType::Map => SystemKind::Map,
+            SystemType::Map => SystemKind::Map {
+                iterations: map_iterations as usize,
+            },
         };
 
         let result = core_equilibrium_solver(&self.system, kind, &initial_guess, settings)
@@ -73,6 +77,7 @@ impl WasmEquilibriumSolverRunner {
         param_names: Vec<String>,
         var_names: Vec<String>,
         system_type: &str,
+        map_iterations: u32,
         initial_guess: Vec<f64>,
         max_steps: u32,
         damping: f64,
@@ -81,7 +86,9 @@ impl WasmEquilibriumSolverRunner {
 
         let system = build_system(equations, params, &param_names, &var_names)?;
         let kind = match system_type {
-            "map" => SystemKind::Map,
+            "map" => SystemKind::Map {
+                iterations: map_iterations as usize,
+            },
             _ => SystemKind::Flow,
         };
 
@@ -101,7 +108,8 @@ impl WasmEquilibriumSolverRunner {
 
         let state = initial_guess;
         let mut residual = vec![0.0; dim];
-        evaluate_equilibrium_residual(&system, kind, &state, &mut residual);
+        evaluate_equilibrium_residual(&system, kind, &state, &mut residual)
+            .map_err(|e| JsValue::from_str(&format!("Residual failed: {}", e)))?;
         let residual_norm = l2_norm(&residual);
 
         Ok(WasmEquilibriumSolverRunner {
@@ -167,7 +175,13 @@ impl WasmEquilibriumSolverRunner {
             }
 
             state.iterations += 1;
-            evaluate_equilibrium_residual(&state.system, state.kind, &state.state, &mut state.residual);
+            evaluate_equilibrium_residual(
+                &state.system,
+                state.kind,
+                &state.state,
+                &mut state.residual,
+            )
+            .map_err(|e| JsValue::from_str(&format!("Residual failed: {}", e)))?;
             state.residual_norm = l2_norm(&state.residual);
         }
 
@@ -207,10 +221,16 @@ impl WasmEquilibriumSolverRunner {
             return Err(JsValue::from_str("Equilibrium solver has not converged yet."));
         }
 
-        let jacobian = compute_system_jacobian(&state.system, &state.state)
+        let jacobian = compute_system_jacobian(&state.system, state.kind, &state.state)
             .map_err(|e| JsValue::from_str(&format!("Jacobian failed: {}", e)))?;
         let eigenpairs = compute_equilibrium_eigenpairs(state.system.equations.len(), &jacobian)
             .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+        let cycle_points = match state.kind {
+            SystemKind::Map { iterations } if iterations > 1 => {
+                Some(compute_map_cycle_points(&state.system, &state.state, iterations))
+            }
+            _ => None,
+        };
 
         let result = EquilibriumResult {
             state: state.state.clone(),
@@ -218,26 +238,10 @@ impl WasmEquilibriumSolverRunner {
             iterations: state.iterations,
             jacobian,
             eigenpairs,
+            cycle_points,
         };
 
         to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
-    }
-}
-
-fn evaluate_equilibrium_residual(
-    system: &EquationSystem,
-    kind: SystemKind,
-    state: &[f64],
-    out: &mut [f64],
-) {
-    match kind {
-        SystemKind::Flow => system.apply(0.0, state, out),
-        SystemKind::Map => {
-            system.apply(0.0, state, out);
-            for i in 0..out.len() {
-                out[i] -= state[i];
-            }
-        }
     }
 }
 
@@ -249,6 +253,28 @@ fn solve_linear_system(dim: usize, jacobian: &[f64], residual: &[f64]) -> anyhow
         .solve(&rhs)
         .map(|v| v.iter().cloned().collect())
         .ok_or_else(|| anyhow::anyhow!("Jacobian is singular."))
+}
+
+fn compute_map_cycle_points(
+    system: &EquationSystem,
+    state: &[f64],
+    iterations: usize,
+) -> Vec<Vec<f64>> {
+    let dim = system.equations.len();
+    let mut points = Vec::with_capacity(iterations.max(1));
+    points.push(state.to_vec());
+    if iterations <= 1 {
+        return points;
+    }
+
+    let mut current = state.to_vec();
+    let mut next = vec![0.0; dim];
+    for _ in 1..iterations {
+        system.apply(0.0, &current, &mut next);
+        points.push(next.clone());
+        std::mem::swap(&mut current, &mut next);
+    }
+    points
 }
 
 fn compute_equilibrium_eigenpairs(
@@ -313,6 +339,7 @@ mod wasm_wrapper_tests {
             Vec::new(),
             Vec::new(),
             "flow",
+            1,
             Vec::new(),
             10,
             1.0,
@@ -329,6 +356,7 @@ mod wasm_wrapper_tests {
             Vec::new(),
             vec!["x".to_string()],
             "flow",
+            1,
             vec![0.0, 1.0],
             10,
             1.0,
@@ -346,6 +374,7 @@ mod wasm_wrapper_tests {
             Vec::new(),
             vec!["x".to_string()],
             "flow",
+            1,
             vec![1.0],
             10,
             1.0,
@@ -409,7 +438,7 @@ mod wasm_value_tests {
     fn solve_equilibrium_converges_for_linear_system() {
         let system = build_linear_system();
         let result_val = system
-            .solve_equilibrium(vec![1.0], 8, 1.0)
+            .solve_equilibrium(vec![1.0], 8, 1.0, 1)
             .expect("solve equilibrium");
         let result: EquilibriumResult = from_value(result_val).expect("decode result");
 
@@ -421,7 +450,7 @@ mod wasm_value_tests {
     fn solve_equilibrium_reports_core_errors() {
         let system = build_linear_system();
         let err = system
-            .solve_equilibrium(vec![1.0], 0, 1.0)
+            .solve_equilibrium(vec![1.0], 0, 1.0, 1)
             .expect_err("expected error");
 
         let message = err.as_string().unwrap_or_default();
@@ -434,8 +463,8 @@ mod wasm_value_tests {
     fn solve_equilibrium_converges_for_identity_map() {
         let system = build_identity_map_system();
         let result_val = system
-            .solve_equilibrium(vec![2.0], 4, 1.0)
-            .expect("solve equilibrium");
+            .solve_equilibrium(vec![2.0], 4, 1.0, 1)
+            .expect("solve fixed point");
         let result: EquilibriumResult = from_value(result_val).expect("decode result");
 
         assert!(result.residual_norm.abs() < 1e-12);
@@ -450,6 +479,7 @@ mod wasm_value_tests {
             vec![],
             vec!["x".to_string()],
             "flow",
+            1,
             vec![1.0, 2.0],
             5,
             1.0,
@@ -469,6 +499,7 @@ mod wasm_value_tests {
             vec![],
             vec!["x".to_string()],
             "flow",
+            1,
             vec![1.0],
             5,
             1.0,
@@ -492,6 +523,7 @@ mod wasm_value_tests {
             vec![],
             vec!["x".to_string()],
             "flow",
+            1,
             vec![0.0],
             5,
             1.0,

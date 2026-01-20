@@ -194,7 +194,7 @@ impl<'a> ContinuationProblem for FoldCurveProblem<'a> {
         self.with_params(p1, p2, |system| {
             match kind {
                 SystemKind::Flow => system.apply(0.0, &state, &mut f_out),
-                SystemKind::Map => {
+                SystemKind::Map { .. } => {
                     system.apply(0.0, &state, &mut f_out);
                     for i in 0..n {
                         f_out[i] -= state[i];
@@ -329,6 +329,7 @@ impl<'a> ContinuationProblem for FoldCurveProblem<'a> {
         Ok(PointDiagnostics {
             test_values: TestFunctionValues::equilibrium(fold, 1.0, 1.0),
             eigenvalues,
+            cycle_points: None,
         })
     }
 

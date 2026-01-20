@@ -202,11 +202,48 @@ pub fn neutral_saddle_test_function(eigenvalues: &[Complex<f64>]) -> f64 {
     }
 }
 
+/// Neimark-Sacker test function for map equilibria: product of (|μ|^2 - 1)
+/// over complex conjugate pairs. Returns 0.0 when no complex pairs exist.
+pub fn neimark_sacker_test_function(eigenvalues: &[Complex<f64>]) -> f64 {
+    const IMAG_EPS: f64 = 1e-8;
+    let mut product = 1.0;
+    let mut found_pair = false;
+
+    for eig in eigenvalues.iter() {
+        if eig.im <= IMAG_EPS {
+            continue;
+        }
+        found_pair = true;
+        product *= eig.norm_sqr() - 1.0;
+    }
+
+    if found_pair { product } else { 0.0 }
+}
+
+/// Period-doubling test function for map equilibria: product of (mu + 1)
+/// over real eigenvalues, with |mu + 1|^2 for each complex conjugate pair.
+pub fn period_doubling_test_function(eigenvalues: &[Complex<f64>]) -> f64 {
+    const IMAG_EPS: f64 = 1e-8;
+    let mut product = 1.0;
+
+    for eig in eigenvalues.iter() {
+        if eig.im.abs() < IMAG_EPS {
+            product *= eig.re + 1.0;
+        } else if eig.im > IMAG_EPS {
+            let shift = eig.re + 1.0;
+            product *= shift * shift + eig.im * eig.im;
+        }
+    }
+
+    product
+}
+
 #[cfg(test)]
 mod tests_additional {
     use super::{
         compute_eigenvalues, compute_nullspace_tangent, continuation_point_to_aug,
-        hopf_test_function, neutral_saddle_test_function,
+        hopf_test_function, neutral_saddle_test_function, neimark_sacker_test_function,
+        period_doubling_test_function,
     };
     use crate::continuation::types::{BifurcationType, ContinuationPoint};
     use nalgebra::DMatrix;
@@ -228,6 +265,7 @@ mod tests_additional {
             param_value: 3.0,
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
+            cycle_points: None,
         };
         let aug = continuation_point_to_aug(&point);
         assert_eq!(aug.as_slice(), &[3.0, 1.0, 2.0]);
@@ -255,6 +293,40 @@ mod tests_additional {
         let value = neutral_saddle_test_function(&eigenvalues);
         assert!((value - 1.0).abs() < 1e-12);
     }
+
+    #[test]
+    fn neimark_sacker_test_function_tracks_unit_circle_crossing() {
+        let inside = vec![Complex::new(0.8, 0.2), Complex::new(0.8, -0.2)];
+        let outside = vec![Complex::new(1.2, 0.2), Complex::new(1.2, -0.2)];
+
+        let inside_value = neimark_sacker_test_function(&inside);
+        let outside_value = neimark_sacker_test_function(&outside);
+
+        assert!(inside_value < 0.0);
+        assert!(outside_value > 0.0);
+    }
+
+    #[test]
+    fn neimark_sacker_test_function_defaults_without_complex_pairs() {
+        let eigenvalues = vec![Complex::new(0.0, 0.0), Complex::new(0.5, 0.0)];
+        let value = neimark_sacker_test_function(&eigenvalues);
+        assert_eq!(value, 0.0);
+    }
+
+    #[test]
+    fn period_doubling_test_function_tracks_minus_one_crossing() {
+        let inside = vec![Complex::new(-0.5, 0.0), Complex::new(0.2, 0.0)];
+        let outside = vec![Complex::new(-1.5, 0.0), Complex::new(0.2, 0.0)];
+        assert!(period_doubling_test_function(&inside) > 0.0);
+        assert!(period_doubling_test_function(&outside) < 0.0);
+    }
+
+    #[test]
+    fn period_doubling_test_function_defaults_without_real_eigenvalues() {
+        let eigenvalues = vec![Complex::new(0.5, 0.5), Complex::new(0.5, -0.5)];
+        let value = period_doubling_test_function(&eigenvalues);
+        assert!((value - 2.5).abs() < 1e-12);
+    }
 }
 
 #[cfg(test)]
@@ -280,6 +352,7 @@ mod tests {
             param_value: 3.0,
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
+            cycle_points: None,
         };
 
         let aug = continuation_point_to_aug(&point);

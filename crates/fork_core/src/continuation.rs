@@ -27,6 +27,7 @@ pub use periodic::{
     CollocationConfig, LimitCycleGuess, LimitCycleSetup,
     continue_limit_cycle_collocation, extend_limit_cycle_collocation,
     limit_cycle_setup_from_hopf, limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd,
+    OrbitTimeMode,
 };
 pub use problem::{PointDiagnostics, TestFunctionValues};
 pub use types::{
@@ -40,10 +41,10 @@ pub use util::{
     compute_eigenvalues, hopf_test_function, neutral_saddle_test_function,
 };
 
-use crate::autodiff::Dual;
 use crate::equation_engine::EquationSystem;
-use crate::equilibrium::{compute_system_jacobian, SystemKind};
-use crate::traits::DynamicalSystem;
+use crate::equilibrium::{
+    compute_param_jacobian, compute_system_jacobian, evaluate_equilibrium_residual, SystemKind,
+};
 use anyhow::{anyhow, bail, Result};
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex;
@@ -78,6 +79,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             param_value: initial_point.param_value,
             stability: BifurcationType::None,
             eigenvalues: initial_diag.eigenvalues,
+            cycle_points: initial_diag.cycle_points.clone(),
         }],
         bifurcations: Vec::new(),
         indices: vec![0],
@@ -221,14 +223,23 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             } else {
                 (corrected_aug.clone(), diagnostics.clone())
             };
+
+            let output_aug = final_aug;
+            let output_diag = final_diag;
+            let (continuation_aug, continuation_diag) = if bifurcation_type != BifurcationType::None {
+                (corrected_aug.clone(), diagnostics.clone())
+            } else {
+                (output_aug.clone(), output_diag.clone())
+            };
             
             // Create new point
             current_index += forward_sign as i32;
             let new_point = ContinuationPoint {
-                state: final_aug.rows(1, dim).iter().cloned().collect(),
-                param_value: final_aug[0],
+                state: output_aug.rows(1, dim).iter().cloned().collect(),
+                param_value: output_aug[0],
                 stability: bifurcation_type,
-                eigenvalues: final_diag.eigenvalues.clone(),
+                eigenvalues: output_diag.eigenvalues.clone(),
+                cycle_points: output_diag.cycle_points.clone(),
             };
             
             // Record bifurcation if detected
@@ -242,9 +253,9 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             // Adaptive step size - increase on success
             step_size = (step_size * 1.2).min(settings.max_step_size);
             
-            prev_aug = final_aug;
+            prev_aug = continuation_aug;
             prev_tangent = consistent_tangent;
-            prev_diag = final_diag;
+            prev_diag = continuation_diag;
         } else {
             // Failed to converge, reduce step size
             consecutive_failures += 1;
@@ -320,6 +331,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
                 param_value: initial_point.param_value,
                 stability: BifurcationType::None,
                 eigenvalues: initial_diag.eigenvalues,
+                cycle_points: initial_diag.cycle_points.clone(),
             }],
             bifurcations: Vec::new(),
             indices: vec![0],
@@ -395,6 +407,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
                 param_value: initial_point.param_value,
                 stability: BifurcationType::None,
                 eigenvalues: initial_diag.eigenvalues,
+                cycle_points: initial_diag.cycle_points.clone(),
             }],
             bifurcations: Vec::new(),
             indices: vec![0],
@@ -564,14 +577,23 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             } else {
                 (corrected_aug.clone(), diagnostics.clone())
             };
+
+            let output_aug = final_aug;
+            let output_diag = final_diag;
+            let (continuation_aug, continuation_diag) = if bifurcation_type != BifurcationType::None {
+                (corrected_aug.clone(), diagnostics.clone())
+            } else {
+                (output_aug.clone(), output_diag.clone())
+            };
             
             self.current_index += self.index_step;
             
             let new_point = ContinuationPoint {
-                state: final_aug.rows(1, self.dim).iter().cloned().collect(),
-                param_value: final_aug[0],
+                state: output_aug.rows(1, self.dim).iter().cloned().collect(),
+                param_value: output_aug[0],
                 stability: bifurcation_type,
-                eigenvalues: final_diag.eigenvalues.clone(),
+                eigenvalues: output_diag.eigenvalues.clone(),
+                cycle_points: output_diag.cycle_points.clone(),
             };
             
             // Record bifurcation if detected
@@ -585,9 +607,9 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             // Adaptive step size - increase on success
             self.step_size = (self.step_size * 1.2).min(self.settings.max_step_size);
             
-            self.prev_aug = final_aug;
+            self.prev_aug = continuation_aug;
             self.prev_tangent = consistent_tangent;
-            self.prev_diag = final_diag;
+            self.prev_diag = continuation_diag;
         } else {
             // Failed to converge, reduce step size
             self.consecutive_failures += 1;
@@ -758,6 +780,7 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
         param_value: endpoint.param_value,
         stability: endpoint.stability.clone(),
         eigenvalues: endpoint.eigenvalues.clone(),
+        cycle_points: endpoint.cycle_points.clone(),
     };
     
     // Use continue_with_initial_tangent to preserve direction
@@ -817,6 +840,7 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             param_value: initial_point.param_value,
             stability: BifurcationType::None,
             eigenvalues: initial_diag.eigenvalues,
+            cycle_points: initial_diag.cycle_points.clone(),
         }],
         bifurcations: Vec::new(),
         indices: vec![0],
@@ -920,13 +944,22 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             } else {
                 (corrected_aug.clone(), diag.clone())
             };
+
+            let output_aug = final_aug;
+            let output_diag = final_diag;
+            let (continuation_aug, continuation_diag) = if bifurcation_type != BifurcationType::None {
+                (corrected_aug.clone(), diag.clone())
+            } else {
+                (output_aug.clone(), output_diag.clone())
+            };
             
             // Create new point with potentially refined state
             let new_pt = ContinuationPoint {
-                state: final_aug.rows(1, dim).iter().cloned().collect(),
-                param_value: final_aug[0],
+                state: output_aug.rows(1, dim).iter().cloned().collect(),
+                param_value: output_aug[0],
                 stability: bifurcation_type,
-                eigenvalues: final_diag.eigenvalues.clone(),
+                eigenvalues: output_diag.eigenvalues.clone(),
+                cycle_points: output_diag.cycle_points.clone(),
             };
             
             // Record bifurcation if detected
@@ -939,11 +972,11 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             current_index += 1;
             
             // Update problem state if needed
-            problem.update_after_step(&final_aug)?;
+            problem.update_after_step(&continuation_aug)?;
             
-            prev_aug = final_aug;
+            prev_aug = continuation_aug;
             prev_tangent = new_tangent;
-            prev_diag = final_diag;
+            prev_diag = continuation_diag;
             
             // Adaptive step size
             step_size = (step_size * 1.2).min(settings.max_step_size);
@@ -1341,6 +1374,7 @@ pub fn extend_branch(
                 param_value: corrected_aug[0],
                 stability: BifurcationType::None,
                 eigenvalues: diagnostics.eigenvalues.clone(),
+                cycle_points: diagnostics.cycle_points.clone(),
             };
 
             let prev_tests = prev_diag.test_values;
@@ -1475,6 +1509,7 @@ pub fn continue_parameter(
             param_value: current_aug[0],
             stability: BifurcationType::None,
             eigenvalues: initial_diag.eigenvalues,
+            cycle_points: initial_diag.cycle_points,
         }],
         bifurcations: Vec::new(),
         indices: vec![0],
@@ -1559,6 +1594,7 @@ fn refine_fold_point(
         param_value: refined_aug[0],
         stability: BifurcationType::Fold,
         eigenvalues: diagnostics.eigenvalues.clone(),
+        cycle_points: diagnostics.cycle_points.clone(),
     };
 
     Ok((point, diagnostics, tangent))
@@ -1607,6 +1643,7 @@ fn refine_hopf_point(
         param_value: refined_aug[0],
         stability: BifurcationType::Hopf,
         eigenvalues: diagnostics.eigenvalues.clone(),
+        cycle_points: diagnostics.cycle_points.clone(),
     };
 
     Ok((point, diagnostics, tangent))
@@ -1644,7 +1681,7 @@ fn solve_fold_newton(
         let old_param = system.params[param_index];
         system.params[param_index] = current_param;
         let mut f_val = vec![0.0; dim];
-        evaluate_residual(system, kind, &current_state, &mut f_val);
+        evaluate_residual(system, kind, &current_state, &mut f_val)?;
         system.params[param_index] = old_param;
 
         let diag = compute_point_diagnostics(system, kind, &current, param_index)?;
@@ -1717,7 +1754,7 @@ fn solve_hopf_newton(
         let old_param = system.params[param_index];
         system.params[param_index] = current_param;
         let mut f_val = vec![0.0; dim];
-        evaluate_residual(system, kind, &current_state, &mut f_val);
+        evaluate_residual(system, kind, &current_state, &mut f_val)?;
         system.params[param_index] = old_param;
 
         let diag = compute_point_diagnostics(system, kind, &current, param_index)?;
@@ -1797,12 +1834,12 @@ fn compute_point_diagnostics(
     let old_param = system.params[param_index];
     system.params[param_index] = param;
 
-    let system_jac = compute_system_jacobian(system, &state)?;
+    let system_jac = compute_system_jacobian(system, kind, &state)?;
 
     system.params[param_index] = old_param;
 
     let mut residual_jac = system_jac.clone();
-    if matches!(kind, SystemKind::Map) {
+    if kind.is_map() {
         for i in 0..dim {
             residual_jac[i * dim + i] -= 1.0;
         }
@@ -1811,14 +1848,14 @@ fn compute_point_diagnostics(
     let residual_mat = DMatrix::from_row_slice(dim, dim, &residual_jac);
     let fold = residual_mat.determinant();
 
-    let eigen_mat = if matches!(kind, SystemKind::Map) {
+    let eigen_mat = if kind.is_map() {
         DMatrix::from_row_slice(dim, dim, &system_jac)
     } else {
         residual_mat.clone()
     };
 
     let eigenvalues = compute_eigenvalues(&eigen_mat)?;
-    let (hopf, neutral) = if matches!(kind, SystemKind::Flow) && dim >= 2 {
+    let (hopf, neutral) = if kind.is_flow() && dim >= 2 {
         (
             hopf_test_function(&eigenvalues).re,
             neutral_saddle_test_function(&eigenvalues),
@@ -1830,6 +1867,7 @@ fn compute_point_diagnostics(
     Ok(PointDiagnostics {
         test_values: TestFunctionValues::equilibrium(fold, hopf, neutral),
         eigenvalues,
+        cycle_points: None,
     })
 }
 
@@ -1867,11 +1905,9 @@ fn compute_extended_jacobian(
     let old_param = system.params[param_index];
     system.params[param_index] = param;
 
-    let mut f_dual = vec![Dual::new(0.0, 0.0); dim];
-    system.evaluate_dual_wrt_param(&state, param_index, &mut f_dual);
-
+    let param_jac = compute_param_jacobian(system, kind, &state, param_index)?;
     for i in 0..dim {
-        j_ext[(i, 0)] = f_dual[i].eps;
+        j_ext[(i, 0)] = param_jac[i];
     }
 
     system.params[param_index] = old_param;
@@ -1887,16 +1923,13 @@ fn compute_extended_jacobian(
     Ok(j_ext)
 }
 
-fn evaluate_residual(system: &EquationSystem, kind: SystemKind, state: &[f64], out: &mut [f64]) {
-    match kind {
-        SystemKind::Flow => system.apply(0.0, state, out),
-        SystemKind::Map => {
-            system.apply(0.0, state, out);
-            for i in 0..out.len() {
-                out[i] -= state[i];
-            }
-        }
-    }
+fn evaluate_residual(
+    system: &EquationSystem,
+    kind: SystemKind,
+    state: &[f64],
+    out: &mut [f64],
+) -> Result<()> {
+    evaluate_equilibrium_residual(system, kind, state, out)
 }
 
 fn solve_palc(
@@ -1920,7 +1953,7 @@ fn solve_palc(
         let old_p = system.params[param_index];
         system.params[param_index] = current_param;
         let mut f_val = vec![0.0; dim];
-        evaluate_residual(system, kind, &current_state, &mut f_val);
+        evaluate_residual(system, kind, &current_state, &mut f_val)?;
         system.params[param_index] = old_p;
 
         let diff = &current_aug - pred_aug;
@@ -2117,6 +2150,7 @@ mod tests {
             Ok(PointDiagnostics {
                 test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
                 eigenvalues: Vec::new(),
+                cycle_points: None,
             })
         }
     }
@@ -2142,6 +2176,7 @@ mod tests {
             Ok(PointDiagnostics {
                 test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
                 eigenvalues: Vec::new(),
+                cycle_points: None,
             })
         }
     }
@@ -2175,6 +2210,7 @@ mod tests {
             param_value: 0.0,
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
+            cycle_points: None,
         };
 
         let mut runner = ContinuationRunner::new(
@@ -2212,12 +2248,14 @@ mod tests {
                     param_value: 0.0,
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
+                    cycle_points: None,
                 },
                 ContinuationPoint {
                     state: vec![0.0],
                     param_value: 0.2,
                     stability: BifurcationType::None,
                     eigenvalues: Vec::new(),
+                    cycle_points: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -2240,6 +2278,7 @@ mod tests {
             param_value: 0.0,
             stability: BifurcationType::None,
             eigenvalues: Vec::new(),
+            cycle_points: None,
         };
 
         let mut full_problem = LinearRelationProblem::default();

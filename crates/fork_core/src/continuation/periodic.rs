@@ -94,6 +94,12 @@ pub struct LimitCycleSetup {
     pub collocation_degree: usize,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum OrbitTimeMode {
+    Continuous,
+    Discrete,
+}
+
 impl LimitCycleSetup {
     pub fn collocation_config(&self) -> CollocationConfig {
         CollocationConfig {
@@ -169,7 +175,7 @@ pub fn limit_cycle_setup_from_hopf(
     let mat = DMatrix::from_row_slice(dim, dim, &jac);
     let eigenvalues = mat.clone().complex_eigenvalues();
 
-    // Match MatCont's init_H_LC.m: pick eigenpair with smallest sum (closest conjugates).
+    // Pick the eigenpair with smallest sum (closest conjugates).
     let (idx1, idx2) = select_hopf_pair(eigenvalues.as_slice())
         .ok_or_else(|| anyhow!("Could not locate Hopf eigenpair"))?;
     let eig1 = eigenvalues[idx1];
@@ -184,8 +190,8 @@ pub fn limit_cycle_setup_from_hopf(
     let lambda = eig1;
     let eigenvector = compute_complex_eigenvector(&mat, lambda)?;
 
-    // Orthogonalize real and imaginary parts as in MatCont's init_H_LC.m
-    // This rotation Q -> Q * exp(i*phi) makes Re(Q) orthogonal to Im(Q).
+    // Orthogonalize real and imaginary parts by rotating Q -> Q * exp(i*phi).
+    // This makes Re(Q) orthogonal to Im(Q).
     let mut d = 0.0;
     let mut s = 0.0;
     let mut r = 0.0;
@@ -273,7 +279,7 @@ pub fn limit_cycle_setup_from_hopf(
 
 /// Initializes a limit cycle continuation from a computed orbit.
 ///
-/// This follows the matcont `initOrbLC.m` algorithm:
+/// Algorithm overview:
 /// 1. Skip 1/3 of the orbit as transient
 /// 2. Find where the orbit returns close to the starting point (within tolerance)
 /// 3. Extract one cycle
@@ -293,6 +299,7 @@ pub fn limit_cycle_setup_from_orbit(
     mesh_points: usize,
     degree: usize,
     tolerance: f64,
+    time_mode: OrbitTimeMode,
 ) -> Result<LimitCycleSetup> {
     if mesh_points < 3 {
         bail!("Limit cycle meshes require at least 3 points");
@@ -313,13 +320,18 @@ pub fn limit_cycle_setup_from_orbit(
         }
     }
     
-    // MatCont-style algorithm adapted for orbits that start off the attractor:
+    let effective_times: Vec<f64> = match time_mode {
+        OrbitTimeMode::Continuous => orbit_times.to_vec(),
+        OrbitTimeMode::Discrete => (0..orbit_states.len()).map(|i| i as f64).collect(),
+    };
+
+    // Algorithm adapted for orbits that start off the attractor:
     // 1. Use point at 1/3 as reference (after transient decay)
     // 2. Search forward for the FIRST local minimum of distance (first return)
-    let n = orbit_times.len();
+    let n = effective_times.len();
     let ref_idx = n / 3;
     let x_ref = &orbit_states[ref_idx];
-    let t_ref = orbit_times[ref_idx];
+    let t_ref = effective_times[ref_idx];
     
     // Skip a small portion after reference to avoid matching ourselves
     // Use a small fixed skip (not percentage-based) to avoid skipping past the first return
@@ -363,13 +375,13 @@ pub fn limit_cycle_setup_from_orbit(
     })?;
     
     // Step 3: Extract one cycle (from ref_idx to cycle_end)
-    let period = orbit_times[cycle_end] - t_ref;
+    let period = effective_times[cycle_end] - t_ref;
     if period <= 0.0 {
         bail!("Computed period is non-positive: {}", period);
     }
     
     // Normalize times to [0, 1] for this cycle
-    let cycle_times: Vec<f64> = orbit_times[ref_idx..=cycle_end]
+    let cycle_times: Vec<f64> = effective_times[ref_idx..=cycle_end]
         .iter()
         .map(|t| (t - t_ref) / period)
         .collect();
@@ -573,7 +585,7 @@ pub fn limit_cycle_setup_from_pd(
     let jac = problem.extended_jacobian(&aug_state)?;
     
     // ========== OPTIMIZED: Direct bordered solve for PD eigenvector ==========
-    // Instead of computing the full monodromy matrix, we use MATCONT's approach:
+    // Instead of computing the full monodromy matrix, we use a bordered-solve approach:
     // 1. Modify the Jacobian to have flip BC [I, I] instead of periodic BC [I, -I]
     // 2. Use bordered linear solve to find the null vector
     // 3. Extract PD eigenvector from the mesh-state portion
@@ -1190,6 +1202,7 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
                 neimark,
             ),
             eigenvalues: eig_vals,
+            cycle_points: None,
         })
     }
 }
@@ -1662,6 +1675,7 @@ pub fn continue_limit_cycle_collocation(
         param_value: guess.param_value,
         stability: BifurcationType::None,
         eigenvalues: Vec::new(),
+        cycle_points: None,
     };
 
     let mut branch = continue_with_problem(&mut problem, point, settings, forward)?;
@@ -1700,6 +1714,38 @@ pub fn extend_limit_cycle_collocation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn limit_cycle_setup_from_orbit_uses_discrete_steps_for_time() {
+        let orbit_times: Vec<f64> = (0..40).map(|i| i as f64 * 0.5).collect();
+        let orbit_states: Vec<Vec<f64>> = (0..40)
+            .map(|i| match i % 4 {
+                0 => vec![0.0],
+                1 => vec![1.0],
+                2 => vec![0.0],
+                _ => vec![-1.0],
+            })
+            .collect();
+
+        let setup = limit_cycle_setup_from_orbit(
+            &orbit_times,
+            &orbit_states,
+            0.0,
+            10,
+            3,
+            0.5,
+            OrbitTimeMode::Discrete,
+        )
+        .expect("setup should succeed");
+
+        let expected_period_steps = 12.0;
+        assert!(
+            (setup.guess.period - expected_period_steps).abs() < 1e-12,
+            "expected discrete period {} but got {}",
+            expected_period_steps,
+            setup.guess.period
+        );
+    }
 
     #[test]
     fn test_period_doubling_detection() {

@@ -83,7 +83,7 @@ impl LCBorders {
 
     /// Update borders after a step using current φ/ψ as bordering.
     /// 
-    /// This follows the MATCONT pattern in adapt() functions.
+    /// This follows the standard adapt() pattern.
     pub fn update(&mut self, jac: &DMatrix<f64>) -> Result<()> {
         let n = jac.nrows();
         if n == 0 {

@@ -25,6 +25,7 @@ impl WasmEquilibriumRunner {
         param_names: Vec<String>,
         var_names: Vec<String>,
         system_type: &str,
+        map_iterations: u32,
         equilibrium_state: Vec<f64>,
         parameter_name: &str,
         settings_val: JsValue,
@@ -45,7 +46,9 @@ impl WasmEquilibriumRunner {
         system.set_maps(compiler.param_map, compiler.var_map);
 
         let kind = match system_type {
-            "map" => SystemKind::Map,
+            "map" => SystemKind::Map {
+                iterations: map_iterations as usize,
+            },
             _ => SystemKind::Flow,
         };
 
@@ -62,6 +65,7 @@ impl WasmEquilibriumRunner {
             param_value: system.params[param_index],
             stability: fork_core::continuation::BifurcationType::None,
             eigenvalues: Vec::new(),
+            cycle_points: None,
         };
 
         let problem = OwnedEquilibriumContinuationProblem::new(system, kind, param_index);
@@ -144,6 +148,7 @@ mod tests {
             vec!["a".to_string()],
             vec!["x".to_string()],
             "flow",
+            1,
             vec![0.0],
             "a",
             settings_with_max_steps(max_steps),
@@ -161,6 +166,7 @@ mod tests {
             vec!["a".to_string()],
             vec!["x".to_string()],
             "flow",
+            1,
             vec![0.0],
             "a",
             settings_val,
@@ -182,6 +188,7 @@ mod tests {
             vec!["p".to_string()],
             vec!["x".to_string()],
             "flow",
+            1,
             vec![0.0],
             "missing",
             settings_with_max_steps(3),
@@ -201,6 +208,7 @@ mod tests {
             vec!["a".to_string()],
             vec!["x".to_string()],
             "flow",
+            1,
             vec![0.0],
             "a",
             JsValue::from_str("nope"),
@@ -220,6 +228,7 @@ mod tests {
             vec!["a".to_string()],
             vec!["x".to_string()],
             "flow",
+            1,
             vec![0.0],
             "a",
             settings_with_max_steps(1),

@@ -195,6 +195,85 @@ describe('appState limit cycle render targets', () => {
     })
   })
 
+  it('continues from orbit for map systems', async () => {
+    const base = createSystem({ name: 'Orbit_Map' })
+    const configured = withParam(
+      {
+        ...base,
+        config: {
+          ...base.config,
+          type: 'map',
+          solver: 'discrete',
+        },
+      },
+      'mu',
+      0.1
+    )
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Map Orbit',
+      systemName: configured.config.name,
+      data: [
+        [0, 0.2],
+        [1, 0.3],
+      ],
+      t_start: 0,
+      t_end: 1,
+      dt: 1,
+      parameters: [...configured.config.params],
+    }
+    const { system, nodeId: orbitId } = addObject(configured, orbit)
+    const client = new MockForkCoreClient(0)
+    let capturedSystemType: string | null = null
+    client.runLimitCycleContinuationFromOrbit = async (request) => {
+      capturedSystemType = request.system.type
+      const state = new Array(request.system.varNames.length + 1).fill(0)
+      state[state.length - 1] = 2
+      return normalizeBranchEigenvalues({
+        points: [
+          {
+            state,
+            param_value: request.paramValue,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state,
+            param_value: request.paramValue + request.settings.step_size,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: { type: 'LimitCycle', ntst: request.ntst, ncol: request.ncol },
+      })
+    }
+    const { getContext } = setupApp(system, client)
+
+    await act(async () => {
+      await getContext().actions.createLimitCycleFromOrbit({
+        orbitId,
+        limitCycleName: 'LC_Map',
+        branchName: 'lc_map_mu',
+        parameterName: 'mu',
+        tolerance: 1e-6,
+        ntst: 10,
+        ncol: 4,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      const { state } = getContext()
+      expect(state.error).toBeNull()
+      expect(capturedSystemType).toBe('map')
+      const lcId = findObjectIdByName(state.system!, 'LC_Map')
+      expect(state.system!.objects[lcId].type).toBe('limit_cycle')
+    })
+  })
+
   it('uses the last computed point after continuing from Hopf', async () => {
     const base = createSystem({ name: 'Hopf_LC' })
     const configured = withParam(base, 'mu', 0.0)

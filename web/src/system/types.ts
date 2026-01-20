@@ -38,12 +38,14 @@ export interface EquilibriumSolution {
   iterations: number
   jacobian: number[]
   eigenpairs: EquilibriumEigenPair[]
+  cycle_points?: number[][]
 }
 
 export interface EquilibriumSolverParams {
   initialGuess: number[]
   maxSteps: number
   dampingFactor: number
+  mapIterations?: number
 }
 
 export interface EquilibriumRunSummary {
@@ -93,6 +95,7 @@ export interface ContinuationPoint {
     | 'NeimarkSacker'
     | string
   eigenvalues?: ContinuationEigenvalue[]
+  cycle_points?: number[][]
   auxiliary?: number
 }
 
@@ -132,6 +135,7 @@ export interface ContinuationObject {
   settings: ContinuationSettings
   timestamp: string
   params?: number[]
+  mapIterations?: number
 }
 
 export type LimitCycleOrigin =

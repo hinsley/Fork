@@ -7,7 +7,32 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum SystemKind {
     Flow,
-    Map,
+    Map { iterations: usize },
+}
+
+impl SystemKind {
+    pub fn is_flow(&self) -> bool {
+        matches!(self, SystemKind::Flow)
+    }
+
+    pub fn is_map(&self) -> bool {
+        matches!(self, SystemKind::Map { .. })
+    }
+
+    pub fn map_iterations(&self) -> usize {
+        match self {
+            SystemKind::Map { iterations } => *iterations,
+            SystemKind::Flow => 1,
+        }
+    }
+
+    pub fn checked_map_iterations(&self) -> Result<usize> {
+        let iterations = self.map_iterations();
+        if self.is_map() && iterations == 0 {
+            bail!("Map iteration count must be greater than zero.");
+        }
+        Ok(iterations)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -55,6 +80,8 @@ pub struct EquilibriumResult {
     pub iterations: usize,
     pub jacobian: Vec<f64>,
     pub eigenpairs: Vec<EigenPair>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cycle_points: Option<Vec<Vec<f64>>>,
 }
 
 pub fn solve_equilibrium(
@@ -63,6 +90,7 @@ pub fn solve_equilibrium(
     initial_guess: &[f64],
     settings: NewtonSettings,
 ) -> Result<EquilibriumResult> {
+    let map_iterations = kind.checked_map_iterations()?;
     let dim = system.equations.len();
     if dim == 0 {
         bail!("System has zero dimension.");
@@ -86,7 +114,7 @@ pub fn solve_equilibrium(
 
     let mut state = initial_guess.to_vec();
     let mut residual = vec![0.0; dim];
-    evaluate_residual(system, kind, &state, &mut residual);
+    evaluate_equilibrium_residual(system, kind, &state, &mut residual)?;
     let mut residual_norm = l2_norm(&residual);
     let mut iterations = 0usize;
 
@@ -97,7 +125,7 @@ pub fn solve_equilibrium(
 
         if iterations >= settings.max_steps {
             bail!(
-                "Newton solver failed to converge in {} steps (‖f(x)‖ = {}).",
+                "Newton solver failed to converge in {} steps (||f(x)|| = {}).",
                 settings.max_steps,
                 residual_norm
             );
@@ -112,13 +140,18 @@ pub fn solve_equilibrium(
         }
 
         iterations += 1;
-        evaluate_residual(system, kind, &state, &mut residual);
+        evaluate_equilibrium_residual(system, kind, &state, &mut residual)?;
         residual_norm = l2_norm(&residual);
     }
 
-    let jacobian = compute_system_jacobian(system, &state)?;
+    let jacobian = compute_system_jacobian(system, kind, &state)?;
     let eigenpairs = compute_eigenpairs(dim, &jacobian)
         .context("Failed to compute eigenvalues/eigenvectors of Jacobian.")?;
+    let cycle_points = if kind.is_map() && map_iterations > 1 {
+        Some(compute_map_cycle_points(system, &state, map_iterations))
+    } else {
+        None
+    };
 
     Ok(EquilibriumResult {
         state,
@@ -126,17 +159,45 @@ pub fn solve_equilibrium(
         iterations,
         jacobian,
         eigenpairs,
+        cycle_points,
     })
 }
 
-fn evaluate_residual(system: &EquationSystem, kind: SystemKind, state: &[f64], out: &mut [f64]) {
+pub fn evaluate_equilibrium_residual(
+    system: &EquationSystem,
+    kind: SystemKind,
+    state: &[f64],
+    out: &mut [f64],
+) -> Result<()> {
+    let iterations = kind.checked_map_iterations()?;
     match kind {
         SystemKind::Flow => system.apply(0.0, state, out),
-        SystemKind::Map => {
-            system.apply(0.0, state, out);
+        SystemKind::Map { .. } => {
+            iterate_map(system, state, iterations, out);
             for i in 0..out.len() {
                 out[i] -= state[i];
             }
+        }
+    }
+    Ok(())
+}
+
+pub fn compute_param_jacobian(
+    system: &EquationSystem,
+    kind: SystemKind,
+    state: &[f64],
+    param_index: usize,
+) -> Result<Vec<f64>> {
+    let iterations = kind.checked_map_iterations()?;
+    match kind {
+        SystemKind::Flow => {
+            let dim = system.equations.len();
+            let mut f_dual = vec![Dual::new(0.0, 0.0); dim];
+            system.evaluate_dual_wrt_param(state, param_index, &mut f_dual);
+            Ok(f_dual.iter().map(|value| value.eps).collect())
+        }
+        SystemKind::Map { .. } => {
+            compute_map_iterate_param_jacobian(system, state, param_index, iterations)
         }
     }
 }
@@ -147,8 +208,8 @@ pub fn compute_jacobian(
     state: &[f64],
 ) -> Result<Vec<f64>> {
     let dim = system.equations.len();
-    let mut jacobian = compute_system_jacobian(system, state)?;
-    if matches!(kind, SystemKind::Map) {
+    let mut jacobian = compute_system_jacobian(system, kind, state)?;
+    if kind.is_map() {
         for i in 0..dim {
             jacobian[i * dim + i] -= 1.0;
         }
@@ -157,7 +218,19 @@ pub fn compute_jacobian(
     Ok(jacobian)
 }
 
-pub fn compute_system_jacobian(system: &EquationSystem, state: &[f64]) -> Result<Vec<f64>> {
+pub fn compute_system_jacobian(
+    system: &EquationSystem,
+    kind: SystemKind,
+    state: &[f64],
+) -> Result<Vec<f64>> {
+    let iterations = kind.checked_map_iterations()?;
+    match kind {
+        SystemKind::Flow => compute_single_step_jacobian(system, state),
+        SystemKind::Map { .. } => compute_map_iterate_jacobian(system, state, iterations),
+    }
+}
+
+fn compute_single_step_jacobian(system: &EquationSystem, state: &[f64]) -> Result<Vec<f64>> {
     let dim = system.equations.len();
     let mut jacobian = vec![0.0; dim * dim];
     let mut dual_state = vec![Dual::new(0.0, 0.0); dim];
@@ -175,6 +248,124 @@ pub fn compute_system_jacobian(system: &EquationSystem, state: &[f64]) -> Result
     }
 
     Ok(jacobian)
+}
+
+fn iterate_map(
+    system: &EquationSystem,
+    state: &[f64],
+    iterations: usize,
+    out: &mut [f64],
+) {
+    let dim = out.len();
+    let mut current = state.to_vec();
+    let mut next = vec![0.0; dim];
+    for _ in 0..iterations {
+        system.apply(0.0, &current, &mut next);
+        std::mem::swap(&mut current, &mut next);
+    }
+    out.copy_from_slice(&current);
+}
+
+pub(crate) fn compute_map_cycle_points(
+    system: &EquationSystem,
+    state: &[f64],
+    iterations: usize,
+) -> Vec<Vec<f64>> {
+    if iterations == 0 {
+        return Vec::new();
+    }
+    let dim = system.equations.len();
+    let mut points = Vec::with_capacity(iterations);
+    let mut current = state.to_vec();
+    let mut next = vec![0.0; dim];
+    points.push(current.clone());
+    for _ in 1..iterations {
+        system.apply(0.0, &current, &mut next);
+        std::mem::swap(&mut current, &mut next);
+        points.push(current.clone());
+    }
+    points
+}
+
+fn compute_map_iterate_jacobian(
+    system: &EquationSystem,
+    state: &[f64],
+    iterations: usize,
+) -> Result<Vec<f64>> {
+    if iterations == 1 {
+        return compute_single_step_jacobian(system, state);
+    }
+
+    let dim = system.equations.len();
+    let mut total = vec![0.0; dim * dim];
+    for i in 0..dim {
+        total[i * dim + i] = 1.0;
+    }
+
+    let mut current = state.to_vec();
+    let mut next_state = vec![0.0; dim];
+    let mut next_total = vec![0.0; dim * dim];
+
+    for _ in 0..iterations {
+        let step = compute_single_step_jacobian(system, &current)?;
+        mat_mul(dim, &step, &total, &mut next_total);
+        total.copy_from_slice(&next_total);
+        system.apply(0.0, &current, &mut next_state);
+        std::mem::swap(&mut current, &mut next_state);
+    }
+
+    Ok(total)
+}
+
+fn compute_map_iterate_param_jacobian(
+    system: &EquationSystem,
+    state: &[f64],
+    param_index: usize,
+    iterations: usize,
+) -> Result<Vec<f64>> {
+    let dim = system.equations.len();
+    let mut sensitivity = vec![0.0; dim];
+    let mut current = state.to_vec();
+    let mut next_state = vec![0.0; dim];
+    let mut next_sensitivity = vec![0.0; dim];
+    let mut f_dual = vec![Dual::new(0.0, 0.0); dim];
+
+    for _ in 0..iterations {
+        system.evaluate_dual_wrt_param(&current, param_index, &mut f_dual);
+        let step_param: Vec<f64> = f_dual.iter().map(|value| value.eps).collect();
+        let step_jac = compute_single_step_jacobian(system, &current)?;
+        mat_vec_mul(dim, &step_jac, &sensitivity, &mut next_sensitivity);
+        for i in 0..dim {
+            next_sensitivity[i] += step_param[i];
+        }
+        sensitivity.copy_from_slice(&next_sensitivity);
+        system.apply(0.0, &current, &mut next_state);
+        std::mem::swap(&mut current, &mut next_state);
+    }
+
+    Ok(sensitivity)
+}
+
+fn mat_mul(dim: usize, left: &[f64], right: &[f64], out: &mut [f64]) {
+    for row in 0..dim {
+        for col in 0..dim {
+            let mut sum = 0.0;
+            for k in 0..dim {
+                sum += left[row * dim + k] * right[k * dim + col];
+            }
+            out[row * dim + col] = sum;
+        }
+    }
+}
+
+fn mat_vec_mul(dim: usize, mat: &[f64], vec: &[f64], out: &mut [f64]) {
+    for row in 0..dim {
+        let mut sum = 0.0;
+        for col in 0..dim {
+            sum += mat[row * dim + col] * vec[col];
+        }
+        out[row] = sum;
+    }
 }
 
 fn solve_linear_system(dim: usize, jacobian: &[f64], residual: &[f64]) -> Result<Vec<f64>> {
@@ -233,7 +424,9 @@ fn normalize_complex_vector(vec: &mut [Complex<f64>]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_jacobian, solve_equilibrium, NewtonSettings, SystemKind};
+    use super::{
+        compute_jacobian, compute_map_cycle_points, solve_equilibrium, NewtonSettings, SystemKind,
+    };
     use crate::equation_engine::{parse, Compiler, EquationSystem};
 
     fn assert_err_contains<T: std::fmt::Debug>(result: anyhow::Result<T>, needle: &str) {
@@ -287,11 +480,11 @@ mod tests {
 
         let result = solve_equilibrium(
             &system,
-            SystemKind::Map,
+            SystemKind::Map { iterations: 1 },
             &[0.6],
             NewtonSettings::default(),
         )
-        .expect("tent map equilibrium should converge");
+        .expect("tent map fixed point should converge");
 
         assert_eq!(result.eigenpairs.len(), 1);
         let eig = result.eigenpairs[0].value.re;
@@ -308,11 +501,30 @@ mod tests {
 
         let flow_jac = compute_jacobian(&system, SystemKind::Flow, &[1.0])
             .expect("flow jacobian should compute");
-        let map_jac = compute_jacobian(&system, SystemKind::Map, &[1.0])
+        let map_jac = compute_jacobian(&system, SystemKind::Map { iterations: 1 }, &[1.0])
             .expect("map jacobian should compute");
 
         assert!((flow_jac[0] - 2.0).abs() < 1e-12);
         assert!((map_jac[0] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn compute_map_cycle_points_tracks_iterates() {
+        let equation = "1 - x";
+        let param_names: Vec<String> = Vec::new();
+        let var_names = vec!["x".to_string()];
+        let compiler = Compiler::new(&var_names, &param_names);
+        let expr = parse(equation).expect("map equation should parse");
+        let bytecode = compiler.compile(&expr);
+
+        let mut system = EquationSystem::new(vec![bytecode], Vec::new());
+        system.set_maps(compiler.param_map, compiler.var_map);
+
+        let points = compute_map_cycle_points(&system, &[0.2], 3);
+        assert_eq!(points.len(), 3);
+        assert!((points[0][0] - 0.2).abs() < 1e-12);
+        assert!((points[1][0] - 0.8).abs() < 1e-12);
+        assert!((points[2][0] - 0.2).abs() < 1e-12);
     }
 
     #[test]
