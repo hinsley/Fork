@@ -14,6 +14,7 @@ import type {
   EquilibriumSolveRequest,
   FoldCurveContinuationRequest,
   HopfCurveContinuationRequest,
+  LimitCycleHopfContinuationRequest,
   LimitCycleOrbitContinuationRequest,
   LimitCyclePDContinuationRequest,
   OrbitCovariantLyapunovRequest,
@@ -64,6 +65,7 @@ type InspectorPanelProps = {
   onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
+  onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
   onCreateLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
   onCreateLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
 }
@@ -96,6 +98,7 @@ export function InspectorPanel({
   onExtendBranch,
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
+  onCreateLimitCycleFromHopf,
   onCreateLimitCycleFromOrbit,
   onCreateLimitCycleFromPD,
 }: InspectorPanelProps) {
@@ -131,6 +134,7 @@ export function InspectorPanel({
           onExtendBranch={onExtendBranch}
           onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
           onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
+          onCreateLimitCycleFromHopf={onCreateLimitCycleFromHopf}
           onCreateLimitCycleFromOrbit={onCreateLimitCycleFromOrbit}
           onCreateLimitCycleFromPD={onCreateLimitCycleFromPD}
         />

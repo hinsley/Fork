@@ -284,6 +284,7 @@ function App() {
         onExtendBranch={actions.extendBranch}
         onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
         onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
+        onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
         onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
         onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
       />
@@ -427,7 +428,8 @@ function App() {
                 onExtendBranch={actions.extendBranch}
                 onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
                 onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
-                        onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
+                onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
+                onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
                 onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
               />
             </Panel>

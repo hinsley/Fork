@@ -60,8 +60,9 @@ behavior.
   `buildDiagramInitialView()` translate stored `scene.camera` / `axisRanges` (if
   present) into a one-time `initialView` payload for `usePlotViewport`.
 - `web/src/ui/InspectorDetailsPanel.tsx`: eigenvalue/multiplier plots set
-  `dragmode: 'pan'` and compute fixed `xaxis.range`/`yaxis.range` values for the
-  complex plane (no relayout persistence is wired for these mini plots).
+  `dragmode: 'pan'`, compute fixed `xaxis.range`/`yaxis.range` values for the
+  complex plane, and add unit circle/disc overlays for multiplier/eigenvalue
+  views (no relayout persistence is wired for these mini plots).
 
 ### Plot styling driven by app theme
 - `web/src/viewports/plotly/plotlyTheme.ts`: `resolvePlotlyBackgroundColor()` is

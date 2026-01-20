@@ -75,6 +75,7 @@ describe('InspectorDetailsPanel', () => {
           onExtendBranch={onExtendBranch}
           onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
           onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
+          onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
           onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
           onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
         />
@@ -124,6 +125,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
@@ -183,6 +185,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
@@ -227,6 +230,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
@@ -270,6 +274,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
@@ -330,6 +335,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={onCreateLimitCycleFromOrbit}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
@@ -483,6 +489,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
@@ -546,6 +553,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
@@ -607,6 +615,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
@@ -675,6 +684,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
@@ -779,6 +789,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
@@ -875,6 +886,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
@@ -928,6 +940,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
         onSetLimitCycleRenderTarget={onSetLimitCycleRenderTarget}
@@ -981,6 +994,7 @@ describe('InspectorDetailsPanel', () => {
           onExtendBranch={vi.fn().mockResolvedValue(undefined)}
           onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
           onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
           onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
           onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
           onSetLimitCycleRenderTarget={(objectId, target) => {
@@ -1048,6 +1062,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
         onSetLimitCycleRenderTarget={vi.fn()}
@@ -1094,6 +1109,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
         onSetLimitCycleRenderTarget={vi.fn()}
@@ -1149,6 +1165,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
         onSetLimitCycleRenderTarget={vi.fn()}
@@ -1202,6 +1219,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
@@ -1252,6 +1270,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
@@ -1351,6 +1370,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={onCreateLimitCycleFromPD}
       />
@@ -1446,6 +1466,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
@@ -1527,6 +1548,7 @@ describe('InspectorDetailsPanel', () => {
         onExtendBranch={vi.fn().mockResolvedValue(undefined)}
         onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
         onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
