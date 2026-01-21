@@ -9,6 +9,8 @@ use num_complex::Complex;
 
 use super::types::ContinuationPoint;
 
+const HOPF_IMAG_EPS: f64 = 1e-8;
+
 /// Computes the null space tangent from an extended Jacobian matrix.
 /// 
 /// Uses Gram-Schmidt eigenvalue decomposition first, falling back to
@@ -143,21 +145,36 @@ pub fn compute_eigenvalues(mat: &DMatrix<f64>) -> Result<Vec<Complex<f64>>> {
     Ok(eigen.iter().cloned().collect())
 }
 
+/// Counts complex conjugate pairs based on positive imaginary parts.
+pub fn hopf_pair_count(eigenvalues: &[Complex<f64>]) -> usize {
+    eigenvalues
+        .iter()
+        .filter(|eig| eig.im > HOPF_IMAG_EPS)
+        .count()
+}
+
+/// Counts real eigenvalues based on a small imaginary tolerance.
+pub fn real_eigenvalue_count(eigenvalues: &[Complex<f64>]) -> usize {
+    eigenvalues
+        .iter()
+        .filter(|eig| eig.im.abs() < HOPF_IMAG_EPS)
+        .count()
+}
+
 /// Hopf test function: product of sums for conjugate eigenpairs.
 /// Zero crossing of the real part indicates a Hopf bifurcation.
 pub fn hopf_test_function(eigenvalues: &[Complex<f64>]) -> Complex<f64> {
-    const IMAG_EPS: f64 = 1e-8;
     let mut product = Complex::new(1.0, 0.0);
     let mut found_pair = false;
 
     for i in 0..eigenvalues.len() {
         let eig_i = eigenvalues[i];
-        if eig_i.im.abs() < IMAG_EPS {
+        if eig_i.im.abs() < HOPF_IMAG_EPS {
             continue;
         }
         for j in (i + 1)..eigenvalues.len() {
             let eig_j = eigenvalues[j];
-            if eig_j.im.abs() < IMAG_EPS {
+            if eig_j.im.abs() < HOPF_IMAG_EPS {
                 continue;
             }
             if eig_i.im.signum() == eig_j.im.signum() {

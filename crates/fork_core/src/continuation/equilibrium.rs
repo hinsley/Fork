@@ -400,6 +400,67 @@ mod tests {
     }
 
     #[test]
+    fn test_rossler_backward_continuation_single_hopf() {
+        // Regression: ensure complex-conjugate eigenpairs colliding into real values
+        // do not create spurious Hopf/neutral-saddle detections in backward continuation.
+        // Matches the Rossler default system in web/src/system/defaultSystems.ts.
+        let equations = vec!["-y - z", "x + a * y", "b + z * (x - c)"];
+        let param_names = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let var_names = vec!["x".to_string(), "y".to_string(), "z".to_string()];
+        let compiler = Compiler::new(&var_names, &param_names);
+        let mut bytecodes = Vec::with_capacity(equations.len());
+        for equation in &equations {
+            let expr = parse(equation).expect("Rossler equation should parse");
+            bytecodes.push(compiler.compile(&expr));
+        }
+
+        let mut system = EquationSystem::new(bytecodes, vec![0.2, 0.2, 5.7]);
+        system.set_maps(compiler.param_map, compiler.var_map);
+
+        let equilibrium = solve_equilibrium(
+            &system,
+            SystemKind::Flow,
+            &[0.0, 0.0, 0.0],
+            NewtonSettings::default(),
+        )
+        .expect("Rossler equilibrium should converge");
+
+        let settings = ContinuationSettings {
+            step_size: 0.01,
+            min_step_size: 1e-5,
+            max_step_size: 0.1,
+            max_steps: 100,
+            corrector_steps: 4,
+            corrector_tolerance: 1e-6,
+            step_tolerance: 1e-6,
+        };
+
+        let branch = continue_parameter(
+            &mut system,
+            SystemKind::Flow,
+            &equilibrium.state,
+            0,
+            settings,
+            false,
+        )
+        .expect("Rossler backward continuation should succeed");
+
+        let hopf_indices: Vec<i32> = branch
+            .points
+            .iter()
+            .zip(branch.indices.iter())
+            .filter(|(pt, _)| pt.stability == BifurcationType::Hopf)
+            .map(|(_, idx)| *idx)
+            .collect();
+
+        assert_eq!(
+            hopf_indices,
+            vec![-9],
+            "expected only Hopf at index -9, got {hopf_indices:?}"
+        );
+    }
+
+    #[test]
     fn test_map_neimark_sacker_detection() {
         let omega = 0.5;
 

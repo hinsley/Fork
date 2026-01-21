@@ -38,7 +38,8 @@ pub use codim1_curves::{Codim2TestFunctions, FoldCurveProblem, HopfCurveProblem}
 pub use lc_codim1_curves::{LPCCurveProblem, PDCurveProblem, NSCurveProblem};
 pub use util::{
     compute_nullspace_tangent, continuation_point_to_aug,
-    compute_eigenvalues, hopf_test_function, neutral_saddle_test_function,
+    compute_eigenvalues, hopf_pair_count, hopf_test_function, neutral_saddle_test_function,
+    real_eigenvalue_count,
 };
 
 use crate::equation_engine::EquationSystem;
@@ -184,8 +185,9 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             
             // Detect equilibrium bifurcations
             let fold_crossed = prev_tests.fold * new_tests.fold < 0.0;
-            let hopf_crossed = prev_tests.hopf * new_tests.hopf < 0.0;
-            let neutral_saddle_crossed = prev_tests.neutral_saddle * new_tests.neutral_saddle < 0.0;
+            let hopf_crossed = hopf_crossed_with_complex_pairs(&prev_diag, &diagnostics);
+            let neutral_saddle_crossed =
+                neutral_saddle_crossed_with_real_pairs(&prev_diag, &diagnostics);
 
             // Prioritize: Fold > Hopf > CycleFold > PeriodDoubling > NeimarkSacker
             let bifurcation_type = if fold_crossed {
@@ -539,8 +541,9 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             
             // Detect equilibrium bifurcations
             let fold_crossed = prev_tests.fold * new_tests.fold < 0.0;
-            let hopf_crossed = prev_tests.hopf * new_tests.hopf < 0.0;
-            let neutral_saddle_crossed = prev_tests.neutral_saddle * new_tests.neutral_saddle < 0.0;
+            let hopf_crossed = hopf_crossed_with_complex_pairs(&self.prev_diag, &diagnostics);
+            let neutral_saddle_crossed =
+                neutral_saddle_crossed_with_real_pairs(&self.prev_diag, &diagnostics);
 
             let bifurcation_type = if fold_crossed {
                 BifurcationType::Fold
@@ -905,8 +908,9 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             
             // Detect equilibrium bifurcations
             let fold_crossed = prev_tests.fold * new_tests.fold < 0.0;
-            let hopf_crossed = prev_tests.hopf * new_tests.hopf < 0.0;
-            let neutral_saddle_crossed = prev_tests.neutral_saddle * new_tests.neutral_saddle < 0.0;
+            let hopf_crossed = hopf_crossed_with_complex_pairs(&prev_diag, &diag);
+            let neutral_saddle_crossed =
+                neutral_saddle_crossed_with_real_pairs(&prev_diag, &diag);
 
             // Prioritize: Fold > Hopf > CycleFold > PeriodDoubling > NeimarkSacker
             let bifurcation_type = if fold_crossed {
@@ -1379,9 +1383,8 @@ pub fn extend_branch(
 
             let prev_tests = prev_diag.test_values;
             let fold_crossed = prev_tests.fold * diagnostics.test_values.fold < 0.0;
-            let hopf_crossed = prev_tests.hopf * diagnostics.test_values.hopf < 0.0;
-            let neutral_crossed =
-                prev_tests.neutral_saddle * diagnostics.test_values.neutral_saddle < 0.0;
+            let hopf_crossed = hopf_crossed_with_complex_pairs(&prev_diag, &diagnostics);
+            let neutral_crossed = neutral_saddle_crossed_with_real_pairs(&prev_diag, &diagnostics);
 
             let mut current_tangent = new_tangent.clone();
 
@@ -1821,6 +1824,27 @@ fn compute_test_gradient(
     Ok(grad)
 }
 
+fn hopf_crossed_with_complex_pairs(prev_diag: &PointDiagnostics, new_diag: &PointDiagnostics) -> bool {
+    let prev_pairs = hopf_pair_count(&prev_diag.eigenvalues);
+    let new_pairs = hopf_pair_count(&new_diag.eigenvalues);
+    prev_diag.test_values.hopf * new_diag.test_values.hopf < 0.0
+        && prev_pairs > 0
+        && new_pairs > 0
+        && prev_pairs == new_pairs
+}
+
+fn neutral_saddle_crossed_with_real_pairs(
+    prev_diag: &PointDiagnostics,
+    new_diag: &PointDiagnostics,
+) -> bool {
+    let prev_real = real_eigenvalue_count(&prev_diag.eigenvalues);
+    let new_real = real_eigenvalue_count(&new_diag.eigenvalues);
+    prev_diag.test_values.neutral_saddle * new_diag.test_values.neutral_saddle < 0.0
+        && prev_real >= 2
+        && new_real >= 2
+        && prev_real == new_real
+}
+
 fn compute_point_diagnostics(
     system: &mut EquationSystem,
     kind: SystemKind,
@@ -2126,6 +2150,85 @@ mod tests {
             hopf_param.abs() < 0.1,
             "Hopf should be near mu=0, found at mu={:.6}",
             hopf_param
+        );
+    }
+
+    #[test]
+    fn test_no_hopf_when_complex_pair_becomes_real() {
+        // dx/dt = -x + y
+        // dy/dt = mu*x - y
+        // Jacobian [[-1, 1], [mu, -1]] has eigenvalues -1 ± sqrt(mu).
+        // For mu < 0: complex pair with negative real part.
+        // For mu > 0: real eigenvalues with negative real parts (no Hopf).
+        let eq0_ops = vec![
+            OpCode::LoadConst(-1.0),
+            OpCode::LoadVar(0),
+            OpCode::Mul,
+            OpCode::LoadVar(1),
+            OpCode::Add,
+        ];
+        let eq1_ops = vec![
+            OpCode::LoadParam(0),
+            OpCode::LoadVar(0),
+            OpCode::Mul,
+            OpCode::LoadConst(-1.0),
+            OpCode::LoadVar(1),
+            OpCode::Mul,
+            OpCode::Add,
+        ];
+
+        let equations = vec![Bytecode { ops: eq0_ops }, Bytecode { ops: eq1_ops }];
+        let params = vec![-0.5];
+        let mut system = EquationSystem::new(equations, params);
+
+        let initial_state = vec![0.0, 0.0];
+        let param_index = 0;
+
+        let settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-5,
+            max_step_size: 0.2,
+            max_steps: 30,
+            corrector_steps: 5,
+            corrector_tolerance: 1e-8,
+            step_tolerance: 1e-8,
+        };
+
+        let branch = continue_parameter(
+            &mut system,
+            SystemKind::Flow,
+            &initial_state,
+            param_index,
+            settings,
+            true,
+        )
+        .expect("Continuation should succeed");
+
+        assert!(
+            branch.points.iter().any(|pt| pt.param_value > 0.0),
+            "Continuation should cross into positive mu"
+        );
+
+        let hopf_points: Vec<_> = branch
+            .points
+            .iter()
+            .filter(|pt| pt.stability == BifurcationType::Hopf)
+            .collect();
+
+        assert!(
+            hopf_points.is_empty(),
+            "Should not detect Hopf when complex pair becomes real"
+        );
+
+        let neutral_points: Vec<_> = branch
+            .points
+            .iter()
+            .filter(|pt| pt.stability == BifurcationType::NeutralSaddle)
+            .collect();
+
+        assert!(
+            neutral_points.is_empty(),
+            "Should not detect neutral saddle when complex pair becomes real"
         );
     }
 
