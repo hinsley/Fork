@@ -1017,6 +1017,12 @@
   color: var(--error);
 }
 
+/* Bifurcation diagrams use the object tree for visibility; avoid implying legend toggles. */
+.viewport-tile--diagram .js-plotly-plot .legend .legendtoggle,
+.viewport-tile--diagram .js-plotly-plot .legend .traces {
+  cursor: default !important;
+}
+
 @media (pointer: coarse) {
   .js-plotly-plot .modebar {
     opacity: 1;

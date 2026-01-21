@@ -2645,7 +2645,11 @@ function buildDiagramBaseLayout(
     plot_bgcolor: plotlyBackground,
     showlegend: hasData,
     dragmode: 'pan',
-    legend: { font: { color: PLOTLY_TEXT_COLOR } },
+    legend: {
+      font: { color: PLOTLY_TEXT_COLOR },
+      itemclick: false,
+      itemdoubleclick: false,
+    },
     xaxis: hasAxes
       ? {
           title: { text: xTitle, font: { color: PLOTLY_TEXT_COLOR } },
@@ -2953,12 +2957,13 @@ function ViewportTile({
   ])
 
   const label = scene ? 'State Space' : 'Bifurcation Diagram'
+  const viewportTypeClass = diagram ? 'viewport-tile--diagram' : ''
 
   return (
     <section
       className={`viewport-tile ${isCollapsed ? 'viewport-tile--collapsed' : ''} ${
         isSelected ? 'viewport-tile--selected' : ''
-      } ${isDropTarget ? 'viewport-tile--drop' : ''}`}
+      } ${isDropTarget ? 'viewport-tile--drop' : ''} ${viewportTypeClass}`}
       data-testid={`viewport-tile-${node.id}`}
       onDragOver={(event) => {
         event.preventDefault()

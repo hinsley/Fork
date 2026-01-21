@@ -169,12 +169,21 @@ describe('ViewportPanel view state wiring', () => {
 
     const props = plotlyCalls.find((entry) => entry.plotId === diagramResult.nodeId)
     expect(props).toBeTruthy()
+    const tile = document.querySelector(
+      `[data-testid="viewport-tile-${diagramResult.nodeId}"]`
+    )
+    expect(tile).toBeTruthy()
+    expect(tile?.classList.contains('viewport-tile--diagram')).toBe(true)
     expect(props?.layout?.xaxis?.range).toBeUndefined()
     expect(props?.layout?.yaxis?.range).toBeUndefined()
     expect(props?.viewRevision).toBe(7)
     expect(props?.initialView).toMatchObject({
       'xaxis.range': [-3, 3],
       'yaxis.range': [2, 4],
+    })
+    expect(props?.layout?.legend).toMatchObject({
+      itemclick: false,
+      itemdoubleclick: false,
     })
   })
 

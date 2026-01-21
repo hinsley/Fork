@@ -21,6 +21,20 @@ References:
 
 ---
 
+### 2026-01-24: Neutral cursor for bifurcation legends
+Context:
+Bifurcation diagrams render a Plotly legend for labels, but legend toggles are disabled so object
+visibility is controlled solely by the object tree. Plotly still shows a pointer cursor on legend
+items, implying a separate visibility toggle that is not wired to object menu state.
+Decision:
+Add a diagram-scoped CSS override to force the legend cursor to `default` for bifurcation viewports.
+Why:
+Avoids suggesting an independent visible/hidden control that could drift from object menu state.
+Impact:
+Legend labels remain visible, but no interactive cursor appears on bifurcation diagrams.
+References:
+`web/src/App.css`, `web/src/ui/ViewportPanel.tsx`
+
 ### 2026-01-20: Accept 1D map samples after StrictMode effect cleanup
 Context:
 In React StrictMode, effects run and clean up immediately on first mount. The initial map sampling

@@ -59,6 +59,12 @@ behavior.
 - `web/src/ui/ViewportPanel.tsx`: `buildSceneInitialView()` and
   `buildDiagramInitialView()` translate stored `scene.camera` / `axisRanges` (if
   present) into a one-time `initialView` payload for `usePlotViewport`.
+- `web/src/ui/ViewportPanel.tsx`: `buildDiagramBaseLayout()` disables legend
+  item click/double-click toggles (`legend.itemclick`/`legend.itemdoubleclick`)
+  so bifurcation visibility is managed only via the object tree.
+- `web/src/App.css`: `.viewport-tile--diagram` overrides Plotly legend cursor
+  styles to avoid implying an independent visibility toggle in bifurcation
+  diagrams.
 - `web/src/ui/InspectorDetailsPanel.tsx`: eigenvalue/multiplier plots set
   `dragmode: 'pan'`, compute fixed `xaxis.range`/`yaxis.range` values for the
   complex plane, and add unit circle/disc overlays for multiplier/eigenvalue
