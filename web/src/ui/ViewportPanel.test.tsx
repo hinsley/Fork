@@ -279,7 +279,7 @@ describe('ViewportPanel view state wiring', () => {
     expect(props).toBeTruthy()
     const selectedTrace = props?.data.find(
       (trace) => trace.name === 'eq_branch selected point'
-    )
+    ) as { x?: number[]; y?: number[]; customdata?: number[] } | undefined
     expect(selectedTrace).toBeTruthy()
     expect(selectedTrace?.x).toEqual([1.3])
     expect(selectedTrace?.y).toEqual([0.8])
@@ -462,7 +462,7 @@ describe('ViewportPanel view state wiring', () => {
         trace.mode === 'lines' &&
         'name' in trace &&
         trace.name === equilibrium.name
-    )
+    ) as { x?: number[]; y?: number[] } | undefined
     expect(cobwebTrace).toBeTruthy()
     if (
       !cobwebTrace ||

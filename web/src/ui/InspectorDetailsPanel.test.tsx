@@ -1168,7 +1168,8 @@ describe('InspectorDetailsPanel', () => {
     const cycleTable = screen.getByRole('region', { name: 'Cycle point data' })
     expect(cycleTable).toBeVisible()
     const rows = within(cycleTable).getAllByRole('row')
-    expect(rows).toHaveLength(1 + branch.data.points[0].cycle_points.length)
+    const cyclePoints = branch.data.points[0].cycle_points ?? []
+    expect(rows).toHaveLength(1 + cyclePoints.length)
     expect(within(cycleTable).getByText('0.3000')).toBeVisible()
     expect(within(cycleTable).getByText('0.9000')).toBeVisible()
   })
