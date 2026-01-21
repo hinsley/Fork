@@ -286,6 +286,127 @@ describe('ViewportPanel view state wiring', () => {
     expect(selectedTrace?.customdata).toEqual([1])
   })
 
+  it('renders full limit cycles on state-variable bifurcation diagrams for flows', () => {
+    const config: SystemConfig = {
+      name: 'LimitCycle_Diagram',
+      equations: ['x', 'y'],
+      params: [0.4],
+      paramNames: ['mu'],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const defaultSettings: ContinuationSettings = {
+      step_size: 0.01,
+      min_step_size: 1e-5,
+      max_step_size: 0.1,
+      max_steps: 100,
+      corrector_steps: 4,
+      corrector_tolerance: 1e-6,
+      step_tolerance: 1e-6,
+    }
+    let system = createSystem({ name: 'LimitCycle_Diagram', config })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit A',
+      systemName: config.name,
+      data: [
+        [0, 0.1, 0.2],
+        [0.1, 0.2, 0.3],
+      ],
+      t_start: 0,
+      t_end: 0.1,
+      dt: 0.1,
+      parameters: [...config.params],
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_branch',
+      systemName: config.name,
+      parameterName: 'mu',
+      parentObject: orbit.name,
+      startObject: orbit.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          {
+            state: [0, 0, 1, 0, 0, 1, 2],
+            param_value: 0.4,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [0, 0, 1, 1, 0, 1, 2],
+            param_value: 0.6,
+            stability: 'PeriodDoubling',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [1],
+        indices: [0, 1],
+        branch_type: { type: 'LimitCycle', ntst: 2, ncol: 1 },
+      },
+      settings: defaultSettings,
+      timestamp: nowIso(),
+      params: [...config.params],
+    }
+    const branchResult = addBranch(system, branch, orbitResult.nodeId)
+    system = branchResult.system
+    const diagramResult = addBifurcationDiagram(system, 'Diagram 1')
+    system = updateBifurcationDiagram(diagramResult.system, diagramResult.nodeId, {
+      xAxis: { kind: 'state', name: 'x' },
+      yAxis: { kind: 'state', name: 'y' },
+    })
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === diagramResult.nodeId)
+    expect(props).toBeTruthy()
+    const mainTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === branch.name &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    ) as
+      | {
+          x?: Array<number | null>
+          customdata?: Array<number | null>
+        }
+      | undefined
+    expect(mainTrace).toBeTruthy()
+    const numericX = (mainTrace?.x ?? []).filter(
+      (value) => typeof value === 'number'
+    ) as number[]
+    expect(numericX.length).toBe(6)
+    const numericCustomdata = (mainTrace?.customdata ?? []).filter(
+      (value) => typeof value === 'number'
+    ) as number[]
+    expect(numericCustomdata.filter((value) => value === 0).length).toBe(3)
+    expect(numericCustomdata.filter((value) => value === 1).length).toBe(3)
+
+    const bifTrace = props?.data.find(
+      (trace) =>
+        'name' in trace && trace.name === `${branch.name} bifurcations`
+    ) as
+      | {
+          x?: number[]
+          marker?: { symbol?: string }
+          text?: string[]
+        }
+      | undefined
+    expect(bifTrace).toBeTruthy()
+    expect(bifTrace?.marker?.symbol).toBe('diamond')
+    const bifX = (bifTrace?.x ?? []).filter(
+      (value) => typeof value === 'number'
+    ) as number[]
+    expect(bifX.length).toBe(3)
+    expect(bifTrace?.text?.[0]).toContain('Index 1')
+    expect(bifTrace?.text?.[0]).toContain('Period Doubling')
+  })
+
   it('expands 1D map sampling range to include cycle points', async () => {
     const config: SystemConfig = {
       name: 'Logistic_Map',

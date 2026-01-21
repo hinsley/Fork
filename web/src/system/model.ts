@@ -60,6 +60,7 @@ export const DEFAULT_RENDER: RenderStyle = {
   lineWidth: 2,
   lineStyle: 'solid',
   pointSize: 4,
+  stateSpaceStride: 1,
 }
 
 // IDs and timestamps are routed through deterministic helpers for tests.

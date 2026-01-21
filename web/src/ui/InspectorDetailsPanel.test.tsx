@@ -137,6 +137,49 @@ describe('InspectorDetailsPanel', () => {
     expect(onUpdateRender).toHaveBeenLastCalledWith(branchNodeId, { lineStyle: 'dashed' })
   })
 
+  it('updates state space stride for limit cycle branches', async () => {
+    const { system } = createPeriodDoublingSystem()
+    const branchNodeId = Object.keys(system.branches)[0]
+    if (!branchNodeId) {
+      throw new Error('Expected a limit cycle branch node.')
+    }
+    const onUpdateRender = vi.fn()
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={branchNodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={onUpdateRender}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    const strideInput = screen.getByTestId('inspector-state-space-stride')
+    fireEvent.change(strideInput, { target: { value: '3' } })
+    expect(onUpdateRender).toHaveBeenLastCalledWith(branchNodeId, {
+      stateSpaceStride: 3,
+    })
+  })
+
   it('applies parameter overrides for selected objects', async () => {
     const user = userEvent.setup()
     const system = createSystem({

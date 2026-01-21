@@ -3666,6 +3666,28 @@ export function InspectorDetailsPanel({
                   data-testid="inspector-point-size"
                 />
               </label>
+              {selectionNode.kind === 'branch' &&
+              isLimitCycleBranch &&
+              systemDraft.type === 'flow' ? (
+                <label>
+                  State space stride
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={nodeRender.stateSpaceStride ?? 1}
+                    onChange={(event) => {
+                      const parsed = parseInteger(event.target.value)
+                      const safeValue = parsed && parsed > 0 ? parsed : 1
+                      onUpdateRender(selectionNode.id, {
+                        stateSpaceStride: safeValue,
+                      })
+                    }}
+                    onFocus={(event) => event.currentTarget.select()}
+                    data-testid="inspector-state-space-stride"
+                  />
+                </label>
+              ) : null}
             </div>
           ) : null}
 

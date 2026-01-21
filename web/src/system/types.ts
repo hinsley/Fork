@@ -207,6 +207,7 @@ export interface RenderStyle {
   lineWidth: number
   lineStyle: LineStyle
   pointSize: number
+  stateSpaceStride?: number
   clv?: ClvRenderStyle
   equilibriumEigenvectors?: EquilibriumEigenvectorRenderStyle
 }

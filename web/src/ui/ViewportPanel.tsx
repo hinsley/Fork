@@ -130,6 +130,12 @@ function resolveLineDash(lineStyle: LineStyle | undefined): 'solid' | 'dash' | '
   return LINE_STYLE_DASH[lineStyle ?? 'solid']
 }
 
+function resolveStateSpaceStride(value?: number | null): number {
+  if (!Number.isFinite(value)) return 1
+  const rounded = Math.round(value as number)
+  return rounded >= 1 ? rounded : 1
+}
+
 type TimeSeriesViewportMeta = {
   yRange?: [number, number] | null
   height?: number | null
@@ -2158,6 +2164,199 @@ function buildDiagramTraces(
           system.config.varNames.indexOf(yAxis.name),
         ]
       : null
+    const isFlow = system.config.type === 'flow'
+
+    if (
+      isFlow &&
+      isLimitCycleBranch &&
+      isStateAxisPair &&
+      stateAxisIndices &&
+      stateAxisIndices[0] >= 0 &&
+      stateAxisIndices[1] >= 0
+    ) {
+      const axisX = stateAxisIndices[0]
+      const axisY = stateAxisIndices[1]
+      const dim = system.config.varNames.length
+      const { ntst, ncol } = resolveLimitCycleMesh(branch)
+      const layout = resolveLimitCycleLayout(branch.branchType)
+      const stateSpaceStride = resolveStateSpaceStride(node.render.stateSpaceStride)
+      const cycleX: Array<number | null> = []
+      const cycleY: Array<number | null> = []
+      const cycleCustomdata: Array<number | null> = []
+      const repX: number[] = []
+      const repY: number[] = []
+      const repIndices: number[] = []
+      const bifX: number[] = []
+      const bifY: number[] = []
+      const bifLabels: string[] = []
+      const bifIndices: number[] = []
+      const bifSet = new Set(branch.data.bifurcations ?? [])
+
+      for (let orderIndex = 0; orderIndex < order.length; orderIndex += 1) {
+        const idx = order[orderIndex]
+        const isBifurcation = bifSet.has(idx)
+        const isSelected =
+          selectionBranchId === branchId && selectionPointIndex === idx
+        const isEndpoint = orderIndex === 0 || orderIndex === order.length - 1
+        const isStrideHit =
+          stateSpaceStride <= 1 || orderIndex % stateSpaceStride === 0
+        if (!isStrideHit && !isBifurcation && !isSelected && !isEndpoint) {
+          continue
+        }
+        const point = branch.data.points[idx]
+        if (!point) continue
+        const { profilePoints } = extractLimitCycleProfile(
+          point.state,
+          dim,
+          ntst,
+          ncol,
+          { layout }
+        )
+        if (profilePoints.length === 0) continue
+
+        let repPoint: number[] | null = null
+        for (const profilePoint of profilePoints) {
+          const xValue = profilePoint[axisX]
+          const yValue = profilePoint[axisY]
+          if (Number.isFinite(xValue) && Number.isFinite(yValue)) {
+            repPoint = profilePoint
+            break
+          }
+        }
+        if (repPoint) {
+          repX.push(repPoint[axisX])
+          repY.push(repPoint[axisY])
+          repIndices.push(idx)
+        }
+
+        let bifLabel = ''
+        if (isBifurcation) {
+          const logicalIndex = indices[idx]
+          const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : idx
+          bifLabel = formatBifurcationLabel(displayIndex, point.stability)
+        }
+
+        const segmentX: Array<number | null> = []
+        const segmentY: Array<number | null> = []
+        const segmentCustomdata: Array<number | null> = []
+        let hasFinite = false
+        for (const profilePoint of profilePoints) {
+          const xValue = profilePoint[axisX]
+          const yValue = profilePoint[axisY]
+          if (Number.isFinite(xValue) && Number.isFinite(yValue)) {
+            segmentX.push(xValue)
+            segmentY.push(yValue)
+            segmentCustomdata.push(idx)
+            hasFinite = true
+            if (isBifurcation) {
+              bifX.push(xValue)
+              bifY.push(yValue)
+              bifLabels.push(bifLabel)
+              bifIndices.push(idx)
+            }
+          } else {
+            segmentX.push(null)
+            segmentY.push(null)
+            segmentCustomdata.push(null)
+          }
+        }
+        if (hasFinite) {
+          cycleX.push(...segmentX, null)
+          cycleY.push(...segmentY, null)
+          cycleCustomdata.push(...segmentCustomdata, null)
+        }
+      }
+
+      if (cycleX.length === 0 || cycleY.length === 0) continue
+      hasData = true
+
+      const highlight = branchId === selectedNodeId
+      const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
+      const markerSize = highlight ? node.render.pointSize + 2 : node.render.pointSize
+      const lineDash = resolveLineDash(node.render.lineStyle)
+
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        name: branch.name,
+        uid: branchId,
+        x: cycleX,
+        y: cycleY,
+        customdata: cycleCustomdata,
+        line: {
+          color: node.render.color,
+          width: lineWidth,
+          dash: lineDash,
+        },
+        connectgaps: false,
+      })
+
+      if (repX.length > 0) {
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: `${branch.name} start`,
+          uid: branchId,
+          x: [repX[0]],
+          y: [repY[0]],
+          customdata: [repIndices[0]],
+          marker: {
+            color: node.render.color,
+            size: markerSize,
+            symbol: 'triangle-up',
+          },
+          showlegend: false,
+          hovertemplate: 'Start<extra></extra>',
+        })
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: `${branch.name} end`,
+          uid: branchId,
+          x: [repX[repX.length - 1]],
+          y: [repY[repY.length - 1]],
+          customdata: [repIndices[repIndices.length - 1]],
+          marker: {
+            color: node.render.color,
+            size: markerSize,
+            symbol: 'triangle-down',
+          },
+          showlegend: false,
+          hovertemplate: 'End<extra></extra>',
+        })
+      }
+
+      if (bifX.length > 0) {
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: `${branch.name} bifurcations`,
+          uid: branchId,
+          x: bifX,
+          y: bifY,
+          customdata: bifIndices,
+          marker: {
+            color: node.render.color,
+            size: markerSize + 2,
+            symbol: 'diamond',
+          },
+          text: bifLabels,
+          showlegend: false,
+          hovertemplate: '%{text}<extra></extra>',
+        })
+      }
+
+      appendSelectedPointMarker(
+        branchId,
+        branch,
+        indices,
+        repIndices,
+        [{ x: repX, y: repY }],
+        markerSize,
+        node.render.color
+      )
+      continue
+    }
 
     if (hasMixedAxes && isLimitCycleBranch) {
       const parameterAxis = xAxis.kind === 'parameter' ? xAxis : yAxis
