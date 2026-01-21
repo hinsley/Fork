@@ -1876,12 +1876,15 @@ function buildSceneTraces(
 function buildDiagramTraces(
   system: System,
   diagram: BifurcationDiagram,
-  selectedNodeId: string | null
+  selectedNodeId: string | null,
+  branchPointSelection: BranchPointSelection | null
 ): DiagramTraceState {
   const traces: Data[] = []
   const xAxis = diagram.xAxis
   const yAxis = diagram.yAxis
   const hasAxes = Boolean(xAxis && yAxis)
+  const selectionBranchId = branchPointSelection?.branchId ?? null
+  const selectionPointIndex = branchPointSelection?.pointIndex ?? null
   const selectedBranchIds = diagram.selectedBranchIds ?? []
   const candidateBranchIds =
     selectedBranchIds.length > 0
@@ -2061,6 +2064,65 @@ function buildDiagramTraces(
     }
   }
 
+  const appendSelectedPointMarker = (
+    branchId: string,
+    branch: ContinuationObject,
+    indices: number[],
+    pointIndices: number[],
+    lines: Array<{ x: Array<number | null>; y: Array<number | null> }>,
+    markerSize: number,
+    color: string
+  ) => {
+    if (selectionBranchId !== branchId || selectionPointIndex === null) return
+    if (
+      selectionPointIndex < 0 ||
+      selectionPointIndex >= branch.data.points.length
+    ) {
+      return
+    }
+    const position = pointIndices.indexOf(selectionPointIndex)
+    if (position < 0) return
+    const selectedX: number[] = []
+    const selectedY: number[] = []
+    for (const line of lines) {
+      const xValue = line.x[position]
+      const yValue = line.y[position]
+      if (
+        typeof xValue === 'number' &&
+        Number.isFinite(xValue) &&
+        typeof yValue === 'number' &&
+        Number.isFinite(yValue)
+      ) {
+        selectedX.push(xValue)
+        selectedY.push(yValue)
+      }
+    }
+    if (selectedX.length === 0) return
+    const logicalIndex = indices[selectionPointIndex]
+    const displayIndex = Number.isFinite(logicalIndex)
+      ? logicalIndex
+      : selectionPointIndex
+    const label = `Selected point: ${displayIndex}`
+    traces.push({
+      type: 'scatter',
+      mode: 'markers',
+      name: `${branch.name} selected point`,
+      uid: branchId,
+      x: selectedX,
+      y: selectedY,
+      customdata: selectedX.map(() => selectionPointIndex),
+      marker: {
+        color,
+        size: markerSize + 4,
+        symbol: 'circle-open',
+        line: { color, width: 2 },
+      },
+      text: selectedX.map(() => label),
+      showlegend: false,
+      hovertemplate: '%{text}<extra></extra>',
+    })
+  }
+
   for (const branchId of branchIds) {
     const branch = system.branches[branchId]
     const node = system.nodes[branchId]
@@ -2182,6 +2244,18 @@ function buildDiagramTraces(
         markerSize,
         node.render.color
       )
+      appendSelectedPointMarker(
+        branchId,
+        branch,
+        indices,
+        pointIndices,
+        [
+          { x: xMax, y: yMax },
+          { x: xMin, y: yMin },
+        ],
+        markerSize,
+        node.render.color
+      )
       continue
     }
 
@@ -2287,6 +2361,15 @@ function buildDiagramTraces(
       }
 
       appendMultiLineMarkers(
+        branchId,
+        branch,
+        indices,
+        pointIndices,
+        [{ x, y }, ...Array.from(cycleLines.values())],
+        markerSize,
+        node.render.color
+      )
+      appendSelectedPointMarker(
         branchId,
         branch,
         indices,
@@ -2450,6 +2533,15 @@ function buildDiagramTraces(
           })
         }
       }
+      appendSelectedPointMarker(
+        branchId,
+        branch,
+        indices,
+        pointIndices,
+        [{ x, y }],
+        markerSize,
+        node.render.color
+      )
       continue
     }
 
@@ -2559,6 +2651,16 @@ function buildDiagramTraces(
         })
       }
     }
+
+    appendSelectedPointMarker(
+      branchId,
+      branch,
+      indices,
+      pointIndices,
+      [{ x, y }],
+      markerSize,
+      node.render.color
+    )
   }
 
   return { traces, hasAxes, hasBranches, hasData, xTitle, yTitle }
@@ -2909,8 +3011,13 @@ function ViewportTile({
 
   const diagramTraceState = useMemo(() => {
     if (!diagram) return null
-    return buildDiagramTraces(system, diagram, selectedNodeId)
-  }, [diagram, selectedNodeId, system])
+    return buildDiagramTraces(
+      system,
+      diagram,
+      selectedNodeId,
+      branchPointSelection ?? null
+    )
+  }, [branchPointSelection, diagram, selectedNodeId, system])
 
   const viewRevision = scene?.viewRevision ?? diagram?.viewRevision ?? 0
   const initialView = useMemo(() => {

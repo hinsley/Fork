@@ -4,13 +4,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ViewportPanel } from './ViewportPanel'
 import {
   addObject,
+  addBranch,
   addBifurcationDiagram,
   addScene,
   createSystem,
   updateBifurcationDiagram,
   updateScene,
 } from '../system/model'
-import type { EquilibriumObject, Scene, SystemConfig } from '../system/types'
+import type {
+  ContinuationObject,
+  ContinuationSettings,
+  EquilibriumObject,
+  OrbitObject,
+  Scene,
+  SystemConfig,
+} from '../system/types'
+import type { BranchPointSelection } from './branchPointSelection'
+import { nowIso } from '../utils/determinism'
 
 type PlotlyProps = {
   plotId: string
@@ -29,11 +39,20 @@ vi.mock('../viewports/plotly/PlotlyViewport', () => ({
   },
 }))
 
-function renderPanel(system: ReturnType<typeof createSystem>) {
+type RenderPanelOverrides = {
+  branchPointSelection?: BranchPointSelection
+  selectedNodeId?: string | null
+}
+
+function renderPanel(
+  system: ReturnType<typeof createSystem>,
+  overrides: RenderPanelOverrides = {}
+) {
   render(
     <ViewportPanel
       system={system}
-      selectedNodeId={null}
+      selectedNodeId={overrides.selectedNodeId ?? null}
+      branchPointSelection={overrides.branchPointSelection}
       theme="light"
       onSelectViewport={vi.fn()}
       onSelectObject={vi.fn()}
@@ -186,6 +205,85 @@ describe('ViewportPanel view state wiring', () => {
       itemclick: false,
       itemdoubleclick: false,
     })
+  })
+
+  it('shows selected branch points on bifurcation diagrams', () => {
+    const config: SystemConfig = {
+      name: 'Selection_System',
+      equations: ['x'],
+      params: [0.2],
+      paramNames: ['mu'],
+      varNames: ['x'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const defaultSettings: ContinuationSettings = {
+      step_size: 0.01,
+      min_step_size: 1e-5,
+      max_step_size: 0.1,
+      max_steps: 100,
+      corrector_steps: 4,
+      corrector_tolerance: 1e-6,
+      step_tolerance: 1e-6,
+    }
+    let system = createSystem({ name: 'Selection_System', config })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit A',
+      systemName: config.name,
+      data: [
+        [0, 0.1],
+        [0.1, 0.2],
+      ],
+      t_start: 0,
+      t_end: 0.1,
+      dt: 0.1,
+      parameters: [...config.params],
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_branch',
+      systemName: config.name,
+      parameterName: 'mu',
+      parentObject: orbit.name,
+      startObject: orbit.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          { state: [0.4], param_value: 1.1, stability: 'None', eigenvalues: [] },
+          { state: [0.8], param_value: 1.3, stability: 'None', eigenvalues: [] },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: { type: 'Equilibrium' },
+      },
+      settings: defaultSettings,
+      timestamp: nowIso(),
+      params: [...config.params],
+    }
+    const branchResult = addBranch(system, branch, orbitResult.nodeId)
+    system = branchResult.system
+    const diagramResult = addBifurcationDiagram(system, 'Diagram 1')
+    system = updateBifurcationDiagram(diagramResult.system, diagramResult.nodeId, {
+      xAxis: { kind: 'parameter', name: 'mu' },
+      yAxis: { kind: 'state', name: 'x' },
+    })
+
+    renderPanel(system, {
+      branchPointSelection: { branchId: branchResult.nodeId, pointIndex: 1 },
+    })
+
+    const props = plotlyCalls.find((entry) => entry.plotId === diagramResult.nodeId)
+    expect(props).toBeTruthy()
+    const selectedTrace = props?.data.find(
+      (trace) => trace.name === 'eq_branch selected point'
+    )
+    expect(selectedTrace).toBeTruthy()
+    expect(selectedTrace?.x).toEqual([1.3])
+    expect(selectedTrace?.y).toEqual([0.8])
+    expect(selectedTrace?.customdata).toEqual([1])
   })
 
   it('expands 1D map sampling range to include cycle points', async () => {
