@@ -1719,6 +1719,7 @@ export function AppProvider({
       try {
         const system = state.system.config
         const equilibriumLabelLower = formatEquilibriumLabel(system.type, { lowercase: true })
+        const hopfCurveLabel = system.type === 'map' ? 'Neimark-Sacker' : 'Hopf'
         const validation = validateSystemConfig(system)
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
@@ -1733,7 +1734,7 @@ export function AppProvider({
         }
         if (sourceBranch.branchType !== 'equilibrium') {
           throw new Error(
-            `Hopf curve continuation is only available for ${equilibriumLabelLower} branches.`
+            `${hopfCurveLabel} curve continuation is only available for ${equilibriumLabelLower} branches.`
           )
         }
 
@@ -1742,8 +1743,11 @@ export function AppProvider({
         if (!point) {
           throw new Error('Select a valid branch point.')
         }
-        if (point.stability !== 'Hopf') {
-          throw new Error('Selected point is not a Hopf bifurcation.')
+        const isHopfCurvePoint =
+          point.stability === 'Hopf' ||
+          (system.type === 'map' && point.stability === 'NeimarkSacker')
+        if (!isHopfCurvePoint) {
+          throw new Error(`Selected point is not a ${hopfCurveLabel} bifurcation.`)
         }
 
         const name = request.name.trim()
@@ -1802,13 +1806,13 @@ export function AppProvider({
             onProgress: (progress) =>
               dispatch({
                 type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Hopf Curve', progress },
+                progress: { label: `${hopfCurveLabel} Curve`, progress },
               }),
           }
         )
         if (curveData.points.length <= 1) {
           throw new Error(
-            'Hopf curve continuation stopped at the seed point. Try a smaller step size or adjust parameters.'
+            `${hopfCurveLabel} curve continuation stopped at the seed point. Try a smaller step size or adjust parameters.`
           )
         }
 

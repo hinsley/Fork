@@ -2115,13 +2115,41 @@ export function InspectorDetailsPanel({
   const branchStartPoint = branchStartIndex !== undefined ? branch?.data.points[branchStartIndex] : null
   const branchEndPoint = branchEndIndex !== undefined ? branch?.data.points[branchEndIndex] : null
   const hopfOmega = selectedBranchPoint ? extractHopfOmega(selectedBranchPoint) : null
+  const hopfCurveLabel = isDiscreteMap ? 'Neimark-Sacker' : 'Hopf'
+  const hasSelectedBranchPoint = Boolean(selectedBranchPoint)
+  const isFoldPointSelected = selectedBranchPoint?.stability === 'Fold'
+  const isCodim1HopfPointSelected =
+    selectedBranchPoint?.stability === 'Hopf' ||
+    (isDiscreteMap && selectedBranchPoint?.stability === 'NeimarkSacker')
   const isHopfSourceBranch =
     branch?.branchType === 'equilibrium' || branch?.branchType === 'hopf_curve'
   const isHopfPointSelected =
-    !!selectedBranchPoint &&
+    hasSelectedBranchPoint &&
     (branch?.branchType === 'equilibrium'
-      ? selectedBranchPoint.stability === 'Hopf'
+      ? selectedBranchPoint?.stability === 'Hopf'
       : true)
+  const showBranchContinueFromPoint =
+    branch?.branchType === 'equilibrium' && hasSelectedBranchPoint
+  const showCodim1CurveContinuations =
+    branch?.branchType === 'equilibrium' &&
+    hasSelectedBranchPoint &&
+    (isFoldPointSelected || isCodim1HopfPointSelected)
+  const showFoldCurveContinuation =
+    showCodim1CurveContinuations && isFoldPointSelected
+  const showHopfCurveContinuation =
+    showCodim1CurveContinuations && isCodim1HopfPointSelected
+  const pdSourceBranchOk =
+    (isDiscreteMap && branch?.branchType === 'equilibrium') ||
+    (!isDiscreteMap && branch?.branchType === 'limit_cycle')
+  const showLimitCycleFromPD =
+    hasSelectedBranchPoint &&
+    pdSourceBranchOk &&
+    selectedBranchPoint?.stability === 'PeriodDoubling'
+  const showLimitCycleFromHopf =
+    !isDiscreteMap &&
+    isHopfSourceBranch &&
+    hasSelectedBranchPoint &&
+    isHopfPointSelected
   const branchEigenvalues = useMemo(
     () =>
       selectedBranchPoint
@@ -2799,15 +2827,20 @@ export function InspectorDetailsPanel({
       return
     }
     if (branch.branchType !== 'equilibrium') {
-      setHopfCurveError(`Hopf curve continuation is only available for ${equilibriumLabelLower} branches.`)
+      setHopfCurveError(
+        `${hopfCurveLabel} curve continuation is only available for ${equilibriumLabelLower} branches.`
+      )
       return
     }
     if (!selectedBranchPoint || branchPointIndex === null) {
       setHopfCurveError('Select a branch point to continue from.')
       return
     }
-    if (selectedBranchPoint.stability !== 'Hopf') {
-      setHopfCurveError('Select a Hopf bifurcation point to continue.')
+    const isHopfCurvePoint =
+      selectedBranchPoint.stability === 'Hopf' ||
+      (isDiscreteMap && selectedBranchPoint.stability === 'NeimarkSacker')
+    if (!isHopfCurvePoint) {
+      setHopfCurveError(`Select a ${hopfCurveLabel} bifurcation point to continue.`)
       return
     }
     if (systemDraft.paramNames.length < 2) {
@@ -6547,1308 +6580,1262 @@ export function InspectorDetailsPanel({
                   </>
                 )}
 
-                <InspectorDisclosure
-                  key={`${selectionKey}-branch-extend`}
-                  title="Extend Branch"
-                  testId="branch-extend-toggle"
-                  defaultOpen={false}
-                >
-                  <div className="inspector-section">
-                    {!canExtendBranch ? (
-                      <p className="empty-state">
-                        {`Branch extension is only available for ${equilibriumLabelLower}, limit cycle, or bifurcation curve branches.`}
-                      </p>
-                    ) : null}
-                    {runDisabled ? (
-                      <div className="field-warning">
-                        Apply valid system changes before extending.
-                      </div>
-                    ) : null}
-                    <label>
-                      Direction
-                      <select
-                        value={branchExtensionDraft.forward ? 'forward' : 'backward'}
-                        onChange={(event) =>
-                          setBranchExtensionDraft((prev) => ({
-                            ...prev,
-                            forward: event.target.value === 'forward',
-                          }))
-                        }
-                        disabled={!canExtendBranch}
-                        data-testid="branch-extend-direction"
-                      >
-                        <option value="forward">Forward (Append)</option>
-                        <option value="backward">Backward (Prepend)</option>
-                      </select>
-                    </label>
-                    <label>
-                      Max points to add
-                      <input
-                        type="number"
-                        value={branchExtensionDraft.maxSteps}
-                        onChange={(event) =>
-                          setBranchExtensionDraft((prev) => ({
-                            ...prev,
-                            maxSteps: event.target.value,
-                          }))
-                        }
-                        disabled={!canExtendBranch}
-                        data-testid="branch-extend-max-steps"
-                      />
-                    </label>
-                    <label>
-                      Step size
-                      <input
-                        type="number"
-                        value={branchExtensionDraft.stepSize}
-                        onChange={(event) =>
-                          setBranchExtensionDraft((prev) => ({
-                            ...prev,
-                            stepSize: event.target.value,
-                          }))
-                        }
-                        disabled={!canExtendBranch}
-                        data-testid="branch-extend-step-size"
-                      />
-                    </label>
-                    <label>
-                      Min step size
-                      <input
-                        type="number"
-                        value={branchExtensionDraft.minStepSize}
-                        onChange={(event) =>
-                          setBranchExtensionDraft((prev) => ({
-                            ...prev,
-                            minStepSize: event.target.value,
-                          }))
-                        }
-                        disabled={!canExtendBranch}
-                        data-testid="branch-extend-min-step"
-                      />
-                    </label>
-                    <label>
-                      Max step size
-                      <input
-                        type="number"
-                        value={branchExtensionDraft.maxStepSize}
-                        onChange={(event) =>
-                          setBranchExtensionDraft((prev) => ({
-                            ...prev,
-                            maxStepSize: event.target.value,
-                          }))
-                        }
-                        disabled={!canExtendBranch}
-                        data-testid="branch-extend-max-step"
-                      />
-                    </label>
-                    <label>
-                      Corrector steps
-                      <input
-                        type="number"
-                        value={branchExtensionDraft.correctorSteps}
-                        onChange={(event) =>
-                          setBranchExtensionDraft((prev) => ({
-                            ...prev,
-                            correctorSteps: event.target.value,
-                          }))
-                        }
-                        disabled={!canExtendBranch}
-                        data-testid="branch-extend-corrector-steps"
-                      />
-                    </label>
-                    <label>
-                      Corrector tolerance
-                      <input
-                        type="number"
-                        value={branchExtensionDraft.correctorTolerance}
-                        onChange={(event) =>
-                          setBranchExtensionDraft((prev) => ({
-                            ...prev,
-                            correctorTolerance: event.target.value,
-                          }))
-                        }
-                        disabled={!canExtendBranch}
-                        data-testid="branch-extend-corrector-tolerance"
-                      />
-                    </label>
-                    <label>
-                      Step tolerance
-                      <input
-                        type="number"
-                        value={branchExtensionDraft.stepTolerance}
-                        onChange={(event) =>
-                          setBranchExtensionDraft((prev) => ({
-                            ...prev,
-                            stepTolerance: event.target.value,
-                          }))
-                        }
-                        disabled={!canExtendBranch}
-                        data-testid="branch-extend-step-tolerance"
-                      />
-                    </label>
-                    {branchExtensionError ? (
-                      <div className="field-error">{branchExtensionError}</div>
-                    ) : null}
-                    <button
-                      onClick={handleExtendBranch}
-                      disabled={runDisabled || !canExtendBranch}
-                      data-testid="branch-extend-submit"
-                    >
-                      Extend Branch
-                    </button>
-                  </div>
-                </InspectorDisclosure>
-
-                <InspectorDisclosure
-                  key={`${selectionKey}-branch-continue`}
-                  title="Continue from Point"
-                  testId="branch-continue-toggle"
-                  defaultOpen={false}
-                >
-                  <div className="inspector-section">
-                    {branch.branchType !== 'equilibrium' ? (
-                      <p className="empty-state">
-                        {`Continuation from points is only available for ${equilibriumLabelLower} branches.`}
-                      </p>
-                    ) : null}
-                    {runDisabled ? (
-                      <div className="field-warning">
-                        Apply valid system changes before continuing.
-                      </div>
-                    ) : null}
-                    {systemDraft.paramNames.length === 0 ? (
-                      <p className="empty-state">Add parameters to enable continuation.</p>
-                    ) : null}
-                    <label>
-                      Branch name
-                      <input
-                        value={branchContinuationDraft.name}
-                        onChange={(event) =>
-                          setBranchContinuationDraft((prev) => ({
-                            ...prev,
-                            name: event.target.value,
-                          }))
-                        }
-                        placeholder={
-                          branchContinuationDraft.parameterName
-                            ? `${toCliSafeName(branch.name)}_${toCliSafeName(branchContinuationDraft.parameterName)}`
-                            : toCliSafeName(branch.name)
-                        }
-                        data-testid="branch-from-point-name"
-                      />
-                    </label>
-                    <div className="inspector-divider">Initialization</div>
-                    <label>
-                      Continuation parameter
-                      <select
-                        value={branchContinuationDraft.parameterName}
-                        onChange={(event) => {
-                          const nextParameterName = event.target.value
-                          setBranchContinuationDraft((prev) => {
-                            const prevSuggestedName = buildSuggestedBranchName(
-                              branch.name,
-                              prev.parameterName
-                            )
-                            const nextSuggestedName = buildSuggestedBranchName(
-                              branch.name,
-                              nextParameterName
-                            )
-                            const shouldUpdateName = prev.name === prevSuggestedName
-                            return {
+                {canExtendBranch ? (
+                  <InspectorDisclosure
+                    key={`${selectionKey}-branch-extend`}
+                    title="Extend Branch"
+                    testId="branch-extend-toggle"
+                    defaultOpen={false}
+                  >
+                    <div className="inspector-section">
+                      {runDisabled ? (
+                        <div className="field-warning">
+                          Apply valid system changes before extending.
+                        </div>
+                      ) : null}
+                      <label>
+                        Direction
+                        <select
+                          value={branchExtensionDraft.forward ? 'forward' : 'backward'}
+                          onChange={(event) =>
+                            setBranchExtensionDraft((prev) => ({
                               ...prev,
-                              parameterName: nextParameterName,
-                              name: shouldUpdateName ? nextSuggestedName : prev.name,
-                            }
-                          })
-                        }}
-                        data-testid="branch-from-point-parameter"
+                              forward: event.target.value === 'forward',
+                            }))
+                          }
+                          disabled={!canExtendBranch}
+                          data-testid="branch-extend-direction"
+                        >
+                          <option value="forward">Forward (Append)</option>
+                          <option value="backward">Backward (Prepend)</option>
+                        </select>
+                      </label>
+                      <label>
+                        Max points to add
+                        <input
+                          type="number"
+                          value={branchExtensionDraft.maxSteps}
+                          onChange={(event) =>
+                            setBranchExtensionDraft((prev) => ({
+                              ...prev,
+                              maxSteps: event.target.value,
+                            }))
+                          }
+                          disabled={!canExtendBranch}
+                          data-testid="branch-extend-max-steps"
+                        />
+                      </label>
+                      <label>
+                        Step size
+                        <input
+                          type="number"
+                          value={branchExtensionDraft.stepSize}
+                          onChange={(event) =>
+                            setBranchExtensionDraft((prev) => ({
+                              ...prev,
+                              stepSize: event.target.value,
+                            }))
+                          }
+                          disabled={!canExtendBranch}
+                          data-testid="branch-extend-step-size"
+                        />
+                      </label>
+                      <label>
+                        Min step size
+                        <input
+                          type="number"
+                          value={branchExtensionDraft.minStepSize}
+                          onChange={(event) =>
+                            setBranchExtensionDraft((prev) => ({
+                              ...prev,
+                              minStepSize: event.target.value,
+                            }))
+                          }
+                          disabled={!canExtendBranch}
+                          data-testid="branch-extend-min-step"
+                        />
+                      </label>
+                      <label>
+                        Max step size
+                        <input
+                          type="number"
+                          value={branchExtensionDraft.maxStepSize}
+                          onChange={(event) =>
+                            setBranchExtensionDraft((prev) => ({
+                              ...prev,
+                              maxStepSize: event.target.value,
+                            }))
+                          }
+                          disabled={!canExtendBranch}
+                          data-testid="branch-extend-max-step"
+                        />
+                      </label>
+                      <label>
+                        Corrector steps
+                        <input
+                          type="number"
+                          value={branchExtensionDraft.correctorSteps}
+                          onChange={(event) =>
+                            setBranchExtensionDraft((prev) => ({
+                              ...prev,
+                              correctorSteps: event.target.value,
+                            }))
+                          }
+                          disabled={!canExtendBranch}
+                          data-testid="branch-extend-corrector-steps"
+                        />
+                      </label>
+                      <label>
+                        Corrector tolerance
+                        <input
+                          type="number"
+                          value={branchExtensionDraft.correctorTolerance}
+                          onChange={(event) =>
+                            setBranchExtensionDraft((prev) => ({
+                              ...prev,
+                              correctorTolerance: event.target.value,
+                            }))
+                          }
+                          disabled={!canExtendBranch}
+                          data-testid="branch-extend-corrector-tolerance"
+                        />
+                      </label>
+                      <label>
+                        Step tolerance
+                        <input
+                          type="number"
+                          value={branchExtensionDraft.stepTolerance}
+                          onChange={(event) =>
+                            setBranchExtensionDraft((prev) => ({
+                              ...prev,
+                              stepTolerance: event.target.value,
+                            }))
+                          }
+                          disabled={!canExtendBranch}
+                          data-testid="branch-extend-step-tolerance"
+                        />
+                      </label>
+                      {branchExtensionError ? (
+                        <div className="field-error">{branchExtensionError}</div>
+                      ) : null}
+                      <button
+                        onClick={handleExtendBranch}
+                        disabled={runDisabled || !canExtendBranch}
+                        data-testid="branch-extend-submit"
                       >
-                        {systemDraft.paramNames.map((name) => (
-                          <option key={name} value={name}>
-                            {name}
-                            {name === branch.parameterName ? ' (current)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Direction
-                      <select
-                        value={branchContinuationDraft.forward ? 'forward' : 'backward'}
-                        onChange={(event) =>
-                          setBranchContinuationDraft((prev) => ({
-                            ...prev,
-                            forward: event.target.value === 'forward',
-                          }))
+                        Extend Branch
+                      </button>
+                    </div>
+                  </InspectorDisclosure>
+                ) : null}
+
+                {showBranchContinueFromPoint ? (
+                  <InspectorDisclosure
+                    key={`${selectionKey}-branch-continue`}
+                    title="Continue from Point"
+                    testId="branch-continue-toggle"
+                    defaultOpen={false}
+                  >
+                    <div className="inspector-section">
+                      {runDisabled ? (
+                        <div className="field-warning">
+                          Apply valid system changes before continuing.
+                        </div>
+                      ) : null}
+                      {systemDraft.paramNames.length === 0 ? (
+                        <p className="empty-state">Add parameters to enable continuation.</p>
+                      ) : null}
+                      <label>
+                        Branch name
+                        <input
+                          value={branchContinuationDraft.name}
+                          onChange={(event) =>
+                            setBranchContinuationDraft((prev) => ({
+                              ...prev,
+                              name: event.target.value,
+                            }))
+                          }
+                          placeholder={
+                            branchContinuationDraft.parameterName
+                              ? `${toCliSafeName(branch.name)}_${toCliSafeName(branchContinuationDraft.parameterName)}`
+                              : toCliSafeName(branch.name)
+                          }
+                          data-testid="branch-from-point-name"
+                        />
+                      </label>
+                      <div className="inspector-divider">Initialization</div>
+                      <label>
+                        Continuation parameter
+                        <select
+                          value={branchContinuationDraft.parameterName}
+                          onChange={(event) => {
+                            const nextParameterName = event.target.value
+                            setBranchContinuationDraft((prev) => {
+                              const prevSuggestedName = buildSuggestedBranchName(
+                                branch.name,
+                                prev.parameterName
+                              )
+                              const nextSuggestedName = buildSuggestedBranchName(
+                                branch.name,
+                                nextParameterName
+                              )
+                              const shouldUpdateName = prev.name === prevSuggestedName
+                              return {
+                                ...prev,
+                                parameterName: nextParameterName,
+                                name: shouldUpdateName ? nextSuggestedName : prev.name,
+                              }
+                            })
+                          }}
+                          data-testid="branch-from-point-parameter"
+                        >
+                          {systemDraft.paramNames.map((name) => (
+                            <option key={name} value={name}>
+                              {name}
+                              {name === branch.parameterName ? ' (current)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Direction
+                        <select
+                          value={branchContinuationDraft.forward ? 'forward' : 'backward'}
+                          onChange={(event) =>
+                            setBranchContinuationDraft((prev) => ({
+                              ...prev,
+                              forward: event.target.value === 'forward',
+                            }))
+                          }
+                          data-testid="branch-from-point-direction"
+                        >
+                          <option value="forward">Forward (Increasing Param)</option>
+                          <option value="backward">Backward (Decreasing Param)</option>
+                        </select>
+                      </label>
+                      <div className="inspector-divider">Predictor</div>
+                      <label>
+                        Initial step size
+                        <input
+                          type="number"
+                          value={branchContinuationDraft.stepSize}
+                          onChange={(event) =>
+                            setBranchContinuationDraft((prev) => ({
+                              ...prev,
+                              stepSize: event.target.value,
+                            }))
+                          }
+                          data-testid="branch-from-point-step-size"
+                        />
+                      </label>
+                      <label>
+                        Max points
+                        <input
+                          type="number"
+                          value={branchContinuationDraft.maxSteps}
+                          onChange={(event) =>
+                            setBranchContinuationDraft((prev) => ({
+                              ...prev,
+                              maxSteps: event.target.value,
+                            }))
+                          }
+                          data-testid="branch-from-point-max-steps"
+                        />
+                      </label>
+                      <label>
+                        Min step size
+                        <input
+                          type="number"
+                          value={branchContinuationDraft.minStepSize}
+                          onChange={(event) =>
+                            setBranchContinuationDraft((prev) => ({
+                              ...prev,
+                              minStepSize: event.target.value,
+                            }))
+                          }
+                          data-testid="branch-from-point-min-step"
+                        />
+                      </label>
+                      <label>
+                        Max step size
+                        <input
+                          type="number"
+                          value={branchContinuationDraft.maxStepSize}
+                          onChange={(event) =>
+                            setBranchContinuationDraft((prev) => ({
+                              ...prev,
+                              maxStepSize: event.target.value,
+                            }))
+                          }
+                          data-testid="branch-from-point-max-step"
+                        />
+                      </label>
+                      <div className="inspector-divider">Corrector</div>
+                      <label>
+                        Corrector steps
+                        <input
+                          type="number"
+                          value={branchContinuationDraft.correctorSteps}
+                          onChange={(event) =>
+                            setBranchContinuationDraft((prev) => ({
+                              ...prev,
+                              correctorSteps: event.target.value,
+                            }))
+                          }
+                          data-testid="branch-from-point-corrector-steps"
+                        />
+                      </label>
+                      <label>
+                        Corrector tolerance
+                        <input
+                          type="number"
+                          value={branchContinuationDraft.correctorTolerance}
+                          onChange={(event) =>
+                            setBranchContinuationDraft((prev) => ({
+                              ...prev,
+                              correctorTolerance: event.target.value,
+                            }))
+                          }
+                          data-testid="branch-from-point-corrector-tolerance"
+                        />
+                      </label>
+                      <label>
+                        Step tolerance
+                        <input
+                          type="number"
+                          value={branchContinuationDraft.stepTolerance}
+                          onChange={(event) =>
+                            setBranchContinuationDraft((prev) => ({
+                              ...prev,
+                              stepTolerance: event.target.value,
+                            }))
+                          }
+                          data-testid="branch-from-point-step-tolerance"
+                        />
+                      </label>
+                      {branchContinuationError ? (
+                        <div className="field-error">{branchContinuationError}</div>
+                      ) : null}
+                      <button
+                        onClick={handleCreateBranchFromPoint}
+                        disabled={
+                          runDisabled ||
+                          !selectedBranchPoint ||
+                          branch.branchType !== 'equilibrium'
                         }
-                        data-testid="branch-from-point-direction"
+                        data-testid="branch-from-point-submit"
                       >
-                        <option value="forward">Forward (Increasing Param)</option>
-                        <option value="backward">Backward (Decreasing Param)</option>
-                      </select>
-                    </label>
-                    <div className="inspector-divider">Predictor</div>
-                    <label>
-                      Initial step size
-                      <input
-                        type="number"
-                        value={branchContinuationDraft.stepSize}
-                        onChange={(event) =>
-                          setBranchContinuationDraft((prev) => ({
-                            ...prev,
-                            stepSize: event.target.value,
-                          }))
-                        }
-                        data-testid="branch-from-point-step-size"
-                      />
-                    </label>
-                    <label>
-                      Max points
-                      <input
-                        type="number"
-                        value={branchContinuationDraft.maxSteps}
-                        onChange={(event) =>
-                          setBranchContinuationDraft((prev) => ({
-                            ...prev,
-                            maxSteps: event.target.value,
-                          }))
-                        }
-                        data-testid="branch-from-point-max-steps"
-                      />
-                    </label>
-                    <label>
-                      Min step size
-                      <input
-                        type="number"
-                        value={branchContinuationDraft.minStepSize}
-                        onChange={(event) =>
-                          setBranchContinuationDraft((prev) => ({
-                            ...prev,
-                            minStepSize: event.target.value,
-                          }))
-                        }
-                        data-testid="branch-from-point-min-step"
-                      />
-                    </label>
-                    <label>
-                      Max step size
-                      <input
-                        type="number"
-                        value={branchContinuationDraft.maxStepSize}
-                        onChange={(event) =>
-                          setBranchContinuationDraft((prev) => ({
-                            ...prev,
-                            maxStepSize: event.target.value,
-                          }))
-                        }
-                        data-testid="branch-from-point-max-step"
-                      />
-                    </label>
-                    <div className="inspector-divider">Corrector</div>
-                    <label>
-                      Corrector steps
-                      <input
-                        type="number"
-                        value={branchContinuationDraft.correctorSteps}
-                        onChange={(event) =>
-                          setBranchContinuationDraft((prev) => ({
-                            ...prev,
-                            correctorSteps: event.target.value,
-                          }))
-                        }
-                        data-testid="branch-from-point-corrector-steps"
-                      />
-                    </label>
-                    <label>
-                      Corrector tolerance
-                      <input
-                        type="number"
-                        value={branchContinuationDraft.correctorTolerance}
-                        onChange={(event) =>
-                          setBranchContinuationDraft((prev) => ({
-                            ...prev,
-                            correctorTolerance: event.target.value,
-                          }))
-                        }
-                        data-testid="branch-from-point-corrector-tolerance"
-                      />
-                    </label>
-                    <label>
-                      Step tolerance
-                      <input
-                        type="number"
-                        value={branchContinuationDraft.stepTolerance}
-                        onChange={(event) =>
-                          setBranchContinuationDraft((prev) => ({
-                            ...prev,
-                            stepTolerance: event.target.value,
-                          }))
-                        }
-                        data-testid="branch-from-point-step-tolerance"
-                      />
-                    </label>
-                    {branchContinuationError ? (
-                      <div className="field-error">{branchContinuationError}</div>
-                    ) : null}
-                    <button
-                      onClick={handleCreateBranchFromPoint}
-                      disabled={
-                        runDisabled ||
-                        !selectedBranchPoint ||
-                        branch.branchType !== 'equilibrium'
-                      }
-                      data-testid="branch-from-point-submit"
-                    >
-                      Create Branch
-                    </button>
-                  </div>
-                </InspectorDisclosure>
+                        Create Branch
+                      </button>
+                    </div>
+                  </InspectorDisclosure>
+                ) : null}
 
-                <InspectorDisclosure
-                  key={`${selectionKey}-codim1-curves`}
-                  title="Codim-1 Curve Continuations"
-                  testId="codim1-curve-toggle"
-                  defaultOpen={false}
-                >
-                  <div className="inspector-section">
-                    {branch.branchType !== 'equilibrium' ? (
-                      <p className="empty-state">
-                        {`Codim-1 curve continuation is only available for ${equilibriumLabelLower} branches.`}
-                      </p>
-                    ) : null}
-                    {runDisabled ? (
-                      <div className="field-warning">
-                        Apply valid system changes before continuing.
-                      </div>
-                    ) : null}
-                    {systemDraft.paramNames.length < 2 ? (
-                      <p className="empty-state">
-                        Add a second parameter to enable codim-1 continuation.
-                      </p>
-                    ) : null}
-                    {!selectedBranchPoint ? (
-                      <p className="empty-state">Select a branch point to continue.</p>
-                    ) : selectedBranchPoint.stability === 'Fold' ? (
-                      <>
-                        <h4 className="inspector-subheading">Fold curve</h4>
-                        <label>
-                          Curve name
-                          <input
-                            value={foldCurveDraft.name}
-                            onChange={(event) =>
-                              setFoldCurveDraft((prev) => ({
-                                ...prev,
-                                name: event.target.value,
-                              }))
-                            }
-                            placeholder={`fold_curve_${toCliSafeName(branch.name)}`}
-                            data-testid="fold-curve-name"
-                          />
-                        </label>
-                        <label>
-                          Second parameter
-                          <select
-                            value={foldCurveDraft.param2Name}
-                            onChange={(event) =>
-                              setFoldCurveDraft((prev) => ({
-                                ...prev,
-                                param2Name: event.target.value,
-                              }))
-                            }
-                            disabled={codim1ParamOptions.length === 0}
-                            data-testid="fold-curve-param2"
-                          >
-                            {codim1ParamOptions.map((name) => {
-                              const idx = systemDraft.paramNames.indexOf(name)
-                              const branchValue =
-                                branchParams.length === systemDraft.paramNames.length
-                                  ? branchParams[idx]
-                                  : undefined
-                              const fallbackValue = parseNumber(systemDraft.params[idx] ?? '')
-                              const value = branchValue ?? fallbackValue
-                              const label = `${name} (current: ${formatNumber(
-                                value ?? Number.NaN,
-                                6
-                              )})`
-                              return (
-                                <option key={name} value={name}>
-                                  {label}
-                                </option>
-                              )
-                            })}
-                          </select>
-                        </label>
-                        <label>
-                          Direction
-                          <select
-                            value={foldCurveDraft.forward ? 'forward' : 'backward'}
-                            onChange={(event) =>
-                              setFoldCurveDraft((prev) => ({
-                                ...prev,
-                                forward: event.target.value === 'forward',
-                              }))
-                            }
-                            data-testid="fold-curve-direction"
-                          >
-                            <option value="forward">Forward</option>
-                            <option value="backward">Backward</option>
-                          </select>
-                        </label>
-                        <label>
-                          Initial step size
-                          <input
-                            type="number"
-                            value={foldCurveDraft.stepSize}
-                            onChange={(event) =>
-                              setFoldCurveDraft((prev) => ({
-                                ...prev,
-                                stepSize: event.target.value,
-                              }))
-                            }
-                            data-testid="fold-curve-step-size"
-                          />
-                        </label>
-                        <label>
-                          Min step size
-                          <input
-                            type="number"
-                            value={foldCurveDraft.minStepSize}
-                            onChange={(event) =>
-                              setFoldCurveDraft((prev) => ({
-                                ...prev,
-                                minStepSize: event.target.value,
-                              }))
-                            }
-                            data-testid="fold-curve-min-step-size"
-                          />
-                        </label>
-                        <label>
-                          Max step size
-                          <input
-                            type="number"
-                            value={foldCurveDraft.maxStepSize}
-                            onChange={(event) =>
-                              setFoldCurveDraft((prev) => ({
-                                ...prev,
-                                maxStepSize: event.target.value,
-                              }))
-                            }
-                            data-testid="fold-curve-max-step-size"
-                          />
-                        </label>
-                        <label>
-                          Max points
-                          <input
-                            type="number"
-                            value={foldCurveDraft.maxSteps}
-                            onChange={(event) =>
-                              setFoldCurveDraft((prev) => ({
-                                ...prev,
-                                maxSteps: event.target.value,
-                              }))
-                            }
-                            data-testid="fold-curve-max-steps"
-                          />
-                        </label>
-                        <label>
-                          Corrector steps
-                          <input
-                            type="number"
-                            value={foldCurveDraft.correctorSteps}
-                            onChange={(event) =>
-                              setFoldCurveDraft((prev) => ({
-                                ...prev,
-                                correctorSteps: event.target.value,
-                              }))
-                            }
-                            data-testid="fold-curve-corrector-steps"
-                          />
-                        </label>
-                        <label>
-                          Corrector tolerance
-                          <input
-                            type="number"
-                            value={foldCurveDraft.correctorTolerance}
-                            onChange={(event) =>
-                              setFoldCurveDraft((prev) => ({
-                                ...prev,
-                                correctorTolerance: event.target.value,
-                              }))
-                            }
-                            data-testid="fold-curve-corrector-tolerance"
-                          />
-                        </label>
-                        <label>
-                          Step tolerance
-                          <input
-                            type="number"
-                            value={foldCurveDraft.stepTolerance}
-                            onChange={(event) =>
-                              setFoldCurveDraft((prev) => ({
-                                ...prev,
-                                stepTolerance: event.target.value,
-                              }))
-                            }
-                            data-testid="fold-curve-step-tolerance"
-                          />
-                        </label>
-                        {foldCurveError ? (
-                          <div className="field-error">{foldCurveError}</div>
-                        ) : null}
-                        <button
-                          onClick={handleCreateFoldCurve}
-                          disabled={
-                            runDisabled ||
-                            !selectedBranchPoint ||
-                            branch.branchType !== 'equilibrium'
-                          }
-                          data-testid="fold-curve-submit"
-                        >
-                          Continue Fold Curve
-                        </button>
-                      </>
-                    ) : selectedBranchPoint.stability === 'Hopf' ? (
-                      <>
-                        <h4 className="inspector-subheading">Hopf curve</h4>
-                        <label>
-                          Curve name
-                          <input
-                            value={hopfCurveDraft.name}
-                            onChange={(event) =>
-                              setHopfCurveDraft((prev) => ({
-                                ...prev,
-                                name: event.target.value,
-                              }))
-                            }
-                            placeholder={`hopf_curve_${toCliSafeName(branch.name)}`}
-                            data-testid="hopf-curve-name"
-                          />
-                        </label>
-                        <label>
-                          Second parameter
-                          <select
-                            value={hopfCurveDraft.param2Name}
-                            onChange={(event) =>
-                              setHopfCurveDraft((prev) => ({
-                                ...prev,
-                                param2Name: event.target.value,
-                              }))
-                            }
-                            disabled={codim1ParamOptions.length === 0}
-                            data-testid="hopf-curve-param2"
-                          >
-                            {codim1ParamOptions.map((name) => {
-                              const idx = systemDraft.paramNames.indexOf(name)
-                              const branchValue =
-                                branchParams.length === systemDraft.paramNames.length
-                                  ? branchParams[idx]
-                                  : undefined
-                              const fallbackValue = parseNumber(systemDraft.params[idx] ?? '')
-                              const value = branchValue ?? fallbackValue
-                              const label = `${name} (current: ${formatNumber(
-                                value ?? Number.NaN,
-                                6
-                              )})`
-                              return (
-                                <option key={name} value={name}>
-                                  {label}
-                                </option>
-                              )
-                            })}
-                          </select>
-                        </label>
-                        <label>
-                          Hopf frequency (ω)
-                          <input
-                            value={formatNumber(hopfOmega ?? Number.NaN, 6)}
-                            disabled
-                            data-testid="hopf-curve-omega"
-                          />
-                        </label>
-                        <label>
-                          Direction
-                          <select
-                            value={hopfCurveDraft.forward ? 'forward' : 'backward'}
-                            onChange={(event) =>
-                              setHopfCurveDraft((prev) => ({
-                                ...prev,
-                                forward: event.target.value === 'forward',
-                              }))
-                            }
-                            data-testid="hopf-curve-direction"
-                          >
-                            <option value="forward">Forward</option>
-                            <option value="backward">Backward</option>
-                          </select>
-                        </label>
-                        <label>
-                          Initial step size
-                          <input
-                            type="number"
-                            value={hopfCurveDraft.stepSize}
-                            onChange={(event) =>
-                              setHopfCurveDraft((prev) => ({
-                                ...prev,
-                                stepSize: event.target.value,
-                              }))
-                            }
-                            data-testid="hopf-curve-step-size"
-                          />
-                        </label>
-                        <label>
-                          Min step size
-                          <input
-                            type="number"
-                            value={hopfCurveDraft.minStepSize}
-                            onChange={(event) =>
-                              setHopfCurveDraft((prev) => ({
-                                ...prev,
-                                minStepSize: event.target.value,
-                              }))
-                            }
-                            data-testid="hopf-curve-min-step-size"
-                          />
-                        </label>
-                        <label>
-                          Max step size
-                          <input
-                            type="number"
-                            value={hopfCurveDraft.maxStepSize}
-                            onChange={(event) =>
-                              setHopfCurveDraft((prev) => ({
-                                ...prev,
-                                maxStepSize: event.target.value,
-                              }))
-                            }
-                            data-testid="hopf-curve-max-step-size"
-                          />
-                        </label>
-                        <label>
-                          Max points
-                          <input
-                            type="number"
-                            value={hopfCurveDraft.maxSteps}
-                            onChange={(event) =>
-                              setHopfCurveDraft((prev) => ({
-                                ...prev,
-                                maxSteps: event.target.value,
-                              }))
-                            }
-                            data-testid="hopf-curve-max-steps"
-                          />
-                        </label>
-                        <label>
-                          Corrector steps
-                          <input
-                            type="number"
-                            value={hopfCurveDraft.correctorSteps}
-                            onChange={(event) =>
-                              setHopfCurveDraft((prev) => ({
-                                ...prev,
-                                correctorSteps: event.target.value,
-                              }))
-                            }
-                            data-testid="hopf-curve-corrector-steps"
-                          />
-                        </label>
-                        <label>
-                          Corrector tolerance
-                          <input
-                            type="number"
-                            value={hopfCurveDraft.correctorTolerance}
-                            onChange={(event) =>
-                              setHopfCurveDraft((prev) => ({
-                                ...prev,
-                                correctorTolerance: event.target.value,
-                              }))
-                            }
-                            data-testid="hopf-curve-corrector-tolerance"
-                          />
-                        </label>
-                        <label>
-                          Step tolerance
-                          <input
-                            type="number"
-                            value={hopfCurveDraft.stepTolerance}
-                            onChange={(event) =>
-                              setHopfCurveDraft((prev) => ({
-                                ...prev,
-                                stepTolerance: event.target.value,
-                              }))
-                            }
-                            data-testid="hopf-curve-step-tolerance"
-                          />
-                        </label>
-                        {hopfCurveError ? (
-                          <div className="field-error">{hopfCurveError}</div>
-                        ) : null}
-                        <button
-                          onClick={handleCreateHopfCurve}
-                          disabled={
-                            runDisabled ||
-                            !selectedBranchPoint ||
-                            branch.branchType !== 'equilibrium'
-                          }
-                          data-testid="hopf-curve-submit"
-                        >
-                          Continue Hopf Curve
-                        </button>
-                      </>
-                    ) : (
-                      <p className="empty-state">
-                        Select a Fold or Hopf point to continue a codim-1 curve.
-                      </p>
-                    )}
-                  </div>
-                </InspectorDisclosure>
-
-                <InspectorDisclosure
-                  key={`${selectionKey}-limit-cycle-hopf`}
-                  title="Cycle from NS"
-                  testId="limit-cycle-from-hopf-toggle"
-                  defaultOpen={false}
-                >
-                  <div className="inspector-section">
-                    {!isHopfSourceBranch ? (
-                      <p className="empty-state">
-                        Limit cycle continuation is only available for equilibrium or Hopf curve
-                        branches.
-                      </p>
-                    ) : null}
-                    {systemDraft.type === 'map' ? (
-                      <p className="empty-state">Limit cycles require a flow system.</p>
-                    ) : null}
-                    {systemDraft.paramNames.length === 0 ? (
-                      <p className="empty-state">Add a parameter before continuing.</p>
-                    ) : null}
-                    {runDisabled ? (
-                      <div className="field-warning">
-                        Apply valid system changes before continuing.
-                      </div>
-                    ) : null}
-                    {!isHopfSourceBranch ||
-                    systemDraft.type === 'map' ||
-                    systemDraft.paramNames.length === 0 ? null : !selectedBranchPoint ? (
-                      <p className="empty-state">Select a branch point to continue.</p>
-                    ) : !isHopfPointSelected ? (
-                      <p className="empty-state">
-                        Select a Hopf bifurcation point to continue a limit cycle.
-                      </p>
-                    ) : (
-                      <>
-                        <label>
-                          Limit cycle name
-                          <input
-                            value={limitCycleFromHopfDraft.limitCycleName}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                limitCycleName: event.target.value,
-                              }))
-                            }
-                            placeholder={`lc_hopf_${toCliSafeName(branch.name)}`}
-                            data-testid="limit-cycle-from-hopf-name"
-                          />
-                        </label>
-                        <label>
-                          Branch name
-                          <input
-                            value={limitCycleFromHopfDraft.branchName}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                branchName: event.target.value,
-                              }))
-                            }
-                            placeholder={limitCycleFromHopfBranchSuggestion}
-                            data-testid="limit-cycle-from-hopf-branch-name"
-                          />
-                        </label>
-                        <label>
-                          Continuation parameter
-                          <select
-                            value={limitCycleFromHopfDraft.parameterName}
-                            onChange={(event) => {
-                              const nextParameterName = event.target.value
-                              setLimitCycleFromHopfDraft((prev) => {
-                                const baseName =
-                                  prev.limitCycleName.trim() ||
-                                  `lc_hopf_${toCliSafeName(branch.name)}`
-                                const prevSuggestedName = buildSuggestedBranchName(
-                                  baseName,
-                                  prev.parameterName
-                                )
-                                const nextSuggestedName = buildSuggestedBranchName(
-                                  baseName,
-                                  nextParameterName
-                                )
-                                const shouldUpdateName = prev.branchName === prevSuggestedName
-                                return {
-                                  ...prev,
-                                  parameterName: nextParameterName,
-                                  branchName: shouldUpdateName
-                                    ? nextSuggestedName
-                                    : prev.branchName,
-                                }
-                              })
-                            }}
-                            data-testid="limit-cycle-from-hopf-parameter"
-                          >
-                            {systemDraft.paramNames.map((name) => (
-                              <option key={name} value={name}>
-                                {name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Initial amplitude
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.amplitude}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                amplitude: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-amplitude"
-                          />
-                        </label>
-                        <label>
-                          NTST
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.ntst}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                ntst: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-ntst"
-                          />
-                          <span className="field-help">Mesh intervals along the cycle.</span>
-                        </label>
-                        <label>
-                          NCOL
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.ncol}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                ncol: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-ncol"
-                          />
-                          <span className="field-help">Collocation points per mesh interval.</span>
-                        </label>
-                        <label>
-                          Direction
-                          <select
-                            value={limitCycleFromHopfDraft.forward ? 'forward' : 'backward'}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                forward: event.target.value === 'forward',
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-direction"
-                          >
-                            <option value="forward">Forward (Increasing Param)</option>
-                            <option value="backward">Backward (Decreasing Param)</option>
-                          </select>
-                        </label>
-                        <label>
-                          Initial step size
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.stepSize}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                stepSize: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-step-size"
-                          />
-                        </label>
-                        <label>
-                          Max points
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.maxSteps}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                maxSteps: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-max-steps"
-                          />
-                        </label>
-                        <label>
-                          Min step size
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.minStepSize}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                minStepSize: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-min-step-size"
-                          />
-                        </label>
-                        <label>
-                          Max step size
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.maxStepSize}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                maxStepSize: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-max-step-size"
-                          />
-                        </label>
-                        <label>
-                          Corrector steps
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.correctorSteps}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                correctorSteps: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-corrector-steps"
-                          />
-                        </label>
-                        <label>
-                          Corrector tolerance
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.correctorTolerance}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                correctorTolerance: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-corrector-tolerance"
-                          />
-                        </label>
-                        <label>
-                          Step tolerance
-                          <input
-                            type="number"
-                            value={limitCycleFromHopfDraft.stepTolerance}
-                            onChange={(event) =>
-                              setLimitCycleFromHopfDraft((prev) => ({
-                                ...prev,
-                                stepTolerance: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-hopf-step-tolerance"
-                          />
-                        </label>
-                        {limitCycleFromHopfError ? (
-                          <div className="field-error">{limitCycleFromHopfError}</div>
-                        ) : null}
-                        <button
-                          onClick={handleCreateLimitCycleFromHopf}
-                          disabled={
-                            runDisabled ||
-                            !selectedBranchPoint ||
-                            !isHopfSourceBranch ||
-                            !isHopfPointSelected ||
-                            systemDraft.paramNames.length === 0
-                          }
-                          data-testid="limit-cycle-from-hopf-submit"
-                        >
-                          Continue Limit Cycle
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </InspectorDisclosure>
-
-                <InspectorDisclosure
-                  key={`${selectionKey}-limit-cycle-pd`}
-                  title="Cycle from PD"
-                  testId="limit-cycle-from-pd-toggle"
-                  defaultOpen={false}
-                >
-                  <div className="inspector-section">
-                    {systemDraft.type === 'map' ? (
-                      branch.branchType !== 'equilibrium' ? (
+                {showCodim1CurveContinuations ? (
+                  <InspectorDisclosure
+                    key={`${selectionKey}-codim1-curves`}
+                    title="Codim-1 Curve Continuations"
+                    testId="codim1-curve-toggle"
+                    defaultOpen={false}
+                  >
+                    <div className="inspector-section">
+                      {runDisabled ? (
+                        <div className="field-warning">
+                          Apply valid system changes before continuing.
+                        </div>
+                      ) : null}
+                      {systemDraft.paramNames.length < 2 ? (
                         <p className="empty-state">
-                          Period-doubling branching for maps requires a cycle branch.
+                          Add a second parameter to enable codim-1 continuation.
                         </p>
-                      ) : null
-                    ) : branch.branchType !== 'limit_cycle' ? (
-                      <p className="empty-state">
-                        Period-doubling branching is only available for limit cycle branches.
-                      </p>
-                    ) : null}
-                    {runDisabled ? (
-                      <div className="field-warning">
-                        Apply valid system changes before continuing.
-                      </div>
-                    ) : null}
-                    {!selectedBranchPoint ? (
-                      <p className="empty-state">Select a branch point to continue.</p>
-                    ) : selectedBranchPoint.stability !== 'PeriodDoubling' ? (
-                      <p className="empty-state">
-                        Select a Period Doubling point to branch.
-                      </p>
-                    ) : (
-                      <>
-                        <label>
-                          Cycle name
-                          <input
-                            value={limitCycleFromPDDraft.limitCycleName}
-                            onChange={(event) =>
-                              setLimitCycleFromPDDraft((prev) => ({
-                                ...prev,
-                                limitCycleName: event.target.value,
-                              }))
+                      ) : null}
+                      {showFoldCurveContinuation ? (
+                        <>
+                          <h4 className="inspector-subheading">Fold curve</h4>
+                          <label>
+                            Curve name
+                            <input
+                              value={foldCurveDraft.name}
+                              onChange={(event) =>
+                                setFoldCurveDraft((prev) => ({
+                                  ...prev,
+                                  name: event.target.value,
+                                }))
+                              }
+                              placeholder={`fold_curve_${toCliSafeName(branch.name)}`}
+                              data-testid="fold-curve-name"
+                            />
+                          </label>
+                          <label>
+                            Second parameter
+                            <select
+                              value={foldCurveDraft.param2Name}
+                              onChange={(event) =>
+                                setFoldCurveDraft((prev) => ({
+                                  ...prev,
+                                  param2Name: event.target.value,
+                                }))
+                              }
+                              disabled={codim1ParamOptions.length === 0}
+                              data-testid="fold-curve-param2"
+                            >
+                              {codim1ParamOptions.map((name) => {
+                                const idx = systemDraft.paramNames.indexOf(name)
+                                const branchValue =
+                                  branchParams.length === systemDraft.paramNames.length
+                                    ? branchParams[idx]
+                                    : undefined
+                                const fallbackValue = parseNumber(systemDraft.params[idx] ?? '')
+                                const value = branchValue ?? fallbackValue
+                                const label = `${name} (current: ${formatNumber(
+                                  value ?? Number.NaN,
+                                  6
+                                )})`
+                                return (
+                                  <option key={name} value={name}>
+                                    {label}
+                                  </option>
+                                )
+                              })}
+                            </select>
+                          </label>
+                          <label>
+                            Direction
+                            <select
+                              value={foldCurveDraft.forward ? 'forward' : 'backward'}
+                              onChange={(event) =>
+                                setFoldCurveDraft((prev) => ({
+                                  ...prev,
+                                  forward: event.target.value === 'forward',
+                                }))
+                              }
+                              data-testid="fold-curve-direction"
+                            >
+                              <option value="forward">Forward</option>
+                              <option value="backward">Backward</option>
+                            </select>
+                          </label>
+                          <label>
+                            Initial step size
+                            <input
+                              type="number"
+                              value={foldCurveDraft.stepSize}
+                              onChange={(event) =>
+                                setFoldCurveDraft((prev) => ({
+                                  ...prev,
+                                  stepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="fold-curve-step-size"
+                            />
+                          </label>
+                          <label>
+                            Min step size
+                            <input
+                              type="number"
+                              value={foldCurveDraft.minStepSize}
+                              onChange={(event) =>
+                                setFoldCurveDraft((prev) => ({
+                                  ...prev,
+                                  minStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="fold-curve-min-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max step size
+                            <input
+                              type="number"
+                              value={foldCurveDraft.maxStepSize}
+                              onChange={(event) =>
+                                setFoldCurveDraft((prev) => ({
+                                  ...prev,
+                                  maxStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="fold-curve-max-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max points
+                            <input
+                              type="number"
+                              value={foldCurveDraft.maxSteps}
+                              onChange={(event) =>
+                                setFoldCurveDraft((prev) => ({
+                                  ...prev,
+                                  maxSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="fold-curve-max-steps"
+                            />
+                          </label>
+                          <label>
+                            Corrector steps
+                            <input
+                              type="number"
+                              value={foldCurveDraft.correctorSteps}
+                              onChange={(event) =>
+                                setFoldCurveDraft((prev) => ({
+                                  ...prev,
+                                  correctorSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="fold-curve-corrector-steps"
+                            />
+                          </label>
+                          <label>
+                            Corrector tolerance
+                            <input
+                              type="number"
+                              value={foldCurveDraft.correctorTolerance}
+                              onChange={(event) =>
+                                setFoldCurveDraft((prev) => ({
+                                  ...prev,
+                                  correctorTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="fold-curve-corrector-tolerance"
+                            />
+                          </label>
+                          <label>
+                            Step tolerance
+                            <input
+                              type="number"
+                              value={foldCurveDraft.stepTolerance}
+                              onChange={(event) =>
+                                setFoldCurveDraft((prev) => ({
+                                  ...prev,
+                                  stepTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="fold-curve-step-tolerance"
+                            />
+                          </label>
+                          {foldCurveError ? (
+                            <div className="field-error">{foldCurveError}</div>
+                          ) : null}
+                          <button
+                            onClick={handleCreateFoldCurve}
+                            disabled={
+                              runDisabled ||
+                              !selectedBranchPoint ||
+                              branch.branchType !== 'equilibrium'
                             }
-                            placeholder={limitCycleFromPDNameSuggestion}
-                            data-testid="limit-cycle-from-pd-name"
-                          />
-                        </label>
-                        <label>
-                          Branch name
-                          <input
-                            value={limitCycleFromPDDraft.branchName}
-                            onChange={(event) =>
-                              setLimitCycleFromPDDraft((prev) => ({
-                                ...prev,
-                                branchName: event.target.value,
-                              }))
+                            data-testid="fold-curve-submit"
+                          >
+                            Continue Fold Curve
+                          </button>
+                        </>
+                      ) : showHopfCurveContinuation ? (
+                        <>
+                          <h4 className="inspector-subheading">{`${hopfCurveLabel} curve`}</h4>
+                          <label>
+                            Curve name
+                            <input
+                              value={hopfCurveDraft.name}
+                              onChange={(event) =>
+                                setHopfCurveDraft((prev) => ({
+                                  ...prev,
+                                  name: event.target.value,
+                                }))
+                              }
+                              placeholder={`hopf_curve_${toCliSafeName(branch.name)}`}
+                              data-testid="hopf-curve-name"
+                            />
+                          </label>
+                          <label>
+                            Second parameter
+                            <select
+                              value={hopfCurveDraft.param2Name}
+                              onChange={(event) =>
+                                setHopfCurveDraft((prev) => ({
+                                  ...prev,
+                                  param2Name: event.target.value,
+                                }))
+                              }
+                              disabled={codim1ParamOptions.length === 0}
+                              data-testid="hopf-curve-param2"
+                            >
+                              {codim1ParamOptions.map((name) => {
+                                const idx = systemDraft.paramNames.indexOf(name)
+                                const branchValue =
+                                  branchParams.length === systemDraft.paramNames.length
+                                    ? branchParams[idx]
+                                    : undefined
+                                const fallbackValue = parseNumber(systemDraft.params[idx] ?? '')
+                                const value = branchValue ?? fallbackValue
+                                const label = `${name} (current: ${formatNumber(
+                                  value ?? Number.NaN,
+                                  6
+                                )})`
+                                return (
+                                  <option key={name} value={name}>
+                                    {label}
+                                  </option>
+                                )
+                              })}
+                            </select>
+                          </label>
+                          <label>
+                            {`${hopfCurveLabel} frequency (ω)`}
+                            <input
+                              value={formatNumber(hopfOmega ?? Number.NaN, 6)}
+                              disabled
+                              data-testid="hopf-curve-omega"
+                            />
+                          </label>
+                          <label>
+                            Direction
+                            <select
+                              value={hopfCurveDraft.forward ? 'forward' : 'backward'}
+                              onChange={(event) =>
+                                setHopfCurveDraft((prev) => ({
+                                  ...prev,
+                                  forward: event.target.value === 'forward',
+                                }))
+                              }
+                              data-testid="hopf-curve-direction"
+                            >
+                              <option value="forward">Forward</option>
+                              <option value="backward">Backward</option>
+                            </select>
+                          </label>
+                          <label>
+                            Initial step size
+                            <input
+                              type="number"
+                              value={hopfCurveDraft.stepSize}
+                              onChange={(event) =>
+                                setHopfCurveDraft((prev) => ({
+                                  ...prev,
+                                  stepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="hopf-curve-step-size"
+                            />
+                          </label>
+                          <label>
+                            Min step size
+                            <input
+                              type="number"
+                              value={hopfCurveDraft.minStepSize}
+                              onChange={(event) =>
+                                setHopfCurveDraft((prev) => ({
+                                  ...prev,
+                                  minStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="hopf-curve-min-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max step size
+                            <input
+                              type="number"
+                              value={hopfCurveDraft.maxStepSize}
+                              onChange={(event) =>
+                                setHopfCurveDraft((prev) => ({
+                                  ...prev,
+                                  maxStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="hopf-curve-max-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max points
+                            <input
+                              type="number"
+                              value={hopfCurveDraft.maxSteps}
+                              onChange={(event) =>
+                                setHopfCurveDraft((prev) => ({
+                                  ...prev,
+                                  maxSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="hopf-curve-max-steps"
+                            />
+                          </label>
+                          <label>
+                            Corrector steps
+                            <input
+                              type="number"
+                              value={hopfCurveDraft.correctorSteps}
+                              onChange={(event) =>
+                                setHopfCurveDraft((prev) => ({
+                                  ...prev,
+                                  correctorSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="hopf-curve-corrector-steps"
+                            />
+                          </label>
+                          <label>
+                            Corrector tolerance
+                            <input
+                              type="number"
+                              value={hopfCurveDraft.correctorTolerance}
+                              onChange={(event) =>
+                                setHopfCurveDraft((prev) => ({
+                                  ...prev,
+                                  correctorTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="hopf-curve-corrector-tolerance"
+                            />
+                          </label>
+                          <label>
+                            Step tolerance
+                            <input
+                              type="number"
+                              value={hopfCurveDraft.stepTolerance}
+                              onChange={(event) =>
+                                setHopfCurveDraft((prev) => ({
+                                  ...prev,
+                                  stepTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="hopf-curve-step-tolerance"
+                            />
+                          </label>
+                          {hopfCurveError ? (
+                            <div className="field-error">{hopfCurveError}</div>
+                          ) : null}
+                          <button
+                            onClick={handleCreateHopfCurve}
+                            disabled={
+                              runDisabled ||
+                              !selectedBranchPoint ||
+                              branch.branchType !== 'equilibrium'
                             }
-                            placeholder={limitCycleFromPDBranchSuggestion}
-                            data-testid="limit-cycle-from-pd-branch-name"
-                          />
-                        </label>
-                        <div className="inspector-divider">Initialization</div>
-                        <label>
-                          Continuation parameter
-                          <input
-                            value={branchParameterName}
-                            disabled
-                            data-testid="limit-cycle-from-pd-parameter"
-                          />
-                        </label>
-                        <label>
-                          Perturbation amplitude
-                          <input
-                            type="number"
-                            value={limitCycleFromPDDraft.amplitude}
-                            onChange={(event) =>
-                              setLimitCycleFromPDDraft((prev) => ({
-                                ...prev,
-                                amplitude: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-pd-amplitude"
-                          />
-                        </label>
-                        {systemDraft.type === 'map' ? null : (
+                            data-testid="hopf-curve-submit"
+                          >
+                            {`Continue ${hopfCurveLabel} Curve`}
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  </InspectorDisclosure>
+                ) : null}
+
+                {showLimitCycleFromHopf ? (
+                  <InspectorDisclosure
+                    key={`${selectionKey}-limit-cycle-hopf`}
+                    title="Cycle from NS"
+                    testId="limit-cycle-from-hopf-toggle"
+                    defaultOpen={false}
+                  >
+                    <div className="inspector-section">
+                      {systemDraft.paramNames.length === 0 ? (
+                        <p className="empty-state">Add a parameter before continuing.</p>
+                      ) : null}
+                      {runDisabled ? (
+                        <div className="field-warning">
+                          Apply valid system changes before continuing.
+                        </div>
+                      ) : null}
+                      {systemDraft.paramNames.length === 0 ? null : (
+                        <>
+                          <label>
+                            Limit cycle name
+                            <input
+                              value={limitCycleFromHopfDraft.limitCycleName}
+                              onChange={(event) =>
+                                setLimitCycleFromHopfDraft((prev) => ({
+                                  ...prev,
+                                  limitCycleName: event.target.value,
+                                }))
+                              }
+                              placeholder={`lc_hopf_${toCliSafeName(branch.name)}`}
+                              data-testid="limit-cycle-from-hopf-name"
+                            />
+                          </label>
+                          <label>
+                            Branch name
+                            <input
+                              value={limitCycleFromHopfDraft.branchName}
+                              onChange={(event) =>
+                                setLimitCycleFromHopfDraft((prev) => ({
+                                  ...prev,
+                                  branchName: event.target.value,
+                                }))
+                              }
+                              placeholder={limitCycleFromHopfBranchSuggestion}
+                              data-testid="limit-cycle-from-hopf-branch-name"
+                            />
+                          </label>
+                          <label>
+                            Continuation parameter
+                            <select
+                              value={limitCycleFromHopfDraft.parameterName}
+                              onChange={(event) => {
+                                const nextParameterName = event.target.value
+                                setLimitCycleFromHopfDraft((prev) => {
+                                  const baseName =
+                                    prev.limitCycleName.trim() ||
+                                    `lc_hopf_${toCliSafeName(branch.name)}`
+                                  const prevSuggestedName = buildSuggestedBranchName(
+                                    baseName,
+                                    prev.parameterName
+                                  )
+                                  const nextSuggestedName = buildSuggestedBranchName(
+                                    baseName,
+                                    nextParameterName
+                                  )
+                                  const shouldUpdateName =
+                                    prev.branchName === prevSuggestedName
+                                  return {
+                                    ...prev,
+                                    parameterName: nextParameterName,
+                                    branchName: shouldUpdateName
+                                      ? nextSuggestedName
+                                      : prev.branchName,
+                                  }
+                                })
+                              }}
+                              data-testid="limit-cycle-from-hopf-parameter"
+                            >
+                              {systemDraft.paramNames.map((name) => (
+                                <option key={name} value={name}>
+                                  {name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Initial amplitude
+                            <input
+                              type="number"
+                              value={limitCycleFromHopfDraft.amplitude}
+                              onChange={(event) =>
+                                setLimitCycleFromHopfDraft((prev) => ({
+                                  ...prev,
+                                  amplitude: event.target.value,
+                                }))
+                              }
+                              data-testid="limit-cycle-from-hopf-amplitude"
+                            />
+                          </label>
+                          <label>
+                            NTST
+                            <input
+                              type="number"
+                              value={limitCycleFromHopfDraft.ntst}
+                              onChange={(event) =>
+                                setLimitCycleFromHopfDraft((prev) => ({
+                                  ...prev,
+                                  ntst: event.target.value,
+                                }))
+                              }
+                              data-testid="limit-cycle-from-hopf-ntst"
+                            />
+                            <span className="field-help">Mesh intervals along the cycle.</span>
+                          </label>
                           <label>
                             NCOL
                             <input
                               type="number"
-                              value={limitCycleFromPDDraft.ncol}
+                              value={limitCycleFromHopfDraft.ncol}
                               onChange={(event) =>
-                                setLimitCycleFromPDDraft((prev) => ({
+                                setLimitCycleFromHopfDraft((prev) => ({
                                   ...prev,
                                   ncol: event.target.value,
                                 }))
                               }
-                              data-testid="limit-cycle-from-pd-ncol"
+                              data-testid="limit-cycle-from-hopf-ncol"
                             />
                             <span className="field-help">
                               Collocation points per mesh interval.
                             </span>
                           </label>
-                        )}
-                        <label>
-                          Direction
-                          <select
-                            value={limitCycleFromPDDraft.forward ? 'forward' : 'backward'}
-                            onChange={(event) =>
-                              setLimitCycleFromPDDraft((prev) => ({
-                                ...prev,
-                                forward: event.target.value === 'forward',
-                              }))
+                          <label>
+                            Direction
+                            <select
+                              value={limitCycleFromHopfDraft.forward ? 'forward' : 'backward'}
+                              onChange={(event) =>
+                                setLimitCycleFromHopfDraft((prev) => ({
+                                  ...prev,
+                                  forward: event.target.value === 'forward',
+                                }))
+                              }
+                              data-testid="limit-cycle-from-hopf-direction"
+                            >
+                              <option value="forward">Forward (Increasing Param)</option>
+                              <option value="backward">Backward (Decreasing Param)</option>
+                            </select>
+                          </label>
+                          <label>
+                            Initial step size
+                            <input
+                              type="number"
+                              value={limitCycleFromHopfDraft.stepSize}
+                              onChange={(event) =>
+                                setLimitCycleFromHopfDraft((prev) => ({
+                                  ...prev,
+                                  stepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="limit-cycle-from-hopf-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max points
+                            <input
+                              type="number"
+                              value={limitCycleFromHopfDraft.maxSteps}
+                              onChange={(event) =>
+                                setLimitCycleFromHopfDraft((prev) => ({
+                                  ...prev,
+                                  maxSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="limit-cycle-from-hopf-max-steps"
+                            />
+                          </label>
+                          <label>
+                            Min step size
+                            <input
+                              type="number"
+                              value={limitCycleFromHopfDraft.minStepSize}
+                              onChange={(event) =>
+                                setLimitCycleFromHopfDraft((prev) => ({
+                                  ...prev,
+                                  minStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="limit-cycle-from-hopf-min-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max step size
+                            <input
+                              type="number"
+                              value={limitCycleFromHopfDraft.maxStepSize}
+                              onChange={(event) =>
+                                setLimitCycleFromHopfDraft((prev) => ({
+                                  ...prev,
+                                  maxStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="limit-cycle-from-hopf-max-step-size"
+                            />
+                          </label>
+                          <label>
+                            Corrector steps
+                            <input
+                              type="number"
+                              value={limitCycleFromHopfDraft.correctorSteps}
+                              onChange={(event) =>
+                                setLimitCycleFromHopfDraft((prev) => ({
+                                  ...prev,
+                                  correctorSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="limit-cycle-from-hopf-corrector-steps"
+                            />
+                          </label>
+                          <label>
+                            Corrector tolerance
+                            <input
+                              type="number"
+                              value={limitCycleFromHopfDraft.correctorTolerance}
+                              onChange={(event) =>
+                                setLimitCycleFromHopfDraft((prev) => ({
+                                  ...prev,
+                                  correctorTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="limit-cycle-from-hopf-corrector-tolerance"
+                            />
+                          </label>
+                          <label>
+                            Step tolerance
+                            <input
+                              type="number"
+                              value={limitCycleFromHopfDraft.stepTolerance}
+                              onChange={(event) =>
+                                setLimitCycleFromHopfDraft((prev) => ({
+                                  ...prev,
+                                  stepTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="limit-cycle-from-hopf-step-tolerance"
+                            />
+                          </label>
+                          {limitCycleFromHopfError ? (
+                            <div className="field-error">{limitCycleFromHopfError}</div>
+                          ) : null}
+                          <button
+                            onClick={handleCreateLimitCycleFromHopf}
+                            disabled={
+                              runDisabled ||
+                              !selectedBranchPoint ||
+                              !isHopfSourceBranch ||
+                              !isHopfPointSelected ||
+                              systemDraft.paramNames.length === 0
                             }
-                            data-testid="limit-cycle-from-pd-direction"
+                            data-testid="limit-cycle-from-hopf-submit"
                           >
-                            <option value="forward">Forward (Increasing Param)</option>
-                            <option value="backward">Backward (Decreasing Param)</option>
-                          </select>
-                        </label>
-                        {systemDraft.type === 'map' ? (
-                          <>
-                            <label>
-                              Max solver steps
-                              <input
-                                type="number"
-                                value={equilibriumDraft.maxSteps}
-                                onChange={(event) =>
-                                  setEquilibriumDraft((prev) => ({
-                                    ...prev,
-                                    maxSteps: event.target.value,
-                                  }))
-                                }
-                                data-testid="limit-cycle-from-pd-solver-steps"
-                              />
-                            </label>
-                            <label>
-                              Damping factor
-                              <input
-                                type="number"
-                                value={equilibriumDraft.dampingFactor}
-                                onChange={(event) =>
-                                  setEquilibriumDraft((prev) => ({
-                                    ...prev,
-                                    dampingFactor: event.target.value,
-                                  }))
-                                }
-                                data-testid="limit-cycle-from-pd-solver-damping"
-                              />
-                            </label>
-                          </>
-                        ) : null}
-                        <div className="inspector-divider">Predictor</div>
-                        <label>
-                          Initial step size
-                          <input
-                            type="number"
-                            value={limitCycleFromPDDraft.stepSize}
-                            onChange={(event) =>
-                              setLimitCycleFromPDDraft((prev) => ({
-                                ...prev,
-                                stepSize: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-pd-step-size"
-                          />
-                        </label>
-                        <label>
-                          Max points
-                          <input
-                            type="number"
-                            value={limitCycleFromPDDraft.maxSteps}
-                            onChange={(event) =>
-                              setLimitCycleFromPDDraft((prev) => ({
-                                ...prev,
-                                maxSteps: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-pd-max-steps"
-                          />
-                        </label>
-                        <label>
-                          Min step size
-                          <input
-                            type="number"
-                            value={limitCycleFromPDDraft.minStepSize}
-                            onChange={(event) =>
-                              setLimitCycleFromPDDraft((prev) => ({
-                                ...prev,
-                                minStepSize: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-pd-min-step-size"
-                          />
-                        </label>
-                        <label>
-                          Max step size
-                          <input
-                            type="number"
-                            value={limitCycleFromPDDraft.maxStepSize}
-                            onChange={(event) =>
-                              setLimitCycleFromPDDraft((prev) => ({
-                                ...prev,
-                                maxStepSize: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-pd-max-step-size"
-                          />
-                        </label>
-                        <div className="inspector-divider">Corrector</div>
-                        <label>
-                          Corrector steps
-                          <input
-                            type="number"
-                            value={limitCycleFromPDDraft.correctorSteps}
-                            onChange={(event) =>
-                              setLimitCycleFromPDDraft((prev) => ({
-                                ...prev,
-                                correctorSteps: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-pd-corrector-steps"
-                          />
-                        </label>
-                        <label>
-                          Corrector tolerance
-                          <input
-                            type="number"
-                            value={limitCycleFromPDDraft.correctorTolerance}
-                            onChange={(event) =>
-                              setLimitCycleFromPDDraft((prev) => ({
-                                ...prev,
-                                correctorTolerance: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-pd-corrector-tolerance"
-                          />
-                        </label>
-                        <label>
-                          Step tolerance
-                          <input
-                            type="number"
-                            value={limitCycleFromPDDraft.stepTolerance}
-                            onChange={(event) =>
-                              setLimitCycleFromPDDraft((prev) => ({
-                                ...prev,
-                                stepTolerance: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-pd-step-tolerance"
-                          />
-                        </label>
-                        {limitCycleFromPDError ? (
-                          <div className="field-error">{limitCycleFromPDError}</div>
-                        ) : null}
-                        <button
-                          onClick={handleCreateLimitCycleFromPD}
-                          disabled={
-                            runDisabled ||
-                            (systemDraft.type === 'map'
-                              ? branch.branchType !== 'equilibrium'
-                              : branch.branchType !== 'limit_cycle') ||
-                            selectedBranchPoint?.stability !== 'PeriodDoubling'
+                            Continue Limit Cycle
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </InspectorDisclosure>
+                ) : null}
+
+                {showLimitCycleFromPD ? (
+                  <InspectorDisclosure
+                    key={`${selectionKey}-limit-cycle-pd`}
+                    title="Cycle from PD"
+                    testId="limit-cycle-from-pd-toggle"
+                    defaultOpen={false}
+                  >
+                    <div className="inspector-section">
+                      {runDisabled ? (
+                        <div className="field-warning">
+                          Apply valid system changes before continuing.
+                        </div>
+                      ) : null}
+                      <label>
+                        Cycle name
+                        <input
+                          value={limitCycleFromPDDraft.limitCycleName}
+                          onChange={(event) =>
+                            setLimitCycleFromPDDraft((prev) => ({
+                              ...prev,
+                              limitCycleName: event.target.value,
+                            }))
                           }
-                          data-testid="limit-cycle-from-pd-submit"
+                          placeholder={limitCycleFromPDNameSuggestion}
+                          data-testid="limit-cycle-from-pd-name"
+                        />
+                      </label>
+                      <label>
+                        Branch name
+                        <input
+                          value={limitCycleFromPDDraft.branchName}
+                          onChange={(event) =>
+                            setLimitCycleFromPDDraft((prev) => ({
+                              ...prev,
+                              branchName: event.target.value,
+                            }))
+                          }
+                          placeholder={limitCycleFromPDBranchSuggestion}
+                          data-testid="limit-cycle-from-pd-branch-name"
+                        />
+                      </label>
+                      <div className="inspector-divider">Initialization</div>
+                      <label>
+                        Continuation parameter
+                        <input
+                          value={branchParameterName}
+                          disabled
+                          data-testid="limit-cycle-from-pd-parameter"
+                        />
+                      </label>
+                      <label>
+                        Perturbation amplitude
+                        <input
+                          type="number"
+                          value={limitCycleFromPDDraft.amplitude}
+                          onChange={(event) =>
+                            setLimitCycleFromPDDraft((prev) => ({
+                              ...prev,
+                              amplitude: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-pd-amplitude"
+                        />
+                      </label>
+                      {systemDraft.type === 'map' ? null : (
+                        <label>
+                          NCOL
+                          <input
+                            type="number"
+                            value={limitCycleFromPDDraft.ncol}
+                            onChange={(event) =>
+                              setLimitCycleFromPDDraft((prev) => ({
+                                ...prev,
+                                ncol: event.target.value,
+                              }))
+                            }
+                            data-testid="limit-cycle-from-pd-ncol"
+                          />
+                          <span className="field-help">
+                            Collocation points per mesh interval.
+                          </span>
+                        </label>
+                      )}
+                      <label>
+                        Direction
+                        <select
+                          value={limitCycleFromPDDraft.forward ? 'forward' : 'backward'}
+                          onChange={(event) =>
+                            setLimitCycleFromPDDraft((prev) => ({
+                              ...prev,
+                              forward: event.target.value === 'forward',
+                            }))
+                          }
+                          data-testid="limit-cycle-from-pd-direction"
                         >
-                          Continue Limit Cycle
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </InspectorDisclosure>
+                          <option value="forward">Forward (Increasing Param)</option>
+                          <option value="backward">Backward (Decreasing Param)</option>
+                        </select>
+                      </label>
+                      {systemDraft.type === 'map' ? (
+                        <>
+                          <label>
+                            Max solver steps
+                            <input
+                              type="number"
+                              value={equilibriumDraft.maxSteps}
+                              onChange={(event) =>
+                                setEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  maxSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="limit-cycle-from-pd-solver-steps"
+                            />
+                          </label>
+                          <label>
+                            Damping factor
+                            <input
+                              type="number"
+                              value={equilibriumDraft.dampingFactor}
+                              onChange={(event) =>
+                                setEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  dampingFactor: event.target.value,
+                                }))
+                              }
+                              data-testid="limit-cycle-from-pd-solver-damping"
+                            />
+                          </label>
+                        </>
+                      ) : null}
+                      <div className="inspector-divider">Predictor</div>
+                      <label>
+                        Initial step size
+                        <input
+                          type="number"
+                          value={limitCycleFromPDDraft.stepSize}
+                          onChange={(event) =>
+                            setLimitCycleFromPDDraft((prev) => ({
+                              ...prev,
+                              stepSize: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-pd-step-size"
+                        />
+                      </label>
+                      <label>
+                        Max points
+                        <input
+                          type="number"
+                          value={limitCycleFromPDDraft.maxSteps}
+                          onChange={(event) =>
+                            setLimitCycleFromPDDraft((prev) => ({
+                              ...prev,
+                              maxSteps: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-pd-max-steps"
+                        />
+                      </label>
+                      <label>
+                        Min step size
+                        <input
+                          type="number"
+                          value={limitCycleFromPDDraft.minStepSize}
+                          onChange={(event) =>
+                            setLimitCycleFromPDDraft((prev) => ({
+                              ...prev,
+                              minStepSize: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-pd-min-step-size"
+                        />
+                      </label>
+                      <label>
+                        Max step size
+                        <input
+                          type="number"
+                          value={limitCycleFromPDDraft.maxStepSize}
+                          onChange={(event) =>
+                            setLimitCycleFromPDDraft((prev) => ({
+                              ...prev,
+                              maxStepSize: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-pd-max-step-size"
+                        />
+                      </label>
+                      <div className="inspector-divider">Corrector</div>
+                      <label>
+                        Corrector steps
+                        <input
+                          type="number"
+                          value={limitCycleFromPDDraft.correctorSteps}
+                          onChange={(event) =>
+                            setLimitCycleFromPDDraft((prev) => ({
+                              ...prev,
+                              correctorSteps: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-pd-corrector-steps"
+                        />
+                      </label>
+                      <label>
+                        Corrector tolerance
+                        <input
+                          type="number"
+                          value={limitCycleFromPDDraft.correctorTolerance}
+                          onChange={(event) =>
+                            setLimitCycleFromPDDraft((prev) => ({
+                              ...prev,
+                              correctorTolerance: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-pd-corrector-tolerance"
+                        />
+                      </label>
+                      <label>
+                        Step tolerance
+                        <input
+                          type="number"
+                          value={limitCycleFromPDDraft.stepTolerance}
+                          onChange={(event) =>
+                            setLimitCycleFromPDDraft((prev) => ({
+                              ...prev,
+                              stepTolerance: event.target.value,
+                            }))
+                          }
+                          data-testid="limit-cycle-from-pd-step-tolerance"
+                        />
+                      </label>
+                      {limitCycleFromPDError ? (
+                        <div className="field-error">{limitCycleFromPDError}</div>
+                      ) : null}
+                      <button
+                        onClick={handleCreateLimitCycleFromPD}
+                        disabled={
+                          runDisabled ||
+                          (systemDraft.type === 'map'
+                            ? branch.branchType !== 'equilibrium'
+                            : branch.branchType !== 'limit_cycle') ||
+                          selectedBranchPoint?.stability !== 'PeriodDoubling'
+                        }
+                        data-testid="limit-cycle-from-pd-submit"
+                      >
+                        Continue Limit Cycle
+                      </button>
+                    </div>
+                  </InspectorDisclosure>
+                ) : null}
               </>
             ) : null}
           </div>
