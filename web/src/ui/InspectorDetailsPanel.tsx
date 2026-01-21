@@ -842,6 +842,17 @@ function buildSuggestedBranchName(baseName: string, parameterName: string): stri
   return safeParamName ? `${safeBaseName}_${safeParamName}` : safeBaseName
 }
 
+function resolveEquilibriumContinuationBaseName(
+  equilibriumName: string,
+  systemType: SystemConfig['type'],
+  mapIterations?: number
+): string {
+  if (systemType === 'map' && typeof mapIterations === 'number' && mapIterations > 1) {
+    return 'cycle'
+  }
+  return equilibriumName
+}
+
 function makeBranchExtensionDraft(
   system: SystemConfig,
   branch?: ContinuationObject | null
@@ -1399,6 +1410,11 @@ export function InspectorDetailsPanel({
     plural: true,
     mapIterations: equilibriumMapIterations,
   })
+  const equilibriumContinuationBaseName = resolveEquilibriumContinuationBaseName(
+    equilibriumName,
+    systemDraft.type,
+    equilibriumMapIterations
+  )
   const limitCycleFromHopfLabel =
     systemDraft.type === 'map' ? 'Cycle from NS' : 'Limit Cycle from Hopf'
   const limitCycleFromPDLabel =
@@ -1714,15 +1730,14 @@ export function InspectorDetailsPanel({
       const paramName = systemDraft.paramNames.includes(prev.parameterName)
         ? prev.parameterName
         : systemDraft.paramNames[0] ?? ''
-      const safeEquilibriumName = toCliSafeName(equilibriumName)
-      const safeParamName = paramName ? toCliSafeName(paramName) : ''
-      const suggestedName = safeParamName
-        ? `${safeEquilibriumName}_${safeParamName}`
-        : safeEquilibriumName
+      const suggestedName = buildSuggestedBranchName(
+        equilibriumContinuationBaseName,
+        paramName
+      )
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, parameterName: paramName, name: nextName }
     })
-  }, [equilibriumName, systemDraft.paramNames])
+  }, [equilibriumContinuationBaseName, equilibriumName, systemDraft.paramNames])
 
   useEffect(() => {
     if (!orbit) return
@@ -2570,13 +2585,10 @@ export function InspectorDetailsPanel({
       return
     }
 
-    const safeEquilibriumName = toCliSafeName(equilibrium.name)
-    const safeParamName = continuationDraft.parameterName
-      ? toCliSafeName(continuationDraft.parameterName)
-      : ''
-    const suggestedName = safeParamName
-      ? `${safeEquilibriumName}_${safeParamName}`
-      : safeEquilibriumName
+    const suggestedName = buildSuggestedBranchName(
+      equilibriumContinuationBaseName,
+      continuationDraft.parameterName
+    )
     const name = continuationDraft.name.trim() || suggestedName
     if (!name.trim()) {
       setContinuationError('Branch name is required.')
@@ -5058,11 +5070,10 @@ export function InspectorDetailsPanel({
                               name: event.target.value,
                             }))
                           }
-                          placeholder={
+                          placeholder={buildSuggestedBranchName(
+                            equilibriumContinuationBaseName,
                             continuationDraft.parameterName
-                              ? `${toCliSafeName(equilibrium.name)}_${toCliSafeName(continuationDraft.parameterName)}`
-                              : toCliSafeName(equilibrium.name)
-                          }
+                          )}
                           data-testid="equilibrium-branch-name"
                         />
                       </label>
@@ -5074,11 +5085,11 @@ export function InspectorDetailsPanel({
                             const nextParameterName = event.target.value
                             setContinuationDraft((prev) => {
                               const prevSuggestedName = buildSuggestedBranchName(
-                                equilibrium.name,
+                                equilibriumContinuationBaseName,
                                 prev.parameterName
                               )
                               const nextSuggestedName = buildSuggestedBranchName(
-                                equilibrium.name,
+                                equilibriumContinuationBaseName,
                                 nextParameterName
                               )
                               const shouldUpdateName = prev.name === prevSuggestedName
