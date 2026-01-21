@@ -52,6 +52,7 @@ import type {
   OrbitPointSelection,
 } from './branchPointSelection'
 import { validateSystemConfig } from '../state/systemValidation'
+import { hasCustomObjectParams } from '../system/parameters'
 import {
   buildSortedArrayOrder,
   computeLimitCycleMetrics,
@@ -426,7 +427,7 @@ function InspectorDisclosure({
   children,
   testId,
 }: {
-  title: string
+  title: ReactNode
   defaultOpen?: boolean
   open?: boolean
   onOpenChange?: (nextOpen: boolean) => void
@@ -1203,6 +1204,7 @@ export function InspectorDetailsPanel({
     equilibriumEigenpairs.some((pair) => pair.vector.length >= equilibriumVectorPlotDim)
   )
   const equilibriumNeeds2d = equilibriumPlotDim < 2
+  const showEquilibriumEigenvectorControls = !equilibriumNeeds2d
   const nodeVisibility = selectionNode?.visibility ?? true
   const showVisibilityToggle =
     selectionNode?.kind === 'object' || selectionNode?.kind === 'branch'
@@ -1990,6 +1992,18 @@ export function InspectorDetailsPanel({
   }, [branch, branchEntries.length, diagram, equilibriumLabel, object, scene, systemDraft.type])
 
   const hasParamOverride = Array.isArray(paramOverrideTarget?.customParameters)
+  const hasCustomParamOverride = hasCustomObjectParams(
+    system.config,
+    paramOverrideTarget?.customParameters
+  )
+  const paramOverrideTitle = hasCustomParamOverride ? (
+    <>
+      <span>Parameters</span>
+      <span className="tree-node__tag">custom</span>
+    </>
+  ) : (
+    'Parameters'
+  )
 
   const limitCycleFromOrbitNameSuggestion = useMemo(() => {
     if (!orbit) return 'lc_orbit'
@@ -3582,7 +3596,7 @@ export function InspectorDetailsPanel({
           {paramOverrideTarget ? (
             <InspectorDisclosure
               key={`${selectionKey}-parameters`}
-              title="Parameters"
+              title={paramOverrideTitle}
               testId="parameters-toggle"
             >
               <div className="inspector-section" data-testid="param-override-section">
@@ -4601,128 +4615,127 @@ export function InspectorDetailsPanel({
                   <h4 className="inspector-subheading">Eigenpairs</h4>
                   {equilibrium.solution && equilibrium.solution.eigenpairs.length > 0 ? (
                     <div className="inspector-list">
-                      {!equilibriumHasEigenvectors ? (
-                        <p className="empty-state">Eigenvectors not computed yet.</p>
-                      ) : null}
-                      {equilibriumNeeds2d ? (
-                        <div className="field-warning">
-                          Eigenvector plotting requires at least two state variables.
-                        </div>
-                      ) : null}
-                      <label>
-                        Show eigenvectors
-                        <input
-                          type="checkbox"
-                          checked={equilibriumEigenvectorRender.enabled}
-                          onChange={(event) =>
-                            updateEquilibriumEigenvectorRender({
-                              enabled: event.target.checked,
-                            })
-                          }
-                          data-testid="equilibrium-eigenvector-enabled"
-                        />
-                      </label>
-                      <label>
-                        Eigenline length (fraction of scene)
-                        <input
-                          type="number"
-                          min={0}
-                          step={0.01}
-                          value={equilibriumEigenvectorRender.lineLengthScale}
-                          onChange={(event) =>
-                            updateEquilibriumEigenvectorRender({
-                              lineLengthScale: Number(event.target.value),
-                            })
-                          }
-                          data-testid="equilibrium-eigenvector-line-length"
-                        />
-                      </label>
-                      <label>
-                        Eigenline thickness (px)
-                        <input
-                          type="number"
-                          min={0.5}
-                          step={0.5}
-                          value={equilibriumEigenvectorRender.lineThickness}
-                          onChange={(event) =>
-                            updateEquilibriumEigenvectorRender({
-                              lineThickness: Number(event.target.value),
-                            })
-                          }
-                          data-testid="equilibrium-eigenvector-line-thickness"
-                        />
-                      </label>
-                      <label>
-                        Eigenspace disc radius (fraction of scene)
-                        <input
-                          type="number"
-                          min={0}
-                          step={0.01}
-                          value={equilibriumEigenvectorRender.discRadiusScale}
-                          onChange={(event) =>
-                            updateEquilibriumEigenvectorRender({
-                              discRadiusScale: Number(event.target.value),
-                            })
-                          }
-                          data-testid="equilibrium-eigenvector-disc-radius"
-                        />
-                      </label>
-                      <label>
-                        Eigenspace disc thickness (px)
-                        <input
-                          type="number"
-                          min={0.5}
-                          step={0.5}
-                          value={equilibriumEigenvectorRender.discThickness}
-                          onChange={(event) =>
-                            updateEquilibriumEigenvectorRender({
-                              discThickness: Number(event.target.value),
-                            })
-                          }
-                          data-testid="equilibrium-eigenvector-disc-thickness"
-                        />
-                      </label>
-                      {equilibriumEigenvectorIndices.length > 0 ? (
-                        <div className="inspector-list">
-                          {equilibriumEigenvectorIndices.map((index, idx) => {
-                            const pair = equilibriumEigenpairs[index]
-                            const label =
-                              pair && !isRealEigenvalue(pair.value)
-                                ? `Eigenspace ${index + 1}`
-                                : `Eigenvector ${index + 1}`
-                            const visible = equilibriumEigenvectorVisibleSet.has(index)
-                            return (
-                              <div className="clv-control-row" key={`eq-eigen-color-${index}`}>
-                                <span className="clv-control-row__label">{label}</span>
-                                <input
-                                  type="checkbox"
-                                  checked={visible}
-                                  onChange={(event) =>
-                                    handleEquilibriumEigenvectorVisibilityChange(
-                                      index,
-                                      event.target.checked
-                                    )
-                                  }
-                                  aria-label={`Show ${label.toLowerCase()}`}
-                                  data-testid={`equilibrium-eigenvector-show-${index}`}
-                                />
-                                <input
-                                  type="color"
-                                  value={equilibriumEigenvectorColors[idx]}
-                                  onChange={(event) =>
-                                    handleEquilibriumEigenvectorColorChange(
-                                      index,
-                                      event.target.value
-                                    )
-                                  }
-                                  disabled={!visible}
-                                  aria-label={`${label} color`}
-                                  data-testid={`equilibrium-eigenvector-color-${index}`}
-                                />
-                              </div>
-                            )
-                          })}
-                        </div>
+                      {showEquilibriumEigenvectorControls ? (
+                        <>
+                          {!equilibriumHasEigenvectors ? (
+                            <p className="empty-state">Eigenvectors not computed yet.</p>
+                          ) : null}
+                          <label>
+                            Show eigenvectors
+                            <input
+                              type="checkbox"
+                              checked={equilibriumEigenvectorRender.enabled}
+                              onChange={(event) =>
+                                updateEquilibriumEigenvectorRender({
+                                  enabled: event.target.checked,
+                                })
+                              }
+                              data-testid="equilibrium-eigenvector-enabled"
+                            />
+                          </label>
+                          <label>
+                            Eigenline length (fraction of scene)
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              value={equilibriumEigenvectorRender.lineLengthScale}
+                              onChange={(event) =>
+                                updateEquilibriumEigenvectorRender({
+                                  lineLengthScale: Number(event.target.value),
+                                })
+                              }
+                              data-testid="equilibrium-eigenvector-line-length"
+                            />
+                          </label>
+                          <label>
+                            Eigenline thickness (px)
+                            <input
+                              type="number"
+                              min={0.5}
+                              step={0.5}
+                              value={equilibriumEigenvectorRender.lineThickness}
+                              onChange={(event) =>
+                                updateEquilibriumEigenvectorRender({
+                                  lineThickness: Number(event.target.value),
+                                })
+                              }
+                              data-testid="equilibrium-eigenvector-line-thickness"
+                            />
+                          </label>
+                          <label>
+                            Eigenspace disc radius (fraction of scene)
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              value={equilibriumEigenvectorRender.discRadiusScale}
+                              onChange={(event) =>
+                                updateEquilibriumEigenvectorRender({
+                                  discRadiusScale: Number(event.target.value),
+                                })
+                              }
+                              data-testid="equilibrium-eigenvector-disc-radius"
+                            />
+                          </label>
+                          <label>
+                            Eigenspace disc thickness (px)
+                            <input
+                              type="number"
+                              min={0.5}
+                              step={0.5}
+                              value={equilibriumEigenvectorRender.discThickness}
+                              onChange={(event) =>
+                                updateEquilibriumEigenvectorRender({
+                                  discThickness: Number(event.target.value),
+                                })
+                              }
+                              data-testid="equilibrium-eigenvector-disc-thickness"
+                            />
+                          </label>
+                          {equilibriumEigenvectorIndices.length > 0 ? (
+                            <div className="inspector-list">
+                              {equilibriumEigenvectorIndices.map((index, idx) => {
+                                const pair = equilibriumEigenpairs[index]
+                                const label =
+                                  pair && !isRealEigenvalue(pair.value)
+                                    ? `Eigenspace ${index + 1}`
+                                    : `Eigenvector ${index + 1}`
+                                const visible = equilibriumEigenvectorVisibleSet.has(index)
+                                return (
+                                  <div className="clv-control-row" key={`eq-eigen-color-${index}`}>
+                                    <span className="clv-control-row__label">{label}</span>
+                                    <input
+                                      type="checkbox"
+                                      checked={visible}
+                                      onChange={(event) =>
+                                        handleEquilibriumEigenvectorVisibilityChange(
+                                          index,
+                                          event.target.checked
+                                        )
+                                      }
+                                      aria-label={`Show ${label.toLowerCase()}`}
+                                      data-testid={`equilibrium-eigenvector-show-${index}`}
+                                    />
+                                    <input
+                                      type="color"
+                                      value={equilibriumEigenvectorColors[idx]}
+                                      onChange={(event) =>
+                                        handleEquilibriumEigenvectorColorChange(
+                                          index,
+                                          event.target.value
+                                        )
+                                      }
+                                      disabled={!visible}
+                                      aria-label={`${label} color`}
+                                      data-testid={`equilibrium-eigenvector-color-${index}`}
+                                    />
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          ) : null}
+                        </>
                       ) : null}
                       {/* Mirror the legacy UI by plotting eigenvalues in the complex plane. */}
                       {equilibriumEigenPlot ? (

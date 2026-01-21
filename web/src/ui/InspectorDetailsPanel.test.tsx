@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createDemoSystem, createPeriodDoublingSystem } from '../system/fixtures'
@@ -200,6 +200,119 @@ describe('InspectorDetailsPanel', () => {
     await waitFor(() =>
       expect(onUpdateObjectParams).toHaveBeenLastCalledWith(nodeId, [1.2, 3.4])
     )
+  })
+
+  it('shows the custom parameters tag in the parameters header when overrides exist', () => {
+    const systemConfig = {
+      name: 'Custom_Param_System',
+      equations: ['x'],
+      params: [0.2, 0.4],
+      paramNames: ['a', 'b'],
+      varNames: ['x'],
+      solver: 'rk4',
+      type: 'flow' as const,
+    }
+    const system = createSystem({ name: 'Custom_Param_System', config: systemConfig })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit Custom',
+      systemName: system.config.name,
+      data: [[0, 1]],
+      t_start: 0,
+      t_end: 0.1,
+      dt: 0.1,
+      customParameters: [0.2, 0.9],
+    }
+
+    const { system: next, nodeId } = addObject(system, orbit)
+
+    render(
+      <InspectorDetailsPanel
+        system={next}
+        selectedNodeId={nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateObjectParams={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    const header = screen.getByTestId('parameters-toggle')
+    expect(within(header).getByText('custom')).toBeInTheDocument()
+  })
+
+  it('hides the custom parameters tag when overrides are not present', () => {
+    const systemConfig = {
+      name: 'Default_Param_System',
+      equations: ['x'],
+      params: [0.2, 0.4],
+      paramNames: ['a', 'b'],
+      varNames: ['x'],
+      solver: 'rk4',
+      type: 'flow' as const,
+    }
+    const system = createSystem({ name: 'Default_Param_System', config: systemConfig })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit Default',
+      systemName: system.config.name,
+      data: [[0, 1]],
+      t_start: 0,
+      t_end: 0.1,
+      dt: 0.1,
+    }
+
+    const { system: next, nodeId } = addObject(system, orbit)
+
+    render(
+      <InspectorDetailsPanel
+        system={next}
+        selectedNodeId={nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateObjectParams={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    const header = screen.getByTestId('parameters-toggle')
+    expect(within(header).queryByText('custom')).toBeNull()
   })
 
   it('applies system changes from the editor', async () => {
@@ -1490,6 +1603,79 @@ describe('InspectorDetailsPanel', () => {
       maxSteps: 10,
       dampingFactor: 0.8,
     })
+  })
+
+  it('hides equilibrium eigenvector controls for 1D systems', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({
+      name: 'Eigenvector_1D_System',
+      config: {
+        name: 'Eigenvector_1D_System',
+        equations: ['x'],
+        params: [],
+        paramNames: [],
+        varNames: ['x'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const eqObject: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ Eigen 1D',
+      systemName: baseSystem.config.name,
+      solution: {
+        state: [0],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [
+          {
+            value: { re: 1, im: 0 },
+            vector: [{ re: 1, im: 0 }],
+          },
+        ],
+      },
+      parameters: [...baseSystem.config.params],
+    }
+    const { system, nodeId } = addObject(baseSystem, eqObject)
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('equilibrium-data-toggle'))
+
+    expect(screen.queryByTestId('equilibrium-eigenvector-enabled')).toBeNull()
+    expect(screen.queryByTestId('equilibrium-eigenvector-line-length')).toBeNull()
+    expect(screen.queryByTestId('equilibrium-eigenvector-disc-radius')).toBeNull()
+    expect(screen.queryByText('Eigenvectors not computed yet.')).toBeNull()
+    expect(
+      screen.queryByText('Eigenvector plotting requires at least two state variables.')
+    ).toBeNull()
   })
 
   it('toggles equilibrium eigenvector plotting', async () => {
