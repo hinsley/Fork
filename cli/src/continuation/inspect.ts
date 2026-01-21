@@ -29,7 +29,7 @@ import {
 } from './utils';
 import { formatEquilibriumLabel } from '../labels';
 import { initiateLCBranchFromPoint, initiateLCFromPD } from './initiate-lc';
-import { initiateEquilibriumBranchFromPoint } from './initiate-eq';
+import { initiateEquilibriumBranchFromPoint, initiateMapCycleFromPD } from './initiate-eq';
 import { initiateFoldCurve, initiateHopfCurve, initiateLPCCurve, initiatePDCurve, initiateNSCurve } from './initiate-codim1';
 import { printProgress, printProgressComplete } from '../format';
 
@@ -594,6 +594,10 @@ export async function showPointDetails(
     if (pt.stability === 'Fold') {
       choices.push({ name: 'Continue Fold Curve (2-parameter)', value: 'CONTINUE_FOLD_CURVE' });
     }
+
+    if (sysConfig.type === 'map' && pt.stability === 'PeriodDoubling') {
+      choices.push({ name: 'Branch to Period-Doubled Cycle', value: 'BRANCH_PD_CYCLE' });
+    }
   } else if (branchType === 'limit_cycle') {
     // For limit cycle branches, offer to create a new limit cycle branch
     choices.push({ name: 'Create New Limit Cycle Branch', value: 'NEW_LC_BRANCH' });
@@ -630,6 +634,17 @@ export async function showPointDetails(
 
   if (action === 'NEW_EQ_BRANCH') {
     const newBranch = await initiateEquilibriumBranchFromPoint(sysName, branch, pt);
+    if (!newBranch) return 'BACK';
+    return {
+      kind: 'OPEN_BRANCH',
+      objectName: newBranch.parentObject,
+      branchName: newBranch.name,
+      autoInspect: true,
+    };
+  }
+
+  if (action === 'BRANCH_PD_CYCLE') {
+    const newBranch = await initiateMapCycleFromPD(sysName, branch, pt, arrayIdx);
     if (!newBranch) return 'BACK';
     return {
       kind: 'OPEN_BRANCH',

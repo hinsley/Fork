@@ -183,7 +183,6 @@ type LimitCycleFromPDDraft = {
   limitCycleName: string
   branchName: string
   amplitude: string
-  ncol: string
   stepSize: string
   maxSteps: string
   minStepSize: string
@@ -804,12 +803,11 @@ function makeLimitCycleFromHopfDraft(system: SystemConfig): LimitCycleFromHopfDr
   }
 }
 
-function makeLimitCycleFromPDDraft(ncol = 4): LimitCycleFromPDDraft {
+function makeLimitCycleFromPDDraft(): LimitCycleFromPDDraft {
   return {
     limitCycleName: '',
     branchName: '',
     amplitude: '0.01',
-    ncol: ncol.toString(),
     stepSize: '0.01',
     maxSteps: '50',
     minStepSize: '1e-5',
@@ -1805,10 +1803,6 @@ export function InspectorDetailsPanel({
         parameterName: paramName,
       }
     })
-    setLimitCycleFromPDDraft((prev) => ({
-      ...prev,
-      ncol: limitCycleMesh.ncol.toString(),
-    }))
     setBranchExtensionDraft(makeBranchExtensionDraft(stableSystemConfigRef.current, branch))
     setBranchContinuationError(null)
     setBranchExtensionError(null)
@@ -1817,7 +1811,7 @@ export function InspectorDetailsPanel({
     setHopfCurveError(null)
     setLimitCycleFromHopfError(null)
     setLimitCycleFromPDError(null)
-  }, [branch, branchName, branchParameterName, limitCycleMesh.ncol, systemDraft.paramNames])
+  }, [branch, branchName, branchParameterName, systemDraft.paramNames])
 
   useEffect(() => {
     const branchId = hasBranch ? selectedNodeId : null
@@ -2950,15 +2944,16 @@ export function InspectorDetailsPanel({
       setLimitCycleFromPDError('Apply valid system settings before continuing.')
       return
     }
-    if (systemDraft.type === 'map') {
-      setLimitCycleFromPDError('Limit cycles require a flow system.')
-      return
-    }
     if (!branch || !selectedNodeId) {
       setLimitCycleFromPDError('Select a branch to continue.')
       return
     }
-    if (branch.branchType !== 'limit_cycle') {
+    if (systemDraft.type === 'map') {
+      if (branch.branchType !== 'equilibrium') {
+        setLimitCycleFromPDError('Period-doubling branching for maps requires a cycle branch.')
+        return
+      }
+    } else if (branch.branchType !== 'limit_cycle') {
       setLimitCycleFromPDError(
         'Period-doubling branching is only available for limit cycle branches.'
       )
@@ -3005,10 +3000,24 @@ export function InspectorDetailsPanel({
       return
     }
 
-    const ncol = parseInteger(limitCycleFromPDDraft.ncol)
-    if (ncol === null || ncol <= 0) {
-      setLimitCycleFromPDError('NCOL must be a positive integer.')
-      return
+    let solverParams:
+      | { maxSteps: number; dampingFactor: number; mapIterations?: number }
+      | undefined
+    if (systemDraft.type === 'map') {
+      const maxSteps = parseNumber(equilibriumDraft.maxSteps)
+      if (maxSteps === null || maxSteps <= 0) {
+        setLimitCycleFromPDError('Max steps must be a positive number.')
+        return
+      }
+      const dampingFactor = parseNumber(equilibriumDraft.dampingFactor)
+      if (dampingFactor === null || dampingFactor <= 0) {
+        setLimitCycleFromPDError('Damping factor must be a positive number.')
+        return
+      }
+      solverParams = {
+        maxSteps,
+        dampingFactor,
+      }
     }
 
     const { settings, error } = buildContinuationSettings({
@@ -3035,9 +3044,10 @@ export function InspectorDetailsPanel({
       limitCycleName,
       branchName,
       amplitude,
-      ncol,
+      ncol: limitCycleMesh.ncol,
       settings,
       forward: limitCycleFromPDDraft.forward,
+      ...(solverParams ? { solverParams } : {}),
     })
   }
 
@@ -6599,7 +6609,7 @@ export function InspectorDetailsPanel({
 
                 <InspectorDisclosure
                   key={`${selectionKey}-branch-continue`}
-                  title="Continue From Point"
+                  title="Continue from Point"
                   testId="branch-continue-toggle"
                   defaultOpen={false}
                 >
@@ -6635,6 +6645,7 @@ export function InspectorDetailsPanel({
                         data-testid="branch-from-point-name"
                       />
                     </label>
+                    <div className="inspector-divider">Initialization</div>
                     <label>
                       Continuation parameter
                       <select
@@ -6684,6 +6695,7 @@ export function InspectorDetailsPanel({
                         <option value="backward">Backward (Decreasing Param)</option>
                       </select>
                     </label>
+                    <div className="inspector-divider">Predictor</div>
                     <label>
                       Initial step size
                       <input
@@ -6740,6 +6752,7 @@ export function InspectorDetailsPanel({
                         data-testid="branch-from-point-max-step"
                       />
                     </label>
+                    <div className="inspector-divider">Corrector</div>
                     <label>
                       Corrector steps
                       <input
@@ -7199,7 +7212,7 @@ export function InspectorDetailsPanel({
 
                 <InspectorDisclosure
                   key={`${selectionKey}-limit-cycle-hopf`}
-                  title="Limit Cycle from Hopf"
+                  title="Cycle from NS"
                   testId="limit-cycle-from-hopf-toggle"
                   defaultOpen={false}
                 >
@@ -7477,18 +7490,21 @@ export function InspectorDetailsPanel({
 
                 <InspectorDisclosure
                   key={`${selectionKey}-limit-cycle-pd`}
-                  title="Limit Cycle from PD"
+                  title="Cycle from PD"
                   testId="limit-cycle-from-pd-toggle"
                   defaultOpen={false}
                 >
                   <div className="inspector-section">
-                    {branch.branchType !== 'limit_cycle' ? (
+                    {systemDraft.type === 'map' ? (
+                      branch.branchType !== 'equilibrium' ? (
+                        <p className="empty-state">
+                          Period-doubling branching for maps requires a cycle branch.
+                        </p>
+                      ) : null
+                    ) : branch.branchType !== 'limit_cycle' ? (
                       <p className="empty-state">
                         Period-doubling branching is only available for limit cycle branches.
                       </p>
-                    ) : null}
-                    {systemDraft.type === 'map' ? (
-                      <p className="empty-state">Limit cycles require a flow system.</p>
                     ) : null}
                     {runDisabled ? (
                       <div className="field-warning">
@@ -7504,7 +7520,7 @@ export function InspectorDetailsPanel({
                     ) : (
                       <>
                         <label>
-                          Limit cycle name
+                          Cycle name
                           <input
                             value={limitCycleFromPDDraft.limitCycleName}
                             onChange={(event) =>
@@ -7531,6 +7547,7 @@ export function InspectorDetailsPanel({
                             data-testid="limit-cycle-from-pd-branch-name"
                           />
                         </label>
+                        <div className="inspector-divider">Initialization</div>
                         <label>
                           Continuation parameter
                           <input
@@ -7554,32 +7571,6 @@ export function InspectorDetailsPanel({
                           />
                         </label>
                         <label>
-                          NTST (doubled)
-                          <input
-                            value={(limitCycleMesh.ntst * 2).toString()}
-                            disabled
-                            data-testid="limit-cycle-from-pd-ntst"
-                          />
-                          <span className="field-help">
-                            Mesh intervals along the cycle (doubled from the parent branch).
-                          </span>
-                        </label>
-                        <label>
-                          NCOL
-                          <input
-                            type="number"
-                            value={limitCycleFromPDDraft.ncol}
-                            onChange={(event) =>
-                              setLimitCycleFromPDDraft((prev) => ({
-                                ...prev,
-                                ncol: event.target.value,
-                              }))
-                            }
-                            data-testid="limit-cycle-from-pd-ncol"
-                          />
-                          <span className="field-help">Collocation points per mesh interval.</span>
-                        </label>
-                        <label>
                           Direction
                           <select
                             value={limitCycleFromPDDraft.forward ? 'forward' : 'backward'}
@@ -7595,6 +7586,39 @@ export function InspectorDetailsPanel({
                             <option value="backward">Backward (Decreasing Param)</option>
                           </select>
                         </label>
+                        {systemDraft.type === 'map' ? (
+                          <>
+                            <label>
+                              Max solver steps
+                              <input
+                                type="number"
+                                value={equilibriumDraft.maxSteps}
+                                onChange={(event) =>
+                                  setEquilibriumDraft((prev) => ({
+                                    ...prev,
+                                    maxSteps: event.target.value,
+                                  }))
+                                }
+                                data-testid="limit-cycle-from-pd-solver-steps"
+                              />
+                            </label>
+                            <label>
+                              Damping factor
+                              <input
+                                type="number"
+                                value={equilibriumDraft.dampingFactor}
+                                onChange={(event) =>
+                                  setEquilibriumDraft((prev) => ({
+                                    ...prev,
+                                    dampingFactor: event.target.value,
+                                  }))
+                                }
+                                data-testid="limit-cycle-from-pd-solver-damping"
+                              />
+                            </label>
+                          </>
+                        ) : null}
+                        <div className="inspector-divider">Predictor</div>
                         <label>
                           Initial step size
                           <input
@@ -7651,6 +7675,7 @@ export function InspectorDetailsPanel({
                             data-testid="limit-cycle-from-pd-max-step-size"
                           />
                         </label>
+                        <div className="inspector-divider">Corrector</div>
                         <label>
                           Corrector steps
                           <input
@@ -7700,7 +7725,9 @@ export function InspectorDetailsPanel({
                           onClick={handleCreateLimitCycleFromPD}
                           disabled={
                             runDisabled ||
-                            branch.branchType !== 'limit_cycle' ||
+                            (systemDraft.type === 'map'
+                              ? branch.branchType !== 'equilibrium'
+                              : branch.branchType !== 'limit_cycle') ||
                             selectedBranchPoint?.stability !== 'PeriodDoubling'
                           }
                           data-testid="limit-cycle-from-pd-submit"

@@ -469,6 +469,23 @@
   color: var(--text);
 }
 
+.inspector-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.inspector-divider::before,
+.inspector-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--panel-border);
+}
+
 .inspector-subheading-row {
   display: flex;
   align-items: center;

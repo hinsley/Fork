@@ -200,6 +200,24 @@ export type LimitCycleContinuationFromPDRequest = {
 
 export type LimitCycleContinuationResult = ContinuationBranchData
 
+export type MapCycleContinuationFromPDRequest = {
+  system: SystemConfig
+  pdState: number[]
+  parameterName: string
+  paramValue: number
+  mapIterations: number
+  amplitude: number
+  settings: ContinuationSettings
+  forward: boolean
+  solverParams?: {
+    maxSteps: number
+    dampingFactor: number
+    mapIterations?: number
+  }
+}
+
+export type MapCycleContinuationResult = ContinuationBranchData
+
 export interface ForkCoreClient {
   simulateOrbit(
     request: SimulateOrbitRequest,
@@ -249,6 +267,10 @@ export interface ForkCoreClient {
     request: LimitCycleContinuationFromPDRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<LimitCycleContinuationResult>
+  runMapCycleContinuationFromPD(
+    request: MapCycleContinuationFromPDRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<MapCycleContinuationResult>
   validateSystem(
     request: ValidateSystemRequest,
     opts?: { signal?: AbortSignal }

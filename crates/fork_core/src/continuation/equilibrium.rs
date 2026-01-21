@@ -13,6 +13,7 @@ use crate::equilibrium::{
     evaluate_equilibrium_residual, SystemKind,
 };
 use anyhow::{bail, Result};
+use nalgebra::linalg::SVD;
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex;
 
@@ -183,6 +184,89 @@ pub fn extend_branch(
     extend_branch_with_problem(&mut problem, branch, settings, forward)
 }
 
+pub fn map_cycle_seed_from_pd(
+    system: &mut EquationSystem,
+    param_index: usize,
+    pd_state: &[f64],
+    param_value: f64,
+    map_iterations: usize,
+    amplitude: f64,
+) -> Result<Vec<f64>> {
+    if map_iterations == 0 {
+        bail!("Map iteration count must be greater than zero.");
+    }
+    if amplitude == 0.0 {
+        bail!("Amplitude must be non-zero.");
+    }
+    let dim = system.equations.len();
+    if dim == 0 {
+        bail!("System has zero dimension.");
+    }
+    if pd_state.len() != dim {
+        bail!(
+            "PD state dimension mismatch. Expected {}, got {}.",
+            dim,
+            pd_state.len()
+        );
+    }
+    if param_index >= system.params.len() {
+        bail!("Parameter index out of bounds.");
+    }
+
+    let old_param = system.params[param_index];
+    system.params[param_index] = param_value;
+
+    let seed = (|| {
+        let jac = compute_system_jacobian(
+            system,
+            SystemKind::Map {
+                iterations: map_iterations,
+            },
+            pd_state,
+        )?;
+        let mut shifted = DMatrix::from_row_slice(dim, dim, &jac);
+        for i in 0..dim {
+            shifted[(i, i)] += 1.0;
+        }
+
+        let svd = SVD::new(shifted, false, true);
+        let v_t = svd
+            .v_t
+            .ok_or_else(|| anyhow::anyhow!("SVD failed to compute eigenvector basis"))?;
+        let (min_idx, _) = svd
+            .singular_values
+            .iter()
+            .enumerate()
+            .fold((0usize, f64::INFINITY), |(idx_min, val_min), (idx, &val)| {
+                if val < val_min {
+                    (idx, val)
+                } else {
+                    (idx_min, val_min)
+                }
+            });
+
+        let mut eigenvector: Vec<f64> = v_t.row(min_idx).iter().copied().collect();
+        let norm = eigenvector.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if norm <= 1e-12 {
+            bail!("PD eigenvector is nearly zero - not at a period-doubling point.");
+        }
+        for v in &mut eigenvector {
+            *v /= norm;
+        }
+
+        let seed: Vec<f64> = pd_state
+            .iter()
+            .zip(eigenvector.iter())
+            .map(|(x, v)| x + amplitude * v)
+            .collect();
+
+        Ok(seed)
+    })();
+
+    system.params[param_index] = old_param;
+    seed
+}
+
 pub fn compute_eigenvalues_for_state(
     system: &mut EquationSystem,
     kind: SystemKind,
@@ -214,6 +298,7 @@ mod tests {
     use super::*;
     use crate::equation_engine::{parse, Bytecode, Compiler, EquationSystem, OpCode};
     use crate::equilibrium::{solve_equilibrium, NewtonSettings};
+    use crate::traits::DynamicalSystem;
 
     #[test]
     fn test_palc_simple_fold() {
@@ -384,6 +469,39 @@ mod tests {
             outside.test_values.period_doubling < 0.0,
             "expected PD test to be negative after crossing, got {}",
             outside.test_values.period_doubling
+        );
+    }
+
+    #[test]
+    fn test_map_pd_seed_doubles_cycle() {
+        let mut ops = Vec::new();
+        ops.push(OpCode::LoadVar(0));
+        ops.push(OpCode::Neg);
+
+        let equations = vec![Bytecode { ops }];
+        let mut system = EquationSystem::new(equations, vec![0.0]);
+        let base_state = vec![0.0];
+
+        let seed = map_cycle_seed_from_pd(&mut system, 0, &base_state, 0.0, 1, 0.2)
+            .expect("PD map seed should build");
+        assert!(
+            seed[0].abs() > 1e-6,
+            "expected nontrivial PD seed, got {:?}",
+            seed
+        );
+
+        let mut next = vec![0.0];
+        system.apply(0.0, &seed, &mut next);
+        assert!(
+            (next[0] - seed[0]).abs() > 1e-6,
+            "expected 2-cycle to move after one iteration"
+        );
+
+        let mut next2 = vec![0.0];
+        system.apply(0.0, &next, &mut next2);
+        assert!(
+            (next2[0] - seed[0]).abs() < 1e-6,
+            "expected 2-cycle to return after two iterations"
         );
     }
 

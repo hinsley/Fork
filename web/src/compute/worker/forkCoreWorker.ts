@@ -11,6 +11,7 @@ import type {
   LimitCycleContinuationFromOrbitRequest,
   LimitCycleContinuationFromPDRequest,
   LimitCycleContinuationResult,
+  MapCycleContinuationFromPDRequest,
   CovariantLyapunovRequest,
   CovariantLyapunovResponse,
   FoldCurveContinuationRequest,
@@ -50,6 +51,11 @@ type WorkerRequest =
       id: string
       kind: 'runLimitCycleContinuationFromPD'
       payload: LimitCycleContinuationFromPDRequest
+    }
+  | {
+      id: string
+      kind: 'runMapCycleContinuationFromPD'
+      payload: MapCycleContinuationFromPDRequest
     }
   | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
   | { id: string; kind: 'cancel' }
@@ -133,6 +139,13 @@ type WasmModule = {
       paramValue: number,
       ntst: number,
       ncol: number,
+      amplitude: number
+    ) => unknown
+    init_map_cycle_from_pd: (
+      pdState: number[],
+      parameterName: string,
+      paramValue: number,
+      mapIterations: number,
       amplitude: number
     ) => unknown
   }
@@ -756,6 +769,61 @@ async function runLimitCycleContinuationFromPD(
   return runner.get_result()
 }
 
+async function runMapCycleContinuationFromPD(
+  request: MapCycleContinuationFromPDRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<EquilibriumContinuationResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+
+  let seed = system.init_map_cycle_from_pd(
+    request.pdState,
+    request.parameterName,
+    request.paramValue,
+    request.mapIterations,
+    request.amplitude
+  ) as number[]
+
+  let nextIterations = Math.max(1, Math.trunc(request.mapIterations * 2))
+  if (request.solverParams) {
+    const solverIterations =
+      request.solverParams.mapIterations ?? nextIterations
+    const mapIterations = Math.max(1, Math.trunc(solverIterations))
+    const solution = system.solve_equilibrium(
+      seed,
+      request.solverParams.maxSteps,
+      request.solverParams.dampingFactor,
+      mapIterations
+    )
+    if (!solution.state || solution.state.length === 0) {
+      throw new Error('Cycle solve did not return a valid state.')
+    }
+    seed = solution.state
+    nextIterations = mapIterations
+  }
+  return runEquilibriumContinuation(
+    {
+      system: request.system,
+      equilibriumState: seed,
+      parameterName: request.parameterName,
+      mapIterations: nextIterations,
+      settings: request.settings,
+      forward: request.forward,
+    },
+    signal,
+    onProgress
+  )
+}
+
 function abortIfNeeded(signal: AbortSignal) {
   if (signal.aborted) {
     const error = new Error('cancelled')
@@ -975,6 +1043,24 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     if (message.kind === 'runLimitCycleContinuationFromPD') {
       const result = await runLimitCycleContinuationFromPD(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runMapCycleContinuationFromPD') {
+      const result = await runMapCycleContinuationFromPD(
         message.payload,
         controller.signal,
         (progress) => {

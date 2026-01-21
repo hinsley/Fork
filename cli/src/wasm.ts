@@ -653,6 +653,31 @@ export class WasmBridge {
     }
 
     /**
+     * Initializes a period-doubled map cycle seed from a period-doubling point.
+     *
+     * @param pdState - State at the PD point
+     * @param parameterName - Name of the continuation parameter
+     * @param paramValue - Parameter value at the PD point
+     * @param mapIterations - Cycle length of the source branch
+     * @param amplitude - Perturbation amplitude for stepping onto the new branch
+     */
+    initMapCycleFromPD(
+        pdState: number[],
+        parameterName: string,
+        paramValue: number,
+        mapIterations: number,
+        amplitude: number
+    ): number[] {
+        return this.instance.init_map_cycle_from_pd(
+            new Float64Array(pdState),
+            parameterName,
+            paramValue,
+            mapIterations,
+            amplitude
+        ) as number[];
+    }
+
+    /**
      * Continues a limit cycle from an initial guess.
      */
     continueLimitCycle(

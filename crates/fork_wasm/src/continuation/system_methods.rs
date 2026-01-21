@@ -3,7 +3,7 @@
 use crate::system::{SystemType, WasmSystem};
 use fork_core::continuation::equilibrium::{
     compute_eigenvalues_for_state, continue_parameter as core_continuation,
-    extend_branch as core_extend_branch,
+    extend_branch as core_extend_branch, map_cycle_seed_from_pd,
 };
 use fork_core::continuation::{
     continue_limit_cycle_collocation, continue_with_problem, extend_limit_cycle_collocation,
@@ -305,6 +305,41 @@ impl WasmSystem {
         .map_err(|e| JsValue::from_str(&format!("Failed to initialize LC from PD: {}", e)))?;
 
         to_value(&setup).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    /// Initializes a period-doubled map cycle seed from a period-doubling bifurcation.
+    /// Takes the cycle state at the PD point and returns a perturbed seed for the doubled cycle.
+    pub fn init_map_cycle_from_pd(
+        &mut self,
+        pd_state: Vec<f64>,
+        param_name: &str,
+        param_value: f64,
+        map_iterations: u32,
+        amplitude: f64,
+    ) -> Result<JsValue, JsValue> {
+        if !matches!(self.system_type, SystemType::Map) {
+            return Err(JsValue::from_str(
+                "Map cycle initialization requires a map system.",
+            ));
+        }
+
+        let param_index = *self
+            .system
+            .param_map
+            .get(param_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param_name)))?;
+
+        let seed = map_cycle_seed_from_pd(
+            &mut self.system,
+            param_index,
+            &pd_state,
+            param_value,
+            map_iterations as usize,
+            amplitude,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Failed to initialize map cycle from PD: {}", e)))?;
+
+        to_value(&seed).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
     /// Computes limit cycle continuation from an initial setup (from init_lc_from_hopf).

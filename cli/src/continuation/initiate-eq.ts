@@ -8,7 +8,7 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
-import { ContinuationObject, ContinuationPoint } from '../types';
+import { ContinuationObject, ContinuationPoint, EquilibriumObject } from '../types';
 import {
   ConfigEntry,
   MENU_PAGE_SIZE,
@@ -320,6 +320,287 @@ export async function initiateEquilibriumBranchFromPoint(
 
   } catch (e) {
     printError(`Continuation Failed: ${e}`);
+    return null;
+  }
+}
+
+/**
+ * Initiates a period-doubled cycle branch for map systems from a PD point.
+ */
+export async function initiateMapCycleFromPD(
+  sysName: string,
+  sourceBranch: ContinuationObject,
+  pdPoint: ContinuationPoint,
+  pdPointIdx: number
+): Promise<ContinuationObject | null> {
+  const sysConfig = Storage.loadSystem(sysName);
+  if (sysConfig.type !== 'map') {
+    printError('Period-doubling cycle branching is only available for map systems.');
+    return null;
+  }
+
+  const sourceIterations = Math.max(
+    sourceBranch.mapIterations ?? pdPoint.cycle_points?.length ?? 1,
+    1
+  );
+  const doubledIterations = sourceIterations * 2;
+
+  const sourceLabel = formatEquilibriumLabel(sysConfig.type, {
+    mapIterations: sourceIterations
+  });
+  const targetLabel = formatEquilibriumLabel(sysConfig.type, {
+    mapIterations: doubledIterations
+  });
+
+  let cycleObjectName = `cycle_pd_${sourceBranch.name}_idx${pdPointIdx}`;
+  let branchName = `${cycleObjectName}_${sourceBranch.parameterName}`;
+  let amplitudeInput = '0.01';
+  let stepSizeInput = '0.01';
+  let maxStepsInput = '50';
+  let minStepSizeInput = '1e-5';
+  let maxStepSizeInput = '0.1';
+  let directionForward = true;
+  let correctorStepsInput = '10';
+  let correctorToleranceInput = '1e-6';
+  let stepToleranceInput = '1e-6';
+
+  const directionLabel = (forward: boolean) =>
+    forward ? 'Forward (Increasing Param)' : 'Backward (Decreasing Param)';
+
+  const entries: ConfigEntry[] = [
+    {
+      id: 'cycleObjectName',
+      label: `${targetLabel} object name`,
+      section: 'Branch Settings',
+      getDisplay: () => cycleObjectName || '(required)',
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: `Name for the new ${targetLabel} Object:`,
+          default: cycleObjectName,
+          validate: (val: string) => {
+            const valid = isValidName(val);
+            if (valid !== true) return valid;
+            if (Storage.listObjects(sysName).includes(val)) return "Object name already exists.";
+            return true;
+          }
+        });
+        cycleObjectName = value;
+        if (!branchName) {
+          branchName = `${cycleObjectName}_${sourceBranch.parameterName}`;
+        }
+      }
+    },
+    {
+      id: 'branchName',
+      label: 'Branch name',
+      section: 'Branch Settings',
+      getDisplay: () => branchName || '(required)',
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: `Name for the ${targetLabel} Branch:`,
+          default: branchName || `${cycleObjectName}_${sourceBranch.parameterName}`,
+          validate: (val: string) => {
+            const valid = isValidName(val);
+            if (valid !== true) return valid;
+            if (!cycleObjectName) return "Select a cycle object name first.";
+            if (Storage.listBranches(sysName, cycleObjectName).includes(val)) return "Branch name already exists.";
+            return true;
+          }
+        });
+        branchName = value;
+      }
+    },
+    {
+      id: 'amplitude',
+      label: 'Perturbation Amplitude (h)',
+      section: 'PD Initialization',
+      getDisplay: () => amplitudeInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Enter perturbation amplitude (e.g., 0.01):',
+          default: amplitudeInput,
+        });
+        amplitudeInput = value;
+      }
+    },
+    {
+      id: 'iterations',
+      label: 'Cycle length (doubled)',
+      section: 'Cycle Settings',
+      getDisplay: () => `${sourceLabel} -> ${targetLabel}`,
+      edit: async () => {
+        printInfo("Cycle length is inherited from the source branch and doubled for PD branching.");
+      }
+    },
+    {
+      id: 'direction',
+      label: 'Direction',
+      section: 'Continuation Settings',
+      getDisplay: () => directionLabel(directionForward),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          type: 'list',
+          name: 'value',
+          message: 'Select parameter direction:',
+          choices: [
+            { name: directionLabel(true), value: true },
+            { name: directionLabel(false), value: false }
+          ],
+          default: directionForward
+        });
+        directionForward = value;
+      }
+    },
+    {
+      id: 'stepSize',
+      label: 'Initial step size',
+      section: 'Algorithm Parameters',
+      getDisplay: () => stepSizeInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Initial step size:',
+          default: stepSizeInput,
+        });
+        stepSizeInput = value;
+      }
+    },
+    {
+      id: 'maxSteps',
+      label: 'Max steps',
+      section: 'Algorithm Parameters',
+      getDisplay: () => maxStepsInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Maximum continuation steps:',
+          default: maxStepsInput,
+        });
+        maxStepsInput = value;
+      }
+    }
+  ];
+
+  const result = await runConfigMenu(`Branch to Period-Doubled ${targetLabel}`, entries);
+  if (result === 'back') return null;
+
+  if (!cycleObjectName) {
+    printError(`Please provide a ${targetLabel} object name.`);
+    return null;
+  }
+
+  if (Storage.listObjects(sysName).includes(cycleObjectName)) {
+    printError(`Object "${cycleObjectName}" already exists.`);
+    return null;
+  }
+
+  if (!branchName) {
+    printError("Please provide a branch name.");
+    return null;
+  }
+
+  if (Storage.listBranches(sysName, cycleObjectName).includes(branchName)) {
+    printError(`Branch "${branchName}" already exists.`);
+    return null;
+  }
+
+  const runConfig = {
+    branchName,
+    params: getBranchParams(sysName, sourceBranch, sysConfig),
+    amplitude: parseFloatOrDefault(amplitudeInput, 0.01),
+    settings: {
+      step_size: parseFloatOrDefault(stepSizeInput, 0.01),
+      max_steps: parseIntOrDefault(maxStepsInput, 50),
+      min_step_size: parseFloatOrDefault(minStepSizeInput, 1e-5),
+      max_step_size: parseFloatOrDefault(maxStepSizeInput, 0.1),
+      corrector_steps: parseIntOrDefault(correctorStepsInput, 10),
+      corrector_tolerance: parseFloatOrDefault(correctorToleranceInput, 1e-6),
+      step_tolerance: parseFloatOrDefault(stepToleranceInput, 1e-6),
+    }
+  };
+
+  const sourceParamIdx = sysConfig.paramNames.indexOf(sourceBranch.parameterName);
+  if (sourceParamIdx >= 0) {
+    runConfig.params[sourceParamIdx] = pdPoint.param_value;
+  }
+
+  try {
+    console.log(chalk.cyan(`Initializing period-doubled ${targetLabel}...`));
+    const bridge = new WasmBridge(sysConfig);
+    const seedState = bridge.initMapCycleFromPD(
+      pdPoint.state,
+      sourceBranch.parameterName,
+      pdPoint.param_value,
+      sourceIterations,
+      runConfig.amplitude
+    );
+
+    console.log(chalk.cyan(`Running ${targetLabel} continuation (max ${runConfig.settings.max_steps} steps)...`));
+    const branchData = normalizeBranchEigenvalues(
+      runEquilibriumContinuationWithProgress(
+        bridge,
+        seedState,
+        sourceBranch.parameterName,
+        doubledIterations,
+        runConfig.settings,
+        directionForward,
+        'PD Cycle Continuation'
+      )
+    );
+
+    const seedPoint = branchData.points[0];
+    const solution = seedPoint
+      ? {
+          state: seedPoint.state,
+          residual_norm: 0,
+          iterations: 0,
+          jacobian: [],
+          eigenpairs: (seedPoint.eigenvalues ?? []).map((eig) => ({
+            value: eig,
+            vector: [],
+          })),
+          cycle_points: seedPoint.cycle_points,
+        }
+      : undefined;
+
+    const eqObj: EquilibriumObject = {
+      type: 'equilibrium',
+      name: cycleObjectName,
+      systemName: sysName,
+      solution,
+      parameters: [...runConfig.params],
+      lastSolverParams: {
+        initialGuess: seedState,
+        maxSteps: 25,
+        dampingFactor: 1,
+        mapIterations: doubledIterations
+      }
+    };
+
+    const newBranch: ContinuationObject = {
+      type: 'continuation',
+      name: branchName,
+      systemName: sysName,
+      parameterName: sourceBranch.parameterName,
+      parentObject: cycleObjectName,
+      startObject: sourceBranch.name,
+      branchType: 'equilibrium',
+      data: branchData,
+      settings: runConfig.settings,
+      timestamp: new Date().toISOString(),
+      params: [...runConfig.params],
+      mapIterations: doubledIterations
+    };
+
+    Storage.saveObject(sysName, eqObj);
+    Storage.saveBranch(sysName, cycleObjectName, newBranch);
+    printSuccess(`Period-doubled ${targetLabel} branching successful! Generated ${branchData.points.length} points.`);
+    return newBranch;
+  } catch (e) {
+    printError(`Period-doubled ${targetLabel} branching failed: ${e}`);
     return null;
   }
 }
