@@ -1898,6 +1898,12 @@ export function InspectorDetailsPanel({
         ? equilibrium.solution.cycle_points
         : [equilibrium.solution.state]
       : null
+  const branchCyclePoints =
+    isDiscreteMap && branch?.branchType === 'equilibrium' && selectedBranchPoint?.state
+      ? selectedBranchPoint.cycle_points && selectedBranchPoint.cycle_points.length > 0
+        ? selectedBranchPoint.cycle_points
+        : [selectedBranchPoint.state]
+      : null
   const plotlyBackground = resolvePlotlyBackgroundColor(theme)
   const equilibriumEigenPlot = useMemo(() => {
     const eigenpairs = equilibrium?.solution?.eigenpairs
@@ -6438,6 +6444,69 @@ export function InspectorDetailsPanel({
                                 ),
                               }))}
                             />
+                            {branchCyclePoints ? (
+                              <>
+                                <div className="inspector-subheading-row">
+                                  <h4 className="inspector-subheading">Cycle points</h4>
+                                  {branchCyclePoints.length > 0 ? (
+                                    <button
+                                      type="button"
+                                      className="inspector-inline-button"
+                                      onClick={() =>
+                                        void writeClipboardText(
+                                          branchCyclePoints
+                                            .map((point) => formatPointValues(point))
+                                            .join('\n')
+                                        )
+                                      }
+                                    >
+                                      Copy
+                                    </button>
+                                  ) : null}
+                                </div>
+                                {branchCyclePoints.length > 0 ? (
+                                  <div
+                                    className="orbit-preview__table"
+                                    role="region"
+                                    aria-label="Cycle point data"
+                                  >
+                                    <table className="orbit-preview__table-grid">
+                                      <thead>
+                                        <tr>
+                                          <th>#</th>
+                                          {systemDraft.varNames.map((name, index) => (
+                                            <th key={`branch-cycle-col-${index}`}>
+                                              {name || `x${index + 1}`}
+                                            </th>
+                                          ))}
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {branchCyclePoints.map((point, rowIndex) => (
+                                          <tr key={`branch-cycle-row-${rowIndex}`}>
+                                            <td>{rowIndex}</td>
+                                            {systemDraft.varNames.map((_, varIndex) => (
+                                              <td
+                                                key={`branch-cycle-cell-${rowIndex}-${varIndex}`}
+                                              >
+                                                {formatFixed(
+                                                  point[varIndex] ?? Number.NaN,
+                                                  4
+                                                )}
+                                              </td>
+                                            ))}
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                ) : (
+                                  <p className="empty-state">
+                                    No cycle points stored yet.
+                                  </p>
+                                )}
+                              </>
+                            ) : null}
                             <h4 className="inspector-subheading">Eigenvalues</h4>
                             {branchEigenvalues.length > 0 ? (
                               <div className="inspector-list">

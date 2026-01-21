@@ -1,5 +1,5 @@
 import { render, waitFor } from '@testing-library/react'
-import type { Layout } from 'plotly.js'
+import type { Data, Layout } from 'plotly.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ViewportPanel } from './ViewportPanel'
 import {
@@ -14,6 +14,7 @@ import type { EquilibriumObject, Scene, SystemConfig } from '../system/types'
 
 type PlotlyProps = {
   plotId: string
+  data: Data[]
   layout: Partial<Layout>
   viewRevision: number | string
   initialView: Record<string, unknown> | null
@@ -314,5 +315,115 @@ describe('ViewportPanel view state wiring', () => {
     )
 
     await waitFor(() => expect(onSampleMap1DFunction).toHaveBeenCalledTimes(2))
+  })
+
+  it('renders cobwebs for 1D map cycles with period > 1', () => {
+    const config: SystemConfig = {
+      name: 'Logistic_Map',
+      equations: ['r * x * (1 - x)'],
+      params: [2.5],
+      paramNames: ['r'],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    let system = createSystem({ name: 'Map_System', config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = sceneResult.system
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Cycle_FP',
+      systemName: config.name,
+      solution: {
+        state: [0.3],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [1],
+        eigenpairs: [],
+        cycle_points: [
+          [0.3],
+          [0.9],
+        ],
+      },
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+
+    renderPanel(system)
+
+    const sceneCalls = plotlyCalls.filter(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
+    const props = sceneCalls[sceneCalls.length - 1]
+    expect(props).toBeTruthy()
+    const cobwebTrace = props?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === equilibriumResult.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'lines' &&
+        'name' in trace &&
+        trace.name === equilibrium.name
+    )
+    expect(cobwebTrace).toBeTruthy()
+    if (
+      !cobwebTrace ||
+      !Array.isArray(cobwebTrace.x) ||
+      !Array.isArray(cobwebTrace.y)
+    ) {
+      throw new Error('Expected cobweb trace coordinates.')
+    }
+    const lastIndex = cobwebTrace.x.length - 1
+    expect(lastIndex).toBeGreaterThanOrEqual(0)
+    expect(Number(cobwebTrace.x[lastIndex])).toBeCloseTo(0.3)
+    expect(Number(cobwebTrace.y[lastIndex])).toBeCloseTo(0.3)
+  })
+
+  it('does not render cobwebs for single-point map cycles', () => {
+    const config: SystemConfig = {
+      name: 'Logistic_Map',
+      equations: ['r * x * (1 - x)'],
+      params: [2.5],
+      paramNames: ['r'],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    let system = createSystem({ name: 'Map_System', config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = sceneResult.system
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'FixedPoint',
+      systemName: config.name,
+      solution: {
+        state: [0.3],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [1],
+        eigenpairs: [],
+        cycle_points: [[0.3]],
+      },
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+
+    renderPanel(system)
+
+    const sceneCalls = plotlyCalls.filter(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
+    const props = sceneCalls[sceneCalls.length - 1]
+    expect(props).toBeTruthy()
+    const cobwebTrace = props?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === equilibriumResult.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'lines' &&
+        'name' in trace &&
+        trace.name === equilibrium.name
+    )
+    expect(cobwebTrace).toBeFalsy()
   })
 })

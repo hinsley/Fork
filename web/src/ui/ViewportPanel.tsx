@@ -206,6 +206,39 @@ function buildCobwebPath(rows: number[][]): { x: number[]; y: number[] } {
   return { x, y }
 }
 
+function buildCobwebLineTrace(
+  rows: number[][],
+  options: { name: string; uid: string; color: string; lineWidth: number }
+): Data | null {
+  const cobweb = buildCobwebPath(rows)
+  if (cobweb.x.length === 0) return null
+  return {
+    type: 'scatter',
+    mode: 'lines',
+    name: options.name,
+    uid: options.uid,
+    x: cobweb.x,
+    y: cobweb.y,
+    line: { color: options.color, width: options.lineWidth },
+    hoverinfo: 'skip',
+    showlegend: false,
+  }
+}
+
+function buildCobwebRowsFromStates(
+  states: number[][],
+  options?: { closeCycle?: boolean }
+): number[][] {
+  const rows = states.map((state, index) => [index, state[0]])
+  if (options?.closeCycle && states.length > 1) {
+    const firstValue = states[0]?.[0]
+    if (Number.isFinite(firstValue)) {
+      rows.push([states.length, firstValue])
+    }
+  }
+  return rows
+}
+
 function buildCobwebBaseTraces(
   range: [number, number] | null,
   samples?: { x: number[]; y: number[] } | null
@@ -1458,6 +1491,7 @@ function buildSceneTraces(
         }
       } else if (isMap1D) {
         const repValue = representativeState[0]
+        const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
         if (hasCyclePoints) {
           const diagonal: number[] = []
           for (const cycleState of cycleTailStates) {
@@ -1493,6 +1527,18 @@ function buildSceneTraces(
             },
             showlegend: false,
           })
+          const cobwebTrace = buildCobwebLineTrace(
+            buildCobwebRowsFromStates(cycleStates, { closeCycle: true }),
+            {
+              name: object.name,
+              uid: nodeId,
+              color: node.render.color,
+              lineWidth,
+            }
+          )
+          if (cobwebTrace) {
+            traces.push(cobwebTrace)
+          }
         } else {
           traces.push({
             type: 'scatter',
@@ -1582,6 +1628,7 @@ function buildSceneTraces(
     const highlight = nodeId === selectedNodeId
     if (isMap) {
       const size = highlight ? node.render.pointSize + 2 : node.render.pointSize
+      const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
       if (dimension >= 3) {
         const x: number[] = []
         const y: number[] = []
@@ -1665,22 +1712,14 @@ function buildSceneTraces(
             },
           })
         }
-        const cobweb = buildCobwebPath(rows)
-        if (cobweb.x.length > 0) {
-          traces.push({
-            type: 'scatter',
-            mode: 'lines',
-            name: object.name,
-            uid: nodeId,
-            x: cobweb.x,
-            y: cobweb.y,
-            line: {
-              color: node.render.color,
-              width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
-            },
-            hoverinfo: 'skip',
-            showlegend: false,
-          })
+        const cobwebTrace = buildCobwebLineTrace(rows, {
+          name: object.name,
+          uid: nodeId,
+          color: node.render.color,
+          lineWidth,
+        })
+        if (cobwebTrace) {
+          traces.push(cobwebTrace)
         }
       }
     } else {

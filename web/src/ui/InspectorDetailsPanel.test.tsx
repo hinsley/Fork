@@ -18,6 +18,7 @@ import type {
   EquilibriumObject,
   LimitCycleObject,
   OrbitObject,
+  SystemConfig,
 } from '../system/types'
 
 describe('InspectorDetailsPanel', () => {
@@ -1069,6 +1070,107 @@ describe('InspectorDetailsPanel', () => {
       branchId,
       pointIndex: 0,
     })
+  })
+
+  it('shows cycle point table for discrete map branch points', async () => {
+    const user = userEvent.setup()
+    const config: SystemConfig = {
+      name: 'Map_System',
+      equations: ['r * x * (1 - x)'],
+      params: [2.5],
+      paramNames: ['r'],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    let system = createSystem({ name: 'Map_System', config })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Cycle_FP',
+      systemName: config.name,
+      solution: {
+        state: [0.3],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [1],
+        eigenpairs: [],
+      },
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'CycleBranch',
+      systemName: config.name,
+      parameterName: 'r',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          {
+            state: [0.3],
+            param_value: 2.5,
+            stability: 'None',
+            cycle_points: [
+              [0.3],
+              [0.9],
+            ],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-5,
+        max_step_size: 0.1,
+        max_steps: 10,
+        corrector_steps: 3,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: new Date().toISOString(),
+      params: [...config.params],
+    }
+    const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
+
+    render(
+      <InspectorDetailsPanel
+        system={branchResult.system}
+        selectedNodeId={branchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-point-details-toggle'))
+
+    const cycleTable = screen.getByRole('region', { name: 'Cycle point data' })
+    expect(cycleTable).toBeVisible()
+    const rows = within(cycleTable).getAllByRole('row')
+    expect(rows).toHaveLength(1 + branch.data.points[0].cycle_points.length)
+    expect(within(cycleTable).getByText('0.3000')).toBeVisible()
+    expect(within(cycleTable).getByText('0.9000')).toBeVisible()
   })
 
   it('keeps the selected cycle navigator point after rendering a limit cycle', async () => {
