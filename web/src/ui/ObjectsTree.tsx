@@ -94,6 +94,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const createMenuRef = useRef<HTMLDivElement | null>(null)
     const nodeContextMenuRef = useRef<HTMLDivElement | null>(null)
     const equilibriumLabel = formatEquilibriumLabel(system.config.type)
+    const createEquilibriumLabel =
+      system.config.type === 'map' ? 'Fixed point / Cycle' : equilibriumLabel
 
     const rootNodes = useMemo(
       () => system.rootIds.filter((id) => system.nodes[id]?.kind === 'object'),
@@ -365,7 +367,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
               }}
               data-testid="create-equilibrium"
             >
-              {equilibriumLabel}
+              {createEquilibriumLabel}
             </button>
           </div>
         ) : null}

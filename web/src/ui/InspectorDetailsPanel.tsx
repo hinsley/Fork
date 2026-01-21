@@ -1399,6 +1399,10 @@ export function InspectorDetailsPanel({
     plural: true,
     mapIterations: equilibriumMapIterations,
   })
+  const selectionTypeLabel =
+    selectionNode?.objectType === 'equilibrium'
+      ? equilibriumLabelLower
+      : selectionNode?.objectType ?? selectionNode?.kind
   const [paramOverrideDraft, setParamOverrideDraft] = useState<string[]>(() =>
     makeParamOverrideDraft(system.config, paramOverrideTarget)
   )
@@ -3527,7 +3531,7 @@ export function InspectorDetailsPanel({
                 />
               </label>
               <div className="inspector-meta">
-                <span>{selectionNode.objectType ?? selectionNode.kind}</span>
+                <span>{selectionTypeLabel}</span>
                 {summary?.detail ? <span>{summary.detail}</span> : null}
               </div>
             </div>

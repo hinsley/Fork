@@ -20,13 +20,27 @@ function formatCycleLabel(mapIterations: number | undefined, options?: LabelOpti
   return /^[a-z]/.test(label) ? `${label[0].toUpperCase()}${label.slice(1)}` : label
 }
 
+function formatFixedPointLabel(options?: LabelOptions): string {
+  const singular = 'Fixed point'
+  const plural = 'Fixed points'
+  const label = options?.plural ? plural : singular
+  return options?.lowercase ? label.toLowerCase() : label
+}
+
 export function formatEquilibriumLabel(
   systemType: SystemType,
   options?: LabelOptions
 ): string {
   const isMap = systemType === 'map'
   if (isMap) {
-    return formatCycleLabel(options?.mapIterations, options)
+    const iterations =
+      typeof options?.mapIterations === 'number' && Number.isFinite(options.mapIterations)
+        ? Math.max(1, Math.trunc(options.mapIterations))
+        : 1
+    if (iterations === 1) {
+      return formatFixedPointLabel(options)
+    }
+    return formatCycleLabel(iterations, options)
   }
   const singular = 'Equilibrium'
   const plural = 'Equilibria'
