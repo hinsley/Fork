@@ -2145,11 +2145,7 @@ export function InspectorDetailsPanel({
     hasSelectedBranchPoint &&
     pdSourceBranchOk &&
     selectedBranchPoint?.stability === 'PeriodDoubling'
-  const showLimitCycleFromHopf =
-    !isDiscreteMap &&
-    isHopfSourceBranch &&
-    hasSelectedBranchPoint &&
-    isHopfPointSelected
+  const showLimitCycleFromHopf = !isDiscreteMap && isHopfSourceBranch
   const branchEigenvalues = useMemo(
     () =>
       selectedBranchPoint
@@ -7336,7 +7332,13 @@ export function InspectorDetailsPanel({
                           Apply valid system changes before continuing.
                         </div>
                       ) : null}
-                      {systemDraft.paramNames.length === 0 ? null : (
+                      {systemDraft.paramNames.length === 0 ? null : !selectedBranchPoint ? (
+                        <p className="empty-state">Select a branch point to continue.</p>
+                      ) : !isHopfPointSelected ? (
+                        <p className="empty-state">
+                          Select a Hopf bifurcation point to continue a limit cycle.
+                        </p>
+                      ) : (
                         <>
                           <label>
                             Limit cycle name
