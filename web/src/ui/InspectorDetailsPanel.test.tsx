@@ -1540,6 +1540,104 @@ describe('InspectorDetailsPanel', () => {
     })
   })
 
+  it('hides NCOL for period-doubling continuation in maps', async () => {
+    // TODO: This map-vs-flow UI gating is a brittle design pattern; revisit with a holistic menu model.
+    const user = userEvent.setup()
+    const baseSystem = createSystem({
+      name: 'PD_Map',
+      config: {
+        name: 'PD_Map',
+        equations: ['x'],
+        params: [0.2],
+        paramNames: ['mu'],
+        varNames: ['x'],
+        solver: 'discrete',
+        type: 'map',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq_PD',
+      systemName: baseSystem.config.name,
+    }
+    const added = addObject(baseSystem, equilibrium)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_pd_mu',
+      systemName: baseSystem.config.name,
+      parameterName: 'mu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          {
+            state: [0.1],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [0.1],
+            param_value: 0.25,
+            stability: 'PeriodDoubling',
+            eigenvalues: [{ re: -1, im: 0 }],
+          },
+        ],
+        bifurcations: [1],
+        indices: [0, 1],
+        branch_type: { type: 'Equilibrium' },
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-5,
+        max_step_size: 0.1,
+        max_steps: 50,
+        corrector_steps: 4,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: new Date().toISOString(),
+      params: [...baseSystem.config.params],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+
+    render(
+      <InspectorDetailsPanel
+        system={branchResult.system}
+        selectedNodeId={branchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    await user.click(screen.getByTestId('branch-bifurcation-1'))
+    await user.click(screen.getByTestId('limit-cycle-from-pd-toggle'))
+
+    expect(screen.getByTestId('limit-cycle-from-pd-name')).toBeVisible()
+    expect(screen.queryByTestId('limit-cycle-from-pd-ncol')).toBeNull()
+  })
+
   it('solves equilibrium requests', async () => {
     const user = userEvent.setup()
     const baseSystem = createSystem({ name: 'Test_System' })
