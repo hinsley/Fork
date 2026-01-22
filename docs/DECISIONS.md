@@ -21,6 +21,25 @@ References:
 
 ---
 
+### 2026-01-22: Decouple map vs flow continuations only when taxonomy diverges
+Context:
+Some bifurcation continuation handlers share map/flow logic with label switches (e.g., PD
+cycle vs limit cycle; Hopf vs Neimark-Sacker). We considered splitting all map/flow
+continuations for consistency.
+Decision:
+Decouple only when map and flow represent different object types or initiation algorithms.
+Keep shared handlers where the math/object is the same (e.g., fold curve continuation,
+equilibrium continuation with mapIterations gating). Split PD cycle vs limit cycle now and
+track Hopf vs Neimark-Sacker as a follow-on task.
+Why:
+Reduces accidental taxonomy drift without adding needless code duplication.
+Impact:
+Map PD cycle and flow PD limit cycle are separate actions; Hopf/NS will be split. Fold and
+equilibrium continuations remain shared with mapIterations-specific configuration.
+References:
+`web/src/state/appState.tsx`, `web/src/ui/InspectorDetailsPanel.tsx`, bead Fork-os5v,
+bead Fork-p1vn, epic Fork-oag1
+
 ### 2026-01-24: Neutral cursor for bifurcation legends
 Context:
 Bifurcation diagrams render a Plotly legend for labels, but legend toggles are disabled so object

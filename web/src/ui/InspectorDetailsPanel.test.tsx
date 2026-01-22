@@ -79,6 +79,7 @@ describe('InspectorDetailsPanel', () => {
           onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
           onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
           onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+          onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
         />
       )
     }
@@ -129,6 +130,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -170,6 +172,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -232,6 +235,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -296,6 +300,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -352,6 +357,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -390,6 +396,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -434,6 +441,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -495,6 +503,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={onCreateLimitCycleFromOrbit}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -649,6 +658,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -713,6 +723,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -783,6 +794,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -852,6 +864,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -921,6 +934,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -1026,6 +1040,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -1123,6 +1138,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -1177,6 +1193,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
         onSetLimitCycleRenderTarget={onSetLimitCycleRenderTarget}
       />
     )
@@ -1280,6 +1297,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -1333,6 +1351,7 @@ describe('InspectorDetailsPanel', () => {
           onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
           onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
           onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+          onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
           onSetLimitCycleRenderTarget={(objectId, target) => {
             setState((prev) => updateLimitCycleRenderTarget(prev, objectId, target))
           }}
@@ -1401,6 +1420,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
         onSetLimitCycleRenderTarget={vi.fn()}
       />
     )
@@ -1448,6 +1468,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
         onSetLimitCycleRenderTarget={vi.fn()}
       />
     )
@@ -1504,6 +1525,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
         onSetLimitCycleRenderTarget={vi.fn()}
       />
     )
@@ -1558,6 +1580,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -1609,6 +1632,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -1709,6 +1733,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={onCreateLimitCycleFromPD}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -1850,6 +1875,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -1947,6 +1973,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -2038,15 +2065,14 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
     expect(screen.getByTestId('limit-cycle-from-hopf-toggle')).toHaveTextContent(
       'Limit Cycle from Hopf'
     )
-    expect(screen.getByTestId('limit-cycle-from-pd-toggle')).toHaveTextContent(
-      'Limit Cycle from PD'
-    )
+    expect(screen.queryByTestId('limit-cycle-from-pd-toggle')).toBeNull()
     expect(screen.queryByText('Cycle from NS')).toBeNull()
     expect(screen.queryByText('Cycle from PD')).toBeNull()
   })
@@ -2128,13 +2154,13 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
-    expect(screen.getByTestId('limit-cycle-from-hopf-toggle')).toHaveTextContent(
-      'Cycle from NS'
-    )
-    expect(screen.getByTestId('limit-cycle-from-pd-toggle')).toHaveTextContent('Cycle from PD')
+    expect(screen.queryByTestId('limit-cycle-from-hopf-toggle')).toBeNull()
+    expect(screen.queryByTestId('limit-cycle-from-pd-toggle')).toBeNull()
+    expect(screen.queryByText('Cycle from NS')).toBeNull()
     expect(screen.queryByText('Limit Cycle from Hopf')).toBeNull()
     expect(screen.queryByText('Limit Cycle from PD')).toBeNull()
   })
@@ -2180,6 +2206,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -2262,6 +2289,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 
@@ -2335,6 +2363,7 @@ describe('InspectorDetailsPanel', () => {
         onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
         onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
       />
     )
 

@@ -45,6 +45,7 @@ import type {
   OrbitRunRequest,
   LimitCycleOrbitContinuationRequest,
   LimitCyclePDContinuationRequest,
+  MapCyclePDContinuationRequest,
 } from '../state/appState'
 import type {
   BranchPointSelection,
@@ -107,6 +108,7 @@ type InspectorDetailsPanelProps = {
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
   onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
   onCreateLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
+  onCreateCycleFromPD: (request: MapCyclePDContinuationRequest) => Promise<void>
   onCreateLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
 }
 
@@ -1101,6 +1103,7 @@ export function InspectorDetailsPanel({
   onCreateHopfCurveFromPoint,
   onCreateLimitCycleFromHopf,
   onCreateLimitCycleFromOrbit,
+  onCreateCycleFromPD,
   onCreateLimitCycleFromPD,
 }: InspectorDetailsPanelProps) {
   const node = selectedNodeId ? system.nodes[selectedNodeId] : null
@@ -1417,8 +1420,6 @@ export function InspectorDetailsPanel({
     systemDraft.type,
     equilibriumMapIterations
   )
-  const limitCycleFromHopfLabel =
-    systemDraft.type === 'map' ? 'Cycle from NS' : 'Limit Cycle from Hopf'
   const limitCycleFromPDLabel =
     systemDraft.type === 'map' ? 'Cycle from PD' : 'Limit Cycle from PD'
   const selectionTypeLabel =
@@ -2137,6 +2138,8 @@ export function InspectorDetailsPanel({
   const branchEndPoint = branchEndIndex !== undefined ? branch?.data.points[branchEndIndex] : null
   const hopfOmega = selectedBranchPoint ? extractHopfOmega(selectedBranchPoint) : null
   const hopfCurveLabel = isDiscreteMap ? 'Neimark-Sacker' : 'Hopf'
+  const pdObjectLabel = isDiscreteMap ? 'Cycle' : 'Limit Cycle'
+  const pdObjectLabelName = isDiscreteMap ? 'Cycle' : 'Limit cycle'
   const hasSelectedBranchPoint = Boolean(selectedBranchPoint)
   const isFoldPointSelected = selectedBranchPoint?.stability === 'Fold'
   const isCodim1HopfPointSelected =
@@ -2149,6 +2152,10 @@ export function InspectorDetailsPanel({
     (branch?.branchType === 'equilibrium'
       ? selectedBranchPoint?.stability === 'Hopf'
       : true)
+  const isPeriodDoublingPointSelected =
+    selectedBranchPoint?.stability === 'PeriodDoubling'
+  const showLimitCycleFromHopf = !isDiscreteMap
+  const showLimitCycleFromPD = isPeriodDoublingPointSelected
   const showBranchContinueFromPoint =
     branch?.branchType === 'equilibrium' && hasSelectedBranchPoint
   const showCodim1CurveContinuations =
@@ -2997,6 +3004,108 @@ export function InspectorDetailsPanel({
   }
 
 
+  const handleCreateCycleFromPD = async () => {
+    if (runDisabled) {
+      setLimitCycleFromPDError('Apply valid system settings before continuing.')
+      return
+    }
+    if (!branch || !selectedNodeId) {
+      setLimitCycleFromPDError('Select a branch to continue.')
+      return
+    }
+    if (systemDraft.type !== 'map') {
+      setLimitCycleFromPDError('Cycle continuation is only available for map systems.')
+      return
+    }
+    if (branch.branchType !== 'equilibrium') {
+      setLimitCycleFromPDError('Period-doubling branching for maps requires a cycle branch.')
+      return
+    }
+    if (!selectedBranchPoint || branchPointIndex === null) {
+      setLimitCycleFromPDError('Select a branch point to continue from.')
+      return
+    }
+    if (selectedBranchPoint.stability !== 'PeriodDoubling') {
+      setLimitCycleFromPDError('Select a Period Doubling point to branch.')
+      return
+    }
+    if (!branchParameterName || !systemDraft.paramNames.includes(branchParameterName)) {
+      setLimitCycleFromPDError('Continuation parameter is not defined in this system.')
+      return
+    }
+
+    const cycleName =
+      limitCycleFromPDDraft.limitCycleName.trim() || limitCycleFromPDNameSuggestion
+    if (!cycleName) {
+      setLimitCycleFromPDError('Cycle name is required.')
+      return
+    }
+    if (!isCliSafeName(cycleName)) {
+      setLimitCycleFromPDError('Cycle names must be alphanumeric with underscores only.')
+      return
+    }
+
+    const branchName =
+      limitCycleFromPDDraft.branchName.trim() || limitCycleFromPDBranchSuggestion
+    if (!branchName) {
+      setLimitCycleFromPDError('Branch name is required.')
+      return
+    }
+    if (!isCliSafeName(branchName)) {
+      setLimitCycleFromPDError('Branch names must be alphanumeric with underscores only.')
+      return
+    }
+
+    const amplitude = parseNumber(limitCycleFromPDDraft.amplitude)
+    if (amplitude === null || amplitude <= 0) {
+      setLimitCycleFromPDError('Amplitude must be a positive number.')
+      return
+    }
+
+    const maxSteps = parseNumber(equilibriumDraft.maxSteps)
+    if (maxSteps === null || maxSteps <= 0) {
+      setLimitCycleFromPDError('Max steps must be a positive number.')
+      return
+    }
+    const dampingFactor = parseNumber(equilibriumDraft.dampingFactor)
+    if (dampingFactor === null || dampingFactor <= 0) {
+      setLimitCycleFromPDError('Damping factor must be a positive number.')
+      return
+    }
+
+    const { settings, error } = buildContinuationSettings({
+      name: '',
+      parameterName: branchParameterName,
+      stepSize: limitCycleFromPDDraft.stepSize,
+      maxSteps: limitCycleFromPDDraft.maxSteps,
+      minStepSize: limitCycleFromPDDraft.minStepSize,
+      maxStepSize: limitCycleFromPDDraft.maxStepSize,
+      correctorSteps: limitCycleFromPDDraft.correctorSteps,
+      correctorTolerance: limitCycleFromPDDraft.correctorTolerance,
+      stepTolerance: limitCycleFromPDDraft.stepTolerance,
+      forward: limitCycleFromPDDraft.forward,
+    })
+    if (!settings) {
+      setLimitCycleFromPDError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setLimitCycleFromPDError(null)
+    await onCreateCycleFromPD({
+      branchId: selectedNodeId,
+      pointIndex: branchPointIndex,
+      cycleName,
+      branchName,
+      amplitude,
+      settings,
+      forward: limitCycleFromPDDraft.forward,
+      solverParams: {
+        maxSteps,
+        dampingFactor,
+      },
+    })
+  }
+
   const handleCreateLimitCycleFromPD = async () => {
     if (runDisabled) {
       setLimitCycleFromPDError('Apply valid system settings before continuing.')
@@ -3007,11 +3116,10 @@ export function InspectorDetailsPanel({
       return
     }
     if (systemDraft.type === 'map') {
-      if (branch.branchType !== 'equilibrium') {
-        setLimitCycleFromPDError('Period-doubling branching for maps requires a cycle branch.')
-        return
-      }
-    } else if (branch.branchType !== 'limit_cycle') {
+      setLimitCycleFromPDError('Limit cycle continuation requires a flow system.')
+      return
+    }
+    if (branch.branchType !== 'limit_cycle') {
       setLimitCycleFromPDError(
         'Period-doubling branching is only available for limit cycle branches.'
       )
@@ -3058,34 +3166,10 @@ export function InspectorDetailsPanel({
       return
     }
 
-    let ncol = limitCycleMesh.ncol
-    if (systemDraft.type !== 'map') {
-      const parsedNcol = parseInteger(limitCycleFromPDDraft.ncol)
-      if (parsedNcol === null || parsedNcol <= 0) {
-        setLimitCycleFromPDError('NCOL must be a positive integer.')
-        return
-      }
-      ncol = parsedNcol
-    }
-
-    let solverParams:
-      | { maxSteps: number; dampingFactor: number; mapIterations?: number }
-      | undefined
-    if (systemDraft.type === 'map') {
-      const maxSteps = parseNumber(equilibriumDraft.maxSteps)
-      if (maxSteps === null || maxSteps <= 0) {
-        setLimitCycleFromPDError('Max steps must be a positive number.')
-        return
-      }
-      const dampingFactor = parseNumber(equilibriumDraft.dampingFactor)
-      if (dampingFactor === null || dampingFactor <= 0) {
-        setLimitCycleFromPDError('Damping factor must be a positive number.')
-        return
-      }
-      solverParams = {
-        maxSteps,
-        dampingFactor,
-      }
+    const parsedNcol = parseInteger(limitCycleFromPDDraft.ncol)
+    if (parsedNcol === null || parsedNcol <= 0) {
+      setLimitCycleFromPDError('NCOL must be a positive integer.')
+      return
     }
 
     const { settings, error } = buildContinuationSettings({
@@ -3112,10 +3196,9 @@ export function InspectorDetailsPanel({
       limitCycleName,
       branchName,
       amplitude,
-      ncol,
+      ncol: parsedNcol,
       settings,
       forward: limitCycleFromPDDraft.forward,
-      ...(solverParams ? { solverParams } : {}),
     })
   }
 
@@ -7347,99 +7430,96 @@ export function InspectorDetailsPanel({
                   </InspectorDisclosure>
                 ) : null}
 
-                <InspectorDisclosure
-                  key={`${selectionKey}-limit-cycle-hopf`}
-                  title={limitCycleFromHopfLabel}
-                  testId="limit-cycle-from-hopf-toggle"
-                  defaultOpen={false}
-                >
-                  <div className="inspector-section">
-                    {!isHopfSourceBranch ? (
-                      <p className="empty-state">
-                        Limit cycle continuation is only available for equilibrium or Hopf curve
-                        branches.
-                      </p>
-                    ) : null}
-                    {systemDraft.type === 'map' ? (
-                      <p className="empty-state">Limit cycles require a flow system.</p>
-                    ) : null}
-                    {systemDraft.paramNames.length === 0 ? (
-                      <p className="empty-state">Add a parameter before continuing.</p>
-                    ) : null}
-                    {runDisabled ? (
-                      <div className="field-warning">
-                        Apply valid system changes before continuing.
-                      </div>
-                    ) : null}
-                    {!isHopfSourceBranch ||
-                    systemDraft.type === 'map' ||
-                    systemDraft.paramNames.length === 0 ? null : !selectedBranchPoint ? (
-                      <p className="empty-state">Select a branch point to continue.</p>
-                    ) : !isHopfPointSelected ? (
-                      <p className="empty-state">
-                        Select a Hopf bifurcation point to continue a limit cycle.
-                      </p>
-                    ) : (
-                        <>
-                          <label>
-                            Limit cycle name
-                            <input
-                              value={limitCycleFromHopfDraft.limitCycleName}
-                              onChange={(event) =>
-                                setLimitCycleFromHopfDraft((prev) => ({
-                                  ...prev,
-                                  limitCycleName: event.target.value,
-                                }))
-                              }
-                              placeholder={`lc_hopf_${toCliSafeName(branch.name)}`}
-                              data-testid="limit-cycle-from-hopf-name"
-                            />
-                          </label>
-                          <label>
-                            Branch name
-                            <input
-                              value={limitCycleFromHopfDraft.branchName}
-                              onChange={(event) =>
-                                setLimitCycleFromHopfDraft((prev) => ({
-                                  ...prev,
-                                  branchName: event.target.value,
-                                }))
-                              }
-                              placeholder={limitCycleFromHopfBranchSuggestion}
-                              data-testid="limit-cycle-from-hopf-branch-name"
-                            />
-                          </label>
-                          <label>
-                            Continuation parameter
-                            <select
-                              value={limitCycleFromHopfDraft.parameterName}
-                              onChange={(event) => {
-                                const nextParameterName = event.target.value
-                                setLimitCycleFromHopfDraft((prev) => {
-                                  const baseName =
-                                    prev.limitCycleName.trim() ||
-                                    `lc_hopf_${toCliSafeName(branch.name)}`
-                                  const prevSuggestedName = buildSuggestedBranchName(
-                                    baseName,
-                                    prev.parameterName
-                                  )
-                                  const nextSuggestedName = buildSuggestedBranchName(
-                                    baseName,
-                                    nextParameterName
-                                  )
-                                  const shouldUpdateName =
-                                    prev.branchName === prevSuggestedName
-                                  return {
+                {showLimitCycleFromHopf ? (
+                  <InspectorDisclosure
+                    key={`${selectionKey}-limit-cycle-hopf`}
+                    title="Limit Cycle from Hopf"
+                    testId="limit-cycle-from-hopf-toggle"
+                    defaultOpen={false}
+                  >
+                    <div className="inspector-section">
+                      {!isHopfSourceBranch ? (
+                        <p className="empty-state">
+                          Limit cycle continuation is only available for equilibrium or Hopf curve
+                          branches.
+                        </p>
+                      ) : null}
+                      {systemDraft.paramNames.length === 0 ? (
+                        <p className="empty-state">Add a parameter before continuing.</p>
+                      ) : null}
+                      {runDisabled ? (
+                        <div className="field-warning">
+                          Apply valid system changes before continuing.
+                        </div>
+                      ) : null}
+                      {!isHopfSourceBranch ||
+                      systemDraft.paramNames.length === 0 ? null : !selectedBranchPoint ? (
+                        <p className="empty-state">Select a branch point to continue.</p>
+                      ) : !isHopfPointSelected ? (
+                        <p className="empty-state">
+                          Select a Hopf bifurcation point to continue a limit cycle.
+                        </p>
+                      ) : (
+                          <>
+                            <label>
+                              Limit cycle name
+                              <input
+                                value={limitCycleFromHopfDraft.limitCycleName}
+                                onChange={(event) =>
+                                  setLimitCycleFromHopfDraft((prev) => ({
                                     ...prev,
-                                    parameterName: nextParameterName,
-                                    branchName: shouldUpdateName
-                                      ? nextSuggestedName
-                                      : prev.branchName,
-                                  }
-                                })
-                              }}
-                              data-testid="limit-cycle-from-hopf-parameter"
-                            >
+                                    limitCycleName: event.target.value,
+                                  }))
+                                }
+                                placeholder={`lc_hopf_${toCliSafeName(branch.name)}`}
+                                data-testid="limit-cycle-from-hopf-name"
+                              />
+                            </label>
+                            <label>
+                              Branch name
+                              <input
+                                value={limitCycleFromHopfDraft.branchName}
+                                onChange={(event) =>
+                                  setLimitCycleFromHopfDraft((prev) => ({
+                                    ...prev,
+                                    branchName: event.target.value,
+                                  }))
+                                }
+                                placeholder={limitCycleFromHopfBranchSuggestion}
+                                data-testid="limit-cycle-from-hopf-branch-name"
+                              />
+                            </label>
+                            <label>
+                              Continuation parameter
+                              <select
+                                value={limitCycleFromHopfDraft.parameterName}
+                                onChange={(event) => {
+                                  const nextParameterName = event.target.value
+                                  setLimitCycleFromHopfDraft((prev) => {
+                                    const baseName =
+                                      prev.limitCycleName.trim() ||
+                                      `lc_hopf_${toCliSafeName(branch.name)}`
+                                    const prevSuggestedName = buildSuggestedBranchName(
+                                      baseName,
+                                      prev.parameterName
+                                    )
+                                    const nextSuggestedName = buildSuggestedBranchName(
+                                      baseName,
+                                      nextParameterName
+                                    )
+                                    const shouldUpdateName =
+                                      prev.branchName === prevSuggestedName
+                                    return {
+                                      ...prev,
+                                      parameterName: nextParameterName,
+                                      branchName: shouldUpdateName
+                                        ? nextSuggestedName
+                                        : prev.branchName,
+                                    }
+                                  })
+                                }}
+                                data-testid="limit-cycle-from-hopf-parameter"
+                              >
                               {systemDraft.paramNames.map((name) => (
                                 <option key={name} value={name}>
                                   {name}
@@ -7623,18 +7703,20 @@ export function InspectorDetailsPanel({
                           >
                             Continue Limit Cycle
                           </button>
-                      </>
+                          </>
                     )}
                   </div>
                 </InspectorDisclosure>
+                ) : null}
 
-                <InspectorDisclosure
-                  key={`${selectionKey}-limit-cycle-pd`}
-                  title={limitCycleFromPDLabel}
-                  testId="limit-cycle-from-pd-toggle"
-                  defaultOpen={false}
-                >
-                  <div className="inspector-section">
+                {showLimitCycleFromPD ? (
+                  <InspectorDisclosure
+                    key={`${selectionKey}-limit-cycle-pd`}
+                    title={limitCycleFromPDLabel}
+                    testId="limit-cycle-from-pd-toggle"
+                    defaultOpen={false}
+                  >
+                    <div className="inspector-section">
                     {systemDraft.type === 'map' ? (
                       branch.branchType !== 'equilibrium' ? (
                         <p className="empty-state">
@@ -7660,7 +7742,7 @@ export function InspectorDetailsPanel({
                     ) : (
                       <>
                         <label>
-                          Cycle name
+                          {pdObjectLabelName} name
                           <input
                             value={limitCycleFromPDDraft.limitCycleName}
                             onChange={(event) =>
@@ -7881,7 +7963,11 @@ export function InspectorDetailsPanel({
                           <div className="field-error">{limitCycleFromPDError}</div>
                         ) : null}
                         <button
-                          onClick={handleCreateLimitCycleFromPD}
+                          onClick={
+                            systemDraft.type === 'map'
+                              ? handleCreateCycleFromPD
+                              : handleCreateLimitCycleFromPD
+                          }
                           disabled={
                             runDisabled ||
                             (systemDraft.type === 'map'
@@ -7891,12 +7977,13 @@ export function InspectorDetailsPanel({
                           }
                           data-testid="limit-cycle-from-pd-submit"
                         >
-                          Continue Limit Cycle
+                          {`Continue ${pdObjectLabel}`}
                         </button>
                       </>
                     )}
-                  </div>
-                </InspectorDisclosure>
+                    </div>
+                  </InspectorDisclosure>
+                ) : null}
               </>
             ) : null}
           </div>

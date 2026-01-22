@@ -50,6 +50,7 @@ describe('SystemSettingsDialog', () => {
         onCreateLimitCycleFromHopf={vi.fn(() => Promise.resolve())}
         onCreateLimitCycleFromOrbit={vi.fn(() => Promise.resolve())}
         onCreateLimitCycleFromPD={vi.fn(() => Promise.resolve())}
+        onCreateCycleFromPD={vi.fn(() => Promise.resolve())}
       />
     )
 
@@ -84,6 +85,7 @@ describe('SystemSettingsDialog', () => {
     const onCreateLimitCycleFromHopf = vi.fn(() => Promise.resolve())
     const onCreateLimitCycleFromOrbit = vi.fn(() => Promise.resolve())
     const onCreateLimitCycleFromPD = vi.fn(() => Promise.resolve())
+    const onCreateCycleFromPD = vi.fn(() => Promise.resolve())
 
     render(
       <SystemSettingsDialog
@@ -112,6 +114,7 @@ describe('SystemSettingsDialog', () => {
         onCreateLimitCycleFromHopf={onCreateLimitCycleFromHopf}
         onCreateLimitCycleFromOrbit={onCreateLimitCycleFromOrbit}
         onCreateLimitCycleFromPD={onCreateLimitCycleFromPD}
+        onCreateCycleFromPD={onCreateCycleFromPD}
       />
     )
 
@@ -142,6 +145,7 @@ describe('SystemSettingsDialog', () => {
     expect(capturedProps?.onCreateLimitCycleFromHopf).toBe(onCreateLimitCycleFromHopf)
     expect(capturedProps?.onCreateLimitCycleFromOrbit).toBe(onCreateLimitCycleFromOrbit)
     expect(capturedProps?.onCreateLimitCycleFromPD).toBe(onCreateLimitCycleFromPD)
+    expect(capturedProps?.onCreateCycleFromPD).toBe(onCreateCycleFromPD)
   })
 
   it('returns null when open without a system', () => {
@@ -172,6 +176,7 @@ describe('SystemSettingsDialog', () => {
         onCreateLimitCycleFromHopf={vi.fn(() => Promise.resolve())}
         onCreateLimitCycleFromOrbit={vi.fn(() => Promise.resolve())}
         onCreateLimitCycleFromPD={vi.fn(() => Promise.resolve())}
+        onCreateCycleFromPD={vi.fn(() => Promise.resolve())}
       />
     )
 
@@ -207,6 +212,7 @@ describe('SystemSettingsDialog', () => {
         onCreateLimitCycleFromHopf={vi.fn(() => Promise.resolve())}
         onCreateLimitCycleFromOrbit={vi.fn(() => Promise.resolve())}
         onCreateLimitCycleFromPD={vi.fn(() => Promise.resolve())}
+        onCreateCycleFromPD={vi.fn(() => Promise.resolve())}
       />
     )
 

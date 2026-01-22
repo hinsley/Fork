@@ -244,6 +244,21 @@ export type LimitCycleOrbitContinuationRequest = {
   forward: boolean
 }
 
+export type MapCyclePDContinuationRequest = {
+  branchId: string
+  pointIndex: number
+  cycleName: string
+  branchName: string
+  amplitude: number
+  settings: ContinuationSettings
+  forward: boolean
+  solverParams: {
+    maxSteps: number
+    dampingFactor: number
+    mapIterations?: number
+  }
+}
+
 export type LimitCyclePDContinuationRequest = {
   branchId: string
   pointIndex: number
@@ -253,11 +268,6 @@ export type LimitCyclePDContinuationRequest = {
   ncol: number
   settings: ContinuationSettings
   forward: boolean
-  solverParams?: {
-    maxSteps: number
-    dampingFactor: number
-    mapIterations?: number
-  }
 }
 
 export type LimitCycleHopfContinuationRequest = {
@@ -369,6 +379,7 @@ type AppActions = {
   createHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
   createLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
   createLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
+  createCycleFromPD: (request: MapCyclePDContinuationRequest) => Promise<void>
   createLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
   addScene: (name: string, targetId?: string | null) => Promise<void>
   addBifurcationDiagram: (name: string, targetId?: string | null) => Promise<void>
@@ -2280,6 +2291,198 @@ export function AppProvider({
     [client, state.system, store]
   )
 
+  const createCycleFromPD = useCallback(
+    async (request: MapCyclePDContinuationRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (system.type !== 'map') {
+          throw new Error('Cycle continuation is only available for map systems.')
+        }
+
+        const sourceBranch = state.system.branches[request.branchId]
+        if (!sourceBranch) {
+          throw new Error('Select a valid branch to continue.')
+        }
+        if (sourceBranch.branchType !== 'equilibrium') {
+          throw new Error('Period-doubling branching for maps requires a cycle branch.')
+        }
+
+        const point = sourceBranch.data.points[request.pointIndex]
+        if (!point) {
+          throw new Error('Select a valid branch point.')
+        }
+        if (point.stability !== 'PeriodDoubling') {
+          throw new Error('Selected point is not a Period Doubling bifurcation.')
+        }
+
+        const cycleName = request.cycleName.trim()
+        const cycleNameError = validateObjectName(cycleName, 'Cycle')
+        if (cycleNameError) {
+          throw new Error(cycleNameError)
+        }
+        const existingNames = Object.values(state.system.objects).map((obj) => obj.name)
+        if (existingNames.includes(cycleName)) {
+          throw new Error(`Object "${cycleName}" already exists.`)
+        }
+
+        const branchName = request.branchName.trim()
+        const branchNameError = validateBranchName(branchName)
+        if (branchNameError) {
+          throw new Error(branchNameError)
+        }
+        if (branchNameExists(state.system, cycleName, branchName)) {
+          throw new Error(`Branch "${branchName}" already exists.`)
+        }
+
+        if (!Number.isFinite(request.amplitude) || request.amplitude <= 0) {
+          throw new Error('Amplitude must be a positive number.')
+        }
+
+        const parameterName = sourceBranch.parameterName
+        if (!system.paramNames.includes(parameterName)) {
+          throw new Error('Continuation parameter is not defined in this system.')
+        }
+
+        const runConfig: SystemConfig = { ...system }
+        runConfig.params = getBranchParams(state.system, sourceBranch)
+
+        const paramIndex = system.paramNames.indexOf(parameterName)
+        if (paramIndex >= 0) {
+          runConfig.params[paramIndex] = point.param_value
+        }
+
+        const sourceIterations = Math.max(
+          sourceBranch.mapIterations ?? point.cycle_points?.length ?? 1,
+          1
+        )
+        const solverMaxSteps = request.solverParams.maxSteps
+        const solverDamping = request.solverParams.dampingFactor
+        const solverMapIterations =
+          request.solverParams.mapIterations ?? sourceIterations * 2
+        if (!Number.isFinite(solverMaxSteps) || solverMaxSteps <= 0) {
+          throw new Error('Max steps must be a positive number.')
+        }
+        if (!Number.isFinite(solverDamping) || solverDamping <= 0) {
+          throw new Error('Damping factor must be a positive number.')
+        }
+        if (
+          !Number.isFinite(solverMapIterations) ||
+          solverMapIterations <= 0 ||
+          !Number.isInteger(solverMapIterations)
+        ) {
+          throw new Error('Cycle length must be a positive integer.')
+        }
+
+        const branchData = await client.runMapCycleContinuationFromPD(
+          {
+            system: runConfig,
+            pdState: point.state,
+            parameterName,
+            paramValue: point.param_value,
+            mapIterations: sourceIterations,
+            amplitude: request.amplitude,
+            settings: request.settings,
+            forward: request.forward,
+            solverParams: {
+              maxSteps: solverMaxSteps,
+              dampingFactor: solverDamping,
+              mapIterations: solverMapIterations,
+            },
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Cycle', progress },
+              }),
+          }
+        )
+
+        if (branchData.points.length <= 1) {
+          throw new Error(
+            'Cycle continuation stopped at the seed point. Try a smaller step size or adjust parameters.'
+          )
+        }
+
+        const indices =
+          branchData.indices && branchData.indices.length === branchData.points.length
+            ? branchData.indices
+            : branchData.points.map((_, index) => index)
+
+        const normalizedBranchData = normalizeBranchEigenvalues({
+          ...branchData,
+          indices,
+        })
+
+        const firstPoint = normalizedBranchData.points[0]
+        if (!firstPoint || firstPoint.state.length === 0) {
+          throw new Error('Cycle continuation did not return a valid initial state.')
+        }
+
+        const solution = {
+          state: firstPoint.state,
+          residual_norm: 0,
+          iterations: 0,
+          jacobian: [],
+          eigenpairs: (firstPoint.eigenvalues ?? []).map((eig) => ({
+            value: eig,
+            vector: [],
+          })),
+          cycle_points: firstPoint.cycle_points,
+        }
+
+        const eqObj: EquilibriumObject = {
+          type: 'equilibrium',
+          name: cycleName,
+          systemName: system.name,
+          solution,
+          parameters: [...runConfig.params],
+          lastSolverParams: {
+            initialGuess: firstPoint.state,
+            maxSteps: solverMaxSteps,
+            dampingFactor: solverDamping,
+            mapIterations: solverMapIterations,
+          },
+        }
+
+        const added = addObject(state.system, eqObj)
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name: branchName,
+          systemName: system.name,
+          parameterName,
+          parentObject: cycleName,
+          startObject: sourceBranch.name,
+          branchType: 'equilibrium',
+          data: normalizedBranchData,
+          settings: request.settings,
+          timestamp: new Date().toISOString(),
+          params: [...runConfig.params],
+          mapIterations: solverMapIterations,
+        }
+
+        const createdBranch = addBranch(added.system, branch, added.nodeId)
+        const selected = selectNode(createdBranch.system, createdBranch.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
   const createLimitCycleFromPD = useCallback(
     async (request: LimitCyclePDContinuationRequest) => {
       if (!state.system) return
@@ -2291,16 +2494,15 @@ export function AppProvider({
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
         }
+        if (system.type === 'map') {
+          throw new Error('Limit cycle continuation is only available for flow systems.')
+        }
 
         const sourceBranch = state.system.branches[request.branchId]
         if (!sourceBranch) {
           throw new Error('Select a valid branch to continue.')
         }
-        if (system.type === 'map') {
-          if (sourceBranch.branchType !== 'equilibrium') {
-            throw new Error('Period-doubling branching for maps requires a cycle branch.')
-          }
-        } else if (sourceBranch.branchType !== 'limit_cycle') {
+        if (sourceBranch.branchType !== 'limit_cycle') {
           throw new Error(
             'Period-doubling branching is only available for limit cycle branches.'
           )
@@ -2357,124 +2559,6 @@ export function AppProvider({
         const paramIndex = system.paramNames.indexOf(parameterName)
         if (paramIndex >= 0) {
           runConfig.params[paramIndex] = point.param_value
-        }
-
-        if (system.type === 'map') {
-          const sourceIterations = Math.max(
-            sourceBranch.mapIterations ?? point.cycle_points?.length ?? 1,
-            1
-          )
-          const requestedSolver = request.solverParams
-          const solverMaxSteps = requestedSolver?.maxSteps ?? 25
-          const solverDamping = requestedSolver?.dampingFactor ?? 1
-          const solverMapIterations =
-            requestedSolver?.mapIterations ?? sourceIterations * 2
-          if (!Number.isFinite(solverMaxSteps) || solverMaxSteps <= 0) {
-            throw new Error('Max steps must be a positive number.')
-          }
-          if (!Number.isFinite(solverDamping) || solverDamping <= 0) {
-            throw new Error('Damping factor must be a positive number.')
-          }
-          if (
-            !Number.isFinite(solverMapIterations) ||
-            solverMapIterations <= 0 ||
-            !Number.isInteger(solverMapIterations)
-          ) {
-            throw new Error('Cycle length must be a positive integer.')
-          }
-          const branchData = await client.runMapCycleContinuationFromPD(
-            {
-              system: runConfig,
-              pdState: point.state,
-              parameterName,
-              paramValue: point.param_value,
-              mapIterations: sourceIterations,
-              amplitude: request.amplitude,
-              settings: request.settings,
-              forward: request.forward,
-              solverParams: {
-                maxSteps: solverMaxSteps,
-                dampingFactor: solverDamping,
-                mapIterations: solverMapIterations,
-              },
-            },
-            {
-              onProgress: (progress) =>
-                dispatch({
-                  type: 'SET_CONTINUATION_PROGRESS',
-                  progress: { label: 'Cycle', progress },
-                }),
-            }
-          )
-
-          if (branchData.points.length <= 1) {
-            throw new Error(
-              'Cycle continuation stopped at the seed point. Try a smaller step size or adjust parameters.'
-            )
-          }
-
-          const indices =
-            branchData.indices && branchData.indices.length === branchData.points.length
-              ? branchData.indices
-              : branchData.points.map((_, index) => index)
-
-          const normalizedBranchData = normalizeBranchEigenvalues({
-            ...branchData,
-            indices,
-          })
-
-          const firstPoint = normalizedBranchData.points[0]
-          if (!firstPoint || firstPoint.state.length === 0) {
-            throw new Error('Cycle continuation did not return a valid initial state.')
-          }
-
-          const solution = {
-            state: firstPoint.state,
-            residual_norm: 0,
-            iterations: 0,
-            jacobian: [],
-            eigenpairs: (firstPoint.eigenvalues ?? []).map((eig) => ({
-              value: eig,
-              vector: [],
-            })),
-            cycle_points: firstPoint.cycle_points,
-          }
-
-          const eqObj: EquilibriumObject = {
-            type: 'equilibrium',
-            name: limitCycleName,
-            systemName: system.name,
-            solution,
-            parameters: [...runConfig.params],
-            lastSolverParams: {
-              initialGuess: firstPoint.state,
-              maxSteps: solverMaxSteps,
-              dampingFactor: solverDamping,
-              mapIterations: solverMapIterations,
-            },
-          }
-
-          const added = addObject(state.system, eqObj)
-          const branch: ContinuationObject = {
-            type: 'continuation',
-            name: branchName,
-            systemName: system.name,
-            parameterName,
-            parentObject: limitCycleName,
-            startObject: sourceBranch.name,
-            branchType: 'equilibrium',
-            data: normalizedBranchData,
-            settings: request.settings,
-            timestamp: new Date().toISOString(),
-            params: [...runConfig.params],
-            mapIterations: solverMapIterations,
-          }
-
-          const createdBranch = addBranch(added.system, branch, added.nodeId)
-          const selected = selectNode(createdBranch.system, createdBranch.nodeId)
-          dispatch({ type: 'SET_SYSTEM', system: selected })
-          await store.save(selected)
-          return
         }
 
         const branchData = await client.runLimitCycleContinuationFromPD(
@@ -2707,6 +2791,7 @@ export function AppProvider({
       createHopfCurveFromPoint,
       createLimitCycleFromOrbit,
       createLimitCycleFromHopf,
+      createCycleFromPD,
       createLimitCycleFromPD,
       addScene: addSceneAction,
       addBifurcationDiagram: addBifurcationDiagramAction,
@@ -2728,6 +2813,7 @@ export function AppProvider({
       createHopfCurveFromPoint,
       createLimitCycleFromHopf,
       createLimitCycleFromOrbit,
+      createCycleFromPD,
       createLimitCycleFromPD,
       addBifurcationDiagramAction,
       createSystemAction,

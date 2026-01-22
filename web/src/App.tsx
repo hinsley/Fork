@@ -286,6 +286,7 @@ function App() {
         onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
         onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
         onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
+        onCreateCycleFromPD={actions.createCycleFromPD}
         onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
       />
 
@@ -430,6 +431,7 @@ function App() {
                 onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
                 onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
                 onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
+                onCreateCycleFromPD={actions.createCycleFromPD}
                 onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
               />
             </Panel>

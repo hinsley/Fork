@@ -17,6 +17,7 @@ import type {
   LimitCycleHopfContinuationRequest,
   LimitCycleOrbitContinuationRequest,
   LimitCyclePDContinuationRequest,
+  MapCyclePDContinuationRequest,
   OrbitCovariantLyapunovRequest,
   OrbitLyapunovRequest,
   OrbitRunRequest,
@@ -69,6 +70,7 @@ type SystemSettingsDialogProps = {
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
   onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
   onCreateLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
+  onCreateCycleFromPD: (request: MapCyclePDContinuationRequest) => Promise<void>
   onCreateLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
 }
 
@@ -104,6 +106,7 @@ export function SystemSettingsDialog({
   onCreateHopfCurveFromPoint,
   onCreateLimitCycleFromHopf,
   onCreateLimitCycleFromOrbit,
+  onCreateCycleFromPD,
   onCreateLimitCycleFromPD,
 }: SystemSettingsDialogProps) {
   if (!open || !system) return null
@@ -159,6 +162,7 @@ export function SystemSettingsDialog({
             onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
             onCreateLimitCycleFromHopf={onCreateLimitCycleFromHopf}
             onCreateLimitCycleFromOrbit={onCreateLimitCycleFromOrbit}
+            onCreateCycleFromPD={onCreateCycleFromPD}
             onCreateLimitCycleFromPD={onCreateLimitCycleFromPD}
           />
         </div>
