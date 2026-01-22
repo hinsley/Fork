@@ -39,6 +39,7 @@ import type {
   EquilibriumSolveRequest,
   FoldCurveContinuationRequest,
   HopfCurveContinuationRequest,
+  MapNSCurveContinuationRequest,
   LimitCycleHopfContinuationRequest,
   OrbitCovariantLyapunovRequest,
   OrbitLyapunovRequest,
@@ -106,6 +107,7 @@ type InspectorDetailsPanelProps = {
   onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
+  onCreateNSCurveFromPoint: (request: MapNSCurveContinuationRequest) => Promise<void>
   onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
   onCreateLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
   onCreateCycleFromPD: (request: MapCyclePDContinuationRequest) => Promise<void>
@@ -1101,6 +1103,7 @@ export function InspectorDetailsPanel({
   onExtendBranch,
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
+  onCreateNSCurveFromPoint,
   onCreateLimitCycleFromHopf,
   onCreateLimitCycleFromOrbit,
   onCreateCycleFromPD,
@@ -1457,6 +1460,10 @@ export function InspectorDetailsPanel({
     makeCodim1CurveDraft(system.config)
   )
   const [hopfCurveError, setHopfCurveError] = useState<string | null>(null)
+  const [nsCurveDraft, setNSCurveDraft] = useState<Codim1CurveDraft>(() =>
+    makeCodim1CurveDraft(system.config)
+  )
+  const [nsCurveError, setNSCurveError] = useState<string | null>(null)
   const [branchContinuationDraft, setBranchContinuationDraft] =
     useState<ContinuationDraft>(() => makeContinuationDraft(system.config))
   const [branchContinuationError, setBranchContinuationError] = useState<string | null>(null)
@@ -1680,6 +1687,16 @@ export function InspectorDetailsPanel({
       }
       return { ...prev, param2Name: systemDraft.paramNames[0] ?? '' }
     })
+    setNSCurveDraft((prev) => {
+      if (systemDraft.paramNames.length === 0) {
+        if (!prev.param2Name) return prev
+        return { ...prev, param2Name: '' }
+      }
+      if (systemDraft.paramNames.includes(prev.param2Name)) {
+        return prev
+      }
+      return { ...prev, param2Name: systemDraft.paramNames[0] ?? '' }
+    })
   }, [systemDraft.paramNames])
 
   useEffect(() => {
@@ -1816,6 +1833,17 @@ export function InspectorDetailsPanel({
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, param2Name, name: nextName }
     })
+    setNSCurveDraft((prev) => {
+      const param2Name =
+        systemDraft.paramNames.includes(prev.param2Name) &&
+        prev.param2Name !== branchParameterName
+          ? prev.param2Name
+          : fallbackParam
+      const safeBranchName = toCliSafeName(branchName)
+      const suggestedName = `ns_curve_${safeBranchName}`
+      const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
+      return { ...prev, param2Name, name: nextName }
+    })
     setLimitCycleFromHopfDraft((prev) => {
       const safeBranchName = toCliSafeName(branchName)
       const suggestedLimitCycleName = `lc_hopf_${safeBranchName}`
@@ -1844,6 +1872,7 @@ export function InspectorDetailsPanel({
     setBranchPointError(null)
     setFoldCurveError(null)
     setHopfCurveError(null)
+    setNSCurveError(null)
     setLimitCycleFromHopfError(null)
     setLimitCycleFromPDError(null)
   }, [branch, branchName, branchParameterName, systemDraft.paramNames])
@@ -2137,14 +2166,14 @@ export function InspectorDetailsPanel({
   const branchStartPoint = branchStartIndex !== undefined ? branch?.data.points[branchStartIndex] : null
   const branchEndPoint = branchEndIndex !== undefined ? branch?.data.points[branchEndIndex] : null
   const hopfOmega = selectedBranchPoint ? extractHopfOmega(selectedBranchPoint) : null
-  const hopfCurveLabel = isDiscreteMap ? 'Neimark-Sacker' : 'Hopf'
+  const hopfCurveLabel = 'Hopf'
+  const nsCurveLabel = 'Neimark-Sacker'
   const pdObjectLabel = isDiscreteMap ? 'Cycle' : 'Limit Cycle'
   const pdObjectLabelName = isDiscreteMap ? 'Cycle' : 'Limit cycle'
   const hasSelectedBranchPoint = Boolean(selectedBranchPoint)
   const isFoldPointSelected = selectedBranchPoint?.stability === 'Fold'
-  const isCodim1HopfPointSelected =
-    selectedBranchPoint?.stability === 'Hopf' ||
-    (isDiscreteMap && selectedBranchPoint?.stability === 'NeimarkSacker')
+  const isHopfCurvePointSelected = selectedBranchPoint?.stability === 'Hopf'
+  const isNSCurvePointSelected = selectedBranchPoint?.stability === 'NeimarkSacker'
   const isHopfSourceBranch =
     branch?.branchType === 'equilibrium' || branch?.branchType === 'hopf_curve'
   const isHopfPointSelected =
@@ -2161,11 +2190,13 @@ export function InspectorDetailsPanel({
   const showCodim1CurveContinuations =
     branch?.branchType === 'equilibrium' &&
     hasSelectedBranchPoint &&
-    (isFoldPointSelected || isCodim1HopfPointSelected)
+    (isFoldPointSelected || isHopfCurvePointSelected || isNSCurvePointSelected)
   const showFoldCurveContinuation =
     showCodim1CurveContinuations && isFoldPointSelected
   const showHopfCurveContinuation =
-    showCodim1CurveContinuations && isCodim1HopfPointSelected
+    showCodim1CurveContinuations && !isDiscreteMap && isHopfCurvePointSelected
+  const showNSCurveContinuation =
+    showCodim1CurveContinuations && isDiscreteMap && isNSCurvePointSelected
   const branchEigenvalues = useMemo(
     () =>
       selectedBranchPoint
@@ -2835,6 +2866,10 @@ export function InspectorDetailsPanel({
       setHopfCurveError('Apply valid system settings before continuing.')
       return
     }
+    if (isDiscreteMap) {
+      setHopfCurveError('Hopf curve continuation is only available for flow systems.')
+      return
+    }
     if (!branch || !selectedNodeId) {
       setHopfCurveError('Select a branch to continue.')
       return
@@ -2849,10 +2884,7 @@ export function InspectorDetailsPanel({
       setHopfCurveError('Select a branch point to continue from.')
       return
     }
-    const isHopfCurvePoint =
-      selectedBranchPoint.stability === 'Hopf' ||
-      (isDiscreteMap && selectedBranchPoint.stability === 'NeimarkSacker')
-    if (!isHopfCurvePoint) {
+    if (selectedBranchPoint.stability !== 'Hopf') {
       setHopfCurveError(`Select a ${hopfCurveLabel} bifurcation point to continue.`)
       return
     }
@@ -2895,6 +2927,75 @@ export function InspectorDetailsPanel({
       param2Name: hopfCurveDraft.param2Name,
       settings,
       forward: hopfCurveDraft.forward,
+    })
+  }
+
+  const handleCreateNSCurve = async () => {
+    if (runDisabled) {
+      setNSCurveError('Apply valid system settings before continuing.')
+      return
+    }
+    if (!isDiscreteMap) {
+      setNSCurveError('Neimark-Sacker curve continuation is only available for map systems.')
+      return
+    }
+    if (!branch || !selectedNodeId) {
+      setNSCurveError('Select a branch to continue.')
+      return
+    }
+    if (branch.branchType !== 'equilibrium') {
+      setNSCurveError(
+        `${nsCurveLabel} curve continuation is only available for ${equilibriumLabelLower} branches.`
+      )
+      return
+    }
+    if (!selectedBranchPoint || branchPointIndex === null) {
+      setNSCurveError('Select a branch point to continue from.')
+      return
+    }
+    if (selectedBranchPoint.stability !== 'NeimarkSacker') {
+      setNSCurveError(`Select a ${nsCurveLabel} bifurcation point to continue.`)
+      return
+    }
+    if (systemDraft.paramNames.length < 2) {
+      setNSCurveError('Add another parameter before continuing.')
+      return
+    }
+    if (!nsCurveDraft.param2Name) {
+      setNSCurveError('Select a second continuation parameter.')
+      return
+    }
+    if (nsCurveDraft.param2Name === branchParameterName) {
+      setNSCurveError('Second parameter must be different from the continuation parameter.')
+      return
+    }
+
+    const safeBranchName = toCliSafeName(branch.name)
+    const suggestedName = `ns_curve_${safeBranchName}`
+    const name = nsCurveDraft.name.trim() || suggestedName
+    if (!name.trim()) {
+      setNSCurveError('Curve name is required.')
+      return
+    }
+    if (!isCliSafeName(name)) {
+      setNSCurveError('Curve names must be alphanumeric with underscores only.')
+      return
+    }
+
+    const { settings, error } = buildCodim1ContinuationSettings(nsCurveDraft)
+    if (!settings) {
+      setNSCurveError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setNSCurveError(null)
+    await onCreateNSCurveFromPoint({
+      branchId: selectedNodeId,
+      pointIndex: branchPointIndex,
+      name,
+      param2Name: nsCurveDraft.param2Name,
+      settings,
+      forward: nsCurveDraft.forward,
     })
   }
 
@@ -4378,32 +4479,29 @@ export function InspectorDetailsPanel({
                 </div>
               </InspectorDisclosure>
 
-              <InspectorDisclosure
-                key={`${selectionKey}-limit-cycle`}
-                title="Limit Cycle"
-                testId="limit-cycle-toggle"
-                defaultOpen={false}
-              >
-                <div className="inspector-section">
-                  <h4 className="inspector-subheading">Continue from Orbit</h4>
-                  {systemDraft.type === 'map' ? (
-                    <p className="empty-state">Limit cycles require a flow system.</p>
-                  ) : null}
-                  {systemDraft.paramNames.length === 0 ? (
-                    <p className="empty-state">Add a parameter before continuing.</p>
-                  ) : null}
-                  {runDisabled ? (
-                    <div className="field-warning">
-                      Apply valid system changes before continuing.
-                    </div>
-                  ) : null}
-                  {orbit && orbit.data.length === 0 ? (
-                    <p className="empty-state">Run an orbit before continuing.</p>
-                  ) : null}
-                  {systemDraft.type === 'map' ||
-                  systemDraft.paramNames.length === 0 ||
-                  !orbit ||
-                  orbit.data.length === 0 ? null : (
+              {!isDiscreteMap ? (
+                <InspectorDisclosure
+                  key={`${selectionKey}-limit-cycle`}
+                  title="Limit Cycle"
+                  testId="limit-cycle-toggle"
+                  defaultOpen={false}
+                >
+                  <div className="inspector-section">
+                    <h4 className="inspector-subheading">Continue from Orbit</h4>
+                    {systemDraft.paramNames.length === 0 ? (
+                      <p className="empty-state">Add a parameter before continuing.</p>
+                    ) : null}
+                    {runDisabled ? (
+                      <div className="field-warning">
+                        Apply valid system changes before continuing.
+                      </div>
+                    ) : null}
+                    {orbit && orbit.data.length === 0 ? (
+                      <p className="empty-state">Run an orbit before continuing.</p>
+                    ) : null}
+                    {systemDraft.paramNames.length === 0 ||
+                    !orbit ||
+                    orbit.data.length === 0 ? null : (
                     <>
                       <label>
                         Limit cycle name
@@ -4642,9 +4740,10 @@ export function InspectorDetailsPanel({
                         Continue Limit Cycle
                       </button>
                     </>
-                  )}
-                </div>
-              </InspectorDisclosure>
+                    )}
+                  </div>
+                </InspectorDisclosure>
+              ) : null}
             </>
           ) : null}
 
@@ -7423,6 +7522,193 @@ export function InspectorDetailsPanel({
                             data-testid="hopf-curve-submit"
                           >
                             {`Continue ${hopfCurveLabel} Curve`}
+                          </button>
+                        </>
+                      ) : showNSCurveContinuation ? (
+                        <>
+                          <h4 className="inspector-subheading">{`${nsCurveLabel} curve`}</h4>
+                          <label>
+                            Curve name
+                            <input
+                              value={nsCurveDraft.name}
+                              onChange={(event) =>
+                                setNSCurveDraft((prev) => ({
+                                  ...prev,
+                                  name: event.target.value,
+                                }))
+                              }
+                              placeholder={`ns_curve_${toCliSafeName(branch.name)}`}
+                              data-testid="ns-curve-name"
+                            />
+                          </label>
+                          <label>
+                            Second parameter
+                            <select
+                              value={nsCurveDraft.param2Name}
+                              onChange={(event) =>
+                                setNSCurveDraft((prev) => ({
+                                  ...prev,
+                                  param2Name: event.target.value,
+                                }))
+                              }
+                              disabled={codim1ParamOptions.length === 0}
+                              data-testid="ns-curve-param2"
+                            >
+                              {codim1ParamOptions.map((name) => {
+                                const idx = systemDraft.paramNames.indexOf(name)
+                                const branchValue =
+                                  branchParams.length === systemDraft.paramNames.length
+                                    ? branchParams[idx]
+                                    : undefined
+                                const fallbackValue = parseNumber(systemDraft.params[idx] ?? '')
+                                const value = branchValue ?? fallbackValue
+                                const label = `${name} (current: ${formatNumber(
+                                  value ?? Number.NaN,
+                                  6
+                                )})`
+                                return (
+                                  <option key={name} value={name}>
+                                    {label}
+                                  </option>
+                                )
+                              })}
+                            </select>
+                          </label>
+                          <label>
+                            {`${nsCurveLabel} frequency (ω)`}
+                            <input
+                              value={formatNumber(hopfOmega ?? Number.NaN, 6)}
+                              disabled
+                              data-testid="ns-curve-omega"
+                            />
+                          </label>
+                          <label>
+                            Direction
+                            <select
+                              value={nsCurveDraft.forward ? 'forward' : 'backward'}
+                              onChange={(event) =>
+                                setNSCurveDraft((prev) => ({
+                                  ...prev,
+                                  forward: event.target.value === 'forward',
+                                }))
+                              }
+                              data-testid="ns-curve-direction"
+                            >
+                              <option value="forward">Forward</option>
+                              <option value="backward">Backward</option>
+                            </select>
+                          </label>
+                          <label>
+                            Initial step size
+                            <input
+                              type="number"
+                              value={nsCurveDraft.stepSize}
+                              onChange={(event) =>
+                                setNSCurveDraft((prev) => ({
+                                  ...prev,
+                                  stepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="ns-curve-step-size"
+                            />
+                          </label>
+                          <label>
+                            Min step size
+                            <input
+                              type="number"
+                              value={nsCurveDraft.minStepSize}
+                              onChange={(event) =>
+                                setNSCurveDraft((prev) => ({
+                                  ...prev,
+                                  minStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="ns-curve-min-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max step size
+                            <input
+                              type="number"
+                              value={nsCurveDraft.maxStepSize}
+                              onChange={(event) =>
+                                setNSCurveDraft((prev) => ({
+                                  ...prev,
+                                  maxStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="ns-curve-max-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max points
+                            <input
+                              type="number"
+                              value={nsCurveDraft.maxSteps}
+                              onChange={(event) =>
+                                setNSCurveDraft((prev) => ({
+                                  ...prev,
+                                  maxSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="ns-curve-max-steps"
+                            />
+                          </label>
+                          <label>
+                            Corrector steps
+                            <input
+                              type="number"
+                              value={nsCurveDraft.correctorSteps}
+                              onChange={(event) =>
+                                setNSCurveDraft((prev) => ({
+                                  ...prev,
+                                  correctorSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="ns-curve-corrector-steps"
+                            />
+                          </label>
+                          <label>
+                            Corrector tolerance
+                            <input
+                              type="number"
+                              value={nsCurveDraft.correctorTolerance}
+                              onChange={(event) =>
+                                setNSCurveDraft((prev) => ({
+                                  ...prev,
+                                  correctorTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="ns-curve-corrector-tolerance"
+                            />
+                          </label>
+                          <label>
+                            Step tolerance
+                            <input
+                              type="number"
+                              value={nsCurveDraft.stepTolerance}
+                              onChange={(event) =>
+                                setNSCurveDraft((prev) => ({
+                                  ...prev,
+                                  stepTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="ns-curve-step-tolerance"
+                            />
+                          </label>
+                          {nsCurveError ? (
+                            <div className="field-error">{nsCurveError}</div>
+                          ) : null}
+                          <button
+                            onClick={handleCreateNSCurve}
+                            disabled={
+                              runDisabled ||
+                              !selectedBranchPoint ||
+                              branch.branchType !== 'equilibrium'
+                            }
+                            data-testid="ns-curve-submit"
+                          >
+                            {`Continue ${nsCurveLabel} Curve`}
                           </button>
                         </>
                       ) : null}

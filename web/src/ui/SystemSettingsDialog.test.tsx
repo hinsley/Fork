@@ -47,6 +47,7 @@ describe('SystemSettingsDialog', () => {
         onExtendBranch={vi.fn(() => Promise.resolve())}
         onCreateFoldCurveFromPoint={vi.fn(() => Promise.resolve())}
         onCreateHopfCurveFromPoint={vi.fn(() => Promise.resolve())}
+        onCreateNSCurveFromPoint={vi.fn(() => Promise.resolve())}
         onCreateLimitCycleFromHopf={vi.fn(() => Promise.resolve())}
         onCreateLimitCycleFromOrbit={vi.fn(() => Promise.resolve())}
         onCreateLimitCycleFromPD={vi.fn(() => Promise.resolve())}
@@ -82,6 +83,7 @@ describe('SystemSettingsDialog', () => {
     const onExtendBranch = vi.fn(() => Promise.resolve())
     const onCreateFoldCurveFromPoint = vi.fn(() => Promise.resolve())
     const onCreateHopfCurveFromPoint = vi.fn(() => Promise.resolve())
+    const onCreateNSCurveFromPoint = vi.fn(() => Promise.resolve())
     const onCreateLimitCycleFromHopf = vi.fn(() => Promise.resolve())
     const onCreateLimitCycleFromOrbit = vi.fn(() => Promise.resolve())
     const onCreateLimitCycleFromPD = vi.fn(() => Promise.resolve())
@@ -111,6 +113,7 @@ describe('SystemSettingsDialog', () => {
         onExtendBranch={onExtendBranch}
         onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
         onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
+        onCreateNSCurveFromPoint={onCreateNSCurveFromPoint}
         onCreateLimitCycleFromHopf={onCreateLimitCycleFromHopf}
         onCreateLimitCycleFromOrbit={onCreateLimitCycleFromOrbit}
         onCreateLimitCycleFromPD={onCreateLimitCycleFromPD}
@@ -142,6 +145,7 @@ describe('SystemSettingsDialog', () => {
     expect(capturedProps?.onExtendBranch).toBe(onExtendBranch)
     expect(capturedProps?.onCreateFoldCurveFromPoint).toBe(onCreateFoldCurveFromPoint)
     expect(capturedProps?.onCreateHopfCurveFromPoint).toBe(onCreateHopfCurveFromPoint)
+    expect(capturedProps?.onCreateNSCurveFromPoint).toBe(onCreateNSCurveFromPoint)
     expect(capturedProps?.onCreateLimitCycleFromHopf).toBe(onCreateLimitCycleFromHopf)
     expect(capturedProps?.onCreateLimitCycleFromOrbit).toBe(onCreateLimitCycleFromOrbit)
     expect(capturedProps?.onCreateLimitCycleFromPD).toBe(onCreateLimitCycleFromPD)
@@ -173,6 +177,7 @@ describe('SystemSettingsDialog', () => {
         onExtendBranch={vi.fn(() => Promise.resolve())}
         onCreateFoldCurveFromPoint={vi.fn(() => Promise.resolve())}
         onCreateHopfCurveFromPoint={vi.fn(() => Promise.resolve())}
+        onCreateNSCurveFromPoint={vi.fn(() => Promise.resolve())}
         onCreateLimitCycleFromHopf={vi.fn(() => Promise.resolve())}
         onCreateLimitCycleFromOrbit={vi.fn(() => Promise.resolve())}
         onCreateLimitCycleFromPD={vi.fn(() => Promise.resolve())}
@@ -209,6 +214,7 @@ describe('SystemSettingsDialog', () => {
         onExtendBranch={vi.fn(() => Promise.resolve())}
         onCreateFoldCurveFromPoint={vi.fn(() => Promise.resolve())}
         onCreateHopfCurveFromPoint={vi.fn(() => Promise.resolve())}
+        onCreateNSCurveFromPoint={vi.fn(() => Promise.resolve())}
         onCreateLimitCycleFromHopf={vi.fn(() => Promise.resolve())}
         onCreateLimitCycleFromOrbit={vi.fn(() => Promise.resolve())}
         onCreateLimitCycleFromPD={vi.fn(() => Promise.resolve())}
