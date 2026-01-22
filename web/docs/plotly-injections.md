@@ -65,14 +65,18 @@ behavior.
 - `web/src/App.css`: `.viewport-tile--diagram` overrides Plotly legend cursor
   styles to avoid implying an independent visibility toggle in bifurcation
   diagrams.
+- `web/src/App.css`: Plotly SVG text colors are forced via the
+  `--plotly-text`/`--plotly-text-muted` CSS variables so new themes can
+  override text contrast without touching Plotly layout code.
 - `web/src/ui/InspectorDetailsPanel.tsx`: eigenvalue/multiplier plots set
   `dragmode: 'pan'`, compute fixed `xaxis.range`/`yaxis.range` values for the
   complex plane, and add unit circle/disc overlays for multiplier/eigenvalue
   views (no relayout persistence is wired for these mini plots).
 
 ### Plot styling driven by app theme
-- `web/src/viewports/plotly/plotlyTheme.ts`: `resolvePlotlyBackgroundColor()` is
-  used to set `paper_bgcolor` and `plot_bgcolor` in layouts.
+- `web/src/viewports/plotly/plotlyTheme.ts`: `resolvePlotlyThemeTokens()` is
+  used to set `paper_bgcolor`, `plot_bgcolor`, and text/annotation/legend font
+  colors in Plotly layouts.
 
 ## Test-only hooks (non-runtime)
 

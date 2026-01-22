@@ -1017,6 +1017,16 @@
   color: var(--error);
 }
 
+/* Plotly text inherits inline fills; use theme-tunable CSS vars for readability. */
+.js-plotly-plot text {
+  fill: var(--plotly-text, var(--text)) !important;
+}
+
+/* Keep muted informational labels legible without overwhelming the plot. */
+.js-plotly-plot .annotation text {
+  fill: var(--plotly-text-muted, var(--text-muted)) !important;
+}
+
 /* Bifurcation diagrams use the object tree for visibility; avoid implying legend toggles. */
 .viewport-tile--diagram .js-plotly-plot .legend .legendtoggle,
 .viewport-tile--diagram .js-plotly-plot .legend .traces {

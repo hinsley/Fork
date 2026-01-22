@@ -17,6 +17,8 @@
   --panel-muted: #5b5b5b;
   --text: #e1e1e1;
   --text-muted: #b1b1b1;
+  --plotly-text: #e1e1e1;
+  --plotly-text-muted: #b1b1b1;
   --accent: #4da3ff;
   --accent-strong: #2f7fd2;
   --accent-cool: #6aa84f;
@@ -43,6 +45,8 @@
   --panel-muted: #9a9a9a;
   --text: #1a1a1a;
   --text-muted: #5c5c5c;
+  --plotly-text: #1a1a1a;
+  --plotly-text-muted: #5c5c5c;
   --accent: #2f7fd2;
   --accent-strong: #1f6bb3;
   --accent-cool: #2d8b57;

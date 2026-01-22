@@ -47,7 +47,7 @@ import {
 import { resolveSceneAxisIndices, resolveSceneAxisSelection } from '../system/sceneAxes'
 import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/PlotlyViewport'
 import type { PlotlyRelayoutEvent } from '../viewports/plotly/usePlotViewport'
-import { resolvePlotlyBackgroundColor } from '../viewports/plotly/plotlyTheme'
+import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
 import { clampMenuX } from './contextMenu'
 import type {
@@ -110,7 +110,7 @@ type ViewportTileProps = {
   onDraftNameChange: (value: string) => void
   onCommitRename: () => void
   onCancelRename: () => void
-  plotlyBackground: string
+  plotlyTheme: PlotlyThemeTokens
 }
 
 function resolvePointIndex(point: PlotlyPointClick): number | null {
@@ -153,8 +153,6 @@ const CLV_HEAD_RATIO = 0.25
 const COBWEB_DIAGONAL_COLOR = 'rgba(120,120,120,0.45)'
 const COBWEB_FUNCTION_COLOR = '#6f7a89'
 const MAP_FUNCTION_SAMPLE_COUNT = 256
-const PLOTLY_TEXT_COLOR = 'var(--text)'
-const PLOTLY_MUTED_TEXT_COLOR = 'var(--text-muted)'
 const EMPTY_TRACES: Data[] = []
 
 function interpolateOrbitState(
@@ -2868,15 +2866,16 @@ function buildDiagramTraces(
 function buildSceneBaseLayout(
   config: SystemConfig,
   axisVariables: SceneAxisVariables | null | undefined,
-  plotlyBackground: string
+  plotlyTheme: PlotlyThemeTokens
 ): Partial<Layout> {
   const base = {
     autosize: true,
     margin: { l: 40, r: 20, t: 20, b: 40 },
-    paper_bgcolor: plotlyBackground,
-    plot_bgcolor: plotlyBackground,
+    paper_bgcolor: plotlyTheme.background,
+    plot_bgcolor: plotlyTheme.background,
     showlegend: false,
-    legend: { font: { color: PLOTLY_TEXT_COLOR } },
+    legend: { font: { color: plotlyTheme.text } },
+    font: { color: plotlyTheme.text },
   } satisfies Partial<Layout>
 
   const varNames = config.varNames
@@ -2892,21 +2891,21 @@ function buildSceneBaseLayout(
       ...base,
       scene: {
         xaxis: {
-          title: { text: axisLabels.x, font: { color: PLOTLY_TEXT_COLOR } },
-          tickfont: { color: PLOTLY_TEXT_COLOR },
+          title: { text: axisLabels.x, font: { color: plotlyTheme.text } },
+          tickfont: { color: plotlyTheme.text },
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
         yaxis: {
-          title: { text: axisLabels.y, font: { color: PLOTLY_TEXT_COLOR } },
-          tickfont: { color: PLOTLY_TEXT_COLOR },
+          title: { text: axisLabels.y, font: { color: plotlyTheme.text } },
+          tickfont: { color: plotlyTheme.text },
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
         zaxis: {
-          title: { text: axisLabels.z, font: { color: PLOTLY_TEXT_COLOR } },
-          tickfont: { color: PLOTLY_TEXT_COLOR },
+          title: { text: axisLabels.z, font: { color: plotlyTheme.text } },
+          tickfont: { color: plotlyTheme.text },
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
-        bgcolor: plotlyBackground,
+        bgcolor: plotlyTheme.background,
         aspectmode: 'data',
       },
     }
@@ -2917,13 +2916,13 @@ function buildSceneBaseLayout(
     return {
       ...base,
       xaxis: {
-        title: { text: `${name}_n`, font: { color: PLOTLY_TEXT_COLOR } },
-        tickfont: { color: PLOTLY_TEXT_COLOR },
+        title: { text: `${name}_n`, font: { color: plotlyTheme.text } },
+        tickfont: { color: plotlyTheme.text },
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },
       yaxis: {
-        title: { text: `${name}_{n+1}`, font: { color: PLOTLY_TEXT_COLOR } },
-        tickfont: { color: PLOTLY_TEXT_COLOR },
+        title: { text: `${name}_{n+1}`, font: { color: plotlyTheme.text } },
+        tickfont: { color: plotlyTheme.text },
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },
     }
@@ -2933,13 +2932,13 @@ function buildSceneBaseLayout(
     return {
       ...base,
       xaxis: {
-        title: { text: 't', font: { color: PLOTLY_TEXT_COLOR } },
-        tickfont: { color: PLOTLY_TEXT_COLOR },
+        title: { text: 't', font: { color: plotlyTheme.text } },
+        tickfont: { color: plotlyTheme.text },
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },
       yaxis: {
-        title: { text: varNames[0] ?? 'x', font: { color: PLOTLY_TEXT_COLOR } },
-        tickfont: { color: PLOTLY_TEXT_COLOR },
+        title: { text: varNames[0] ?? 'x', font: { color: plotlyTheme.text } },
+        tickfont: { color: plotlyTheme.text },
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },
     }
@@ -2950,18 +2949,18 @@ function buildSceneBaseLayout(
     ...panMode,
     xaxis: {
       zerolinecolor: 'rgba(120,120,120,0.3)',
-      tickfont: { color: PLOTLY_TEXT_COLOR },
+      tickfont: { color: plotlyTheme.text },
     },
     yaxis: {
       zerolinecolor: 'rgba(120,120,120,0.3)',
-      tickfont: { color: PLOTLY_TEXT_COLOR },
+      tickfont: { color: plotlyTheme.text },
     },
   }
 }
 
 function buildDiagramBaseLayout(
   traceState: DiagramTraceState | null,
-  plotlyBackground: string
+  plotlyTheme: PlotlyThemeTokens
 ): Partial<Layout> {
   const hasAxes = traceState?.hasAxes ?? false
   const hasBranches = traceState?.hasBranches ?? false
@@ -2981,19 +2980,20 @@ function buildDiagramBaseLayout(
   return {
     autosize: true,
     margin: { l: 40, r: 20, t: 20, b: 40 },
-    paper_bgcolor: plotlyBackground,
-    plot_bgcolor: plotlyBackground,
+    paper_bgcolor: plotlyTheme.background,
+    plot_bgcolor: plotlyTheme.background,
     showlegend: hasData,
     dragmode: 'pan',
+    font: { color: plotlyTheme.text },
     legend: {
-      font: { color: PLOTLY_TEXT_COLOR },
+      font: { color: plotlyTheme.text },
       itemclick: false,
       itemdoubleclick: false,
     },
     xaxis: hasAxes
       ? {
-          title: { text: xTitle, font: { color: PLOTLY_TEXT_COLOR } },
-          tickfont: { color: PLOTLY_TEXT_COLOR },
+          title: { text: xTitle, font: { color: plotlyTheme.text } },
+          tickfont: { color: plotlyTheme.text },
           zerolinecolor: 'rgba(120,120,120,0.3)',
           gridcolor: 'rgba(120,120,120,0.15)',
           automargin: true,
@@ -3001,8 +3001,8 @@ function buildDiagramBaseLayout(
       : { visible: false },
     yaxis: hasAxes
       ? {
-          title: { text: yTitle, font: { color: PLOTLY_TEXT_COLOR } },
-          tickfont: { color: PLOTLY_TEXT_COLOR },
+          title: { text: yTitle, font: { color: plotlyTheme.text } },
+          tickfont: { color: plotlyTheme.text },
           zerolinecolor: 'rgba(120,120,120,0.3)',
           gridcolor: 'rgba(120,120,120,0.15)',
           automargin: true,
@@ -3017,7 +3017,7 @@ function buildDiagramBaseLayout(
             xref: 'paper',
             yref: 'paper',
             showarrow: false,
-            font: { color: PLOTLY_MUTED_TEXT_COLOR, size: 12 },
+            font: { color: plotlyTheme.muted, size: 12 },
           },
         ]
       : [],
@@ -3111,7 +3111,7 @@ function ViewportTile({
   onDraftNameChange,
   onCommitRename,
   onCancelRename,
-  plotlyBackground,
+  plotlyTheme,
 }: ViewportTileProps) {
   const { node, scene, diagram } = entry
   const isSelected = node.id === selectedNodeId
@@ -3226,14 +3226,14 @@ function ViewportTile({
   }, [diagram, scene, system])
 
   const layout = useMemo(() => {
-    if (scene) return buildSceneBaseLayout(system.config, scene.axisVariables, plotlyBackground)
-    if (diagram) return buildDiagramBaseLayout(diagramTraceState, plotlyBackground)
+    if (scene) return buildSceneBaseLayout(system.config, scene.axisVariables, plotlyTheme)
+    if (diagram) return buildDiagramBaseLayout(diagramTraceState, plotlyTheme)
     const fallbackAxisVariables = system.scenes[0]?.axisVariables ?? null
-    return buildSceneBaseLayout(system.config, fallbackAxisVariables, plotlyBackground)
+    return buildSceneBaseLayout(system.config, fallbackAxisVariables, plotlyTheme)
   }, [
     diagram,
     diagramTraceState,
-    plotlyBackground,
+    plotlyTheme,
     scene,
     system.config,
     system.scenes,
@@ -3459,7 +3459,7 @@ export function ViewportPanel({
   } | null>(null)
   const mapRequestKeyRef = useRef<string | null>(null)
   const mapKeyRef = useRef<string | null>(null)
-  const plotlyBackground = resolvePlotlyBackgroundColor(theme)
+  const plotlyTheme = useMemo(() => resolvePlotlyThemeTokens(theme), [theme])
 
   const viewports = useMemo(() => {
     const entries: ViewportEntry[] = []
@@ -3780,7 +3780,7 @@ export function ViewportPanel({
                 onDraftNameChange={(value) => setDraftName(value)}
                 onCommitRename={() => commitRename(entry.node)}
                 onCancelRename={cancelRename}
-                plotlyBackground={plotlyBackground}
+                plotlyTheme={plotlyTheme}
               />
             </div>
             <div className="viewport-insert" data-testid={`viewport-insert-${entry.node.id}`}>

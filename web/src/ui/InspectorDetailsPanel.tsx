@@ -31,7 +31,7 @@ import {
 import { resolveSceneAxisSelection } from '../system/sceneAxes'
 import { formatEquilibriumLabel } from '../system/labels'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
-import { resolvePlotlyBackgroundColor } from '../viewports/plotly/plotlyTheme'
+import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
 import type {
   BranchContinuationRequest,
   BranchExtensionRequest,
@@ -513,7 +513,7 @@ function summarizeEigenvalues(point: ContinuationPoint, branchType?: string): st
 
 function buildEigenvaluePlot(
   eigenvalues: ComplexValue[] | null | undefined,
-  plotlyBackground: string,
+  plotlyTheme: PlotlyThemeTokens,
   options?: {
     showRadiusLines?: boolean
     showUnitCircle?: boolean
@@ -521,6 +521,7 @@ function buildEigenvaluePlot(
   }
 ) {
   if (!eigenvalues || eigenvalues.length === 0) return null
+  const { background, text, muted } = plotlyTheme
   const showUnitCircle = options?.showUnitCircle ?? false
   const showUnitDisc = options?.showUnitDisc ?? false
   const x = eigenvalues.map((value) => value.re)
@@ -590,22 +591,23 @@ function buildEigenvaluePlot(
   const layout: Partial<Layout> = {
     autosize: true,
     margin: { l: 36, r: 16, t: 8, b: 32 },
-    paper_bgcolor: plotlyBackground,
-    plot_bgcolor: plotlyBackground,
+    paper_bgcolor: background,
+    plot_bgcolor: background,
     showlegend: false,
     dragmode: 'pan',
+    font: { color: text },
     xaxis: {
-      title: { text: 'Real part', font: { size: 11, color: 'var(--text)' } },
+      title: { text: 'Real part', font: { size: 11, color: text } },
       zerolinecolor: 'rgba(120,120,120,0.3)',
       gridcolor: 'rgba(120,120,120,0.15)',
-      tickfont: { size: 10, color: 'var(--text-muted)' },
+      tickfont: { size: 10, color: muted },
       range: rangeX,
     },
     yaxis: {
-      title: { text: 'Imaginary part', font: { size: 11, color: 'var(--text)' } },
+      title: { text: 'Imaginary part', font: { size: 11, color: text } },
       zerolinecolor: 'rgba(120,120,120,0.3)',
       gridcolor: 'rgba(120,120,120,0.15)',
-      tickfont: { size: 10, color: 'var(--text-muted)' },
+      tickfont: { size: 10, color: muted },
       scaleanchor: 'x',
       scaleratio: 1,
       range: rangeY,
@@ -622,7 +624,7 @@ function buildEigenvaluePlot(
         yanchor: 'bottom',
         xshift: -6,
         yshift: 6,
-        font: { size: 10, color: 'var(--text-muted)' },
+        font: { size: 10, color: muted },
       },
       {
         x: 0,
@@ -635,7 +637,7 @@ function buildEigenvaluePlot(
         yanchor: 'top',
         xshift: 6,
         yshift: -6,
-        font: { size: 10, color: 'var(--text-muted)' },
+        font: { size: 10, color: muted },
       },
     ],
   }
@@ -1927,15 +1929,15 @@ export function InspectorDetailsPanel({
         ? selectedBranchPoint.cycle_points
         : [selectedBranchPoint.state]
       : null
-  const plotlyBackground = resolvePlotlyBackgroundColor(theme)
+  const plotlyTheme = useMemo(() => resolvePlotlyThemeTokens(theme), [theme])
   const equilibriumEigenPlot = useMemo(() => {
     const eigenpairs = equilibrium?.solution?.eigenpairs
     if (!eigenpairs || eigenpairs.length === 0) return null
-    return buildEigenvaluePlot(eigenpairs.map((pair) => pair.value), plotlyBackground, {
+    return buildEigenvaluePlot(eigenpairs.map((pair) => pair.value), plotlyTheme, {
       showRadiusLines: isDiscreteMap,
       showUnitDisc: isDiscreteMap,
     })
-  }, [equilibrium?.solution?.eigenpairs, isDiscreteMap, plotlyBackground])
+  }, [equilibrium?.solution?.eigenpairs, isDiscreteMap, plotlyTheme])
   useEffect(() => {
     if (!systemDirty && !systemTouched) {
       setWasmEquationErrors([])
@@ -2166,18 +2168,18 @@ export function InspectorDetailsPanel({
   )
   const branchEigenPlot = useMemo(() => {
     if (branch?.branchType !== 'equilibrium') return null
-    return buildEigenvaluePlot(branchEigenvalues, plotlyBackground, {
+    return buildEigenvaluePlot(branchEigenvalues, plotlyTheme, {
       showRadiusLines: isDiscreteMap,
       showUnitDisc: isDiscreteMap,
     })
-  }, [branch?.branchType, branchEigenvalues, isDiscreteMap, plotlyBackground])
+  }, [branch?.branchType, branchEigenvalues, isDiscreteMap, plotlyTheme])
   const branchMultiplierPlot = useMemo(() => {
     if (branch?.branchType !== 'limit_cycle') return null
     if (branchEigenvalues.length === 0) return null
-    return buildEigenvaluePlot(branchEigenvalues, plotlyBackground, {
+    return buildEigenvaluePlot(branchEigenvalues, plotlyTheme, {
       showUnitCircle: true,
     })
-  }, [branch?.branchType, branchEigenvalues, plotlyBackground])
+  }, [branch?.branchType, branchEigenvalues, plotlyTheme])
   const selectedBranchPointParams = useMemo(() => {
     if (!branch || !selectedBranchPoint) return []
     return resolveBranchPointParams(
@@ -2229,10 +2231,10 @@ export function InspectorDetailsPanel({
   }, [limitCycle?.floquetMultipliers, limitCycleRenderData])
   const limitCycleMultiplierPlot = useMemo(() => {
     if (limitCycleDisplayMultipliers.length === 0) return null
-    return buildEigenvaluePlot(limitCycleDisplayMultipliers, plotlyBackground, {
+    return buildEigenvaluePlot(limitCycleDisplayMultipliers, plotlyTheme, {
       showUnitCircle: true,
     })
-  }, [limitCycleDisplayMultipliers, plotlyBackground])
+  }, [limitCycleDisplayMultipliers, plotlyTheme])
 
   const handleApplySystem = async () => {
     setSystemTouched(true)
