@@ -229,11 +229,47 @@ export function renameNode(system: System, nodeId: string, newName: string): Sys
   const next = structuredClone(system)
   const node = next.nodes[nodeId]
   if (!node) return system
+  const renamedObject = next.objects[nodeId]
+  const oldObjectName = renamedObject?.name
+
   node.name = newName
-  const obj = next.objects[nodeId]
-  if (obj) obj.name = newName
+  if (renamedObject) {
+    renamedObject.name = newName
+  }
   const branch = next.branches[nodeId]
   if (branch) branch.name = newName
+
+  if (oldObjectName && oldObjectName !== newName) {
+    for (const candidate of Object.values(next.branches)) {
+      if (candidate.parentObject === oldObjectName) {
+        candidate.parentObject = newName
+      }
+      if (
+        candidate.startObject === oldObjectName &&
+        (candidate.branchType === 'equilibrium' || candidate.branchType === 'limit_cycle')
+      ) {
+        candidate.startObject = newName
+      }
+    }
+
+    for (const obj of Object.values(next.objects)) {
+      if (obj.type !== 'limit_cycle') continue
+      if (obj.origin.type === 'orbit' && obj.origin.orbitName === oldObjectName) {
+        obj.origin = { ...obj.origin, orbitName: newName }
+      } else if (
+        obj.origin.type === 'hopf' &&
+        obj.origin.equilibriumObjectName === oldObjectName
+      ) {
+        obj.origin = { ...obj.origin, equilibriumObjectName: newName }
+      } else if (
+        obj.origin.type === 'pd' &&
+        obj.origin.sourceLimitCycleObjectName === oldObjectName
+      ) {
+        obj.origin = { ...obj.origin, sourceLimitCycleObjectName: newName }
+      }
+    }
+  }
+
   const scene = next.scenes.find((entry) => entry.id === nodeId)
   if (scene) scene.name = newName
   const diagram = next.bifurcationDiagrams.find((entry) => entry.id === nodeId)

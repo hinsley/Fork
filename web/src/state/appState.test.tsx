@@ -405,6 +405,105 @@ describe('appState limit cycle render targets', () => {
   })
 })
 
+describe('appState Hopf curve continuation', () => {
+  it('continues a Hopf curve after renaming the parent equilibrium', async () => {
+    const base = createSystem({
+      name: 'Hopf_Curve_Rename',
+      config: {
+        name: 'Hopf_Curve_Rename',
+        equations: ['p1*x - y', 'x + p1*y'],
+        params: [0, 0.5],
+        paramNames: ['p1', 'p2'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_H',
+      systemName: base.config.name,
+      parameters: [...base.config.params],
+    }
+    const added = addObject(base, equilibrium)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_hopf_p1',
+      systemName: base.config.name,
+      parameterName: 'p1',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          {
+            state: [0, 0],
+            param_value: 0,
+            stability: 'Hopf',
+            eigenvalues: [
+              { re: 0, im: 1 },
+              { re: 0, im: -1 },
+            ],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...base.config.params],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+    const client = new MockForkCoreClient(0)
+    client.runHopfCurveContinuation = async (request) => ({
+      points: [
+        {
+          state: request.hopfState,
+          param1_value: request.param1Value,
+          param2_value: request.param2Value,
+          codim2_type: 'None',
+          eigenvalues: [],
+          auxiliary: request.hopfOmega * request.hopfOmega,
+        },
+        {
+          state: request.hopfState,
+          param1_value: request.param1Value + request.settings.step_size,
+          param2_value: request.param2Value + request.settings.step_size,
+          codim2_type: 'None',
+          eigenvalues: [],
+          auxiliary: request.hopfOmega * request.hopfOmega,
+        },
+      ],
+      codim2_bifurcations: [],
+      indices: [0, 1],
+    })
+    const { getContext } = setupApp(branchResult.system, client)
+
+    await act(async () => {
+      getContext().actions.renameNode(added.nodeId, 'EQ_H_RENAMED')
+    })
+
+    await act(async () => {
+      await getContext().actions.createHopfCurveFromPoint({
+        branchId: branchResult.nodeId,
+        pointIndex: 0,
+        name: 'hopf_curve_p1_p2',
+        param2Name: 'p2',
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      const next = getContext().state.system
+      expect(next).not.toBeNull()
+      expect(getContext().state.error).toBeNull()
+      const hopfCurveId = findBranchIdByName(next!, 'hopf_curve_p1_p2')
+      expect(next!.branches[hopfCurveId].parentObject).toBe('EQ_H_RENAMED')
+    })
+  })
+})
+
 describe('appState Lyapunov analysis parameters', () => {
   function makeOrbit(parameters?: number[]): OrbitObject {
     return {
