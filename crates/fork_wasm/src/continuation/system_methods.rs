@@ -1,6 +1,7 @@
 //! WasmSystem continuation methods.
 
 use crate::system::{SystemType, WasmSystem};
+use fork_core::continuation::codim1_curves::estimate_hopf_kappa_from_jacobian;
 use fork_core::continuation::equilibrium::{
     compute_eigenvalues_for_state, continue_parameter as core_continuation,
     extend_branch as core_extend_branch, map_cycle_seed_from_pd,
@@ -9,11 +10,10 @@ use fork_core::continuation::{
     continue_limit_cycle_collocation, continue_with_problem, extend_limit_cycle_collocation,
     limit_cycle_setup_from_hopf, limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd,
     BranchType, Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType, Codim2BifurcationType,
-    ContinuationBranch, ContinuationSettings, LimitCycleSetup, StepResult,
-    FoldCurveProblem, HopfCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
-    CollocationConfig, OrbitTimeMode,
+    CollocationConfig, ContinuationBranch, ContinuationSettings, FoldCurveProblem,
+    HopfCurveProblem, LPCCurveProblem, LimitCycleSetup, NSCurveProblem, OrbitTimeMode,
+    PDCurveProblem, StepResult,
 };
-use fork_core::continuation::codim1_curves::estimate_hopf_kappa_from_jacobian;
 use fork_core::equilibrium::{compute_jacobian, SystemKind};
 use fork_core::traits::DynamicalSystem;
 use nalgebra::DMatrix;
@@ -36,11 +36,15 @@ impl WasmSystem {
 
         let kind = match self.system_type {
             SystemType::Flow => SystemKind::Flow,
-            SystemType::Map => SystemKind::Map { iterations: map_iterations as usize },
+            SystemType::Map => SystemKind::Map {
+                iterations: map_iterations as usize,
+            },
         };
 
-        let param_index = *self.system.param_map.get(parameter_name)
-            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
+        let param_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
 
         let branch = core_continuation(
             &mut self.system,
@@ -69,32 +73,61 @@ impl WasmSystem {
         let mut branch: ContinuationBranch = from_value(branch_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid branch data: {}", e)))?;
 
+        if branch.points.is_empty() {
+            return Err(JsValue::from_str("Branch has no points"));
+        }
+
+        if branch.indices.len() != branch.points.len() {
+            branch.indices = (0..branch.points.len() as i32).collect();
+        }
+
+        let endpoint_idx = if forward {
+            branch
+                .indices
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, &idx)| idx)
+                .map(|(pos, _)| pos)
+                .ok_or_else(|| JsValue::from_str("Branch has no indices"))?
+        } else {
+            branch
+                .indices
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, &idx)| idx)
+                .map(|(pos, _)| pos)
+                .ok_or_else(|| JsValue::from_str("Branch has no indices"))?
+        };
+
         // Auto-recover missing upoldp for LimitCycle branches
-        if let BranchType::LimitCycle { .. } = branch.branch_type {
+        if matches!(&branch.branch_type, BranchType::LimitCycle { .. }) {
             if branch.upoldp.is_none() {
-                if let Some(last_pt) = branch.points.last() {
-                    let dim = self.system.equations.len();
-                    if last_pt.state.len() > dim {
-                        let x0 = &last_pt.state[0..dim];
-                        let period = *last_pt.state.last().unwrap_or(&1.0);
-                        let mut work = vec![0.0; dim];
-                        self.system.apply(0.0, x0, &mut work);
-                        // x'(0) = T * f(x0) (approx tangent for phase condition)
-                        let u0: Vec<f64> = work.iter().map(|&v| v * period).collect();
-                        branch.upoldp = Some(vec![u0]);
-                    }
+                let endpoint = &branch.points[endpoint_idx];
+                let dim = self.system.equations.len();
+                if endpoint.state.len() > dim {
+                    let x0 = &endpoint.state[0..dim];
+                    let period = *endpoint.state.last().unwrap_or(&1.0);
+                    let mut work = vec![0.0; dim];
+                    self.system.apply(0.0, x0, &mut work);
+                    // x'(0) = T * f(x0) (approx tangent for phase condition)
+                    let u0: Vec<f64> = work.iter().map(|&v| v * period).collect();
+                    branch.upoldp = Some(vec![u0]);
                 }
             }
         }
 
-        let param_index = *self.system.param_map.get(parameter_name)
-            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
+        let param_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
 
         let updated_branch = match &branch.branch_type {
             BranchType::Equilibrium => {
                 let kind = match self.system_type {
                     SystemType::Flow => SystemKind::Flow,
-                    SystemType::Map => SystemKind::Map { iterations: map_iterations as usize },
+                    SystemType::Map => SystemKind::Map {
+                        iterations: map_iterations as usize,
+                    },
                 };
                 core_extend_branch(
                     &mut self.system,
@@ -108,7 +141,9 @@ impl WasmSystem {
             }
             BranchType::LimitCycle { ntst, ncol } => {
                 // Extract phase anchor and direction from upoldp
-                let upoldp = branch.upoldp.clone()
+                let upoldp = branch
+                    .upoldp
+                    .clone()
                     .ok_or_else(|| JsValue::from_str("Limit cycle branch missing upoldp data"))?;
 
                 // Use first point of upoldp as phase direction reference
@@ -123,11 +158,10 @@ impl WasmSystem {
                     vec![1.0] // Fallback
                 };
 
-                // Extract phase anchor from last point's state (first mesh point)
-                let last_pt = branch.points.last()
-                    .ok_or_else(|| JsValue::from_str("Branch has no points"))?;
+                // Anchor phase at the signed-index endpoint that is being extended.
+                let endpoint = &branch.points[endpoint_idx];
                 let dim = self.system.equations.len();
-                let phase_anchor: Vec<f64> = last_pt.state.iter().take(dim).cloned().collect();
+                let phase_anchor: Vec<f64> = endpoint.state.iter().take(dim).cloned().collect();
 
                 let config = CollocationConfig {
                     mesh_points: *ntst,
@@ -160,27 +194,25 @@ impl WasmSystem {
     ) -> Result<JsValue, JsValue> {
         let kind = match self.system_type {
             SystemType::Flow => SystemKind::Flow,
-            SystemType::Map => SystemKind::Map { iterations: map_iterations as usize },
+            SystemType::Map => SystemKind::Map {
+                iterations: map_iterations as usize,
+            },
         };
 
-        let param_index = *self
-            .system
-            .param_map
-            .get(parameter_name)
-            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
+        let param_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
 
         if state.len() != self.system.equations.len() {
-            return Err(JsValue::from_str("State dimension mismatch for eigenvalue computation."));
+            return Err(JsValue::from_str(
+                "State dimension mismatch for eigenvalue computation.",
+            ));
         }
 
-        let eigenvalues = compute_eigenvalues_for_state(
-            &mut self.system,
-            kind,
-            &state,
-            param_index,
-            param_value,
-        )
-        .map_err(|e| JsValue::from_str(&format!("Eigenvalue computation failed: {}", e)))?;
+        let eigenvalues =
+            compute_eigenvalues_for_state(&mut self.system, kind, &state, param_index, param_value)
+                .map_err(|e| JsValue::from_str(&format!("Eigenvalue computation failed: {}", e)))?;
 
         to_value(&eigenvalues)
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
@@ -197,11 +229,10 @@ impl WasmSystem {
         ntst: u32,
         ncol: u32,
     ) -> Result<JsValue, JsValue> {
-        let param_index = *self
-            .system
-            .param_map
-            .get(parameter_name)
-            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
+        let param_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
 
         let setup = limit_cycle_setup_from_hopf(
             &mut self.system,
@@ -235,7 +266,8 @@ impl WasmSystem {
         if orbit_states_flat.len() % dim != 0 {
             return Err(JsValue::from_str(&format!(
                 "Orbit states length {} not divisible by dimension {}",
-                orbit_states_flat.len(), dim
+                orbit_states_flat.len(),
+                dim
             )));
         }
 
@@ -243,7 +275,8 @@ impl WasmSystem {
         if n_points != orbit_times.len() {
             return Err(JsValue::from_str(&format!(
                 "Orbit has {} time points but {} state vectors",
-                orbit_times.len(), n_points
+                orbit_times.len(),
+                n_points
             )));
         }
 
@@ -337,7 +370,9 @@ impl WasmSystem {
             map_iterations as usize,
             amplitude,
         )
-        .map_err(|e| JsValue::from_str(&format!("Failed to initialize map cycle from PD: {}", e)))?;
+        .map_err(|e| {
+            JsValue::from_str(&format!("Failed to initialize map cycle from PD: {}", e))
+        })?;
 
         to_value(&seed).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
@@ -356,11 +391,10 @@ impl WasmSystem {
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
-        let param_index = *self
-            .system
-            .param_map
-            .get(parameter_name)
-            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
+        let param_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
 
         let config = setup.collocation_config();
 
@@ -406,12 +440,20 @@ impl WasmSystem {
 
         let kind = match self.system_type {
             SystemType::Flow => SystemKind::Flow,
-            SystemType::Map => SystemKind::Map { iterations: map_iterations as usize },
+            SystemType::Map => SystemKind::Map {
+                iterations: map_iterations as usize,
+            },
         };
 
-        let param1_index = *self.system.param_map.get(param1_name)
+        let param1_index = *self
+            .system
+            .param_map
+            .get(param1_name)
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param1_name)))?;
-        let param2_index = *self.system.param_map.get(param2_name)
+        let param2_index = *self
+            .system
+            .param_map
+            .get(param2_name)
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
 
         // Set parameters to fold point values
@@ -461,7 +503,11 @@ impl WasmSystem {
             .map(|pt| {
                 // pt.state layout: [p2, x1, ..., xn]
                 // Extract p2 (first element)
-                let p2 = if !pt.state.is_empty() { pt.state[0] } else { param2_value };
+                let p2 = if !pt.state.is_empty() {
+                    pt.state[0]
+                } else {
+                    param2_value
+                };
                 // Extract physical state (elements 1 to n)
                 let physical_state: Vec<f64> = if pt.state.len() >= n + 1 {
                     pt.state[1..(n + 1)].to_vec()
@@ -524,12 +570,20 @@ impl WasmSystem {
 
         let kind = match self.system_type {
             SystemType::Flow => SystemKind::Flow,
-            SystemType::Map => SystemKind::Map { iterations: map_iterations as usize },
+            SystemType::Map => SystemKind::Map {
+                iterations: map_iterations as usize,
+            },
         };
 
-        let param1_index = *self.system.param_map.get(param1_name)
+        let param1_index = *self
+            .system
+            .param_map
+            .get(param1_name)
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param1_name)))?;
-        let param2_index = *self.system.param_map.get(param2_name)
+        let param2_index = *self
+            .system
+            .param_map
+            .get(param2_name)
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
 
         // Set parameters to Hopf point values
@@ -540,8 +594,8 @@ impl WasmSystem {
         let jac = compute_jacobian(&self.system, kind, &hopf_state)
             .map_err(|e| JsValue::from_str(&format!("Failed to compute Jacobian: {}", e)))?;
         let jac_mat = DMatrix::from_row_slice(n, n, &jac);
-        let kappa_seed = estimate_hopf_kappa_from_jacobian(&jac_mat)
-            .unwrap_or(hopf_omega * hopf_omega);
+        let kappa_seed =
+            estimate_hopf_kappa_from_jacobian(&jac_mat).unwrap_or(hopf_omega * hopf_omega);
         let kappa = if kappa_seed.is_finite() && kappa_seed > 0.0 {
             kappa_seed
         } else {
@@ -594,7 +648,11 @@ impl WasmSystem {
             .map(|pt| {
                 // pt.state layout: [p2, x1, ..., xn, κ]
                 // Extract p2 (first element)
-                let p2 = if !pt.state.is_empty() { pt.state[0] } else { param2_value };
+                let p2 = if !pt.state.is_empty() {
+                    pt.state[0]
+                } else {
+                    param2_value
+                };
                 // Extract physical state (elements 1 to n)
                 let physical_state: Vec<f64> = if pt.state.len() >= n + 1 {
                     pt.state[1..(n + 1)].to_vec()
@@ -613,7 +671,7 @@ impl WasmSystem {
                     param1_value: pt.param_value, // p1
                     param2_value: p2,             // p2 extracted from augmented state
                     codim2_type: Codim2BifurcationType::None,
-                    auxiliary: Some(kappa),       // κ extracted from augmented state
+                    auxiliary: Some(kappa), // κ extracted from augmented state
                     eigenvalues: pt.eigenvalues.clone(),
                 }
             })
@@ -661,9 +719,15 @@ impl WasmSystem {
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
-        let param1_index = *self.system.param_map.get(param1_name)
+        let param1_index = *self
+            .system
+            .param_map
+            .get(param1_name)
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param1_name)))?;
-        let param2_index = *self.system.param_map.get(param2_name)
+        let param2_index = *self
+            .system
+            .param_map
+            .get(param2_name)
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
 
         // Set parameters
@@ -688,7 +752,12 @@ impl WasmSystem {
         } else {
             return Err(JsValue::from_str(&format!(
                 "Invalid lc_state.len()={}, expected {} or {} (ntst={}, ncol={}, dim={})",
-                lc_state.len(), expected_ncoords, implicit_ncoords, ntst, ncol, dim
+                lc_state.len(),
+                expected_ncoords,
+                implicit_ncoords,
+                ntst,
+                ncol,
+                dim
             )));
         };
 
@@ -786,9 +855,15 @@ impl WasmSystem {
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
-        let param1_index = *self.system.param_map.get(param1_name)
+        let param1_index = *self
+            .system
+            .param_map
+            .get(param1_name)
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param1_name)))?;
-        let param2_index = *self.system.param_map.get(param2_name)
+        let param2_index = *self
+            .system
+            .param_map
+            .get(param2_name)
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
 
         self.system.params[param1_index] = param1_value;
@@ -818,7 +893,12 @@ impl WasmSystem {
         } else {
             return Err(JsValue::from_str(&format!(
                 "Invalid lc_state.len()={}, expected {} or {} (ntst={}, ncol={}, dim={})",
-                lc_state.len(), expected_ncoords, implicit_ncoords, ntst, ncol, dim
+                lc_state.len(),
+                expected_ncoords,
+                implicit_ncoords,
+                ntst,
+                ncol,
+                dim
             )));
         };
 
@@ -914,9 +994,15 @@ impl WasmSystem {
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
-        let param1_index = *self.system.param_map.get(param1_name)
+        let param1_index = *self
+            .system
+            .param_map
+            .get(param1_name)
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param1_name)))?;
-        let param2_index = *self.system.param_map.get(param2_name)
+        let param2_index = *self
+            .system
+            .param_map
+            .get(param2_name)
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
 
         self.system.params[param1_index] = param1_value;
@@ -940,7 +1026,12 @@ impl WasmSystem {
         } else {
             return Err(JsValue::from_str(&format!(
                 "Invalid lc_state.len()={}, expected {} or {} (ntst={}, ncol={}, dim={})",
-                lc_state.len(), expected_ncoords, implicit_ncoords, ntst, ncol, dim
+                lc_state.len(),
+                expected_ncoords,
+                implicit_ncoords,
+                ntst,
+                ncol,
+                dim
             )));
         };
 
@@ -1050,11 +1141,15 @@ impl WasmSystem {
 
         let kind = match self.system_type {
             SystemType::Flow => SystemKind::Flow,
-            SystemType::Map => SystemKind::Map { iterations: map_iterations as usize },
+            SystemType::Map => SystemKind::Map {
+                iterations: map_iterations as usize,
+            },
         };
 
-        let param_index = *self.system.param_map.get(parameter_name)
-            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
+        let param_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
 
         let branch = core_continuation(
             &mut self.system,

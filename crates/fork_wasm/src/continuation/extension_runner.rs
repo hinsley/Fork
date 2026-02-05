@@ -1,7 +1,7 @@
 //! Continuation branch extension runner.
 
-use crate::system::build_system;
 use super::shared::{compute_tangent_from_problem, OwnedEquilibriumContinuationProblem};
+use crate::system::build_system;
 use fork_core::continuation::periodic::PeriodicOrbitCollocationProblem;
 use fork_core::continuation::{
     BranchType, ContinuationBranch, ContinuationPoint, ContinuationProblem, ContinuationRunner,
@@ -13,7 +13,6 @@ use fork_core::traits::DynamicalSystem;
 use nalgebra::DVector;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
-
 
 struct ExtensionMergeContext {
     branch: ContinuationBranch,
@@ -61,7 +60,7 @@ impl WasmContinuationExtensionRunner {
         let mut branch: ContinuationBranch = from_value(branch_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid branch data: {}", e)))?;
 
-        if branch.indices.is_empty() {
+        if branch.indices.len() != branch.points.len() {
             branch.indices = (0..branch.points.len() as i32).collect();
         }
 
@@ -104,7 +103,12 @@ impl WasmContinuationExtensionRunner {
             } else {
                 None
             };
-            (min_idx_pos, branch.indices[min_idx_pos], next_idx_pos, false)
+            (
+                min_idx_pos,
+                branch.indices[min_idx_pos],
+                next_idx_pos,
+                false,
+            )
         };
 
         let sign = if is_append { 1 } else { -1 };
@@ -135,7 +139,8 @@ impl WasmContinuationExtensionRunner {
                     _ => SystemKind::Flow,
                 };
 
-                let mut problem = OwnedEquilibriumContinuationProblem::new(system, kind, param_index);
+                let mut problem =
+                    OwnedEquilibriumContinuationProblem::new(system, kind, param_index);
                 let dim = problem.dimension();
                 if endpoint.state.len() != dim {
                     return Err(JsValue::from_str(&format!(
@@ -158,11 +163,7 @@ impl WasmContinuationExtensionRunner {
                     for (i, &v) in neighbor.state.iter().enumerate() {
                         neighbor_aug[i + 1] = v;
                     }
-                    let secant = if is_append {
-                        &end_aug - &neighbor_aug
-                    } else {
-                        &neighbor_aug - &end_aug
-                    };
+                    let secant = &end_aug - &neighbor_aug;
                     if secant.norm() > 1e-12 {
                         Some(secant.normalize())
                     } else {
@@ -194,13 +195,11 @@ impl WasmContinuationExtensionRunner {
                     cycle_points: endpoint.cycle_points.clone(),
                 };
 
-                let mut runner = ContinuationRunner::new_with_tangent(
-                    problem,
-                    initial_point,
-                    tangent,
-                    settings,
-                )
-                .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+                let mut runner =
+                    ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
+                        .map_err(|e| {
+                            JsValue::from_str(&format!("Continuation init failed: {}", e))
+                        })?;
                 runner.set_branch_type(merge.branch.branch_type.clone());
                 runner.set_upoldp(merge.branch.upoldp.clone());
 
@@ -208,24 +207,21 @@ impl WasmContinuationExtensionRunner {
             }
             BranchType::LimitCycle { ntst, ncol } => {
                 if merge.branch.upoldp.is_none() {
-                    if let Some(last_pt) = merge.branch.points.last() {
-                        let dim = system.equations.len();
-                        if last_pt.state.len() > dim {
-                            let x0 = &last_pt.state[0..dim];
-                            let period = *last_pt.state.last().unwrap_or(&1.0);
-                            let mut work = vec![0.0; dim];
-                            system.apply(0.0, x0, &mut work);
-                            let u0: Vec<f64> = work.iter().map(|&v| v * period).collect();
-                            merge.branch.upoldp = Some(vec![u0]);
-                        }
+                    let dim = system.equations.len();
+                    if endpoint.state.len() > dim {
+                        let x0 = &endpoint.state[0..dim];
+                        let period = *endpoint.state.last().unwrap_or(&1.0);
+                        let mut work = vec![0.0; dim];
+                        system.apply(0.0, x0, &mut work);
+                        let u0: Vec<f64> = work.iter().map(|&v| v * period).collect();
+                        merge.branch.upoldp = Some(vec![u0]);
                     }
                 }
 
-                let upoldp = merge
-                    .branch
-                    .upoldp
-                    .clone()
-                    .ok_or_else(|| JsValue::from_str("Limit cycle branch missing upoldp data"))?;
+                let upoldp =
+                    merge.branch.upoldp.clone().ok_or_else(|| {
+                        JsValue::from_str("Limit cycle branch missing upoldp data")
+                    })?;
 
                 let phase_direction = if !upoldp.is_empty() && !upoldp[0].is_empty() {
                     let dir_norm: f64 = upoldp[0].iter().map(|v| v * v).sum::<f64>().sqrt();
@@ -238,13 +234,8 @@ impl WasmContinuationExtensionRunner {
                     vec![1.0]
                 };
 
-                let last_pt = merge
-                    .branch
-                    .points
-                    .last()
-                    .ok_or_else(|| JsValue::from_str("Branch has no points"))?;
                 let dim = system.equations.len();
-                let phase_anchor: Vec<f64> = last_pt.state.iter().take(dim).cloned().collect();
+                let phase_anchor: Vec<f64> = endpoint.state.iter().take(dim).cloned().collect();
 
                 let mut boxed_system = Box::new(system);
                 let system_ptr: *mut EquationSystem = &mut *boxed_system;
@@ -280,11 +271,7 @@ impl WasmContinuationExtensionRunner {
                     for (i, &v) in neighbor.state.iter().enumerate() {
                         neighbor_aug[i + 1] = v;
                     }
-                    let secant = if is_append {
-                        &end_aug - &neighbor_aug
-                    } else {
-                        &neighbor_aug - &end_aug
-                    };
+                    let secant = &end_aug - &neighbor_aug;
                     if secant.norm() > 1e-12 {
                         Some(secant.normalize())
                     } else {
@@ -321,13 +308,11 @@ impl WasmContinuationExtensionRunner {
                 let problem: PeriodicOrbitCollocationProblem<'static> =
                     unsafe { std::mem::transmute(problem) };
 
-                let mut runner = ContinuationRunner::new_with_tangent(
-                    problem,
-                    initial_point,
-                    tangent,
-                    settings,
-                )
-                .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+                let mut runner =
+                    ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
+                        .map_err(|e| {
+                            JsValue::from_str(&format!("Continuation init failed: {}", e))
+                        })?;
                 runner.set_branch_type(merge.branch.branch_type.clone());
                 runner.set_upoldp(merge.branch.upoldp.clone());
 
@@ -390,9 +375,7 @@ impl WasmContinuationExtensionRunner {
         let mut branch = merge.branch;
         let orig_count = branch.points.len();
         let ExtensionMergeContext {
-            index_offset,
-            sign,
-            ..
+            index_offset, sign, ..
         } = merge;
 
         for (i, pt) in extension.points.into_iter().enumerate().skip(1) {
@@ -456,7 +439,10 @@ mod tests {
         );
 
         assert!(result.is_err(), "should reject empty branch");
-        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        let message = result
+            .err()
+            .and_then(|err| err.as_string())
+            .unwrap_or_default();
         assert!(message.contains("Branch has no indices"));
     }
 

@@ -6815,8 +6815,8 @@ export function InspectorDetailsPanel({
                           disabled={!canExtendBranch}
                           data-testid="branch-extend-direction"
                         >
-                          <option value="forward">Forward (Append)</option>
-                          <option value="backward">Backward (Prepend)</option>
+                          <option value="forward">Forward (Toward Higher Branch Index)</option>
+                          <option value="backward">Backward (Toward Lower Branch Index)</option>
                         </select>
                       </label>
                       <label>
