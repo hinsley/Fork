@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "vercel:install": "sh ./scripts/vercel-install.sh",
+    "vercel:build": "sh ./scripts/vercel-build.sh",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run && npm run test:e2e",
