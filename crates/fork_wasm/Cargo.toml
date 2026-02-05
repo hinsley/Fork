@@ -20,3 +20,6 @@ console_error_panic_hook = "0.1.7"
 nalgebra = "0.34"  # DEBUG_PD_CURVE: Added for debug residual computation
 anyhow = "1.0"
 num-complex = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

@@ -1,9 +1,7 @@
 //! Limit cycle continuation runner and mesh helpers.
 
 use crate::system::build_system;
-use fork_core::continuation::periodic::{
-    CollocationCoefficients, PeriodicOrbitCollocationProblem,
-};
+use fork_core::continuation::periodic::{CollocationCoefficients, PeriodicOrbitCollocationProblem};
 use fork_core::continuation::{
     BranchType, ContinuationPoint, ContinuationRunner, ContinuationSettings, LimitCycleSetup,
 };
@@ -131,11 +129,8 @@ impl WasmLimitCycleRunner {
             setup.guess.stage_states.clone()
         };
 
-        let flat_state = flatten_collocation_state(
-            &setup.guess.mesh_states,
-            &stage_states,
-            setup.guess.period,
-        );
+        let flat_state =
+            flatten_collocation_state(&setup.guess.mesh_states, &stage_states, setup.guess.period);
 
         let initial_point = ContinuationPoint {
             state: flat_state,
@@ -245,6 +240,7 @@ mod wasm_tests {
     };
     use serde_wasm_bindgen::{from_value, to_value};
     use wasm_bindgen::JsValue;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     fn settings_value(max_steps: usize) -> JsValue {
         let settings = ContinuationSettings {
@@ -276,7 +272,7 @@ mod wasm_tests {
         to_value(&setup).expect("setup")
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn limit_cycle_runner_rejects_unknown_parameter() {
         let result = WasmLimitCycleRunner::new(
             vec!["a * x".to_string()],
@@ -291,11 +287,14 @@ mod wasm_tests {
         );
 
         assert!(result.is_err(), "should reject unknown parameter");
-        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        let message = result
+            .err()
+            .and_then(|err| err.as_string())
+            .unwrap_or_default();
         assert!(message.contains("Unknown parameter"));
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn limit_cycle_runner_sets_branch_type_and_state_shape() {
         let mesh_points = 2;
         let degree = 1;

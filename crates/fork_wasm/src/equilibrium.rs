@@ -1,13 +1,13 @@
 //! Equilibrium solver runner and helpers.
 
 use crate::system::{build_system, SystemType, WasmSystem};
-use fork_core::traits::DynamicalSystem;
+use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::{
     compute_system_jacobian, evaluate_equilibrium_residual,
     solve_equilibrium as core_equilibrium_solver, EigenPair, EquilibriumResult, NewtonSettings,
     SystemKind,
 };
-use fork_core::equation_engine::EquationSystem;
+use fork_core::traits::DynamicalSystem;
 use nalgebra::linalg::SVD;
 use nalgebra::{Complex, DMatrix, DVector};
 use serde::Serialize;
@@ -156,19 +156,16 @@ impl WasmEquilibriumSolverRunner {
             if state.iterations >= state.settings.max_steps {
                 return Err(JsValue::from_str(&format!(
                     "Newton solver failed to converge in {} steps (‖f(x)‖ = {}).",
-                    state.settings.max_steps,
-                    state.residual_norm
+                    state.settings.max_steps, state.residual_norm
                 )));
             }
 
-            let jacobian = fork_core::equilibrium::compute_jacobian(
-                &state.system,
-                state.kind,
-                &state.state,
-            )
-            .map_err(|e| JsValue::from_str(&format!("Jacobian failed: {}", e)))?;
-            let delta = solve_linear_system(state.system.equations.len(), &jacobian, &state.residual)
-                .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+            let jacobian =
+                fork_core::equilibrium::compute_jacobian(&state.system, state.kind, &state.state)
+                    .map_err(|e| JsValue::from_str(&format!("Jacobian failed: {}", e)))?;
+            let delta =
+                solve_linear_system(state.system.equations.len(), &jacobian, &state.residual)
+                    .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
 
             for i in 0..state.state.len() {
                 state.state[i] -= state.settings.damping * delta[i];
@@ -218,7 +215,9 @@ impl WasmEquilibriumSolverRunner {
             .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
 
         if state.residual_norm > state.settings.tolerance {
-            return Err(JsValue::from_str("Equilibrium solver has not converged yet."));
+            return Err(JsValue::from_str(
+                "Equilibrium solver has not converged yet.",
+            ));
         }
 
         let jacobian = compute_system_jacobian(&state.system, state.kind, &state.state)
@@ -226,9 +225,11 @@ impl WasmEquilibriumSolverRunner {
         let eigenpairs = compute_equilibrium_eigenpairs(state.system.equations.len(), &jacobian)
             .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
         let cycle_points = match state.kind {
-            SystemKind::Map { iterations } if iterations > 1 => {
-                Some(compute_map_cycle_points(&state.system, &state.state, iterations))
-            }
+            SystemKind::Map { iterations } if iterations > 1 => Some(compute_map_cycle_points(
+                &state.system,
+                &state.state,
+                iterations,
+            )),
             _ => None,
         };
 
@@ -277,10 +278,7 @@ fn compute_map_cycle_points(
     points
 }
 
-fn compute_equilibrium_eigenpairs(
-    dim: usize,
-    jacobian: &[f64],
-) -> anyhow::Result<Vec<EigenPair>> {
+fn compute_equilibrium_eigenpairs(dim: usize, jacobian: &[f64]) -> anyhow::Result<Vec<EigenPair>> {
     let matrix = DMatrix::from_row_slice(dim, dim, jacobian);
     let eigenvalues = matrix.complex_eigenvalues();
     let complex_matrix = matrix.map(|v| Complex::new(v, 0.0));
@@ -295,9 +293,9 @@ fn compute_equilibrium_eigenpairs(
         }
 
         let svd = SVD::new(shifted, true, true);
-        let v_t = svd
-            .v_t
-            .ok_or_else(|| anyhow::anyhow!("Failed to compute eigenvector for eigenvalue index {}", idx))?;
+        let v_t = svd.v_t.ok_or_else(|| {
+            anyhow::anyhow!("Failed to compute eigenvector for eigenvalue index {}", idx)
+        })?;
         let row_index = v_t.nrows().saturating_sub(1);
         let row = v_t.row(row_index);
         let mut vector: Vec<Complex<f64>> = row.iter().map(|c| *c).collect();
@@ -330,8 +328,9 @@ fn normalize_complex_vector(vec: &mut [Complex<f64>]) {
 #[cfg(all(test, target_arch = "wasm32"))]
 mod wasm_wrapper_tests {
     use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
-    #[test]
+    #[wasm_bindgen_test]
     fn runner_rejects_zero_dimension_system() {
         let result = WasmEquilibriumSolverRunner::new(
             Vec::new(),
@@ -348,7 +347,7 @@ mod wasm_wrapper_tests {
         assert!(result.is_err(), "expected error for zero-dimension system");
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn runner_rejects_initial_guess_dimension_mismatch() {
         let result = WasmEquilibriumSolverRunner::new(
             vec!["x".to_string()],
@@ -365,8 +364,7 @@ mod wasm_wrapper_tests {
         assert!(result.is_err(), "expected error for initial guess mismatch");
     }
 
-    #[cfg(target_arch = "wasm32")]
-    #[test]
+    #[wasm_bindgen_test]
     fn runner_progresses_and_completes() {
         let mut runner = WasmEquilibriumSolverRunner::new(
             vec!["x".to_string()],
@@ -408,6 +406,7 @@ mod wasm_value_tests {
     use crate::system::WasmSystem;
     use fork_core::equilibrium::EquilibriumResult;
     use serde_wasm_bindgen::from_value;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     fn build_linear_system() -> WasmSystem {
         WasmSystem::new(
@@ -433,8 +432,7 @@ mod wasm_value_tests {
         .expect("system should build")
     }
 
-    #[cfg(target_arch = "wasm32")]
-    #[test]
+    #[wasm_bindgen_test]
     fn solve_equilibrium_converges_for_linear_system() {
         let system = build_linear_system();
         let result_val = system
@@ -446,7 +444,7 @@ mod wasm_value_tests {
         assert!(result.iterations <= 8);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn solve_equilibrium_reports_core_errors() {
         let system = build_linear_system();
         let err = system
@@ -458,8 +456,7 @@ mod wasm_value_tests {
         assert!(message.contains("max_steps must be greater than zero"));
     }
 
-    #[cfg(target_arch = "wasm32")]
-    #[test]
+    #[wasm_bindgen_test]
     fn solve_equilibrium_converges_for_identity_map() {
         let system = build_identity_map_system();
         let result_val = system
@@ -471,7 +468,7 @@ mod wasm_value_tests {
         assert_eq!(result.iterations, 0);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn equilibrium_runner_rejects_dimension_mismatch() {
         let result = WasmEquilibriumSolverRunner::new(
             vec!["x".to_string()],
@@ -486,12 +483,14 @@ mod wasm_value_tests {
         );
 
         assert!(result.is_err(), "should error on dimension mismatch");
-        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        let message = result
+            .err()
+            .and_then(|err| err.as_string())
+            .unwrap_or_default();
         assert!(message.contains("Initial guess dimension mismatch"));
     }
 
-    #[cfg(target_arch = "wasm32")]
-    #[test]
+    #[wasm_bindgen_test]
     fn equilibrium_runner_requires_convergence_for_result() {
         let runner = WasmEquilibriumSolverRunner::new(
             vec!["x".to_string()],
@@ -514,8 +513,7 @@ mod wasm_value_tests {
         assert!(message.contains("not converged"));
     }
 
-    #[cfg(target_arch = "wasm32")]
-    #[test]
+    #[wasm_bindgen_test]
     fn equilibrium_runner_marks_done_when_residual_is_small() {
         let mut runner = WasmEquilibriumSolverRunner::new(
             vec!["x".to_string()],

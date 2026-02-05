@@ -408,6 +408,7 @@ mod tests {
         BifurcationType, BranchType, ContinuationBranch, ContinuationPoint, ContinuationSettings,
     };
     use serde_wasm_bindgen::{from_value, to_value};
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     fn settings_value(max_steps: usize) -> wasm_bindgen::JsValue {
         let settings = ContinuationSettings {
@@ -422,7 +423,7 @@ mod tests {
         to_value(&settings).expect("settings")
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn extension_runner_rejects_empty_branch() {
         let branch = ContinuationBranch {
             points: Vec::new(),
@@ -454,7 +455,7 @@ mod tests {
         assert!(message.contains("Branch has no indices"));
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn extension_runner_fills_missing_indices() {
         let branch = ContinuationBranch {
             points: vec![ContinuationPoint {
@@ -492,7 +493,7 @@ mod tests {
         assert_eq!(result_branch.indices, vec![0]);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn extension_runner_merges_indices_after_step() {
         let branch = ContinuationBranch {
             points: vec![
@@ -539,7 +540,7 @@ mod tests {
         assert_eq!(result_branch.indices.last().copied(), Some(2));
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn backward_extension_from_forward_initialized_branch_moves_param_outward_on_min_index_side() {
         let branch = ContinuationBranch {
             points: vec![

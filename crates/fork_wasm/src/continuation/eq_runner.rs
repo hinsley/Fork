@@ -7,7 +7,6 @@ use fork_core::equilibrium::SystemKind;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 
-
 /// WASM-exported runner for stepped equilibrium continuation.
 /// Allows progress reporting by running batches of steps at a time.
 #[wasm_bindgen]
@@ -126,6 +125,7 @@ impl WasmEquilibriumRunner {
 mod tests {
     use super::*;
     use fork_core::continuation::ContinuationSettings;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     fn settings_with_max_steps(max_steps: usize) -> JsValue {
         let settings = ContinuationSettings {
@@ -157,7 +157,7 @@ mod tests {
         .expect("runner")
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn equilibrium_runner_handles_zero_steps() {
         let settings_val = settings_with_max_steps(0);
         let mut runner = WasmEquilibriumRunner::new(
@@ -180,7 +180,7 @@ mod tests {
         assert!(runner.get_result().is_ok());
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn equilibrium_runner_rejects_unknown_parameter() {
         let result = WasmEquilibriumRunner::new(
             vec!["x".to_string()],
@@ -196,11 +196,14 @@ mod tests {
         );
 
         assert!(result.is_err(), "should reject unknown parameter");
-        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        let message = result
+            .err()
+            .and_then(|err| err.as_string())
+            .unwrap_or_default();
         assert!(message.contains("Unknown parameter"));
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn equilibrium_runner_rejects_invalid_settings() {
         let result = WasmEquilibriumRunner::new(
             vec!["a * x".to_string()],
@@ -216,11 +219,14 @@ mod tests {
         );
 
         assert!(result.is_err(), "should reject invalid settings");
-        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        let message = result
+            .err()
+            .and_then(|err| err.as_string())
+            .unwrap_or_default();
         assert!(message.contains("Invalid continuation settings"));
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn equilibrium_runner_rejects_invalid_equation() {
         let result = WasmEquilibriumRunner::new(
             vec!["1 +".to_string()],
@@ -236,11 +242,14 @@ mod tests {
         );
 
         assert!(result.is_err(), "should reject invalid equation");
-        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        let message = result
+            .err()
+            .and_then(|err| err.as_string())
+            .unwrap_or_default();
         assert!(message.contains("Unexpected token"));
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn equilibrium_runner_errors_after_result_taken() {
         let mut runner = build_runner(0);
         runner.run_steps(1).expect("run steps");

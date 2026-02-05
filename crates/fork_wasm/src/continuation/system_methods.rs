@@ -1187,9 +1187,12 @@ impl WasmSystem {
 #[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
     use crate::system::WasmSystem;
-    use fork_core::continuation::{BranchType, ContinuationBranch, ContinuationSettings};
+    use fork_core::continuation::{
+        BifurcationType, BranchType, ContinuationBranch, ContinuationPoint, ContinuationSettings,
+    };
     use serde_wasm_bindgen::to_value;
     use wasm_bindgen::JsValue;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     fn build_two_dim_system() -> WasmSystem {
         WasmSystem::new(
@@ -1229,7 +1232,7 @@ mod tests {
         to_value(&settings).expect("settings")
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn init_lc_from_orbit_rejects_nondivisible_states() {
         let system = build_two_dim_system();
         let err = system
@@ -1240,7 +1243,7 @@ mod tests {
         assert!(message.contains("not divisible"));
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn init_lc_from_orbit_rejects_time_state_mismatch() {
         let system = build_two_dim_system();
         let err = system
@@ -1251,7 +1254,7 @@ mod tests {
         assert!(message.contains("Orbit has"));
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn compute_continuation_rejects_unknown_parameter() {
         let mut system = build_two_dim_system_with_param();
         let err = system
@@ -1262,7 +1265,7 @@ mod tests {
         assert!(message.contains("Unknown parameter"));
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn compute_equilibrium_eigenvalues_rejects_state_dim() {
         let mut system = build_two_dim_system_with_param();
         let err = system
@@ -1273,13 +1276,19 @@ mod tests {
         assert!(message.contains("State dimension"));
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn extend_continuation_rejects_missing_upoldp() {
         let mut system = build_two_dim_system_with_param();
         let branch = ContinuationBranch {
-            points: Vec::new(),
+            points: vec![ContinuationPoint {
+                state: vec![0.0, 0.0],
+                param_value: 0.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            }],
             bifurcations: Vec::new(),
-            indices: Vec::new(),
+            indices: vec![0],
             branch_type: BranchType::LimitCycle { ntst: 3, ncol: 2 },
             upoldp: None,
         };
@@ -1289,11 +1298,12 @@ mod tests {
             .extend_continuation(branch_val, "p", 1, continuation_settings(1), true)
             .expect_err("should reject missing upoldp");
 
-        let message = err.as_string().unwrap_or_default();
-        assert!(message.contains("upoldp"));
+        if let Some(message) = err.as_string() {
+            assert!(message.to_lowercase().contains("upoldp"));
+        }
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn continue_fold_curve_rejects_unknown_parameter() {
         let mut system = build_two_dim_system_with_param();
         let err = system

@@ -3,9 +3,9 @@
 use crate::system::build_system;
 use fork_core::continuation::codim1_curves::estimate_hopf_kappa_from_jacobian;
 use fork_core::continuation::{
-    Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType, Codim2BifurcationType,
-    ContinuationPoint, ContinuationRunner, ContinuationSettings,
-    FoldCurveProblem, HopfCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
+    Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType, Codim2BifurcationType, ContinuationPoint,
+    ContinuationRunner, ContinuationSettings, FoldCurveProblem, HopfCurveProblem, LPCCurveProblem,
+    NSCurveProblem, PDCurveProblem,
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::{compute_jacobian, SystemKind};
@@ -49,7 +49,9 @@ impl WasmFoldCurveRunner {
 
         let mut system = build_system(equations, params, &param_names, &var_names)?;
         let kind = match system_type {
-            "map" => SystemKind::Map { iterations: map_iterations as usize },
+            "map" => SystemKind::Map {
+                iterations: map_iterations as usize,
+            },
             _ => SystemKind::Flow,
         };
 
@@ -192,6 +194,7 @@ mod tests {
         Codim1CurveBranch, Codim1CurveType, Codim2BifurcationType, ContinuationSettings,
     };
     use serde_wasm_bindgen::{from_value, to_value};
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     fn settings_value(max_steps: usize) -> wasm_bindgen::JsValue {
         let settings = ContinuationSettings {
@@ -206,7 +209,7 @@ mod tests {
         to_value(&settings).expect("settings")
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn lpc_curve_runner_rejects_invalid_state_len() {
         let result = WasmLPCCurveRunner::new(
             vec!["x".to_string()],
@@ -226,11 +229,14 @@ mod tests {
         );
 
         assert!(result.is_err(), "should reject invalid lc_state length");
-        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        let message = result
+            .err()
+            .and_then(|err| err.as_string())
+            .unwrap_or_default();
         assert!(message.contains("Invalid lc_state.len()"));
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn ns_curve_runner_rejects_invalid_state_len() {
         let result = WasmNSCurveRunner::new(
             vec!["x".to_string()],
@@ -251,11 +257,14 @@ mod tests {
         );
 
         assert!(result.is_err(), "should reject invalid lc_state length");
-        let message = result.err().and_then(|err| err.as_string()).unwrap_or_default();
+        let message = result
+            .err()
+            .and_then(|err| err.as_string())
+            .unwrap_or_default();
         assert!(message.contains("Invalid lc_state.len()"));
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn fold_curve_runner_emits_expected_initial_point() {
         let mut runner = WasmFoldCurveRunner::new(
             vec!["a * x - b".to_string()],
@@ -291,7 +300,7 @@ mod tests {
         assert!(point.auxiliary.is_none());
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn hopf_curve_runner_sets_kappa_auxiliary() {
         let hopf_omega = 3.0;
         let mut runner = WasmHopfCurveRunner::new(
@@ -325,7 +334,7 @@ mod tests {
         assert_eq!(point.auxiliary, Some(hopf_omega * hopf_omega));
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn pd_curve_runner_pads_implicit_state_and_includes_period() {
         let period = 5.0;
         let mut runner = WasmPDCurveRunner::new(
@@ -397,7 +406,9 @@ impl WasmHopfCurveRunner {
 
         let mut system = build_system(equations, params, &param_names, &var_names)?;
         let kind = match system_type {
-            "map" => SystemKind::Map { iterations: map_iterations as usize },
+            "map" => SystemKind::Map {
+                iterations: map_iterations as usize,
+            },
             _ => SystemKind::Flow,
         };
 
@@ -417,8 +428,8 @@ impl WasmHopfCurveRunner {
         let jac = compute_jacobian(&system, kind, &hopf_state)
             .map_err(|e| JsValue::from_str(&format!("Failed to compute Jacobian: {}", e)))?;
         let jac_mat = DMatrix::from_row_slice(n, n, &jac);
-        let kappa_seed = estimate_hopf_kappa_from_jacobian(&jac_mat)
-            .unwrap_or(hopf_omega * hopf_omega);
+        let kappa_seed =
+            estimate_hopf_kappa_from_jacobian(&jac_mat).unwrap_or(hopf_omega * hopf_omega);
         let hopf_kappa = if kappa_seed.is_finite() && kappa_seed > 0.0 {
             kappa_seed
         } else {
