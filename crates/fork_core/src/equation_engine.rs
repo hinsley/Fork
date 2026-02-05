@@ -30,8 +30,30 @@ pub enum OpCode {
     Sin,
     /// Pops top value (a), pushes cos(a).
     Cos,
+    /// Pops top value (a), pushes tan(a).
+    Tan,
     /// Pops top value (a), pushes exp(a).
     Exp,
+    /// Pops top value (a), pushes ln(a).
+    Log,
+    /// Pops top value (a), pushes sinh(a).
+    Sinh,
+    /// Pops top value (a), pushes cosh(a).
+    Cosh,
+    /// Pops top value (a), pushes tanh(a).
+    Tanh,
+    /// Pops top value (a), pushes sec(a).
+    Sec,
+    /// Pops top value (a), pushes csc(a).
+    Csc,
+    /// Pops top value (a), pushes cot(a).
+    Cot,
+    /// Pops top value (a), pushes sech(a).
+    Sech,
+    /// Pops top value (a), pushes csch(a).
+    Csch,
+    /// Pops top value (a), pushes coth(a).
+    Coth,
     /// Pops top value (a), pushes -a.
     Neg,
 }
@@ -116,9 +138,53 @@ impl VM {
                     let a = stack.pop().unwrap();
                     stack.push(a.cos());
                 }
+                OpCode::Tan => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.tan());
+                }
                 OpCode::Exp => {
                     let a = stack.pop().unwrap();
                     stack.push(a.exp());
+                }
+                OpCode::Log => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.ln());
+                }
+                OpCode::Sinh => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.sinh());
+                }
+                OpCode::Cosh => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.cosh());
+                }
+                OpCode::Tanh => {
+                    let a = stack.pop().unwrap();
+                    stack.push(a.tanh());
+                }
+                OpCode::Sec => {
+                    let a = stack.pop().unwrap();
+                    stack.push(T::one() / a.cos());
+                }
+                OpCode::Csc => {
+                    let a = stack.pop().unwrap();
+                    stack.push(T::one() / a.sin());
+                }
+                OpCode::Cot => {
+                    let a = stack.pop().unwrap();
+                    stack.push(T::one() / a.tan());
+                }
+                OpCode::Sech => {
+                    let a = stack.pop().unwrap();
+                    stack.push(T::one() / a.cosh());
+                }
+                OpCode::Csch => {
+                    let a = stack.pop().unwrap();
+                    stack.push(T::one() / a.sinh());
+                }
+                OpCode::Coth => {
+                    let a = stack.pop().unwrap();
+                    stack.push(T::one() / a.tanh());
                 }
                 OpCode::Neg => {
                     let a = stack.pop().unwrap();
@@ -208,7 +274,18 @@ impl Compiler {
                 match func.as_str() {
                     "sin" => ops.push(OpCode::Sin),
                     "cos" => ops.push(OpCode::Cos),
+                    "tan" => ops.push(OpCode::Tan),
                     "exp" => ops.push(OpCode::Exp),
+                    "log" | "ln" => ops.push(OpCode::Log),
+                    "sinh" => ops.push(OpCode::Sinh),
+                    "cosh" => ops.push(OpCode::Cosh),
+                    "tanh" => ops.push(OpCode::Tanh),
+                    "sec" => ops.push(OpCode::Sec),
+                    "csc" => ops.push(OpCode::Csc),
+                    "cot" => ops.push(OpCode::Cot),
+                    "sech" => ops.push(OpCode::Sech),
+                    "csch" => ops.push(OpCode::Csch),
+                    "coth" => ops.push(OpCode::Coth),
                     _ => panic!("Unknown function: {}", func),
                 }
             }
@@ -416,7 +493,55 @@ impl Parser {
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use super::{parse, Compiler, Dual, EquationSystem};
+    use crate::traits::DynamicalSystem;
+
+    fn eval_with_x_and_p(expr: &str, x: f64, p: f64) -> f64 {
+        let var_names = vec!["x".to_string()];
+        let param_names = vec!["p".to_string()];
+        let compiler = Compiler::new(&var_names, &param_names);
+        let parsed = parse(expr).expect("expression should parse");
+        let bytecode = compiler.compile(&parsed);
+
+        let system = EquationSystem::new(vec![bytecode], vec![p]);
+        let mut out = vec![0.0];
+        system.apply(0.0, &[x], &mut out);
+        out[0]
+    }
+
+    fn assert_close(actual: f64, expected: f64) {
+        let tol = 1e-12;
+        assert!(
+            (actual - expected).abs() < tol,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    fn assert_eps_close(actual: f64, expected: f64) {
+        let tol = 1e-6;
+        assert!(
+            (actual - expected).abs() < tol,
+            "expected derivative {expected}, got {actual}"
+        );
+    }
+
+    fn eval_dual_wrt_p(expr: &str, x: f64, p: f64) -> Dual {
+        let var_names = vec!["x".to_string()];
+        let param_names = vec!["p".to_string()];
+        let compiler = Compiler::new(&var_names, &param_names);
+        let parsed = parse(expr).expect("expression should parse");
+        let bytecode = compiler.compile(&parsed);
+
+        let system = EquationSystem::new(vec![bytecode], vec![p]);
+        let mut out = vec![Dual::new(0.0, 0.0)];
+        system.evaluate_dual_wrt_param(&[x], 0, &mut out);
+        out[0]
+    }
+
+    fn numeric_derivative_wrt_p(expr: &str, x: f64, p: f64) -> f64 {
+        let h = 1e-6;
+        (eval_with_x_and_p(expr, x, p + h) - eval_with_x_and_p(expr, x, p - h)) / (2.0 * h)
+    }
 
     #[test]
     fn parse_rejects_invalid_token() {
@@ -427,6 +552,44 @@ mod tests {
     fn parse_rejects_invalid_number() {
         assert!(parse("1..2").is_err());
         assert!(parse(".").is_err());
+    }
+
+    #[test]
+    fn evaluates_trig_and_hyperbolic_function_family() {
+        let x = 0.7_f64;
+        let p = 1.1_f64;
+
+        assert_close(eval_with_x_and_p("tan(x)", x, p), x.tan());
+        assert_close(eval_with_x_and_p("log(p)", x, p), p.ln());
+
+        assert_close(eval_with_x_and_p("sec(x)", x, p), 1.0 / x.cos());
+        assert_close(eval_with_x_and_p("csc(x)", x, p), 1.0 / x.sin());
+        assert_close(eval_with_x_and_p("cot(x)", x, p), 1.0 / x.tan());
+
+        assert_close(eval_with_x_and_p("sinh(p)", x, p), p.sinh());
+        assert_close(eval_with_x_and_p("cosh(p)", x, p), p.cosh());
+        assert_close(eval_with_x_and_p("tanh(p)", x, p), p.tanh());
+        assert_close(eval_with_x_and_p("sech(p)", x, p), 1.0 / p.cosh());
+        assert_close(eval_with_x_and_p("csch(p)", x, p), 1.0 / p.sinh());
+        assert_close(eval_with_x_and_p("coth(p)", x, p), 1.0 / p.tanh());
+    }
+
+    #[test]
+    fn dual_param_derivative_matches_numeric_for_supported_functions() {
+        let x = 0.7_f64;
+        let p = 1.1_f64;
+        let expressions = [
+            "tan(p)", "log(p)", "sec(p)", "csc(p)", "cot(p)", "sinh(p)", "cosh(p)", "tanh(p)",
+            "sech(p)", "csch(p)", "coth(p)",
+        ];
+
+        for expr in expressions {
+            let dual = eval_dual_wrt_p(expr, x, p);
+            let expected_val = eval_with_x_and_p(expr, x, p);
+            let expected_eps = numeric_derivative_wrt_p(expr, x, p);
+            assert_close(dual.val, expected_val);
+            assert_eps_close(dual.eps, expected_eps);
+        }
     }
 }
 
