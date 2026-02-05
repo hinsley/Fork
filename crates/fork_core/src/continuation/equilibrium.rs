@@ -1,11 +1,11 @@
 use super::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
-use super::{
-    continue_with_problem, extend_branch_with_problem, BifurcationType, ContinuationBranch,
-    ContinuationPoint, ContinuationSettings,
-};
 use super::util::{
     hopf_test_function, neimark_sacker_test_function, neutral_saddle_test_function,
     period_doubling_test_function,
+};
+use super::{
+    continue_with_problem, extend_branch_with_problem, BifurcationType, ContinuationBranch,
+    ContinuationPoint, ContinuationSettings,
 };
 use crate::equation_engine::EquationSystem;
 use crate::equilibrium::{
@@ -233,17 +233,16 @@ pub fn map_cycle_seed_from_pd(
         let v_t = svd
             .v_t
             .ok_or_else(|| anyhow::anyhow!("SVD failed to compute eigenvector basis"))?;
-        let (min_idx, _) = svd
-            .singular_values
-            .iter()
-            .enumerate()
-            .fold((0usize, f64::INFINITY), |(idx_min, val_min), (idx, &val)| {
+        let (min_idx, _) = svd.singular_values.iter().enumerate().fold(
+            (0usize, f64::INFINITY),
+            |(idx_min, val_min), (idx, &val)| {
                 if val < val_min {
                     (idx, val)
                 } else {
                     (idx_min, val_min)
                 }
-            });
+            },
+        );
 
         let mut eigenvector: Vec<f64> = v_t.row(min_idx).iter().copied().collect();
         let norm = eigenvector.iter().map(|v| v * v).sum::<f64>().sqrt();
@@ -355,18 +354,18 @@ mod tests {
         ops0.push(OpCode::Mul);
         ops0.push(OpCode::LoadVar(1));
         ops0.push(OpCode::Sub);
-        
+
         let mut ops1 = Vec::new();
         ops1.push(OpCode::LoadVar(0));
         ops1.push(OpCode::LoadParam(0));
         ops1.push(OpCode::LoadVar(1));
         ops1.push(OpCode::Mul);
         ops1.push(OpCode::Add);
-        
+
         let equations = vec![Bytecode { ops: ops0 }, Bytecode { ops: ops1 }];
         let params = vec![-0.5]; // Start at mu = -0.5
         let mut system = EquationSystem::new(equations, params);
-        
+
         let initial_state = vec![0.0, 0.0];
         let settings = ContinuationSettings {
             step_size: 0.1,
@@ -377,7 +376,7 @@ mod tests {
             corrector_tolerance: 1e-8,
             step_tolerance: 1e-8,
         };
-        
+
         let branch = continue_parameter(
             &mut system,
             SystemKind::Flow,
@@ -385,18 +384,26 @@ mod tests {
             0,
             settings,
             true, // Forward to mu = 0 and beyond
-        ).expect("Continuation should succeed");
-        
+        )
+        .expect("Continuation should succeed");
+
         println!("Branch has {} points", branch.points.len());
-        println!("Bifurcations detected at indices: {:?}", branch.bifurcations);
-        
+        println!(
+            "Bifurcations detected at indices: {:?}",
+            branch.bifurcations
+        );
+
         assert!(!branch.bifurcations.is_empty(), "No bifurcations detected!");
-        
+
         let bif_idx = branch.bifurcations[0];
         let bif_point = &branch.points[bif_idx];
-        
+
         assert_eq!(bif_point.stability, BifurcationType::Hopf);
-        assert!(bif_point.param_value.abs() < 1e-3, "Hopf point {} too far from 0", bif_point.param_value);
+        assert!(
+            bif_point.param_value.abs() < 1e-3,
+            "Hopf point {} too far from 0",
+            bif_point.param_value
+        );
     }
 
     #[test]
@@ -457,6 +464,258 @@ mod tests {
             hopf_indices,
             vec![-9],
             "expected only Hopf at index -9, got {hopf_indices:?}"
+        );
+    }
+
+    #[test]
+    fn test_rossler_backward_extension_keeps_local_parameter_direction() {
+        let equations = vec!["-y - z", "x + a * y", "b + z * (x - c)"];
+        let param_names = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let var_names = vec!["x".to_string(), "y".to_string(), "z".to_string()];
+        let compiler = Compiler::new(&var_names, &param_names);
+        let mut bytecodes = Vec::with_capacity(equations.len());
+        for equation in &equations {
+            let expr = parse(equation).expect("Rossler equation should parse");
+            bytecodes.push(compiler.compile(&expr));
+        }
+
+        let mut system = EquationSystem::new(bytecodes, vec![0.2, 0.2, 5.7]);
+        system.set_maps(compiler.param_map, compiler.var_map);
+
+        let equilibrium = solve_equilibrium(
+            &system,
+            SystemKind::Flow,
+            &[0.0, 0.0, 0.0],
+            NewtonSettings::default(),
+        )
+        .expect("Rossler equilibrium should converge");
+
+        let settings = ContinuationSettings {
+            step_size: 0.01,
+            min_step_size: 1e-5,
+            max_step_size: 0.1,
+            max_steps: 40,
+            corrector_steps: 4,
+            corrector_tolerance: 1e-6,
+            step_tolerance: 1e-6,
+        };
+
+        let seed_branch = continue_parameter(
+            &mut system,
+            SystemKind::Flow,
+            &equilibrium.state,
+            0,
+            settings,
+            false,
+        )
+        .expect("Rossler backward continuation should succeed");
+
+        let old_min_idx = *seed_branch.indices.iter().min().expect("minimum index");
+        let endpoint_pos = seed_branch
+            .indices
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, idx)| *idx)
+            .map(|(pos, _)| pos)
+            .expect("endpoint position");
+        let neighbor_pos = seed_branch
+            .indices
+            .iter()
+            .enumerate()
+            .filter(|(pos, _)| *pos != endpoint_pos)
+            .min_by_key(|(_, idx)| *idx)
+            .map(|(pos, _)| pos)
+            .expect("neighbor position");
+
+        let endpoint_param = seed_branch.points[endpoint_pos].param_value;
+        let neighbor_param = seed_branch.points[neighbor_pos].param_value;
+        let secant_param = endpoint_param - neighbor_param;
+        assert!(
+            secant_param.abs() > 1e-10,
+            "Expected non-degenerate endpoint secant"
+        );
+
+        let extension = extend_branch(
+            &mut system,
+            SystemKind::Flow,
+            seed_branch,
+            0,
+            ContinuationSettings {
+                max_steps: 20,
+                ..settings
+            },
+            false,
+        )
+        .expect("Rossler backward extension should succeed");
+
+        let new_min_idx = *extension
+            .indices
+            .iter()
+            .min()
+            .expect("extended minimum index");
+        assert!(
+            new_min_idx < old_min_idx,
+            "Expected backward extension to decrease minimum index"
+        );
+
+        let first_new_pos = extension
+            .indices
+            .iter()
+            .position(|idx| *idx == old_min_idx - 1)
+            .expect("first extended point index");
+        let first_new_param = extension.points[first_new_pos].param_value;
+        let first_delta = first_new_param - endpoint_param;
+        assert!(
+            first_delta * secant_param > 0.0,
+            "First backward extension step doubled back: secant={}, delta={}",
+            secant_param,
+            first_delta
+        );
+
+        let mut side: Vec<(i32, f64)> = extension
+            .indices
+            .iter()
+            .zip(extension.points.iter())
+            .filter(|(idx, _)| **idx <= old_min_idx)
+            .map(|(idx, pt)| (*idx, pt.param_value))
+            .collect();
+        side.sort_by(|a, b| b.0.cmp(&a.0));
+
+        for window in side.windows(2) {
+            let prev = window[0];
+            let next = window[1];
+            let step_delta = next.1 - prev.1;
+            assert!(
+                step_delta * secant_param >= -1e-9,
+                "Backward extension changed direction between idx {} and {}: secant={}, step_delta={}",
+                prev.0,
+                next.0,
+                secant_param,
+                step_delta
+            );
+        }
+    }
+
+    #[test]
+    fn test_rossler_forward_initialized_branch_extends_backward_from_min_index_side() {
+        let equations = vec!["-y - z", "x + a * y", "b + z * (x - c)"];
+        let param_names = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let var_names = vec!["x".to_string(), "y".to_string(), "z".to_string()];
+        let compiler = Compiler::new(&var_names, &param_names);
+        let mut bytecodes = Vec::with_capacity(equations.len());
+        for equation in &equations {
+            let expr = parse(equation).expect("Rossler equation should parse");
+            bytecodes.push(compiler.compile(&expr));
+        }
+
+        let mut system = EquationSystem::new(bytecodes, vec![0.2, 0.2, 5.7]);
+        system.set_maps(compiler.param_map, compiler.var_map);
+
+        let equilibrium = solve_equilibrium(
+            &system,
+            SystemKind::Flow,
+            &[0.0, 0.0, 0.0],
+            NewtonSettings::default(),
+        )
+        .expect("Rossler equilibrium should converge");
+
+        let settings = ContinuationSettings {
+            step_size: 0.01,
+            min_step_size: 1e-5,
+            max_step_size: 0.1,
+            max_steps: 120,
+            corrector_steps: 4,
+            corrector_tolerance: 1e-6,
+            step_tolerance: 1e-6,
+        };
+
+        let forward_branch = continue_parameter(
+            &mut system,
+            SystemKind::Flow,
+            &equilibrium.state,
+            0,
+            settings,
+            true,
+        )
+        .expect("Rossler forward continuation should succeed");
+
+        let old_min_idx = *forward_branch.indices.iter().min().expect("minimum index");
+        let old_max_idx = *forward_branch.indices.iter().max().expect("maximum index");
+        assert_eq!(
+            old_min_idx, 0,
+            "forward-initialized branch should start at index 0"
+        );
+
+        let endpoint_pos = forward_branch
+            .indices
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, idx)| *idx)
+            .map(|(pos, _)| pos)
+            .expect("endpoint position");
+        let neighbor_pos = forward_branch
+            .indices
+            .iter()
+            .enumerate()
+            .filter(|(pos, _)| *pos != endpoint_pos)
+            .min_by_key(|(_, idx)| *idx)
+            .map(|(pos, _)| pos)
+            .expect("neighbor position");
+
+        let endpoint_param = forward_branch.points[endpoint_pos].param_value;
+        let neighbor_param = forward_branch.points[neighbor_pos].param_value;
+        let secant_param = endpoint_param - neighbor_param;
+        assert!(
+            secant_param.abs() > 1e-10,
+            "Expected non-degenerate endpoint secant"
+        );
+
+        let extended = extend_branch(
+            &mut system,
+            SystemKind::Flow,
+            forward_branch,
+            0,
+            ContinuationSettings {
+                max_steps: 40,
+                ..settings
+            },
+            false,
+        )
+        .expect("Backward extension should succeed from forward-initialized branch");
+
+        let new_min_idx = *extended
+            .indices
+            .iter()
+            .min()
+            .expect("extended minimum index");
+        let new_max_idx = *extended
+            .indices
+            .iter()
+            .max()
+            .expect("extended maximum index");
+        assert!(
+            new_min_idx < old_min_idx,
+            "Backward extension should decrease min index (old={}, new={})",
+            old_min_idx,
+            new_min_idx
+        );
+        assert_eq!(
+            new_max_idx, old_max_idx,
+            "Backward extension should preserve max index side"
+        );
+
+        let first_new_pos = extended
+            .indices
+            .iter()
+            .position(|idx| *idx == old_min_idx - 1)
+            .expect("first extended point index");
+        let first_new_param = extended.points[first_new_pos].param_value;
+        let first_delta = first_new_param - endpoint_param;
+        assert!(
+            first_delta * secant_param > 0.0,
+            "Backward extension from forward-initialized branch doubled back: secant={}, delta={}",
+            secant_param,
+            first_delta
         );
     }
 

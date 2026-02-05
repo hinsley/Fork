@@ -32,6 +32,23 @@ enum ExtensionRunnerKind {
     },
 }
 
+fn orient_extension_tangent(
+    tangent: &mut DVector<f64>,
+    secant: Option<&DVector<f64>>,
+    forward: bool,
+) {
+    if let Some(secant) = secant {
+        if tangent.dot(secant) < 0.0 {
+            *tangent = -tangent.clone();
+        }
+    } else {
+        let forward_sign = if forward { 1.0 } else { -1.0 };
+        if tangent[0] * forward_sign < 0.0 {
+            *tangent = -tangent.clone();
+        }
+    }
+}
+
 #[wasm_bindgen]
 pub struct WasmContinuationExtensionRunner {
     runner: Option<ExtensionRunnerKind>,
@@ -173,19 +190,14 @@ impl WasmContinuationExtensionRunner {
                     None
                 };
 
-                let mut tangent = compute_tangent_from_problem(&mut problem, &end_aug)
-                    .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
-
-                if let Some(secant) = secant_direction {
-                    if tangent.dot(&secant) < 0.0 {
-                        tangent = -tangent;
-                    }
+                let mut tangent = if let Some(secant) = secant_direction.as_ref() {
+                    secant.clone()
                 } else {
-                    let forward_sign = if forward { 1.0 } else { -1.0 };
-                    if tangent[0] * forward_sign < 0.0 {
-                        tangent = -tangent;
-                    }
-                }
+                    compute_tangent_from_problem(&mut problem, &end_aug)
+                        .map_err(|e| JsValue::from_str(&format!("{}", e)))?
+                };
+
+                orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
 
                 let initial_point = ContinuationPoint {
                     state: endpoint.state.clone(),
@@ -281,19 +293,14 @@ impl WasmContinuationExtensionRunner {
                     None
                 };
 
-                let mut tangent = compute_tangent_from_problem(&mut problem, &end_aug)
-                    .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
-
-                if let Some(secant) = secant_direction {
-                    if tangent.dot(&secant) < 0.0 {
-                        tangent = -tangent;
-                    }
+                let mut tangent = if let Some(secant) = secant_direction.as_ref() {
+                    secant.clone()
                 } else {
-                    let forward_sign = if forward { 1.0 } else { -1.0 };
-                    if tangent[0] * forward_sign < 0.0 {
-                        tangent = -tangent;
-                    }
-                }
+                    compute_tangent_from_problem(&mut problem, &end_aug)
+                        .map_err(|e| JsValue::from_str(&format!("{}", e)))?
+                };
+
+                orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
 
                 let initial_point = ContinuationPoint {
                     state: endpoint.state.clone(),
@@ -432,6 +439,7 @@ mod tests {
             vec![],
             vec!["x".to_string()],
             "flow",
+            1,
             branch_val,
             "p",
             settings_value(3),
@@ -469,6 +477,7 @@ mod tests {
             vec!["a".to_string()],
             vec!["x".to_string()],
             "flow",
+            1,
             branch_val,
             "a",
             settings_value(0),
@@ -515,6 +524,7 @@ mod tests {
             vec!["a".to_string()],
             vec!["x".to_string()],
             "flow",
+            1,
             branch_val,
             "a",
             settings_value(1),
@@ -527,5 +537,94 @@ mod tests {
         let result_branch: ContinuationBranch = from_value(result_val).expect("branch");
         assert_eq!(result_branch.indices.len(), 3);
         assert_eq!(result_branch.indices.last().copied(), Some(2));
+    }
+
+    #[test]
+    fn backward_extension_from_forward_initialized_branch_moves_param_outward_on_min_index_side() {
+        let branch = ContinuationBranch {
+            points: vec![
+                ContinuationPoint {
+                    state: vec![0.2],
+                    param_value: 0.2,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+                ContinuationPoint {
+                    state: vec![0.21],
+                    param_value: 0.21,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+            ],
+            bifurcations: Vec::new(),
+            indices: vec![0, 1],
+            branch_type: BranchType::Equilibrium,
+            upoldp: None,
+        };
+        let branch_val = to_value(&branch).expect("branch");
+
+        let mut runner = WasmContinuationExtensionRunner::new(
+            vec!["x - a".to_string()],
+            vec![0.2],
+            vec!["a".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            1,
+            branch_val,
+            "a",
+            settings_value(1),
+            false,
+        )
+        .expect("runner");
+
+        runner.run_steps(1).expect("run steps");
+        let result_val = runner.get_result().expect("result");
+        let result_branch: ContinuationBranch = from_value(result_val).expect("branch");
+
+        let new_pos = result_branch
+            .indices
+            .iter()
+            .position(|idx| *idx == -1)
+            .expect("new backward index");
+        let new_param = result_branch.points[new_pos].param_value;
+        assert!(
+            new_param < 0.2,
+            "expected backward extension from min-index side to decrease parameter, got {}",
+            new_param
+        );
+    }
+}
+
+#[cfg(test)]
+mod orientation_tests {
+    use super::orient_extension_tangent;
+    use nalgebra::DVector;
+
+    #[test]
+    fn orient_extension_tangent_aligns_with_secant_by_dot() {
+        let mut tangent = DVector::from_vec(vec![0.2, 1.0, 0.0]);
+        let secant = DVector::from_vec(vec![-0.1, -1.0, 0.0]);
+        assert!(tangent.dot(&secant) < 0.0, "setup should require a flip");
+
+        orient_extension_tangent(&mut tangent, Some(&secant), false);
+
+        assert!(
+            tangent.dot(&secant) > 0.0,
+            "tangent should align with secant by dot product"
+        );
+    }
+
+    #[test]
+    fn orient_extension_tangent_falls_back_to_requested_direction_without_secant() {
+        let mut tangent = DVector::from_vec(vec![1.0, 0.0, 0.0]);
+
+        orient_extension_tangent(&mut tangent, None, false);
+
+        assert!(
+            tangent[0] < 0.0,
+            "without secant, backward direction should enforce negative parameter component"
+        );
     }
 }

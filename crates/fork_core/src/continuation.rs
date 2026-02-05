@@ -685,6 +685,23 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
     }
 }
 
+fn orient_extension_tangent(
+    tangent: &mut DVector<f64>,
+    secant: Option<&DVector<f64>>,
+    forward: bool,
+) {
+    if let Some(secant) = secant {
+        if tangent.dot(secant) < 0.0 {
+            *tangent = -tangent.clone();
+        }
+    } else {
+        let forward_sign = if forward { 1.0 } else { -1.0 };
+        if tangent[0] * forward_sign < 0.0 {
+            *tangent = -tangent.clone();
+        }
+    }
+}
+
 /// Extends an existing branch using pseudo-arclength continuation.
 /// Uses a secant predictor from the last two points to determine the continuation direction.
 pub fn extend_branch_with_problem<P: ContinuationProblem>(
@@ -791,22 +808,14 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
         None
     };
 
-    // Compute tangent at endpoint
-    let mut tangent = compute_tangent_from_problem(problem, &end_aug)?;
-
-    // Orient tangent to match secant direction (or use forward flag if no secant)
-    if let Some(secant) = secant_direction {
-        // Orient tangent to have positive dot product with secant
-        if tangent.dot(&secant) < 0.0 {
-            tangent = -tangent;
-        }
+    // With at least two points, secant provides a robust outward direction.
+    let mut tangent = if let Some(secant) = secant_direction.as_ref() {
+        secant.clone()
     } else {
-        // Fall back to parameter direction if only one point
-        let forward_sign = if forward { 1.0 } else { -1.0 };
-        if tangent[0] * forward_sign < 0.0 {
-            tangent = -tangent;
-        }
-    }
+        compute_tangent_from_problem(problem, &end_aug)?
+    };
+
+    orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
 
     // Now run continuation with the correctly oriented tangent
     let initial_point = ContinuationPoint {
@@ -1361,15 +1370,12 @@ pub fn extend_branch(
         // This preserves outward continuation on the requested signed-index side.
         let secant = &prev_aug - &neighbor_aug;
 
-        // Orient tangent to match secant direction
-        if secant.norm() > 1e-12 && prev_tangent.dot(&secant) < 0.0 {
-            prev_tangent = -prev_tangent;
+        if secant.norm() > 1e-12 {
+            prev_tangent = secant.normalize();
+            orient_extension_tangent(&mut prev_tangent, Some(&secant), forward);
         }
     } else {
-        // Fall back to forward flag if only one point
-        if !is_append {
-            prev_tangent = -prev_tangent;
-        }
+        orient_extension_tangent(&mut prev_tangent, None, forward);
     }
 
     let mut prev_diag = diagnostics_from_point(system, kind, param_index, &prev_point)?;

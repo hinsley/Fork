@@ -10,6 +10,7 @@ import {
   createSystem,
   renameNode,
   toggleNodeVisibility,
+  updateBranch,
   updateLimitCycleRenderTarget,
   updateNodeRender,
 } from '../system/model'
@@ -684,7 +685,7 @@ describe('InspectorDetailsPanel', () => {
           },
         ],
         bifurcations: [1],
-        indices: [0, 1],
+        indices: [1, 0],
         branch_type: { type: 'LimitCycle', ntst: 20, ncol: 4 },
       },
       settings: {
@@ -1773,7 +1774,7 @@ describe('InspectorDetailsPanel', () => {
           },
         ],
         bifurcations: [1],
-        indices: [0, 1],
+        indices: [1, 0],
         branch_type: { type: 'LimitCycle', ntst: 20, ncol: 4 },
       },
       settings: {
@@ -1917,7 +1918,7 @@ describe('InspectorDetailsPanel', () => {
           },
         ],
         bifurcations: [1],
-        indices: [0, 1],
+        indices: [1, 0],
         branch_type: { type: 'Equilibrium' },
       },
       settings: {
@@ -2016,7 +2017,7 @@ describe('InspectorDetailsPanel', () => {
           },
         ],
         bifurcations: [1],
-        indices: [0, 1],
+        indices: [1, 0],
         branch_type: { type: 'Equilibrium' },
       },
       settings: {
@@ -2474,5 +2475,173 @@ describe('InspectorDetailsPanel', () => {
         colors: expect.arrayContaining(['#ff0000']),
       }),
     })
+  })
+
+  it('jumps to the newest branch point after extension', async () => {
+    const user = userEvent.setup()
+    const { system, branchNodeId } = createDemoSystem()
+    const baseBranch = system.branches[branchNodeId]
+    if (!baseBranch) {
+      throw new Error('Expected equilibrium branch fixture data.')
+    }
+
+    const seededBranch: ContinuationObject = {
+      ...baseBranch,
+      data: {
+        ...baseBranch.data,
+        points: [
+          {
+            state: [0, 0],
+            param_value: 0,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [0.1, 0.1],
+            param_value: 0.1,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        indices: [0, 1],
+      },
+    }
+
+    function Wrapper() {
+      const [state, setState] = useState(updateBranch(system, branchNodeId, seededBranch))
+      return (
+        <InspectorDetailsPanel
+          system={state}
+          selectedNodeId={branchNodeId}
+          view="selection"
+          theme="light"
+          onRename={vi.fn()}
+          onToggleVisibility={vi.fn()}
+          onUpdateRender={vi.fn()}
+          onUpdateScene={vi.fn()}
+          onUpdateBifurcationDiagram={vi.fn()}
+          onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+          onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+          onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+          onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+          onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+          onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+          onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+          onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onExtendBranch={async () => {
+            setState((prev) => {
+              const source = prev.branches[branchNodeId]
+              const nextPoints = [
+                ...source.data.points,
+                {
+                  state: [0.2, 0.2],
+                  param_value: 0.2,
+                  stability: 'None',
+                  eigenvalues: [],
+                },
+              ]
+              const nextIndices = [...(source.data.indices ?? []), 2]
+              return updateBranch(prev, branchNodeId, {
+                ...source,
+                data: {
+                  ...source.data,
+                  points: nextPoints,
+                  indices: nextIndices,
+                },
+              })
+            })
+          }}
+          onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+          onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        />
+      )
+    }
+
+    render(<Wrapper />)
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    expect(screen.getByText('Selected point: 1 ([1] memaddr)')).toBeVisible()
+
+    await user.click(screen.getByTestId('branch-extend-toggle'))
+    await user.click(screen.getByTestId('branch-extend-submit'))
+
+    await waitFor(() => {
+      expect(screen.getByText('Selected point: 2 ([2] memaddr)')).toBeVisible()
+    })
+  })
+
+  it('selects the most negative endpoint for backward-only equilibrium branches', async () => {
+    const user = userEvent.setup()
+    const { system, branchNodeId } = createDemoSystem()
+    const baseBranch = system.branches[branchNodeId]
+    if (!baseBranch) {
+      throw new Error('Expected equilibrium branch fixture data.')
+    }
+
+    const backwardOnlyBranch: ContinuationObject = {
+      ...baseBranch,
+      data: {
+        ...baseBranch.data,
+        points: [
+          {
+            state: [-0.2, -0.2],
+            param_value: -0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [-0.1, -0.1],
+            param_value: -0.1,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [0, 0],
+            param_value: 0,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        indices: [-2, -1, 0],
+      },
+    }
+
+    render(
+      <InspectorDetailsPanel
+        system={updateBranch(system, branchNodeId, backwardOnlyBranch)}
+        selectedNodeId={branchNodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    expect(screen.getByText('Selected point: -2 ([0] memaddr)')).toBeVisible()
   })
 })

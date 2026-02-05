@@ -1278,6 +1278,7 @@ export function InspectorDetailsPanel({
   const systemConfigKey = useMemo(() => buildSystemConfigKey(system.config), [system.config])
   const stableSystemConfigRef = useRef(system.config)
   const prevBranchIdRef = useRef<string | null>(null)
+  const prevBranchPointCountRef = useRef(0)
   const internalBranchPointSelectionRef = useRef(false)
   const [branchPointIndex, setBranchPointIndex] = useState<number | null>(null)
   const [branchNavigatorOpen, setBranchNavigatorOpen] = useState(false)
@@ -1881,6 +1882,7 @@ export function InspectorDetailsPanel({
     const branchId = hasBranch ? selectedNodeId : null
     if (!hasBranch) {
       prevBranchIdRef.current = branchId
+      prevBranchPointCountRef.current = 0
       setBranchPointIndex(null)
       setBranchPointInput('')
       syncBranchPointSelection(null)
@@ -1888,18 +1890,35 @@ export function InspectorDetailsPanel({
     }
     if (branchSortedOrder.length === 0) {
       prevBranchIdRef.current = branchId
+      prevBranchPointCountRef.current = 0
       setBranchPointIndex(null)
       setBranchPointInput('')
       syncBranchPointSelection(null)
       return
     }
+    const pointCount = branchIndices.length
     const branchChanged = prevBranchIdRef.current !== branchId
+    const pointsExtended = !branchChanged && pointCount > prevBranchPointCountRef.current
+    if (pointsExtended) {
+      const newestIndex = pointCount - 1
+      setBranchPointIndex(newestIndex)
+      const logicalIndex = branchIndices[newestIndex]
+      setBranchPointInput(
+        typeof logicalIndex === 'number' ? logicalIndex.toString() : ''
+      )
+      setBranchPointError(null)
+      syncBranchPointSelection(newestIndex)
+      prevBranchIdRef.current = branchId
+      prevBranchPointCountRef.current = pointCount
+      return
+    }
     const hasValidIndex =
       branchPointIndex !== null &&
       branchPointIndex >= 0 &&
       branchPointIndex < branchIndices.length
     if (!branchChanged && hasValidIndex) {
       prevBranchIdRef.current = branchId
+      prevBranchPointCountRef.current = pointCount
       return
     }
     const renderTargetIndex =
@@ -1910,7 +1929,28 @@ export function InspectorDetailsPanel({
       renderTargetIndex !== null &&
       renderTargetIndex >= 0 &&
       renderTargetIndex < branchIndices.length
-    const initialIndex = renderTargetValid ? renderTargetIndex : branchSortedOrder[0]
+    const minLogicalArrayIndex = branchSortedOrder[0]
+    const maxLogicalArrayIndex = branchSortedOrder[branchSortedOrder.length - 1]
+    const minLogicalIndex = branchIndices[minLogicalArrayIndex]
+    const maxLogicalIndex = branchIndices[maxLogicalArrayIndex]
+    const hasNegativeLogicalSide =
+      typeof minLogicalIndex === 'number' && Number.isFinite(minLogicalIndex) && minLogicalIndex < 0
+    const hasPositiveLogicalSide =
+      typeof maxLogicalIndex === 'number' && Number.isFinite(maxLogicalIndex) && maxLogicalIndex > 0
+    const newestEndpointArrayIndex =
+      maxLogicalArrayIndex >= minLogicalArrayIndex
+        ? maxLogicalArrayIndex
+        : minLogicalArrayIndex
+    const equilibriumInitialIndex = hasNegativeLogicalSide && !hasPositiveLogicalSide
+      ? minLogicalArrayIndex
+      : hasPositiveLogicalSide && !hasNegativeLogicalSide
+        ? maxLogicalArrayIndex
+        : newestEndpointArrayIndex
+    const initialIndex = renderTargetValid
+      ? renderTargetIndex
+      : branch?.branchType === 'equilibrium'
+        ? equilibriumInitialIndex
+        : branchSortedOrder[0]
     setBranchPointIndex(initialIndex)
     const logicalIndex = branchIndices[initialIndex]
     setBranchPointInput(
@@ -1919,6 +1959,7 @@ export function InspectorDetailsPanel({
     setBranchPointError(null)
     syncBranchPointSelection(initialIndex)
     prevBranchIdRef.current = branchId
+    prevBranchPointCountRef.current = pointCount
   }, [
     branchIndices,
     branchPointIndex,
@@ -6815,8 +6856,8 @@ export function InspectorDetailsPanel({
                           disabled={!canExtendBranch}
                           data-testid="branch-extend-direction"
                         >
-                          <option value="forward">Forward (Toward Higher Branch Index)</option>
-                          <option value="backward">Backward (Toward Lower Branch Index)</option>
+                          <option value="forward">Forward (Increasing Index)</option>
+                          <option value="backward">Backward (Decreasing Index)</option>
                         </select>
                       </label>
                       <label>

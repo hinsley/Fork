@@ -1255,7 +1255,7 @@ mod tests {
     fn compute_continuation_rejects_unknown_parameter() {
         let mut system = build_two_dim_system_with_param();
         let err = system
-            .compute_continuation(vec![0.0, 0.0], "missing", continuation_settings(1), true)
+            .compute_continuation(vec![0.0, 0.0], "missing", 1, continuation_settings(1), true)
             .expect_err("should reject unknown parameter");
 
         let message = err.as_string().unwrap_or_default();
@@ -1266,7 +1266,7 @@ mod tests {
     fn compute_equilibrium_eigenvalues_rejects_state_dim() {
         let mut system = build_two_dim_system_with_param();
         let err = system
-            .compute_equilibrium_eigenvalues(vec![0.0], "p", 0.0)
+            .compute_equilibrium_eigenvalues(vec![0.0], "p", 1, 0.0)
             .expect_err("should reject state dimension mismatch");
 
         let message = err.as_string().unwrap_or_default();
@@ -1286,7 +1286,7 @@ mod tests {
         let branch_val = to_value(&branch).expect("branch");
 
         let err = system
-            .extend_continuation(branch_val, "p", continuation_settings(1), true)
+            .extend_continuation(branch_val, "p", 1, continuation_settings(1), true)
             .expect_err("should reject missing upoldp");
 
         let message = err.as_string().unwrap_or_default();
@@ -1303,6 +1303,7 @@ mod tests {
                 0.0,
                 "missing",
                 0.0,
+                1,
                 continuation_settings(1),
                 true,
             )
