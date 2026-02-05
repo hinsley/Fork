@@ -1495,3 +1495,85 @@ fn split_lc_continuation_state(
         Ok((full_lc_state, period, p2, None))
     }
 }
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod wasm_tests {
+    use super::{
+        Codim1BranchData, Codim1BranchPoint, Codim1BranchType, WasmCodim1CurveExtensionRunner,
+    };
+    use fork_core::continuation::ContinuationSettings;
+    use serde_wasm_bindgen::to_value;
+    use wasm_bindgen::JsValue;
+
+    fn settings_value(max_steps: usize) -> JsValue {
+        let settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-6,
+            max_step_size: 1.0,
+            max_steps,
+            corrector_steps: 1,
+            corrector_tolerance: 1e-8,
+            step_tolerance: 1e-8,
+        };
+        to_value(&settings).expect("settings")
+    }
+
+    fn fold_point(state: f64, param_value: f64, param2_value: Option<f64>) -> Codim1BranchPoint {
+        Codim1BranchPoint {
+            state: vec![state],
+            param_value,
+            param2_value,
+            stability: None,
+            eigenvalues: Vec::new(),
+            auxiliary: None,
+        }
+    }
+
+    #[test]
+    fn backward_extension_selects_signed_min_index_endpoint_on_non_monotonic_order() {
+        // Intentional non-monotonic storage order:
+        // array position is [idx 0, idx -2, idx +1]. The min signed index point is the
+        // backward endpoint. We leave only that point missing param2_value so endpoint
+        // selection failures become unambiguous.
+        let branch = Codim1BranchData {
+            points: vec![
+                fold_point(0.0, 0.0, Some(0.5)),
+                fold_point(-0.1, -0.1, None),
+                fold_point(0.2, 0.2, Some(0.5)),
+            ],
+            bifurcations: Vec::new(),
+            indices: vec![0, -2, 1],
+            branch_type: Codim1BranchType::FoldCurve {
+                param1_name: "a".to_string(),
+                param2_name: "b".to_string(),
+            },
+        };
+        let branch_val = to_value(&branch).expect("branch");
+
+        let result = WasmCodim1CurveExtensionRunner::new(
+            vec!["x - a - b".to_string()],
+            vec![0.0, 0.0],
+            vec!["a".to_string(), "b".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            1,
+            branch_val,
+            "a",
+            settings_value(1),
+            false,
+        );
+
+        assert!(
+            result.is_err(),
+            "should select min-index endpoint with missing param2_value"
+        );
+        let err = result.err().expect("error");
+
+        let message = err.as_string().unwrap_or_default();
+        assert!(
+            message.contains("Fold curve point missing param2_value"),
+            "expected backward endpoint validation error, got '{}'",
+            message
+        );
+    }
+}

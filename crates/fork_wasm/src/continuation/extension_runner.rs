@@ -595,6 +595,152 @@ mod tests {
             new_param
         );
     }
+
+    #[test]
+    fn backward_extension_uses_signed_min_index_when_points_are_out_of_array_order() {
+        // Intentional non-monotonic storage order:
+        // array position is [idx 0, idx -1, idx +1]. Endpoint selection must use signed indices,
+        // not first/last array position.
+        let branch = ContinuationBranch {
+            points: vec![
+                ContinuationPoint {
+                    state: vec![0.2],
+                    param_value: 0.2,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+                ContinuationPoint {
+                    state: vec![0.1],
+                    param_value: 0.1,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+                ContinuationPoint {
+                    state: vec![0.3],
+                    param_value: 0.3,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+            ],
+            bifurcations: Vec::new(),
+            indices: vec![0, -1, 1],
+            branch_type: BranchType::Equilibrium,
+            upoldp: None,
+        };
+        let branch_val = to_value(&branch).expect("branch");
+
+        let mut runner = WasmContinuationExtensionRunner::new(
+            vec!["x - a".to_string()],
+            vec![0.2],
+            vec!["a".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            1,
+            branch_val,
+            "a",
+            settings_value(1),
+            false,
+        )
+        .expect("runner");
+
+        runner.run_steps(1).expect("run steps");
+        let result_val = runner.get_result().expect("result");
+        let result_branch: ContinuationBranch = from_value(result_val).expect("branch");
+
+        let new_pos = result_branch
+            .indices
+            .iter()
+            .position(|idx| *idx == -2)
+            .expect("new backward index");
+        let new_param = result_branch.points[new_pos].param_value;
+        let endpoint_param = 0.1;
+        let neighbor_param = 0.2;
+        let secant_param = endpoint_param - neighbor_param;
+        let param_delta = new_param - endpoint_param;
+
+        assert!(
+            param_delta * secant_param > 0.0,
+            "expected extension away from selected signed-index endpoint (delta={}, secant={})",
+            param_delta,
+            secant_param
+        );
+    }
+
+    #[test]
+    fn limit_cycle_extension_recovers_upoldp_from_signed_index_endpoint() {
+        // Intentional non-monotonic storage order:
+        // ensure endpoint-derived phase data (upoldp/anchor direction inputs) comes from
+        // the signed min-index side for backward extension, not from array position.
+        let branch = ContinuationBranch {
+            points: vec![
+                ContinuationPoint {
+                    state: vec![10.0, 100.0, 7.0],
+                    param_value: 0.0,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+                ContinuationPoint {
+                    state: vec![2.0, 20.0, 3.0],
+                    param_value: 0.0,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+                ContinuationPoint {
+                    state: vec![30.0, 300.0, 5.0],
+                    param_value: 0.0,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+            ],
+            bifurcations: Vec::new(),
+            indices: vec![0, -1, 2],
+            branch_type: BranchType::LimitCycle { ntst: 1, ncol: 1 },
+            upoldp: None,
+        };
+        let branch_val = to_value(&branch).expect("branch");
+
+        let mut runner = WasmContinuationExtensionRunner::new(
+            vec!["x - a".to_string()],
+            vec![0.0],
+            vec!["a".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            1,
+            branch_val,
+            "a",
+            settings_value(0),
+            false,
+        )
+        .expect("runner");
+
+        runner.run_steps(1).expect("run steps");
+        let result_val = runner.get_result().expect("result");
+        let result_branch: ContinuationBranch = from_value(result_val).expect("branch");
+        let recovered_upoldp = result_branch
+            .upoldp
+            .and_then(|values| values.first().cloned())
+            .and_then(|dir| dir.first().copied())
+            .expect("recovered upoldp");
+
+        let expected_endpoint_upoldp = 6.0;
+        assert!(
+            (recovered_upoldp - expected_endpoint_upoldp).abs() < 1e-9,
+            "expected endpoint-derived upoldp {}, got {}",
+            expected_endpoint_upoldp,
+            recovered_upoldp
+        );
+        assert!(
+            (recovered_upoldp - 70.0).abs() > 1e-6 && (recovered_upoldp - 150.0).abs() > 1e-6,
+            "upoldp should come from selected signed-index endpoint, got {}",
+            recovered_upoldp
+        );
+    }
 }
 
 #[cfg(test)]
