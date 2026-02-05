@@ -1,6 +1,6 @@
 {
   "framework": "vite",
-  "installCommand": "curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal && $HOME/.cargo/bin/rustup target add wasm32-unknown-unknown && $HOME/.cargo/bin/cargo install wasm-pack && npm install",
-  "buildCommand": "export PATH=\"$HOME/.cargo/bin:$PATH\" && (cd ../crates/fork_wasm && wasm-pack build --target web --out-dir pkg-web) && npm run build",
+  "installCommand": "set -e; export PATH=\"$PATH:/rust/bin:$HOME/.cargo/bin\"; if ! command -v rustup >/dev/null 2>&1; then curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal; if [ -f \"$HOME/.cargo/env\" ]; then . \"$HOME/.cargo/env\"; fi; export PATH=\"$PATH:/rust/bin:$HOME/.cargo/bin\"; fi; rustup target add wasm32-unknown-unknown; if ! command -v wasm-pack >/dev/null 2>&1; then cargo install --locked wasm-pack; fi; npm install",
+  "buildCommand": "set -e; export PATH=\"$PATH:/rust/bin:$HOME/.cargo/bin\"; (cd ../crates/fork_wasm && wasm-pack build --target web --out-dir pkg-web) && npm run build",
   "outputDirectory": "dist"
 }
