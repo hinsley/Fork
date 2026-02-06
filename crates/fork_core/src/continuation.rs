@@ -714,7 +714,16 @@ fn orient_extension_tangent(
         }
     } else {
         let forward_sign = if forward { 1.0 } else { -1.0 };
-        if tangent[0] * forward_sign < 0.0 {
+        let tangent_norm = tangent.norm();
+        let param_component_threshold = 0.01 * tangent_norm;
+
+        if tangent[0].abs() < param_component_threshold {
+            tangent[0] = param_component_threshold * forward_sign;
+            let norm = tangent.norm();
+            if norm > 1e-12 {
+                *tangent = &*tangent / norm;
+            }
+        } else if tangent[0] * forward_sign < 0.0 {
             *tangent = -tangent.clone();
         }
     }
@@ -2446,6 +2455,25 @@ mod tests {
 
         assert_eq!(extended.points.len(), 3);
         assert_eq!(extended.indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_orient_extension_tangent_biases_small_parameter_component_without_secant() {
+        let mut forward_tangent = DVector::from_vec(vec![1e-12, 1.0]);
+        orient_extension_tangent(&mut forward_tangent, None, true);
+        assert!(
+            forward_tangent[0] > 1e-3,
+            "Expected forward tangent parameter component to be biased positive, got {}",
+            forward_tangent[0]
+        );
+
+        let mut backward_tangent = DVector::from_vec(vec![1e-12, 1.0]);
+        orient_extension_tangent(&mut backward_tangent, None, false);
+        assert!(
+            backward_tangent[0] < -1e-3,
+            "Expected backward tangent parameter component to be biased negative, got {}",
+            backward_tangent[0]
+        );
     }
 
     #[test]

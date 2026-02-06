@@ -10,6 +10,7 @@ import { createPeriodDoublingSystem } from '../system/fixtures'
 import { normalizeBranchEigenvalues } from '../system/continuation'
 import type {
   ContinuationObject,
+  ContinuationPoint,
   ContinuationSettings,
   EquilibriumObject,
   IsoclineObject,
@@ -1368,5 +1369,103 @@ describe('appState homoclinic and homotopy actions', () => {
     expect(updated.data.points.length).toBe(3)
     expect(updated.data.indices).toEqual([0, 1, -1])
     expect(capturedPointState).toEqual(packedState0)
+  })
+
+  it('uses packed homoc state for restart fallback when point.state is display-trimmed', async () => {
+    const base = makeTwoParamSystem('Homoc_Extend_Packed_State')
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_A',
+      systemName: base.config.name,
+    }
+    const added = addObject(base, equilibrium)
+    const p2 = 0.25
+    const packedState = [
+      0, 0, 1, 1, 2, 2,
+      0.5, 0.5, 1.5, 1.5,
+      0, 0,
+      p2,
+      8, 0.01, 0, 0,
+    ]
+
+    const displayState = [0, 0]
+    const point = {
+      state: displayState,
+      packedState,
+      param_value: 0.2,
+      stability: 'None',
+      eigenvalues: [],
+    } as unknown as ContinuationPoint
+
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'homoc_source',
+      systemName: base.config.name,
+      parameterName: 'mu, nu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'homoclinic_curve',
+      data: {
+        points: [point],
+        bifurcations: [],
+        indices: [0],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 2,
+          ncol: 1,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          free_time: true,
+          free_eps0: true,
+          free_eps1: false,
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2, p2],
+    }
+
+    const branchResult = addBranch(added.system, sourceBranch, added.nodeId)
+    const client = new MockForkCoreClient(0)
+    client.runContinuationExtension = async () => {
+      throw new Error('generic extension unavailable')
+    }
+    let capturedPointState: number[] = []
+    client.runHomoclinicFromHomoclinic = async (request) => {
+      capturedPointState = [...request.pointState]
+      return normalizeBranchEigenvalues(
+        {
+          points: [
+            {
+              state: packedState,
+              param_value: 0.2,
+              stability: 'None',
+              eigenvalues: [],
+            },
+            {
+              state: packedState,
+              param_value: 0.21,
+              stability: 'None',
+              eigenvalues: [],
+            },
+          ],
+          bifurcations: [],
+          indices: [0, 1],
+          branch_type: sourceBranch.data.branch_type,
+        },
+        { stateDimension: base.config.varNames.length }
+      )
+    }
+    const { getContext } = setupApp(branchResult.system, client)
+
+    await act(async () => {
+      await getContext().actions.extendBranch({
+        branchId: branchResult.nodeId,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    expect(capturedPointState).toEqual(packedState)
   })
 })

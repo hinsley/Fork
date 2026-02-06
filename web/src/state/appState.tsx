@@ -62,6 +62,7 @@ import {
   getBranchParams,
   normalizeEigenvalueArray,
   normalizeBranchEigenvalues,
+  resolveContinuationPointParam2Value,
   serializeBranchDataForWasm,
 } from '../system/continuation'
 import { resolveObjectParams } from '../system/parameters'
@@ -113,6 +114,18 @@ function resolveExtensionEndpointArrayIndex(
     }
   }
   return { arrayIndex: selected, logicalIndex: indices[selected] ?? 0 }
+}
+
+function resolveHomoclinicSeedState(point: ContinuationPoint, stateDimension: number): number[] {
+  const withPacked = point as ContinuationPoint & {
+    packedState?: number[]
+    packed_state?: number[]
+  }
+  const packed = withPacked.packedState ?? withPacked.packed_state
+  if (Array.isArray(packed) && packed.length > stateDimension) {
+    return [...packed]
+  }
+  return [...point.state]
 }
 
 function mergeHomoclinicExtensionData(
@@ -2114,8 +2127,25 @@ export function AppProvider({
           if (param1Idx >= 0) {
             runConfig.params[param1Idx] = endpointPoint.param_value
           }
+          const param2Idx = system.paramNames.indexOf(sourceType.param2_name)
+          const endpointParam2 =
+            Number.isFinite(endpointPoint.param2_value)
+              ? endpointPoint.param2_value
+              : resolveContinuationPointParam2Value(
+                  endpointPoint,
+                  sourceBranch.data.branch_type,
+                  system.varNames.length
+                )
+          if (param2Idx >= 0 && Number.isFinite(endpointParam2)) {
+            runConfig.params[param2Idx] = endpointParam2 as number
+          }
+          const endpointSeedState = resolveHomoclinicSeedState(
+            endpointPoint,
+            system.varNames.length
+          )
 
           const branchData = serializeBranchDataForWasm(sourceBranch)
+          let genericExtensionError: Error | null = null
           try {
             const genericExtension = await client.runContinuationExtension(
               {
@@ -2137,15 +2167,16 @@ export function AppProvider({
             if (genericExtension.points.length > sourceBranch.data.points.length) {
               updatedData = genericExtension
             }
-          } catch {
-            // fall back to endpoint restart path below
+          } catch (error) {
+            genericExtensionError =
+              error instanceof Error ? error : new Error(String(error))
           }
 
           if (!updatedData) {
             const extension = await client.runHomoclinicFromHomoclinic(
               {
                 system: runConfig,
-                pointState: endpointPoint.state,
+                pointState: endpointSeedState,
                 sourceNtst: sourceType.ntst,
                 sourceNcol: sourceType.ncol,
                 parameterName: sourceType.param1_name,
@@ -2168,8 +2199,12 @@ export function AppProvider({
             )
 
             if (extension.points.length <= 1) {
+              const genericSuffix =
+                genericExtensionError && genericExtensionError.message.trim().length > 0
+                  ? ` Primary extension path error: ${genericExtensionError.message}`
+                  : ''
               throw new Error(
-                'Homoclinic extension stopped at the endpoint. Try a smaller step size or adjust parameters.'
+                `Homoclinic extension stopped at the endpoint. Try a smaller step size or adjust parameters.${genericSuffix}`
               )
             }
 
@@ -3762,10 +3797,11 @@ export function AppProvider({
           runConfig.params[param1Idx] = point.param_value
         }
 
+        const seedState = resolveHomoclinicSeedState(point, system.varNames.length)
         const branchData = await client.runHomoclinicFromHomoclinic(
           {
             system: runConfig,
-            pointState: point.state,
+            pointState: seedState,
             sourceNtst: sourceType.ntst,
             sourceNcol: sourceType.ncol,
             parameterName: sourceType.param1_name,

@@ -49,7 +49,16 @@ fn orient_extension_tangent(
         }
     } else {
         let forward_sign = if forward { 1.0 } else { -1.0 };
-        if tangent[0] * forward_sign < 0.0 {
+        let tangent_norm = tangent.norm();
+        let param_component_threshold = 0.01 * tangent_norm;
+
+        if tangent[0].abs() < param_component_threshold {
+            tangent[0] = param_component_threshold * forward_sign;
+            let norm = tangent.norm();
+            if norm > 1e-12 {
+                *tangent = &*tangent / norm;
+            }
+        } else if tangent[0] * forward_sign < 0.0 {
             *tangent = -tangent.clone();
         }
     }
