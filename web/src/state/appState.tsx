@@ -2979,6 +2979,7 @@ export function AppProvider({
         if (!point) {
           throw new Error('Select a valid branch point.')
         }
+
         if (point.stability !== 'PeriodDoubling') {
           throw new Error('Selected point is not a Period Doubling bifurcation.')
         }
@@ -3374,6 +3375,17 @@ export function AppProvider({
         if (!point) {
           throw new Error('Select a valid branch point.')
         }
+        const multipliers = normalizeEigenvalueArray(point.eigenvalues)
+        if (multipliers.length > 0) {
+          const hasUnitMultiplier = multipliers
+            .map((value) => Math.hypot(value.re, value.im))
+            .some((magnitude) => Number.isFinite(magnitude) && Math.abs(magnitude - 1) < 0.5)
+          if (!hasUnitMultiplier) {
+            throw new Error(
+              'Selected limit cycle point is numerically ill-conditioned (no Floquet multiplier near 1). Pick an earlier large-period point before multiplier blow-up.'
+            )
+          }
+        }
 
         const name = request.name.trim()
         const nameError = validateBranchName(name)
@@ -3454,7 +3466,7 @@ export function AppProvider({
 
         if (branchData.points.length <= 1) {
           throw new Error(
-            'Homoclinic continuation stopped at the seed point. Try a smaller step size or adjust parameters.'
+            'Homoclinic continuation stopped at the seed point. Try Free T = off with Free eps0/eps1 = on, a smaller step size (for example 1e-3), or select an earlier large-cycle point.'
           )
         }
 

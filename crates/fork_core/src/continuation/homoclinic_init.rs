@@ -1,7 +1,7 @@
 use super::periodic::CollocationCoefficients;
 use super::types::HomotopyStage;
 use crate::equation_engine::EquationSystem;
-use crate::equilibrium::{compute_jacobian, SystemKind};
+use crate::equilibrium::{compute_jacobian, solve_equilibrium, NewtonSettings, SystemKind};
 use crate::traits::DynamicalSystem;
 use anyhow::{anyhow, bail, Result};
 use nalgebra::{DMatrix, DVector};
@@ -225,8 +225,10 @@ pub fn homoclinic_setup_from_large_cycle(
     let dim = system.equations.len();
     let (mesh_states, stage_states, period) =
         parse_limit_cycle_state(lc_state, dim, lc_ntst, lc_ncol)?;
-    let (mut x0, seam_interval) =
+    let (seed_x0, _seed_seam) =
         locate_cycle_equilibrium_seed(system, base_params, &mesh_states, &stage_states)?;
+    let mut x0 = refine_equilibrium_seed(system, base_params, &seed_x0)?;
+    let seam_interval = locate_cycle_seam_by_distance(&mesh_states, &stage_states, &x0);
     let reduced = rotate_and_drop_interval(&mesh_states, &stage_states, seam_interval)?;
     let reduced_period = period * (reduced.mesh_states.len() as f64 - 1.0) / (lc_ntst as f64);
 
@@ -704,6 +706,100 @@ fn locate_cycle_equilibrium_seed(
     Ok((best_state, seam_interval))
 }
 
+fn refine_equilibrium_seed(
+    system: &mut EquationSystem,
+    params: &[f64],
+    seed: &[f64],
+) -> Result<Vec<f64>> {
+    if seed.is_empty() {
+        bail!("Equilibrium seed must be non-empty");
+    }
+    if system.params.len() != params.len() {
+        bail!("Parameter vector length mismatch");
+    }
+
+    let old_params = system.params.clone();
+    system.params.copy_from_slice(params);
+
+    let mut seed_flow = vec![0.0; seed.len()];
+    system.apply(0.0, seed, &mut seed_flow);
+    let initial_norm = l2_norm(&seed_flow);
+
+    let attempts = [
+        NewtonSettings {
+            max_steps: 40,
+            damping: 1.0,
+            tolerance: 1e-11,
+        },
+        NewtonSettings {
+            max_steps: 60,
+            damping: 0.5,
+            tolerance: 1e-10,
+        },
+        NewtonSettings {
+            max_steps: 80,
+            damping: 0.25,
+            tolerance: 1e-9,
+        },
+    ];
+
+    let mut best_state = seed.to_vec();
+    let mut best_norm = initial_norm;
+
+    for settings in attempts {
+        if let Ok(solution) = solve_equilibrium(system, SystemKind::Flow, seed, settings) {
+            if solution.residual_norm < best_norm {
+                best_norm = solution.residual_norm;
+                best_state = solution.state;
+            }
+            if best_norm <= 1e-10 {
+                break;
+            }
+        }
+    }
+
+    system.params = old_params;
+
+    if best_norm > 1e-5 {
+        bail!(
+            "Failed to refine equilibrium seed from large cycle (initial ||f|| = {:.3e}, best ||f|| = {:.3e}).",
+            initial_norm,
+            best_norm
+        );
+    }
+
+    Ok(best_state)
+}
+
+fn locate_cycle_seam_by_distance(
+    mesh_states: &[Vec<f64>],
+    stage_states: &[Vec<Vec<f64>>],
+    target: &[f64],
+) -> usize {
+    let mut best_dist = f64::INFINITY;
+    let mut seam_interval = 0usize;
+
+    for (interval_idx, state) in mesh_states.iter().enumerate() {
+        let dist = l2_distance(state, target);
+        if dist < best_dist {
+            best_dist = dist;
+            seam_interval = interval_idx % mesh_states.len();
+        }
+    }
+
+    for (interval_idx, interval) in stage_states.iter().enumerate() {
+        for stage in interval {
+            let dist = l2_distance(stage, target);
+            if dist < best_dist {
+                best_dist = dist;
+                seam_interval = interval_idx;
+            }
+        }
+    }
+
+    seam_interval
+}
+
 fn rotate_and_drop_interval(
     mesh_states: &[Vec<f64>],
     stage_states: &[Vec<Vec<f64>>],
@@ -990,6 +1086,44 @@ mod tests {
         assert!(setup.guess.eps1.is_finite());
         assert!(setup.basis.nneg > 0);
         assert!(setup.basis.npos > 0);
+    }
+
+    #[test]
+    fn large_cycle_setup_refines_equilibrium_seed() {
+        let mut system = linear_system();
+        let state = synthetic_lc_state(2, 6, 2);
+        let setup = homoclinic_setup_from_large_cycle(
+            &mut system,
+            &state,
+            6,
+            2,
+            5,
+            2,
+            &[0.2, 0.1],
+            0,
+            1,
+            "mu",
+            "nu",
+            HomoclinicExtraFlags {
+                free_time: false,
+                free_eps0: true,
+                free_eps1: true,
+            },
+        )
+        .expect("setup");
+
+        let mut f = vec![0.0; 2];
+        let old_params = system.params.clone();
+        system.params = vec![0.2, 0.1];
+        system.apply(0.0, &setup.guess.x0, &mut f);
+        system.params = old_params;
+
+        let residual_norm = l2_norm(&f);
+        assert!(
+            residual_norm < 1e-8,
+            "expected equilibrium seed residual < 1e-8, got {}",
+            residual_norm
+        );
     }
 
     #[test]

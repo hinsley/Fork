@@ -31,6 +31,13 @@ Web:
 
 Output: a new `homoclinic_curve` branch.
 
+Recommended seed settings for robust starts from long cycles:
+
+- `Free T = false`
+- `Free eps0 = true`
+- `Free eps1 = true`
+- Small predictor step (for example `1e-3`) and tighter corrector tolerances.
+
 ## Method 2: Homoclinic from Homoclinic
 
 Start from a point on an existing `homoclinic_curve` branch.
