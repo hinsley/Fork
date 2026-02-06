@@ -1330,13 +1330,16 @@ describe('appState homoclinic and homotopy actions', () => {
     const branchResult = addBranch(added.system, sourceBranch, added.nodeId)
     const client = new MockForkCoreClient(0)
     let restartCalled = false
-    client.runContinuationExtension = async (request) =>
-      normalizeBranchEigenvalues(
+    const attemptedStepSizes: number[] = []
+    client.runContinuationExtension = async (request) => {
+      attemptedStepSizes.push(request.settings.step_size)
+      return normalizeBranchEigenvalues(
         {
           ...request.branchData,
         },
         { stateDimension: request.system.varNames.length }
       )
+    }
     client.runHomoclinicFromHomoclinic = async () => {
       restartCalled = true
       throw new Error('restart should not be called from extension')
@@ -1352,6 +1355,8 @@ describe('appState homoclinic and homotopy actions', () => {
     })
 
     expect(getContext().state.error).toContain('Automatic restart is disabled for extension')
+    expect(attemptedStepSizes.length).toBe(2)
+    expect(attemptedStepSizes[1]).toBeLessThan(attemptedStepSizes[0])
     expect(restartCalled).toBe(false)
     const updated = getContext().state.system!.branches[branchResult.nodeId]
     expect(updated.data.points.length).toBe(2)
