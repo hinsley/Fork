@@ -446,6 +446,7 @@ describe('InspectorDetailsPanel', () => {
     const expressionInput = screen.getByTestId('isocline-expression')
     fireEvent.change(expressionInput, { target: { value: 'x + y - z' } })
     fireEvent.change(screen.getByTestId('isocline-frozen-z'), { target: { value: '2' } })
+    expect(screen.getByRole('button', { name: 'Compute' })).toBeInTheDocument()
     await user.click(screen.getByTestId('isocline-compute'))
 
     expect(onUpdateIsoclineObject).toHaveBeenCalledWith(added.nodeId, {

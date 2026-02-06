@@ -6122,7 +6122,7 @@ export function InspectorDetailsPanel({
                   disabled={isoclineComputing}
                   data-testid="isocline-compute"
                 >
-                  {isoclineComputing ? 'Computing...' : 'Compute & Redraw'}
+                  {isoclineComputing ? 'Computing...' : 'Compute'}
                 </button>
               </div>
             </InspectorDisclosure>

@@ -506,6 +506,40 @@ describe('appState Hopf curve continuation', () => {
 })
 
 describe('appState isocline computation', () => {
+  it('creates 3D isoclines with all variables active by default', async () => {
+    const base = createSystem({
+      name: 'Iso_Default_3D',
+      config: {
+        name: 'Iso_Default_3D',
+        equations: ['x + y', 'y - z', 'z - x'],
+        params: [],
+        paramNames: [],
+        varNames: ['x', 'y', 'z'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const { getContext } = setupApp(base, new MockForkCoreClient(0))
+
+    let isoclineId: string | null = null
+    await act(async () => {
+      isoclineId = await getContext().actions.createIsoclineObject('Iso_Default')
+    })
+
+    expect(isoclineId).not.toBeNull()
+    if (!isoclineId) {
+      throw new Error('Expected isocline id to be created.')
+    }
+
+    const next = getContext().state.system
+    expect(next).not.toBeNull()
+    if (!next) {
+      throw new Error('Expected system to remain loaded.')
+    }
+    const object = next.objects[isoclineId] as IsoclineObject
+    expect(object.axes.map((axis) => axis.variableName)).toEqual(['x', 'y', 'z'])
+  })
+
   it('computes with current settings and stores last-computed snapshot/cache', async () => {
     const base = createSystem({ name: 'Iso_Current' })
     const client = new MockForkCoreClient(0)

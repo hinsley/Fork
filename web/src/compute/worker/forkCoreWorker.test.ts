@@ -13,6 +13,7 @@ const workerScope: WorkerScope = {
 
 const wasmState = {
   throwMode: 'none' as 'none' | 'validate' | 'abort',
+  useCamelCaseIsoclineMethod: false,
   lastRunStepsArg: null as number | null,
   lastSystemType: null as string | null,
   lastLimitCycleRunnerSystemType: null as string | null,
@@ -58,6 +59,19 @@ beforeAll(async () => {
         const systemType = args[5]
         wasmState.lastSystemType = typeof systemType === 'string' ? systemType : null
         const equations = (args[0] as string[]) ?? []
+        if (wasmState.useCamelCaseIsoclineMethod) {
+          ;(
+            this as {
+              compute_isocline?: unknown
+              computeIsocline?: () => {
+                geometry: string
+                dim: number
+                points: number[]
+                segments: number[]
+              }
+            }
+          ).compute_isocline = undefined
+        }
         if (wasmState.throwMode === 'abort') {
           const error = new Error('cancelled')
           error.name = 'AbortError'
@@ -103,6 +117,14 @@ beforeAll(async () => {
         return { dimension: 2, checkpoints: 1, times: [0], vectors: [] }
       }
       compute_isocline() {
+        return {
+          geometry: 'segments',
+          dim: 2,
+          points: [0, 0, 1, 1],
+          segments: [0, 1],
+        }
+      }
+      computeIsocline() {
         return {
           geometry: 'segments',
           dim: 2,
@@ -201,6 +223,7 @@ afterAll(() => {
 beforeEach(() => {
   workerScope.postMessage.mockClear()
   wasmState.throwMode = 'none'
+  wasmState.useCamelCaseIsoclineMethod = false
   wasmState.lastRunStepsArg = null
   wasmState.lastSystemType = null
   wasmState.lastLimitCycleRunnerSystemType = null
@@ -349,6 +372,40 @@ describe('forkCoreWorker', () => {
     const handler = requireHandler()
     const message = {
       id: 'job-isocline',
+      kind: 'computeIsocline',
+      payload: {
+        system: {
+          ...baseSystem,
+          equations: ['x + y', 'x - y'],
+          varNames: ['x', 'y'],
+        },
+        expression: 'x + y',
+        level: 0,
+        axes: [
+          { variableName: 'x', min: -2, max: 2, samples: 16 },
+          { variableName: 'y', min: -2, max: 2, samples: 16 },
+        ],
+        frozenState: [0, 0],
+      },
+    }
+
+    await handler({ data: message } as unknown as MessageEvent<Record<string, unknown>>)
+
+    const response = workerScope.postMessage.mock.calls[0][0] as {
+      ok: boolean
+      result: { geometry: string; dim: number; segments?: number[] }
+    }
+    expect(response.ok).toBe(true)
+    expect(response.result.geometry).toBe('segments')
+    expect(response.result.dim).toBe(2)
+    expect(response.result.segments).toEqual([0, 1])
+  })
+
+  it('computes isoclines when wasm exposes computeIsocline', async () => {
+    wasmState.useCamelCaseIsoclineMethod = true
+    const handler = requireHandler()
+    const message = {
+      id: 'job-isocline-camel',
       kind: 'computeIsocline',
       payload: {
         system: {

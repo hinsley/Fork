@@ -178,7 +178,7 @@ function defaultIsoclineSamples(activeCount: number): number {
 
 function defaultIsoclineAxes(system: SystemConfig): IsoclineAxis[] {
   const maxAxes = Math.min(system.varNames.length, 3)
-  const count = maxAxes <= 1 ? maxAxes : 2
+  const count = maxAxes
   const sampleCount = defaultIsoclineSamples(count)
   return system.varNames.slice(0, count).map((variableName) => ({
     variableName,

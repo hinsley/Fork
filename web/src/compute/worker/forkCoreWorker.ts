@@ -99,7 +99,18 @@ type WasmModule = {
     set_t: (t: number) => void
     get_t: () => number
     step: (dt: number) => void
-    compute_isocline: (
+    compute_isocline?: (
+      expression: string,
+      level: number,
+      axisIndices: number[],
+      axisMins: number[],
+      axisMaxs: number[],
+      axisSamples: number[],
+      frozenState: number[],
+      varNames: string[],
+      paramNames: string[]
+    ) => ComputeIsoclineResult
+    computeIsocline?: (
       expression: string,
       level: number,
       axisIndices: number[],
@@ -391,7 +402,14 @@ async function runComputeIsocline(
   const axisMins = request.axes.map((axis) => axis.min)
   const axisMaxs = request.axes.map((axis) => axis.max)
   const axisSamples = request.axes.map((axis) => axis.samples)
-  const result = system.compute_isocline(
+  const computeIsocline = system.compute_isocline ?? system.computeIsocline
+  if (typeof computeIsocline !== 'function') {
+    throw new Error(
+      'Isocline computation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  const result = computeIsocline.call(
+    system,
     request.expression,
     request.level,
     axisIndices,
