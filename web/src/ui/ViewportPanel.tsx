@@ -36,6 +36,7 @@ import {
   extractLimitCycleProfile,
   formatBifurcationLabel,
   getBranchParams,
+  resolveContinuationPointParam2Value,
   type LimitCycleProfileLayout,
 } from '../system/continuation'
 import { resolveClvRender } from '../system/clv'
@@ -948,6 +949,14 @@ function resolveAxisValue(
     if (axis.name === branchType.param2_name) {
       if (Number.isFinite(point.param2_value)) {
         return point.param2_value ?? null
+      }
+      const inferred = resolveContinuationPointParam2Value(
+        point,
+        branchType,
+        system.config.varNames.length
+      )
+      if (Number.isFinite(inferred)) {
+        return inferred ?? null
       }
       const fallback = branchParams[paramIndex]
       return Number.isFinite(fallback) ? fallback : null

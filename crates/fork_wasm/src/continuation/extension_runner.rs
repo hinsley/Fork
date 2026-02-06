@@ -2,10 +2,11 @@
 
 use super::shared::{compute_tangent_from_problem, OwnedEquilibriumContinuationProblem};
 use crate::system::build_system;
+use fork_core::continuation::homoclinic::HomoclinicProblem;
 use fork_core::continuation::periodic::PeriodicOrbitCollocationProblem;
 use fork_core::continuation::{
-    BranchType, ContinuationBranch, ContinuationPoint, ContinuationProblem, ContinuationRunner,
-    ContinuationSettings,
+    homoclinic_setup_from_homoclinic_point, BranchType, ContinuationBranch, ContinuationPoint,
+    ContinuationProblem, ContinuationRunner, ContinuationSettings, HomoclinicExtraFlags,
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::SystemKind;
@@ -28,6 +29,11 @@ enum ExtensionRunnerKind {
     LimitCycle {
         _system: Box<EquationSystem>,
         runner: ContinuationRunner<PeriodicOrbitCollocationProblem<'static>>,
+        merge: ExtensionMergeContext,
+    },
+    Homoclinic {
+        _system: Box<EquationSystem>,
+        runner: ContinuationRunner<HomoclinicProblem<'static>>,
         merge: ExtensionMergeContext,
     },
 }
@@ -141,7 +147,7 @@ impl WasmContinuationExtensionRunner {
             .cloned()
             .ok_or_else(|| JsValue::from_str("Branch endpoint missing"))?;
 
-        let system = build_system(equations, params, &param_names, &var_names)?;
+        let mut system = build_system(equations, params, &param_names, &var_names)?;
         let param_index = *system
             .param_map
             .get(parameter_name)
@@ -329,9 +335,126 @@ impl WasmContinuationExtensionRunner {
                     merge,
                 }
             }
-            BranchType::HomoclinicCurve { .. } | BranchType::HomotopySaddleCurve { .. } => {
+            BranchType::HomoclinicCurve {
+                ntst,
+                ncol,
+                param1_name,
+                param2_name,
+                free_time,
+                free_eps0,
+                free_eps1,
+            } => {
+                let param1_index = *system.param_map.get(param1_name).ok_or_else(|| {
+                    JsValue::from_str(&format!("Unknown parameter: {}", param1_name))
+                })?;
+                let param2_index = *system.param_map.get(param2_name).ok_or_else(|| {
+                    JsValue::from_str(&format!("Unknown parameter: {}", param2_name))
+                })?;
+                let mut base_params = system.params.clone();
+                if param1_index >= base_params.len() || param2_index >= base_params.len() {
+                    return Err(JsValue::from_str("Homoclinic parameter index out of range"));
+                }
+                base_params[param1_index] = endpoint.param_value;
+
+                let setup = homoclinic_setup_from_homoclinic_point(
+                    &mut system,
+                    &endpoint.state,
+                    *ntst,
+                    *ncol,
+                    *ntst,
+                    *ncol,
+                    &base_params,
+                    param1_index,
+                    param2_index,
+                    param1_name,
+                    param2_name,
+                    HomoclinicExtraFlags {
+                        free_time: *free_time,
+                        free_eps0: *free_eps0,
+                        free_eps1: *free_eps1,
+                    },
+                )
+                .map_err(|e| {
+                    JsValue::from_str(&format!("Failed to initialize homoclinic extension: {}", e))
+                })?;
+
+                let mut boxed_system = Box::new(system);
+                let system_ptr: *mut EquationSystem = &mut *boxed_system;
+                let mut problem = HomoclinicProblem::new(unsafe { &mut *system_ptr }, setup)
+                    .map_err(|e| {
+                        JsValue::from_str(&format!(
+                            "Failed to create homoclinic extension problem: {}",
+                            e
+                        ))
+                    })?;
+
+                let dim = problem.dimension();
+                if endpoint.state.len() != dim {
+                    return Err(JsValue::from_str(&format!(
+                        "Dimension mismatch: branch point state has length {}, problem expects {}",
+                        endpoint.state.len(),
+                        dim
+                    )));
+                }
+
+                let mut end_aug = DVector::zeros(dim + 1);
+                end_aug[0] = endpoint.param_value;
+                for (i, &v) in endpoint.state.iter().enumerate() {
+                    end_aug[i + 1] = v;
+                }
+
+                let secant_direction = if let Some(neighbor_pos) = neighbor_idx {
+                    let neighbor = &merge.branch.points[neighbor_pos];
+                    let mut neighbor_aug = DVector::zeros(dim + 1);
+                    neighbor_aug[0] = neighbor.param_value;
+                    for (i, &v) in neighbor.state.iter().enumerate() {
+                        neighbor_aug[i + 1] = v;
+                    }
+                    let secant = &end_aug - &neighbor_aug;
+                    if secant.norm() > 1e-12 {
+                        Some(secant.normalize())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let mut tangent = if let Some(secant) = secant_direction.as_ref() {
+                    secant.clone()
+                } else {
+                    compute_tangent_from_problem(&mut problem, &end_aug)
+                        .map_err(|e| JsValue::from_str(&format!("{}", e)))?
+                };
+
+                orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
+
+                let initial_point = ContinuationPoint {
+                    state: endpoint.state.clone(),
+                    param_value: endpoint.param_value,
+                    stability: endpoint.stability.clone(),
+                    eigenvalues: endpoint.eigenvalues.clone(),
+                    cycle_points: endpoint.cycle_points.clone(),
+                };
+
+                let problem: HomoclinicProblem<'static> = unsafe { std::mem::transmute(problem) };
+                let mut runner =
+                    ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
+                        .map_err(|e| {
+                            JsValue::from_str(&format!("Continuation init failed: {}", e))
+                        })?;
+                runner.set_branch_type(merge.branch.branch_type.clone());
+                runner.set_upoldp(merge.branch.upoldp.clone());
+
+                ExtensionRunnerKind::Homoclinic {
+                    _system: boxed_system,
+                    runner,
+                    merge,
+                }
+            }
+            BranchType::HomotopySaddleCurve { .. } => {
                 return Err(JsValue::from_str(
-                    "Branch extension for homoclinic and homotopy-saddle curves is not available yet.",
+                    "Branch extension for homotopy-saddle curves is not available yet.",
                 ))
             }
         };
@@ -345,6 +468,7 @@ impl WasmContinuationExtensionRunner {
         match self.runner.as_ref() {
             Some(ExtensionRunnerKind::Equilibrium { runner, .. }) => runner.is_done(),
             Some(ExtensionRunnerKind::LimitCycle { runner, .. }) => runner.is_done(),
+            Some(ExtensionRunnerKind::Homoclinic { runner, .. }) => runner.is_done(),
             None => true,
         }
     }
@@ -357,6 +481,9 @@ impl WasmContinuationExtensionRunner {
             Some(ExtensionRunnerKind::LimitCycle { runner, .. }) => runner
                 .run_steps(batch_size as usize)
                 .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+            Some(ExtensionRunnerKind::Homoclinic { runner, .. }) => runner
+                .run_steps(batch_size as usize)
+                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
             None => return Err(JsValue::from_str("Runner not initialized")),
         };
 
@@ -367,6 +494,7 @@ impl WasmContinuationExtensionRunner {
         let result = match self.runner.as_ref() {
             Some(ExtensionRunnerKind::Equilibrium { runner, .. }) => runner.step_result(),
             Some(ExtensionRunnerKind::LimitCycle { runner, .. }) => runner.step_result(),
+            Some(ExtensionRunnerKind::Homoclinic { runner, .. }) => runner.step_result(),
             None => return Err(JsValue::from_str("Runner not initialized")),
         };
 
@@ -382,6 +510,9 @@ impl WasmContinuationExtensionRunner {
         let (extension, merge) = match runner_kind {
             ExtensionRunnerKind::Equilibrium { runner, merge } => (runner.take_result(), merge),
             ExtensionRunnerKind::LimitCycle { runner, merge, .. } => (runner.take_result(), merge),
+            ExtensionRunnerKind::Homoclinic { runner, merge, .. } => {
+                (runner.take_result(), merge)
+            }
         };
 
         let mut branch = merge.branch;

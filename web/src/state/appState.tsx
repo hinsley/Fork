@@ -1998,6 +1998,7 @@ export function AppProvider({
           ![
             'equilibrium',
             'limit_cycle',
+            'homoclinic_curve',
             'fold_curve',
             'hopf_curve',
             'lpc_curve',
@@ -2006,7 +2007,7 @@ export function AppProvider({
           ].includes(sourceBranch.branchType)
         ) {
           throw new Error(
-            `Branch extension is only available for ${equilibriumLabelLower}, limit cycle, or bifurcation curve branches.`
+            `Branch extension is only available for ${equilibriumLabelLower}, limit cycle, homoclinic, or bifurcation curve branches.`
           )
         }
         if (!sourceBranch.data.points.length) {
@@ -2022,13 +2023,25 @@ export function AppProvider({
             ? sourceBranch.mapIterations ?? 1
             : undefined
 
+        const branchTypeMeta = sourceBranch.data.branch_type
+        const extensionParameterName =
+          branchTypeMeta &&
+          typeof branchTypeMeta === 'object' &&
+          'param1_name' in branchTypeMeta &&
+          typeof branchTypeMeta.param1_name === 'string'
+            ? branchTypeMeta.param1_name
+            : sourceBranch.parameterName
+        if (!system.paramNames.includes(extensionParameterName)) {
+          throw new Error('Branch continuation parameter is not defined in this system.')
+        }
+
         const branchData = serializeBranchDataForWasm(sourceBranch)
 
         const updatedData = await client.runContinuationExtension(
           {
             system: runConfig,
             branchData,
-            parameterName: sourceBranch.parameterName,
+            parameterName: extensionParameterName,
             mapIterations,
             settings: request.settings,
             forward: request.forward,
@@ -2042,7 +2055,9 @@ export function AppProvider({
           }
         )
 
-        const normalized = normalizeBranchEigenvalues(updatedData)
+        const normalized = normalizeBranchEigenvalues(updatedData, {
+          stateDimension: system.varNames.length,
+        })
         const updatedBranch: ContinuationObject = {
           ...sourceBranch,
           data: normalized,
@@ -3475,21 +3490,24 @@ export function AppProvider({
             ? branchData.indices
             : branchData.points.map((_, index) => index)
 
-        const normalized = normalizeBranchEigenvalues({
-          ...branchData,
-          indices,
-          branch_type:
-            branchData.branch_type ?? {
-              type: 'HomoclinicCurve' as const,
-              ntst: Math.round(request.targetNtst),
-              ncol: Math.round(request.targetNcol),
-              param1_name: request.parameterName,
-              param2_name: request.param2Name,
-              free_time: request.freeTime,
-              free_eps0: request.freeEps0,
-              free_eps1: request.freeEps1,
-            },
-        })
+        const normalized = normalizeBranchEigenvalues(
+          {
+            ...branchData,
+            indices,
+            branch_type:
+              branchData.branch_type ?? {
+                type: 'HomoclinicCurve' as const,
+                ntst: Math.round(request.targetNtst),
+                ncol: Math.round(request.targetNcol),
+                param1_name: request.parameterName,
+                param2_name: request.param2Name,
+                free_time: request.freeTime,
+                free_eps0: request.freeEps0,
+                free_eps1: request.freeEps1,
+              },
+          },
+          { stateDimension: system.varNames.length }
+        )
 
         const branch: ContinuationObject = {
           type: 'continuation',
@@ -3630,21 +3648,24 @@ export function AppProvider({
             ? branchData.indices
             : branchData.points.map((_, index) => index)
 
-        const normalized = normalizeBranchEigenvalues({
-          ...branchData,
-          indices,
-          branch_type:
-            branchData.branch_type ?? {
-              type: 'HomoclinicCurve' as const,
-              ntst: Math.round(request.targetNtst),
-              ncol: Math.round(request.targetNcol),
-              param1_name: sourceType.param1_name,
-              param2_name: sourceType.param2_name,
-              free_time: request.freeTime,
-              free_eps0: request.freeEps0,
-              free_eps1: request.freeEps1,
-            },
-        })
+        const normalized = normalizeBranchEigenvalues(
+          {
+            ...branchData,
+            indices,
+            branch_type:
+              branchData.branch_type ?? {
+                type: 'HomoclinicCurve' as const,
+                ntst: Math.round(request.targetNtst),
+                ncol: Math.round(request.targetNcol),
+                param1_name: sourceType.param1_name,
+                param2_name: sourceType.param2_name,
+                free_time: request.freeTime,
+                free_eps0: request.freeEps0,
+                free_eps1: request.freeEps1,
+              },
+          },
+          { stateDimension: system.varNames.length }
+        )
 
         const branch: ContinuationObject = {
           type: 'continuation',
@@ -3794,19 +3815,22 @@ export function AppProvider({
             ? branchData.indices
             : branchData.points.map((_, index) => index)
 
-        const normalized = normalizeBranchEigenvalues({
-          ...branchData,
-          indices,
-          branch_type:
-            branchData.branch_type ?? {
-              type: 'HomotopySaddleCurve' as const,
-              ntst: Math.round(request.ntst),
-              ncol: Math.round(request.ncol),
-              param1_name: request.parameterName,
-              param2_name: request.param2Name,
-              stage: 'StageD' as const,
-            },
-        })
+        const normalized = normalizeBranchEigenvalues(
+          {
+            ...branchData,
+            indices,
+            branch_type:
+              branchData.branch_type ?? {
+                type: 'HomotopySaddleCurve' as const,
+                ntst: Math.round(request.ntst),
+                ncol: Math.round(request.ncol),
+                param1_name: request.parameterName,
+                param2_name: request.param2Name,
+                stage: 'StageD' as const,
+              },
+          },
+          { stateDimension: system.varNames.length }
+        )
 
         const branch: ContinuationObject = {
           type: 'continuation',
@@ -3951,21 +3975,24 @@ export function AppProvider({
             ? branchData.indices
             : branchData.points.map((_, index) => index)
 
-        const normalized = normalizeBranchEigenvalues({
-          ...branchData,
-          indices,
-          branch_type:
-            branchData.branch_type ?? {
-              type: 'HomoclinicCurve' as const,
-              ntst: Math.round(request.targetNtst),
-              ncol: Math.round(request.targetNcol),
-              param1_name: sourceType.param1_name,
-              param2_name: sourceType.param2_name,
-              free_time: request.freeTime,
-              free_eps0: request.freeEps0,
-              free_eps1: request.freeEps1,
-            },
-        })
+        const normalized = normalizeBranchEigenvalues(
+          {
+            ...branchData,
+            indices,
+            branch_type:
+              branchData.branch_type ?? {
+                type: 'HomoclinicCurve' as const,
+                ntst: Math.round(request.targetNtst),
+                ncol: Math.round(request.targetNcol),
+                param1_name: sourceType.param1_name,
+                param2_name: sourceType.param2_name,
+                free_time: request.freeTime,
+                free_eps0: request.freeEps0,
+                free_eps1: request.freeEps1,
+              },
+          },
+          { stateDimension: system.varNames.length }
+        )
 
         const branch: ContinuationObject = {
           type: 'continuation',

@@ -11,6 +11,7 @@ import {
   interpretLimitCycleStability,
   normalizeBranchEigenvalues,
   normalizeEigenvalueArray,
+  resolveContinuationPointParam2Value,
   serializeBranchDataForWasm,
 } from './continuation'
 import { addObject, createSystem } from './model'
@@ -133,6 +134,79 @@ describe('continuation helpers', () => {
       { re: 1, im: 2 },
       { re: 3, im: 4 },
     ])
+  })
+
+  it('decodes homoclinic secondary parameter from packed state', () => {
+    const p2 = 0.37
+    const state = [
+      // mesh (ntst+1=3 points, dim=2)
+      0, 0, 1, 1, 2, 2,
+      // stages (ntst*ncol=2 points, dim=2)
+      0.5, 0.5, 1.5, 1.5,
+      // x0 (dim=2)
+      0, 0,
+      // p2
+      p2,
+      // extras + Riccati tail (unused in decoder)
+      10, 0.01, 0, 0,
+    ]
+    const branchType = {
+      type: 'HomoclinicCurve' as const,
+      ntst: 2,
+      ncol: 1,
+      param1_name: 'a',
+      param2_name: 'b',
+      free_time: true,
+      free_eps0: true,
+      free_eps1: false,
+    }
+
+    const value = resolveContinuationPointParam2Value(
+      { state, param2_value: undefined },
+      branchType,
+      2
+    )
+
+    expect(value).toBeCloseTo(p2, 12)
+  })
+
+  it('hydrates missing homoclinic param2 values during normalization', () => {
+    const p2 = -0.42
+    const state = [
+      0, 0, 1, 1, 2, 2,
+      0.5, 0.5, 1.5, 1.5,
+      0, 0,
+      p2,
+      8, 0.02, 0, 0,
+    ]
+
+    const normalized = normalizeBranchEigenvalues(
+      {
+        points: [
+          {
+            state,
+            param_value: 0.1,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 2,
+          ncol: 1,
+          param1_name: 'a',
+          param2_name: 'b',
+          free_time: true,
+          free_eps0: true,
+          free_eps1: false,
+        },
+      },
+      { stateDimension: 2 }
+    )
+
+    expect(normalized.points[0].param2_value).toBeCloseTo(p2, 12)
   })
 
   it('serializes branch data for WASM consumers', () => {

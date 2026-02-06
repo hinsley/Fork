@@ -316,15 +316,16 @@ pub fn homoclinic_setup_from_homoclinic_point(
     extras: HomoclinicExtraFlags,
 ) -> Result<HomoclinicSetup> {
     let dim = system.equations.len();
+    let inferred = infer_fixed_homoclinic_extras(point_state, dim, source_ntst, source_ncol);
     let decoded = decode_homoclinic_state(
         point_state,
         dim,
         source_ntst,
         source_ncol,
         extras,
-        1.0,
-        1e-2,
-        1e-2,
+        inferred.time,
+        inferred.eps0,
+        inferred.eps1,
     )?;
 
     let remeshed = remesh_open_orbit(
@@ -368,6 +369,51 @@ pub fn homoclinic_setup_from_homoclinic_point(
         extras,
         basis,
     })
+}
+
+#[derive(Debug, Clone, Copy)]
+struct InferredHomoclinicExtras {
+    time: f64,
+    eps0: f64,
+    eps1: f64,
+}
+
+fn infer_fixed_homoclinic_extras(
+    point_state: &[f64],
+    dim: usize,
+    ntst: usize,
+    ncol: usize,
+) -> InferredHomoclinicExtras {
+    let defaults = InferredHomoclinicExtras {
+        time: 1.0,
+        eps0: 1e-2,
+        eps1: 1e-2,
+    };
+
+    if dim == 0 {
+        return defaults;
+    }
+
+    let mesh_len = (ntst + 1) * dim;
+    let stage_len = ntst * ncol * dim;
+    let x0_start = mesh_len + stage_len;
+    let x0_end = x0_start + dim;
+    if point_state.len() < x0_end || mesh_len < dim {
+        return defaults;
+    }
+
+    let first_mesh = &point_state[0..dim];
+    let last_mesh = &point_state[mesh_len - dim..mesh_len];
+    let x0 = &point_state[x0_start..x0_end];
+
+    let eps0 = l2_distance(first_mesh, x0).max(1e-8);
+    let eps1 = l2_distance(last_mesh, x0).max(1e-8);
+
+    InferredHomoclinicExtras {
+        time: defaults.time,
+        eps0,
+        eps1,
+    }
 }
 
 pub fn homotopy_saddle_setup_from_equilibrium(
@@ -1193,5 +1239,67 @@ mod tests {
         assert_eq!(setup.setup.ntst, 6);
         assert_eq!(setup.setup.ncol, 2);
         assert!(setup.setup.guess.eps1 > setup.setup.guess.eps0);
+    }
+
+    #[test]
+    fn homoclinic_restart_infers_fixed_endpoint_distances() {
+        let mut system = linear_system();
+        let state = synthetic_lc_state(2, 6, 2);
+        let setup = homoclinic_setup_from_large_cycle(
+            &mut system,
+            &state,
+            6,
+            2,
+            5,
+            2,
+            &[0.2, 0.1],
+            0,
+            1,
+            "mu",
+            "nu",
+            HomoclinicExtraFlags {
+                free_time: true,
+                free_eps0: true,
+                free_eps1: false,
+            },
+        )
+        .expect("setup");
+
+        let point_state = pack_homoclinic_state(&setup);
+        let expected_eps1 = l2_distance(
+            setup.guess.mesh_states.last().expect("last mesh point"),
+            &setup.guess.x0,
+        );
+
+        let restarted = homoclinic_setup_from_homoclinic_point(
+            &mut system,
+            &point_state,
+            setup.ntst,
+            setup.ncol,
+            setup.ntst,
+            setup.ncol,
+            &[0.2, 0.1],
+            0,
+            1,
+            "mu",
+            "nu",
+            HomoclinicExtraFlags {
+                free_time: true,
+                free_eps0: true,
+                free_eps1: false,
+            },
+        )
+        .expect("restart");
+
+        assert!(
+            (restarted.guess.eps1 - expected_eps1).abs() < 1e-6,
+            "expected eps1 to be inferred from endpoint distance, got {} vs {}",
+            restarted.guess.eps1,
+            expected_eps1
+        );
+        assert!(
+            (restarted.guess.eps1 - 1e-2).abs() > 1e-3,
+            "eps1 should not fall back to placeholder defaults"
+        );
     }
 }

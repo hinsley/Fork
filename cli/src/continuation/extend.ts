@@ -161,11 +161,18 @@ export async function extendBranch(
       branchDataToPass.branch_type = { type: 'LimitCycle', ntst, ncol };
     }
 
+    const branchTypeMeta = branch.data.branch_type as
+      | { param1_name?: string }
+      | undefined;
+    const extensionParameterName =
+      typeof branchTypeMeta?.param1_name === 'string'
+        ? branchTypeMeta.param1_name
+        : branch.parameterName;
 
     const updatedData = runContinuationExtensionWithProgress(
       bridge,
       branchDataToPass,
-      branch.parameterName,
+      extensionParameterName,
       mapIterations,
       continuationSettings,
       directionForward,

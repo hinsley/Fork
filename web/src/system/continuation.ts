@@ -210,15 +210,73 @@ export function interpretLimitCycleStability(
 }
 
 export function normalizeBranchEigenvalues(
-  data: ContinuationBranchDataInput
+  data: ContinuationBranchDataInput,
+  options?: { stateDimension?: number }
 ): ContinuationBranchData {
+  const stateDimension = options?.stateDimension
   return {
     ...data,
-    points: data.points.map((point) => ({
-      ...point,
-      eigenvalues: normalizeEigenvalueArray(point.eigenvalues),
-    })),
+    points: data.points.map((point) => {
+      const inferredParam2 =
+        typeof stateDimension === 'number' && Number.isFinite(stateDimension)
+          ? resolveContinuationPointParam2Value(
+              point,
+              data.branch_type,
+              Math.max(1, Math.round(stateDimension))
+            )
+          : undefined
+      const param2_value = Number.isFinite(point.param2_value)
+        ? point.param2_value
+        : inferredParam2
+      return {
+        ...point,
+        param2_value,
+        eigenvalues: normalizeEigenvalueArray(point.eigenvalues),
+      }
+    }),
   }
+}
+
+export function resolveContinuationPointParam2Value(
+  point: Pick<ContinuationPoint, 'state' | 'param2_value'>,
+  branchType: ContinuationBranchData['branch_type'] | undefined,
+  stateDimension: number
+): number | undefined {
+  if (Number.isFinite(point.param2_value)) {
+    return point.param2_value
+  }
+  if (!branchType || typeof branchType !== 'object' || !('type' in branchType)) {
+    return undefined
+  }
+  if (!Number.isFinite(stateDimension) || stateDimension < 1) {
+    return undefined
+  }
+  const dim = Math.max(1, Math.round(stateDimension))
+  let ntst: number | null = null
+  let ncol: number | null = null
+
+  if (branchType.type === 'HomoclinicCurve' || branchType.type === 'HomotopySaddleCurve') {
+    ntst = branchType.ntst
+    ncol = branchType.ncol
+  } else {
+    return undefined
+  }
+
+  if (!Number.isInteger(ntst) || !Number.isInteger(ncol) || ntst <= 0 || ncol <= 0) {
+    return undefined
+  }
+  if (!Array.isArray(point.state) || point.state.length === 0) {
+    return undefined
+  }
+
+  const meshLen = (ntst + 1) * dim
+  const stageLen = ntst * ncol * dim
+  const p2Index = meshLen + stageLen + dim
+  if (p2Index < 0 || p2Index >= point.state.length) {
+    return undefined
+  }
+  const value = point.state[p2Index]
+  return Number.isFinite(value) ? value : undefined
 }
 
 function serializeEigenvalueArray(raw: EigenvalueInput[] | undefined): EigenvalueWire[] {

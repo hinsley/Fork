@@ -72,6 +72,7 @@ import {
   getBranchParams,
   interpretLimitCycleStability,
   normalizeEigenvalueArray,
+  resolveContinuationPointParam2Value,
 } from '../system/continuation'
 import { isCliSafeName, toCliSafeName } from '../utils/naming'
 
@@ -1059,7 +1060,8 @@ function resolveBranchPointParams(
   paramNames: string[],
   baseParams: number[],
   branch: ContinuationObject,
-  point: ContinuationPoint
+  point: ContinuationPoint,
+  stateDimension: number
 ): number[] {
   if (paramNames.length === 0) return []
   const codim1ParamNames = resolveCodim1ParamNames(branch)
@@ -1070,7 +1072,12 @@ function resolveBranchPointParams(
       if (name === codim1ParamNames.param1) {
         value = point.param_value
       } else if (name === codim1ParamNames.param2) {
-        value = point.param2_value ?? baseParams[index]
+        value =
+          resolveContinuationPointParam2Value(
+            point,
+            branch.data.branch_type,
+            stateDimension
+          ) ?? baseParams[index]
       }
     } else if (index === continuationParamIndex) {
       value = point.param_value
@@ -1482,6 +1489,7 @@ export function InspectorDetailsPanel({
       [
         'equilibrium',
         'limit_cycle',
+        'homoclinic_curve',
         'fold_curve',
         'hopf_curve',
         'lpc_curve',
@@ -2832,13 +2840,15 @@ export function InspectorDetailsPanel({
       systemDraft.paramNames,
       branchParams,
       branch,
-      selectedBranchPoint
+      selectedBranchPoint,
+      systemDraft.varNames.length
     )
   }, [
     branch,
     branchParams,
     selectedBranchPoint,
     systemDraft.paramNames,
+    systemDraft.varNames.length,
   ])
   const limitCycleRenderData = useMemo(() => {
     if (!limitCycleRenderPoint || !limitCycleRenderBranch) return null
@@ -2847,7 +2857,8 @@ export function InspectorDetailsPanel({
       systemDraft.paramNames,
       baseParams,
       limitCycleRenderBranch,
-      limitCycleRenderPoint
+      limitCycleRenderPoint,
+      systemDraft.varNames.length
     )
     const multipliers = normalizeEigenvalueArray(limitCycleRenderPoint.eigenvalues)
     const parameterName =
@@ -2864,6 +2875,7 @@ export function InspectorDetailsPanel({
     limitCycleRenderPoint,
     system,
     systemDraft.paramNames,
+    systemDraft.varNames.length,
   ])
   const limitCycleDisplayParams =
     limitCycleRenderData?.params ?? limitCycle?.parameters ?? []
@@ -3576,7 +3588,7 @@ export function InspectorDetailsPanel({
     }
     if (!canExtendBranch) {
       setBranchExtensionError(
-        `Branch extension is only available for ${equilibriumLabelLower}, limit cycle, or bifurcation curve branches.`
+        `Branch extension is only available for ${equilibriumLabelLower}, limit cycle, homoclinic, or bifurcation curve branches.`
       )
       return
     }
@@ -7800,7 +7812,11 @@ export function InspectorDetailsPanel({
                                     value = selectedBranchPoint.param_value
                                   } else if (name === codim1ParamNames.param2) {
                                     value =
-                                      selectedBranchPoint.param2_value ?? branchParams[index]
+                                      resolveContinuationPointParam2Value(
+                                        selectedBranchPoint,
+                                        branch.data.branch_type,
+                                        systemDraft.varNames.length
+                                      ) ?? branchParams[index]
                                   }
                                 } else if (index === continuationParamIndex) {
                                   value = selectedBranchPoint.param_value
@@ -8197,7 +8213,11 @@ export function InspectorDetailsPanel({
                                     value = selectedBranchPoint.param_value
                                   } else if (name === codim1ParamNames.param2) {
                                     value =
-                                      selectedBranchPoint.param2_value ?? branchParams[index]
+                                      resolveContinuationPointParam2Value(
+                                        selectedBranchPoint,
+                                        branch.data.branch_type,
+                                        systemDraft.varNames.length
+                                      ) ?? branchParams[index]
                                   }
                                 } else if (index === continuationParamIndex) {
                                   value = selectedBranchPoint.param_value

@@ -3300,6 +3300,103 @@ describe('InspectorDetailsPanel', () => {
     )
   })
 
+  it('allows extending homoclinic branches with the standard extension menu', async () => {
+    const user = userEvent.setup()
+    const base = createSystem({
+      name: 'Homoc_Extend_UI',
+      config: {
+        name: 'Homoc_Extend_UI',
+        equations: ['y', '-x'],
+        params: [0.2, 0.1],
+        paramNames: ['mu', 'nu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_Seed',
+      systemName: base.config.name,
+    }
+    const added = addObject(base, equilibrium)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'homoc_seed',
+      systemName: base.config.name,
+      parameterName: 'mu, nu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'homoclinic_curve',
+      data: {
+        points: [
+          {
+            state: new Array(24).fill(0),
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 2,
+          ncol: 1,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          free_time: true,
+          free_eps0: true,
+          free_eps1: false,
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2, 0.1],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+    const onExtendBranch = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <InspectorDetailsPanel
+        system={branchResult.system}
+        selectedNodeId={branchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={onExtendBranch}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-extend-toggle'))
+    await user.click(screen.getByTestId('branch-extend-submit'))
+
+    expect(onExtendBranch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        branchId: branchResult.nodeId,
+      })
+    )
+  })
+
   it('submits homotopy-saddle-from-equilibrium requests', async () => {
     const user = userEvent.setup()
     const base = createSystem({

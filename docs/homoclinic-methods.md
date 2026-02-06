@@ -54,6 +54,25 @@ Web:
 
 Output: a new `homoclinic_curve` branch (restart/continuation).
 
+## Extending Existing Homoclinic Branches
+
+Homoclinic branches can be extended with the same `Extend Branch` workflow used for equilibrium and limit-cycle branches.
+
+CLI:
+1. Open a `homoclinic_curve` branch.
+2. Choose `Extend Branch`.
+3. Set direction (`Forward` or `Backward`) and continuation settings.
+
+Web:
+1. Select a `homoclinic_curve` branch.
+2. Open `Extend Branch` in Inspector.
+3. Choose direction and submit.
+
+Notes:
+
+- Forward/backward extension always follows branch index orientation, independent of how the branch was originally created.
+- Two-parameter homoclinic curves decode the second parameter from packed homoclinic state when needed for plotting/inspection.
+
 ## Method 5: Homotopy-Saddle from Equilibrium
 
 Start from a point on an `equilibrium` branch.
