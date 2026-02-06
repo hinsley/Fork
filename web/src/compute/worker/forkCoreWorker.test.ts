@@ -102,6 +102,14 @@ beforeAll(async () => {
       compute_covariant_lyapunov_vectors() {
         return { dimension: 2, checkpoints: 1, times: [0], vectors: [] }
       }
+      compute_isocline() {
+        return {
+          geometry: 'segments',
+          dim: 2,
+          points: [0, 0, 1, 1],
+          segments: [0, 1],
+        }
+      }
       init_lc_from_hopf() {
         return {}
       }
@@ -335,6 +343,39 @@ describe('forkCoreWorker', () => {
     }
     expect(response.ok).toBe(true)
     expect(response.result).toEqual({ x: [0, 1, 2], y: [1, 2, 3] })
+  })
+
+  it('computes isoclines', async () => {
+    const handler = requireHandler()
+    const message = {
+      id: 'job-isocline',
+      kind: 'computeIsocline',
+      payload: {
+        system: {
+          ...baseSystem,
+          equations: ['x + y', 'x - y'],
+          varNames: ['x', 'y'],
+        },
+        expression: 'x + y',
+        level: 0,
+        axes: [
+          { variableName: 'x', min: -2, max: 2, samples: 16 },
+          { variableName: 'y', min: -2, max: 2, samples: 16 },
+        ],
+        frozenState: [0, 0],
+      },
+    }
+
+    await handler({ data: message } as unknown as MessageEvent<Record<string, unknown>>)
+
+    const response = workerScope.postMessage.mock.calls[0][0] as {
+      ok: boolean
+      result: { geometry: string; dim: number; segments?: number[] }
+    }
+    expect(response.ok).toBe(true)
+    expect(response.result.geometry).toBe('segments')
+    expect(response.result.dim).toBe(2)
+    expect(response.result.segments).toEqual([0, 1])
   })
 
   it('returns empty map samples for invalid requests', async () => {

@@ -1,6 +1,8 @@
 /// <reference lib="webworker" />
 
 import type {
+  ComputeIsoclineRequest,
+  ComputeIsoclineResult,
   Codim1CurveBranch,
   ContinuationProgress,
   ContinuationExtensionRequest,
@@ -30,6 +32,7 @@ import type {
 type WorkerRequest =
   | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
   | { id: string; kind: 'sampleMap1DFunction'; payload: SampleMap1DFunctionRequest }
+  | { id: string; kind: 'computeIsocline'; payload: ComputeIsoclineRequest }
   | { id: string; kind: 'computeLyapunovExponents'; payload: LyapunovExponentsRequest }
   | { id: string; kind: 'computeCovariantLyapunovVectors'; payload: CovariantLyapunovRequest }
   | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
@@ -69,6 +72,7 @@ type WorkerResponse =
       result:
         | SimulateOrbitResult
         | SampleMap1DFunctionResult
+        | ComputeIsoclineResult
         | number[]
         | CovariantLyapunovResponse
         | SolveEquilibriumResult
@@ -95,6 +99,17 @@ type WasmModule = {
     set_t: (t: number) => void
     get_t: () => number
     step: (dt: number) => void
+    compute_isocline: (
+      expression: string,
+      level: number,
+      axisIndices: number[],
+      axisMins: number[],
+      axisMaxs: number[],
+      axisSamples: number[],
+      frozenState: number[],
+      varNames: string[],
+      paramNames: string[]
+    ) => ComputeIsoclineResult
     solve_equilibrium: (
       initialGuess: number[],
       maxSteps: number,
@@ -351,6 +366,44 @@ async function runSampleMap1DFunction(
   }
 
   return { x: xValues, y: yValues }
+}
+
+async function runComputeIsocline(
+  request: ComputeIsoclineRequest,
+  signal: AbortSignal
+): Promise<ComputeIsoclineResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+  abortIfNeeded(signal)
+
+  const axisIndices = request.axes.map((axis) => request.system.varNames.indexOf(axis.variableName))
+  if (axisIndices.some((index) => index < 0)) {
+    throw new Error('Isocline axis variable is not part of the system state variables.')
+  }
+  const axisMins = request.axes.map((axis) => axis.min)
+  const axisMaxs = request.axes.map((axis) => axis.max)
+  const axisSamples = request.axes.map((axis) => axis.samples)
+  const result = system.compute_isocline(
+    request.expression,
+    request.level,
+    axisIndices,
+    axisMins,
+    axisMaxs,
+    axisSamples,
+    request.frozenState,
+    request.system.varNames,
+    request.system.paramNames
+  )
+  abortIfNeeded(signal)
+  return result
 }
 
 async function runLyapunovExponents(
@@ -907,6 +960,13 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     if (message.kind === 'sampleMap1DFunction') {
       const result = await runSampleMap1DFunction(message.payload, controller.signal)
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'computeIsocline') {
+      const result = await runComputeIsocline(message.payload, controller.signal)
       const response: WorkerResponse = { id: message.id, ok: true, result }
       ctx.postMessage(response)
       return

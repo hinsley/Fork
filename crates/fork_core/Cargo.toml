@@ -15,5 +15,5 @@ thiserror = "1.0"
 anyhow = "1.0"
 nalgebra = { version = "0.34", features = ["std", "sparse"] }
 nalgebra-sparse = "0.11"
-
+marching-cubes = "0.1.2"
 

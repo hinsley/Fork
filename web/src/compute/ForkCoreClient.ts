@@ -41,6 +41,40 @@ export type SampleMap1DFunctionResult = {
   y: number[]
 }
 
+export type IsoclineAxisRequest = {
+  variableName: string
+  min: number
+  max: number
+  samples: number
+}
+
+export type ComputeIsoclineRequest = {
+  system: SystemConfig
+  expression: string
+  level: number
+  axes: IsoclineAxisRequest[]
+  frozenState: number[]
+}
+
+export type ComputeIsoclineResult =
+  | {
+      geometry: 'points'
+      dim: number
+      points: number[]
+    }
+  | {
+      geometry: 'segments'
+      dim: number
+      points: number[]
+      segments: number[]
+    }
+  | {
+      geometry: 'triangles'
+      dim: number
+      points: number[]
+      triangles: number[]
+    }
+
 export type LyapunovExponentsRequest = {
   system: SystemConfig
   startState: number[]
@@ -227,6 +261,10 @@ export interface ForkCoreClient {
     request: SampleMap1DFunctionRequest,
     opts?: { signal?: AbortSignal }
   ): Promise<SampleMap1DFunctionResult>
+  computeIsocline(
+    request: ComputeIsoclineRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<ComputeIsoclineResult>
   computeLyapunovExponents(
     request: LyapunovExponentsRequest,
     opts?: { signal?: AbortSignal }

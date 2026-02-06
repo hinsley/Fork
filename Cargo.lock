@@ -72,6 +72,7 @@ name = "fork_core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "marching-cubes",
  "nalgebra",
  "nalgebra-sparse",
  "num-complex",
@@ -201,6 +202,12 @@ dependencies = [
  "once_cell",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "marching-cubes"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3789d0ce591676c041a2c460cdca511777fed6eacccd3acf25e6c35fc23d28f0"
 
 [[package]]
 name = "matrixmultiply"

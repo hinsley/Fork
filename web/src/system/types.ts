@@ -160,6 +160,50 @@ export interface LimitCycleObject {
   createdAt: string
 }
 
+export type IsoclineSource =
+  | {
+      kind: 'custom'
+      expression: string
+    }
+  | {
+      kind: 'flow_derivative'
+      variableName: string
+    }
+  | {
+      kind: 'map_increment'
+      variableName: string
+    }
+
+export interface IsoclineAxis {
+  variableName: string
+  min: number
+  max: number
+  samples: number
+}
+
+export interface IsoclineComputedSnapshot {
+  source: IsoclineSource
+  expression: string
+  level: number
+  axes: IsoclineAxis[]
+  frozenState: number[]
+  parameters: number[]
+  computedAt: string
+}
+
+export interface IsoclineObject {
+  type: 'isocline'
+  name: string
+  systemName: string
+  source: IsoclineSource
+  level: number
+  axes: IsoclineAxis[]
+  frozenState: number[]
+  parameters?: number[]
+  customParameters?: number[]
+  lastComputed?: IsoclineComputedSnapshot
+}
+
 export type LimitCycleRenderTarget =
   | { type: 'object' }
   | { type: 'branch'; branchId: string; pointIndex: number }
@@ -168,6 +212,7 @@ export type AnalysisObject =
   | OrbitObject
   | EquilibriumObject
   | LimitCycleObject
+  | IsoclineObject
   | ContinuationObject
 
 export interface CovariantLyapunovData {

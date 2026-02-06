@@ -30,6 +30,7 @@ type ObjectsTreeProps = {
   onReorderNode: (nodeId: string, targetId: string) => void
   onCreateOrbit: () => void
   onCreateEquilibrium: () => void
+  onCreateIsocline?: () => void
   onDeleteNode: (id: string) => void
 }
 
@@ -56,6 +57,7 @@ function getNodeLabel(node: TreeNode, system: System) {
     return `${node.name} (${equilibriumLabel})`
   }
   if (node.objectType === 'limit_cycle') return `${node.name} (limit cycle)`
+  if (node.objectType === 'isocline') return `${node.name} (isocline)`
   if (node.objectType === 'orbit') return `${node.name} (orbit)`
   if (node.kind === 'scene') return `${node.name} (scene)`
   if (node.kind === 'diagram') return `${node.name} (bifurcation)`
@@ -74,6 +76,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       onReorderNode,
       onCreateOrbit,
       onCreateEquilibrium,
+      onCreateIsocline = () => {},
       onDeleteNode,
     },
     ref
@@ -368,6 +371,16 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
               data-testid="create-equilibrium"
             >
               {createEquilibriumLabel}
+            </button>
+            <button
+              className="context-menu__item"
+              onClick={() => {
+                onCreateIsocline()
+                setCreateMenu(null)
+              }}
+              data-testid="create-isocline"
+            >
+              Isocline
             </button>
           </div>
         ) : null}

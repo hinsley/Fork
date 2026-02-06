@@ -3,6 +3,7 @@ pub mod autodiff;
 pub mod continuation;
 pub mod equation_engine;
 pub mod equilibrium;
+pub mod isocline;
 pub mod solvers;
 /// The `fork_core` crate provides the fundamental mathematical engine for the Fork CLI.
 /// It is designed to be generic, supporting both standard floating-point arithmetic (`f64`)

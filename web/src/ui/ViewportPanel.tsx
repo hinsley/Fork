@@ -16,6 +16,7 @@ import type {
   ContinuationObject,
   ContinuationPoint,
   EquilibriumEigenPair,
+  IsoclineComputedSnapshot,
   LineStyle,
   OrbitObject,
   SceneAxisVariables,
@@ -25,9 +26,11 @@ import type {
   TreeNode,
 } from '../system/types'
 import type {
+  ComputeIsoclineResult,
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
 } from '../compute/ForkCoreClient'
+import type { IsoclineComputeRequest } from '../state/appState'
 import {
   buildSortedArrayOrder,
   ensureBranchIndices,
@@ -77,6 +80,17 @@ type ViewportPanelProps = {
     request: SampleMap1DFunctionRequest,
     opts?: { signal?: AbortSignal }
   ) => Promise<SampleMap1DFunctionResult>
+  isoclineGeometryCache?: Record<
+    string,
+    {
+      signature: string
+      geometry: ComputeIsoclineResult
+    }
+  >
+  onComputeIsocline?: (
+    request: IsoclineComputeRequest,
+    opts?: { signal?: AbortSignal; silent?: boolean }
+  ) => Promise<ComputeIsoclineResult | null>
 }
 
 type ViewportEntry = {
@@ -111,6 +125,17 @@ type ViewportTileProps = {
   onCommitRename: () => void
   onCancelRename: () => void
   plotlyTheme: PlotlyThemeTokens
+  isoclineGeometryCache?: Record<
+    string,
+    {
+      signature: string
+      geometry: ComputeIsoclineResult
+    }
+  >
+  onComputeIsocline?: (
+    request: IsoclineComputeRequest,
+    opts?: { signal?: AbortSignal; silent?: boolean }
+  ) => Promise<ComputeIsoclineResult | null>
 }
 
 function resolvePointIndex(point: PlotlyPointClick): number | null {
@@ -1241,16 +1266,271 @@ function buildLimitCyclePreviewTraces(
   })
 }
 
+function buildIsoclineSnapshotSignature(snapshot: IsoclineComputedSnapshot): string {
+  return JSON.stringify({
+    source: snapshot.source,
+    expression: snapshot.expression,
+    level: snapshot.level,
+    axes: snapshot.axes,
+    frozenState: snapshot.frozenState,
+    parameters: snapshot.parameters,
+  })
+}
+
+function buildIsoclineTraces(config: {
+  nodeId: string
+  name: string
+  color: string
+  lineWidth: number
+  pointSize: number
+  highlight: boolean
+  geometry: ComputeIsoclineResult
+  axisIndices: [number, number, number] | null
+  isMap1D: boolean
+  isTimeSeries: boolean
+  timeRange: [number, number] | null
+}): Data[] {
+  const {
+    nodeId,
+    name,
+    color,
+    lineWidth,
+    pointSize,
+    highlight,
+    geometry,
+    axisIndices,
+    isMap1D,
+    isTimeSeries,
+    timeRange,
+  } = config
+  const traces: Data[] = []
+  const dim = geometry.dim
+  if (!Number.isFinite(dim) || dim <= 0) return traces
+  const pointCount = Math.floor(geometry.points.length / dim)
+  if (pointCount <= 0) return traces
+  const axes: [number, number, number] = axisIndices ?? [0, 1, 2]
+  const width = highlight ? lineWidth + 1 : lineWidth
+  const markerSize = highlight ? pointSize + 2 : pointSize
+  const readPoint = (index: number): number[] | null => {
+    if (index < 0 || index >= pointCount) return null
+    const start = index * dim
+    const point = geometry.points.slice(start, start + dim)
+    return point.length === dim ? point : null
+  }
+  const projectPoint = (
+    point: number[]
+  ): [number, number, number] | [number, number] | [number] | null => {
+    if (dim >= 3) {
+      const x = point[axes[0]]
+      const y = point[axes[1]]
+      const z = point[axes[2]]
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null
+      return [x, y, z]
+    }
+    if (dim === 2) {
+      const x = point[0]
+      const y = point[1]
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+      return [x, y]
+    }
+    const value = point[0]
+    if (!Number.isFinite(value)) return null
+    return [value]
+  }
+
+  if (geometry.geometry === 'points') {
+    if (dim >= 3) {
+      const x: number[] = []
+      const y: number[] = []
+      const z: number[] = []
+      for (let index = 0; index < pointCount; index += 1) {
+        const projected = projectPoint(readPoint(index) ?? [])
+        if (!projected || projected.length !== 3) continue
+        x.push(projected[0])
+        y.push(projected[1])
+        z.push(projected[2])
+      }
+      if (x.length > 0) {
+        traces.push({
+          type: 'scatter3d',
+          mode: 'markers',
+          name,
+          uid: nodeId,
+          x,
+          y,
+          z,
+          marker: { color, size: markerSize },
+        })
+      }
+      return traces
+    }
+    if (dim === 2) {
+      const x: number[] = []
+      const y: number[] = []
+      for (let index = 0; index < pointCount; index += 1) {
+        const projected = projectPoint(readPoint(index) ?? [])
+        if (!projected || projected.length !== 2) continue
+        x.push(projected[0])
+        y.push(projected[1])
+      }
+      if (x.length > 0) {
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name,
+          uid: nodeId,
+          x,
+          y,
+          marker: { color, size: markerSize },
+        })
+      }
+      return traces
+    }
+    const x: number[] = []
+    const y: number[] = []
+    const fallbackTime = timeRange ? timeRange[0] : 0
+    for (let index = 0; index < pointCount; index += 1) {
+      const projected = projectPoint(readPoint(index) ?? [])
+      if (!projected || projected.length !== 1) continue
+      if (isMap1D) {
+        x.push(projected[0])
+        y.push(projected[0])
+      } else if (isTimeSeries) {
+        x.push(fallbackTime)
+        y.push(projected[0])
+      } else {
+        x.push(index)
+        y.push(projected[0])
+      }
+    }
+    if (x.length > 0) {
+      traces.push({
+        type: 'scatter',
+        mode: 'markers',
+        name,
+        uid: nodeId,
+        x,
+        y,
+        marker: { color, size: markerSize },
+      })
+    }
+    return traces
+  }
+
+  if (geometry.geometry === 'segments') {
+    if (dim >= 3) {
+      const x: Array<number | null> = []
+      const y: Array<number | null> = []
+      const z: Array<number | null> = []
+      for (let edge = 0; edge + 1 < geometry.segments.length; edge += 2) {
+        const a = readPoint(geometry.segments[edge] ?? -1)
+        const b = readPoint(geometry.segments[edge + 1] ?? -1)
+        if (!a || !b) continue
+        const pa = projectPoint(a)
+        const pb = projectPoint(b)
+        if (!pa || !pb || pa.length !== 3 || pb.length !== 3) continue
+        x.push(pa[0], pb[0], null)
+        y.push(pa[1], pb[1], null)
+        z.push(pa[2], pb[2], null)
+      }
+      if (x.length > 0) {
+        traces.push({
+          type: 'scatter3d',
+          mode: 'lines',
+          name,
+          uid: nodeId,
+          x,
+          y,
+          z,
+          line: { color, width },
+        })
+      }
+      return traces
+    }
+    if (dim !== 2) return traces
+    const x: Array<number | null> = []
+    const y: Array<number | null> = []
+    for (let edge = 0; edge + 1 < geometry.segments.length; edge += 2) {
+      const a = readPoint(geometry.segments[edge] ?? -1)
+      const b = readPoint(geometry.segments[edge + 1] ?? -1)
+      if (!a || !b) continue
+      const pa = projectPoint(a)
+      const pb = projectPoint(b)
+      if (!pa || !pb || pa.length !== 2 || pb.length !== 2) continue
+      x.push(pa[0], pb[0], null)
+      y.push(pa[1], pb[1], null)
+    }
+    if (x.length > 0) {
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        name,
+        uid: nodeId,
+        x,
+        y,
+        line: { color, width },
+      })
+    }
+    return traces
+  }
+
+  if (dim < 3) return traces
+  const x: number[] = []
+  const y: number[] = []
+  const z: number[] = []
+  for (let index = 0; index < pointCount; index += 1) {
+    const projected = projectPoint(readPoint(index) ?? [])
+    if (!projected || projected.length !== 3) return traces
+    x.push(projected[0])
+    y.push(projected[1])
+    z.push(projected[2])
+  }
+  if (x.length === 0) return traces
+  const i: number[] = []
+  const j: number[] = []
+  const k: number[] = []
+  for (let face = 0; face + 2 < geometry.triangles.length; face += 3) {
+    i.push(geometry.triangles[face] ?? 0)
+    j.push(geometry.triangles[face + 1] ?? 0)
+    k.push(geometry.triangles[face + 2] ?? 0)
+  }
+  if (i.length === 0) return traces
+  traces.push({
+    type: 'mesh3d',
+    name,
+    uid: nodeId,
+    x,
+    y,
+    z,
+    i: Uint32Array.from(i),
+    j: Uint32Array.from(j),
+    k: Uint32Array.from(k),
+    color,
+    opacity: highlight ? 0.5 : 0.35,
+    flatshading: true,
+    showscale: false,
+  } as Data)
+  return traces
+}
+
 function buildSceneTraces(
   system: System,
   scene: Scene,
   selectedNodeId: string | null,
+  isoclineGeometryCache?: Record<
+    string,
+    {
+      signature: string
+      geometry: ComputeIsoclineResult
+    }
+  >,
   timeSeriesMeta?: TimeSeriesViewportMeta | null,
   mapRange?: [number, number] | null,
   mapFunctionSamples?: MapFunctionSamples | null,
   plotSize?: PlotSize | null
 ): Data[] {
   const traces: Data[] = []
+  const isoclineCache = isoclineGeometryCache ?? {}
   const limitCycleRenderTargets = system.ui.limitCycleRenderTargets ?? {}
   const isMap = system.config.type === 'map'
   const isTimeSeries = system.config.varNames.length === 1 && !isMap
@@ -1329,6 +1609,30 @@ function buildSceneTraces(
     if (!node || node.kind !== 'object' || !node.visibility) continue
     const object = system.objects[nodeId]
     if (!object) continue
+
+    if (object.type === 'isocline') {
+      if (!object.lastComputed) continue
+      const signature = buildIsoclineSnapshotSignature(object.lastComputed)
+      const cached = isoclineCache[nodeId]
+      if (!cached || cached.signature !== signature) continue
+      const highlight = nodeId === selectedNodeId
+      traces.push(
+        ...buildIsoclineTraces({
+          nodeId,
+          name: object.name,
+          color: node.render.color,
+          lineWidth: node.render.lineWidth,
+          pointSize: node.render.pointSize,
+          highlight,
+          geometry: cached.geometry,
+          axisIndices: sceneAxes,
+          isMap1D,
+          isTimeSeries,
+          timeRange,
+        })
+      )
+      continue
+    }
 
     if (object.type === 'equilibrium') {
       if (!object.solution || object.solution.state.length === 0) continue
@@ -3112,6 +3416,8 @@ function ViewportTile({
   onCommitRename,
   onCancelRename,
   plotlyTheme,
+  isoclineGeometryCache,
+  onComputeIsocline,
 }: ViewportTileProps) {
   const { node, scene, diagram } = entry
   const isSelected = node.id === selectedNodeId
@@ -3128,6 +3434,7 @@ function ViewportTile({
     height: null,
   }))
   const [plotSize, setPlotSize] = useState<PlotSize | null>(null)
+  const isoclineWarmupControllersRef = useRef(new Map<string, AbortController>())
   const activeSceneId = scene?.id ?? null
   const timeSeriesRange =
     timeSeriesState.sceneId === activeSceneId ? timeSeriesState.range : null
@@ -3203,6 +3510,49 @@ function ViewportTile({
     [scene, system.config.type, system.config.varNames.length]
   )
 
+  useEffect(() => {
+    const warmupControllers = isoclineWarmupControllersRef.current
+    return () => {
+      for (const controller of warmupControllers.values()) {
+        controller.abort()
+      }
+      warmupControllers.clear()
+    }
+  }, [])
+
+  useEffect(() => {
+    for (const controller of isoclineWarmupControllersRef.current.values()) {
+      controller.abort()
+    }
+    isoclineWarmupControllersRef.current.clear()
+    if (!scene || !onComputeIsocline) return
+    const manualSelection = scene.selectedNodeIds ?? []
+    const candidateIds =
+      manualSelection.length > 0
+        ? manualSelection
+        : scene.display === 'selection' && selectedNodeId
+          ? [selectedNodeId]
+          : collectVisibleObjectIds(system)
+    for (const nodeId of candidateIds) {
+      const object = system.objects[nodeId]
+      if (!object || object.type !== 'isocline' || !object.lastComputed) continue
+      const signature = buildIsoclineSnapshotSignature(object.lastComputed)
+      const cached = isoclineGeometryCache?.[nodeId]
+      if (cached && cached.signature === signature) continue
+      const controller = new AbortController()
+      isoclineWarmupControllersRef.current.set(nodeId, controller)
+      void onComputeIsocline(
+        { isoclineId: nodeId, useLastComputedSettings: true },
+        { signal: controller.signal, silent: true }
+      ).finally(() => {
+        const current = isoclineWarmupControllersRef.current.get(nodeId)
+        if (current === controller) {
+          isoclineWarmupControllersRef.current.delete(nodeId)
+        }
+      })
+    }
+  }, [isoclineGeometryCache, onComputeIsocline, scene, selectedNodeId, system])
+
   const timeSeriesMeta = useMemo(() => {
     if (!scene || system.config.varNames.length !== 1 || system.config.type === 'map') return null
     return { yRange: timeSeriesRange, height: plotHeight }
@@ -3258,6 +3608,7 @@ function ViewportTile({
       system,
       scene,
       selectedNodeId,
+      isoclineGeometryCache,
       timeSeriesMeta,
       mapRange,
       mapFunctionSamples,
@@ -3269,6 +3620,7 @@ function ViewportTile({
     plotAreaSize,
     scene,
     selectedNodeId,
+    isoclineGeometryCache,
     system,
     timeSeriesMeta,
   ])
@@ -3432,6 +3784,8 @@ export function ViewportPanel({
   onRenameViewport,
   onDeleteViewport,
   onSampleMap1DFunction,
+  isoclineGeometryCache,
+  onComputeIsocline,
 }: ViewportPanelProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -3781,6 +4135,8 @@ export function ViewportPanel({
                 onCommitRename={() => commitRename(entry.node)}
                 onCancelRename={cancelRename}
                 plotlyTheme={plotlyTheme}
+                isoclineGeometryCache={isoclineGeometryCache}
+                onComputeIsocline={onComputeIsocline}
               />
             </div>
             <div className="viewport-insert" data-testid={`viewport-insert-${entry.node.id}`}>

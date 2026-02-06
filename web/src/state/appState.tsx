@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import type {
+  ComputeIsoclineRequest as CoreComputeIsoclineRequest,
+  ComputeIsoclineResult,
   ContinuationProgress,
   CovariantLyapunovRequest as CoreCovariantLyapunovRequest,
   CovariantLyapunovResponse,
@@ -19,6 +21,9 @@ import type {
   CovariantLyapunovData,
   EquilibriumObject,
   EquilibriumSolverParams,
+  IsoclineAxis,
+  IsoclineObject,
+  IsoclineSource,
   LimitCycleRenderTarget,
   LimitCycleObject,
   OrbitObject,
@@ -101,6 +106,7 @@ function getNodeLabel(node: TreeNode | undefined, systemType: SystemConfig['type
     if (node.objectType === 'orbit') return 'Orbit'
     if (node.objectType === 'equilibrium') return formatEquilibriumLabel(systemType)
     if (node.objectType === 'limit_cycle') return 'Limit cycle'
+    if (node.objectType === 'isocline') return 'Isocline'
     return 'Object'
   }
   return 'Item'
@@ -154,6 +160,174 @@ function requireOrbitRunConfig(system: SystemConfig, orbit: OrbitObject): System
     ...system,
     params: [...orbit.parameters],
   }
+}
+
+function defaultIsoclineSource(system: SystemConfig): IsoclineSource {
+  const firstVariable = system.varNames[0] ?? 'x'
+  if (system.type === 'map') {
+    return { kind: 'map_increment', variableName: firstVariable }
+  }
+  return { kind: 'flow_derivative', variableName: firstVariable }
+}
+
+function defaultIsoclineSamples(activeCount: number): number {
+  if (activeCount <= 1) return 256
+  if (activeCount === 2) return 96
+  return 40
+}
+
+function defaultIsoclineAxes(system: SystemConfig): IsoclineAxis[] {
+  const maxAxes = Math.min(system.varNames.length, 3)
+  const count = maxAxes <= 1 ? maxAxes : 2
+  const sampleCount = defaultIsoclineSamples(count)
+  return system.varNames.slice(0, count).map((variableName) => ({
+    variableName,
+    min: -2,
+    max: 2,
+    samples: sampleCount,
+  }))
+}
+
+function normalizeIsoclineAxes(system: SystemConfig, axes: IsoclineAxis[]): IsoclineAxis[] {
+  const varSet = new Set(system.varNames)
+  const unique: IsoclineAxis[] = []
+  const used = new Set<string>()
+  for (const axis of axes) {
+    if (!varSet.has(axis.variableName)) continue
+    if (used.has(axis.variableName)) continue
+    used.add(axis.variableName)
+    unique.push({
+      variableName: axis.variableName,
+      min: Number.isFinite(axis.min) ? axis.min : -2,
+      max: Number.isFinite(axis.max) ? axis.max : 2,
+      samples:
+        Number.isFinite(axis.samples) && axis.samples >= 2
+          ? Math.max(2, Math.floor(axis.samples))
+          : defaultIsoclineSamples(axes.length),
+    })
+    if (unique.length === 3) break
+  }
+  if (unique.length > 0) return unique
+  return defaultIsoclineAxes(system)
+}
+
+function normalizeIsoclineFrozenState(system: SystemConfig, frozenState: number[]): number[] {
+  return system.varNames.map((_, index) => {
+    const value = frozenState[index]
+    return Number.isFinite(value) ? value : 0
+  })
+}
+
+function resolveIsoclineExpression(system: SystemConfig, source: IsoclineSource): string {
+  if (source.kind === 'custom') return source.expression
+  const varIndex = system.varNames.indexOf(source.variableName)
+  if (varIndex < 0 || varIndex >= system.equations.length) {
+    throw new Error(`Unknown state variable "${source.variableName}" for isocline expression.`)
+  }
+  if (source.kind === 'flow_derivative') {
+    return system.equations[varIndex]
+  }
+  return `(${system.equations[varIndex]}) - (${source.variableName})`
+}
+
+function normalizeIsoclineSource(system: SystemConfig, source: IsoclineSource): IsoclineSource {
+  if (source.kind === 'custom') {
+    return {
+      kind: 'custom',
+      expression: source.expression,
+    }
+  }
+  const fallback = system.varNames[0] ?? 'x'
+  const safeVariable = system.varNames.includes(source.variableName)
+    ? source.variableName
+    : fallback
+  if (system.type === 'map') {
+    return source.kind === 'map_increment'
+      ? { kind: 'map_increment', variableName: safeVariable }
+      : { kind: 'map_increment', variableName: safeVariable }
+  }
+  return source.kind === 'flow_derivative'
+    ? { kind: 'flow_derivative', variableName: safeVariable }
+    : { kind: 'flow_derivative', variableName: safeVariable }
+}
+
+function buildCurrentIsoclineComputeRequest(
+  system: SystemConfig,
+  object: IsoclineObject
+): {
+  request: CoreComputeIsoclineRequest
+  snapshot: NonNullable<IsoclineObject['lastComputed']>
+} {
+  const source = normalizeIsoclineSource(system, object.source)
+  const axes = normalizeIsoclineAxes(system, object.axes)
+  const frozenState = normalizeIsoclineFrozenState(system, object.frozenState)
+  const expression = resolveIsoclineExpression(system, source).trim()
+  if (!expression) {
+    throw new Error('Isocline expression is required before computing.')
+  }
+  const runConfig: SystemConfig = {
+    ...system,
+    params: resolveObjectParams(system, object.customParameters),
+  }
+  const request: CoreComputeIsoclineRequest = {
+    system: runConfig,
+    expression,
+    level: object.level,
+    axes,
+    frozenState,
+  }
+  const snapshot: NonNullable<IsoclineObject['lastComputed']> = {
+    source,
+    expression,
+    level: object.level,
+    axes,
+    frozenState,
+    parameters: [...runConfig.params],
+    computedAt: new Date().toISOString(),
+  }
+  return { request, snapshot }
+}
+
+function buildLastIsoclineComputeRequest(
+  system: SystemConfig,
+  object: IsoclineObject
+): {
+  request: CoreComputeIsoclineRequest
+  snapshot: NonNullable<IsoclineObject['lastComputed']>
+} {
+  const snapshot = object.lastComputed
+  if (!snapshot) {
+    throw new Error('No previously computed isocline settings are available.')
+  }
+  const params =
+    Array.isArray(snapshot.parameters) && snapshot.parameters.length === system.params.length
+      ? snapshot.parameters
+      : system.params
+  const runConfig: SystemConfig = {
+    ...system,
+    params: [...params],
+  }
+  const request: CoreComputeIsoclineRequest = {
+    system: runConfig,
+    expression: snapshot.expression,
+    level: snapshot.level,
+    axes: snapshot.axes,
+    frozenState: snapshot.frozenState,
+  }
+  return { request, snapshot }
+}
+
+function buildIsoclineSnapshotSignature(
+  snapshot: NonNullable<IsoclineObject['lastComputed']>
+): string {
+  return JSON.stringify({
+    source: snapshot.source,
+    expression: snapshot.expression,
+    level: snapshot.level,
+    axes: snapshot.axes,
+    frozenState: snapshot.frozenState,
+    parameters: snapshot.parameters,
+  })
 }
 
 export type ContinuationProgressState = {
@@ -279,6 +453,11 @@ export type LimitCyclePDContinuationRequest = {
   forward: boolean
 }
 
+export type IsoclineComputeRequest = {
+  isoclineId: string
+  useLastComputedSettings?: boolean
+}
+
 export type LimitCycleHopfContinuationRequest = {
   branchId: string
   pointIndex: number
@@ -300,6 +479,13 @@ type AppState = {
   error: string | null
   timings: JobTiming[]
   continuationProgress: ContinuationProgressState | null
+  isoclineGeometryCache: Record<
+    string,
+    {
+      signature: string
+      geometry: ComputeIsoclineResult
+    }
+  >
 }
 
 type AppAction =
@@ -309,6 +495,13 @@ type AppAction =
   | { type: 'SET_ERROR'; error: string | null }
   | { type: 'ADD_TIMING'; timing: JobTiming }
   | { type: 'SET_CONTINUATION_PROGRESS'; progress: ContinuationProgressState | null }
+  | {
+      type: 'SET_ISOCLINE_GEOMETRY'
+      isoclineId: string
+      signature: string
+      geometry: ComputeIsoclineResult
+    }
+  | { type: 'REMOVE_ISOCLINE_GEOMETRY'; isoclineId: string }
 
 const initialState: AppState = {
   system: null,
@@ -317,12 +510,20 @@ const initialState: AppState = {
   error: null,
   timings: [],
   continuationProgress: null,
+  isoclineGeometryCache: {},
 }
 
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'SET_SYSTEM':
-      return { ...state, system: action.system }
+      return {
+        ...state,
+        system: action.system,
+        isoclineGeometryCache:
+          state.system && action.system && state.system.id === action.system.id
+            ? state.isoclineGeometryCache
+            : {},
+      }
     case 'SET_SYSTEMS':
       return { ...state, systems: action.systems }
     case 'SET_BUSY':
@@ -333,6 +534,26 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, timings: [action.timing, ...state.timings].slice(0, 100) }
     case 'SET_CONTINUATION_PROGRESS':
       return { ...state, continuationProgress: action.progress }
+    case 'SET_ISOCLINE_GEOMETRY':
+      return {
+        ...state,
+        isoclineGeometryCache: {
+          ...state.isoclineGeometryCache,
+          [action.isoclineId]: {
+            signature: action.signature,
+            geometry: action.geometry,
+          },
+        },
+      }
+    case 'REMOVE_ISOCLINE_GEOMETRY': {
+      if (!(action.isoclineId in state.isoclineGeometryCache)) return state
+      const nextCache = { ...state.isoclineGeometryCache }
+      delete nextCache[action.isoclineId]
+      return {
+        ...state,
+        isoclineGeometryCache: nextCache,
+      }
+    }
     default:
       return state
   }
@@ -361,6 +582,10 @@ type AppActions = {
   updateViewportHeight: (nodeId: string, height: number) => void
   updateRender: (nodeId: string, render: Partial<TreeNode['render']>) => void
   updateObjectParams: (nodeId: string, params: number[] | null) => void
+  updateIsoclineObject: (
+    nodeId: string,
+    update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>
+  ) => void
   updateScene: (sceneId: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
   updateBifurcationDiagram: (
     diagramId: string,
@@ -373,7 +598,12 @@ type AppActions = {
   deleteNode: (nodeId: string) => Promise<void>
   createOrbitObject: (name: string) => Promise<string | null>
   createEquilibriumObject: (name: string) => Promise<string | null>
+  createIsoclineObject: (name: string) => Promise<string | null>
   runOrbit: (request: OrbitRunRequest) => Promise<void>
+  computeIsocline: (
+    request: IsoclineComputeRequest,
+    opts?: { signal?: AbortSignal; silent?: boolean }
+  ) => Promise<ComputeIsoclineResult | null>
   sampleMap1DFunction: (
     request: SampleMap1DFunctionRequest,
     opts?: { signal?: AbortSignal }
@@ -427,10 +657,25 @@ export function AppProvider({
   const uiSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const systemSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestSystemRef = useRef<System | null>(null)
+  const isoclineWarmupSystemIdRef = useRef<string | null>(null)
+  const isoclineWarmupControllersRef = useRef(new Map<string, AbortController>())
 
   useEffect(() => {
     latestSystemRef.current = state.system
   }, [state.system])
+
+  useEffect(() => {
+    const warmupControllers = isoclineWarmupControllersRef.current
+    return () => {
+      if (uiSaveTimer.current) clearTimeout(uiSaveTimer.current)
+      if (systemSaveTimer.current) clearTimeout(systemSaveTimer.current)
+      for (const controller of warmupControllers.values()) {
+        controller.abort()
+      }
+      warmupControllers.clear()
+      isoclineWarmupSystemIdRef.current = null
+    }
+  }, [])
 
   const scheduleUiSave = useCallback(
     (nextSystem: System) => {
@@ -723,6 +968,39 @@ export function AppProvider({
     [scheduleSystemSave, state.system]
   )
 
+  const updateIsoclineObjectAction = useCallback(
+    (
+      nodeId: string,
+      update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>
+    ) => {
+      if (!state.system) return
+      const object = state.system.objects[nodeId]
+      if (!object || object.type !== 'isocline') return
+      const source = update.source
+        ? normalizeIsoclineSource(state.system.config, update.source)
+        : object.source
+      const axes = update.axes
+        ? normalizeIsoclineAxes(state.system.config, update.axes)
+        : object.axes
+      const frozenState = update.frozenState
+        ? normalizeIsoclineFrozenState(state.system.config, update.frozenState)
+        : object.frozenState
+      const level =
+        typeof update.level === 'number' && Number.isFinite(update.level) ? update.level : object.level
+      const merged = {
+        ...update,
+        source,
+        axes,
+        frozenState,
+        level,
+      } as Partial<IsoclineObject>
+      const system = updateObject(state.system, nodeId, merged)
+      dispatch({ type: 'SET_SYSTEM', system })
+      scheduleSystemSave(system)
+    },
+    [scheduleSystemSave, state.system]
+  )
+
   const setLimitCycleRenderTargetAction = useCallback(
     (objectId: string, target: LimitCycleRenderTarget | null) => {
       if (!state.system) return
@@ -760,6 +1038,7 @@ export function AppProvider({
       try {
         const system = removeNode(state.system, nodeId)
         dispatch({ type: 'SET_SYSTEM', system })
+        dispatch({ type: 'REMOVE_ISOCLINE_GEOMETRY', isoclineId: nodeId })
         await store.save(system)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
@@ -898,6 +1177,105 @@ export function AppProvider({
     },
     [client]
   )
+
+  const computeIsocline = useCallback(
+    async (
+      request: IsoclineComputeRequest,
+      opts?: { signal?: AbortSignal; silent?: boolean }
+    ): Promise<ComputeIsoclineResult | null> => {
+      if (!state.system) return null
+      const silent = Boolean(opts?.silent)
+      if (!silent) {
+        dispatch({ type: 'SET_BUSY', busy: true })
+      }
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        const object = state.system.objects[request.isoclineId]
+        if (!object || object.type !== 'isocline') {
+          throw new Error('Select a valid isocline object.')
+        }
+
+        const payload = request.useLastComputedSettings
+          ? buildLastIsoclineComputeRequest(system, object)
+          : buildCurrentIsoclineComputeRequest(system, object)
+        const result = await client.computeIsocline(payload.request, { signal: opts?.signal })
+        const signature = buildIsoclineSnapshotSignature(payload.snapshot)
+        dispatch({
+          type: 'SET_ISOCLINE_GEOMETRY',
+          isoclineId: request.isoclineId,
+          signature,
+          geometry: result,
+        })
+        if (!request.useLastComputedSettings) {
+          const updated = updateObject(state.system, request.isoclineId, {
+            source: payload.snapshot.source,
+            level: payload.snapshot.level,
+            axes: payload.snapshot.axes,
+            frozenState: payload.snapshot.frozenState,
+            parameters: payload.snapshot.parameters,
+            lastComputed: payload.snapshot,
+          } as Partial<IsoclineObject>)
+          dispatch({ type: 'SET_SYSTEM', system: updated })
+          await store.save(updated)
+        }
+        return result
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          return null
+        }
+        if (!silent) {
+          const message = err instanceof Error ? err.message : String(err)
+          dispatch({ type: 'SET_ERROR', error: message })
+        }
+        return null
+      } finally {
+        if (!silent) {
+          dispatch({ type: 'SET_BUSY', busy: false })
+        }
+      }
+    },
+    [client, state.system, store]
+  )
+
+  useEffect(() => {
+    const system = state.system
+    if (!system) {
+      for (const controller of isoclineWarmupControllersRef.current.values()) {
+        controller.abort()
+      }
+      isoclineWarmupControllersRef.current.clear()
+      isoclineWarmupSystemIdRef.current = null
+      return
+    }
+    if (isoclineWarmupSystemIdRef.current === system.id) return
+    isoclineWarmupSystemIdRef.current = system.id
+    for (const controller of isoclineWarmupControllersRef.current.values()) {
+      controller.abort()
+    }
+    isoclineWarmupControllersRef.current.clear()
+
+    for (const [isoclineId, object] of Object.entries(system.objects)) {
+      if (object.type !== 'isocline' || !object.lastComputed) continue
+      const signature = buildIsoclineSnapshotSignature(object.lastComputed)
+      const cached = state.isoclineGeometryCache[isoclineId]
+      if (cached && cached.signature === signature) continue
+      const controller = new AbortController()
+      isoclineWarmupControllersRef.current.set(isoclineId, controller)
+      void computeIsocline(
+        { isoclineId, useLastComputedSettings: true },
+        { signal: controller.signal, silent: true }
+      ).finally(() => {
+        const current = isoclineWarmupControllersRef.current.get(isoclineId)
+        if (current === controller) {
+          isoclineWarmupControllersRef.current.delete(isoclineId)
+        }
+      })
+    }
+  }, [computeIsocline, state.isoclineGeometryCache, state.system])
 
   const computeLyapunovExponents = useCallback(
     async (request: OrbitLyapunovRequest) => {
@@ -1134,6 +1512,57 @@ export function AppProvider({
           systemName: system.name,
           parameters: [...system.params],
           lastSolverParams: solverParams,
+        }
+        const result = addObject(state.system, obj)
+        const selected = selectNode(result.system, result.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+        return result.nodeId
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+        return null
+      } finally {
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [state.system, store]
+  )
+
+  const createIsoclineObject = useCallback(
+    async (name: string) => {
+      if (!state.system) return null
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        const trimmedName = name.trim()
+        const nameError = validateObjectName(trimmedName, 'Isocline')
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        const existingNames = Object.values(state.system.objects).map((obj) => obj.name)
+        if (existingNames.includes(trimmedName)) {
+          throw new Error(`Object "${trimmedName}" already exists.`)
+        }
+        if (system.varNames.length < 1) {
+          throw new Error('Define at least one state variable before creating an isocline.')
+        }
+
+        const axes = defaultIsoclineAxes(system)
+        const source = defaultIsoclineSource(system)
+        const obj: IsoclineObject = {
+          type: 'isocline',
+          name: trimmedName,
+          systemName: system.name,
+          source,
+          level: 0,
+          axes,
+          frozenState: system.varNames.map(() => 0),
+          parameters: [...system.params],
         }
         const result = addObject(state.system, obj)
         const selected = selectNode(result.system, result.nodeId)
@@ -2939,13 +3368,16 @@ export function AppProvider({
       updateViewportHeight: updateViewportHeightAction,
       updateRender: updateRenderAction,
       updateObjectParams: updateObjectParamsAction,
+      updateIsoclineObject: updateIsoclineObjectAction,
       updateScene: updateSceneAction,
       updateBifurcationDiagram: updateBifurcationDiagramAction,
       setLimitCycleRenderTarget: setLimitCycleRenderTargetAction,
       deleteNode: deleteNodeAction,
       createOrbitObject,
       createEquilibriumObject,
+      createIsoclineObject,
       runOrbit,
+      computeIsocline,
       sampleMap1DFunction,
       computeLyapunovExponents,
       computeCovariantLyapunovVectors,
@@ -3003,10 +3435,13 @@ export function AppProvider({
       updateViewportHeightAction,
       updateRenderAction,
       updateObjectParamsAction,
+      updateIsoclineObjectAction,
       updateSceneAction,
       updateBifurcationDiagramAction,
       setLimitCycleRenderTargetAction,
       deleteNodeAction,
+      createIsoclineObject,
+      computeIsocline,
       addSceneAction,
       importSystem,
     ]

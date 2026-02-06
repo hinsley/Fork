@@ -2,6 +2,7 @@ import { render, waitFor } from '@testing-library/react'
 import type { Data, Layout } from 'plotly.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ViewportPanel } from './ViewportPanel'
+import type { ComputeIsoclineResult } from '../compute/ForkCoreClient'
 import {
   addObject,
   addBranch,
@@ -15,6 +16,7 @@ import type {
   ContinuationObject,
   ContinuationSettings,
   EquilibriumObject,
+  IsoclineObject,
   OrbitObject,
   Scene,
   SystemConfig,
@@ -42,6 +44,13 @@ vi.mock('../viewports/plotly/PlotlyViewport', () => ({
 type RenderPanelOverrides = {
   branchPointSelection?: BranchPointSelection
   selectedNodeId?: string | null
+  isoclineGeometryCache?: Record<
+    string,
+    {
+      signature: string
+      geometry: ComputeIsoclineResult
+    }
+  >
 }
 
 function renderPanel(
@@ -63,8 +72,22 @@ function renderPanel(
       onCreateBifurcation={vi.fn()}
       onRenameViewport={vi.fn()}
       onDeleteViewport={vi.fn()}
+      isoclineGeometryCache={overrides.isoclineGeometryCache}
     />
   )
+}
+
+function buildIsoclineSignature(object: IsoclineObject): string {
+  const snapshot = object.lastComputed
+  if (!snapshot) return ''
+  return JSON.stringify({
+    source: snapshot.source,
+    expression: snapshot.expression,
+    level: snapshot.level,
+    axes: snapshot.axes,
+    frozenState: snapshot.frozenState,
+    parameters: snapshot.parameters,
+  })
 }
 
 describe('ViewportPanel view state wiring', () => {
@@ -175,6 +198,195 @@ describe('ViewportPanel view state wiring', () => {
     const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
     expect(props).toBeTruthy()
     expect(props?.initialView).toBeNull()
+  })
+
+  it('renders cached 2D isocline segments in scene traces', () => {
+    let system = createSystem({ name: 'Iso2D' })
+    const sceneResult = addScene(system, 'Scene Iso 2D')
+    system = sceneResult.system
+    const isocline: IsoclineObject = {
+      type: 'isocline',
+      name: 'Iso_Segments',
+      systemName: system.config.name,
+      source: { kind: 'custom', expression: 'x + y' },
+      level: 0,
+      axes: [
+        { variableName: 'x', min: -2, max: 2, samples: 24 },
+        { variableName: 'y', min: -2, max: 2, samples: 24 },
+      ],
+      frozenState: [0, 0],
+      parameters: [...system.config.params],
+      lastComputed: {
+        source: { kind: 'custom', expression: 'x + y' },
+        expression: 'x + y',
+        level: 0,
+        axes: [
+          { variableName: 'x', min: -2, max: 2, samples: 24 },
+          { variableName: 'y', min: -2, max: 2, samples: 24 },
+        ],
+        frozenState: [0, 0],
+        parameters: [...system.config.params],
+        computedAt: nowIso(),
+      },
+    }
+    const added = addObject(system, isocline)
+    const signature = buildIsoclineSignature(isocline)
+
+    renderPanel(added.system, {
+      isoclineGeometryCache: {
+        [added.nodeId]: {
+          signature,
+          geometry: {
+            geometry: 'segments',
+            dim: 2,
+            points: [-1, 0, 1, 0],
+            segments: [0, 1],
+          },
+        },
+      },
+    })
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const trace = props?.data.find(
+      (entry) =>
+        'uid' in entry &&
+        entry.uid === added.nodeId &&
+        'mode' in entry &&
+        entry.mode === 'lines'
+    ) as { x?: Array<number | null>; y?: Array<number | null> } | undefined
+    expect(trace).toBeTruthy()
+    expect(trace?.x).toEqual([-1, 1, null])
+    expect(trace?.y).toEqual([0, 0, null])
+  })
+
+  it('renders cached 1D isocline points as diagonal markers in map scenes', () => {
+    const config: SystemConfig = {
+      name: 'IsoMap1D',
+      equations: ['r * x * (1 - x)'],
+      params: [2.5],
+      paramNames: ['r'],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene Iso 1D')
+    system = sceneResult.system
+    const isocline: IsoclineObject = {
+      type: 'isocline',
+      name: 'Iso_Points',
+      systemName: config.name,
+      source: { kind: 'custom', expression: 'x' },
+      level: 0,
+      axes: [{ variableName: 'x', min: 0, max: 1, samples: 32 }],
+      frozenState: [0],
+      parameters: [...config.params],
+      lastComputed: {
+        source: { kind: 'custom', expression: 'x' },
+        expression: 'x',
+        level: 0,
+        axes: [{ variableName: 'x', min: 0, max: 1, samples: 32 }],
+        frozenState: [0],
+        parameters: [...config.params],
+        computedAt: nowIso(),
+      },
+    }
+    const added = addObject(system, isocline)
+    const signature = buildIsoclineSignature(isocline)
+
+    renderPanel(added.system, {
+      isoclineGeometryCache: {
+        [added.nodeId]: {
+          signature,
+          geometry: {
+            geometry: 'points',
+            dim: 1,
+            points: [0.25, 0.75],
+          },
+        },
+      },
+    })
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const trace = props?.data.find(
+      (entry) =>
+        'uid' in entry &&
+        entry.uid === added.nodeId &&
+        'mode' in entry &&
+        entry.mode === 'markers'
+    ) as { x?: number[]; y?: number[] } | undefined
+    expect(trace).toBeTruthy()
+    expect(trace?.x).toEqual([0.25, 0.75])
+    expect(trace?.y).toEqual([0.25, 0.75])
+  })
+
+  it('renders cached 3D isocline triangles as meshes', () => {
+    const config: SystemConfig = {
+      name: 'Iso3D',
+      equations: ['x', 'y', 'z'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene Iso 3D')
+    system = sceneResult.system
+    const isocline: IsoclineObject = {
+      type: 'isocline',
+      name: 'Iso_Mesh',
+      systemName: config.name,
+      source: { kind: 'custom', expression: 'x + y + z' },
+      level: 0,
+      axes: [
+        { variableName: 'x', min: -1, max: 1, samples: 8 },
+        { variableName: 'y', min: -1, max: 1, samples: 8 },
+        { variableName: 'z', min: -1, max: 1, samples: 8 },
+      ],
+      frozenState: [0, 0, 0],
+      parameters: [],
+      lastComputed: {
+        source: { kind: 'custom', expression: 'x + y + z' },
+        expression: 'x + y + z',
+        level: 0,
+        axes: [
+          { variableName: 'x', min: -1, max: 1, samples: 8 },
+          { variableName: 'y', min: -1, max: 1, samples: 8 },
+          { variableName: 'z', min: -1, max: 1, samples: 8 },
+        ],
+        frozenState: [0, 0, 0],
+        parameters: [],
+        computedAt: nowIso(),
+      },
+    }
+    const added = addObject(system, isocline)
+    const signature = buildIsoclineSignature(isocline)
+
+    renderPanel(added.system, {
+      isoclineGeometryCache: {
+        [added.nodeId]: {
+          signature,
+          geometry: {
+            geometry: 'triangles',
+            dim: 3,
+            points: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+            triangles: [0, 1, 2],
+          },
+        },
+      },
+    })
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const meshTrace = props?.data.find(
+      (entry) => 'uid' in entry && entry.uid === added.nodeId && entry.type === 'mesh3d'
+    ) as { x?: number[]; i?: Uint32Array | number[] } | undefined
+    expect(meshTrace).toBeTruthy()
+    expect(meshTrace?.x).toEqual([0, 1, 0])
+    expect(Array.from(meshTrace?.i ?? [])).toEqual([0])
   })
 
   it('omits diagram ranges from layout but seeds initialView', () => {

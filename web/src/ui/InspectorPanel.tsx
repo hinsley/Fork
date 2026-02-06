@@ -1,6 +1,7 @@
 import { InspectorDetailsPanel } from './InspectorDetailsPanel'
 import type {
   BifurcationDiagram,
+  IsoclineObject,
   LimitCycleRenderTarget,
   Scene,
   System,
@@ -14,6 +15,7 @@ import type {
   EquilibriumSolveRequest,
   FoldCurveContinuationRequest,
   HopfCurveContinuationRequest,
+  IsoclineComputeRequest,
   MapNSCurveContinuationRequest,
   LimitCycleHopfContinuationRequest,
   LimitCycleOrbitContinuationRequest,
@@ -43,6 +45,14 @@ type InspectorPanelProps = {
   onToggleVisibility: (id: string) => void
   onUpdateRender: (id: string, render: Partial<TreeNode['render']>) => void
   onUpdateObjectParams: (id: string, params: number[] | null) => void
+  onUpdateIsoclineObject?: (
+    id: string,
+    update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>
+  ) => void
+  onComputeIsocline?: (
+    request: IsoclineComputeRequest,
+    opts?: { signal?: AbortSignal; silent?: boolean }
+  ) => Promise<unknown>
   onUpdateScene: (id: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
   onUpdateBifurcationDiagram: (
     id: string,
@@ -88,6 +98,8 @@ export function InspectorPanel({
   onToggleVisibility,
   onUpdateRender,
   onUpdateObjectParams,
+  onUpdateIsoclineObject,
+  onComputeIsocline,
   onUpdateScene,
   onUpdateBifurcationDiagram,
   onSetLimitCycleRenderTarget,
@@ -126,6 +138,8 @@ export function InspectorPanel({
           onToggleVisibility={onToggleVisibility}
           onUpdateRender={onUpdateRender}
           onUpdateObjectParams={onUpdateObjectParams}
+          onUpdateIsoclineObject={onUpdateIsoclineObject}
+          onComputeIsocline={onComputeIsocline}
           onUpdateScene={onUpdateScene}
           onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
           onSetLimitCycleRenderTarget={onSetLimitCycleRenderTarget}

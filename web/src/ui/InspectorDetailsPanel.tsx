@@ -9,6 +9,7 @@ import type {
   ContinuationPoint,
   EquilibriumEigenvectorRenderStyle,
   EquilibriumObject,
+  IsoclineObject,
   LineStyle,
   LimitCycleObject,
   LimitCycleOrigin,
@@ -40,6 +41,7 @@ import type {
   EquilibriumSolveRequest,
   FoldCurveContinuationRequest,
   HopfCurveContinuationRequest,
+  IsoclineComputeRequest,
   MapNSCurveContinuationRequest,
   LimitCycleHopfContinuationRequest,
   OrbitCovariantLyapunovRequest,
@@ -84,6 +86,14 @@ type InspectorDetailsPanelProps = {
   onToggleVisibility: (id: string) => void
   onUpdateRender: (id: string, render: Partial<TreeNode['render']>) => void
   onUpdateObjectParams?: (id: string, params: number[] | null) => void
+  onUpdateIsoclineObject?: (
+    id: string,
+    update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>
+  ) => void
+  onComputeIsocline?: (
+    request: IsoclineComputeRequest,
+    opts?: { signal?: AbortSignal; silent?: boolean }
+  ) => Promise<unknown>
   onUpdateScene: (id: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
   onUpdateBifurcationDiagram: (
     id: string,
@@ -768,7 +778,7 @@ function makeEquilibriumSolveDraft(
 
 function makeParamOverrideDraft(
   system: SystemConfig,
-  object?: OrbitObject | EquilibriumObject | LimitCycleObject | null
+  object?: OrbitObject | EquilibriumObject | LimitCycleObject | IsoclineObject | null
 ): string[] {
   const fallback = system.params.map((value) => value.toString())
   const customParams =
@@ -1080,6 +1090,101 @@ function buildSystemConfigKey(config: SystemConfig): string {
   ])
 }
 
+function defaultIsoclineSamples(activeCount: number): number {
+  if (activeCount <= 1) return 256
+  if (activeCount === 2) return 96
+  return 40
+}
+
+function resolveIsoclineSourceExpression(
+  systemConfig: SystemConfig,
+  object: IsoclineObject
+): string {
+  const source = object.source
+  if (source.kind === 'custom') return source.expression
+  const index = systemConfig.varNames.indexOf(source.variableName)
+  if (index < 0 || index >= systemConfig.equations.length) return ''
+  if (source.kind === 'flow_derivative') {
+    return systemConfig.equations[index] ?? ''
+  }
+  return `(${systemConfig.equations[index] ?? ''}) - (${source.variableName})`
+}
+
+function isSameNumberArray(a: number[] | undefined, b: number[] | undefined): boolean {
+  const left = Array.isArray(a) ? a : []
+  const right = Array.isArray(b) ? b : []
+  if (left.length !== right.length) return false
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false
+  }
+  return true
+}
+
+function isSameIsoclineAxes(
+  left: IsoclineObject['axes'] | undefined,
+  right: IsoclineObject['axes'] | undefined
+): boolean {
+  if (!left || !right) return !left && !right
+  if (left.length !== right.length) return false
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index]
+    const b = right[index]
+    if (!a || !b) return false
+    if (
+      a.variableName !== b.variableName ||
+      a.min !== b.min ||
+      a.max !== b.max ||
+      a.samples !== b.samples
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function isSameIsoclineSource(
+  left: IsoclineObject['source'],
+  right: IsoclineObject['source']
+): boolean {
+  if (left.kind !== right.kind) return false
+  if (left.kind === 'custom' && right.kind === 'custom') {
+    return left.expression === right.expression
+  }
+  if (left.kind === 'flow_derivative' && right.kind === 'flow_derivative') {
+    return left.variableName === right.variableName
+  }
+  if (left.kind === 'map_increment' && right.kind === 'map_increment') {
+    return left.variableName === right.variableName
+  }
+  return false
+}
+
+function resolveIsoclineParameters(systemConfig: SystemConfig, object: IsoclineObject): number[] {
+  if (
+    Array.isArray(object.customParameters) &&
+    object.customParameters.length === systemConfig.params.length &&
+    object.customParameters.every(Number.isFinite)
+  ) {
+    return object.customParameters
+  }
+  return systemConfig.params
+}
+
+function isIsoclineSnapshotStale(systemConfig: SystemConfig, object: IsoclineObject): boolean {
+  const snapshot = object.lastComputed
+  if (!snapshot) return true
+  const expression = resolveIsoclineSourceExpression(systemConfig, object).trim()
+  const params = resolveIsoclineParameters(systemConfig, object)
+  return !(
+    isSameIsoclineSource(snapshot.source, object.source) &&
+    snapshot.expression === expression &&
+    snapshot.level === object.level &&
+    isSameIsoclineAxes(snapshot.axes, object.axes) &&
+    isSameNumberArray(snapshot.frozenState, object.frozenState) &&
+    isSameNumberArray(snapshot.parameters, params)
+  )
+}
+
 export function InspectorDetailsPanel({
   system,
   selectedNodeId,
@@ -1095,6 +1200,8 @@ export function InspectorDetailsPanel({
   onToggleVisibility,
   onUpdateRender,
   onUpdateObjectParams = () => {},
+  onUpdateIsoclineObject = () => {},
+  onComputeIsocline = async () => null,
   onUpdateScene,
   onUpdateBifurcationDiagram,
   onSetLimitCycleRenderTarget,
@@ -1121,7 +1228,8 @@ export function InspectorDetailsPanel({
   const orbit = object?.type === 'orbit' ? object : null
   const equilibrium = object?.type === 'equilibrium' ? object : null
   const limitCycle = object?.type === 'limit_cycle' ? object : null
-  const paramOverrideTarget = orbit || equilibrium || limitCycle
+  const isocline = object?.type === 'isocline' ? object : null
+  const paramOverrideTarget = orbit || equilibrium || limitCycle || isocline
   const selectedOrbitPointIndex =
     orbitPointSelection && orbitPointSelection.orbitId === selectedNodeId
       ? orbitPointSelection.pointIndex
@@ -1487,6 +1595,35 @@ export function InspectorDetailsPanel({
   const [branchPointError, setBranchPointError] = useState<string | null>(null)
   const [sceneSearch, setSceneSearch] = useState('')
   const [diagramSearch, setDiagramSearch] = useState('')
+  const isoclineComputeControllerRef = useRef<AbortController | null>(null)
+  const [isoclineError, setIsoclineError] = useState<string | null>(null)
+  const [isoclineComputing, setIsoclineComputing] = useState(false)
+  const isoclineMaxActiveVariables = Math.min(systemDraft.varNames.length, 3)
+  const isoclineActiveSet = useMemo(() => {
+    if (!isocline) return new Set<string>()
+    return new Set(isocline.axes.map((axis) => axis.variableName))
+  }, [isocline])
+  const isoclineResolvedExpression = useMemo(() => {
+    if (!isocline) return ''
+    return resolveIsoclineSourceExpression(system.config, isocline)
+  }, [isocline, system.config])
+  const isoclineStale = useMemo(() => {
+    if (!isocline) return false
+    return isIsoclineSnapshotStale(system.config, isocline)
+  }, [isocline, system.config])
+  const isMapSystem = systemDraft.type === 'map'
+  const isoclineSourceKind = useMemo(() => {
+    if (!isocline) return 'custom'
+    if (isocline.source.kind === 'custom') return 'custom'
+    return isMapSystem ? 'map_increment' : 'flow_derivative'
+  }, [isMapSystem, isocline])
+  const isoclineSourceVariable = useMemo(() => {
+    if (!isocline) return systemDraft.varNames[0] ?? ''
+    if (isocline.source.kind === 'custom') return systemDraft.varNames[0] ?? ''
+    return systemDraft.varNames.includes(isocline.source.variableName)
+      ? isocline.source.variableName
+      : systemDraft.varNames[0] ?? ''
+  }, [isocline, systemDraft.varNames])
   const orbitPreviewPageCount = useMemo(() => {
     if (!orbit || orbit.data.length === 0) return 0
     return Math.ceil(orbit.data.length / ORBIT_PREVIEW_PAGE_SIZE)
@@ -1749,7 +1886,25 @@ export function InspectorDetailsPanel({
       }))
       setContinuationError(null)
     }
+    if (current.type === 'isocline') {
+      setIsoclineError(null)
+    }
   }, [object?.type, selectedNodeId, systemConfigKey])
+
+  useEffect(() => {
+    return () => {
+      isoclineComputeControllerRef.current?.abort()
+      isoclineComputeControllerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isocline) return
+    isoclineComputeControllerRef.current?.abort()
+    isoclineComputeControllerRef.current = null
+    setIsoclineComputing(false)
+    setIsoclineError(null)
+  }, [isocline])
 
   useEffect(() => {
     if (!sceneId) return
@@ -1975,6 +2130,7 @@ export function InspectorDetailsPanel({
     branchIndices,
     branchPointIndex,
     branchRenderTarget,
+    branch?.branchType,
     branchSortedOrder,
     hasBranch,
     selectedNodeId,
@@ -2077,6 +2233,12 @@ export function InspectorDetailsPanel({
         return {
           label: 'Limit Cycle',
           detail: `Period ${object.period}`,
+        }
+      }
+      if (object.type === 'isocline') {
+        return {
+          label: 'Isocline',
+          detail: object.lastComputed ? `Computed ${object.lastComputed.computedAt}` : 'Not computed',
         }
       }
       return null
@@ -2612,6 +2774,108 @@ export function InspectorDetailsPanel({
       )
     )
   }
+
+  const handleUpdateIsocline = useCallback(
+    (update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>) => {
+      if (!isocline || !selectedNodeId) return
+      onUpdateIsoclineObject(selectedNodeId, update)
+    },
+    [isocline, onUpdateIsoclineObject, selectedNodeId]
+  )
+
+  const handleToggleIsoclineAxis = useCallback(
+    (variableName: string, checked: boolean) => {
+      if (!isocline) return
+      const existing = isocline.axes
+      if (checked) {
+        if (existing.some((axis) => axis.variableName === variableName)) return
+        if (existing.length >= isoclineMaxActiveVariables) return
+        const nextCount = existing.length + 1
+        handleUpdateIsocline({
+          axes: [
+            ...existing,
+            {
+              variableName,
+              min: -2,
+              max: 2,
+              samples: defaultIsoclineSamples(nextCount),
+            },
+          ],
+        })
+        return
+      }
+      if (!existing.some((axis) => axis.variableName === variableName)) return
+      if (existing.length <= 1) return
+      handleUpdateIsocline({
+        axes: existing.filter((axis) => axis.variableName !== variableName),
+      })
+    },
+    [handleUpdateIsocline, isocline, isoclineMaxActiveVariables]
+  )
+
+  const handleUpdateIsoclineAxisField = useCallback(
+    (
+      variableName: string,
+      field: 'min' | 'max' | 'samples',
+      rawValue: string
+    ) => {
+      if (!isocline) return
+      const nextAxes = isocline.axes.map((axis) => {
+        if (axis.variableName !== variableName) return axis
+        if (field === 'samples') {
+          const parsed = parseInteger(rawValue)
+          if (parsed === null || parsed < 2) return axis
+          return { ...axis, samples: parsed }
+        }
+        const parsed = parseNumber(rawValue)
+        if (parsed === null) return axis
+        return { ...axis, [field]: parsed }
+      })
+      handleUpdateIsocline({ axes: nextAxes })
+    },
+    [handleUpdateIsocline, isocline]
+  )
+
+  const handleUpdateIsoclineFrozenValue = useCallback(
+    (variableIndex: number, rawValue: string) => {
+      if (!isocline) return
+      const parsed = parseNumber(rawValue)
+      if (parsed === null) return
+      const nextFrozen = [...isocline.frozenState]
+      nextFrozen[variableIndex] = parsed
+      handleUpdateIsocline({ frozenState: nextFrozen })
+    },
+    [handleUpdateIsocline, isocline]
+  )
+
+  const handleComputeIsocline = useCallback(async () => {
+    if (!isocline || !selectedNodeId) return
+    isoclineComputeControllerRef.current?.abort()
+    const controller = new AbortController()
+    isoclineComputeControllerRef.current = controller
+    setIsoclineComputing(true)
+    setIsoclineError(null)
+    try {
+      const result = await onComputeIsocline(
+        { isoclineId: selectedNodeId } satisfies IsoclineComputeRequest,
+        { signal: controller.signal }
+      )
+      if (!result && !controller.signal.aborted) {
+        setIsoclineError('Isocline compute failed. Check settings and try again.')
+      }
+    } catch (err) {
+      if (controller.signal.aborted) return
+      const message = err instanceof Error ? err.message : String(err)
+      setIsoclineError(message)
+    } finally {
+      if (isoclineComputeControllerRef.current === controller) {
+        isoclineComputeControllerRef.current = null
+      }
+      if (!controller.signal.aborted) {
+        setIsoclineComputing(false)
+      }
+    }
+  }, [isocline, onComputeIsocline, selectedNodeId])
 
   const handleSolveEquilibrium = async () => {
     if (runDisabled) {
@@ -5634,6 +5898,232 @@ export function InspectorDetailsPanel({
                 ) : (
                   <p className="empty-state">Floquet multipliers not computed yet.</p>
                 )}
+              </div>
+            </InspectorDisclosure>
+          ) : null}
+
+          {isocline ? (
+            <InspectorDisclosure
+              key={`${selectionKey}-isocline`}
+              title="Isocline"
+              testId="isocline-toggle"
+            >
+              <div className="inspector-section">
+                <label>
+                  Source
+                  <select
+                    value={isoclineSourceKind}
+                    onChange={(event) => {
+                      const nextKind = event.target.value as
+                        | 'custom'
+                        | 'flow_derivative'
+                        | 'map_increment'
+                      if (nextKind === 'custom') {
+                        handleUpdateIsocline({
+                          source:
+                            isocline.source.kind === 'custom'
+                              ? isocline.source
+                              : { kind: 'custom', expression: isoclineResolvedExpression },
+                        })
+                        return
+                      }
+                      handleUpdateIsocline({
+                        source: {
+                          kind: nextKind,
+                          variableName: isoclineSourceVariable,
+                        },
+                      })
+                    }}
+                    data-testid="isocline-source-kind"
+                  >
+                    <option value="custom">Custom expression</option>
+                    {isMapSystem ? (
+                      <option value="map_increment">Map increment (x_n+1 - x_n)</option>
+                    ) : (
+                      <option value="flow_derivative">Time derivative (dx/dt)</option>
+                    )}
+                  </select>
+                </label>
+
+                {isoclineSourceKind === 'custom' ? (
+                  <label>
+                    Expression
+                    <input
+                      value={isocline.source.kind === 'custom' ? isocline.source.expression : ''}
+                      onChange={(event) =>
+                        handleUpdateIsocline({
+                          source: {
+                            kind: 'custom',
+                            expression: event.target.value,
+                          },
+                        })
+                      }
+                      placeholder="x + y"
+                      data-testid="isocline-expression"
+                    />
+                  </label>
+                ) : (
+                  <label>
+                    Variable
+                    <select
+                      value={isoclineSourceVariable}
+                      onChange={(event) =>
+                        handleUpdateIsocline({
+                          source: {
+                            kind: isoclineSourceKind as 'flow_derivative' | 'map_increment',
+                            variableName: event.target.value,
+                          },
+                        })
+                      }
+                      data-testid="isocline-source-variable"
+                    >
+                      {systemDraft.varNames.map((name) => (
+                        <option key={`isocline-source-var-${name}`} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                <label>
+                  Level c
+                  <input
+                    type="number"
+                    value={isocline.level}
+                    onChange={(event) => {
+                      const parsed = parseNumber(event.target.value)
+                      if (parsed === null) return
+                      handleUpdateIsocline({ level: parsed })
+                    }}
+                    data-testid="isocline-level"
+                  />
+                </label>
+                <p className="empty-state" data-testid="isocline-resolved-expression">
+                  f(x, p) = {isoclineResolvedExpression || '∅'}
+                </p>
+
+                <div className="inspector-subsection">
+                  <h4 className="inspector-subheading">
+                    Active variables ({Math.min(isocline.axes.length, isoclineMaxActiveVariables)}/
+                    {isoclineMaxActiveVariables})
+                  </h4>
+                  {systemDraft.varNames.map((name) => {
+                    const axis = isocline.axes.find((entry) => entry.variableName === name)
+                    const active = Boolean(axis)
+                    const disableActivate =
+                      !active && isocline.axes.length >= isoclineMaxActiveVariables
+                    return (
+                      <div key={`isocline-axis-${name}`} className="inspector-subsection">
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            disabled={disableActivate}
+                            onChange={(event) =>
+                              handleToggleIsoclineAxis(name, event.target.checked)
+                            }
+                            data-testid={`isocline-axis-active-${name}`}
+                          />{' '}
+                          {name}
+                        </label>
+                        {axis ? (
+                          <div className="continuation-grid">
+                            <label>
+                              Min
+                              <input
+                                type="number"
+                                value={axis.min}
+                                onChange={(event) =>
+                                  handleUpdateIsoclineAxisField(
+                                    axis.variableName,
+                                    'min',
+                                    event.target.value
+                                  )
+                                }
+                                data-testid={`isocline-axis-min-${name}`}
+                              />
+                            </label>
+                            <label>
+                              Max
+                              <input
+                                type="number"
+                                value={axis.max}
+                                onChange={(event) =>
+                                  handleUpdateIsoclineAxisField(
+                                    axis.variableName,
+                                    'max',
+                                    event.target.value
+                                  )
+                                }
+                                data-testid={`isocline-axis-max-${name}`}
+                              />
+                            </label>
+                            <label>
+                              Samples
+                              <input
+                                type="number"
+                                value={axis.samples}
+                                onChange={(event) =>
+                                  handleUpdateIsoclineAxisField(
+                                    axis.variableName,
+                                    'samples',
+                                    event.target.value
+                                  )
+                                }
+                                data-testid={`isocline-axis-samples-${name}`}
+                              />
+                            </label>
+                          </div>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="inspector-subsection">
+                  <h4 className="inspector-subheading">Frozen values</h4>
+                  {systemDraft.varNames
+                    .map((name, index) => ({ name, index }))
+                    .filter((entry) => !isoclineActiveSet.has(entry.name))
+                    .map(({ name, index }) => (
+                      <label key={`isocline-frozen-${name}`}>
+                        {name}
+                        <input
+                          type="number"
+                          value={isocline.frozenState[index] ?? 0}
+                          onChange={(event) =>
+                            handleUpdateIsoclineFrozenValue(index, event.target.value)
+                          }
+                          data-testid={`isocline-frozen-${name}`}
+                        />
+                      </label>
+                    ))}
+                </div>
+
+                {!isocline.lastComputed ? (
+                  <p className="empty-state" data-testid="isocline-not-computed">
+                    Not computed yet.
+                  </p>
+                ) : (
+                  <p className="empty-state" data-testid="isocline-last-computed">
+                    Last computed at {isocline.lastComputed.computedAt}
+                  </p>
+                )}
+                {isoclineStale ? (
+                  <div className="field-warning" data-testid="isocline-stale-indicator">
+                    Settings changed since the last compute.
+                  </div>
+                ) : null}
+                {isoclineError ? <div className="field-error">{isoclineError}</div> : null}
+                <button
+                  type="button"
+                  onClick={() => void handleComputeIsocline()}
+                  disabled={isoclineComputing}
+                  data-testid="isocline-compute"
+                >
+                  {isoclineComputing ? 'Computing...' : 'Compute & Redraw'}
+                </button>
               </div>
             </InspectorDisclosure>
           ) : null}

@@ -12,6 +12,7 @@ import type {
   ContinuationObject,
   ContinuationSettings,
   EquilibriumObject,
+  IsoclineObject,
   OrbitObject,
   System,
 } from '../system/types'
@@ -501,6 +502,166 @@ describe('appState Hopf curve continuation', () => {
       const hopfCurveId = findBranchIdByName(next!, 'hopf_curve_p1_p2')
       expect(next!.branches[hopfCurveId].parentObject).toBe('EQ_H_RENAMED')
     })
+  })
+})
+
+describe('appState isocline computation', () => {
+  it('computes with current settings and stores last-computed snapshot/cache', async () => {
+    const base = createSystem({ name: 'Iso_Current' })
+    const client = new MockForkCoreClient(0)
+    const captured: Array<{ expression: string; level: number }> = []
+    client.computeIsocline = async (request) => {
+      captured.push({ expression: request.expression, level: request.level })
+      return {
+        geometry: 'segments',
+        dim: request.system.varNames.length,
+        points: [0, 0, 1, 1],
+        segments: [0, 1],
+      }
+    }
+    const { getContext } = setupApp(base, client)
+
+    let isoclineId: string | null = null
+    await act(async () => {
+      isoclineId = await getContext().actions.createIsoclineObject('Iso_1')
+    })
+    expect(isoclineId).not.toBeNull()
+    if (!isoclineId) {
+      throw new Error('Expected isocline id to be created.')
+    }
+    const createdIsoclineId = isoclineId
+
+    await act(async () => {
+      getContext().actions.updateIsoclineObject(createdIsoclineId, {
+        source: { kind: 'custom', expression: 'x + y' },
+        level: 1.5,
+        axes: [
+          { variableName: 'x', min: -1, max: 1, samples: 32 },
+          { variableName: 'y', min: -2, max: 2, samples: 48 },
+        ],
+        frozenState: [0, 0],
+      })
+    })
+
+    await act(async () => {
+      await getContext().actions.computeIsocline({ isoclineId: createdIsoclineId })
+    })
+
+    const next = getContext().state.system
+    expect(next).not.toBeNull()
+    if (!next) {
+      throw new Error('Expected system to remain loaded.')
+    }
+    const object = next.objects[createdIsoclineId] as IsoclineObject
+    expect(captured).toEqual([{ expression: 'x + y', level: 1.5 }])
+    expect(object.lastComputed?.expression).toBe('x + y')
+    expect(object.lastComputed?.level).toBe(1.5)
+    expect(getContext().state.isoclineGeometryCache[createdIsoclineId]).toBeDefined()
+  })
+
+  it('uses last-computed settings when requested explicitly', async () => {
+    const base = createSystem({ name: 'Iso_Last' })
+    const client = new MockForkCoreClient(0)
+    const capturedLevels: number[] = []
+    client.computeIsocline = async (request) => {
+      capturedLevels.push(request.level)
+      return {
+        geometry: 'segments',
+        dim: request.system.varNames.length,
+        points: [0, 0, 1, 1],
+        segments: [0, 1],
+      }
+    }
+    const { getContext } = setupApp(base, client)
+
+    let isoclineId: string | null = null
+    await act(async () => {
+      isoclineId = await getContext().actions.createIsoclineObject('Iso_2')
+    })
+    expect(isoclineId).not.toBeNull()
+    if (!isoclineId) {
+      throw new Error('Expected isocline id to be created.')
+    }
+    const createdIsoclineId = isoclineId
+
+    await act(async () => {
+      getContext().actions.updateIsoclineObject(createdIsoclineId, {
+        source: { kind: 'custom', expression: 'x - y' },
+        level: 0,
+      })
+    })
+
+    await act(async () => {
+      await getContext().actions.computeIsocline({ isoclineId: createdIsoclineId })
+    })
+
+    await act(async () => {
+      getContext().actions.updateIsoclineObject(createdIsoclineId, { level: 9 })
+    })
+
+    await act(async () => {
+      await getContext().actions.computeIsocline({
+        isoclineId: createdIsoclineId,
+        useLastComputedSettings: true,
+      })
+    })
+
+    const next = getContext().state.system
+    expect(next).not.toBeNull()
+    if (!next) {
+      throw new Error('Expected system to remain loaded.')
+    }
+    const object = next.objects[createdIsoclineId] as IsoclineObject
+    expect(capturedLevels).toEqual([0, 0])
+    expect(object.level).toBe(9)
+    expect(object.lastComputed?.level).toBe(0)
+  })
+
+  it('rehydrates cached geometry from last-computed snapshots on load', async () => {
+    const base = createSystem({ name: 'Iso_Load' })
+    const object: IsoclineObject = {
+      type: 'isocline',
+      name: 'Iso_Seed',
+      systemName: base.config.name,
+      source: { kind: 'custom', expression: 'x' },
+      level: 4,
+      axes: [
+        { variableName: 'x', min: -4, max: 4, samples: 24 },
+        { variableName: 'y', min: -4, max: 4, samples: 24 },
+      ],
+      frozenState: [0, 0],
+      parameters: [...base.config.params],
+      lastComputed: {
+        source: { kind: 'custom', expression: 'x + y' },
+        expression: 'x + y',
+        level: -2,
+        axes: [
+          { variableName: 'x', min: -1, max: 1, samples: 16 },
+          { variableName: 'y', min: -1, max: 1, samples: 16 },
+        ],
+        frozenState: [0, 0],
+        parameters: [...base.config.params],
+        computedAt: '2026-02-06T00:00:00.000Z',
+      },
+    }
+    const added = addObject(base, object)
+    const client = new MockForkCoreClient(0)
+    const captured: Array<{ expression: string; level: number }> = []
+    client.computeIsocline = async (request) => {
+      captured.push({ expression: request.expression, level: request.level })
+      return {
+        geometry: 'segments',
+        dim: request.system.varNames.length,
+        points: [0, 0, 1, 1],
+        segments: [0, 1],
+      }
+    }
+    const { getContext } = setupApp(added.system, client)
+
+    await waitFor(() => {
+      expect(getContext().state.isoclineGeometryCache[added.nodeId]).toBeDefined()
+    })
+    expect(captured).toEqual([{ expression: 'x + y', level: -2 }])
   })
 })
 

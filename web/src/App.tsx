@@ -132,6 +132,13 @@ function App() {
     await actions.createEquilibriumObject(name)
   }
 
+  const createIsocline = async () => {
+    if (!system) return
+    const names = Object.values(system.objects).map((obj) => obj.name)
+    const name = nextObjectName('Isocline', names)
+    await actions.createIsoclineObject(name)
+  }
+
   const openCreateObjectMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
     objectsTreeRef.current?.openCreateMenu({ x: event.clientX, y: event.clientY })
   }
@@ -339,6 +346,7 @@ function App() {
                 onReorderNode={actions.reorderNode}
                 onCreateOrbit={createOrbit}
                 onCreateEquilibrium={createEquilibrium}
+                onCreateIsocline={createIsocline}
                 onDeleteNode={actions.deleteNode}
               />
             </Panel>
@@ -378,6 +386,8 @@ function App() {
                 onRenameViewport={actions.renameNode}
                 onDeleteViewport={actions.deleteNode}
                 onSampleMap1DFunction={actions.sampleMap1DFunction}
+                isoclineGeometryCache={state.isoclineGeometryCache}
+                onComputeIsocline={actions.computeIsocline}
               />
             </Panel>
           </div>
@@ -416,6 +426,8 @@ function App() {
                 onToggleVisibility={actions.toggleVisibility}
                 onUpdateRender={actions.updateRender}
                 onUpdateObjectParams={actions.updateObjectParams}
+                onUpdateIsoclineObject={actions.updateIsoclineObject}
+                onComputeIsocline={actions.computeIsocline}
                 onUpdateScene={actions.updateScene}
                 onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
                 onSetLimitCycleRenderTarget={actions.setLimitCycleRenderTarget}

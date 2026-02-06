@@ -18,6 +18,7 @@ import { renderPlot } from '../viewports/plotly/plotlyAdapter'
 import type {
   ContinuationObject,
   EquilibriumObject,
+  IsoclineObject,
   LimitCycleObject,
   OrbitObject,
   SystemConfig,
@@ -371,6 +372,97 @@ describe('InspectorDetailsPanel', () => {
 
     const header = screen.getByTestId('parameters-toggle')
     expect(within(header).queryByText('custom')).toBeNull()
+  })
+
+  it('updates isocline controls and runs manual compute', async () => {
+    const user = userEvent.setup()
+    const config: SystemConfig = {
+      name: 'Iso_Config',
+      equations: ['x + y', 'y - z', 'x - z'],
+      params: [0.1],
+      paramNames: ['mu'],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const system = createSystem({ name: config.name, config })
+    const isocline: IsoclineObject = {
+      type: 'isocline',
+      name: 'Iso_1',
+      systemName: config.name,
+      source: { kind: 'custom', expression: 'x + y' },
+      level: 0,
+      axes: [
+        { variableName: 'x', min: -2, max: 2, samples: 32 },
+        { variableName: 'y', min: -2, max: 2, samples: 32 },
+      ],
+      frozenState: [0, 0, 1],
+      parameters: [...config.params],
+    }
+    const added = addObject(system, isocline)
+    const onUpdateIsoclineObject = vi.fn()
+    const onComputeIsocline = vi.fn().mockResolvedValue({
+      geometry: 'segments',
+      dim: 3,
+      points: [0, 0, 1, 1, 1, 1],
+      segments: [0, 1],
+    })
+
+    render(
+      <InspectorDetailsPanel
+        system={added.system}
+        selectedNodeId={added.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateObjectParams={vi.fn()}
+        onUpdateIsoclineObject={onUpdateIsoclineObject}
+        onComputeIsocline={onComputeIsocline}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('isocline-toggle'))
+    await user.selectOptions(screen.getByTestId('isocline-source-kind'), 'flow_derivative')
+    const expressionInput = screen.getByTestId('isocline-expression')
+    fireEvent.change(expressionInput, { target: { value: 'x + y - z' } })
+    fireEvent.change(screen.getByTestId('isocline-frozen-z'), { target: { value: '2' } })
+    await user.click(screen.getByTestId('isocline-compute'))
+
+    expect(onUpdateIsoclineObject).toHaveBeenCalledWith(added.nodeId, {
+      source: { kind: 'flow_derivative', variableName: 'x' },
+    })
+
+    expect(onUpdateIsoclineObject).toHaveBeenCalledWith(
+      added.nodeId,
+      expect.objectContaining({
+        source: { kind: 'custom', expression: 'x + y - z' },
+      })
+    )
+    expect(onUpdateIsoclineObject).toHaveBeenCalledWith(added.nodeId, { frozenState: [0, 0, 2] })
+    expect(onComputeIsocline).toHaveBeenCalledWith(
+      { isoclineId: added.nodeId },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
   })
 
   it('applies system changes from the editor', async () => {

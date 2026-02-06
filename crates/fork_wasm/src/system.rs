@@ -2,6 +2,7 @@
 
 use fork_core::autodiff::Dual;
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
+use fork_core::isocline::{compile_scalar_expression, compute_isocline, IsoclineAxisSpec};
 use fork_core::solvers::{DiscreteMap, RK4, Tsit5};
 use fork_core::traits::{DynamicalSystem, Steppable};
 use wasm_bindgen::prelude::*;
@@ -134,6 +135,45 @@ impl WasmSystem {
         }
 
         jacobian
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn compute_isocline(
+        &self,
+        expression: String,
+        level: f64,
+        axis_indices: Vec<usize>,
+        axis_mins: Vec<f64>,
+        axis_maxs: Vec<f64>,
+        axis_samples: Vec<usize>,
+        frozen_state: Vec<f64>,
+        var_names: Vec<String>,
+        param_names: Vec<String>,
+    ) -> Result<JsValue, JsValue> {
+        let axis_count = axis_indices.len();
+        if axis_count != axis_mins.len()
+            || axis_count != axis_maxs.len()
+            || axis_count != axis_samples.len()
+        {
+            return Err(JsValue::from_str(
+                "Axis arrays must have the same length for isocline computation.",
+            ));
+        }
+
+        let scalar = compile_scalar_expression(&expression, &var_names, &param_names)
+            .map_err(|err| JsValue::from_str(&err.to_string()))?;
+        let axes: Vec<IsoclineAxisSpec> = (0..axis_count)
+            .map(|idx| IsoclineAxisSpec {
+                var_index: axis_indices[idx],
+                min: axis_mins[idx],
+                max: axis_maxs[idx],
+                samples: axis_samples[idx],
+            })
+            .collect();
+        let geometry = compute_isocline(&self.system, &scalar, level, &axes, &frozen_state)
+            .map_err(|err| JsValue::from_str(&err.to_string()))?;
+        serde_wasm_bindgen::to_value(&geometry)
+            .map_err(|err| JsValue::from_str(&format!("Failed to serialize isocline: {err}")))
     }
 }
 
@@ -296,5 +336,32 @@ mod tests {
         system.set_state(&[1.0, 1.0]);
         let jacobian = system.compute_jacobian();
         assert_eq!(jacobian, vec![2.0, 0.0, 0.0, 3.0]);
+    }
+
+    #[test]
+    #[cfg(target_arch = "wasm32")]
+    fn wasm_system_compute_isocline_returns_geometry() {
+        let system = WasmSystem::new(
+            vec!["x".to_string()],
+            Vec::new(),
+            Vec::new(),
+            vec!["x".to_string()],
+            "rk4",
+            "flow",
+        )
+        .expect("system should build");
+
+        let result = system.compute_isocline(
+            "x".to_string(),
+            0.0,
+            vec![0],
+            vec![-1.0],
+            vec![1.0],
+            vec![33],
+            vec![0.0],
+            vec!["x".to_string()],
+            Vec::new(),
+        );
+        assert!(result.is_ok(), "expected isocline computation to succeed");
     }
 }

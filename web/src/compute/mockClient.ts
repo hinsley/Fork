@@ -1,4 +1,6 @@
 import type {
+  ComputeIsoclineRequest,
+  ComputeIsoclineResult,
   Codim1CurveBranch,
   ContinuationProgress,
   ContinuationExtensionRequest,
@@ -120,6 +122,98 @@ export class MockForkCoreClient implements ForkCoreClient {
           y.push(t)
         }
         return { x, y }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async computeIsocline(
+    request: ComputeIsoclineRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<ComputeIsoclineResult> {
+    const job = this.queue.enqueue(
+      'computeIsocline',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const dim = request.system.varNames.length
+        if (request.axes.length <= 1) {
+          const point = request.frozenState.slice(0, dim)
+          const axis = request.axes[0]
+          if (axis) {
+            const axisIndex = request.system.varNames.indexOf(axis.variableName)
+            if (axisIndex >= 0) {
+              point[axisIndex] = (axis.min + axis.max) * 0.5
+            }
+          }
+          const result: ComputeIsoclineResult = {
+            geometry: 'points',
+            dim,
+            points: point,
+          }
+          return result
+        }
+        if (request.axes.length === 2) {
+          const axisA = request.axes[0]
+          const axisB = request.axes[1]
+          const idxA = request.system.varNames.indexOf(axisA.variableName)
+          const idxB = request.system.varNames.indexOf(axisB.variableName)
+          const p0 = request.frozenState.slice(0, dim)
+          const p1 = request.frozenState.slice(0, dim)
+          if (idxA >= 0) {
+            p0[idxA] = axisA.min
+            p1[idxA] = axisA.max
+          }
+          if (idxB >= 0) {
+            p0[idxB] = axisB.min
+            p1[idxB] = axisB.max
+          }
+          const result: ComputeIsoclineResult = {
+            geometry: 'segments',
+            dim,
+            points: [...p0, ...p1],
+            segments: [0, 1],
+          }
+          return result
+        }
+        const a = request.axes[0]
+        const b = request.axes[1]
+        const c = request.axes[2]
+        const ia = request.system.varNames.indexOf(a.variableName)
+        const ib = request.system.varNames.indexOf(b.variableName)
+        const ic = request.system.varNames.indexOf(c.variableName)
+        const p0 = request.frozenState.slice(0, dim)
+        const p1 = request.frozenState.slice(0, dim)
+        const p2 = request.frozenState.slice(0, dim)
+        if (ia >= 0) {
+          p0[ia] = a.min
+          p1[ia] = a.max
+          p2[ia] = a.min
+        }
+        if (ib >= 0) {
+          p0[ib] = b.min
+          p1[ib] = b.min
+          p2[ib] = b.max
+        }
+        if (ic >= 0) {
+          const mid = (c.min + c.max) * 0.5
+          p0[ic] = mid
+          p1[ic] = mid
+          p2[ic] = mid
+        }
+        const result: ComputeIsoclineResult = {
+          geometry: 'triangles',
+          dim,
+          points: [...p0, ...p1, ...p2],
+          triangles: [0, 1, 2],
+        }
+        return result
       },
       opts
     )

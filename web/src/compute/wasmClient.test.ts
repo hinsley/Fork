@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
+  ComputeIsoclineRequest,
   ContinuationProgress,
   EquilibriumContinuationRequest,
   LyapunovExponentsRequest,
@@ -165,5 +166,40 @@ describe('WasmForkCoreClient', () => {
     worker.emit({ id: message.id, ok: false, error: 'cancelled', aborted: true })
 
     await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('sends computeIsocline requests and resolves geometry', async () => {
+    const client = new WasmForkCoreClient()
+    const request: ComputeIsoclineRequest = {
+      system: {
+        ...baseSystem,
+        equations: ['x + y', 'x - y'],
+        varNames: ['x', 'y'],
+      },
+      expression: 'x + y',
+      level: 0,
+      axes: [
+        { variableName: 'x', min: -2, max: 2, samples: 16 },
+        { variableName: 'y', min: -2, max: 2, samples: 16 },
+      ],
+      frozenState: [0, 0],
+    }
+
+    const promise = client.computeIsocline(request)
+    await flushQueue()
+
+    const worker = MockWorker.instances[0]
+    const message = worker.posted[0]
+    expect(message).toMatchObject({ kind: 'computeIsocline', payload: request })
+
+    const result = {
+      geometry: 'segments' as const,
+      dim: 2,
+      points: [0, 0, 1, 1],
+      segments: [0, 1],
+    }
+    worker.emit({ id: message.id, ok: true, result })
+
+    await expect(promise).resolves.toEqual(result)
   })
 })
