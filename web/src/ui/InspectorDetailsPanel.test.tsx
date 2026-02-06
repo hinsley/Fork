@@ -447,13 +447,33 @@ describe('InspectorDetailsPanel', () => {
     ).toBeInTheDocument()
     expect(screen.getByTestId('isocline-frozen-table')).toBeInTheDocument()
     expect(screen.getByTestId('isocline-parameter-table')).toBeInTheDocument()
+    const levelInput = screen.getByTestId('isocline-level')
+    const minInput = screen.getByTestId('isocline-axis-min-x')
+    const samplesInput = screen.getByTestId('isocline-axis-samples-x')
+    const frozenInput = screen.getByTestId('isocline-frozen-z')
+    fireEvent.change(levelInput, { target: { value: '-' } })
+    fireEvent.change(minInput, { target: { value: '-' } })
+    fireEvent.change(frozenInput, { target: { value: '-' } })
+    expect(levelInput).toHaveValue('-')
+    expect(minInput).toHaveValue('-')
+    expect(frozenInput).toHaveValue('-')
+    await user.clear(levelInput)
+    await user.type(levelInput, '1.5')
+    await user.clear(minInput)
+    await user.type(minInput, '-1')
+    await user.clear(samplesInput)
+    await user.type(samplesInput, '16')
+    expect(samplesInput).toHaveValue('16')
     await user.selectOptions(screen.getByTestId('isocline-source-kind'), 'flow_derivative')
     const expressionInput = screen.getByTestId('isocline-expression')
     fireEvent.change(expressionInput, { target: { value: 'x + y - z' } })
-    fireEvent.change(screen.getByTestId('isocline-frozen-z'), { target: { value: '2' } })
+    fireEvent.change(frozenInput, { target: { value: '2' } })
     expect(screen.getByRole('button', { name: 'Compute' })).toBeInTheDocument()
     await user.click(screen.getByTestId('isocline-compute'))
 
+    expect(onUpdateIsoclineObject).toHaveBeenCalledWith(added.nodeId, {
+      level: 1.5,
+    })
     expect(onUpdateIsoclineObject).toHaveBeenCalledWith(added.nodeId, {
       source: { kind: 'flow_derivative', variableName: 'x' },
     })
@@ -464,10 +484,166 @@ describe('InspectorDetailsPanel', () => {
         source: { kind: 'custom', expression: 'x + y - z' },
       })
     )
+    expect(onUpdateIsoclineObject).toHaveBeenCalledWith(
+      added.nodeId,
+      expect.objectContaining({
+        axes: expect.arrayContaining([
+          expect.objectContaining({ variableName: 'x', samples: 16 }),
+        ]),
+      })
+    )
     expect(onUpdateIsoclineObject).toHaveBeenCalledWith(added.nodeId, { frozenState: [0, 0, 2] })
     expect(onComputeIsocline).toHaveBeenCalledWith(
       { isoclineId: added.nodeId },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
+  })
+
+  it('blocks compute when isocline drafts are unparsable', async () => {
+    const user = userEvent.setup()
+    const config: SystemConfig = {
+      name: 'Iso_Parse_Error',
+      equations: ['x + y', 'y - z', 'x - z'],
+      params: [0.1],
+      paramNames: ['mu'],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const system = createSystem({ name: config.name, config })
+    const isocline: IsoclineObject = {
+      type: 'isocline',
+      name: 'Iso_Parse_Error_Object',
+      systemName: config.name,
+      source: { kind: 'custom', expression: 'x + y' },
+      level: 0,
+      axes: [
+        { variableName: 'x', min: -2, max: 2, samples: 32 },
+        { variableName: 'y', min: -2, max: 2, samples: 32 },
+      ],
+      frozenState: [0, 0, 0],
+      parameters: [...config.params],
+    }
+    const added = addObject(system, isocline)
+    const onComputeIsocline = vi.fn().mockResolvedValue(null)
+
+    render(
+      <InspectorDetailsPanel
+        system={added.system}
+        selectedNodeId={added.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateObjectParams={vi.fn()}
+        onUpdateIsoclineObject={vi.fn()}
+        onComputeIsocline={onComputeIsocline}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('isocline-toggle'))
+    fireEvent.change(screen.getByTestId('isocline-level'), { target: { value: '-' } })
+    await user.click(screen.getByTestId('isocline-compute'))
+
+    expect(onComputeIsocline).not.toHaveBeenCalled()
+    expect(screen.getByText('Isocline value must be a valid real number.')).toBeInTheDocument()
+  })
+
+  it('surfaces compute-time semantic validation errors for isoclines', async () => {
+    const user = userEvent.setup()
+    const config: SystemConfig = {
+      name: 'Iso_Semantic_Error',
+      equations: ['x + y', 'y - z', 'x - z'],
+      params: [0.1],
+      paramNames: ['mu'],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const system = createSystem({ name: config.name, config })
+    const isocline: IsoclineObject = {
+      type: 'isocline',
+      name: 'Iso_Semantic_Error_Object',
+      systemName: config.name,
+      source: { kind: 'custom', expression: 'x + y' },
+      level: 0,
+      axes: [
+        { variableName: 'x', min: -2, max: 2, samples: 32 },
+        { variableName: 'y', min: -2, max: 2, samples: 32 },
+      ],
+      frozenState: [0, 0, 0],
+      parameters: [...config.params],
+    }
+    const added = addObject(system, isocline)
+    const onComputeIsocline = vi
+      .fn()
+      .mockRejectedValue(new Error('Each axis range must be finite with max > min.'))
+
+    render(
+      <InspectorDetailsPanel
+        system={added.system}
+        selectedNodeId={added.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateObjectParams={vi.fn()}
+        onUpdateIsoclineObject={vi.fn()}
+        onComputeIsocline={onComputeIsocline}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('isocline-toggle'))
+    fireEvent.change(screen.getByTestId('isocline-axis-min-x'), { target: { value: '5' } })
+    fireEvent.change(screen.getByTestId('isocline-axis-max-x'), { target: { value: '-5' } })
+    await user.click(screen.getByTestId('isocline-compute'))
+
+    expect(onComputeIsocline).toHaveBeenCalledWith(
+      { isoclineId: added.nodeId },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
+    await waitFor(() =>
+      expect(
+        screen.getByText('Each axis range must be finite with max > min.')
+      ).toBeInTheDocument()
     )
   })
 

@@ -387,7 +387,6 @@ function App() {
                 onDeleteViewport={actions.deleteNode}
                 onSampleMap1DFunction={actions.sampleMap1DFunction}
                 isoclineGeometryCache={state.isoclineGeometryCache}
-                onComputeIsocline={actions.computeIsocline}
               />
             </Panel>
           </div>

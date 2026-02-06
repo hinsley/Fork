@@ -201,8 +201,8 @@ function normalizeIsoclineAxes(system: SystemConfig, axes: IsoclineAxis[]): Isoc
       min: Number.isFinite(axis.min) ? axis.min : -2,
       max: Number.isFinite(axis.max) ? axis.max : 2,
       samples:
-        Number.isFinite(axis.samples) && axis.samples >= 2
-          ? Math.max(2, Math.floor(axis.samples))
+        Number.isFinite(axis.samples)
+          ? Math.trunc(axis.samples)
           : defaultIsoclineSamples(axes.length),
     })
     if (unique.length === 3) break
@@ -1227,9 +1227,10 @@ export function AppProvider({
         if (err instanceof Error && err.name === 'AbortError') {
           return null
         }
+        const message = err instanceof Error ? err.message : String(err)
         if (!silent) {
-          const message = err instanceof Error ? err.message : String(err)
           dispatch({ type: 'SET_ERROR', error: message })
+          throw err instanceof Error ? err : new Error(message)
         }
         return null
       } finally {

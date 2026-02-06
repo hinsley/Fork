@@ -30,7 +30,6 @@ import type {
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
 } from '../compute/ForkCoreClient'
-import type { IsoclineComputeRequest } from '../state/appState'
 import {
   buildSortedArrayOrder,
   ensureBranchIndices,
@@ -87,10 +86,6 @@ type ViewportPanelProps = {
       geometry: ComputeIsoclineResult
     }
   >
-  onComputeIsocline?: (
-    request: IsoclineComputeRequest,
-    opts?: { signal?: AbortSignal; silent?: boolean }
-  ) => Promise<ComputeIsoclineResult | null>
 }
 
 type ViewportEntry = {
@@ -132,10 +127,6 @@ type ViewportTileProps = {
       geometry: ComputeIsoclineResult
     }
   >
-  onComputeIsocline?: (
-    request: IsoclineComputeRequest,
-    opts?: { signal?: AbortSignal; silent?: boolean }
-  ) => Promise<ComputeIsoclineResult | null>
 }
 
 function resolvePointIndex(point: PlotlyPointClick): number | null {
@@ -3417,7 +3408,6 @@ function ViewportTile({
   onCancelRename,
   plotlyTheme,
   isoclineGeometryCache,
-  onComputeIsocline,
 }: ViewportTileProps) {
   const { node, scene, diagram } = entry
   const isSelected = node.id === selectedNodeId
@@ -3434,7 +3424,6 @@ function ViewportTile({
     height: null,
   }))
   const [plotSize, setPlotSize] = useState<PlotSize | null>(null)
-  const isoclineWarmupControllersRef = useRef(new Map<string, AbortController>())
   const activeSceneId = scene?.id ?? null
   const timeSeriesRange =
     timeSeriesState.sceneId === activeSceneId ? timeSeriesState.range : null
@@ -3509,49 +3498,6 @@ function ViewportTile({
     },
     [scene, system.config.type, system.config.varNames.length]
   )
-
-  useEffect(() => {
-    const warmupControllers = isoclineWarmupControllersRef.current
-    return () => {
-      for (const controller of warmupControllers.values()) {
-        controller.abort()
-      }
-      warmupControllers.clear()
-    }
-  }, [])
-
-  useEffect(() => {
-    for (const controller of isoclineWarmupControllersRef.current.values()) {
-      controller.abort()
-    }
-    isoclineWarmupControllersRef.current.clear()
-    if (!scene || !onComputeIsocline) return
-    const manualSelection = scene.selectedNodeIds ?? []
-    const candidateIds =
-      manualSelection.length > 0
-        ? manualSelection
-        : scene.display === 'selection' && selectedNodeId
-          ? [selectedNodeId]
-          : collectVisibleObjectIds(system)
-    for (const nodeId of candidateIds) {
-      const object = system.objects[nodeId]
-      if (!object || object.type !== 'isocline' || !object.lastComputed) continue
-      const signature = buildIsoclineSnapshotSignature(object.lastComputed)
-      const cached = isoclineGeometryCache?.[nodeId]
-      if (cached && cached.signature === signature) continue
-      const controller = new AbortController()
-      isoclineWarmupControllersRef.current.set(nodeId, controller)
-      void onComputeIsocline(
-        { isoclineId: nodeId, useLastComputedSettings: true },
-        { signal: controller.signal, silent: true }
-      ).finally(() => {
-        const current = isoclineWarmupControllersRef.current.get(nodeId)
-        if (current === controller) {
-          isoclineWarmupControllersRef.current.delete(nodeId)
-        }
-      })
-    }
-  }, [isoclineGeometryCache, onComputeIsocline, scene, selectedNodeId, system])
 
   const timeSeriesMeta = useMemo(() => {
     if (!scene || system.config.varNames.length !== 1 || system.config.type === 'map') return null
@@ -3785,7 +3731,6 @@ export function ViewportPanel({
   onDeleteViewport,
   onSampleMap1DFunction,
   isoclineGeometryCache,
-  onComputeIsocline,
 }: ViewportPanelProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -4136,7 +4081,6 @@ export function ViewportPanel({
                 onCancelRename={cancelRename}
                 plotlyTheme={plotlyTheme}
                 isoclineGeometryCache={isoclineGeometryCache}
-                onComputeIsocline={onComputeIsocline}
               />
             </div>
             <div className="viewport-insert" data-testid={`viewport-insert-${entry.node.id}`}>

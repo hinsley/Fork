@@ -540,6 +540,63 @@ describe('appState isocline computation', () => {
     expect(object.axes.map((axis) => axis.variableName)).toEqual(['x', 'y', 'z'])
   })
 
+  it('preserves parseable but semantically invalid axis settings until compute', async () => {
+    const base = createSystem({ name: 'Iso_Invalid_Preserved' })
+    const client = new MockForkCoreClient(0)
+    let capturedRequest:
+      | {
+          min: number
+          max: number
+          samples: number
+        }
+      | null = null
+    client.computeIsocline = async (request) => {
+      capturedRequest = {
+        min: request.axes[0]?.min ?? Number.NaN,
+        max: request.axes[0]?.max ?? Number.NaN,
+        samples: request.axes[0]?.samples ?? Number.NaN,
+      }
+      return {
+        geometry: 'segments',
+        dim: request.system.varNames.length,
+        points: [0, 0, 1, 1],
+        segments: [0, 1],
+      }
+    }
+    const { getContext } = setupApp(base, client)
+
+    let isoclineId: string | null = null
+    await act(async () => {
+      isoclineId = await getContext().actions.createIsoclineObject('Iso_Invalid')
+    })
+    expect(isoclineId).not.toBeNull()
+    if (!isoclineId) {
+      throw new Error('Expected isocline id to be created.')
+    }
+
+    await act(async () => {
+      getContext().actions.updateIsoclineObject(isoclineId!, {
+        axes: [
+          { variableName: 'x', min: 5, max: -5, samples: 1 },
+          { variableName: 'y', min: -2, max: 2, samples: 8 },
+        ],
+      })
+    })
+
+    await act(async () => {
+      await getContext().actions.computeIsocline({ isoclineId: isoclineId! })
+    })
+
+    const next = getContext().state.system
+    expect(next).not.toBeNull()
+    if (!next) {
+      throw new Error('Expected system to remain loaded.')
+    }
+    const object = next.objects[isoclineId] as IsoclineObject
+    expect(object.axes[0]).toMatchObject({ variableName: 'x', min: 5, max: -5, samples: 1 })
+    expect(capturedRequest).toEqual({ min: 5, max: -5, samples: 1 })
+  })
+
   it('computes with current settings and stores last-computed snapshot/cache', async () => {
     const base = createSystem({ name: 'Iso_Current' })
     const client = new MockForkCoreClient(0)

@@ -243,6 +243,12 @@ type BranchEntry = {
   visible: boolean
 }
 
+type IsoclineAxisDraft = {
+  min: string
+  max: string
+  samples: string
+}
+
 const FLOW_SOLVERS = ['rk4', 'tsit5']
 const MAP_SOLVERS = ['discrete']
 const ORBIT_PREVIEW_PAGE_SIZE = 10
@@ -968,6 +974,20 @@ function parseInteger(value: string): number | null {
   return parsed
 }
 
+function parseDraftNumber(value: string): number | null {
+  const trimmed = value.trim()
+  if (trimmed.length === 0) return null
+  const parsed = Number(trimmed)
+  if (!Number.isFinite(parsed)) return null
+  return parsed
+}
+
+function parseDraftInteger(value: string): number | null {
+  const parsed = parseDraftNumber(value)
+  if (parsed === null || !Number.isInteger(parsed)) return null
+  return parsed
+}
+
 function buildContinuationSettings(draft: ContinuationDraft) {
   const stepSize = parseNumber(draft.stepSize)
   const maxSteps = parseInteger(draft.maxSteps)
@@ -1168,6 +1188,32 @@ function resolveIsoclineParameters(systemConfig: SystemConfig, object: IsoclineO
     return object.customParameters
   }
   return systemConfig.params
+}
+
+function buildIsoclineAxisDrafts(
+  axes: IsoclineObject['axes']
+): Record<string, IsoclineAxisDraft> {
+  const drafts: Record<string, IsoclineAxisDraft> = {}
+  for (const axis of axes) {
+    drafts[axis.variableName] = {
+      min: axis.min.toString(),
+      max: axis.max.toString(),
+      samples: axis.samples.toString(),
+    }
+  }
+  return drafts
+}
+
+function buildIsoclineFrozenDrafts(
+  varNames: string[],
+  frozenState: number[]
+): Record<string, string> {
+  const drafts: Record<string, string> = {}
+  for (let index = 0; index < varNames.length; index += 1) {
+    const name = varNames[index]
+    drafts[name] = (frozenState[index] ?? 0).toString()
+  }
+  return drafts
 }
 
 function isIsoclineSnapshotStale(systemConfig: SystemConfig, object: IsoclineObject): boolean {
@@ -1596,8 +1642,14 @@ export function InspectorDetailsPanel({
   const [sceneSearch, setSceneSearch] = useState('')
   const [diagramSearch, setDiagramSearch] = useState('')
   const isoclineComputeControllerRef = useRef<AbortController | null>(null)
+  const isoclineSelectionIdRef = useRef<string | null>(null)
   const [isoclineError, setIsoclineError] = useState<string | null>(null)
   const [isoclineComputing, setIsoclineComputing] = useState(false)
+  const [isoclineLevelDraft, setIsoclineLevelDraft] = useState('')
+  const [isoclineAxisDrafts, setIsoclineAxisDrafts] = useState<Record<string, IsoclineAxisDraft>>(
+    {}
+  )
+  const [isoclineFrozenDrafts, setIsoclineFrozenDrafts] = useState<Record<string, string>>({})
   const isoclineMaxActiveVariables = Math.min(systemDraft.varNames.length, 3)
   const isoclineActiveSet = useMemo(() => {
     if (!isocline) return new Set<string>()
@@ -1905,6 +1957,12 @@ export function InspectorDetailsPanel({
     }
     if (current.type === 'isocline') {
       setIsoclineError(null)
+      setIsoclineLevelDraft(current.level.toString())
+      setIsoclineAxisDrafts(buildIsoclineAxisDrafts(current.axes))
+      setIsoclineFrozenDrafts(
+        buildIsoclineFrozenDrafts(stableSystemConfig.varNames, current.frozenState)
+      )
+      isoclineSelectionIdRef.current = selectedNodeId
     }
   }, [object?.type, selectedNodeId, systemConfigKey])
 
@@ -1919,9 +1977,47 @@ export function InspectorDetailsPanel({
     if (isocline) return
     isoclineComputeControllerRef.current?.abort()
     isoclineComputeControllerRef.current = null
+    isoclineSelectionIdRef.current = null
     setIsoclineComputing(false)
     setIsoclineError(null)
+    setIsoclineLevelDraft('')
+    setIsoclineAxisDrafts({})
+    setIsoclineFrozenDrafts({})
   }, [isocline])
+
+  useEffect(() => {
+    if (!isocline || !selectedNodeId) return
+    const selectionChanged = isoclineSelectionIdRef.current !== selectedNodeId
+    isoclineSelectionIdRef.current = selectedNodeId
+    if (selectionChanged) {
+      setIsoclineLevelDraft(isocline.level.toString())
+      setIsoclineAxisDrafts(buildIsoclineAxisDrafts(isocline.axes))
+      setIsoclineFrozenDrafts(buildIsoclineFrozenDrafts(systemDraft.varNames, isocline.frozenState))
+      return
+    }
+
+    setIsoclineAxisDrafts((prev) => {
+      const next: Record<string, IsoclineAxisDraft> = {}
+      for (const axis of isocline.axes) {
+        const current = prev[axis.variableName]
+        next[axis.variableName] = {
+          min: current?.min ?? axis.min.toString(),
+          max: current?.max ?? axis.max.toString(),
+          samples: current?.samples ?? axis.samples.toString(),
+        }
+      }
+      return next
+    })
+
+    setIsoclineFrozenDrafts((prev) => {
+      const next: Record<string, string> = {}
+      for (let index = 0; index < systemDraft.varNames.length; index += 1) {
+        const name = systemDraft.varNames[index]
+        next[name] = prev[name] ?? (isocline.frozenState[index] ?? 0).toString()
+      }
+      return next
+    })
+  }, [isocline, selectedNodeId, systemDraft.varNames])
 
   useEffect(() => {
     if (!sceneId) return
@@ -2803,6 +2899,7 @@ export function InspectorDetailsPanel({
   const handleToggleIsoclineAxis = useCallback(
     (variableName: string, checked: boolean) => {
       if (!isocline) return
+      setIsoclineError(null)
       const existing = isocline.axes
       if (checked) {
         if (existing.some((axis) => axis.variableName === variableName)) return
@@ -2837,14 +2934,30 @@ export function InspectorDetailsPanel({
       rawValue: string
     ) => {
       if (!isocline) return
+      setIsoclineError(null)
+      setIsoclineAxisDrafts((prev) => {
+        const currentAxis = isocline.axes.find((axis) => axis.variableName === variableName)
+        const current = prev[variableName] ?? {
+          min: currentAxis?.min.toString() ?? '',
+          max: currentAxis?.max.toString() ?? '',
+          samples: currentAxis?.samples.toString() ?? '',
+        }
+        return {
+          ...prev,
+          [variableName]: {
+            ...current,
+            [field]: rawValue,
+          },
+        }
+      })
       const nextAxes = isocline.axes.map((axis) => {
         if (axis.variableName !== variableName) return axis
         if (field === 'samples') {
-          const parsed = parseInteger(rawValue)
-          if (parsed === null || parsed < 2) return axis
+          const parsed = parseDraftInteger(rawValue)
+          if (parsed === null) return axis
           return { ...axis, samples: parsed }
         }
-        const parsed = parseNumber(rawValue)
+        const parsed = parseDraftNumber(rawValue)
         if (parsed === null) return axis
         return { ...axis, [field]: parsed }
       })
@@ -2854,9 +2967,14 @@ export function InspectorDetailsPanel({
   )
 
   const handleUpdateIsoclineFrozenValue = useCallback(
-    (variableIndex: number, rawValue: string) => {
+    (variableName: string, variableIndex: number, rawValue: string) => {
       if (!isocline) return
-      const parsed = parseNumber(rawValue)
+      setIsoclineError(null)
+      setIsoclineFrozenDrafts((prev) => ({
+        ...prev,
+        [variableName]: rawValue,
+      }))
+      const parsed = parseDraftNumber(rawValue)
       if (parsed === null) return
       const nextFrozen = [...isocline.frozenState]
       nextFrozen[variableIndex] = parsed
@@ -2867,6 +2985,62 @@ export function InspectorDetailsPanel({
 
   const handleComputeIsocline = useCallback(async () => {
     if (!isocline || !selectedNodeId) return
+    const parsedLevel = parseDraftNumber(isoclineLevelDraft)
+    if (parsedLevel === null) {
+      setIsoclineError('Isocline value must be a valid real number.')
+      return
+    }
+
+    const parsedAxes: IsoclineObject['axes'] = []
+    for (const axis of isocline.axes) {
+      const draft = isoclineAxisDrafts[axis.variableName]
+      const min = parseDraftNumber(draft?.min ?? axis.min.toString())
+      if (min === null) {
+        setIsoclineError(`Axis "${axis.variableName}" min must be a valid real number.`)
+        return
+      }
+      const max = parseDraftNumber(draft?.max ?? axis.max.toString())
+      if (max === null) {
+        setIsoclineError(`Axis "${axis.variableName}" max must be a valid real number.`)
+        return
+      }
+      const samples = parseDraftInteger(draft?.samples ?? axis.samples.toString())
+      if (samples === null) {
+        setIsoclineError(`Axis "${axis.variableName}" samples must be an integer.`)
+        return
+      }
+      parsedAxes.push({
+        ...axis,
+        min,
+        max,
+        samples,
+      })
+    }
+
+    const parsedFrozen = [...isocline.frozenState]
+    for (const { name, index, value } of isoclineFrozenVariables) {
+      const parsed = parseDraftNumber(isoclineFrozenDrafts[name] ?? value.toString())
+      if (parsed === null) {
+        setIsoclineError(`Frozen variable "${name}" must be a valid real number.`)
+        return
+      }
+      parsedFrozen[index] = parsed
+    }
+
+    const pendingUpdate: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>> = {}
+    if (parsedLevel !== isocline.level) {
+      pendingUpdate.level = parsedLevel
+    }
+    if (!isSameIsoclineAxes(parsedAxes, isocline.axes)) {
+      pendingUpdate.axes = parsedAxes
+    }
+    if (!isSameNumberArray(parsedFrozen, isocline.frozenState)) {
+      pendingUpdate.frozenState = parsedFrozen
+    }
+    if (Object.keys(pendingUpdate).length > 0) {
+      handleUpdateIsocline(pendingUpdate)
+    }
+
     isoclineComputeControllerRef.current?.abort()
     const controller = new AbortController()
     isoclineComputeControllerRef.current = controller
@@ -2892,7 +3066,16 @@ export function InspectorDetailsPanel({
         setIsoclineComputing(false)
       }
     }
-  }, [isocline, onComputeIsocline, selectedNodeId])
+  }, [
+    handleUpdateIsocline,
+    isocline,
+    isoclineAxisDrafts,
+    isoclineFrozenDrafts,
+    isoclineFrozenVariables,
+    isoclineLevelDraft,
+    onComputeIsocline,
+    selectedNodeId,
+  ])
 
   const handleSolveEquilibrium = async () => {
     if (runDisabled) {
@@ -6006,10 +6189,14 @@ export function InspectorDetailsPanel({
                 <label>
                   Isocline value
                   <input
-                    type="number"
-                    value={isocline.level}
+                    type="text"
+                    inputMode="decimal"
+                    value={isoclineLevelDraft}
                     onChange={(event) => {
-                      const parsed = parseNumber(event.target.value)
+                      const raw = event.target.value
+                      setIsoclineError(null)
+                      setIsoclineLevelDraft(raw)
+                      const parsed = parseDraftNumber(raw)
                       if (parsed === null) return
                       handleUpdateIsocline({ level: parsed })
                     }}
@@ -6067,9 +6254,10 @@ export function InspectorDetailsPanel({
                               <td className="isocline-table__label">{axis.variableName}</td>
                               <td>
                                 <input
-                                  type="number"
+                                  type="text"
+                                  inputMode="decimal"
                                   className="state-table__input"
-                                  value={axis.min}
+                                  value={isoclineAxisDrafts[axis.variableName]?.min ?? axis.min.toString()}
                                   onChange={(event) =>
                                     handleUpdateIsoclineAxisField(
                                       axis.variableName,
@@ -6082,9 +6270,10 @@ export function InspectorDetailsPanel({
                               </td>
                               <td>
                                 <input
-                                  type="number"
+                                  type="text"
+                                  inputMode="decimal"
                                   className="state-table__input"
-                                  value={axis.max}
+                                  value={isoclineAxisDrafts[axis.variableName]?.max ?? axis.max.toString()}
                                   onChange={(event) =>
                                     handleUpdateIsoclineAxisField(
                                       axis.variableName,
@@ -6097,9 +6286,13 @@ export function InspectorDetailsPanel({
                               </td>
                               <td>
                                 <input
-                                  type="number"
+                                  type="text"
+                                  inputMode="numeric"
                                   className="state-table__input"
-                                  value={axis.samples}
+                                  value={
+                                    isoclineAxisDrafts[axis.variableName]?.samples ??
+                                    axis.samples.toString()
+                                  }
                                   onChange={(event) =>
                                     handleUpdateIsoclineAxisField(
                                       axis.variableName,
@@ -6141,11 +6334,16 @@ export function InspectorDetailsPanel({
                               <td className="isocline-table__label">{name}</td>
                               <td>
                                 <input
-                                  type="number"
+                                  type="text"
+                                  inputMode="decimal"
                                   className="state-table__input"
-                                  value={value}
+                                  value={isoclineFrozenDrafts[name] ?? value.toString()}
                                   onChange={(event) =>
-                                    handleUpdateIsoclineFrozenValue(index, event.target.value)
+                                    handleUpdateIsoclineFrozenValue(
+                                      name,
+                                      index,
+                                      event.target.value
+                                    )
                                   }
                                   data-testid={`isocline-frozen-${name}`}
                                 />
