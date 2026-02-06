@@ -1264,7 +1264,7 @@ describe('appState homoclinic and homotopy actions', () => {
     expect(updated.data.points[1].param2_value).toBeCloseTo(p2, 12)
   })
 
-  it('falls back to homoc restart and extends backward from the minimum logical index', async () => {
+  it('does not auto-restart homoc extension when the extension runner cannot advance', async () => {
     const base = makeTwoParamSystem('Homoc_Extend_Backward')
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
@@ -1329,31 +1329,17 @@ describe('appState homoclinic and homotopy actions', () => {
     }
     const branchResult = addBranch(added.system, sourceBranch, added.nodeId)
     const client = new MockForkCoreClient(0)
-    let capturedPointState: number[] = []
-    client.runHomoclinicFromHomoclinic = async (request) => {
-      capturedPointState = [...request.pointState]
-      return normalizeBranchEigenvalues(
+    let restartCalled = false
+    client.runContinuationExtension = async (request) =>
+      normalizeBranchEigenvalues(
         {
-          points: [
-            {
-              state: packedState0,
-              param_value: 0.2,
-              stability: 'None',
-              eigenvalues: [],
-            },
-            {
-              state: packedState0,
-              param_value: 0.19,
-              stability: 'None',
-              eigenvalues: [],
-            },
-          ],
-          bifurcations: [],
-          indices: [0, 1],
-          branch_type: sourceBranch.data.branch_type,
+          ...request.branchData,
         },
         { stateDimension: request.system.varNames.length }
       )
+    client.runHomoclinicFromHomoclinic = async () => {
+      restartCalled = true
+      throw new Error('restart should not be called from extension')
     }
     const { getContext } = setupApp(branchResult.system, client)
 
@@ -1365,13 +1351,14 @@ describe('appState homoclinic and homotopy actions', () => {
       })
     })
 
+    expect(getContext().state.error).toContain('Automatic restart is disabled for extension')
+    expect(restartCalled).toBe(false)
     const updated = getContext().state.system!.branches[branchResult.nodeId]
-    expect(updated.data.points.length).toBe(3)
-    expect(updated.data.indices).toEqual([0, 1, -1])
-    expect(capturedPointState).toEqual(packedState0)
+    expect(updated.data.points.length).toBe(2)
+    expect(updated.data.indices).toEqual([0, 1])
   })
 
-  it('uses packed homoc state for restart fallback when point.state is display-trimmed', async () => {
+  it('uses packed homoc state for explicit homoc restart when point.state is display-trimmed', async () => {
     const base = makeTwoParamSystem('Homoc_Extend_Packed_State')
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
@@ -1427,9 +1414,6 @@ describe('appState homoclinic and homotopy actions', () => {
 
     const branchResult = addBranch(added.system, sourceBranch, added.nodeId)
     const client = new MockForkCoreClient(0)
-    client.runContinuationExtension = async () => {
-      throw new Error('generic extension unavailable')
-    }
     let capturedPointState: number[] = []
     client.runHomoclinicFromHomoclinic = async (request) => {
       capturedPointState = [...request.pointState]
@@ -1459,8 +1443,15 @@ describe('appState homoclinic and homotopy actions', () => {
     const { getContext } = setupApp(branchResult.system, client)
 
     await act(async () => {
-      await getContext().actions.extendBranch({
+      await getContext().actions.createHomoclinicFromHomoclinic({
         branchId: branchResult.nodeId,
+        pointIndex: 0,
+        name: 'homoc_restart',
+        targetNtst: 2,
+        targetNcol: 1,
+        freeTime: true,
+        freeEps0: true,
+        freeEps1: false,
         settings: continuationSettings,
         forward: true,
       })

@@ -128,50 +128,6 @@ function resolveHomoclinicSeedState(point: ContinuationPoint, stateDimension: nu
   return [...point.state]
 }
 
-function mergeHomoclinicExtensionData(
-  source: ContinuationObject['data'],
-  extension: ContinuationObject['data'],
-  endpointLogicalIndex: number,
-  forward: boolean
-): ContinuationObject['data'] {
-  const sourceIndices = ensureBranchIndices(source)
-  const extensionIndices = ensureBranchIndices(extension)
-  const mergedPoints = [...source.points]
-  const mergedIndices = [...sourceIndices]
-  const sourceBifurcations = source.bifurcations ?? []
-  const extensionBifurcations = extension.bifurcations ?? []
-  const mergedBifurcations = [...sourceBifurcations]
-  const originCount = source.points.length
-
-  for (let i = 1; i < extension.points.length; i += 1) {
-    mergedPoints.push(extension.points[i])
-    const raw = extensionIndices[i]
-    const finiteRaw = Number.isFinite(raw) ? raw : i
-    const stepMagnitude = Math.max(1, Math.abs(Math.trunc(finiteRaw)))
-    const signedStep = forward ? stepMagnitude : -stepMagnitude
-    mergedIndices.push(endpointLogicalIndex + signedStep)
-  }
-
-  for (const bifIdx of extensionBifurcations) {
-    if (bifIdx > 0) {
-      mergedBifurcations.push(originCount + bifIdx - 1)
-    }
-  }
-
-  const uniqueBifurcations = Array.from(
-    new Set(mergedBifurcations.filter((idx) => idx >= 0 && idx < mergedPoints.length))
-  ).sort((a, b) => a - b)
-
-  return {
-    ...source,
-    points: mergedPoints,
-    bifurcations: uniqueBifurcations,
-    indices: mergedIndices,
-    branch_type: extension.branch_type ?? source.branch_type,
-    upoldp: extension.upoldp ?? source.upoldp,
-  }
-}
-
 function getNodeLabel(node: TreeNode | undefined, systemType: SystemConfig['type']): string {
   if (!node) return 'Item'
   if (node.kind === 'branch') return 'Branch'
@@ -2139,80 +2095,29 @@ export function AppProvider({
           if (param2Idx >= 0 && Number.isFinite(endpointParam2)) {
             runConfig.params[param2Idx] = endpointParam2 as number
           }
-          const endpointSeedState = resolveHomoclinicSeedState(
-            endpointPoint,
-            system.varNames.length
-          )
 
           const branchData = serializeBranchDataForWasm(sourceBranch)
-          let genericExtensionError: Error | null = null
-          try {
-            const genericExtension = await client.runContinuationExtension(
-              {
-                system: runConfig,
-                branchData,
-                parameterName: sourceType.param1_name,
-                mapIterations,
-                settings: request.settings,
-                forward: request.forward,
-              },
-              {
-                onProgress: (progress) =>
-                  dispatch({
-                    type: 'SET_CONTINUATION_PROGRESS',
-                    progress: { label: 'Homoclinic extension', progress },
-                  }),
-              }
-            )
-            if (genericExtension.points.length > sourceBranch.data.points.length) {
-              updatedData = genericExtension
+          updatedData = await client.runContinuationExtension(
+            {
+              system: runConfig,
+              branchData,
+              parameterName: sourceType.param1_name,
+              mapIterations,
+              settings: request.settings,
+              forward: request.forward,
+            },
+            {
+              onProgress: (progress) =>
+                dispatch({
+                  type: 'SET_CONTINUATION_PROGRESS',
+                  progress: { label: 'Homoclinic extension', progress },
+                }),
             }
-          } catch (error) {
-            genericExtensionError =
-              error instanceof Error ? error : new Error(String(error))
-          }
+          )
 
-          if (!updatedData) {
-            const extension = await client.runHomoclinicFromHomoclinic(
-              {
-                system: runConfig,
-                pointState: endpointSeedState,
-                sourceNtst: sourceType.ntst,
-                sourceNcol: sourceType.ncol,
-                parameterName: sourceType.param1_name,
-                param2Name: sourceType.param2_name,
-                targetNtst: sourceType.ntst,
-                targetNcol: sourceType.ncol,
-                freeTime: sourceType.free_time,
-                freeEps0: sourceType.free_eps0,
-                freeEps1: sourceType.free_eps1,
-                settings: request.settings,
-                forward: request.forward,
-              },
-              {
-                onProgress: (progress) =>
-                  dispatch({
-                    type: 'SET_CONTINUATION_PROGRESS',
-                    progress: { label: 'Homoclinic extension (restart)', progress },
-                  }),
-              }
-            )
-
-            if (extension.points.length <= 1) {
-              const genericSuffix =
-                genericExtensionError && genericExtensionError.message.trim().length > 0
-                  ? ` Primary extension path error: ${genericExtensionError.message}`
-                  : ''
-              throw new Error(
-                `Homoclinic extension stopped at the endpoint. Try a smaller step size or adjust parameters.${genericSuffix}`
-              )
-            }
-
-            updatedData = mergeHomoclinicExtensionData(
-              sourceBranch.data,
-              extension,
-              endpoint.logicalIndex,
-              request.forward
+          if (updatedData.points.length <= sourceBranch.data.points.length) {
+            throw new Error(
+              'Homoclinic extension stopped at the endpoint. Automatic restart is disabled for extension; adjust step/mesh settings or use explicit Homoclinic from Homoclinic.'
             )
           }
         } else {
