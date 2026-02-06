@@ -957,7 +957,14 @@ async function runHomoclinicFromLargeCycle(
     request.system.type
   )
 
-  const setup = system.init_homoclinic_from_large_cycle(
+  const initHomoclinicFromLargeCycle = system.init_homoclinic_from_large_cycle
+  if (typeof initHomoclinicFromLargeCycle !== 'function') {
+    throw new Error(
+      'Homoclinic initialization from large cycle is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  const setup = initHomoclinicFromLargeCycle.call(
+    system,
     new Float64Array(request.lcState),
     request.sourceNtst,
     request.sourceNcol,
@@ -971,7 +978,13 @@ async function runHomoclinicFromLargeCycle(
   )
 
   const settings: Record<string, number> = { ...request.settings }
-  const runner = new wasm.WasmHomoclinicRunner(
+  const HomoclinicRunner = wasm.WasmHomoclinicRunner
+  if (typeof HomoclinicRunner !== 'function') {
+    throw new Error(
+      'Homoclinic continuation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  const runner = new HomoclinicRunner(
     request.system.equations,
     new Float64Array(request.system.params),
     request.system.paramNames,
@@ -1010,7 +1023,14 @@ async function runHomoclinicFromHomoclinic(
     request.system.type
   )
 
-  const setup = system.init_homoclinic_from_homoclinic(
+  const initHomoclinicFromHomoclinic = system.init_homoclinic_from_homoclinic
+  if (typeof initHomoclinicFromHomoclinic !== 'function') {
+    throw new Error(
+      'Homoclinic reinitialization is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  const setup = initHomoclinicFromHomoclinic.call(
+    system,
     new Float64Array(request.pointState),
     request.sourceNtst,
     request.sourceNcol,
@@ -1024,7 +1044,13 @@ async function runHomoclinicFromHomoclinic(
   )
 
   const settings: Record<string, number> = { ...request.settings }
-  const runner = new wasm.WasmHomoclinicRunner(
+  const HomoclinicRunner = wasm.WasmHomoclinicRunner
+  if (typeof HomoclinicRunner !== 'function') {
+    throw new Error(
+      'Homoclinic continuation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  const runner = new HomoclinicRunner(
     request.system.equations,
     new Float64Array(request.system.params),
     request.system.paramNames,
@@ -1063,7 +1089,14 @@ async function runHomotopySaddleFromEquilibrium(
     request.system.type
   )
 
-  const setup = system.init_homotopy_saddle_from_equilibrium(
+  const initHomotopySaddleFromEquilibrium = system.init_homotopy_saddle_from_equilibrium
+  if (typeof initHomotopySaddleFromEquilibrium !== 'function') {
+    throw new Error(
+      'Homotopy-saddle initialization is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  const setup = initHomotopySaddleFromEquilibrium.call(
+    system,
     new Float64Array(request.equilibriumState),
     request.parameterName,
     request.param2Name,
@@ -1076,7 +1109,13 @@ async function runHomotopySaddleFromEquilibrium(
   )
 
   const settings: Record<string, number> = { ...request.settings }
-  const runner = new wasm.WasmHomotopySaddleRunner(
+  const HomotopySaddleRunner = wasm.WasmHomotopySaddleRunner
+  if (typeof HomotopySaddleRunner !== 'function') {
+    throw new Error(
+      'Homotopy-saddle continuation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  const runner = new HomotopySaddleRunner(
     request.system.equations,
     new Float64Array(request.system.params),
     request.system.paramNames,
@@ -1115,7 +1154,14 @@ async function runHomoclinicFromHomotopySaddle(
     request.system.type
   )
 
-  const setup = system.init_homoclinic_from_homotopy_saddle(
+  const initHomoclinicFromHomotopySaddle = system.init_homoclinic_from_homotopy_saddle
+  if (typeof initHomoclinicFromHomotopySaddle !== 'function') {
+    throw new Error(
+      'Homoclinic initialization from homotopy-saddle is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  const setup = initHomoclinicFromHomotopySaddle.call(
+    system,
     new Float64Array(request.stageDState),
     request.sourceNtst,
     request.sourceNcol,
@@ -1129,7 +1175,13 @@ async function runHomoclinicFromHomotopySaddle(
   )
 
   const settings: Record<string, number> = { ...request.settings }
-  const runner = new wasm.WasmHomoclinicRunner(
+  const HomoclinicRunner = wasm.WasmHomoclinicRunner
+  if (typeof HomoclinicRunner !== 'function') {
+    throw new Error(
+      'Homoclinic continuation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  const runner = new HomoclinicRunner(
     request.system.equations,
     new Float64Array(request.system.params),
     request.system.paramNames,

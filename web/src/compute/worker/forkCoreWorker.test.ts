@@ -14,6 +14,7 @@ const workerScope: WorkerScope = {
 const wasmState = {
   throwMode: 'none' as 'none' | 'validate' | 'abort',
   useCamelCaseIsoclineMethod: false,
+  disableHomoclinicLargeCycleInit: false,
   lastRunStepsArg: null as number | null,
   lastSystemType: null as string | null,
   lastLimitCycleRunnerSystemType: null as string | null,
@@ -76,6 +77,10 @@ beforeAll(async () => {
           const error = new Error('cancelled')
           error.name = 'AbortError'
           throw error
+        }
+        if (wasmState.disableHomoclinicLargeCycleInit) {
+          ;(this as { init_homoclinic_from_large_cycle?: unknown }).init_homoclinic_from_large_cycle =
+            undefined
         }
         if (wasmState.throwMode !== 'validate') return
         if (equations.length > 1) {
@@ -238,6 +243,7 @@ beforeEach(() => {
   workerScope.postMessage.mockClear()
   wasmState.throwMode = 'none'
   wasmState.useCamelCaseIsoclineMethod = false
+  wasmState.disableHomoclinicLargeCycleInit = false
   wasmState.lastRunStepsArg = null
   wasmState.lastSystemType = null
   wasmState.lastLimitCycleRunnerSystemType = null
@@ -455,6 +461,46 @@ describe('forkCoreWorker', () => {
           (payload as { id?: string; ok?: boolean }).ok === true
       )
     ).toBe(true)
+  })
+
+  it('returns a clear error when homoclinic methods are missing from the wasm build', async () => {
+    const handler = requireHandler()
+    wasmState.disableHomoclinicLargeCycleInit = true
+
+    await handler({
+      data: {
+        id: 'job-h-missing-method',
+        kind: 'runHomoclinicFromLargeCycle',
+        payload: {
+          system: {
+            ...baseSystem,
+            params: [0.2, 0.1],
+            paramNames: ['mu', 'nu'],
+          },
+          lcState: [0, 1, 1, 0, 2],
+          sourceNtst: 4,
+          sourceNcol: 2,
+          parameterName: 'mu',
+          param2Name: 'nu',
+          targetNtst: 8,
+          targetNcol: 2,
+          freeTime: true,
+          freeEps0: true,
+          freeEps1: false,
+          settings: continuationSettings,
+          forward: true,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    const errorResponse = workerScope.postMessage.mock.calls
+      .map(([payload]) => payload as { id?: string; ok?: boolean; error?: string })
+      .find(
+        (payload) =>
+          payload.id === 'job-h-missing-method' && payload.ok === false && !!payload.error
+      )
+
+    expect(errorResponse?.error).toContain('Rebuild fork_wasm pkg-web')
   })
 
   it('simulates orbits and returns time series data', async () => {
