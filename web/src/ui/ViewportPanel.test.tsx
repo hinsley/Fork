@@ -9,6 +9,7 @@ import {
   addBifurcationDiagram,
   addScene,
   createSystem,
+  updateLimitCycleRenderTarget,
   updateBifurcationDiagram,
   updateScene,
 } from '../system/model'
@@ -17,6 +18,7 @@ import type {
   ContinuationSettings,
   EquilibriumObject,
   IsoclineObject,
+  LimitCycleObject,
   OrbitObject,
   Scene,
   SystemConfig,
@@ -258,6 +260,96 @@ describe('ViewportPanel view state wiring', () => {
     expect(trace).toBeTruthy()
     expect(trace?.x).toEqual([-1, 1, null])
     expect(trace?.y).toEqual([0, 0, null])
+  })
+
+  it('renders limit cycle object traces from homoclinic branch render targets', () => {
+    let system = createSystem({
+      name: 'LC_Render_Homoc',
+      config: {
+        name: 'LC_Render_Homoc',
+        equations: ['y', '-x'],
+        params: [0.2, 0.1],
+        paramNames: ['mu', 'nu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const sceneResult = addScene(system, 'Scene LC')
+    system = sceneResult.system
+    const lcObject: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_A',
+      systemName: system.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_A' },
+      ntst: 2,
+      ncol: 1,
+      period: 1,
+      state: [0, 0, 1, 0, 2, 0, 0.5, 0, 1.5, 0, 1],
+      createdAt: nowIso(),
+    }
+    const addedObject = addObject(system, lcObject)
+    const homocBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'homoc_child',
+      systemName: system.config.name,
+      parameterName: 'mu, nu',
+      parentObject: lcObject.name,
+      startObject: lcObject.name,
+      branchType: 'homoclinic_curve',
+      data: {
+        points: [
+          {
+            state: [0, 0, 1, 0, 2, 0, 0.5, 0, 1.5, 0, 0, 0, 0.25, 8, 0.02, 0, 0],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 2,
+          ncol: 1,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          free_time: true,
+          free_eps0: true,
+          free_eps1: false,
+        },
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-6,
+        max_step_size: 0.1,
+        max_steps: 5,
+        corrector_steps: 4,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      } as ContinuationSettings,
+      timestamp: nowIso(),
+      params: [0.2, 0.1],
+    }
+    const addedBranch = addBranch(addedObject.system, homocBranch, addedObject.nodeId)
+    system = updateLimitCycleRenderTarget(addedBranch.system, addedObject.nodeId, {
+      type: 'branch',
+      branchId: addedBranch.nodeId,
+      pointIndex: 0,
+    })
+
+    renderPanel(system)
+
+    const sceneId = sceneResult.nodeId
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneId)
+    expect(props).toBeTruthy()
+    const trace = props?.data.find(
+      (entry) => 'uid' in entry && entry.uid === addedObject.nodeId && 'mode' in entry
+    ) as { mode?: string; x?: Array<number | null>; y?: Array<number | null> } | undefined
+    expect(trace).toBeTruthy()
+    expect(trace?.mode).toBe('lines')
+    expect((trace?.x?.length ?? 0) > 2).toBe(true)
+    expect((trace?.y?.length ?? 0) > 2).toBe(true)
   })
 
   it('renders cached 1D isocline points as diagonal markers in map scenes', () => {

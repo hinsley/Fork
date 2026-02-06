@@ -1637,6 +1637,114 @@ describe('InspectorDetailsPanel', () => {
     })
   })
 
+  it('allows setting limit cycle render targets from homoclinic child branches', async () => {
+    const user = userEvent.setup()
+    let system = createSystem({
+      name: 'LC_Homoc_Render_Target',
+      config: {
+        name: 'LC_Homoc_Render_Target',
+        equations: ['y', '-x'],
+        params: [0.2, 0.1],
+        paramNames: ['mu', 'nu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+
+    const lcObject: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_A',
+      systemName: system.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_A' },
+      ntst: 2,
+      ncol: 1,
+      period: 1,
+      state: [0, 0, 1, 0, 2, 0, 0.5, 0, 1.5, 0, 1],
+      createdAt: new Date().toISOString(),
+    }
+    const addedObject = addObject(system, lcObject)
+    system = addedObject.system
+
+    const homocBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'homoc_child',
+      systemName: system.config.name,
+      parameterName: 'mu, nu',
+      parentObject: lcObject.name,
+      startObject: lcObject.name,
+      branchType: 'homoclinic_curve',
+      data: {
+        points: [
+          {
+            state: [0, 0, 1, 0, 2, 0, 0.5, 0, 1.5, 0, 0, 0, 0.25, 8, 0.02, 0, 0],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 2,
+          ncol: 1,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          free_time: true,
+          free_eps0: true,
+          free_eps1: false,
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2, 0.1],
+    }
+    const addedBranch = addBranch(system, homocBranch, addedObject.nodeId)
+    const onSetLimitCycleRenderTarget = vi.fn()
+
+    render(
+      <InspectorDetailsPanel
+        system={addedBranch.system}
+        selectedNodeId={addedBranch.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onSetLimitCycleRenderTarget={onSetLimitCycleRenderTarget}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    const button = await screen.findByTestId('branch-point-render-lc')
+    await user.click(button)
+
+    expect(onSetLimitCycleRenderTarget).toHaveBeenCalledWith(addedObject.nodeId, {
+      type: 'branch',
+      branchId: addedBranch.nodeId,
+      pointIndex: 0,
+    })
+  })
+
   it('shows cycle point table for discrete map branch points', async () => {
     const user = userEvent.setup()
     const config: SystemConfig = {

@@ -973,6 +973,8 @@ function resolveAxisValue(
 
 const LIMIT_CYCLE_BRANCH_TYPES = new Set([
   'limit_cycle',
+  'homoclinic_curve',
+  'homotopy_saddle_curve',
   'pd_curve',
   'lpc_curve',
   'ns_curve',
@@ -992,7 +994,14 @@ function resolveLimitCycleMesh(
   if ('type' in branchType) {
     const typeName = branchType.type
     if (
-      ['LimitCycle', 'PDCurve', 'LPCCurve', 'NSCurve'].includes(typeName) &&
+      [
+        'LimitCycle',
+        'HomoclinicCurve',
+        'HomotopySaddleCurve',
+        'PDCurve',
+        'LPCCurve',
+        'NSCurve',
+      ].includes(typeName) &&
       'ntst' in branchType &&
       'ncol' in branchType
     ) {
@@ -1026,7 +1035,9 @@ function resolveLimitCycleEnvelope(
   const dim = system.config.varNames.length
   if (dim <= 0) return null
   const { ntst, ncol } = resolveLimitCycleMesh(branch)
-  const { profilePoints } = extractLimitCycleProfile(point.state, dim, ntst, ncol)
+  const { profilePoints } = extractLimitCycleProfile(point.state, dim, ntst, ncol, {
+    allowPackedTail: allowsPackedTailLimitCycleProfile(branch.branchType),
+  })
   let min = Number.POSITIVE_INFINITY
   let max = Number.NEGATIVE_INFINITY
 
@@ -1058,6 +1069,12 @@ function resolveLimitCycleLayout(
   return 'mesh-first'
 }
 
+function allowsPackedTailLimitCycleProfile(
+  branchType: ContinuationObject['branchType']
+): boolean {
+  return branchType === 'homoclinic_curve' || branchType === 'homotopy_saddle_curve'
+}
+
 type LimitCycleTraceConfig = {
   state: number[]
   dim: number
@@ -1071,6 +1088,7 @@ type LimitCycleTraceConfig = {
   layout?: LimitCycleProfileLayout
   showLegend?: boolean
   axisIndices?: [number, number, number] | null
+  allowPackedTail?: boolean
 }
 
 function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
@@ -1087,12 +1105,14 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
     layout,
     showLegend,
     axisIndices,
+    allowPackedTail,
   } = config
   const traces: Data[] = []
   if (!state || state.length === 0 || dim <= 0) return traces
   const plotDim = Math.min(dim, 3)
   const { profilePoints, period } = extractLimitCycleProfile(state, dim, ntst, ncol, {
     layout,
+    allowPackedTail,
   })
   const fallbackAxes: [number, number, number] = [0, 1, 2]
   const axes =
@@ -1245,6 +1265,7 @@ function buildLimitCyclePreviewTraces(
     )
   if (isCurrentTarget) return EMPTY_TRACES
   const { ntst, ncol } = resolveLimitCycleMesh(branch)
+  const allowPackedTail = allowsPackedTailLimitCycleProfile(branch.branchType)
   const dim = system.config.varNames.length
   const indices = ensureBranchIndices(branch.data)
   const logicalIndex = indices[selection.pointIndex]
@@ -1261,6 +1282,7 @@ function buildLimitCyclePreviewTraces(
     lineWidth: render.lineWidth + 1,
     pointSize: render.pointSize + 2,
     layout: resolveLimitCycleLayout(branch.branchType),
+    allowPackedTail,
     showLegend: false,
     axisIndices,
   })
@@ -1897,6 +1919,7 @@ function buildSceneTraces(
       let ntst = object.ntst
       let ncol = object.ncol
       let layout: LimitCycleProfileLayout = 'mesh-first'
+      let allowPackedTail = false
       if (renderTarget?.type === 'branch') {
         const branch = system.branches[renderTarget.branchId]
         const point = branch?.data.points[renderTarget.pointIndex]
@@ -1906,6 +1929,7 @@ function buildSceneTraces(
           ntst = mesh.ntst
           ncol = mesh.ncol
           layout = resolveLimitCycleLayout(branch.branchType)
+          allowPackedTail = allowsPackedTailLimitCycleProfile(branch.branchType)
         }
       }
       const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
@@ -1921,6 +1945,7 @@ function buildSceneTraces(
           lineWidth,
           pointSize: node.render.pointSize + (highlight ? 2 : 0),
           layout,
+          allowPackedTail,
           axisIndices: sceneAxes,
         })
       )

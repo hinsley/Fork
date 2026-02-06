@@ -209,6 +209,29 @@ describe('continuation helpers', () => {
     expect(normalized.points[0].param2_value).toBeCloseTo(p2, 12)
   })
 
+  it('extracts orbit profile from packed-tail homoclinic state', () => {
+    const dim = 2
+    const ntst = 2
+    const ncol = 1
+    const packed = [
+      // mesh
+      0, 0, 1, 0, 2, 0,
+      // stage
+      0.5, 0, 1.5, 0,
+      // x0 + p2 + extras + Riccati tail
+      0, 0, 0.25, 8, 0.02, 0, 0,
+    ]
+
+    const { profilePoints } = extractLimitCycleProfile(packed, dim, ntst, ncol, {
+      layout: 'mesh-first',
+      allowPackedTail: true,
+    })
+
+    expect(profilePoints.length).toBeGreaterThan(0)
+    expect(profilePoints[0]).toEqual([0, 0])
+    expect(profilePoints[profilePoints.length - 1]).toEqual([2, 0])
+  })
+
   it('serializes branch data for WASM consumers', () => {
     const branch: ContinuationObject = {
       ...baseBranch,

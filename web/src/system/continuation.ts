@@ -88,7 +88,7 @@ export function extractLimitCycleProfile(
   dim: number,
   ntst: number,
   ncol: number,
-  options?: { layout?: LimitCycleProfileLayout }
+  options?: { layout?: LimitCycleProfileLayout; allowPackedTail?: boolean }
 ): { profilePoints: number[][]; period: number } {
   const period = flatState.length > 0 ? flatState[flatState.length - 1] : Number.NaN
   const profilePoints: number[][] = []
@@ -144,6 +144,49 @@ export function extractLimitCycleProfile(
     }
 
     return { profilePoints, period }
+  }
+
+  if (options?.allowPackedTail && rawState.length > explicitLen && explicitLen > 0) {
+    const layout = options?.layout ?? 'mesh-first'
+    const meshCount = explicitMeshCount
+    const meshLen = meshCount * dim
+    const stageRawLen = stageCount * dim
+    const meshStart = layout === 'mesh-first' ? 0 : stageRawLen
+    const stageStart = layout === 'mesh-first' ? meshLen : 0
+    const meshSlice = rawState.slice(meshStart, meshStart + meshLen)
+    const stageSlice = rawState.slice(stageStart, stageStart + stageRawLen)
+    if (meshSlice.length === meshLen && stageSlice.length === stageRawLen) {
+      const meshPoints: number[][] = []
+      const stagePoints: number[][] = []
+
+      for (let i = 0; i < meshCount; i += 1) {
+        const offset = i * dim
+        meshPoints.push(meshSlice.slice(offset, offset + dim))
+      }
+      for (let i = 0; i < stageCount; i += 1) {
+        const offset = i * dim
+        stagePoints.push(stageSlice.slice(offset, offset + dim))
+      }
+
+      if (meshPoints.length > 0) {
+        profilePoints.push(meshPoints[0])
+      }
+      for (let interval = 0; interval < ntst; interval += 1) {
+        const stageOffset = interval * ncol
+        for (let stage = 0; stage < ncol; stage += 1) {
+          const point = stagePoints[stageOffset + stage]
+          if (point) {
+            profilePoints.push(point)
+          }
+        }
+        const nextMesh =
+          interval + 1 < meshPoints.length ? meshPoints[interval + 1] : meshPoints[0]
+        if (nextMesh) {
+          profilePoints.push(nextMesh)
+        }
+      }
+      return { profilePoints, period: Number.NaN }
+    }
   }
 
   const profilePointCount = Math.max(ntst * ncol + 1, 0)

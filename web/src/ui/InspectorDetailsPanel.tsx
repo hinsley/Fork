@@ -1638,7 +1638,7 @@ export function InspectorDetailsPanel({
     !limitCycleRenderTarget || limitCycleRenderTarget.type === 'object'
   const canRenderStoredCycle = limitCycle?.origin.type === 'orbit'
   const limitCycleParentId = useMemo(() => {
-    if (!branch || branch.branchType !== 'limit_cycle') return null
+    if (!branch) return null
     return (
       Object.entries(system.objects).find(
         ([, obj]) => obj.type === 'limit_cycle' && obj.name === branch.parentObject
@@ -8142,6 +8142,28 @@ export function InspectorDetailsPanel({
                                     </div>
                                   </>
                                 ) : null}
+                              </div>
+                            ) : null}
+
+                            {branchPointIndex !== null &&
+                            selectedNodeId &&
+                            limitCycleParentId &&
+                            onSetLimitCycleRenderTarget &&
+                            !isBranchRenderTarget ? (
+                              <div className="inspector-row">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onSetLimitCycleRenderTarget(limitCycleParentId, {
+                                      type: 'branch',
+                                      branchId: selectedNodeId,
+                                      pointIndex: branchPointIndex,
+                                    })
+                                  }
+                                  data-testid="branch-point-render-lc"
+                                >
+                                  Render LC Here
+                                </button>
                               </div>
                             ) : null}
 
