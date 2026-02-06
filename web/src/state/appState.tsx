@@ -2097,7 +2097,7 @@ export function AppProvider({
           throw new Error('Branch continuation parameter is not defined in this system.')
         }
 
-        let updatedData: ContinuationObject['data']
+        let updatedData: ContinuationObject['data'] | null = null
         if (sourceBranch.branchType === 'homoclinic_curve') {
           const sourceType = sourceBranch.data.branch_type
           if (!sourceType || sourceType.type !== 'HomoclinicCurve') {
@@ -2115,43 +2115,71 @@ export function AppProvider({
             runConfig.params[param1Idx] = endpointPoint.param_value
           }
 
-          const extension = await client.runHomoclinicFromHomoclinic(
-            {
-              system: runConfig,
-              pointState: endpointPoint.state,
-              sourceNtst: sourceType.ntst,
-              sourceNcol: sourceType.ncol,
-              parameterName: sourceType.param1_name,
-              param2Name: sourceType.param2_name,
-              targetNtst: sourceType.ntst,
-              targetNcol: sourceType.ncol,
-              freeTime: sourceType.free_time,
-              freeEps0: sourceType.free_eps0,
-              freeEps1: sourceType.free_eps1,
-              settings: request.settings,
-              forward: request.forward,
-            },
-            {
-              onProgress: (progress) =>
-                dispatch({
-                  type: 'SET_CONTINUATION_PROGRESS',
-                  progress: { label: 'Homoclinic extension', progress },
-                }),
-            }
-          )
-
-          if (extension.points.length <= 1) {
-            throw new Error(
-              'Homoclinic extension stopped at the endpoint. Try a smaller step size or adjust parameters.'
+          const branchData = serializeBranchDataForWasm(sourceBranch)
+          try {
+            const genericExtension = await client.runContinuationExtension(
+              {
+                system: runConfig,
+                branchData,
+                parameterName: sourceType.param1_name,
+                mapIterations,
+                settings: request.settings,
+                forward: request.forward,
+              },
+              {
+                onProgress: (progress) =>
+                  dispatch({
+                    type: 'SET_CONTINUATION_PROGRESS',
+                    progress: { label: 'Homoclinic extension', progress },
+                  }),
+              }
             )
+            if (genericExtension.points.length > sourceBranch.data.points.length) {
+              updatedData = genericExtension
+            }
+          } catch {
+            // fall back to endpoint restart path below
           }
 
-          updatedData = mergeHomoclinicExtensionData(
-            sourceBranch.data,
-            extension,
-            endpoint.logicalIndex,
-            request.forward
-          )
+          if (!updatedData) {
+            const extension = await client.runHomoclinicFromHomoclinic(
+              {
+                system: runConfig,
+                pointState: endpointPoint.state,
+                sourceNtst: sourceType.ntst,
+                sourceNcol: sourceType.ncol,
+                parameterName: sourceType.param1_name,
+                param2Name: sourceType.param2_name,
+                targetNtst: sourceType.ntst,
+                targetNcol: sourceType.ncol,
+                freeTime: sourceType.free_time,
+                freeEps0: sourceType.free_eps0,
+                freeEps1: sourceType.free_eps1,
+                settings: request.settings,
+                forward: request.forward,
+              },
+              {
+                onProgress: (progress) =>
+                  dispatch({
+                    type: 'SET_CONTINUATION_PROGRESS',
+                    progress: { label: 'Homoclinic extension (restart)', progress },
+                  }),
+              }
+            )
+
+            if (extension.points.length <= 1) {
+              throw new Error(
+                'Homoclinic extension stopped at the endpoint. Try a smaller step size or adjust parameters.'
+              )
+            }
+
+            updatedData = mergeHomoclinicExtensionData(
+              sourceBranch.data,
+              extension,
+              endpoint.logicalIndex,
+              request.forward
+            )
+          }
         } else {
           const branchData = serializeBranchDataForWasm(sourceBranch)
 
@@ -2172,6 +2200,9 @@ export function AppProvider({
                 }),
             }
           )
+        }
+        if (!updatedData) {
+          throw new Error('Branch extension did not return updated continuation data.')
         }
 
         const normalized = normalizeBranchEigenvalues(updatedData, {
