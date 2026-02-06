@@ -5987,7 +5987,7 @@ export function InspectorDetailsPanel({
                 )}
 
                 <label>
-                  Level c
+                  Isocline value
                   <input
                     type="number"
                     value={isocline.level}
