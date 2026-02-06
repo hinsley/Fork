@@ -1142,7 +1142,7 @@ describe('appState homoclinic and homotopy actions', () => {
     })
   })
 
-  it('extends homoclinic branches with param1 routing and param2 hydration', async () => {
+  it('extends homoclinic branches via homoc restart with param2 hydration', async () => {
     const base = makeTwoParamSystem('Homoc_Extend')
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
@@ -1196,9 +1196,9 @@ describe('appState homoclinic and homotopy actions', () => {
     const branchResult = addBranch(added.system, sourceBranch, added.nodeId)
 
     const client = new MockForkCoreClient(0)
-    let capturedParameterName = ''
+    let continuationExtensionCalled = false
     client.runContinuationExtension = async (request) => {
-      capturedParameterName = request.parameterName
+      continuationExtensionCalled = true
       return normalizeBranchEigenvalues(
         {
           ...request.branchData,
@@ -1216,6 +1216,34 @@ describe('appState homoclinic and homotopy actions', () => {
         { stateDimension: request.system.varNames.length }
       )
     }
+    let capturedParameterName = ''
+    let capturedPointState: number[] = []
+    client.runHomoclinicFromHomoclinic = async (request) => {
+      capturedParameterName = request.parameterName
+      capturedPointState = [...request.pointState]
+      return normalizeBranchEigenvalues(
+        {
+          points: [
+            {
+              state: packedState,
+              param_value: 0.2,
+              stability: 'None',
+              eigenvalues: [],
+            },
+            {
+              state: packedState,
+              param_value: 0.21,
+              stability: 'None',
+              eigenvalues: [],
+            },
+          ],
+          bifurcations: [],
+          indices: [0, 1],
+          branch_type: sourceBranch.data.branch_type,
+        },
+        { stateDimension: request.system.varNames.length }
+      )
+    }
 
     const { getContext } = setupApp(branchResult.system, client)
 
@@ -1227,9 +1255,108 @@ describe('appState homoclinic and homotopy actions', () => {
       })
     })
 
+    expect(continuationExtensionCalled).toBe(false)
     expect(capturedParameterName).toBe('mu')
+    expect(capturedPointState).toEqual(packedState)
     const updated = getContext().state.system!.branches[branchResult.nodeId]
     expect(updated.data.points[0].param2_value).toBeCloseTo(p2, 12)
     expect(updated.data.points[1].param2_value).toBeCloseTo(p2, 12)
+  })
+
+  it('extends homoclinic branches backward from the minimum logical index', async () => {
+    const base = makeTwoParamSystem('Homoc_Extend_Backward')
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_A',
+      systemName: base.config.name,
+    }
+    const added = addObject(base, equilibrium)
+    const p2 = 0.25
+    const packedState = [
+      0, 0, 1, 1, 2, 2,
+      0.5, 0.5, 1.5, 1.5,
+      0, 0,
+      p2,
+      8, 0.01, 0, 0,
+    ]
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'homoc_source',
+      systemName: base.config.name,
+      parameterName: 'mu, nu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'homoclinic_curve',
+      data: {
+        points: [
+          {
+            state: packedState,
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: packedState,
+            param_value: 0.21,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [1],
+        indices: [0, 1],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 2,
+          ncol: 1,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          free_time: true,
+          free_eps0: true,
+          free_eps1: false,
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2, p2],
+    }
+    const branchResult = addBranch(added.system, sourceBranch, added.nodeId)
+    const client = new MockForkCoreClient(0)
+    client.runHomoclinicFromHomoclinic = async (request) => {
+      return normalizeBranchEigenvalues(
+        {
+          points: [
+            {
+              state: packedState,
+              param_value: 0.2,
+              stability: 'None',
+              eigenvalues: [],
+            },
+            {
+              state: packedState,
+              param_value: 0.19,
+              stability: 'None',
+              eigenvalues: [],
+            },
+          ],
+          bifurcations: [],
+          indices: [0, 1],
+          branch_type: sourceBranch.data.branch_type,
+        },
+        { stateDimension: request.system.varNames.length }
+      )
+    }
+    const { getContext } = setupApp(branchResult.system, client)
+
+    await act(async () => {
+      await getContext().actions.extendBranch({
+        branchId: branchResult.nodeId,
+        settings: continuationSettings,
+        forward: false,
+      })
+    })
+
+    const updated = getContext().state.system!.branches[branchResult.nodeId]
+    expect(updated.data.points.length).toBe(3)
+    expect(updated.data.indices).toEqual([0, 1, -1])
   })
 })

@@ -57,6 +57,7 @@ import {
   updateSystem,
 } from '../system/model'
 import {
+  ensureBranchIndices,
   extractHopfOmega,
   getBranchParams,
   normalizeEigenvalueArray,
@@ -95,6 +96,67 @@ function validateObjectName(name: string, label: string): string | null {
     return `${label} names must be alphanumeric with underscores only.`
   }
   return null
+}
+
+function resolveExtensionEndpointArrayIndex(
+  branch: ContinuationObject,
+  forward: boolean
+): { arrayIndex: number; logicalIndex: number } {
+  const indices = ensureBranchIndices(branch.data)
+  if (indices.length === 0) {
+    return { arrayIndex: 0, logicalIndex: 0 }
+  }
+  let selected = 0
+  for (let i = 1; i < indices.length; i += 1) {
+    if (forward ? indices[i] > indices[selected] : indices[i] < indices[selected]) {
+      selected = i
+    }
+  }
+  return { arrayIndex: selected, logicalIndex: indices[selected] ?? 0 }
+}
+
+function mergeHomoclinicExtensionData(
+  source: ContinuationObject['data'],
+  extension: ContinuationObject['data'],
+  endpointLogicalIndex: number,
+  forward: boolean
+): ContinuationObject['data'] {
+  const sourceIndices = ensureBranchIndices(source)
+  const extensionIndices = ensureBranchIndices(extension)
+  const mergedPoints = [...source.points]
+  const mergedIndices = [...sourceIndices]
+  const sourceBifurcations = source.bifurcations ?? []
+  const extensionBifurcations = extension.bifurcations ?? []
+  const mergedBifurcations = [...sourceBifurcations]
+  const originCount = source.points.length
+
+  for (let i = 1; i < extension.points.length; i += 1) {
+    mergedPoints.push(extension.points[i])
+    const raw = extensionIndices[i]
+    const finiteRaw = Number.isFinite(raw) ? raw : i
+    const stepMagnitude = Math.max(1, Math.abs(Math.trunc(finiteRaw)))
+    const signedStep = forward ? stepMagnitude : -stepMagnitude
+    mergedIndices.push(endpointLogicalIndex + signedStep)
+  }
+
+  for (const bifIdx of extensionBifurcations) {
+    if (bifIdx > 0) {
+      mergedBifurcations.push(originCount + bifIdx - 1)
+    }
+  }
+
+  const uniqueBifurcations = Array.from(
+    new Set(mergedBifurcations.filter((idx) => idx >= 0 && idx < mergedPoints.length))
+  ).sort((a, b) => a - b)
+
+  return {
+    ...source,
+    points: mergedPoints,
+    bifurcations: uniqueBifurcations,
+    indices: mergedIndices,
+    branch_type: extension.branch_type ?? source.branch_type,
+    upoldp: extension.upoldp ?? source.upoldp,
+  }
 }
 
 function getNodeLabel(node: TreeNode | undefined, systemType: SystemConfig['type']): string {
@@ -2035,25 +2097,82 @@ export function AppProvider({
           throw new Error('Branch continuation parameter is not defined in this system.')
         }
 
-        const branchData = serializeBranchDataForWasm(sourceBranch)
-
-        const updatedData = await client.runContinuationExtension(
-          {
-            system: runConfig,
-            branchData,
-            parameterName: extensionParameterName,
-            mapIterations,
-            settings: request.settings,
-            forward: request.forward,
-          },
-          {
-            onProgress: (progress) =>
-              dispatch({
-                type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: 'Extension', progress },
-              }),
+        let updatedData: ContinuationObject['data']
+        if (sourceBranch.branchType === 'homoclinic_curve') {
+          const sourceType = sourceBranch.data.branch_type
+          if (!sourceType || sourceType.type !== 'HomoclinicCurve') {
+            throw new Error(
+              'Homoclinic branch metadata is missing. Reinitialize from a valid homoclinic point.'
+            )
           }
-        )
+          const endpoint = resolveExtensionEndpointArrayIndex(sourceBranch, request.forward)
+          const endpointPoint = sourceBranch.data.points[endpoint.arrayIndex]
+          if (!endpointPoint) {
+            throw new Error('Unable to resolve a valid homoclinic endpoint for extension.')
+          }
+          const param1Idx = system.paramNames.indexOf(sourceType.param1_name)
+          if (param1Idx >= 0) {
+            runConfig.params[param1Idx] = endpointPoint.param_value
+          }
+
+          const extension = await client.runHomoclinicFromHomoclinic(
+            {
+              system: runConfig,
+              pointState: endpointPoint.state,
+              sourceNtst: sourceType.ntst,
+              sourceNcol: sourceType.ncol,
+              parameterName: sourceType.param1_name,
+              param2Name: sourceType.param2_name,
+              targetNtst: sourceType.ntst,
+              targetNcol: sourceType.ncol,
+              freeTime: sourceType.free_time,
+              freeEps0: sourceType.free_eps0,
+              freeEps1: sourceType.free_eps1,
+              settings: request.settings,
+              forward: request.forward,
+            },
+            {
+              onProgress: (progress) =>
+                dispatch({
+                  type: 'SET_CONTINUATION_PROGRESS',
+                  progress: { label: 'Homoclinic extension', progress },
+                }),
+            }
+          )
+
+          if (extension.points.length <= 1) {
+            throw new Error(
+              'Homoclinic extension stopped at the endpoint. Try a smaller step size or adjust parameters.'
+            )
+          }
+
+          updatedData = mergeHomoclinicExtensionData(
+            sourceBranch.data,
+            extension,
+            endpoint.logicalIndex,
+            request.forward
+          )
+        } else {
+          const branchData = serializeBranchDataForWasm(sourceBranch)
+
+          updatedData = await client.runContinuationExtension(
+            {
+              system: runConfig,
+              branchData,
+              parameterName: extensionParameterName,
+              mapIterations,
+              settings: request.settings,
+              forward: request.forward,
+            },
+            {
+              onProgress: (progress) =>
+                dispatch({
+                  type: 'SET_CONTINUATION_PROGRESS',
+                  progress: { label: 'Extension', progress },
+                }),
+            }
+          )
+        }
 
         const normalized = normalizeBranchEigenvalues(updatedData, {
           stateDimension: system.varNames.length,
