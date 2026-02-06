@@ -71,7 +71,9 @@ behavior.
 - `web/src/ui/InspectorDetailsPanel.tsx`: eigenvalue/multiplier plots set
   `dragmode: 'pan'`, compute fixed `xaxis.range`/`yaxis.range` values for the
   complex plane, and add unit circle/disc overlays for multiplier/eigenvalue
-  views (no relayout persistence is wired for these mini plots).
+  views. Equilibrium eigenvalue markers are color-mapped from the corresponding
+  eigenvector/eigendisc render colors (no relayout persistence is wired for
+  these mini plots).
 
 ### Plot styling driven by app theme
 - `web/src/viewports/plotly/plotlyTheme.ts`: `resolvePlotlyThemeTokens()` is

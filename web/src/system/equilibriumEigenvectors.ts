@@ -167,6 +167,69 @@ export function resolveEquilibriumEigenvectorColors(
   return indices.map((index) => colorMap.get(index) ?? defaultEigenvectorColor(index))
 }
 
+function findConjugateEigenspaceIndex(
+  eigenpairs: EquilibriumEigenPair[],
+  index: number,
+  candidateIndices: number[],
+  eps: number
+): number | null {
+  const value = eigenpairs[index]?.value
+  if (!value) return null
+  for (const candidateIndex of candidateIndices) {
+    if (candidateIndex === index) continue
+    const candidate = eigenpairs[candidateIndex]?.value
+    if (!candidate) continue
+    if (!Number.isFinite(candidate.re) || !Number.isFinite(candidate.im)) continue
+    if (candidate.im <= eps) continue
+    if (Math.abs(candidate.re - value.re) > eps) continue
+    if (Math.abs(candidate.im + value.im) > eps) continue
+    return candidateIndex
+  }
+  return null
+}
+
+export function resolveEquilibriumEigenvalueMarkerColors(
+  eigenpairs: EquilibriumEigenPair[],
+  eigenspaceIndices: number[],
+  eigenspaceColors: string[],
+  options?: {
+    fallbackColor?: string
+    eps?: number
+  }
+): string[] {
+  const fallbackColor = options?.fallbackColor ?? 'var(--accent)'
+  const eps = options?.eps ?? REAL_EIGENVALUE_EPS
+  if (eigenpairs.length === 0) return []
+  const colorByIndex = new Map<number, string>()
+  eigenspaceIndices.forEach((index, idx) => {
+    const color = eigenspaceColors[idx]
+    if (typeof color === 'string' && color) {
+      colorByIndex.set(index, color)
+    }
+  })
+  const fallbackIndices = resolveEquilibriumEigenspaceIndices(eigenpairs, eps)
+  const candidateIndices = eigenspaceIndices.length > 0 ? eigenspaceIndices : fallbackIndices
+
+  return eigenpairs.map((pair, index) => {
+    const value = pair.value
+    if (!value || !Number.isFinite(value.re) || !Number.isFinite(value.im)) {
+      return colorByIndex.get(index) ?? fallbackColor
+    }
+    if (value.im < -eps) {
+      const conjugateIndex = findConjugateEigenspaceIndex(
+        eigenpairs,
+        index,
+        candidateIndices,
+        eps
+      )
+      if (conjugateIndex !== null) {
+        return colorByIndex.get(conjugateIndex) ?? fallbackColor
+      }
+    }
+    return colorByIndex.get(index) ?? fallbackColor
+  })
+}
+
 export function resolveEquilibriumEigenvectorRender(
   render: Partial<EquilibriumEigenvectorRenderStyle> | undefined,
   eigenspaceIndices?: number[]

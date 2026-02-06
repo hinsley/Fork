@@ -14,6 +14,7 @@ import {
   updateLimitCycleRenderTarget,
   updateNodeRender,
 } from '../system/model'
+import { renderPlot } from '../viewports/plotly/plotlyAdapter'
 import type {
   ContinuationObject,
   EquilibriumObject,
@@ -2474,6 +2475,108 @@ describe('InspectorDetailsPanel', () => {
       equilibriumEigenvectors: expect.objectContaining({
         colors: expect.arrayContaining(['#ff0000']),
       }),
+    })
+  })
+
+  it('colors equilibrium eigenvalue argand markers from eigenspace colors', async () => {
+    const user = userEvent.setup()
+    const renderPlotMock = vi.mocked(renderPlot)
+    renderPlotMock.mockClear()
+    const baseSystem = createSystem({ name: 'Eigenvalue_Color_System' })
+    const eqObject: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ Colors',
+      systemName: baseSystem.config.name,
+      solution: {
+        state: [0, 0],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [
+          {
+            value: { re: -1, im: 0 },
+            vector: [
+              { re: 1, im: 0 },
+              { re: 0, im: 0 },
+            ],
+          },
+          {
+            value: { re: 0.2, im: 0.5 },
+            vector: [
+              { re: 0.2, im: 0.1 },
+              { re: 0.8, im: 0.3 },
+            ],
+          },
+          {
+            value: { re: 0.2, im: -0.5 },
+            vector: [
+              { re: 0.2, im: -0.1 },
+              { re: 0.8, im: -0.3 },
+            ],
+          },
+        ],
+      },
+      parameters: [...baseSystem.config.params],
+    }
+    const { system, nodeId } = addObject(baseSystem, eqObject)
+
+    function Wrapper() {
+      const [state, setState] = useState(system)
+      return (
+        <InspectorDetailsPanel
+          system={state}
+          selectedNodeId={nodeId}
+          view="selection"
+          theme="light"
+          onRename={vi.fn()}
+          onToggleVisibility={vi.fn()}
+          onUpdateRender={(id, render) =>
+            setState((prev) => updateNodeRender(prev, id, render))
+          }
+          onUpdateScene={vi.fn()}
+          onUpdateBifurcationDiagram={vi.fn()}
+          onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+          onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+          onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+          onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+          onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+          onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+          onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+          onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+          onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+          onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        />
+      )
+    }
+
+    render(<Wrapper />)
+    await user.click(screen.getByTestId('equilibrium-data-toggle'))
+
+    fireEvent.change(screen.getByTestId('equilibrium-eigenvector-color-1'), {
+      target: { value: '#ff0000' },
+    })
+
+    await waitFor(() => {
+      const equilibriumPlotCall = [...renderPlotMock.mock.calls]
+        .reverse()
+        .find(
+          (call) =>
+            (call[0] as HTMLDivElement).getAttribute('data-testid') ===
+            'equilibrium-eigenvalue-plot'
+        )
+      expect(equilibriumPlotCall).toBeTruthy()
+      const traces = equilibriumPlotCall?.[1] as Array<{
+        mode?: string
+        marker?: { color?: unknown }
+      }>
+      const markerTrace = traces.find((trace) => trace.mode === 'markers')
+      expect(markerTrace?.marker?.color).toEqual(['#1f77b4', '#ff0000', '#ff0000'])
     })
   })
 

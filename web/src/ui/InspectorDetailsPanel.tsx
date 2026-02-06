@@ -24,6 +24,7 @@ import { defaultClvIndices, resolveClvColors, resolveClvRender } from '../system
 import {
   defaultEquilibriumEigenvectorIndices,
   isRealEigenvalue,
+  resolveEquilibriumEigenvalueMarkerColors,
   resolveEquilibriumEigenvectorColors,
   resolveEquilibriumEigenspaceIndices,
   resolveEquilibriumEigenvectorRender,
@@ -522,6 +523,7 @@ function buildEigenvaluePlot(
     showRadiusLines?: boolean
     showUnitCircle?: boolean
     showUnitDisc?: boolean
+    markerColors?: string[]
   }
 ) {
   if (!eigenvalues || eigenvalues.length === 0) return null
@@ -575,6 +577,10 @@ function buildEigenvaluePlot(
         },
       ]
     : []
+  const markerColor =
+    options?.markerColors && options.markerColors.length === eigenvalues.length
+      ? options.markerColors
+      : 'var(--accent)'
   const data: Data[] = [
     ...unitCircle,
     ...radiusLines,
@@ -585,7 +591,7 @@ function buildEigenvaluePlot(
       type: 'scatter',
       name: 'Eigenvalues',
       marker: {
-        color: 'var(--accent)',
+        color: markerColor,
         size: 8,
         line: { color: 'var(--panel-border)', width: 1 },
       },
@@ -1215,6 +1221,11 @@ export function InspectorDetailsPanel({
     equilibriumEigenvectorRender.vectorIndices,
     equilibriumEigenvectorRender.colors,
     equilibriumEigenvectorRender.colorOverrides
+  )
+  const equilibriumEigenvalueMarkerColors = resolveEquilibriumEigenvalueMarkerColors(
+    equilibriumEigenpairs,
+    equilibriumEigenvectorIndices,
+    equilibriumEigenvectorColors
   )
   const equilibriumEigenvectorVisibleSet = new Set(equilibriumEigenvectorRender.vectorIndices)
   const equilibriumPlotDim = equilibrium?.solution?.state?.length ?? system.config.varNames.length
@@ -2007,8 +2018,14 @@ export function InspectorDetailsPanel({
     return buildEigenvaluePlot(eigenpairs.map((pair) => pair.value), plotlyTheme, {
       showRadiusLines: isDiscreteMap,
       showUnitDisc: isDiscreteMap,
+      markerColors: equilibriumEigenvalueMarkerColors,
     })
-  }, [equilibrium?.solution?.eigenpairs, isDiscreteMap, plotlyTheme])
+  }, [
+    equilibrium?.solution?.eigenpairs,
+    equilibriumEigenvalueMarkerColors,
+    isDiscreteMap,
+    plotlyTheme,
+  ])
   useEffect(() => {
     if (!systemDirty && !systemTouched) {
       setWasmEquationErrors([])
