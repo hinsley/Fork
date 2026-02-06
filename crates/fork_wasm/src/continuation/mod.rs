@@ -7,6 +7,8 @@ mod curve_runners;
 mod codim1_extension_runner;
 mod eq_runner;
 mod extension_runner;
+mod homoc_runner;
+mod homotopy_saddle_runner;
 mod lc_runner;
 mod shared;
 mod system_methods;
@@ -18,14 +20,16 @@ pub use curve_runners::{
 pub use codim1_extension_runner::WasmCodim1CurveExtensionRunner;
 pub use eq_runner::WasmEquilibriumRunner;
 pub use extension_runner::WasmContinuationExtensionRunner;
+pub use homoc_runner::WasmHomoclinicRunner;
+pub use homotopy_saddle_runner::WasmHomotopySaddleRunner;
 pub use lc_runner::WasmLimitCycleRunner;
 
 #[cfg(test)]
 mod tests {
     use super::{
         WasmCodim1CurveExtensionRunner, WasmContinuationExtensionRunner, WasmEquilibriumRunner,
-        WasmFoldCurveRunner, WasmHopfCurveRunner, WasmLPCCurveRunner, WasmLimitCycleRunner,
-        WasmNSCurveRunner, WasmPDCurveRunner,
+        WasmFoldCurveRunner, WasmHomoclinicRunner, WasmHomotopySaddleRunner, WasmHopfCurveRunner,
+        WasmLPCCurveRunner, WasmLimitCycleRunner, WasmNSCurveRunner, WasmPDCurveRunner,
     };
 
     #[test]
@@ -58,6 +62,11 @@ mod tests {
         );
         assert!(
             std::any::type_name::<WasmLimitCycleRunner>().ends_with("WasmLimitCycleRunner")
+        );
+        assert!(std::any::type_name::<WasmHomoclinicRunner>().ends_with("WasmHomoclinicRunner"));
+        assert!(
+            std::any::type_name::<WasmHomotopySaddleRunner>()
+                .ends_with("WasmHomotopySaddleRunner")
         );
     }
 }

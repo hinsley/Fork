@@ -31,6 +31,12 @@ import { formatEquilibriumLabel } from '../labels';
 import { initiateLCBranchFromPoint, initiateLCFromPD } from './initiate-lc';
 import { initiateEquilibriumBranchFromPoint, initiateMapCycleFromPD } from './initiate-eq';
 import { initiateFoldCurve, initiateHopfCurve, initiateLPCCurve, initiatePDCurve, initiateNSCurve } from './initiate-codim1';
+import {
+  initiateHomoclinicFromHomoclinic,
+  initiateHomoclinicFromHomotopySaddle,
+  initiateHomoclinicFromLargeCycle
+} from './initiate-homoclinic';
+import { initiateHomotopySaddleFromEquilibrium } from './initiate-homotopy-saddle';
 import { printProgress, printProgressComplete } from '../format';
 
 type BranchDetailResult = 'SUMMARY' | 'EXIT' | NavigationRequest;
@@ -308,7 +314,15 @@ export function formatPointRow(
 
   // Format parameter display based on branch type
   let paramDisplay: string;
-  if (branch.branchType === 'fold_curve' || branch.branchType === 'hopf_curve') {
+  if (
+    branch.branchType === 'fold_curve' ||
+    branch.branchType === 'hopf_curve' ||
+    branch.branchType === 'lpc_curve' ||
+    branch.branchType === 'pd_curve' ||
+    branch.branchType === 'ns_curve' ||
+    branch.branchType === 'homoclinic_curve' ||
+    branch.branchType === 'homotopy_saddle_curve'
+  ) {
     // Two-parameter branch: show both p1 and p2
     const p1Val = formatNumber(pt.param_value);
     const p2Val = pt.param2_value !== undefined ? formatNumber(pt.param2_value) : '?';
@@ -334,6 +348,119 @@ export function formatPointRow(
   return label;
 }
 
+function l2Distance(a: number[], b: number[]): number {
+  const n = Math.min(a.length, b.length);
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0);
+    sum += d * d;
+  }
+  return Math.sqrt(sum);
+}
+
+function decodePackedHomoclinicPoint(
+  point: ContinuationPoint,
+  dim: number,
+  ntst: number,
+  ncol: number,
+  freeTime: boolean,
+  freeEps0: boolean,
+  freeEps1: boolean
+): {
+  time: number | null;
+  eps0: number | null;
+  eps1: number | null;
+  startDistance: number | null;
+  endDistance: number | null;
+} | null {
+  if (dim <= 0 || ntst < 1 || ncol < 1) return null;
+
+  const state = point.state;
+  const meshLen = (ntst + 1) * dim;
+  const stageLen = ntst * ncol * dim;
+  const x0Start = meshLen + stageLen;
+  const minLen = x0Start + dim + 1;
+  if (!Array.isArray(state) || state.length < minLen) {
+    return null;
+  }
+
+  const x0 = state.slice(x0Start, x0Start + dim);
+  const start = state.slice(0, dim);
+  const endStart = ntst * dim;
+  const end = state.slice(endStart, endStart + dim);
+
+  let cursor = x0Start + dim + 1; // skip param2
+  let time: number | null = null;
+  let eps0: number | null = null;
+  let eps1: number | null = null;
+
+  if (freeTime && cursor < state.length) {
+    time = state[cursor++];
+  }
+  if (freeEps0 && cursor < state.length) {
+    eps0 = state[cursor++];
+  }
+  if (freeEps1 && cursor < state.length) {
+    eps1 = state[cursor++];
+  }
+
+  const startDistance = l2Distance(start, x0);
+  const endDistance = l2Distance(end, x0);
+
+  if (!freeEps0) {
+    eps0 = startDistance;
+  }
+  if (!freeEps1) {
+    eps1 = endDistance;
+  }
+
+  return { time, eps0, eps1, startDistance, endDistance };
+}
+
+function printHomoclinicDiagnostics(
+  point: ContinuationPoint,
+  dim: number,
+  branchType: {
+    ntst: number;
+    ncol: number;
+    free_time: boolean;
+    free_eps0: boolean;
+    free_eps1: boolean;
+  }
+) {
+  const decoded = decodePackedHomoclinicPoint(
+    point,
+    dim,
+    branchType.ntst,
+    branchType.ncol,
+    branchType.free_time,
+    branchType.free_eps0,
+    branchType.free_eps1
+  );
+  if (!decoded) {
+    console.log(chalk.gray('Homoclinic diagnostics: unavailable (packed state mismatch).'));
+    return;
+  }
+
+  if (decoded.time !== null) {
+    console.log(chalk.cyan(`T: ${formatNumberFullPrecision(decoded.time)}`));
+  }
+  if (decoded.eps0 !== null || decoded.eps1 !== null) {
+    console.log(
+      chalk.cyan(
+        `eps0: ${formatNumberFullPrecision(decoded.eps0 ?? Number.NaN)} | eps1: ${formatNumberFullPrecision(decoded.eps1 ?? Number.NaN)}`
+      )
+    );
+  }
+  if (decoded.startDistance !== null && decoded.endDistance !== null) {
+    console.log(
+      chalk.gray(
+        `Endpoint distances to x0: start=${formatNumber(decoded.startDistance)}, end=${formatNumber(decoded.endDistance)}`
+      )
+    );
+  }
+}
+
 /**
  * Computes missing eigenvalues for points that lack them.
  * 
@@ -346,7 +473,15 @@ export function formatPointRow(
  */
 export async function hydrateEigenvalues(sysName: string, branch: ContinuationObject) {
   // Skip hydration for codim-1 curves - they have two parameters and different eigenvalue semantics
-  if (branch.branchType === 'fold_curve' || branch.branchType === 'hopf_curve') {
+  if (
+    branch.branchType === 'fold_curve' ||
+    branch.branchType === 'hopf_curve' ||
+    branch.branchType === 'lpc_curve' ||
+    branch.branchType === 'pd_curve' ||
+    branch.branchType === 'ns_curve' ||
+    branch.branchType === 'homoclinic_curve' ||
+    branch.branchType === 'homotopy_saddle_curve'
+  ) {
     return;
   }
 
@@ -464,7 +599,15 @@ export async function showPointDetails(
     : [...sysConfig.params];
 
   // Handle two-parameter branches (fold_curve, hopf_curve) specially
-  if (branchType === 'fold_curve' || branchType === 'hopf_curve') {
+  if (
+    branchType === 'fold_curve' ||
+    branchType === 'hopf_curve' ||
+    branchType === 'lpc_curve' ||
+    branchType === 'pd_curve' ||
+    branchType === 'ns_curve' ||
+    branchType === 'homoclinic_curve' ||
+    branchType === 'homotopy_saddle_curve'
+  ) {
     // Get param names from branch_type
     const branchTypeData = branch.data.branch_type as { param1_name?: string; param2_name?: string } | undefined;
     const p1Name = branchTypeData?.param1_name ?? 'p1';
@@ -578,12 +721,48 @@ export async function showPointDetails(
     console.log(`State: ${formatArray(pt.state)}`);
   }
 
+  if (branchType === 'homoclinic_curve') {
+    const branchTypeData = branch.data.branch_type as any;
+    if (branchTypeData?.type === 'HomoclinicCurve') {
+      console.log(chalk.white('\nHomoclinic diagnostics:'));
+      printHomoclinicDiagnostics(pt, sysConfig.varNames.length, {
+        ntst: branchTypeData.ntst ?? 0,
+        ncol: branchTypeData.ncol ?? 0,
+        free_time: Boolean(branchTypeData.free_time),
+        free_eps0: Boolean(branchTypeData.free_eps0),
+        free_eps1: Boolean(branchTypeData.free_eps1),
+      });
+    }
+  }
+
+  if (branchType === 'homotopy_saddle_curve') {
+    const branchTypeData = branch.data.branch_type as any;
+    const stage = branchTypeData?.type === 'HomotopySaddleCurve' ? branchTypeData.stage : 'Unknown';
+    console.log(chalk.white(`Stage: ${stage}`));
+    if (branchTypeData?.type === 'HomotopySaddleCurve') {
+      console.log(chalk.white('Endpoint diagnostics:'));
+      printHomoclinicDiagnostics(pt, sysConfig.varNames.length, {
+        ntst: branchTypeData.ntst ?? 0,
+        ncol: branchTypeData.ncol ?? 0,
+        free_time: true,
+        free_eps0: false,
+        free_eps1: true,
+      });
+    }
+  }
+
   // Build action menu based on branch type and point type
   const choices: any[] = [];
 
   if (branchType === 'equilibrium') {
     // For equilibrium branches, always offer to create a new equilibrium branch
     choices.push({ name: `Create New ${equilibriumLabel} Branch`, value: 'NEW_EQ_BRANCH' });
+    if (sysConfig.type === 'flow') {
+      choices.push({
+        name: 'Continue Homotopy-Saddle (Method 5)',
+        value: 'CONTINUE_HOMOTOPY_SADDLE'
+      });
+    }
 
     // For Hopf points, offer Hopf curve continuation
     if (pt.stability === 'Hopf') {
@@ -601,6 +780,10 @@ export async function showPointDetails(
   } else if (branchType === 'limit_cycle') {
     // For limit cycle branches, offer to create a new limit cycle branch
     choices.push({ name: 'Create New Limit Cycle Branch', value: 'NEW_LC_BRANCH' });
+    choices.push({
+      name: 'Continue Homoclinic Curve (Method 1)',
+      value: 'CONTINUE_HOMOCLINIC_FROM_LC'
+    });
 
     // For Period Doubling points, offer to branch to double period or continue PD curve
     if (pt.stability === 'PeriodDoubling') {
@@ -616,6 +799,19 @@ export async function showPointDetails(
     // For Neimark-Sacker points, offer NS curve continuation
     if (pt.stability === 'NeimarkSacker') {
       choices.push({ name: 'Continue NS Curve (2-parameter)', value: 'CONTINUE_NS_CURVE' });
+    }
+  } else if (branchType === 'homoclinic_curve') {
+    choices.push({
+      name: 'Continue Homoclinic Curve (Method 2)',
+      value: 'CONTINUE_HOMOCLINIC_FROM_HOMOCLINIC'
+    });
+  } else if (branchType === 'homotopy_saddle_curve') {
+    const stage = (branch.data.branch_type as any)?.stage;
+    if (stage === 'StageD') {
+      choices.push({
+        name: 'Continue Homoclinic Curve (Method 4)',
+        value: 'CONTINUE_HOMOCLINIC_FROM_HOMOTOPY'
+      });
     }
   }
 
@@ -667,6 +863,50 @@ export async function showPointDetails(
 
   if (action === 'BRANCH_PD') {
     const newBranch = await initiateLCFromPD(sysName, branch, pt, arrayIdx);
+    if (!newBranch) return 'BACK';
+    return {
+      kind: 'OPEN_BRANCH',
+      objectName: newBranch.parentObject,
+      branchName: newBranch.name,
+      autoInspect: true,
+    };
+  }
+
+  if (action === 'CONTINUE_HOMOTOPY_SADDLE') {
+    const newBranch = await initiateHomotopySaddleFromEquilibrium(sysName, branch, pt, arrayIdx);
+    if (!newBranch) return 'BACK';
+    return {
+      kind: 'OPEN_BRANCH',
+      objectName: newBranch.parentObject,
+      branchName: newBranch.name,
+      autoInspect: true,
+    };
+  }
+
+  if (action === 'CONTINUE_HOMOCLINIC_FROM_LC') {
+    const newBranch = await initiateHomoclinicFromLargeCycle(sysName, branch, pt, arrayIdx);
+    if (!newBranch) return 'BACK';
+    return {
+      kind: 'OPEN_BRANCH',
+      objectName: newBranch.parentObject,
+      branchName: newBranch.name,
+      autoInspect: true,
+    };
+  }
+
+  if (action === 'CONTINUE_HOMOCLINIC_FROM_HOMOCLINIC') {
+    const newBranch = await initiateHomoclinicFromHomoclinic(sysName, branch, pt, arrayIdx);
+    if (!newBranch) return 'BACK';
+    return {
+      kind: 'OPEN_BRANCH',
+      objectName: newBranch.parentObject,
+      branchName: newBranch.name,
+      autoInspect: true,
+    };
+  }
+
+  if (action === 'CONTINUE_HOMOCLINIC_FROM_HOMOTOPY') {
+    const newBranch = await initiateHomoclinicFromHomotopySaddle(sysName, branch, pt, arrayIdx);
     if (!newBranch) return 'BACK';
     return {
       kind: 'OPEN_BRANCH',

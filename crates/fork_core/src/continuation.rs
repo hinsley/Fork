@@ -22,9 +22,26 @@ pub mod codim1_curves;
 #[path = "continuation/lc_codim1_curves/mod.rs"]
 pub mod lc_codim1_curves;
 
+#[path = "continuation/homoclinic.rs"]
+pub mod homoclinic;
+
+#[path = "continuation/homoclinic_init.rs"]
+pub mod homoclinic_init;
+
+#[path = "continuation/homotopy_saddle.rs"]
+pub mod homotopy_saddle;
+
 // Re-export types needed for external use
 pub use codim1_curves::{Codim2TestFunctions, FoldCurveProblem, HopfCurveProblem};
 pub use lc_codim1_curves::{LPCCurveProblem, NSCurveProblem, PDCurveProblem};
+pub use homoclinic::continue_homoclinic_curve;
+pub use homoclinic_init::{
+    compute_homoclinic_basis, decode_homoclinic_state, homoclinic_setup_from_homoclinic_point,
+    homoclinic_setup_from_homotopy_saddle_point, homoclinic_setup_from_large_cycle,
+    homotopy_saddle_setup_from_equilibrium, pack_homoclinic_state, DecodedHomoclinicState,
+    HomoclinicBasis, HomoclinicExtraFlags, HomoclinicGuess, HomoclinicSetup, HomotopySaddleSetup,
+};
+pub use homotopy_saddle::{continue_homotopy_saddle_curve, homotopy_stage_d_to_homoclinic};
 pub use periodic::{
     continue_limit_cycle_collocation, extend_limit_cycle_collocation, limit_cycle_setup_from_hopf,
     limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd, CollocationConfig, LimitCycleGuess,
@@ -33,7 +50,8 @@ pub use periodic::{
 pub use problem::{PointDiagnostics, TestFunctionValues};
 pub use types::{
     BifurcationType, BranchType, Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType,
-    Codim2BifurcationType, ContinuationBranch, ContinuationPoint, ContinuationSettings, StepResult,
+    Codim2BifurcationType, ContinuationBranch, ContinuationPoint, ContinuationSettings,
+    HomotopyStage, StepResult,
 };
 pub use util::{
     compute_eigenvalues, compute_nullspace_tangent, continuation_point_to_aug, hopf_pair_count,

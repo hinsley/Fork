@@ -3,6 +3,10 @@ import type {
   ComputeIsoclineRequest,
   ContinuationProgress,
   EquilibriumContinuationRequest,
+  HomoclinicFromHomoclinicRequest,
+  HomoclinicFromHomotopySaddleRequest,
+  HomoclinicFromLargeCycleRequest,
+  HomotopySaddleFromEquilibriumRequest,
   LyapunovExponentsRequest,
   SimulateOrbitRequest,
 } from './ForkCoreClient'
@@ -201,5 +205,99 @@ describe('WasmForkCoreClient', () => {
     worker.emit({ id: message.id, ok: true, result })
 
     await expect(promise).resolves.toEqual(result)
+  })
+
+  it('sends homoclinic and homotopy worker request kinds', async () => {
+    const client = new WasmForkCoreClient()
+    const common = {
+      system: {
+        ...baseSystem,
+        params: [0.2, 0.1],
+        paramNames: ['mu', 'nu'],
+      },
+      settings: continuationSettings,
+      forward: true,
+    }
+
+    const method1Request: HomoclinicFromLargeCycleRequest = {
+      ...common,
+      lcState: [0, 1, 1, 0, 2],
+      sourceNtst: 4,
+      sourceNcol: 2,
+      parameterName: 'mu',
+      param2Name: 'nu',
+      targetNtst: 8,
+      targetNcol: 2,
+      freeTime: true,
+      freeEps0: true,
+      freeEps1: false,
+    }
+    const method2Request: HomoclinicFromHomoclinicRequest = {
+      ...common,
+      pointState: new Array(80).fill(0),
+      sourceNtst: 8,
+      sourceNcol: 2,
+      parameterName: 'mu',
+      param2Name: 'nu',
+      targetNtst: 8,
+      targetNcol: 2,
+      freeTime: true,
+      freeEps0: true,
+      freeEps1: false,
+    }
+    const method5Request: HomotopySaddleFromEquilibriumRequest = {
+      ...common,
+      equilibriumState: [0, 0],
+      parameterName: 'mu',
+      param2Name: 'nu',
+      ntst: 8,
+      ncol: 2,
+      eps0: 0.01,
+      eps1: 0.1,
+      time: 20,
+      eps1Tol: 1e-4,
+    }
+    const method4Request: HomoclinicFromHomotopySaddleRequest = {
+      ...common,
+      stageDState: new Array(80).fill(0),
+      sourceNtst: 8,
+      sourceNcol: 2,
+      parameterName: 'mu',
+      param2Name: 'nu',
+      targetNtst: 8,
+      targetNcol: 2,
+      freeTime: true,
+      freeEps0: true,
+      freeEps1: false,
+    }
+
+    const p1 = client.runHomoclinicFromLargeCycle(method1Request)
+    await flushQueue()
+    const worker = MockWorker.instances[0]
+    let message = worker.posted.at(-1) as { id: string; kind: string }
+    expect(message.kind).toBe('runHomoclinicFromLargeCycle')
+    worker.emit({ id: message.id, ok: true, result: { points: [], bifurcations: [], indices: [] } })
+    await expect(p1).resolves.toEqual({ points: [], bifurcations: [], indices: [] })
+
+    const p2 = client.runHomoclinicFromHomoclinic(method2Request)
+    await flushQueue()
+    message = worker.posted.at(-1) as { id: string; kind: string }
+    expect(message.kind).toBe('runHomoclinicFromHomoclinic')
+    worker.emit({ id: message.id, ok: true, result: { points: [], bifurcations: [], indices: [] } })
+    await expect(p2).resolves.toEqual({ points: [], bifurcations: [], indices: [] })
+
+    const p5 = client.runHomotopySaddleFromEquilibrium(method5Request)
+    await flushQueue()
+    message = worker.posted.at(-1) as { id: string; kind: string }
+    expect(message.kind).toBe('runHomotopySaddleFromEquilibrium')
+    worker.emit({ id: message.id, ok: true, result: { points: [], bifurcations: [], indices: [] } })
+    await expect(p5).resolves.toEqual({ points: [], bifurcations: [], indices: [] })
+
+    const p4 = client.runHomoclinicFromHomotopySaddle(method4Request)
+    await flushQueue()
+    message = worker.posted.at(-1) as { id: string; kind: string }
+    expect(message.kind).toBe('runHomoclinicFromHomotopySaddle')
+    worker.emit({ id: message.id, ok: true, result: { points: [], bifurcations: [], indices: [] } })
+    await expect(p4).resolves.toEqual({ points: [], bifurcations: [], indices: [] })
   })
 })

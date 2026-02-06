@@ -111,6 +111,7 @@ async function run() {
   const serialization = require('../src/continuation/serialization') as typeof import('../src/continuation/serialization');
   const utils = require('../src/continuation/utils') as typeof import('../src/continuation/utils');
   const format = require('../src/format') as typeof import('../src/format');
+  const labels = require('../src/labels') as typeof import('../src/labels');
   const chalk = require('chalk');
 
   chalk.level = 0;
@@ -219,6 +220,24 @@ async function run() {
 
     const multipliers = utils.summarizeEigenvalues(point as any, 'limit_cycle');
     assert.ok(multipliers.startsWith('Multipliers:'));
+  });
+
+  test('labels format homoclinic and homotopy branch types', () => {
+    const homoc = makeContinuationBranch({
+      name: 'homoc_branch',
+      systemName: 'S',
+      parentObject: 'eq_seed'
+    }) as any;
+    homoc.branchType = 'homoclinic_curve';
+    const homotopy = makeContinuationBranch({
+      name: 'homotopy_branch',
+      systemName: 'S',
+      parentObject: 'eq_seed'
+    }) as any;
+    homotopy.branchType = 'homotopy_saddle_curve';
+
+    assert.equal(labels.formatBranchTypeLabel('flow', homoc), 'homoclinic curve');
+    assert.equal(labels.formatBranchTypeLabel('flow', homotopy), 'homotopy saddle curve');
   });
 
   test('utils selects branch params', () => {

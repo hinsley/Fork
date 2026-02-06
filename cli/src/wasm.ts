@@ -136,6 +136,42 @@ export class WasmBridge {
         ) as ContinuationRunner;
     }
 
+    createHomoclinicContinuationRunner(
+        setup: any,
+        settings: any,
+        forward: boolean
+    ): ContinuationRunner {
+        if (!wasmModule) throw new Error("WASM module not loaded");
+
+        return new wasmModule.WasmHomoclinicRunner(
+            this.config.equations,
+            new Float64Array(this.config.params),
+            this.config.paramNames,
+            this.config.varNames,
+            setup,
+            settings,
+            forward
+        ) as ContinuationRunner;
+    }
+
+    createHomotopySaddleContinuationRunner(
+        setup: any,
+        settings: any,
+        forward: boolean
+    ): ContinuationRunner {
+        if (!wasmModule) throw new Error("WASM module not loaded");
+
+        return new wasmModule.WasmHomotopySaddleRunner(
+            this.config.equations,
+            new Float64Array(this.config.params),
+            this.config.paramNames,
+            this.config.varNames,
+            setup,
+            settings,
+            forward
+        ) as ContinuationRunner;
+    }
+
     createContinuationExtensionRunner(
         branchData: ContinuationBranchData,
         parameterName: string,
@@ -689,6 +725,132 @@ export class WasmBridge {
         return this.instance.compute_limit_cycle_continuation(
             setup,
             parameterName,
+            settings,
+            forward
+        ) as ContinuationBranchData;
+    }
+
+    initHomoclinicFromLargeCycle(
+        lcState: number[],
+        sourceNtst: number,
+        sourceNcol: number,
+        parameterName: string,
+        param2Name: string,
+        targetNtst: number,
+        targetNcol: number,
+        freeTime: boolean,
+        freeEps0: boolean,
+        freeEps1: boolean
+    ): any {
+        return this.instance.init_homoclinic_from_large_cycle(
+            new Float64Array(lcState),
+            sourceNtst,
+            sourceNcol,
+            parameterName,
+            param2Name,
+            targetNtst,
+            targetNcol,
+            freeTime,
+            freeEps0,
+            freeEps1
+        );
+    }
+
+    initHomoclinicFromHomoclinic(
+        pointState: number[],
+        sourceNtst: number,
+        sourceNcol: number,
+        parameterName: string,
+        param2Name: string,
+        targetNtst: number,
+        targetNcol: number,
+        freeTime: boolean,
+        freeEps0: boolean,
+        freeEps1: boolean
+    ): any {
+        return this.instance.init_homoclinic_from_homoclinic(
+            new Float64Array(pointState),
+            sourceNtst,
+            sourceNcol,
+            parameterName,
+            param2Name,
+            targetNtst,
+            targetNcol,
+            freeTime,
+            freeEps0,
+            freeEps1
+        );
+    }
+
+    initHomotopySaddleFromEquilibrium(
+        equilibriumState: number[],
+        parameterName: string,
+        param2Name: string,
+        ntst: number,
+        ncol: number,
+        eps0: number,
+        eps1: number,
+        time: number,
+        eps1Tol: number
+    ): any {
+        return this.instance.init_homotopy_saddle_from_equilibrium(
+            new Float64Array(equilibriumState),
+            parameterName,
+            param2Name,
+            ntst,
+            ncol,
+            eps0,
+            eps1,
+            time,
+            eps1Tol
+        );
+    }
+
+    initHomoclinicFromHomotopySaddle(
+        stageDState: number[],
+        sourceNtst: number,
+        sourceNcol: number,
+        parameterName: string,
+        param2Name: string,
+        targetNtst: number,
+        targetNcol: number,
+        freeTime: boolean,
+        freeEps0: boolean,
+        freeEps1: boolean
+    ): any {
+        return this.instance.init_homoclinic_from_homotopy_saddle(
+            new Float64Array(stageDState),
+            sourceNtst,
+            sourceNcol,
+            parameterName,
+            param2Name,
+            targetNtst,
+            targetNcol,
+            freeTime,
+            freeEps0,
+            freeEps1
+        );
+    }
+
+    continueHomoclinic(
+        setup: any,
+        settings: any,
+        forward: boolean
+    ): ContinuationBranchData {
+        return this.instance.compute_homoclinic_continuation(
+            setup,
+            settings,
+            forward
+        ) as ContinuationBranchData;
+    }
+
+    continueHomotopySaddle(
+        setup: any,
+        settings: any,
+        forward: boolean
+    ): ContinuationBranchData {
+        return this.instance.compute_homotopy_saddle_continuation(
+            setup,
             settings,
             forward
         ) as ContinuationBranchData;

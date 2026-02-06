@@ -68,5 +68,5 @@ export function formatBranchTypeLabel(
       mapIterations: branch.mapIterations,
     })
   }
-  return branch.branchType.replace('_', ' ')
+  return branch.branchType.replace(/_/g, ' ')
 }

@@ -48,12 +48,41 @@ pub struct ContinuationPoint {
 pub enum BranchType {
     Equilibrium,
     LimitCycle { ntst: usize, ncol: usize },
+    HomoclinicCurve {
+        ntst: usize,
+        ncol: usize,
+        param1_name: String,
+        param2_name: String,
+        free_time: bool,
+        free_eps0: bool,
+        free_eps1: bool,
+    },
+    HomotopySaddleCurve {
+        ntst: usize,
+        ncol: usize,
+        param1_name: String,
+        param2_name: String,
+        stage: HomotopyStage,
+    },
 }
 
 impl Default for BranchType {
     fn default() -> Self {
         BranchType::Equilibrium
     }
+}
+
+/// Stage label for the homotopy-saddle workflow.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum HomotopyStage {
+    #[serde(rename = "StageA")]
+    StageA,
+    #[serde(rename = "StageB")]
+    StageB,
+    #[serde(rename = "StageC")]
+    StageC,
+    #[serde(rename = "StageD")]
+    StageD,
 }
 
 /// A complete continuation branch containing multiple points.

@@ -13,6 +13,7 @@ import type {
   ContinuationSettings,
   EquilibriumObject,
   IsoclineObject,
+  LimitCycleObject,
   OrbitObject,
   System,
 } from '../system/types'
@@ -849,5 +850,295 @@ describe('appState Lyapunov analysis parameters', () => {
     expect(getContext().state.error).toBe(
       'Orbit parameters are unavailable. Run the orbit again to compute Lyapunov data.'
     )
+  })
+})
+
+describe('appState homoclinic and homotopy actions', () => {
+  function makeTwoParamSystem(name: string): System {
+    return createSystem({
+      name,
+      config: {
+        name,
+        equations: ['y', '-x'],
+        params: [0.2, 0.1],
+        paramNames: ['mu', 'nu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+  }
+
+  it('creates a homoclinic branch from a limit-cycle branch point', async () => {
+    const base = makeTwoParamSystem('Homoc_App_M1')
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_A',
+      systemName: base.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_A' },
+      ntst: 4,
+      ncol: 2,
+      period: 6,
+      state: [0, 1, 1, 0, 0, -1, -1, 0, 6],
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(base, limitCycle)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_branch',
+      systemName: base.config.name,
+      parameterName: 'mu',
+      parentObject: limitCycle.name,
+      startObject: limitCycle.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          {
+            state: [0, 1, 1, 0, 0, -1, -1, 0, 6],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+        branch_type: { type: 'LimitCycle', ntst: 4, ncol: 2 },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2, 0.1],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+    const { getContext } = setupApp(branchResult.system)
+
+    await act(async () => {
+      await getContext().actions.createHomoclinicFromLargeCycle({
+        branchId: branchResult.nodeId,
+        pointIndex: 0,
+        name: 'homoc_m1',
+        parameterName: 'mu',
+        param2Name: 'nu',
+        targetNtst: 8,
+        targetNcol: 2,
+        freeTime: true,
+        freeEps0: true,
+        freeEps1: false,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      expect(findBranchIdByName(getContext().state.system!, 'homoc_m1')).toBeTruthy()
+      expect(
+        getContext().state.system!.branches[
+          findBranchIdByName(getContext().state.system!, 'homoc_m1')
+        ].branchType
+      ).toBe('homoclinic_curve')
+    })
+  })
+
+  it('creates a homotopy-saddle branch from an equilibrium branch point', async () => {
+    const base = makeTwoParamSystem('Homoc_App_M5')
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_A',
+      systemName: base.config.name,
+    }
+    const added = addObject(base, equilibrium)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_branch',
+      systemName: base.config.name,
+      parameterName: 'mu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          {
+            state: [0, 0],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+        branch_type: { type: 'Equilibrium' },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2, 0.1],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+    const { getContext } = setupApp(branchResult.system)
+
+    await act(async () => {
+      await getContext().actions.createHomotopySaddleFromEquilibrium({
+        branchId: branchResult.nodeId,
+        pointIndex: 0,
+        name: 'homotopy_m5',
+        parameterName: 'mu',
+        param2Name: 'nu',
+        ntst: 8,
+        ncol: 2,
+        eps0: 0.01,
+        eps1: 0.1,
+        time: 20,
+        eps1Tol: 1e-4,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      expect(findBranchIdByName(getContext().state.system!, 'homotopy_m5')).toBeTruthy()
+      expect(
+        getContext().state.system!.branches[
+          findBranchIdByName(getContext().state.system!, 'homotopy_m5')
+        ].branchType
+      ).toBe('homotopy_saddle_curve')
+    })
+  })
+
+  it('creates a homoclinic restart branch from a homoclinic branch point', async () => {
+    const base = makeTwoParamSystem('Homoc_App_M2')
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_A',
+      systemName: base.config.name,
+    }
+    const added = addObject(base, equilibrium)
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'homoc_source',
+      systemName: base.config.name,
+      parameterName: 'mu, nu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'homoclinic_curve',
+      data: {
+        points: [
+          {
+            state: new Array(80).fill(0),
+            param_value: 0.2,
+            param2_value: 0.1,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 8,
+          ncol: 2,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          free_time: true,
+          free_eps0: true,
+          free_eps1: false,
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2, 0.1],
+    }
+    const branchResult = addBranch(added.system, sourceBranch, added.nodeId)
+    const { getContext } = setupApp(branchResult.system)
+
+    await act(async () => {
+      await getContext().actions.createHomoclinicFromHomoclinic({
+        branchId: branchResult.nodeId,
+        pointIndex: 0,
+        name: 'homoc_m2',
+        targetNtst: 8,
+        targetNcol: 2,
+        freeTime: true,
+        freeEps0: true,
+        freeEps1: false,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      expect(findBranchIdByName(getContext().state.system!, 'homoc_m2')).toBeTruthy()
+      expect(
+        getContext().state.system!.branches[
+          findBranchIdByName(getContext().state.system!, 'homoc_m2')
+        ].branchType
+      ).toBe('homoclinic_curve')
+    })
+  })
+
+  it('creates a homoclinic branch from a StageD homotopy-saddle point', async () => {
+    const base = makeTwoParamSystem('Homoc_App_M4')
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_A',
+      systemName: base.config.name,
+    }
+    const added = addObject(base, equilibrium)
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'homotopy_source',
+      systemName: base.config.name,
+      parameterName: 'mu, nu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'homotopy_saddle_curve',
+      data: {
+        points: [
+          {
+            state: new Array(80).fill(0),
+            param_value: 0.2,
+            param2_value: 0.1,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+        branch_type: {
+          type: 'HomotopySaddleCurve',
+          ntst: 8,
+          ncol: 2,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          stage: 'StageD',
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2, 0.1],
+    }
+    const branchResult = addBranch(added.system, sourceBranch, added.nodeId)
+    const { getContext } = setupApp(branchResult.system)
+
+    await act(async () => {
+      await getContext().actions.createHomoclinicFromHomotopySaddle({
+        branchId: branchResult.nodeId,
+        pointIndex: 0,
+        name: 'homoc_m4',
+        targetNtst: 8,
+        targetNcol: 2,
+        freeTime: true,
+        freeEps0: true,
+        freeEps1: false,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      expect(findBranchIdByName(getContext().state.system!, 'homoc_m4')).toBeTruthy()
+      expect(
+        getContext().state.system!.branches[
+          findBranchIdByName(getContext().state.system!, 'homoc_m4')
+        ].branchType
+      ).toBe('homoclinic_curve')
+    })
   })
 })

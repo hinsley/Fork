@@ -14,7 +14,11 @@ import type {
   EquilibriumContinuationRequest,
   EquilibriumSolveRequest,
   FoldCurveContinuationRequest,
+  HomoclinicFromHomoclinicRequest,
+  HomoclinicFromHomotopySaddleRequest,
+  HomoclinicFromLargeCycleRequest,
   HopfCurveContinuationRequest,
+  HomotopySaddleFromEquilibriumRequest,
   IsoclineComputeRequest,
   MapNSCurveContinuationRequest,
   LimitCycleHopfContinuationRequest,
@@ -82,6 +86,18 @@ type InspectorPanelProps = {
   onCreateLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
   onCreateCycleFromPD: (request: MapCyclePDContinuationRequest) => Promise<void>
   onCreateLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
+  onCreateHomoclinicFromLargeCycle?: (
+    request: HomoclinicFromLargeCycleRequest
+  ) => Promise<void>
+  onCreateHomoclinicFromHomoclinic?: (
+    request: HomoclinicFromHomoclinicRequest
+  ) => Promise<void>
+  onCreateHomotopySaddleFromEquilibrium?: (
+    request: HomotopySaddleFromEquilibriumRequest
+  ) => Promise<void>
+  onCreateHomoclinicFromHomotopySaddle?: (
+    request: HomoclinicFromHomotopySaddleRequest
+  ) => Promise<void>
 }
 
 export function InspectorPanel({
@@ -119,6 +135,10 @@ export function InspectorPanel({
   onCreateLimitCycleFromOrbit,
   onCreateCycleFromPD,
   onCreateLimitCycleFromPD,
+  onCreateHomoclinicFromLargeCycle,
+  onCreateHomoclinicFromHomoclinic,
+  onCreateHomotopySaddleFromEquilibrium,
+  onCreateHomoclinicFromHomotopySaddle,
 }: InspectorPanelProps) {
   return (
     <div className="inspector">
@@ -159,6 +179,10 @@ export function InspectorPanel({
           onCreateLimitCycleFromOrbit={onCreateLimitCycleFromOrbit}
           onCreateCycleFromPD={onCreateCycleFromPD}
           onCreateLimitCycleFromPD={onCreateLimitCycleFromPD}
+          onCreateHomoclinicFromLargeCycle={onCreateHomoclinicFromLargeCycle}
+          onCreateHomoclinicFromHomoclinic={onCreateHomoclinicFromHomoclinic}
+          onCreateHomotopySaddleFromEquilibrium={onCreateHomotopySaddleFromEquilibrium}
+          onCreateHomoclinicFromHomotopySaddle={onCreateHomoclinicFromHomotopySaddle}
         />
       </div>
     </div>

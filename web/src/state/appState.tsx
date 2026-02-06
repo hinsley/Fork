@@ -453,6 +453,63 @@ export type LimitCyclePDContinuationRequest = {
   forward: boolean
 }
 
+export type HomoclinicFromLargeCycleRequest = {
+  branchId: string
+  pointIndex: number
+  name: string
+  parameterName: string
+  param2Name: string
+  targetNtst: number
+  targetNcol: number
+  freeTime: boolean
+  freeEps0: boolean
+  freeEps1: boolean
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type HomoclinicFromHomoclinicRequest = {
+  branchId: string
+  pointIndex: number
+  name: string
+  targetNtst: number
+  targetNcol: number
+  freeTime: boolean
+  freeEps0: boolean
+  freeEps1: boolean
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type HomotopySaddleFromEquilibriumRequest = {
+  branchId: string
+  pointIndex: number
+  name: string
+  parameterName: string
+  param2Name: string
+  ntst: number
+  ncol: number
+  eps0: number
+  eps1: number
+  time: number
+  eps1Tol: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type HomoclinicFromHomotopySaddleRequest = {
+  branchId: string
+  pointIndex: number
+  name: string
+  targetNtst: number
+  targetNcol: number
+  freeTime: boolean
+  freeEps0: boolean
+  freeEps1: boolean
+  settings: ContinuationSettings
+  forward: boolean
+}
+
 export type IsoclineComputeRequest = {
   isoclineId: string
   useLastComputedSettings?: boolean
@@ -621,6 +678,14 @@ type AppActions = {
   createLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
   createCycleFromPD: (request: MapCyclePDContinuationRequest) => Promise<void>
   createLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
+  createHomoclinicFromLargeCycle: (request: HomoclinicFromLargeCycleRequest) => Promise<void>
+  createHomoclinicFromHomoclinic: (request: HomoclinicFromHomoclinicRequest) => Promise<void>
+  createHomotopySaddleFromEquilibrium: (
+    request: HomotopySaddleFromEquilibriumRequest
+  ) => Promise<void>
+  createHomoclinicFromHomotopySaddle: (
+    request: HomoclinicFromHomotopySaddleRequest
+  ) => Promise<void>
   addScene: (name: string, targetId?: string | null) => Promise<void>
   addBifurcationDiagram: (name: string, targetId?: string | null) => Promise<void>
   importSystem: (file: File) => Promise<void>
@@ -3279,6 +3344,651 @@ export function AppProvider({
     [client, state.system, store]
   )
 
+  const createHomoclinicFromLargeCycle = useCallback(
+    async (request: HomoclinicFromLargeCycleRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (system.type === 'map') {
+          throw new Error('Homoclinic continuation is only available for flow systems.')
+        }
+        if (system.paramNames.length < 2) {
+          throw new Error('Homoclinic continuation requires at least 2 parameters.')
+        }
+
+        const sourceBranch = state.system.branches[request.branchId]
+        if (!sourceBranch) {
+          throw new Error('Select a valid branch to continue.')
+        }
+        if (sourceBranch.branchType !== 'limit_cycle') {
+          throw new Error('Homoclinic initialization from a cycle requires a limit cycle branch.')
+        }
+
+        const point = sourceBranch.data.points[request.pointIndex]
+        if (!point) {
+          throw new Error('Select a valid branch point.')
+        }
+
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+          throw new Error(`Branch "${name}" already exists.`)
+        }
+
+        if (!system.paramNames.includes(request.parameterName)) {
+          throw new Error('Select a valid first continuation parameter.')
+        }
+        if (!system.paramNames.includes(request.param2Name)) {
+          throw new Error('Select a valid second continuation parameter.')
+        }
+        if (request.param2Name === request.parameterName) {
+          throw new Error('Second parameter must be different from the continuation parameter.')
+        }
+
+        if (
+          !Number.isFinite(request.targetNtst) ||
+          request.targetNtst < 2 ||
+          !Number.isInteger(request.targetNtst)
+        ) {
+          throw new Error('Target NTST must be an integer greater than or equal to 2.')
+        }
+        if (
+          !Number.isFinite(request.targetNcol) ||
+          request.targetNcol < 1 ||
+          !Number.isInteger(request.targetNcol)
+        ) {
+          throw new Error('Target NCOL must be a positive integer.')
+        }
+        if (!request.freeTime && !request.freeEps0 && !request.freeEps1) {
+          throw new Error('At least one of T, eps0, or eps1 must be free.')
+        }
+
+        let sourceNtst = 20
+        let sourceNcol = 4
+        const sourceType = sourceBranch.data.branch_type
+        if (sourceType?.type === 'LimitCycle') {
+          sourceNtst = sourceType.ntst
+          sourceNcol = sourceType.ncol
+        }
+
+        const runConfig: SystemConfig = { ...system }
+        runConfig.params = getBranchParams(state.system, sourceBranch)
+        const param1Idx = system.paramNames.indexOf(request.parameterName)
+        if (param1Idx >= 0) {
+          runConfig.params[param1Idx] = point.param_value
+        }
+
+        const branchData = await client.runHomoclinicFromLargeCycle(
+          {
+            system: runConfig,
+            lcState: point.state,
+            sourceNtst,
+            sourceNcol,
+            parameterName: request.parameterName,
+            param2Name: request.param2Name,
+            targetNtst: Math.round(request.targetNtst),
+            targetNcol: Math.round(request.targetNcol),
+            freeTime: request.freeTime,
+            freeEps0: request.freeEps0,
+            freeEps1: request.freeEps1,
+            settings: request.settings,
+            forward: request.forward,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Homoclinic', progress },
+              }),
+          }
+        )
+
+        if (branchData.points.length <= 1) {
+          throw new Error(
+            'Homoclinic continuation stopped at the seed point. Try a smaller step size or adjust parameters.'
+          )
+        }
+
+        const indices =
+          branchData.indices && branchData.indices.length === branchData.points.length
+            ? branchData.indices
+            : branchData.points.map((_, index) => index)
+
+        const normalized = normalizeBranchEigenvalues({
+          ...branchData,
+          indices,
+          branch_type:
+            branchData.branch_type ?? {
+              type: 'HomoclinicCurve' as const,
+              ntst: Math.round(request.targetNtst),
+              ncol: Math.round(request.targetNcol),
+              param1_name: request.parameterName,
+              param2_name: request.param2Name,
+              free_time: request.freeTime,
+              free_eps0: request.freeEps0,
+              free_eps1: request.freeEps1,
+            },
+        })
+
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name,
+          systemName: system.name,
+          parameterName: `${request.parameterName}, ${request.param2Name}`,
+          parentObject: sourceBranch.parentObject,
+          startObject: sourceBranch.name,
+          branchType: 'homoclinic_curve',
+          data: normalized,
+          settings: request.settings,
+          timestamp: new Date().toISOString(),
+          params: [...runConfig.params],
+        }
+
+        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        if (!parentNodeId) {
+          throw new Error('Unable to locate the parent object in the tree.')
+        }
+
+        const created = addBranch(state.system, branch, parentNodeId)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const createHomoclinicFromHomoclinic = useCallback(
+    async (request: HomoclinicFromHomoclinicRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (system.type === 'map') {
+          throw new Error('Homoclinic continuation is only available for flow systems.')
+        }
+
+        const sourceBranch = state.system.branches[request.branchId]
+        if (!sourceBranch) {
+          throw new Error('Select a valid branch to continue.')
+        }
+        if (sourceBranch.branchType !== 'homoclinic_curve') {
+          throw new Error(
+            'Homoclinic reinitialization requires an existing homoclinic branch.'
+          )
+        }
+
+        const point = sourceBranch.data.points[request.pointIndex]
+        if (!point) {
+          throw new Error('Select a valid branch point.')
+        }
+
+        const sourceType = sourceBranch.data.branch_type
+        if (!sourceType || sourceType.type !== 'HomoclinicCurve') {
+          throw new Error('Source homoclinic branch is missing metadata.')
+        }
+
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+          throw new Error(`Branch "${name}" already exists.`)
+        }
+
+        if (
+          !Number.isFinite(request.targetNtst) ||
+          request.targetNtst < 2 ||
+          !Number.isInteger(request.targetNtst)
+        ) {
+          throw new Error('Target NTST must be an integer greater than or equal to 2.')
+        }
+        if (
+          !Number.isFinite(request.targetNcol) ||
+          request.targetNcol < 1 ||
+          !Number.isInteger(request.targetNcol)
+        ) {
+          throw new Error('Target NCOL must be a positive integer.')
+        }
+        if (!request.freeTime && !request.freeEps0 && !request.freeEps1) {
+          throw new Error('At least one of T, eps0, or eps1 must be free.')
+        }
+
+        const runConfig: SystemConfig = { ...system }
+        runConfig.params = getBranchParams(state.system, sourceBranch)
+        const param1Idx = system.paramNames.indexOf(sourceType.param1_name)
+        if (param1Idx >= 0) {
+          runConfig.params[param1Idx] = point.param_value
+        }
+
+        const branchData = await client.runHomoclinicFromHomoclinic(
+          {
+            system: runConfig,
+            pointState: point.state,
+            sourceNtst: sourceType.ntst,
+            sourceNcol: sourceType.ncol,
+            parameterName: sourceType.param1_name,
+            param2Name: sourceType.param2_name,
+            targetNtst: Math.round(request.targetNtst),
+            targetNcol: Math.round(request.targetNcol),
+            freeTime: request.freeTime,
+            freeEps0: request.freeEps0,
+            freeEps1: request.freeEps1,
+            settings: request.settings,
+            forward: request.forward,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Homoclinic', progress },
+              }),
+          }
+        )
+
+        if (branchData.points.length <= 1) {
+          throw new Error(
+            'Homoclinic continuation stopped at the seed point. Try a smaller step size or adjust parameters.'
+          )
+        }
+
+        const indices =
+          branchData.indices && branchData.indices.length === branchData.points.length
+            ? branchData.indices
+            : branchData.points.map((_, index) => index)
+
+        const normalized = normalizeBranchEigenvalues({
+          ...branchData,
+          indices,
+          branch_type:
+            branchData.branch_type ?? {
+              type: 'HomoclinicCurve' as const,
+              ntst: Math.round(request.targetNtst),
+              ncol: Math.round(request.targetNcol),
+              param1_name: sourceType.param1_name,
+              param2_name: sourceType.param2_name,
+              free_time: request.freeTime,
+              free_eps0: request.freeEps0,
+              free_eps1: request.freeEps1,
+            },
+        })
+
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name,
+          systemName: system.name,
+          parameterName: `${sourceType.param1_name}, ${sourceType.param2_name}`,
+          parentObject: sourceBranch.parentObject,
+          startObject: sourceBranch.name,
+          branchType: 'homoclinic_curve',
+          data: normalized,
+          settings: request.settings,
+          timestamp: new Date().toISOString(),
+          params: [...runConfig.params],
+        }
+
+        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        if (!parentNodeId) {
+          throw new Error('Unable to locate the parent object in the tree.')
+        }
+
+        const created = addBranch(state.system, branch, parentNodeId)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const createHomotopySaddleFromEquilibrium = useCallback(
+    async (request: HomotopySaddleFromEquilibriumRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const equilibriumLabelLower = formatEquilibriumLabel(system.type, { lowercase: true })
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (system.type === 'map') {
+          throw new Error('Homotopy-saddle continuation is only available for flow systems.')
+        }
+        if (system.paramNames.length < 2) {
+          throw new Error('Homotopy-saddle continuation requires at least 2 parameters.')
+        }
+
+        const sourceBranch = state.system.branches[request.branchId]
+        if (!sourceBranch) {
+          throw new Error('Select a valid branch to continue.')
+        }
+        if (sourceBranch.branchType !== 'equilibrium') {
+          throw new Error(
+            `Homotopy-saddle continuation is only available for ${equilibriumLabelLower} branches.`
+          )
+        }
+
+        const point = sourceBranch.data.points[request.pointIndex]
+        if (!point) {
+          throw new Error('Select a valid branch point.')
+        }
+
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+          throw new Error(`Branch "${name}" already exists.`)
+        }
+
+        if (!system.paramNames.includes(request.parameterName)) {
+          throw new Error('Select a valid first continuation parameter.')
+        }
+        if (!system.paramNames.includes(request.param2Name)) {
+          throw new Error('Select a valid second continuation parameter.')
+        }
+        if (request.param2Name === request.parameterName) {
+          throw new Error('Second parameter must be different from the continuation parameter.')
+        }
+
+        if (!Number.isFinite(request.ntst) || request.ntst < 2 || !Number.isInteger(request.ntst)) {
+          throw new Error('NTST must be an integer greater than or equal to 2.')
+        }
+        if (!Number.isFinite(request.ncol) || request.ncol < 1 || !Number.isInteger(request.ncol)) {
+          throw new Error('NCOL must be a positive integer.')
+        }
+        if (!Number.isFinite(request.eps0) || request.eps0 <= 0) {
+          throw new Error('eps0 must be a positive number.')
+        }
+        if (!Number.isFinite(request.eps1) || request.eps1 <= 0) {
+          throw new Error('eps1 must be a positive number.')
+        }
+        if (!Number.isFinite(request.time) || request.time <= 0) {
+          throw new Error('T must be a positive number.')
+        }
+        if (!Number.isFinite(request.eps1Tol) || request.eps1Tol <= 0) {
+          throw new Error('eps1 tolerance must be a positive number.')
+        }
+
+        const runConfig: SystemConfig = { ...system }
+        runConfig.params = getBranchParams(state.system, sourceBranch)
+        const param1Idx = system.paramNames.indexOf(request.parameterName)
+        if (param1Idx >= 0) {
+          runConfig.params[param1Idx] = point.param_value
+        }
+
+        const branchData = await client.runHomotopySaddleFromEquilibrium(
+          {
+            system: runConfig,
+            equilibriumState: point.state,
+            parameterName: request.parameterName,
+            param2Name: request.param2Name,
+            ntst: Math.round(request.ntst),
+            ncol: Math.round(request.ncol),
+            eps0: request.eps0,
+            eps1: request.eps1,
+            time: request.time,
+            eps1Tol: request.eps1Tol,
+            settings: request.settings,
+            forward: request.forward,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Homotopy-Saddle', progress },
+              }),
+          }
+        )
+
+        if (branchData.points.length <= 1) {
+          throw new Error(
+            'Homotopy-saddle continuation stopped at the seed point. Try a smaller step size or adjust parameters.'
+          )
+        }
+
+        const indices =
+          branchData.indices && branchData.indices.length === branchData.points.length
+            ? branchData.indices
+            : branchData.points.map((_, index) => index)
+
+        const normalized = normalizeBranchEigenvalues({
+          ...branchData,
+          indices,
+          branch_type:
+            branchData.branch_type ?? {
+              type: 'HomotopySaddleCurve' as const,
+              ntst: Math.round(request.ntst),
+              ncol: Math.round(request.ncol),
+              param1_name: request.parameterName,
+              param2_name: request.param2Name,
+              stage: 'StageD' as const,
+            },
+        })
+
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name,
+          systemName: system.name,
+          parameterName: `${request.parameterName}, ${request.param2Name}`,
+          parentObject: sourceBranch.parentObject,
+          startObject: sourceBranch.name,
+          branchType: 'homotopy_saddle_curve',
+          data: normalized,
+          settings: request.settings,
+          timestamp: new Date().toISOString(),
+          params: [...runConfig.params],
+          mapIterations: sourceBranch.mapIterations,
+        }
+
+        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        if (!parentNodeId) {
+          throw new Error(`Unable to locate the parent ${equilibriumLabelLower} in the tree.`)
+        }
+
+        const created = addBranch(state.system, branch, parentNodeId)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const createHomoclinicFromHomotopySaddle = useCallback(
+    async (request: HomoclinicFromHomotopySaddleRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (system.type === 'map') {
+          throw new Error('Homoclinic continuation is only available for flow systems.')
+        }
+
+        const sourceBranch = state.system.branches[request.branchId]
+        if (!sourceBranch) {
+          throw new Error('Select a valid branch to continue.')
+        }
+        if (sourceBranch.branchType !== 'homotopy_saddle_curve') {
+          throw new Error(
+            'Homoclinic initialization from homotopy-saddle requires a homotopy-saddle branch.'
+          )
+        }
+
+        const point = sourceBranch.data.points[request.pointIndex]
+        if (!point) {
+          throw new Error('Select a valid branch point.')
+        }
+
+        const sourceType = sourceBranch.data.branch_type
+        if (!sourceType || sourceType.type !== 'HomotopySaddleCurve') {
+          throw new Error('Source homotopy-saddle branch is missing metadata.')
+        }
+        if (sourceType.stage !== 'StageD') {
+          throw new Error('Method 4 initialization requires a StageD homotopy-saddle branch.')
+        }
+
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+          throw new Error(`Branch "${name}" already exists.`)
+        }
+
+        if (
+          !Number.isFinite(request.targetNtst) ||
+          request.targetNtst < 2 ||
+          !Number.isInteger(request.targetNtst)
+        ) {
+          throw new Error('Target NTST must be an integer greater than or equal to 2.')
+        }
+        if (
+          !Number.isFinite(request.targetNcol) ||
+          request.targetNcol < 1 ||
+          !Number.isInteger(request.targetNcol)
+        ) {
+          throw new Error('Target NCOL must be a positive integer.')
+        }
+        if (!request.freeTime && !request.freeEps0 && !request.freeEps1) {
+          throw new Error('At least one of T, eps0, or eps1 must be free.')
+        }
+
+        const runConfig: SystemConfig = { ...system }
+        runConfig.params = getBranchParams(state.system, sourceBranch)
+        const param1Idx = system.paramNames.indexOf(sourceType.param1_name)
+        if (param1Idx >= 0) {
+          runConfig.params[param1Idx] = point.param_value
+        }
+
+        const branchData = await client.runHomoclinicFromHomotopySaddle(
+          {
+            system: runConfig,
+            stageDState: point.state,
+            sourceNtst: sourceType.ntst,
+            sourceNcol: sourceType.ncol,
+            parameterName: sourceType.param1_name,
+            param2Name: sourceType.param2_name,
+            targetNtst: Math.round(request.targetNtst),
+            targetNcol: Math.round(request.targetNcol),
+            freeTime: request.freeTime,
+            freeEps0: request.freeEps0,
+            freeEps1: request.freeEps1,
+            settings: request.settings,
+            forward: request.forward,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Homoclinic', progress },
+              }),
+          }
+        )
+
+        if (branchData.points.length <= 1) {
+          throw new Error(
+            'Homoclinic continuation stopped at the seed point. Try a smaller step size or adjust parameters.'
+          )
+        }
+
+        const indices =
+          branchData.indices && branchData.indices.length === branchData.points.length
+            ? branchData.indices
+            : branchData.points.map((_, index) => index)
+
+        const normalized = normalizeBranchEigenvalues({
+          ...branchData,
+          indices,
+          branch_type:
+            branchData.branch_type ?? {
+              type: 'HomoclinicCurve' as const,
+              ntst: Math.round(request.targetNtst),
+              ncol: Math.round(request.targetNcol),
+              param1_name: sourceType.param1_name,
+              param2_name: sourceType.param2_name,
+              free_time: request.freeTime,
+              free_eps0: request.freeEps0,
+              free_eps1: request.freeEps1,
+            },
+        })
+
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name,
+          systemName: system.name,
+          parameterName: `${sourceType.param1_name}, ${sourceType.param2_name}`,
+          parentObject: sourceBranch.parentObject,
+          startObject: sourceBranch.name,
+          branchType: 'homoclinic_curve',
+          data: normalized,
+          settings: request.settings,
+          timestamp: new Date().toISOString(),
+          params: [...runConfig.params],
+        }
+
+        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        if (!parentNodeId) {
+          throw new Error('Unable to locate the parent object in the tree.')
+        }
+
+        const created = addBranch(state.system, branch, parentNodeId)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
   const addSceneAction = useCallback(
     async (name: string, targetId?: string | null) => {
       if (!state.system) return
@@ -3393,6 +4103,10 @@ export function AppProvider({
       createLimitCycleFromHopf,
       createCycleFromPD,
       createLimitCycleFromPD,
+      createHomoclinicFromLargeCycle,
+      createHomoclinicFromHomoclinic,
+      createHomotopySaddleFromEquilibrium,
+      createHomoclinicFromHomotopySaddle,
       addScene: addSceneAction,
       addBifurcationDiagram: addBifurcationDiagramAction,
       importSystem,
@@ -3416,6 +4130,10 @@ export function AppProvider({
       createLimitCycleFromOrbit,
       createCycleFromPD,
       createLimitCycleFromPD,
+      createHomoclinicFromLargeCycle,
+      createHomoclinicFromHomoclinic,
+      createHomotopySaddleFromEquilibrium,
+      createHomoclinicFromHomotopySaddle,
       addBifurcationDiagramAction,
       createSystemAction,
       deleteSystem,

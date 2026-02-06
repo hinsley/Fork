@@ -234,6 +234,72 @@ export type LimitCycleContinuationFromPDRequest = {
 
 export type LimitCycleContinuationResult = ContinuationBranchData
 
+export type HomoclinicFromLargeCycleRequest = {
+  system: SystemConfig
+  lcState: number[]
+  sourceNtst: number
+  sourceNcol: number
+  parameterName: string
+  param2Name: string
+  targetNtst: number
+  targetNcol: number
+  freeTime: boolean
+  freeEps0: boolean
+  freeEps1: boolean
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type HomoclinicFromHomoclinicRequest = {
+  system: SystemConfig
+  pointState: number[]
+  sourceNtst: number
+  sourceNcol: number
+  parameterName: string
+  param2Name: string
+  targetNtst: number
+  targetNcol: number
+  freeTime: boolean
+  freeEps0: boolean
+  freeEps1: boolean
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type HomotopySaddleFromEquilibriumRequest = {
+  system: SystemConfig
+  equilibriumState: number[]
+  parameterName: string
+  param2Name: string
+  ntst: number
+  ncol: number
+  eps0: number
+  eps1: number
+  time: number
+  eps1Tol: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type HomoclinicFromHomotopySaddleRequest = {
+  system: SystemConfig
+  stageDState: number[]
+  sourceNtst: number
+  sourceNcol: number
+  parameterName: string
+  param2Name: string
+  targetNtst: number
+  targetNcol: number
+  freeTime: boolean
+  freeEps0: boolean
+  freeEps1: boolean
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type HomoclinicContinuationResult = ContinuationBranchData
+export type HomotopySaddleContinuationResult = ContinuationBranchData
+
 export type MapCycleContinuationFromPDRequest = {
   system: SystemConfig
   pdState: number[]
@@ -305,6 +371,22 @@ export interface ForkCoreClient {
     request: LimitCycleContinuationFromPDRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<LimitCycleContinuationResult>
+  runHomoclinicFromLargeCycle(
+    request: HomoclinicFromLargeCycleRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<HomoclinicContinuationResult>
+  runHomoclinicFromHomoclinic(
+    request: HomoclinicFromHomoclinicRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<HomoclinicContinuationResult>
+  runHomotopySaddleFromEquilibrium(
+    request: HomotopySaddleFromEquilibriumRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<HomotopySaddleContinuationResult>
+  runHomoclinicFromHomotopySaddle(
+    request: HomoclinicFromHomotopySaddleRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<HomoclinicContinuationResult>
   runMapCycleContinuationFromPD(
     request: MapCycleContinuationFromPDRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }

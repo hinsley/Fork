@@ -329,6 +329,11 @@ impl WasmContinuationExtensionRunner {
                     merge,
                 }
             }
+            BranchType::HomoclinicCurve { .. } | BranchType::HomotopySaddleCurve { .. } => {
+                return Err(JsValue::from_str(
+                    "Branch extension for homoclinic and homotopy-saddle curves is not available yet.",
+                ))
+            }
         };
 
         Ok(WasmContinuationExtensionRunner {

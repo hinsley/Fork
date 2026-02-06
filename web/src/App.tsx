@@ -296,6 +296,10 @@ function App() {
         onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
         onCreateCycleFromPD={actions.createCycleFromPD}
         onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
+        onCreateHomoclinicFromLargeCycle={actions.createHomoclinicFromLargeCycle}
+        onCreateHomoclinicFromHomoclinic={actions.createHomoclinicFromHomoclinic}
+        onCreateHomotopySaddleFromEquilibrium={actions.createHomotopySaddleFromEquilibrium}
+        onCreateHomoclinicFromHomotopySaddle={actions.createHomoclinicFromHomotopySaddle}
       />
 
       {error ? (
@@ -446,6 +450,10 @@ function App() {
                 onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
                 onCreateCycleFromPD={actions.createCycleFromPD}
                 onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
+                onCreateHomoclinicFromLargeCycle={actions.createHomoclinicFromLargeCycle}
+                onCreateHomoclinicFromHomoclinic={actions.createHomoclinicFromHomoclinic}
+                onCreateHomotopySaddleFromEquilibrium={actions.createHomotopySaddleFromEquilibrium}
+                onCreateHomoclinicFromHomotopySaddle={actions.createHomoclinicFromHomotopySaddle}
               />
             </Panel>
           </div>

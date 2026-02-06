@@ -9,6 +9,12 @@ import type {
   ContinuationExtensionResult,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
+  HomoclinicContinuationResult,
+  HomoclinicFromHomoclinicRequest,
+  HomoclinicFromHomotopySaddleRequest,
+  HomoclinicFromLargeCycleRequest,
+  HomotopySaddleContinuationResult,
+  HomotopySaddleFromEquilibriumRequest,
   LimitCycleContinuationFromHopfRequest,
   LimitCycleContinuationFromOrbitRequest,
   LimitCycleContinuationFromPDRequest,
@@ -60,6 +66,26 @@ type WorkerRequest =
       kind: 'runMapCycleContinuationFromPD'
       payload: MapCycleContinuationFromPDRequest
     }
+  | {
+      id: string
+      kind: 'runHomoclinicFromLargeCycle'
+      payload: HomoclinicFromLargeCycleRequest
+    }
+  | {
+      id: string
+      kind: 'runHomoclinicFromHomoclinic'
+      payload: HomoclinicFromHomoclinicRequest
+    }
+  | {
+      id: string
+      kind: 'runHomotopySaddleFromEquilibrium'
+      payload: HomotopySaddleFromEquilibriumRequest
+    }
+  | {
+      id: string
+      kind: 'runHomoclinicFromHomotopySaddle'
+      payload: HomoclinicFromHomotopySaddleRequest
+    }
   | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
   | { id: string; kind: 'cancel' }
 
@@ -81,6 +107,8 @@ type WorkerResponse =
         | ContinuationExtensionResult
         | Codim1CurveBranch
         | LimitCycleContinuationResult
+        | HomoclinicContinuationResult
+        | HomotopySaddleContinuationResult
     }
   | { id: string; ok: false; error: string; aborted?: boolean }
   | WorkerProgress
@@ -167,6 +195,53 @@ type WasmModule = {
       ncol: number,
       amplitude: number
     ) => unknown
+    init_homoclinic_from_large_cycle: (
+      lcState: Float64Array,
+      sourceNtst: number,
+      sourceNcol: number,
+      parameterName: string,
+      param2Name: string,
+      targetNtst: number,
+      targetNcol: number,
+      freeTime: boolean,
+      freeEps0: boolean,
+      freeEps1: boolean
+    ) => unknown
+    init_homoclinic_from_homoclinic: (
+      pointState: Float64Array,
+      sourceNtst: number,
+      sourceNcol: number,
+      parameterName: string,
+      param2Name: string,
+      targetNtst: number,
+      targetNcol: number,
+      freeTime: boolean,
+      freeEps0: boolean,
+      freeEps1: boolean
+    ) => unknown
+    init_homotopy_saddle_from_equilibrium: (
+      equilibriumState: Float64Array,
+      parameterName: string,
+      param2Name: string,
+      ntst: number,
+      ncol: number,
+      eps0: number,
+      eps1: number,
+      time: number,
+      eps1Tol: number
+    ) => unknown
+    init_homoclinic_from_homotopy_saddle: (
+      stageDState: Float64Array,
+      sourceNtst: number,
+      sourceNcol: number,
+      parameterName: string,
+      param2Name: string,
+      targetNtst: number,
+      targetNcol: number,
+      freeTime: boolean,
+      freeEps0: boolean,
+      freeEps1: boolean
+    ) => unknown
     init_map_cycle_from_pd: (
       pdState: number[],
       parameterName: string,
@@ -244,6 +319,32 @@ type WasmModule = {
     run_steps: (batchSize: number) => ContinuationProgress
     get_progress: () => ContinuationProgress
     get_result: () => LimitCycleContinuationResult
+  }
+  WasmHomoclinicRunner: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    setup: unknown,
+    settings: Record<string, number>,
+    forward: boolean
+  ) => {
+    run_steps: (batchSize: number) => ContinuationProgress
+    get_progress: () => ContinuationProgress
+    get_result: () => HomoclinicContinuationResult
+  }
+  WasmHomotopySaddleRunner: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    setup: unknown,
+    settings: Record<string, number>,
+    forward: boolean
+  ) => {
+    run_steps: (batchSize: number) => ContinuationProgress
+    get_progress: () => ContinuationProgress
+    get_result: () => HomotopySaddleContinuationResult
   }
   WasmContinuationExtensionRunner: new (
     equations: string[],
@@ -840,6 +941,217 @@ async function runLimitCycleContinuationFromPD(
   return runner.get_result()
 }
 
+async function runHomoclinicFromLargeCycle(
+  request: HomoclinicFromLargeCycleRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<HomoclinicContinuationResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+
+  const setup = system.init_homoclinic_from_large_cycle(
+    new Float64Array(request.lcState),
+    request.sourceNtst,
+    request.sourceNcol,
+    request.parameterName,
+    request.param2Name,
+    request.targetNtst,
+    request.targetNcol,
+    request.freeTime,
+    request.freeEps0,
+    request.freeEps1
+  )
+
+  const settings: Record<string, number> = { ...request.settings }
+  const runner = new wasm.WasmHomoclinicRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    setup,
+    settings,
+    request.forward
+  )
+
+  let progress = runner.get_progress()
+  onProgress(progress)
+
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+
+  return runner.get_result()
+}
+
+async function runHomoclinicFromHomoclinic(
+  request: HomoclinicFromHomoclinicRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<HomoclinicContinuationResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+
+  const setup = system.init_homoclinic_from_homoclinic(
+    new Float64Array(request.pointState),
+    request.sourceNtst,
+    request.sourceNcol,
+    request.parameterName,
+    request.param2Name,
+    request.targetNtst,
+    request.targetNcol,
+    request.freeTime,
+    request.freeEps0,
+    request.freeEps1
+  )
+
+  const settings: Record<string, number> = { ...request.settings }
+  const runner = new wasm.WasmHomoclinicRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    setup,
+    settings,
+    request.forward
+  )
+
+  let progress = runner.get_progress()
+  onProgress(progress)
+
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+
+  return runner.get_result()
+}
+
+async function runHomotopySaddleFromEquilibrium(
+  request: HomotopySaddleFromEquilibriumRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<HomotopySaddleContinuationResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+
+  const setup = system.init_homotopy_saddle_from_equilibrium(
+    new Float64Array(request.equilibriumState),
+    request.parameterName,
+    request.param2Name,
+    request.ntst,
+    request.ncol,
+    request.eps0,
+    request.eps1,
+    request.time,
+    request.eps1Tol
+  )
+
+  const settings: Record<string, number> = { ...request.settings }
+  const runner = new wasm.WasmHomotopySaddleRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    setup,
+    settings,
+    request.forward
+  )
+
+  let progress = runner.get_progress()
+  onProgress(progress)
+
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+
+  return runner.get_result()
+}
+
+async function runHomoclinicFromHomotopySaddle(
+  request: HomoclinicFromHomotopySaddleRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<HomoclinicContinuationResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+
+  const setup = system.init_homoclinic_from_homotopy_saddle(
+    new Float64Array(request.stageDState),
+    request.sourceNtst,
+    request.sourceNcol,
+    request.parameterName,
+    request.param2Name,
+    request.targetNtst,
+    request.targetNcol,
+    request.freeTime,
+    request.freeEps0,
+    request.freeEps1
+  )
+
+  const settings: Record<string, number> = { ...request.settings }
+  const runner = new wasm.WasmHomoclinicRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    setup,
+    settings,
+    request.forward
+  )
+
+  let progress = runner.get_progress()
+  onProgress(progress)
+
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+
+  return runner.get_result()
+}
+
 async function runMapCycleContinuationFromPD(
   request: MapCycleContinuationFromPDRequest,
   signal: AbortSignal,
@@ -1139,6 +1451,78 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     if (message.kind === 'runMapCycleContinuationFromPD') {
       const result = await runMapCycleContinuationFromPD(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runHomoclinicFromLargeCycle') {
+      const result = await runHomoclinicFromLargeCycle(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runHomoclinicFromHomoclinic') {
+      const result = await runHomoclinicFromHomoclinic(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runHomotopySaddleFromEquilibrium') {
+      const result = await runHomotopySaddleFromEquilibrium(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runHomoclinicFromHomotopySaddle') {
+      const result = await runHomoclinicFromHomotopySaddle(
         message.payload,
         controller.signal,
         (progress) => {

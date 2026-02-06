@@ -40,7 +40,11 @@ import type {
   EquilibriumContinuationRequest,
   EquilibriumSolveRequest,
   FoldCurveContinuationRequest,
+  HomoclinicFromHomoclinicRequest,
+  HomoclinicFromHomotopySaddleRequest,
+  HomoclinicFromLargeCycleRequest,
   HopfCurveContinuationRequest,
+  HomotopySaddleFromEquilibriumRequest,
   IsoclineComputeRequest,
   MapNSCurveContinuationRequest,
   LimitCycleHopfContinuationRequest,
@@ -123,6 +127,18 @@ type InspectorDetailsPanelProps = {
   onCreateLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
   onCreateCycleFromPD: (request: MapCyclePDContinuationRequest) => Promise<void>
   onCreateLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
+  onCreateHomoclinicFromLargeCycle?: (
+    request: HomoclinicFromLargeCycleRequest
+  ) => Promise<void>
+  onCreateHomoclinicFromHomoclinic?: (
+    request: HomoclinicFromHomoclinicRequest
+  ) => Promise<void>
+  onCreateHomotopySaddleFromEquilibrium?: (
+    request: HomotopySaddleFromEquilibriumRequest
+  ) => Promise<void>
+  onCreateHomoclinicFromHomotopySaddle?: (
+    request: HomoclinicFromHomotopySaddleRequest
+  ) => Promise<void>
 }
 
 type SystemDraft = {
@@ -199,6 +215,62 @@ type LimitCycleFromPDDraft = {
   branchName: string
   amplitude: string
   ncol: string
+  stepSize: string
+  maxSteps: string
+  minStepSize: string
+  maxStepSize: string
+  correctorSteps: string
+  correctorTolerance: string
+  stepTolerance: string
+  forward: boolean
+}
+
+type HomoclinicFromLargeCycleDraft = {
+  name: string
+  parameterName: string
+  param2Name: string
+  targetNtst: string
+  targetNcol: string
+  freeTime: boolean
+  freeEps0: boolean
+  freeEps1: boolean
+  stepSize: string
+  maxSteps: string
+  minStepSize: string
+  maxStepSize: string
+  correctorSteps: string
+  correctorTolerance: string
+  stepTolerance: string
+  forward: boolean
+}
+
+type HomoclinicRestartDraft = {
+  name: string
+  targetNtst: string
+  targetNcol: string
+  freeTime: boolean
+  freeEps0: boolean
+  freeEps1: boolean
+  stepSize: string
+  maxSteps: string
+  minStepSize: string
+  maxStepSize: string
+  correctorSteps: string
+  correctorTolerance: string
+  stepTolerance: string
+  forward: boolean
+}
+
+type HomotopySaddleFromEquilibriumDraft = {
+  name: string
+  parameterName: string
+  param2Name: string
+  ntst: string
+  ncol: string
+  eps0: string
+  eps1: string
+  time: string
+  eps1Tol: string
   stepSize: string
   maxSteps: string
   minStepSize: string
@@ -849,6 +921,78 @@ function makeLimitCycleFromPDDraft(): LimitCycleFromPDDraft {
   }
 }
 
+function makeHomoclinicFromLargeCycleDraft(
+  system: SystemConfig
+): HomoclinicFromLargeCycleDraft {
+  const parameterName = system.paramNames[0] ?? ''
+  const param2Name =
+    system.paramNames.find((name) => name !== parameterName) ?? system.paramNames[0] ?? ''
+  return {
+    name: '',
+    parameterName,
+    param2Name,
+    targetNtst: '40',
+    targetNcol: '4',
+    freeTime: true,
+    freeEps0: true,
+    freeEps1: false,
+    stepSize: '0.01',
+    maxSteps: '80',
+    minStepSize: '1e-6',
+    maxStepSize: '0.1',
+    correctorSteps: '8',
+    correctorTolerance: '1e-7',
+    stepTolerance: '1e-7',
+    forward: true,
+  }
+}
+
+function makeHomoclinicRestartDraft(): HomoclinicRestartDraft {
+  return {
+    name: '',
+    targetNtst: '40',
+    targetNcol: '4',
+    freeTime: true,
+    freeEps0: true,
+    freeEps1: false,
+    stepSize: '0.01',
+    maxSteps: '80',
+    minStepSize: '1e-6',
+    maxStepSize: '0.1',
+    correctorSteps: '8',
+    correctorTolerance: '1e-7',
+    stepTolerance: '1e-7',
+    forward: true,
+  }
+}
+
+function makeHomotopySaddleFromEquilibriumDraft(
+  system: SystemConfig
+): HomotopySaddleFromEquilibriumDraft {
+  const parameterName = system.paramNames[0] ?? ''
+  const param2Name =
+    system.paramNames.find((name) => name !== parameterName) ?? system.paramNames[0] ?? ''
+  return {
+    name: '',
+    parameterName,
+    param2Name,
+    ntst: '40',
+    ncol: '4',
+    eps0: '0.01',
+    eps1: '0.1',
+    time: '40',
+    eps1Tol: '1e-4',
+    stepSize: '0.01',
+    maxSteps: '120',
+    minStepSize: '1e-6',
+    maxStepSize: '0.1',
+    correctorSteps: '8',
+    correctorTolerance: '1e-7',
+    stepTolerance: '1e-7',
+    forward: true,
+  }
+}
+
 function makeContinuationDraft(system: SystemConfig): ContinuationDraft {
   return {
     name: '',
@@ -1267,6 +1411,10 @@ export function InspectorDetailsPanel({
   onCreateLimitCycleFromOrbit,
   onCreateCycleFromPD,
   onCreateLimitCycleFromPD,
+  onCreateHomoclinicFromLargeCycle = async () => {},
+  onCreateHomoclinicFromHomoclinic = async () => {},
+  onCreateHomotopySaddleFromEquilibrium = async () => {},
+  onCreateHomoclinicFromHomotopySaddle = async () => {},
 }: InspectorDetailsPanelProps) {
   const node = selectedNodeId ? system.nodes[selectedNodeId] : null
   const object = selectedNodeId ? system.objects[selectedNodeId] : undefined
@@ -1618,6 +1766,31 @@ export function InspectorDetailsPanel({
     () => makeLimitCycleFromPDDraft()
   )
   const [limitCycleFromPDError, setLimitCycleFromPDError] = useState<string | null>(null)
+  const [homoclinicFromLargeCycleDraft, setHomoclinicFromLargeCycleDraft] =
+    useState<HomoclinicFromLargeCycleDraft>(() =>
+      makeHomoclinicFromLargeCycleDraft(system.config)
+    )
+  const [homoclinicFromLargeCycleError, setHomoclinicFromLargeCycleError] = useState<
+    string | null
+  >(null)
+  const [homoclinicFromHomoclinicDraft, setHomoclinicFromHomoclinicDraft] =
+    useState<HomoclinicRestartDraft>(() => makeHomoclinicRestartDraft())
+  const [homoclinicFromHomoclinicError, setHomoclinicFromHomoclinicError] = useState<
+    string | null
+  >(null)
+  const [
+    homotopySaddleFromEquilibriumDraft,
+    setHomotopySaddleFromEquilibriumDraft,
+  ] = useState<HomotopySaddleFromEquilibriumDraft>(() =>
+    makeHomotopySaddleFromEquilibriumDraft(system.config)
+  )
+  const [homotopySaddleFromEquilibriumError, setHomotopySaddleFromEquilibriumError] =
+    useState<string | null>(null)
+  const [homoclinicFromHomotopySaddleDraft, setHomoclinicFromHomotopySaddleDraft] =
+    useState<HomoclinicRestartDraft>(() => makeHomoclinicRestartDraft())
+  const [homoclinicFromHomotopySaddleError, setHomoclinicFromHomotopySaddleError] = useState<
+    string | null
+  >(null)
   const [foldCurveDraft, setFoldCurveDraft] = useState<Codim1CurveDraft>(() =>
     makeCodim1CurveDraft(system.config)
   )
@@ -1844,6 +2017,10 @@ export function InspectorDetailsPanel({
   }, [systemDraft.type, systemDraft.solver])
 
   useEffect(() => {
+    const firstParam = systemDraft.paramNames[0] ?? ''
+    const resolveDistinctParam = (paramName: string) =>
+      systemDraft.paramNames.find((name) => name !== paramName) ?? firstParam
+
     setContinuationDraft((prev) => {
       if (systemDraft.paramNames.length === 0) {
         if (!prev.parameterName) return prev
@@ -1873,6 +2050,34 @@ export function InspectorDetailsPanel({
         return prev
       }
       return { ...prev, parameterName: systemDraft.paramNames[0] ?? '' }
+    })
+    setHomoclinicFromLargeCycleDraft((prev) => {
+      if (systemDraft.paramNames.length === 0) {
+        if (!prev.parameterName && !prev.param2Name) return prev
+        return { ...prev, parameterName: '', param2Name: '' }
+      }
+      const parameterName = systemDraft.paramNames.includes(prev.parameterName)
+        ? prev.parameterName
+        : firstParam
+      const param2Name =
+        systemDraft.paramNames.includes(prev.param2Name) && prev.param2Name !== parameterName
+          ? prev.param2Name
+          : resolveDistinctParam(parameterName)
+      return { ...prev, parameterName, param2Name }
+    })
+    setHomotopySaddleFromEquilibriumDraft((prev) => {
+      if (systemDraft.paramNames.length === 0) {
+        if (!prev.parameterName && !prev.param2Name) return prev
+        return { ...prev, parameterName: '', param2Name: '' }
+      }
+      const parameterName = systemDraft.paramNames.includes(prev.parameterName)
+        ? prev.parameterName
+        : firstParam
+      const param2Name =
+        systemDraft.paramNames.includes(prev.param2Name) && prev.param2Name !== parameterName
+          ? prev.param2Name
+          : resolveDistinctParam(parameterName)
+      return { ...prev, parameterName, param2Name }
     })
     setBranchContinuationDraft((prev) => {
       if (systemDraft.paramNames.length === 0) {
@@ -2146,6 +2351,56 @@ export function InspectorDetailsPanel({
         parameterName: paramName,
       }
     })
+    setHomoclinicFromLargeCycleDraft((prev) => {
+      const safeBranchName = toCliSafeName(branchName)
+      const suggestedName = `homoc_${safeBranchName}`
+      const parameterName = systemDraft.paramNames.includes(prev.parameterName)
+        ? prev.parameterName
+        : systemDraft.paramNames.includes(branchParameterName)
+          ? branchParameterName
+          : systemDraft.paramNames[0] ?? ''
+      const fallbackParam2 =
+        systemDraft.paramNames.find((name) => name !== parameterName) ??
+        systemDraft.paramNames[0] ??
+        ''
+      const param2Name =
+        systemDraft.paramNames.includes(prev.param2Name) && prev.param2Name !== parameterName
+          ? prev.param2Name
+          : fallbackParam2
+      const name = prev.name.trim().length > 0 ? prev.name : suggestedName
+      return { ...prev, name, parameterName, param2Name }
+    })
+    setHomoclinicFromHomoclinicDraft((prev) => {
+      const safeBranchName = toCliSafeName(branchName)
+      const suggestedName = `homoc_${safeBranchName}_restart`
+      const name = prev.name.trim().length > 0 ? prev.name : suggestedName
+      return { ...prev, name }
+    })
+    setHomotopySaddleFromEquilibriumDraft((prev) => {
+      const safeBranchName = toCliSafeName(branchName)
+      const suggestedName = `homotopy_saddle_${safeBranchName}`
+      const parameterName = systemDraft.paramNames.includes(prev.parameterName)
+        ? prev.parameterName
+        : systemDraft.paramNames.includes(branchParameterName)
+          ? branchParameterName
+          : systemDraft.paramNames[0] ?? ''
+      const fallbackParam2 =
+        systemDraft.paramNames.find((name) => name !== parameterName) ??
+        systemDraft.paramNames[0] ??
+        ''
+      const param2Name =
+        systemDraft.paramNames.includes(prev.param2Name) && prev.param2Name !== parameterName
+          ? prev.param2Name
+          : fallbackParam2
+      const name = prev.name.trim().length > 0 ? prev.name : suggestedName
+      return { ...prev, name, parameterName, param2Name }
+    })
+    setHomoclinicFromHomotopySaddleDraft((prev) => {
+      const safeBranchName = toCliSafeName(branchName)
+      const suggestedName = `homoc_${safeBranchName}_stage_d`
+      const name = prev.name.trim().length > 0 ? prev.name : suggestedName
+      return { ...prev, name }
+    })
     setBranchExtensionDraft(makeBranchExtensionDraft(stableSystemConfigRef.current, branch))
     setBranchContinuationError(null)
     setBranchExtensionError(null)
@@ -2155,6 +2410,10 @@ export function InspectorDetailsPanel({
     setNSCurveError(null)
     setLimitCycleFromHopfError(null)
     setLimitCycleFromPDError(null)
+    setHomoclinicFromLargeCycleError(null)
+    setHomoclinicFromHomoclinicError(null)
+    setHomotopySaddleFromEquilibriumError(null)
+    setHomoclinicFromHomotopySaddleError(null)
   }, [branch, branchName, branchParameterName, systemDraft.paramNames])
 
   useEffect(() => {
@@ -2530,6 +2789,22 @@ export function InspectorDetailsPanel({
     showCodim1CurveContinuations && !isDiscreteMap && isHopfCurvePointSelected
   const showNSCurveContinuation =
     showCodim1CurveContinuations && isDiscreteMap && isNSCurvePointSelected
+  const homotopyBranchStage =
+    branch?.data.branch_type &&
+    typeof branch.data.branch_type === 'object' &&
+    'type' in branch.data.branch_type &&
+    branch.data.branch_type.type === 'HomotopySaddleCurve'
+      ? branch.data.branch_type.stage
+      : null
+  const showHomoclinicFromLargeCycle =
+    branch?.branchType === 'limit_cycle' && hasSelectedBranchPoint
+  const showHomoclinicFromHomoclinic =
+    branch?.branchType === 'homoclinic_curve' && hasSelectedBranchPoint
+  const showHomotopySaddleFromEquilibrium =
+    branch?.branchType === 'equilibrium' && hasSelectedBranchPoint
+  const showHomoclinicFromHomotopySaddle =
+    branch?.branchType === 'homotopy_saddle_curve' && hasSelectedBranchPoint
+  const homotopyStageDReady = homotopyBranchStage === 'StageD'
   const branchEigenvalues = useMemo(
     () =>
       selectedBranchPoint
@@ -3822,6 +4097,445 @@ export function InspectorDetailsPanel({
       ncol: parsedNcol,
       settings,
       forward: limitCycleFromPDDraft.forward,
+    })
+  }
+
+  const handleCreateHomoclinicFromLargeCycle = async () => {
+    if (runDisabled) {
+      setHomoclinicFromLargeCycleError('Apply valid system settings before continuing.')
+      return
+    }
+    if (systemDraft.type === 'map') {
+      setHomoclinicFromLargeCycleError('Homoclinic continuation requires a flow system.')
+      return
+    }
+    if (!branch || !selectedNodeId) {
+      setHomoclinicFromLargeCycleError('Select a branch to continue.')
+      return
+    }
+    if (branch.branchType !== 'limit_cycle') {
+      setHomoclinicFromLargeCycleError(
+        'Homoclinic initialization from a cycle requires a limit cycle branch.'
+      )
+      return
+    }
+    if (!selectedBranchPoint || branchPointIndex === null) {
+      setHomoclinicFromLargeCycleError('Select a branch point to continue from.')
+      return
+    }
+    if (systemDraft.paramNames.length < 2) {
+      setHomoclinicFromLargeCycleError('Add another parameter before continuing.')
+      return
+    }
+    if (!systemDraft.paramNames.includes(homoclinicFromLargeCycleDraft.parameterName)) {
+      setHomoclinicFromLargeCycleError('Select a valid first continuation parameter.')
+      return
+    }
+    if (!systemDraft.paramNames.includes(homoclinicFromLargeCycleDraft.param2Name)) {
+      setHomoclinicFromLargeCycleError('Select a valid second continuation parameter.')
+      return
+    }
+    if (homoclinicFromLargeCycleDraft.parameterName === homoclinicFromLargeCycleDraft.param2Name) {
+      setHomoclinicFromLargeCycleError(
+        'Second parameter must be different from the continuation parameter.'
+      )
+      return
+    }
+
+    const name =
+      homoclinicFromLargeCycleDraft.name.trim() || `homoc_${toCliSafeName(branch.name)}`
+    if (!name) {
+      setHomoclinicFromLargeCycleError('Branch name is required.')
+      return
+    }
+    if (!isCliSafeName(name)) {
+      setHomoclinicFromLargeCycleError(
+        'Branch names must be alphanumeric with underscores only.'
+      )
+      return
+    }
+
+    const targetNtst = parseInteger(homoclinicFromLargeCycleDraft.targetNtst)
+    if (targetNtst === null || targetNtst < 2) {
+      setHomoclinicFromLargeCycleError('Target NTST must be an integer greater than or equal to 2.')
+      return
+    }
+    const targetNcol = parseInteger(homoclinicFromLargeCycleDraft.targetNcol)
+    if (targetNcol === null || targetNcol < 1) {
+      setHomoclinicFromLargeCycleError('Target NCOL must be a positive integer.')
+      return
+    }
+    if (
+      !homoclinicFromLargeCycleDraft.freeTime &&
+      !homoclinicFromLargeCycleDraft.freeEps0 &&
+      !homoclinicFromLargeCycleDraft.freeEps1
+    ) {
+      setHomoclinicFromLargeCycleError('At least one of T, eps0, or eps1 must be free.')
+      return
+    }
+
+    const { settings, error } = buildContinuationSettings({
+      name: '',
+      parameterName: homoclinicFromLargeCycleDraft.parameterName,
+      stepSize: homoclinicFromLargeCycleDraft.stepSize,
+      maxSteps: homoclinicFromLargeCycleDraft.maxSteps,
+      minStepSize: homoclinicFromLargeCycleDraft.minStepSize,
+      maxStepSize: homoclinicFromLargeCycleDraft.maxStepSize,
+      correctorSteps: homoclinicFromLargeCycleDraft.correctorSteps,
+      correctorTolerance: homoclinicFromLargeCycleDraft.correctorTolerance,
+      stepTolerance: homoclinicFromLargeCycleDraft.stepTolerance,
+      forward: homoclinicFromLargeCycleDraft.forward,
+    })
+    if (!settings) {
+      setHomoclinicFromLargeCycleError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setHomoclinicFromLargeCycleError(null)
+    await onCreateHomoclinicFromLargeCycle({
+      branchId: selectedNodeId,
+      pointIndex: branchPointIndex,
+      name,
+      parameterName: homoclinicFromLargeCycleDraft.parameterName,
+      param2Name: homoclinicFromLargeCycleDraft.param2Name,
+      targetNtst,
+      targetNcol,
+      freeTime: homoclinicFromLargeCycleDraft.freeTime,
+      freeEps0: homoclinicFromLargeCycleDraft.freeEps0,
+      freeEps1: homoclinicFromLargeCycleDraft.freeEps1,
+      settings,
+      forward: homoclinicFromLargeCycleDraft.forward,
+    })
+  }
+
+  const handleCreateHomoclinicFromHomoclinic = async () => {
+    if (runDisabled) {
+      setHomoclinicFromHomoclinicError('Apply valid system settings before continuing.')
+      return
+    }
+    if (systemDraft.type === 'map') {
+      setHomoclinicFromHomoclinicError('Homoclinic continuation requires a flow system.')
+      return
+    }
+    if (!branch || !selectedNodeId) {
+      setHomoclinicFromHomoclinicError('Select a branch to continue.')
+      return
+    }
+    if (branch.branchType !== 'homoclinic_curve') {
+      setHomoclinicFromHomoclinicError(
+        'Homoclinic reinitialization requires an existing homoclinic branch.'
+      )
+      return
+    }
+    if (!selectedBranchPoint || branchPointIndex === null) {
+      setHomoclinicFromHomoclinicError('Select a branch point to continue from.')
+      return
+    }
+    if (
+      !branch.data.branch_type ||
+      typeof branch.data.branch_type !== 'object' ||
+      !('type' in branch.data.branch_type) ||
+      branch.data.branch_type.type !== 'HomoclinicCurve'
+    ) {
+      setHomoclinicFromHomoclinicError('Source homoclinic branch is missing metadata.')
+      return
+    }
+
+    const name =
+      homoclinicFromHomoclinicDraft.name.trim() ||
+      `homoc_${toCliSafeName(branch.name)}_restart`
+    if (!name) {
+      setHomoclinicFromHomoclinicError('Branch name is required.')
+      return
+    }
+    if (!isCliSafeName(name)) {
+      setHomoclinicFromHomoclinicError(
+        'Branch names must be alphanumeric with underscores only.'
+      )
+      return
+    }
+
+    const targetNtst = parseInteger(homoclinicFromHomoclinicDraft.targetNtst)
+    if (targetNtst === null || targetNtst < 2) {
+      setHomoclinicFromHomoclinicError('Target NTST must be an integer greater than or equal to 2.')
+      return
+    }
+    const targetNcol = parseInteger(homoclinicFromHomoclinicDraft.targetNcol)
+    if (targetNcol === null || targetNcol < 1) {
+      setHomoclinicFromHomoclinicError('Target NCOL must be a positive integer.')
+      return
+    }
+    if (
+      !homoclinicFromHomoclinicDraft.freeTime &&
+      !homoclinicFromHomoclinicDraft.freeEps0 &&
+      !homoclinicFromHomoclinicDraft.freeEps1
+    ) {
+      setHomoclinicFromHomoclinicError('At least one of T, eps0, or eps1 must be free.')
+      return
+    }
+
+    const { settings, error } = buildContinuationSettings({
+      name: '',
+      parameterName: branch.parameterName,
+      stepSize: homoclinicFromHomoclinicDraft.stepSize,
+      maxSteps: homoclinicFromHomoclinicDraft.maxSteps,
+      minStepSize: homoclinicFromHomoclinicDraft.minStepSize,
+      maxStepSize: homoclinicFromHomoclinicDraft.maxStepSize,
+      correctorSteps: homoclinicFromHomoclinicDraft.correctorSteps,
+      correctorTolerance: homoclinicFromHomoclinicDraft.correctorTolerance,
+      stepTolerance: homoclinicFromHomoclinicDraft.stepTolerance,
+      forward: homoclinicFromHomoclinicDraft.forward,
+    })
+    if (!settings) {
+      setHomoclinicFromHomoclinicError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setHomoclinicFromHomoclinicError(null)
+    await onCreateHomoclinicFromHomoclinic({
+      branchId: selectedNodeId,
+      pointIndex: branchPointIndex,
+      name,
+      targetNtst,
+      targetNcol,
+      freeTime: homoclinicFromHomoclinicDraft.freeTime,
+      freeEps0: homoclinicFromHomoclinicDraft.freeEps0,
+      freeEps1: homoclinicFromHomoclinicDraft.freeEps1,
+      settings,
+      forward: homoclinicFromHomoclinicDraft.forward,
+    })
+  }
+
+  const handleCreateHomotopySaddleFromEquilibrium = async () => {
+    if (runDisabled) {
+      setHomotopySaddleFromEquilibriumError('Apply valid system settings before continuing.')
+      return
+    }
+    if (systemDraft.type === 'map') {
+      setHomotopySaddleFromEquilibriumError(
+        'Homotopy-saddle continuation requires a flow system.'
+      )
+      return
+    }
+    if (!branch || !selectedNodeId) {
+      setHomotopySaddleFromEquilibriumError('Select a branch to continue.')
+      return
+    }
+    if (branch.branchType !== 'equilibrium') {
+      setHomotopySaddleFromEquilibriumError(
+        `Homotopy-saddle continuation is only available for ${equilibriumLabelLower} branches.`
+      )
+      return
+    }
+    if (!selectedBranchPoint || branchPointIndex === null) {
+      setHomotopySaddleFromEquilibriumError('Select a branch point to continue from.')
+      return
+    }
+    if (systemDraft.paramNames.length < 2) {
+      setHomotopySaddleFromEquilibriumError('Add another parameter before continuing.')
+      return
+    }
+    if (!systemDraft.paramNames.includes(homotopySaddleFromEquilibriumDraft.parameterName)) {
+      setHomotopySaddleFromEquilibriumError('Select a valid first continuation parameter.')
+      return
+    }
+    if (!systemDraft.paramNames.includes(homotopySaddleFromEquilibriumDraft.param2Name)) {
+      setHomotopySaddleFromEquilibriumError('Select a valid second continuation parameter.')
+      return
+    }
+    if (
+      homotopySaddleFromEquilibriumDraft.parameterName ===
+      homotopySaddleFromEquilibriumDraft.param2Name
+    ) {
+      setHomotopySaddleFromEquilibriumError(
+        'Second parameter must be different from the continuation parameter.'
+      )
+      return
+    }
+
+    const name =
+      homotopySaddleFromEquilibriumDraft.name.trim() ||
+      `homotopy_saddle_${toCliSafeName(branch.name)}`
+    if (!name) {
+      setHomotopySaddleFromEquilibriumError('Branch name is required.')
+      return
+    }
+    if (!isCliSafeName(name)) {
+      setHomotopySaddleFromEquilibriumError(
+        'Branch names must be alphanumeric with underscores only.'
+      )
+      return
+    }
+
+    const ntst = parseInteger(homotopySaddleFromEquilibriumDraft.ntst)
+    if (ntst === null || ntst < 2) {
+      setHomotopySaddleFromEquilibriumError('NTST must be an integer greater than or equal to 2.')
+      return
+    }
+    const ncol = parseInteger(homotopySaddleFromEquilibriumDraft.ncol)
+    if (ncol === null || ncol < 1) {
+      setHomotopySaddleFromEquilibriumError('NCOL must be a positive integer.')
+      return
+    }
+    const eps0 = parseNumber(homotopySaddleFromEquilibriumDraft.eps0)
+    if (eps0 === null || eps0 <= 0) {
+      setHomotopySaddleFromEquilibriumError('eps0 must be a positive number.')
+      return
+    }
+    const eps1 = parseNumber(homotopySaddleFromEquilibriumDraft.eps1)
+    if (eps1 === null || eps1 <= 0) {
+      setHomotopySaddleFromEquilibriumError('eps1 must be a positive number.')
+      return
+    }
+    const time = parseNumber(homotopySaddleFromEquilibriumDraft.time)
+    if (time === null || time <= 0) {
+      setHomotopySaddleFromEquilibriumError('T must be a positive number.')
+      return
+    }
+    const eps1Tol = parseNumber(homotopySaddleFromEquilibriumDraft.eps1Tol)
+    if (eps1Tol === null || eps1Tol <= 0) {
+      setHomotopySaddleFromEquilibriumError('eps1 tolerance must be a positive number.')
+      return
+    }
+
+    const { settings, error } = buildContinuationSettings({
+      name: '',
+      parameterName: homotopySaddleFromEquilibriumDraft.parameterName,
+      stepSize: homotopySaddleFromEquilibriumDraft.stepSize,
+      maxSteps: homotopySaddleFromEquilibriumDraft.maxSteps,
+      minStepSize: homotopySaddleFromEquilibriumDraft.minStepSize,
+      maxStepSize: homotopySaddleFromEquilibriumDraft.maxStepSize,
+      correctorSteps: homotopySaddleFromEquilibriumDraft.correctorSteps,
+      correctorTolerance: homotopySaddleFromEquilibriumDraft.correctorTolerance,
+      stepTolerance: homotopySaddleFromEquilibriumDraft.stepTolerance,
+      forward: homotopySaddleFromEquilibriumDraft.forward,
+    })
+    if (!settings) {
+      setHomotopySaddleFromEquilibriumError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setHomotopySaddleFromEquilibriumError(null)
+    await onCreateHomotopySaddleFromEquilibrium({
+      branchId: selectedNodeId,
+      pointIndex: branchPointIndex,
+      name,
+      parameterName: homotopySaddleFromEquilibriumDraft.parameterName,
+      param2Name: homotopySaddleFromEquilibriumDraft.param2Name,
+      ntst,
+      ncol,
+      eps0,
+      eps1,
+      time,
+      eps1Tol,
+      settings,
+      forward: homotopySaddleFromEquilibriumDraft.forward,
+    })
+  }
+
+  const handleCreateHomoclinicFromHomotopySaddle = async () => {
+    if (runDisabled) {
+      setHomoclinicFromHomotopySaddleError('Apply valid system settings before continuing.')
+      return
+    }
+    if (systemDraft.type === 'map') {
+      setHomoclinicFromHomotopySaddleError('Homoclinic continuation requires a flow system.')
+      return
+    }
+    if (!branch || !selectedNodeId) {
+      setHomoclinicFromHomotopySaddleError('Select a branch to continue.')
+      return
+    }
+    if (branch.branchType !== 'homotopy_saddle_curve') {
+      setHomoclinicFromHomotopySaddleError(
+        'Homoclinic initialization from homotopy-saddle requires a homotopy-saddle branch.'
+      )
+      return
+    }
+    if (!selectedBranchPoint || branchPointIndex === null) {
+      setHomoclinicFromHomotopySaddleError('Select a branch point to continue from.')
+      return
+    }
+    if (
+      !branch.data.branch_type ||
+      typeof branch.data.branch_type !== 'object' ||
+      !('type' in branch.data.branch_type) ||
+      branch.data.branch_type.type !== 'HomotopySaddleCurve'
+    ) {
+      setHomoclinicFromHomotopySaddleError('Source homotopy-saddle branch is missing metadata.')
+      return
+    }
+    if (branch.data.branch_type.stage !== 'StageD') {
+      setHomoclinicFromHomotopySaddleError(
+        'Method 4 initialization requires selecting a StageD homotopy-saddle branch.'
+      )
+      return
+    }
+
+    const name =
+      homoclinicFromHomotopySaddleDraft.name.trim() ||
+      `homoc_${toCliSafeName(branch.name)}_stage_d`
+    if (!name) {
+      setHomoclinicFromHomotopySaddleError('Branch name is required.')
+      return
+    }
+    if (!isCliSafeName(name)) {
+      setHomoclinicFromHomotopySaddleError(
+        'Branch names must be alphanumeric with underscores only.'
+      )
+      return
+    }
+
+    const targetNtst = parseInteger(homoclinicFromHomotopySaddleDraft.targetNtst)
+    if (targetNtst === null || targetNtst < 2) {
+      setHomoclinicFromHomotopySaddleError(
+        'Target NTST must be an integer greater than or equal to 2.'
+      )
+      return
+    }
+    const targetNcol = parseInteger(homoclinicFromHomotopySaddleDraft.targetNcol)
+    if (targetNcol === null || targetNcol < 1) {
+      setHomoclinicFromHomotopySaddleError('Target NCOL must be a positive integer.')
+      return
+    }
+    if (
+      !homoclinicFromHomotopySaddleDraft.freeTime &&
+      !homoclinicFromHomotopySaddleDraft.freeEps0 &&
+      !homoclinicFromHomotopySaddleDraft.freeEps1
+    ) {
+      setHomoclinicFromHomotopySaddleError('At least one of T, eps0, or eps1 must be free.')
+      return
+    }
+
+    const { settings, error } = buildContinuationSettings({
+      name: '',
+      parameterName: branch.parameterName,
+      stepSize: homoclinicFromHomotopySaddleDraft.stepSize,
+      maxSteps: homoclinicFromHomotopySaddleDraft.maxSteps,
+      minStepSize: homoclinicFromHomotopySaddleDraft.minStepSize,
+      maxStepSize: homoclinicFromHomotopySaddleDraft.maxStepSize,
+      correctorSteps: homoclinicFromHomotopySaddleDraft.correctorSteps,
+      correctorTolerance: homoclinicFromHomotopySaddleDraft.correctorTolerance,
+      stepTolerance: homoclinicFromHomotopySaddleDraft.stepTolerance,
+      forward: homoclinicFromHomotopySaddleDraft.forward,
+    })
+    if (!settings) {
+      setHomoclinicFromHomotopySaddleError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setHomoclinicFromHomotopySaddleError(null)
+    await onCreateHomoclinicFromHomotopySaddle({
+      branchId: selectedNodeId,
+      pointIndex: branchPointIndex,
+      name,
+      targetNtst,
+      targetNcol,
+      freeTime: homoclinicFromHomotopySaddleDraft.freeTime,
+      freeEps0: homoclinicFromHomotopySaddleDraft.freeEps0,
+      freeEps1: homoclinicFromHomotopySaddleDraft.freeEps1,
+      settings,
+      forward: homoclinicFromHomotopySaddleDraft.forward,
     })
   }
 
@@ -9096,6 +9810,1100 @@ export function InspectorDetailsPanel({
                         </button>
                       </>
                     )}
+                    </div>
+                  </InspectorDisclosure>
+                ) : null}
+
+                {showHomoclinicFromLargeCycle ? (
+                  <InspectorDisclosure
+                    key={`${selectionKey}-homoclinic-large-cycle`}
+                    title="Homoclinic from Large Cycle"
+                    testId="homoclinic-from-large-cycle-toggle"
+                    defaultOpen={false}
+                  >
+                    <div className="inspector-section">
+                      {systemDraft.type === 'map' ? (
+                        <p className="empty-state">
+                          Homoclinic continuation is only available for flow systems.
+                        </p>
+                      ) : null}
+                      {systemDraft.paramNames.length < 2 ? (
+                        <p className="empty-state">Add a second parameter to continue.</p>
+                      ) : null}
+                      {runDisabled ? (
+                        <div className="field-warning">
+                          Apply valid system changes before continuing.
+                        </div>
+                      ) : null}
+                      {!selectedBranchPoint ? (
+                        <p className="empty-state">Select a branch point to continue.</p>
+                      ) : (
+                        <>
+                          <label>
+                            Branch name
+                            <input
+                              value={homoclinicFromLargeCycleDraft.name}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  name: event.target.value,
+                                }))
+                              }
+                              placeholder={`homoc_${toCliSafeName(branch.name)}`}
+                              data-testid="homoclinic-from-large-cycle-name"
+                            />
+                          </label>
+                          <label>
+                            First parameter
+                            <select
+                              value={homoclinicFromLargeCycleDraft.parameterName}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  parameterName: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-param1"
+                            >
+                              {systemDraft.paramNames.map((name) => (
+                                <option key={name} value={name}>
+                                  {name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Second parameter
+                            <select
+                              value={homoclinicFromLargeCycleDraft.param2Name}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  param2Name: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-param2"
+                            >
+                              {systemDraft.paramNames
+                                .filter(
+                                  (name) =>
+                                    name !== homoclinicFromLargeCycleDraft.parameterName
+                                )
+                                .map((name) => (
+                                  <option key={name} value={name}>
+                                    {name}
+                                  </option>
+                                ))}
+                            </select>
+                          </label>
+                          <div className="inspector-divider">Initialization</div>
+                          <label>
+                            Target NTST
+                            <input
+                              type="number"
+                              value={homoclinicFromLargeCycleDraft.targetNtst}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  targetNtst: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-ntst"
+                            />
+                          </label>
+                          <label>
+                            Target NCOL
+                            <input
+                              type="number"
+                              value={homoclinicFromLargeCycleDraft.targetNcol}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  targetNcol: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-ncol"
+                            />
+                          </label>
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={homoclinicFromLargeCycleDraft.freeTime}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  freeTime: event.target.checked,
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-free-time"
+                            />
+                            Free T
+                          </label>
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={homoclinicFromLargeCycleDraft.freeEps0}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  freeEps0: event.target.checked,
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-free-eps0"
+                            />
+                            Free eps0
+                          </label>
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={homoclinicFromLargeCycleDraft.freeEps1}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  freeEps1: event.target.checked,
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-free-eps1"
+                            />
+                            Free eps1
+                          </label>
+                          <label>
+                            Direction
+                            <select
+                              value={
+                                homoclinicFromLargeCycleDraft.forward
+                                  ? 'forward'
+                                  : 'backward'
+                              }
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  forward: event.target.value === 'forward',
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-direction"
+                            >
+                              <option value="forward">Forward</option>
+                              <option value="backward">Backward</option>
+                            </select>
+                          </label>
+                          <div className="inspector-divider">Predictor</div>
+                          <label>
+                            Initial step size
+                            <input
+                              type="number"
+                              value={homoclinicFromLargeCycleDraft.stepSize}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  stepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max points
+                            <input
+                              type="number"
+                              value={homoclinicFromLargeCycleDraft.maxSteps}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  maxSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-max-steps"
+                            />
+                          </label>
+                          <label>
+                            Min step size
+                            <input
+                              type="number"
+                              value={homoclinicFromLargeCycleDraft.minStepSize}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  minStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-min-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max step size
+                            <input
+                              type="number"
+                              value={homoclinicFromLargeCycleDraft.maxStepSize}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  maxStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-max-step-size"
+                            />
+                          </label>
+                          <div className="inspector-divider">Corrector</div>
+                          <label>
+                            Corrector steps
+                            <input
+                              type="number"
+                              value={homoclinicFromLargeCycleDraft.correctorSteps}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  correctorSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-corrector-steps"
+                            />
+                          </label>
+                          <label>
+                            Corrector tolerance
+                            <input
+                              type="number"
+                              value={homoclinicFromLargeCycleDraft.correctorTolerance}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  correctorTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-corrector-tolerance"
+                            />
+                          </label>
+                          <label>
+                            Step tolerance
+                            <input
+                              type="number"
+                              value={homoclinicFromLargeCycleDraft.stepTolerance}
+                              onChange={(event) =>
+                                setHomoclinicFromLargeCycleDraft((prev) => ({
+                                  ...prev,
+                                  stepTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-large-cycle-step-tolerance"
+                            />
+                          </label>
+                          {homoclinicFromLargeCycleError ? (
+                            <div className="field-error">{homoclinicFromLargeCycleError}</div>
+                          ) : null}
+                          <button
+                            onClick={handleCreateHomoclinicFromLargeCycle}
+                            disabled={
+                              runDisabled ||
+                              !selectedBranchPoint ||
+                              branch.branchType !== 'limit_cycle' ||
+                              systemDraft.type === 'map'
+                            }
+                            data-testid="homoclinic-from-large-cycle-submit"
+                          >
+                            Continue Homoclinic
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </InspectorDisclosure>
+                ) : null}
+
+                {showHomoclinicFromHomoclinic ? (
+                  <InspectorDisclosure
+                    key={`${selectionKey}-homoclinic-homoclinic`}
+                    title="Homoclinic from Homoclinic"
+                    testId="homoclinic-from-homoclinic-toggle"
+                    defaultOpen={false}
+                  >
+                    <div className="inspector-section">
+                      {runDisabled ? (
+                        <div className="field-warning">
+                          Apply valid system changes before continuing.
+                        </div>
+                      ) : null}
+                      {!selectedBranchPoint ? (
+                        <p className="empty-state">Select a branch point to continue.</p>
+                      ) : (
+                        <>
+                          <label>
+                            Branch name
+                            <input
+                              value={homoclinicFromHomoclinicDraft.name}
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  name: event.target.value,
+                                }))
+                              }
+                              placeholder={`homoc_${toCliSafeName(branch.name)}_restart`}
+                              data-testid="homoclinic-from-homoclinic-name"
+                            />
+                          </label>
+                          <div className="inspector-divider">Initialization</div>
+                          <label>
+                            Target NTST
+                            <input
+                              type="number"
+                              value={homoclinicFromHomoclinicDraft.targetNtst}
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  targetNtst: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homoclinic-ntst"
+                            />
+                          </label>
+                          <label>
+                            Target NCOL
+                            <input
+                              type="number"
+                              value={homoclinicFromHomoclinicDraft.targetNcol}
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  targetNcol: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homoclinic-ncol"
+                            />
+                          </label>
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={homoclinicFromHomoclinicDraft.freeTime}
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  freeTime: event.target.checked,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homoclinic-free-time"
+                            />
+                            Free T
+                          </label>
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={homoclinicFromHomoclinicDraft.freeEps0}
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  freeEps0: event.target.checked,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homoclinic-free-eps0"
+                            />
+                            Free eps0
+                          </label>
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={homoclinicFromHomoclinicDraft.freeEps1}
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  freeEps1: event.target.checked,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homoclinic-free-eps1"
+                            />
+                            Free eps1
+                          </label>
+                          <label>
+                            Direction
+                            <select
+                              value={
+                                homoclinicFromHomoclinicDraft.forward
+                                  ? 'forward'
+                                  : 'backward'
+                              }
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  forward: event.target.value === 'forward',
+                                }))
+                              }
+                              data-testid="homoclinic-from-homoclinic-direction"
+                            >
+                              <option value="forward">Forward</option>
+                              <option value="backward">Backward</option>
+                            </select>
+                          </label>
+                          <div className="inspector-divider">Predictor</div>
+                          <label>
+                            Initial step size
+                            <input
+                              type="number"
+                              value={homoclinicFromHomoclinicDraft.stepSize}
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  stepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homoclinic-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max points
+                            <input
+                              type="number"
+                              value={homoclinicFromHomoclinicDraft.maxSteps}
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  maxSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homoclinic-max-steps"
+                            />
+                          </label>
+                          <label>
+                            Min step size
+                            <input
+                              type="number"
+                              value={homoclinicFromHomoclinicDraft.minStepSize}
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  minStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homoclinic-min-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max step size
+                            <input
+                              type="number"
+                              value={homoclinicFromHomoclinicDraft.maxStepSize}
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  maxStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homoclinic-max-step-size"
+                            />
+                          </label>
+                          <div className="inspector-divider">Corrector</div>
+                          <label>
+                            Corrector steps
+                            <input
+                              type="number"
+                              value={homoclinicFromHomoclinicDraft.correctorSteps}
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  correctorSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homoclinic-corrector-steps"
+                            />
+                          </label>
+                          <label>
+                            Corrector tolerance
+                            <input
+                              type="number"
+                              value={homoclinicFromHomoclinicDraft.correctorTolerance}
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  correctorTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homoclinic-corrector-tolerance"
+                            />
+                          </label>
+                          <label>
+                            Step tolerance
+                            <input
+                              type="number"
+                              value={homoclinicFromHomoclinicDraft.stepTolerance}
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  stepTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homoclinic-step-tolerance"
+                            />
+                          </label>
+                          {homoclinicFromHomoclinicError ? (
+                            <div className="field-error">{homoclinicFromHomoclinicError}</div>
+                          ) : null}
+                          <button
+                            onClick={handleCreateHomoclinicFromHomoclinic}
+                            disabled={
+                              runDisabled ||
+                              !selectedBranchPoint ||
+                              branch.branchType !== 'homoclinic_curve'
+                            }
+                            data-testid="homoclinic-from-homoclinic-submit"
+                          >
+                            Continue Homoclinic
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </InspectorDisclosure>
+                ) : null}
+
+                {showHomotopySaddleFromEquilibrium ? (
+                  <InspectorDisclosure
+                    key={`${selectionKey}-homotopy-saddle-equilibrium`}
+                    title="Homotopy-Saddle from Equilibrium"
+                    testId="homotopy-saddle-from-equilibrium-toggle"
+                    defaultOpen={false}
+                  >
+                    <div className="inspector-section">
+                      {systemDraft.type === 'map' ? (
+                        <p className="empty-state">
+                          Homotopy-saddle continuation is only available for flow systems.
+                        </p>
+                      ) : null}
+                      {systemDraft.paramNames.length < 2 ? (
+                        <p className="empty-state">Add a second parameter to continue.</p>
+                      ) : null}
+                      {runDisabled ? (
+                        <div className="field-warning">
+                          Apply valid system changes before continuing.
+                        </div>
+                      ) : null}
+                      {!selectedBranchPoint ? (
+                        <p className="empty-state">Select a branch point to continue.</p>
+                      ) : (
+                        <>
+                          <label>
+                            Branch name
+                            <input
+                              value={homotopySaddleFromEquilibriumDraft.name}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  name: event.target.value,
+                                }))
+                              }
+                              placeholder={`homotopy_saddle_${toCliSafeName(branch.name)}`}
+                              data-testid="homotopy-saddle-from-equilibrium-name"
+                            />
+                          </label>
+                          <label>
+                            First parameter
+                            <select
+                              value={homotopySaddleFromEquilibriumDraft.parameterName}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  parameterName: event.target.value,
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-param1"
+                            >
+                              {systemDraft.paramNames.map((name) => (
+                                <option key={name} value={name}>
+                                  {name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Second parameter
+                            <select
+                              value={homotopySaddleFromEquilibriumDraft.param2Name}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  param2Name: event.target.value,
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-param2"
+                            >
+                              {systemDraft.paramNames
+                                .filter(
+                                  (name) =>
+                                    name !== homotopySaddleFromEquilibriumDraft.parameterName
+                                )
+                                .map((name) => (
+                                  <option key={name} value={name}>
+                                    {name}
+                                  </option>
+                                ))}
+                            </select>
+                          </label>
+                          <div className="inspector-divider">Initialization</div>
+                          <label>
+                            NTST
+                            <input
+                              type="number"
+                              value={homotopySaddleFromEquilibriumDraft.ntst}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  ntst: event.target.value,
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-ntst"
+                            />
+                          </label>
+                          <label>
+                            NCOL
+                            <input
+                              type="number"
+                              value={homotopySaddleFromEquilibriumDraft.ncol}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  ncol: event.target.value,
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-ncol"
+                            />
+                          </label>
+                          <label>
+                            eps0
+                            <input
+                              type="number"
+                              value={homotopySaddleFromEquilibriumDraft.eps0}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  eps0: event.target.value,
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-eps0"
+                            />
+                          </label>
+                          <label>
+                            eps1
+                            <input
+                              type="number"
+                              value={homotopySaddleFromEquilibriumDraft.eps1}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  eps1: event.target.value,
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-eps1"
+                            />
+                          </label>
+                          <label>
+                            T
+                            <input
+                              type="number"
+                              value={homotopySaddleFromEquilibriumDraft.time}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  time: event.target.value,
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-time"
+                            />
+                          </label>
+                          <label>
+                            eps1 tolerance
+                            <input
+                              type="number"
+                              value={homotopySaddleFromEquilibriumDraft.eps1Tol}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  eps1Tol: event.target.value,
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-eps1-tol"
+                            />
+                          </label>
+                          <label>
+                            Direction
+                            <select
+                              value={
+                                homotopySaddleFromEquilibriumDraft.forward
+                                  ? 'forward'
+                                  : 'backward'
+                              }
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  forward: event.target.value === 'forward',
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-direction"
+                            >
+                              <option value="forward">Forward</option>
+                              <option value="backward">Backward</option>
+                            </select>
+                          </label>
+                          <div className="inspector-divider">Predictor</div>
+                          <label>
+                            Initial step size
+                            <input
+                              type="number"
+                              value={homotopySaddleFromEquilibriumDraft.stepSize}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  stepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max points
+                            <input
+                              type="number"
+                              value={homotopySaddleFromEquilibriumDraft.maxSteps}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  maxSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-max-steps"
+                            />
+                          </label>
+                          <label>
+                            Min step size
+                            <input
+                              type="number"
+                              value={homotopySaddleFromEquilibriumDraft.minStepSize}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  minStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-min-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max step size
+                            <input
+                              type="number"
+                              value={homotopySaddleFromEquilibriumDraft.maxStepSize}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  maxStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-max-step-size"
+                            />
+                          </label>
+                          <div className="inspector-divider">Corrector</div>
+                          <label>
+                            Corrector steps
+                            <input
+                              type="number"
+                              value={homotopySaddleFromEquilibriumDraft.correctorSteps}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  correctorSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-corrector-steps"
+                            />
+                          </label>
+                          <label>
+                            Corrector tolerance
+                            <input
+                              type="number"
+                              value={homotopySaddleFromEquilibriumDraft.correctorTolerance}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  correctorTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-corrector-tolerance"
+                            />
+                          </label>
+                          <label>
+                            Step tolerance
+                            <input
+                              type="number"
+                              value={homotopySaddleFromEquilibriumDraft.stepTolerance}
+                              onChange={(event) =>
+                                setHomotopySaddleFromEquilibriumDraft((prev) => ({
+                                  ...prev,
+                                  stepTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="homotopy-saddle-from-equilibrium-step-tolerance"
+                            />
+                          </label>
+                          {homotopySaddleFromEquilibriumError ? (
+                            <div className="field-error">{homotopySaddleFromEquilibriumError}</div>
+                          ) : null}
+                          <button
+                            onClick={handleCreateHomotopySaddleFromEquilibrium}
+                            disabled={
+                              runDisabled ||
+                              !selectedBranchPoint ||
+                              branch.branchType !== 'equilibrium' ||
+                              systemDraft.type === 'map'
+                            }
+                            data-testid="homotopy-saddle-from-equilibrium-submit"
+                          >
+                            Continue Homotopy-Saddle
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </InspectorDisclosure>
+                ) : null}
+
+                {showHomoclinicFromHomotopySaddle ? (
+                  <InspectorDisclosure
+                    key={`${selectionKey}-homoclinic-homotopy-saddle`}
+                    title="Homoclinic from Homotopy-Saddle"
+                    testId="homoclinic-from-homotopy-saddle-toggle"
+                    defaultOpen={false}
+                  >
+                    <div className="inspector-section">
+                      <div className="field-help">{`Current stage: ${homotopyBranchStage ?? 'Unknown'}`}</div>
+                      {!homotopyStageDReady ? (
+                        <p className="empty-state">
+                          Continue the homotopy-saddle branch to StageD before initializing a
+                          homoclinic curve.
+                        </p>
+                      ) : null}
+                      {runDisabled ? (
+                        <div className="field-warning">
+                          Apply valid system changes before continuing.
+                        </div>
+                      ) : null}
+                      {!selectedBranchPoint ? (
+                        <p className="empty-state">Select a branch point to continue.</p>
+                      ) : (
+                        <>
+                          <label>
+                            Branch name
+                            <input
+                              value={homoclinicFromHomotopySaddleDraft.name}
+                              onChange={(event) =>
+                                setHomoclinicFromHomotopySaddleDraft((prev) => ({
+                                  ...prev,
+                                  name: event.target.value,
+                                }))
+                              }
+                              placeholder={`homoc_${toCliSafeName(branch.name)}_stage_d`}
+                              data-testid="homoclinic-from-homotopy-saddle-name"
+                            />
+                          </label>
+                          <div className="inspector-divider">Initialization</div>
+                          <label>
+                            Target NTST
+                            <input
+                              type="number"
+                              value={homoclinicFromHomotopySaddleDraft.targetNtst}
+                              onChange={(event) =>
+                                setHomoclinicFromHomotopySaddleDraft((prev) => ({
+                                  ...prev,
+                                  targetNtst: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homotopy-saddle-ntst"
+                            />
+                          </label>
+                          <label>
+                            Target NCOL
+                            <input
+                              type="number"
+                              value={homoclinicFromHomotopySaddleDraft.targetNcol}
+                              onChange={(event) =>
+                                setHomoclinicFromHomotopySaddleDraft((prev) => ({
+                                  ...prev,
+                                  targetNcol: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homotopy-saddle-ncol"
+                            />
+                          </label>
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={homoclinicFromHomotopySaddleDraft.freeTime}
+                              onChange={(event) =>
+                                setHomoclinicFromHomotopySaddleDraft((prev) => ({
+                                  ...prev,
+                                  freeTime: event.target.checked,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homotopy-saddle-free-time"
+                            />
+                            Free T
+                          </label>
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={homoclinicFromHomotopySaddleDraft.freeEps0}
+                              onChange={(event) =>
+                                setHomoclinicFromHomotopySaddleDraft((prev) => ({
+                                  ...prev,
+                                  freeEps0: event.target.checked,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homotopy-saddle-free-eps0"
+                            />
+                            Free eps0
+                          </label>
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={homoclinicFromHomotopySaddleDraft.freeEps1}
+                              onChange={(event) =>
+                                setHomoclinicFromHomotopySaddleDraft((prev) => ({
+                                  ...prev,
+                                  freeEps1: event.target.checked,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homotopy-saddle-free-eps1"
+                            />
+                            Free eps1
+                          </label>
+                          <label>
+                            Direction
+                            <select
+                              value={
+                                homoclinicFromHomotopySaddleDraft.forward
+                                  ? 'forward'
+                                  : 'backward'
+                              }
+                              onChange={(event) =>
+                                setHomoclinicFromHomotopySaddleDraft((prev) => ({
+                                  ...prev,
+                                  forward: event.target.value === 'forward',
+                                }))
+                              }
+                              data-testid="homoclinic-from-homotopy-saddle-direction"
+                            >
+                              <option value="forward">Forward</option>
+                              <option value="backward">Backward</option>
+                            </select>
+                          </label>
+                          <div className="inspector-divider">Predictor</div>
+                          <label>
+                            Initial step size
+                            <input
+                              type="number"
+                              value={homoclinicFromHomotopySaddleDraft.stepSize}
+                              onChange={(event) =>
+                                setHomoclinicFromHomotopySaddleDraft((prev) => ({
+                                  ...prev,
+                                  stepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homotopy-saddle-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max points
+                            <input
+                              type="number"
+                              value={homoclinicFromHomotopySaddleDraft.maxSteps}
+                              onChange={(event) =>
+                                setHomoclinicFromHomotopySaddleDraft((prev) => ({
+                                  ...prev,
+                                  maxSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homotopy-saddle-max-steps"
+                            />
+                          </label>
+                          <label>
+                            Min step size
+                            <input
+                              type="number"
+                              value={homoclinicFromHomotopySaddleDraft.minStepSize}
+                              onChange={(event) =>
+                                setHomoclinicFromHomotopySaddleDraft((prev) => ({
+                                  ...prev,
+                                  minStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homotopy-saddle-min-step-size"
+                            />
+                          </label>
+                          <label>
+                            Max step size
+                            <input
+                              type="number"
+                              value={homoclinicFromHomotopySaddleDraft.maxStepSize}
+                              onChange={(event) =>
+                                setHomoclinicFromHomotopySaddleDraft((prev) => ({
+                                  ...prev,
+                                  maxStepSize: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homotopy-saddle-max-step-size"
+                            />
+                          </label>
+                          <div className="inspector-divider">Corrector</div>
+                          <label>
+                            Corrector steps
+                            <input
+                              type="number"
+                              value={homoclinicFromHomotopySaddleDraft.correctorSteps}
+                              onChange={(event) =>
+                                setHomoclinicFromHomotopySaddleDraft((prev) => ({
+                                  ...prev,
+                                  correctorSteps: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homotopy-saddle-corrector-steps"
+                            />
+                          </label>
+                          <label>
+                            Corrector tolerance
+                            <input
+                              type="number"
+                              value={homoclinicFromHomotopySaddleDraft.correctorTolerance}
+                              onChange={(event) =>
+                                setHomoclinicFromHomotopySaddleDraft((prev) => ({
+                                  ...prev,
+                                  correctorTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homotopy-saddle-corrector-tolerance"
+                            />
+                          </label>
+                          <label>
+                            Step tolerance
+                            <input
+                              type="number"
+                              value={homoclinicFromHomotopySaddleDraft.stepTolerance}
+                              onChange={(event) =>
+                                setHomoclinicFromHomotopySaddleDraft((prev) => ({
+                                  ...prev,
+                                  stepTolerance: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homotopy-saddle-step-tolerance"
+                            />
+                          </label>
+                          {homoclinicFromHomotopySaddleError ? (
+                            <div className="field-error">{homoclinicFromHomotopySaddleError}</div>
+                          ) : null}
+                          <button
+                            onClick={handleCreateHomoclinicFromHomotopySaddle}
+                            disabled={
+                              runDisabled ||
+                              !selectedBranchPoint ||
+                              branch.branchType !== 'homotopy_saddle_curve' ||
+                              !homotopyStageDReady
+                            }
+                            data-testid="homoclinic-from-homotopy-saddle-submit"
+                          >
+                            Continue Homoclinic
+                          </button>
+                        </>
+                      )}
                     </div>
                   </InspectorDisclosure>
                 ) : null}

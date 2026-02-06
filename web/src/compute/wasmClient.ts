@@ -11,7 +11,13 @@ import type {
   EquilibriumContinuationResult,
   FoldCurveContinuationRequest,
   ForkCoreClient,
+  HomoclinicContinuationResult,
+  HomoclinicFromHomoclinicRequest,
+  HomoclinicFromHomotopySaddleRequest,
+  HomoclinicFromLargeCycleRequest,
   HopfCurveContinuationRequest,
+  HomotopySaddleContinuationResult,
+  HomotopySaddleFromEquilibriumRequest,
   LimitCycleContinuationFromHopfRequest,
   LimitCycleContinuationFromOrbitRequest,
   LimitCycleContinuationFromPDRequest,
@@ -61,6 +67,26 @@ type WorkerRequest =
       kind: 'runMapCycleContinuationFromPD'
       payload: MapCycleContinuationFromPDRequest
     }
+  | {
+      id: string
+      kind: 'runHomoclinicFromLargeCycle'
+      payload: HomoclinicFromLargeCycleRequest
+    }
+  | {
+      id: string
+      kind: 'runHomoclinicFromHomoclinic'
+      payload: HomoclinicFromHomoclinicRequest
+    }
+  | {
+      id: string
+      kind: 'runHomotopySaddleFromEquilibrium'
+      payload: HomotopySaddleFromEquilibriumRequest
+    }
+  | {
+      id: string
+      kind: 'runHomoclinicFromHomotopySaddle'
+      payload: HomoclinicFromHomotopySaddleRequest
+    }
   | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
   | { id: string; kind: 'cancel' }
 
@@ -82,6 +108,8 @@ type WorkerResponse =
         | ContinuationExtensionResult
         | Codim1CurveBranch
         | LimitCycleContinuationResult
+        | HomoclinicContinuationResult
+        | HomotopySaddleContinuationResult
     }
   | { id: string; ok: false; error: string; aborted?: boolean }
   | WorkerProgress
@@ -105,6 +133,8 @@ export class WasmForkCoreClient implements ForkCoreClient {
           | ContinuationExtensionResult
           | Codim1CurveBranch
           | LimitCycleContinuationResult
+          | HomoclinicContinuationResult
+          | HomotopySaddleContinuationResult
       ) => void
       reject: (error: Error) => void
       onProgress?: (progress: ContinuationProgress) => void
@@ -331,6 +361,68 @@ export class WasmForkCoreClient implements ForkCoreClient {
     return await job.promise
   }
 
+  async runHomoclinicFromLargeCycle(
+    request: HomoclinicFromLargeCycleRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<HomoclinicContinuationResult> {
+    const job = this.queue.enqueue(
+      'runHomoclinicFromLargeCycle',
+      (signal) =>
+        this.runWorker('runHomoclinicFromLargeCycle', request, signal, opts?.onProgress),
+      opts
+    )
+    return await job.promise
+  }
+
+  async runHomoclinicFromHomoclinic(
+    request: HomoclinicFromHomoclinicRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<HomoclinicContinuationResult> {
+    const job = this.queue.enqueue(
+      'runHomoclinicFromHomoclinic',
+      (signal) =>
+        this.runWorker('runHomoclinicFromHomoclinic', request, signal, opts?.onProgress),
+      opts
+    )
+    return await job.promise
+  }
+
+  async runHomotopySaddleFromEquilibrium(
+    request: HomotopySaddleFromEquilibriumRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<HomotopySaddleContinuationResult> {
+    const job = this.queue.enqueue(
+      'runHomotopySaddleFromEquilibrium',
+      (signal) =>
+        this.runWorker(
+          'runHomotopySaddleFromEquilibrium',
+          request,
+          signal,
+          opts?.onProgress
+        ),
+      opts
+    )
+    return await job.promise
+  }
+
+  async runHomoclinicFromHomotopySaddle(
+    request: HomoclinicFromHomotopySaddleRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<HomoclinicContinuationResult> {
+    const job = this.queue.enqueue(
+      'runHomoclinicFromHomotopySaddle',
+      (signal) =>
+        this.runWorker(
+          'runHomoclinicFromHomotopySaddle',
+          request,
+          signal,
+          opts?.onProgress
+        ),
+      opts
+    )
+    return await job.promise
+  }
+
   async validateSystem(
     request: ValidateSystemRequest,
     opts?: { signal?: AbortSignal }
@@ -426,6 +518,30 @@ export class WasmForkCoreClient implements ForkCoreClient {
     onProgress?: (progress: ContinuationProgress) => void
   ): Promise<EquilibriumContinuationResult>
   private runWorker(
+    kind: 'runHomoclinicFromLargeCycle',
+    payload: HomoclinicFromLargeCycleRequest,
+    signal: AbortSignal,
+    onProgress?: (progress: ContinuationProgress) => void
+  ): Promise<HomoclinicContinuationResult>
+  private runWorker(
+    kind: 'runHomoclinicFromHomoclinic',
+    payload: HomoclinicFromHomoclinicRequest,
+    signal: AbortSignal,
+    onProgress?: (progress: ContinuationProgress) => void
+  ): Promise<HomoclinicContinuationResult>
+  private runWorker(
+    kind: 'runHomotopySaddleFromEquilibrium',
+    payload: HomotopySaddleFromEquilibriumRequest,
+    signal: AbortSignal,
+    onProgress?: (progress: ContinuationProgress) => void
+  ): Promise<HomotopySaddleContinuationResult>
+  private runWorker(
+    kind: 'runHomoclinicFromHomotopySaddle',
+    payload: HomoclinicFromHomotopySaddleRequest,
+    signal: AbortSignal,
+    onProgress?: (progress: ContinuationProgress) => void
+  ): Promise<HomoclinicContinuationResult>
+  private runWorker(
     kind: 'validateSystem',
     payload: ValidateSystemRequest,
     signal: AbortSignal
@@ -446,6 +562,10 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | 'runLimitCycleContinuationFromOrbit'
       | 'runLimitCycleContinuationFromPD'
       | 'runMapCycleContinuationFromPD'
+      | 'runHomoclinicFromLargeCycle'
+      | 'runHomoclinicFromHomoclinic'
+      | 'runHomotopySaddleFromEquilibrium'
+      | 'runHomoclinicFromHomotopySaddle'
       | 'validateSystem',
     payload:
       | SimulateOrbitRequest
@@ -462,6 +582,10 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | LimitCycleContinuationFromOrbitRequest
       | LimitCycleContinuationFromPDRequest
       | MapCycleContinuationFromPDRequest
+      | HomoclinicFromLargeCycleRequest
+      | HomoclinicFromHomoclinicRequest
+      | HomotopySaddleFromEquilibriumRequest
+      | HomoclinicFromHomotopySaddleRequest
       | ValidateSystemRequest,
     signal: AbortSignal,
     onProgress?: (progress: ContinuationProgress) => void
@@ -477,6 +601,8 @@ export class WasmForkCoreClient implements ForkCoreClient {
     | ContinuationExtensionResult
     | Codim1CurveBranch
     | LimitCycleContinuationResult
+    | HomoclinicContinuationResult
+    | HomotopySaddleContinuationResult
   > {
     const id = makeStableId('req')
     const message: WorkerRequest =
@@ -508,6 +634,22 @@ export class WasmForkCoreClient implements ForkCoreClient {
                 ? { id, kind, payload: payload as LimitCycleContinuationFromPDRequest }
                 : kind === 'runMapCycleContinuationFromPD'
                   ? { id, kind, payload: payload as MapCycleContinuationFromPDRequest }
+                  : kind === 'runHomoclinicFromLargeCycle'
+                    ? { id, kind, payload: payload as HomoclinicFromLargeCycleRequest }
+                    : kind === 'runHomoclinicFromHomoclinic'
+                      ? { id, kind, payload: payload as HomoclinicFromHomoclinicRequest }
+                      : kind === 'runHomotopySaddleFromEquilibrium'
+                        ? {
+                            id,
+                            kind,
+                            payload: payload as HomotopySaddleFromEquilibriumRequest,
+                          }
+                        : kind === 'runHomoclinicFromHomotopySaddle'
+                          ? {
+                              id,
+                              kind,
+                              payload: payload as HomoclinicFromHomotopySaddleRequest,
+                            }
                   : { id, kind, payload: payload as ValidateSystemRequest }
 
     const promise = new Promise<
@@ -522,6 +664,8 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | ContinuationExtensionResult
       | Codim1CurveBranch
       | LimitCycleContinuationResult
+      | HomoclinicContinuationResult
+      | HomotopySaddleContinuationResult
     >((resolve, reject) => {
       this.pending.set(id, { resolve, reject, onProgress })
     })

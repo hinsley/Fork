@@ -88,6 +88,44 @@ export function runLimitCycleContinuationWithProgress(
 }
 
 /**
+ * Continue a homoclinic curve with stepped progress updates.
+ */
+export function runHomoclinicContinuationWithProgress(
+  bridge: WasmBridge,
+  setup: any,
+  settings: any,
+  forward: boolean,
+  label: string
+): ContinuationBranchData {
+  const runner = bridge.createHomoclinicContinuationRunner(
+    setup,
+    settings,
+    forward
+  );
+
+  return runContinuationRunnerWithProgress(runner, label);
+}
+
+/**
+ * Continue a homotopy-saddle curve with stepped progress updates.
+ */
+export function runHomotopySaddleContinuationWithProgress(
+  bridge: WasmBridge,
+  setup: any,
+  settings: any,
+  forward: boolean,
+  label: string
+): ContinuationBranchData {
+  const runner = bridge.createHomotopySaddleContinuationRunner(
+    setup,
+    settings,
+    forward
+  );
+
+  return runContinuationRunnerWithProgress(runner, label);
+}
+
+/**
  * Extend an existing branch while reporting progress.
  */
 export function runContinuationExtensionWithProgress(

@@ -141,6 +141,18 @@ beforeAll(async () => {
       init_lc_from_pd() {
         return {}
       }
+      init_homoclinic_from_large_cycle() {
+        return {}
+      }
+      init_homoclinic_from_homoclinic() {
+        return {}
+      }
+      init_homotopy_saddle_from_equilibrium() {
+        return {}
+      }
+      init_homoclinic_from_homotopy_saddle() {
+        return {}
+      }
     }
 
     class MockWasmEquilibriumRunner {
@@ -208,6 +220,8 @@ beforeAll(async () => {
       WasmFoldCurveRunner: MockContinuationRunner,
       WasmHopfCurveRunner: MockContinuationRunner,
       WasmLimitCycleRunner: MockLimitCycleRunner,
+      WasmHomoclinicRunner: MockContinuationRunner,
+      WasmHomotopySaddleRunner: MockContinuationRunner,
       WasmContinuationExtensionRunner: MockContinuationRunner,
       WasmCodim1CurveExtensionRunner: MockContinuationRunner,
     }
@@ -311,6 +325,136 @@ describe('forkCoreWorker', () => {
       throw new Error('Expected a continuation result payload.')
     }
     expect(response.result.points).toEqual([])
+  })
+
+  it('runs homoclinic and homotopy continuation handlers', async () => {
+    const handler = requireHandler()
+    const payloadBase = {
+      system: {
+        ...baseSystem,
+        params: [0.2, 0.1],
+        paramNames: ['mu', 'nu'],
+      },
+      settings: continuationSettings,
+      forward: true,
+    }
+
+    await handler({
+      data: {
+        id: 'job-h1',
+        kind: 'runHomoclinicFromLargeCycle',
+        payload: {
+          ...payloadBase,
+          lcState: [0, 1, 1, 0, 2],
+          sourceNtst: 4,
+          sourceNcol: 2,
+          parameterName: 'mu',
+          param2Name: 'nu',
+          targetNtst: 8,
+          targetNcol: 2,
+          freeTime: true,
+          freeEps0: true,
+          freeEps1: false,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(
+      workerScope.postMessage.mock.calls.some(
+        ([payload]) =>
+          (payload as { id?: string; ok?: boolean }).id === 'job-h1' &&
+          (payload as { id?: string; ok?: boolean }).ok === true
+      )
+    ).toBe(true)
+
+    workerScope.postMessage.mockClear()
+
+    await handler({
+      data: {
+        id: 'job-h2',
+        kind: 'runHomoclinicFromHomoclinic',
+        payload: {
+          ...payloadBase,
+          pointState: new Array(80).fill(0),
+          sourceNtst: 8,
+          sourceNcol: 2,
+          parameterName: 'mu',
+          param2Name: 'nu',
+          targetNtst: 8,
+          targetNcol: 2,
+          freeTime: true,
+          freeEps0: true,
+          freeEps1: false,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(
+      workerScope.postMessage.mock.calls.some(
+        ([payload]) =>
+          (payload as { id?: string; ok?: boolean }).id === 'job-h2' &&
+          (payload as { id?: string; ok?: boolean }).ok === true
+      )
+    ).toBe(true)
+
+    workerScope.postMessage.mockClear()
+
+    await handler({
+      data: {
+        id: 'job-h5',
+        kind: 'runHomotopySaddleFromEquilibrium',
+        payload: {
+          ...payloadBase,
+          equilibriumState: [0, 0],
+          parameterName: 'mu',
+          param2Name: 'nu',
+          ntst: 8,
+          ncol: 2,
+          eps0: 0.01,
+          eps1: 0.1,
+          time: 20,
+          eps1Tol: 1e-4,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(
+      workerScope.postMessage.mock.calls.some(
+        ([payload]) =>
+          (payload as { id?: string; ok?: boolean }).id === 'job-h5' &&
+          (payload as { id?: string; ok?: boolean }).ok === true
+      )
+    ).toBe(true)
+
+    workerScope.postMessage.mockClear()
+
+    await handler({
+      data: {
+        id: 'job-h4',
+        kind: 'runHomoclinicFromHomotopySaddle',
+        payload: {
+          ...payloadBase,
+          stageDState: new Array(80).fill(0),
+          sourceNtst: 8,
+          sourceNcol: 2,
+          parameterName: 'mu',
+          param2Name: 'nu',
+          targetNtst: 8,
+          targetNcol: 2,
+          freeTime: true,
+          freeEps0: true,
+          freeEps1: false,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(
+      workerScope.postMessage.mock.calls.some(
+        ([payload]) =>
+          (payload as { id?: string; ok?: boolean }).id === 'job-h4' &&
+          (payload as { id?: string; ok?: boolean }).ok === true
+      )
+    ).toBe(true)
   })
 
   it('simulates orbits and returns time series data', async () => {

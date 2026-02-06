@@ -11,7 +11,13 @@ import type {
   EquilibriumContinuationResult,
   FoldCurveContinuationRequest,
   ForkCoreClient,
+  HomoclinicContinuationResult,
+  HomoclinicFromHomoclinicRequest,
+  HomoclinicFromHomotopySaddleRequest,
+  HomoclinicFromLargeCycleRequest,
   HopfCurveContinuationRequest,
+  HomotopySaddleContinuationResult,
+  HomotopySaddleFromEquilibriumRequest,
   LimitCycleContinuationFromHopfRequest,
   LimitCycleContinuationFromOrbitRequest,
   LimitCycleContinuationFromPDRequest,
@@ -676,6 +682,269 @@ export class MockForkCoreClient implements ForkCoreClient {
             type: 'LimitCycle',
             ntst: request.ntst * 2,
             ncol: request.ncol,
+          },
+        })
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runHomoclinicFromLargeCycle(
+    request: HomoclinicFromLargeCycleRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<HomoclinicContinuationResult> {
+    const job = this.queue.enqueue(
+      'runHomoclinicFromLargeCycle',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const paramIdx = request.system.paramNames.indexOf(request.parameterName)
+        const paramValue = paramIdx >= 0 ? request.system.params[paramIdx] ?? 0 : 0
+        const progress: ContinuationProgress = {
+          done: false,
+          current_step: 0,
+          max_steps: request.settings.max_steps,
+          points_computed: 0,
+          bifurcations_found: 0,
+          current_param: paramValue,
+        }
+        opts?.onProgress?.(progress)
+        opts?.onProgress?.({
+          ...progress,
+          done: true,
+          current_step: request.settings.max_steps,
+          points_computed: 2,
+          current_param: paramValue + request.settings.step_size,
+        })
+
+        const state =
+          request.lcState.length > 0
+            ? request.lcState
+            : new Array(request.system.varNames.length + 1).fill(0)
+        return normalizeBranchEigenvalues({
+          points: [
+            { state, param_value: paramValue, stability: 'None', eigenvalues: [] },
+            {
+              state,
+              param_value: paramValue + request.settings.step_size,
+              stability: 'None',
+              eigenvalues: [],
+            },
+          ],
+          bifurcations: [],
+          indices: [0, 1],
+          branch_type: {
+            type: 'HomoclinicCurve',
+            ntst: request.targetNtst,
+            ncol: request.targetNcol,
+            param1_name: request.parameterName,
+            param2_name: request.param2Name,
+            free_time: request.freeTime,
+            free_eps0: request.freeEps0,
+            free_eps1: request.freeEps1,
+          },
+        })
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runHomoclinicFromHomoclinic(
+    request: HomoclinicFromHomoclinicRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<HomoclinicContinuationResult> {
+    const job = this.queue.enqueue(
+      'runHomoclinicFromHomoclinic',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const paramIdx = request.system.paramNames.indexOf(request.parameterName)
+        const paramValue = paramIdx >= 0 ? request.system.params[paramIdx] ?? 0 : 0
+        const progress: ContinuationProgress = {
+          done: false,
+          current_step: 0,
+          max_steps: request.settings.max_steps,
+          points_computed: 0,
+          bifurcations_found: 0,
+          current_param: paramValue,
+        }
+        opts?.onProgress?.(progress)
+        opts?.onProgress?.({
+          ...progress,
+          done: true,
+          current_step: request.settings.max_steps,
+          points_computed: 2,
+          current_param: paramValue + request.settings.step_size,
+        })
+
+        const state =
+          request.pointState.length > 0
+            ? request.pointState
+            : new Array(request.system.varNames.length + 1).fill(0)
+        return normalizeBranchEigenvalues({
+          points: [
+            { state, param_value: paramValue, stability: 'None', eigenvalues: [] },
+            {
+              state,
+              param_value: paramValue + request.settings.step_size,
+              stability: 'None',
+              eigenvalues: [],
+            },
+          ],
+          bifurcations: [],
+          indices: [0, 1],
+          branch_type: {
+            type: 'HomoclinicCurve',
+            ntst: request.targetNtst,
+            ncol: request.targetNcol,
+            param1_name: request.parameterName,
+            param2_name: request.param2Name,
+            free_time: request.freeTime,
+            free_eps0: request.freeEps0,
+            free_eps1: request.freeEps1,
+          },
+        })
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runHomotopySaddleFromEquilibrium(
+    request: HomotopySaddleFromEquilibriumRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<HomotopySaddleContinuationResult> {
+    const job = this.queue.enqueue(
+      'runHomotopySaddleFromEquilibrium',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const paramIdx = request.system.paramNames.indexOf(request.parameterName)
+        const paramValue = paramIdx >= 0 ? request.system.params[paramIdx] ?? 0 : 0
+        const progress: ContinuationProgress = {
+          done: false,
+          current_step: 0,
+          max_steps: request.settings.max_steps,
+          points_computed: 0,
+          bifurcations_found: 0,
+          current_param: paramValue,
+        }
+        opts?.onProgress?.(progress)
+        opts?.onProgress?.({
+          ...progress,
+          done: true,
+          current_step: request.settings.max_steps,
+          points_computed: 2,
+          bifurcations_found: 1,
+          current_param: paramValue + request.settings.step_size,
+        })
+
+        const state =
+          request.equilibriumState.length > 0
+            ? request.equilibriumState
+            : new Array(request.system.varNames.length).fill(0)
+        return normalizeBranchEigenvalues({
+          points: [
+            { state, param_value: paramValue, stability: 'None', eigenvalues: [] },
+            {
+              state,
+              param_value: paramValue + request.settings.step_size,
+              stability: 'None',
+              eigenvalues: [],
+            },
+          ],
+          bifurcations: [1],
+          indices: [0, 1],
+          branch_type: {
+            type: 'HomotopySaddleCurve',
+            ntst: request.ntst,
+            ncol: request.ncol,
+            param1_name: request.parameterName,
+            param2_name: request.param2Name,
+            stage: 'StageD',
+          },
+        })
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runHomoclinicFromHomotopySaddle(
+    request: HomoclinicFromHomotopySaddleRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<HomoclinicContinuationResult> {
+    const job = this.queue.enqueue(
+      'runHomoclinicFromHomotopySaddle',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const paramIdx = request.system.paramNames.indexOf(request.parameterName)
+        const paramValue = paramIdx >= 0 ? request.system.params[paramIdx] ?? 0 : 0
+        const progress: ContinuationProgress = {
+          done: false,
+          current_step: 0,
+          max_steps: request.settings.max_steps,
+          points_computed: 0,
+          bifurcations_found: 0,
+          current_param: paramValue,
+        }
+        opts?.onProgress?.(progress)
+        opts?.onProgress?.({
+          ...progress,
+          done: true,
+          current_step: request.settings.max_steps,
+          points_computed: 2,
+          current_param: paramValue + request.settings.step_size,
+        })
+
+        const state =
+          request.stageDState.length > 0
+            ? request.stageDState
+            : new Array(request.system.varNames.length + 1).fill(0)
+        return normalizeBranchEigenvalues({
+          points: [
+            { state, param_value: paramValue, stability: 'None', eigenvalues: [] },
+            {
+              state,
+              param_value: paramValue + request.settings.step_size,
+              stability: 'None',
+              eigenvalues: [],
+            },
+          ],
+          bifurcations: [],
+          indices: [0, 1],
+          branch_type: {
+            type: 'HomoclinicCurve',
+            ntst: request.targetNtst,
+            ncol: request.targetNcol,
+            param1_name: request.parameterName,
+            param2_name: request.param2Name,
+            free_time: request.freeTime,
+            free_eps0: request.freeEps0,
+            free_eps1: request.freeEps1,
           },
         })
       },

@@ -8,11 +8,14 @@ use fork_core::continuation::equilibrium::{
 };
 use fork_core::continuation::{
     continue_limit_cycle_collocation, continue_with_problem, extend_limit_cycle_collocation,
+    continue_homoclinic_curve, continue_homotopy_saddle_curve,
+    homoclinic_setup_from_homoclinic_point, homoclinic_setup_from_homotopy_saddle_point,
+    homoclinic_setup_from_large_cycle, homotopy_saddle_setup_from_equilibrium,
     limit_cycle_setup_from_hopf, limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd,
     BranchType, Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType, Codim2BifurcationType,
     CollocationConfig, ContinuationBranch, ContinuationSettings, FoldCurveProblem,
-    HopfCurveProblem, LPCCurveProblem, LimitCycleSetup, NSCurveProblem, OrbitTimeMode,
-    PDCurveProblem, StepResult,
+    HomoclinicExtraFlags, HomoclinicSetup, HomotopySaddleSetup, HopfCurveProblem, LPCCurveProblem,
+    LimitCycleSetup, NSCurveProblem, OrbitTimeMode, PDCurveProblem, StepResult,
 };
 use fork_core::equilibrium::{compute_jacobian, SystemKind};
 use fork_core::traits::DynamicalSystem;
@@ -178,6 +181,11 @@ impl WasmSystem {
                     forward,
                 )
                 .map_err(|e| JsValue::from_str(&format!("LC branch extension failed: {}", e)))?
+            }
+            BranchType::HomoclinicCurve { .. } | BranchType::HomotopySaddleCurve { .. } => {
+                return Err(JsValue::from_str(
+                    "Branch extension for homoclinic and homotopy-saddle curves is not available yet.",
+                ))
             }
         };
 
@@ -407,6 +415,246 @@ impl WasmSystem {
             forward,
         )
         .map_err(|e| JsValue::from_str(&format!("Limit cycle continuation failed: {}", e)))?;
+
+        to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn init_homoclinic_from_large_cycle(
+        &mut self,
+        lc_state: Vec<f64>,
+        source_ntst: u32,
+        source_ncol: u32,
+        parameter_name: &str,
+        param2_name: &str,
+        target_ntst: u32,
+        target_ncol: u32,
+        free_time: bool,
+        free_eps0: bool,
+        free_eps1: bool,
+    ) -> Result<JsValue, JsValue> {
+        let param1_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
+        let param2_index = *self
+            .system
+            .param_map
+            .get(param2_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+        let base_params = self.system.params.clone();
+
+        let setup = homoclinic_setup_from_large_cycle(
+            &mut self.system,
+            &lc_state,
+            source_ntst as usize,
+            source_ncol as usize,
+            target_ntst as usize,
+            target_ncol as usize,
+            &base_params,
+            param1_index,
+            param2_index,
+            parameter_name,
+            param2_name,
+            HomoclinicExtraFlags {
+                free_time,
+                free_eps0,
+                free_eps1,
+            },
+        )
+        .map_err(|e| {
+            JsValue::from_str(&format!(
+                "Failed to initialize homoclinic setup from large cycle: {}",
+                e
+            ))
+        })?;
+
+        to_value(&setup).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn init_homoclinic_from_homoclinic(
+        &mut self,
+        point_state: Vec<f64>,
+        source_ntst: u32,
+        source_ncol: u32,
+        parameter_name: &str,
+        param2_name: &str,
+        target_ntst: u32,
+        target_ncol: u32,
+        free_time: bool,
+        free_eps0: bool,
+        free_eps1: bool,
+    ) -> Result<JsValue, JsValue> {
+        let param1_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
+        let param2_index = *self
+            .system
+            .param_map
+            .get(param2_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+        let base_params = self.system.params.clone();
+
+        let setup = homoclinic_setup_from_homoclinic_point(
+            &mut self.system,
+            &point_state,
+            source_ntst as usize,
+            source_ncol as usize,
+            target_ntst as usize,
+            target_ncol as usize,
+            &base_params,
+            param1_index,
+            param2_index,
+            parameter_name,
+            param2_name,
+            HomoclinicExtraFlags {
+                free_time,
+                free_eps0,
+                free_eps1,
+            },
+        )
+        .map_err(|e| {
+            JsValue::from_str(&format!(
+                "Failed to initialize homoclinic setup from homoclinic point: {}",
+                e
+            ))
+        })?;
+
+        to_value(&setup).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn init_homotopy_saddle_from_equilibrium(
+        &mut self,
+        equilibrium_state: Vec<f64>,
+        parameter_name: &str,
+        param2_name: &str,
+        ntst: u32,
+        ncol: u32,
+        eps0: f64,
+        eps1: f64,
+        time: f64,
+        eps1_tol: f64,
+    ) -> Result<JsValue, JsValue> {
+        let param1_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
+        let param2_index = *self
+            .system
+            .param_map
+            .get(param2_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+        let base_params = self.system.params.clone();
+
+        let setup = homotopy_saddle_setup_from_equilibrium(
+            &mut self.system,
+            &equilibrium_state,
+            &base_params,
+            param1_index,
+            param2_index,
+            parameter_name,
+            param2_name,
+            ntst as usize,
+            ncol as usize,
+            eps0,
+            eps1,
+            time,
+            eps1_tol,
+        )
+        .map_err(|e| {
+            JsValue::from_str(&format!(
+                "Failed to initialize homotopy-saddle setup from equilibrium: {}",
+                e
+            ))
+        })?;
+
+        to_value(&setup).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn init_homoclinic_from_homotopy_saddle(
+        &mut self,
+        stage_d_state: Vec<f64>,
+        source_ntst: u32,
+        source_ncol: u32,
+        parameter_name: &str,
+        param2_name: &str,
+        target_ntst: u32,
+        target_ncol: u32,
+        free_time: bool,
+        free_eps0: bool,
+        free_eps1: bool,
+    ) -> Result<JsValue, JsValue> {
+        let param1_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
+        let param2_index = *self
+            .system
+            .param_map
+            .get(param2_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+        let base_params = self.system.params.clone();
+
+        let setup = homoclinic_setup_from_homotopy_saddle_point(
+            &mut self.system,
+            &stage_d_state,
+            source_ntst as usize,
+            source_ncol as usize,
+            target_ntst as usize,
+            target_ncol as usize,
+            &base_params,
+            param1_index,
+            param2_index,
+            parameter_name,
+            param2_name,
+            HomoclinicExtraFlags {
+                free_time,
+                free_eps0,
+                free_eps1,
+            },
+        )
+        .map_err(|e| {
+            JsValue::from_str(&format!(
+                "Failed to initialize homoclinic setup from homotopy-saddle point: {}",
+                e
+            ))
+        })?;
+
+        to_value(&setup).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn compute_homoclinic_continuation(
+        &mut self,
+        setup_val: JsValue,
+        settings_val: JsValue,
+        forward: bool,
+    ) -> Result<JsValue, JsValue> {
+        let setup: HomoclinicSetup = from_value(setup_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid homoclinic setup: {}", e)))?;
+        let settings: ContinuationSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
+
+        let branch = continue_homoclinic_curve(&mut self.system, setup, settings, forward)
+            .map_err(|e| JsValue::from_str(&format!("Homoclinic continuation failed: {}", e)))?;
+
+        to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn compute_homotopy_saddle_continuation(
+        &mut self,
+        setup_val: JsValue,
+        settings_val: JsValue,
+        forward: bool,
+    ) -> Result<JsValue, JsValue> {
+        let setup: HomotopySaddleSetup = from_value(setup_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid homotopy-saddle setup: {}", e)))?;
+        let settings: ContinuationSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
+
+        let branch = continue_homotopy_saddle_curve(&mut self.system, setup, settings, forward)
+            .map_err(|e| {
+                JsValue::from_str(&format!("Homotopy-saddle continuation failed: {}", e))
+            })?;
 
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }

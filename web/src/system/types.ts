@@ -102,6 +102,24 @@ export interface ContinuationPoint {
 export type BranchType =
   | { type: 'Equilibrium' }
   | { type: 'LimitCycle'; ntst: number; ncol: number }
+  | {
+      type: 'HomoclinicCurve'
+      ntst: number
+      ncol: number
+      param1_name: string
+      param2_name: string
+      free_time: boolean
+      free_eps0: boolean
+      free_eps1: boolean
+    }
+  | {
+      type: 'HomotopySaddleCurve'
+      ntst: number
+      ncol: number
+      param1_name: string
+      param2_name: string
+      stage: 'StageA' | 'StageB' | 'StageC' | 'StageD'
+    }
   | { type: 'FoldCurve'; param1_name: string; param2_name: string }
   | { type: 'HopfCurve'; param1_name: string; param2_name: string }
   | { type: 'LPCCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
@@ -126,6 +144,8 @@ export interface ContinuationObject {
   branchType:
     | 'equilibrium'
     | 'limit_cycle'
+    | 'homoclinic_curve'
+    | 'homotopy_saddle_curve'
     | 'fold_curve'
     | 'hopf_curve'
     | 'lpc_curve'
