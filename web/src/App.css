@@ -576,6 +576,31 @@
   text-align: right;
 }
 
+.isocline-axis-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.isocline-axis-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.isocline-axis-toggle input[type='checkbox'] {
+  margin: 0;
+}
+
+.isocline-table__label {
+  text-align: left;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
 .inspector-subsection {
   display: grid;
   gap: 6px;

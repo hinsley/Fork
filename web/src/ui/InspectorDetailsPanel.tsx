@@ -1603,6 +1603,22 @@ export function InspectorDetailsPanel({
     if (!isocline) return new Set<string>()
     return new Set(isocline.axes.map((axis) => axis.variableName))
   }, [isocline])
+  const isoclineActiveAxes = useMemo(() => {
+    if (!isocline) return []
+    return systemDraft.varNames
+      .map((name) => isocline.axes.find((axis) => axis.variableName === name))
+      .filter((axis): axis is IsoclineObject['axes'][number] => Boolean(axis))
+  }, [isocline, systemDraft.varNames])
+  const isoclineFrozenVariables = useMemo(() => {
+    if (!isocline) return []
+    return systemDraft.varNames
+      .map((name, index) => ({
+        name,
+        index,
+        value: isocline.frozenState[index] ?? 0,
+      }))
+      .filter((entry) => !isoclineActiveSet.has(entry.name))
+  }, [isocline, isoclineActiveSet, systemDraft.varNames])
   const isoclineResolvedExpression = useMemo(() => {
     if (!isocline) return ''
     return resolveIsoclineSourceExpression(system.config, isocline)
@@ -1855,7 +1871,8 @@ export function InspectorDetailsPanel({
     if (
       current.type === 'orbit' ||
       current.type === 'equilibrium' ||
-      current.type === 'limit_cycle'
+      current.type === 'limit_cycle' ||
+      current.type === 'isocline'
     ) {
       setParamOverrideDraft(makeParamOverrideDraft(stableSystemConfig, current))
       setParamOverrideError(null)
@@ -4199,7 +4216,7 @@ export function InspectorDetailsPanel({
             </div>
           ) : null}
 
-          {paramOverrideTarget ? (
+          {paramOverrideTarget && !isocline ? (
             <InspectorDisclosure
               key={`${selectionKey}-parameters`}
               title={paramOverrideTitle}
@@ -6008,14 +6025,13 @@ export function InspectorDetailsPanel({
                     Active variables ({Math.min(isocline.axes.length, isoclineMaxActiveVariables)}/
                     {isoclineMaxActiveVariables})
                   </h4>
-                  {systemDraft.varNames.map((name) => {
-                    const axis = isocline.axes.find((entry) => entry.variableName === name)
-                    const active = Boolean(axis)
-                    const disableActivate =
-                      !active && isocline.axes.length >= isoclineMaxActiveVariables
-                    return (
-                      <div key={`isocline-axis-${name}`} className="inspector-subsection">
-                        <label>
+                  <div className="isocline-axis-selector">
+                    {systemDraft.varNames.map((name) => {
+                      const active = isoclineActiveSet.has(name)
+                      const disableActivate =
+                        !active && isocline.axes.length >= isoclineMaxActiveVariables
+                      return (
+                        <label key={`isocline-axis-toggle-${name}`} className="isocline-axis-toggle">
                           <input
                             type="checkbox"
                             checked={active}
@@ -6024,81 +6040,148 @@ export function InspectorDetailsPanel({
                               handleToggleIsoclineAxis(name, event.target.checked)
                             }
                             data-testid={`isocline-axis-active-${name}`}
-                          />{' '}
-                          {name}
+                          />
+                          <span>{name}</span>
                         </label>
-                        {axis ? (
-                          <div className="continuation-grid">
-                            <label>
-                              Min
-                              <input
-                                type="number"
-                                value={axis.min}
-                                onChange={(event) =>
-                                  handleUpdateIsoclineAxisField(
-                                    axis.variableName,
-                                    'min',
-                                    event.target.value
-                                  )
-                                }
-                                data-testid={`isocline-axis-min-${name}`}
-                              />
-                            </label>
-                            <label>
-                              Max
-                              <input
-                                type="number"
-                                value={axis.max}
-                                onChange={(event) =>
-                                  handleUpdateIsoclineAxisField(
-                                    axis.variableName,
-                                    'max',
-                                    event.target.value
-                                  )
-                                }
-                                data-testid={`isocline-axis-max-${name}`}
-                              />
-                            </label>
-                            <label>
-                              Samples
-                              <input
-                                type="number"
-                                value={axis.samples}
-                                onChange={(event) =>
-                                  handleUpdateIsoclineAxisField(
-                                    axis.variableName,
-                                    'samples',
-                                    event.target.value
-                                  )
-                                }
-                                data-testid={`isocline-axis-samples-${name}`}
-                              />
-                            </label>
-                          </div>
-                        ) : null}
-                      </div>
-                    )
-                  })}
+                      )
+                    })}
+                  </div>
+                  {isoclineActiveAxes.length > 0 ? (
+                    <div
+                      className="state-table__wrap"
+                      role="region"
+                      aria-label="Isocline active variable ranges"
+                    >
+                      <table className="state-table__grid isocline-axis-table">
+                        <thead>
+                          <tr>
+                            <th>Variable</th>
+                            <th>Min</th>
+                            <th>Max</th>
+                            <th>Samples</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {isoclineActiveAxes.map((axis) => (
+                            <tr key={`isocline-axis-row-${axis.variableName}`}>
+                              <td className="isocline-table__label">{axis.variableName}</td>
+                              <td>
+                                <input
+                                  type="number"
+                                  className="state-table__input"
+                                  value={axis.min}
+                                  onChange={(event) =>
+                                    handleUpdateIsoclineAxisField(
+                                      axis.variableName,
+                                      'min',
+                                      event.target.value
+                                    )
+                                  }
+                                  data-testid={`isocline-axis-min-${axis.variableName}`}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  className="state-table__input"
+                                  value={axis.max}
+                                  onChange={(event) =>
+                                    handleUpdateIsoclineAxisField(
+                                      axis.variableName,
+                                      'max',
+                                      event.target.value
+                                    )
+                                  }
+                                  data-testid={`isocline-axis-max-${axis.variableName}`}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  className="state-table__input"
+                                  value={axis.samples}
+                                  onChange={(event) =>
+                                    handleUpdateIsoclineAxisField(
+                                      axis.variableName,
+                                      'samples',
+                                      event.target.value
+                                    )
+                                  }
+                                  data-testid={`isocline-axis-samples-${axis.variableName}`}
+                                />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="empty-state">Select at least one active variable.</p>
+                  )}
                 </div>
 
-                <div className="inspector-subsection">
-                  <h4 className="inspector-subheading">Frozen values</h4>
-                  {systemDraft.varNames
-                    .map((name, index) => ({ name, index }))
-                    .filter((entry) => !isoclineActiveSet.has(entry.name))
-                    .map(({ name, index }) => (
-                      <label key={`isocline-frozen-${name}`}>
-                        {name}
-                        <input
-                          type="number"
-                          value={isocline.frozenState[index] ?? 0}
-                          onChange={(event) =>
-                            handleUpdateIsoclineFrozenValue(index, event.target.value)
-                          }
-                          data-testid={`isocline-frozen-${name}`}
-                        />
-                      </label>
-                    ))}
+                {isoclineFrozenVariables.length > 0 ? (
+                  <div className="inspector-subsection" data-testid="isocline-frozen-table">
+                    <h4 className="inspector-subheading">Frozen variables</h4>
+                    <div
+                      className="state-table__wrap"
+                      role="region"
+                      aria-label="Isocline frozen variables"
+                    >
+                      <table className="state-table__grid isocline-frozen-table">
+                        <thead>
+                          <tr>
+                            <th>Variable</th>
+                            <th>Value</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {isoclineFrozenVariables.map(({ name, index, value }) => (
+                            <tr key={`isocline-frozen-row-${name}`}>
+                              <td className="isocline-table__label">{name}</td>
+                              <td>
+                                <input
+                                  type="number"
+                                  className="state-table__input"
+                                  value={value}
+                                  onChange={(event) =>
+                                    handleUpdateIsoclineFrozenValue(index, event.target.value)
+                                  }
+                                  data-testid={`isocline-frozen-${name}`}
+                                />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="inspector-subsection" data-testid="isocline-parameter-table">
+                  <StateTable
+                    title="Isocline parameters"
+                    varNames={systemDraft.paramNames}
+                    values={paramOverrideDraft}
+                    onChange={handleParamOverrideChange}
+                    onCopy={() => void writeClipboardText(formatPointValues(paramOverrideDraft))}
+                    onPaste={handlePasteParamOverride}
+                    emptyMessage="No parameters defined yet."
+                    testIdPrefix="param-override"
+                  />
+                  {hasParamOverride ? (
+                    <div className="inspector-inline-actions">
+                      <button
+                        type="button"
+                        className="inspector-inline-button"
+                        onClick={handleClearParamOverride}
+                        data-testid="param-override-clear"
+                      >
+                        Restore default parameters
+                      </button>
+                    </div>
+                  ) : null}
+                  {paramOverrideError ? <div className="field-error">{paramOverrideError}</div> : null}
                 </div>
 
                 {!isocline.lastComputed ? (
