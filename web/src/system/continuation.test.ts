@@ -11,6 +11,7 @@ import {
   interpretLimitCycleStability,
   normalizeBranchEigenvalues,
   normalizeEigenvalueArray,
+  resolveContinuationPointEquilibriumState,
   resolveContinuationPointParam2Value,
   serializeBranchDataForWasm,
 } from './continuation'
@@ -207,6 +208,34 @@ describe('continuation helpers', () => {
     )
 
     expect(normalized.points[0].param2_value).toBeCloseTo(p2, 12)
+  })
+
+  it('extracts equilibrium coordinates from packed homoclinic states', () => {
+    const x0 = [1.25, -0.75]
+    const state = [
+      0, 0, 1, 1, 2, 2,
+      0.5, 0.5, 1.5, 1.5,
+      ...x0,
+      0.33,
+      8, 0.02, 0, 0,
+    ]
+
+    const equilibriumState = resolveContinuationPointEquilibriumState(
+      { state },
+      {
+        type: 'HomoclinicCurve',
+        ntst: 2,
+        ncol: 1,
+        param1_name: 'a',
+        param2_name: 'b',
+        free_time: true,
+        free_eps0: true,
+        free_eps1: false,
+      },
+      2
+    )
+
+    expect(equilibriumState).toEqual(x0)
   })
 
   it('extracts orbit profile from packed-tail homoclinic state', () => {

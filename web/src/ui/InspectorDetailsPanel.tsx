@@ -72,6 +72,7 @@ import {
   getBranchParams,
   interpretLimitCycleStability,
   normalizeEigenvalueArray,
+  resolveContinuationPointEquilibriumState,
   resolveContinuationPointParam2Value,
 } from '../system/continuation'
 import { isCliSafeName, toCliSafeName } from '../utils/naming'
@@ -2850,6 +2851,17 @@ export function InspectorDetailsPanel({
     systemDraft.paramNames,
     systemDraft.varNames.length,
   ])
+  const selectedBranchPointState = useMemo(() => {
+    if (!branch || !selectedBranchPoint) return []
+    const equilibriumState = resolveContinuationPointEquilibriumState(
+      selectedBranchPoint,
+      branch.data.branch_type,
+      systemDraft.varNames.length
+    )
+    return equilibriumState && equilibriumState.length > 0
+      ? equilibriumState
+      : selectedBranchPoint.state
+  }, [branch, selectedBranchPoint, systemDraft.varNames.length])
   const limitCycleRenderData = useMemo(() => {
     if (!limitCycleRenderPoint || !limitCycleRenderBranch) return null
     const baseParams = getBranchParams(system, limitCycleRenderBranch)
@@ -8252,13 +8264,13 @@ export function InspectorDetailsPanel({
                             />
                             <div className="inspector-subheading-row">
                               <h4 className="inspector-subheading">State</h4>
-                              {selectedBranchPoint.state.length > 0 ? (
+                              {selectedBranchPointState.length > 0 ? (
                                 <button
                                   type="button"
                                   className="inspector-inline-button"
                                   onClick={() =>
                                     void writeClipboardText(
-                                      formatPointValues(selectedBranchPoint.state)
+                                      formatPointValues(selectedBranchPointState)
                                     )
                                   }
                                 >
@@ -8270,7 +8282,7 @@ export function InspectorDetailsPanel({
                               rows={systemDraft.varNames.map((name, index) => ({
                                 label: name || `x${index + 1}`,
                                 value: formatNumber(
-                                  selectedBranchPoint.state[index] ?? Number.NaN,
+                                  selectedBranchPointState[index] ?? Number.NaN,
                                   6
                                 ),
                               }))}

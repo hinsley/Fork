@@ -294,32 +294,65 @@ export function resolveContinuationPointParam2Value(
   if (!Number.isFinite(stateDimension) || stateDimension < 1) {
     return undefined
   }
-  const dim = Math.max(1, Math.round(stateDimension))
-  let ntst: number | null = null
-  let ncol: number | null = null
-
-  if (branchType.type === 'HomoclinicCurve' || branchType.type === 'HomotopySaddleCurve') {
-    ntst = branchType.ntst
-    ncol = branchType.ncol
-  } else {
-    return undefined
-  }
-
-  if (!Number.isInteger(ntst) || !Number.isInteger(ncol) || ntst <= 0 || ncol <= 0) {
+  const offsets = resolveHomoclinicPackedOffsets(branchType, stateDimension)
+  if (!offsets) {
     return undefined
   }
   if (!Array.isArray(point.state) || point.state.length === 0) {
     return undefined
   }
 
-  const meshLen = (ntst + 1) * dim
-  const stageLen = ntst * ncol * dim
-  const p2Index = meshLen + stageLen + dim
+  const p2Index = offsets.param2Index
   if (p2Index < 0 || p2Index >= point.state.length) {
     return undefined
   }
   const value = point.state[p2Index]
   return Number.isFinite(value) ? value : undefined
+}
+
+export function resolveContinuationPointEquilibriumState(
+  point: Pick<ContinuationPoint, 'state'>,
+  branchType: ContinuationBranchData['branch_type'] | undefined,
+  stateDimension: number
+): number[] | undefined {
+  const offsets = resolveHomoclinicPackedOffsets(branchType, stateDimension)
+  if (!offsets) return undefined
+  if (!Array.isArray(point.state) || point.state.length === 0) {
+    return undefined
+  }
+  const start = offsets.equilibriumStart
+  const end = start + offsets.dim
+  if (start < 0 || end > point.state.length) {
+    return undefined
+  }
+  const values = point.state.slice(start, end)
+  return values.every((value) => Number.isFinite(value)) ? values : undefined
+}
+
+function resolveHomoclinicPackedOffsets(
+  branchType: ContinuationBranchData['branch_type'] | undefined,
+  stateDimension: number
+): { dim: number; equilibriumStart: number; param2Index: number } | null {
+  if (!branchType || typeof branchType !== 'object' || !('type' in branchType)) {
+    return null
+  }
+  if (!Number.isFinite(stateDimension) || stateDimension < 1) {
+    return null
+  }
+  if (branchType.type !== 'HomoclinicCurve' && branchType.type !== 'HomotopySaddleCurve') {
+    return null
+  }
+  const ntst = branchType.ntst
+  const ncol = branchType.ncol
+  if (!Number.isInteger(ntst) || !Number.isInteger(ncol) || ntst <= 0 || ncol <= 0) {
+    return null
+  }
+  const dim = Math.max(1, Math.round(stateDimension))
+  const meshLen = (ntst + 1) * dim
+  const stageLen = ntst * ncol * dim
+  const equilibriumStart = meshLen + stageLen
+  const param2Index = equilibriumStart + dim
+  return { dim, equilibriumStart, param2Index }
 }
 
 function serializeEigenvalueArray(raw: EigenvalueInput[] | undefined): EigenvalueWire[] {

@@ -36,6 +36,7 @@ import {
   extractLimitCycleProfile,
   formatBifurcationLabel,
   getBranchParams,
+  resolveContinuationPointEquilibriumState,
   resolveContinuationPointParam2Value,
   type LimitCycleProfileLayout,
 } from '../system/continuation'
@@ -934,6 +935,15 @@ function resolveAxisValue(
   if (axis.kind === 'state') {
     const index = system.config.varNames.indexOf(axis.name)
     if (index < 0) return null
+    const equilibriumState = resolveContinuationPointEquilibriumState(
+      point,
+      branch.data.branch_type,
+      system.config.varNames.length
+    )
+    if (equilibriumState && index < equilibriumState.length) {
+      const value = equilibriumState[index]
+      return Number.isFinite(value) ? value : null
+    }
     const value = point.state[index]
     return Number.isFinite(value) ? value : null
   }
@@ -2537,7 +2547,10 @@ function buildDiagramTraces(
           dim,
           ntst,
           ncol,
-          { layout }
+          {
+            layout,
+            allowPackedTail: allowsPackedTailLimitCycleProfile(branch.branchType),
+          }
         )
         if (profilePoints.length === 0) continue
 

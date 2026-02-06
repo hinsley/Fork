@@ -711,6 +711,125 @@ describe('ViewportPanel view state wiring', () => {
     expect(bifTrace?.text?.[0]).toContain('Period Doubling')
   })
 
+  it('renders homoclinic branches on flow state-variable bifurcation diagrams', () => {
+    const config: SystemConfig = {
+      name: 'Flow_Homoc_Diagram',
+      equations: ['y', '-x'],
+      params: [0.2, 0.1],
+      paramNames: ['mu', 'nu'],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: config.name, config })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_Seed',
+      systemName: config.name,
+      solution: {
+        state: [0, 0],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [0, 0, 0, 0],
+        eigenpairs: [],
+      },
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+    const continuationSettings: ContinuationSettings = {
+      step_size: 0.01,
+      min_step_size: 1e-6,
+      max_step_size: 0.1,
+      max_steps: 10,
+      corrector_steps: 4,
+      corrector_tolerance: 1e-6,
+      step_tolerance: 1e-6,
+    }
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'homoc_branch',
+      systemName: config.name,
+      parameterName: 'mu, nu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'homoclinic_curve',
+      data: {
+        points: [
+          {
+            state: [
+              // mesh + stage
+              0, 0, 1, 0, 2, 0, 0.5, 0, 1.5, 0,
+              // x0 + p2 + extras/tail
+              0.1, 0.2, 0.1, 8, 0.02, 0, 0,
+            ],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [
+              // mesh + stage
+              1, 1, 2, 1, 3, 1, 1.5, 1, 2.5, 1,
+              // x0 + p2 + extras/tail
+              0.4, 0.5, 0.12, 9, 0.02, 0, 0,
+            ],
+            param_value: 0.3,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [1],
+        indices: [0, 1],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 2,
+          ncol: 1,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          free_time: true,
+          free_eps0: true,
+          free_eps1: false,
+        },
+      },
+      settings: continuationSettings,
+      timestamp: nowIso(),
+      params: [...config.params],
+    }
+    const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
+    system = branchResult.system
+    const diagramResult = addBifurcationDiagram(system, 'Diagram 1')
+    system = updateBifurcationDiagram(diagramResult.system, diagramResult.nodeId, {
+      xAxis: { kind: 'state', name: 'x' },
+      yAxis: { kind: 'state', name: 'y' },
+    })
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === diagramResult.nodeId)
+    expect(props).toBeTruthy()
+    const mainTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === branch.name &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    ) as
+      | {
+          x?: Array<number | null>
+          y?: Array<number | null>
+        }
+      | undefined
+    expect(mainTrace).toBeTruthy()
+    const numericX = (mainTrace?.x ?? []).filter(
+      (value) => typeof value === 'number'
+    ) as number[]
+    const numericY = (mainTrace?.y ?? []).filter(
+      (value) => typeof value === 'number'
+    ) as number[]
+    expect(numericX.length).toBeGreaterThan(0)
+    expect(numericY.length).toBeGreaterThan(0)
+  })
+
   it('expands 1D map sampling range to include cycle points', async () => {
     const config: SystemConfig = {
       name: 'Logistic_Map',

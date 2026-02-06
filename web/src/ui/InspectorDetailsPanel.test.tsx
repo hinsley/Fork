@@ -1745,6 +1745,114 @@ describe('InspectorDetailsPanel', () => {
     })
   })
 
+  it('shows homoclinic point state as equilibrium coordinates in point details', async () => {
+    const user = userEvent.setup()
+    const base = createSystem({
+      name: 'Homoc_State_Details',
+      config: {
+        name: 'Homoc_State_Details',
+        equations: ['y', '-x'],
+        params: [0.2, 0.1],
+        paramNames: ['mu', 'nu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_Seed',
+      systemName: base.config.name,
+    }
+    const added = addObject(base, equilibrium)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'homoc_seed',
+      systemName: base.config.name,
+      parameterName: 'mu, nu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'homoclinic_curve',
+      data: {
+        points: [
+          {
+            state: [
+              // mesh + stage
+              12, 34, 13, 35, 14, 36, 12.5, 34.5, 13.5, 35.5,
+              // x0 + p2 + extras/tail
+              1.25, -0.75, 0.11, 8, 0.02, 0, 0,
+            ],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 2,
+          ncol: 1,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          free_time: true,
+          free_eps0: true,
+          free_eps1: false,
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2, 0.1],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+
+    render(
+      <InspectorDetailsPanel
+        system={branchResult.system}
+        selectedNodeId={branchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    await user.click(screen.getByTestId('branch-bifurcation-0'))
+    await user.click(screen.getByTestId('branch-point-details-toggle'))
+
+    const details = screen.getByTestId('branch-point-details-toggle').closest('details')
+    if (!details) {
+      throw new Error('Missing point details disclosure.')
+    }
+    const detailsScope = within(details)
+    const xRow = detailsScope.getByText('x').closest('.inspector-metrics__row')
+    const yRow = detailsScope.getByText('y').closest('.inspector-metrics__row')
+    expect(xRow).toBeTruthy()
+    expect(yRow).toBeTruthy()
+    expect(xRow?.querySelector('.inspector-metrics__value')?.textContent).toBe('1.25000')
+    expect(yRow?.querySelector('.inspector-metrics__value')?.textContent).toBe('-0.750000')
+  })
+
   it('shows cycle point table for discrete map branch points', async () => {
     const user = userEvent.setup()
     const config: SystemConfig = {
