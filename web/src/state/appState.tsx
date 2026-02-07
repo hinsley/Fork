@@ -128,43 +128,6 @@ function resolveHomoclinicSeedState(point: ContinuationPoint, stateDimension: nu
   return [...point.state]
 }
 
-function createHomoclinicExtensionRetrySettings(
-  settings: ContinuationSettings
-): ContinuationSettings | null {
-  const retryStep = Math.max(settings.min_step_size * 10, settings.step_size * 0.2)
-  const nextStep = Math.min(settings.max_step_size, retryStep)
-  const nextCorrectorSteps = Math.max(settings.corrector_steps, 12)
-  const nextCorrectorTolerance = Math.min(settings.corrector_tolerance, 1e-8)
-  const nextStepTolerance = Math.min(settings.step_tolerance, 1e-8)
-  const nextMaxStepSize = Math.min(
-    settings.max_step_size,
-    Math.max(nextStep, settings.step_size * 0.5)
-  )
-
-  const unchanged =
-    Math.abs(nextStep - settings.step_size) <= settings.step_size * 1e-12 &&
-    nextCorrectorSteps === settings.corrector_steps &&
-    Math.abs(nextCorrectorTolerance - settings.corrector_tolerance) <=
-      Math.max(1e-16, settings.corrector_tolerance * 1e-12) &&
-    Math.abs(nextStepTolerance - settings.step_tolerance) <=
-      Math.max(1e-16, settings.step_tolerance * 1e-12) &&
-    Math.abs(nextMaxStepSize - settings.max_step_size) <=
-      Math.max(1e-16, settings.max_step_size * 1e-12)
-
-  if (unchanged) {
-    return null
-  }
-
-  return {
-    ...settings,
-    step_size: nextStep,
-    max_step_size: nextMaxStepSize,
-    corrector_steps: nextCorrectorSteps,
-    corrector_tolerance: nextCorrectorTolerance,
-    step_tolerance: nextStepTolerance,
-  }
-}
-
 function getNodeLabel(node: TreeNode | undefined, systemType: SystemConfig['type']): string {
   if (!node) return 'Item'
   if (node.kind === 'branch') return 'Branch'
@@ -2134,45 +2097,25 @@ export function AppProvider({
           }
 
           const branchData = serializeBranchDataForWasm(sourceBranch)
-          const runHomocExtension = async (
-            settings: ContinuationSettings,
-            label: string
-          ): Promise<ContinuationObject['data']> =>
-            client.runContinuationExtension(
-              {
-                system: runConfig,
-                branchData,
-                parameterName: sourceType.param1_name,
-                mapIterations,
-                settings,
-                forward: request.forward,
-              },
-              {
-                onProgress: (progress) =>
-                  dispatch({
-                    type: 'SET_CONTINUATION_PROGRESS',
-                    progress: { label, progress },
-                  }),
-              }
-            )
-
-          updatedData = await runHomocExtension(request.settings, 'Homoclinic extension')
-          const sourcePointCount = sourceBranch.data.points.length
-
-          if (updatedData.points.length <= sourcePointCount) {
-            const retrySettings = createHomoclinicExtensionRetrySettings(request.settings)
-            if (retrySettings) {
-              const retried = await runHomocExtension(
-                retrySettings,
-                'Homoclinic extension (retry)'
-              )
-              if (retried.points.length > sourcePointCount) {
-                updatedData = retried
-              }
+          updatedData = await client.runContinuationExtension(
+            {
+              system: runConfig,
+              branchData,
+              parameterName: sourceType.param1_name,
+              mapIterations,
+              settings: request.settings,
+              forward: request.forward,
+            },
+            {
+              onProgress: (progress) =>
+                dispatch({
+                  type: 'SET_CONTINUATION_PROGRESS',
+                  progress: { label: 'Homoclinic extension', progress },
+                }),
             }
-          }
+          )
 
-          if (updatedData.points.length <= sourcePointCount) {
+          if (updatedData.points.length <= sourceBranch.data.points.length) {
             throw new Error(
               'Homoclinic extension stopped at the endpoint. Automatic restart is disabled for extension; adjust step/mesh settings or use explicit Homoclinic from Homoclinic.'
             )

@@ -1355,8 +1355,7 @@ describe('appState homoclinic and homotopy actions', () => {
     })
 
     expect(getContext().state.error).toContain('Automatic restart is disabled for extension')
-    expect(attemptedStepSizes.length).toBe(2)
-    expect(attemptedStepSizes[1]).toBeLessThan(attemptedStepSizes[0])
+    expect(attemptedStepSizes).toEqual([continuationSettings.step_size])
     expect(restartCalled).toBe(false)
     const updated = getContext().state.system!.branches[branchResult.nodeId]
     expect(updated.data.points.length).toBe(2)
