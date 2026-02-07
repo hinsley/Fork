@@ -50,13 +50,50 @@ function continuationSettingsFromInputs(inputs: {
     min_step_size: Math.max(parseFloatOrDefault(inputs.minStepSizeInput, 1e-5), 1e-12),
     max_step_size: Math.max(parseFloatOrDefault(inputs.maxStepSizeInput, 0.1), 1e-9),
     max_steps: Math.max(parseIntOrDefault(inputs.maxStepsInput, 300), 1),
-    corrector_steps: Math.max(parseIntOrDefault(inputs.correctorStepsInput, 8), 1),
+    corrector_steps: Math.max(parseIntOrDefault(inputs.correctorStepsInput, 32), 1),
     corrector_tolerance: Math.max(
       parseFloatOrDefault(inputs.correctorToleranceInput, 1e-7),
       Number.EPSILON
     ),
     step_tolerance: Math.max(parseFloatOrDefault(inputs.stepToleranceInput, 1e-7), Number.EPSILON)
   };
+}
+
+function discardInitialApproximationPoint(data: ContinuationBranchData): ContinuationBranchData {
+  if (!Array.isArray(data.points) || data.points.length <= 1) {
+    return data;
+  }
+  const seed = data.points[0];
+  const seedAnchor =
+    seed &&
+    Array.isArray(seed.state) &&
+    seed.state.length > 0 &&
+    Number.isFinite(seed.param_value)
+      ? [seed.param_value, ...seed.state]
+      : null;
+  const points = data.points.slice(1);
+  const rawIndices =
+    Array.isArray(data.indices) && data.indices.length === data.points.length
+      ? data.indices.slice(1)
+      : points.map((_, index) => index);
+  const indexBase = rawIndices.length > 0 ? rawIndices[0] : 0;
+  const indices = rawIndices.map((value, index) =>
+    Number.isFinite(value) ? value - indexBase : index
+  );
+  const bifurcations = (data.bifurcations ?? [])
+    .filter((idx) => idx > 0)
+    .map((idx) => idx - 1)
+    .filter((idx) => idx >= 0 && idx < points.length);
+  const normalized: ContinuationBranchData & { upoldp?: number[][] } = {
+    ...data,
+    points,
+    indices,
+    bifurcations,
+  };
+  if (seedAnchor && seedAnchor.every(Number.isFinite)) {
+    normalized.upoldp = [seedAnchor];
+  }
+  return normalized;
 }
 
 function ensureHomoclinicBranchType(
@@ -123,7 +160,7 @@ export async function initiateHomoclinicFromLargeCycle(
   let maxStepsInput = '300';
   let minStepSizeInput = '1e-5';
   let maxStepSizeInput = '0.1';
-  let correctorStepsInput = '12';
+  let correctorStepsInput = '32';
   let correctorToleranceInput = '1e-8';
   let stepToleranceInput = '1e-8';
   let directionForward = true;
@@ -461,7 +498,7 @@ export async function initiateHomoclinicFromLargeCycle(
     );
 
     const branchData = ensureHomoclinicBranchType(
-      normalizeBranchEigenvalues(rawData),
+      discardInitialApproximationPoint(normalizeBranchEigenvalues(rawData)),
       {
         type: 'HomoclinicCurve',
         ntst: targetNtst,
@@ -534,7 +571,7 @@ export async function initiateHomoclinicFromHomoclinic(
   let maxStepsInput = '300';
   let minStepSizeInput = '1e-5';
   let maxStepSizeInput = '0.1';
-  let correctorStepsInput = '8';
+  let correctorStepsInput = '32';
   let correctorToleranceInput = '1e-7';
   let stepToleranceInput = '1e-7';
   let directionForward = true;
@@ -906,7 +943,7 @@ export async function initiateHomoclinicFromHomotopySaddle(
   let maxStepsInput = '300';
   let minStepSizeInput = '1e-5';
   let maxStepSizeInput = '0.1';
-  let correctorStepsInput = '12';
+  let correctorStepsInput = '32';
   let correctorToleranceInput = '1e-8';
   let stepToleranceInput = '1e-8';
   let directionForward = true;

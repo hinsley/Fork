@@ -1,8 +1,8 @@
+use super::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
 use super::{
     continue_with_problem, extend_branch_with_problem, BifurcationType, BranchType,
     ContinuationBranch, ContinuationPoint, ContinuationSettings,
 };
-use super::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
 #[allow(unused_imports)]
 use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
 use crate::equilibrium::{compute_jacobian, SystemKind};
@@ -21,7 +21,10 @@ struct FlowContext<'a> {
 
 impl<'a> FlowContext<'a> {
     fn new(system: &'a mut EquationSystem, param_index: usize) -> Self {
-        Self { system, param_index }
+        Self {
+            system,
+            param_index,
+        }
     }
 
     fn dimension(&self) -> usize {
@@ -38,7 +41,6 @@ impl<'a> FlowContext<'a> {
         self.system.params[self.param_index] = old;
         result
     }
-
 }
 
 fn normalize_phase_data(
@@ -53,7 +55,8 @@ fn normalize_phase_data(
     if norm_sq == 0.0 {
         bail!("Phase direction must be non-zero");
     }
-    let normalized_direction: Vec<f64> = direction.into_iter().map(|v| v / norm_sq.sqrt()).collect();
+    let normalized_direction: Vec<f64> =
+        direction.into_iter().map(|v| v / norm_sq.sqrt()).collect();
     Ok((anchor, normalized_direction))
 }
 
@@ -254,7 +257,8 @@ pub fn limit_cycle_setup_from_hopf(
             let mut s_state = vec![0.0; dim];
             for i in 0..dim {
                 s_state[i] = hopf_state[i]
-                    + amplitude * (real_part[i] * theta_stage.cos() - imag_part[i] * theta_stage.sin());
+                    + amplitude
+                        * (real_part[i] * theta_stage.cos() - imag_part[i] * theta_stage.sin());
             }
             interval_stages.push(s_state);
         }
@@ -316,10 +320,15 @@ pub fn limit_cycle_setup_from_orbit(
     }
     for (i, state) in orbit_states.iter().enumerate() {
         if state.len() != dim {
-            bail!("State {} has dimension {} but expected {}", i, state.len(), dim);
+            bail!(
+                "State {} has dimension {} but expected {}",
+                i,
+                state.len(),
+                dim
+            );
         }
     }
-    
+
     let effective_times: Vec<f64> = match time_mode {
         OrbitTimeMode::Continuous => orbit_times.to_vec(),
         OrbitTimeMode::Discrete => (0..orbit_states.len()).map(|i| i as f64).collect(),
@@ -332,31 +341,28 @@ pub fn limit_cycle_setup_from_orbit(
     let ref_idx = n / 3;
     let x_ref = &orbit_states[ref_idx];
     let t_ref = effective_times[ref_idx];
-    
+
     // Skip a small portion after reference to avoid matching ourselves
     // Use a small fixed skip (not percentage-based) to avoid skipping past the first return
     let skip_start = ref_idx + 10;
-    
+
     // Compute distances from x_ref to all points after skip_start
     let mut distances: Vec<f64> = Vec::new();
     for i in skip_start..n {
         let x = &orbit_states[i];
-        let dist: f64 = x.iter()
-            .zip(x_ref.iter())
-            .map(|(a, b)| (a - b).abs())
-            .sum();
+        let dist: f64 = x.iter().zip(x_ref.iter()).map(|(a, b)| (a - b).abs()).sum();
         distances.push(dist);
     }
-    
+
     if distances.len() < 3 {
         bail!("Not enough points after transient for cycle detection");
     }
-    
+
     // Find the FIRST local minimum that's within tolerance
     // A local minimum is where distances[i-1] > distances[i] < distances[i+1]
     let mut cycle_end = None;
-    for i in 1..distances.len()-1 {
-        if distances[i] < distances[i-1] && distances[i] < distances[i+1] {
+    for i in 1..distances.len() - 1 {
+        if distances[i] < distances[i - 1] && distances[i] < distances[i + 1] {
             // This is a local minimum
             if distances[i] < tolerance {
                 cycle_end = Some(skip_start + i);
@@ -364,29 +370,33 @@ pub fn limit_cycle_setup_from_orbit(
             }
         }
     }
-    
+
     // If no local minimum found within tolerance, find the overall minimum
     let min_dist = distances.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-    
+
     let cycle_end = cycle_end.ok_or_else(|| {
-        anyhow!("No cycle detected: no local minimum within tolerance {}. \
+        anyhow!(
+            "No cycle detected: no local minimum within tolerance {}. \
                  Closest approach: {:.6}. Try tolerance > {:.4} or longer orbit.",
-                 tolerance, min_dist, min_dist * 1.2)
+            tolerance,
+            min_dist,
+            min_dist * 1.2
+        )
     })?;
-    
+
     // Step 3: Extract one cycle (from ref_idx to cycle_end)
     let period = effective_times[cycle_end] - t_ref;
     if period <= 0.0 {
         bail!("Computed period is non-positive: {}", period);
     }
-    
+
     // Normalize times to [0, 1] for this cycle
     let cycle_times: Vec<f64> = effective_times[ref_idx..=cycle_end]
         .iter()
         .map(|t| (t - t_ref) / period)
         .collect();
     let cycle_states: Vec<&Vec<f64>> = orbit_states[ref_idx..=cycle_end].iter().collect();
-    
+
     // Step 4: Remesh to collocation grid
     // We need mesh_points mesh states at uniform intervals: tau = 0, 1/ntst, 2/ntst, ..., (ntst-1)/ntst
     let mut mesh_states = Vec::with_capacity(mesh_points);
@@ -395,7 +405,7 @@ pub fn limit_cycle_setup_from_orbit(
         let interpolated = interpolate_orbit_state(tau, &cycle_times, &cycle_states, dim)?;
         mesh_states.push(interpolated);
     }
-    
+
     // Phase condition: use first mesh point and direction of flow at that point
     // For simplicity, we use the initial direction (x1 - x0) normalized
     let phase_anchor = mesh_states[0].clone();
@@ -413,19 +423,19 @@ pub fn limit_cycle_setup_from_orbit(
         dir[0] = 1.0;
         dir
     };
-    
+
     // Build stage states via interpolation
     let coeffs = CollocationCoefficients::new(degree)?;
     let stage_states =
         build_stage_states_from_mesh(dim, mesh_points, degree, &coeffs.nodes, &mesh_states);
-    
+
     let guess = LimitCycleGuess {
         param_value,
         period,
         mesh_states,
         stage_states,
     };
-    
+
     Ok(LimitCycleSetup {
         guess,
         phase_anchor,
@@ -454,27 +464,26 @@ fn interpolate_orbit_state(
             lower = times.len() - 2;
         }
     }
-    
+
     let t0 = times[lower];
     let t1 = times[lower + 1];
     let dt = t1 - t0;
-    
+
     if dt.abs() < 1e-15 {
         // Degenerate interval, just return the state
         return Ok(states[lower].clone());
     }
-    
+
     let alpha = (tau - t0) / dt;
     let alpha = alpha.clamp(0.0, 1.0);
-    
+
     let mut result = vec![0.0; dim];
     for i in 0..dim {
         result[i] = states[lower][i] * (1.0 - alpha) + states[lower + 1][i] * alpha;
     }
-    
+
     Ok(result)
 }
-
 
 /// Initializes a limit cycle continuation from a Period-Doubling bifurcation.
 ///
@@ -502,12 +511,12 @@ pub fn limit_cycle_setup_from_pd(
     amplitude: f64,
 ) -> Result<LimitCycleSetup> {
     let dim = system.equations.len();
-    
+
     // Parse the LC state to extract mesh, stages, period
     let mesh_data_len = ntst * dim;
     let stage_data_len = ntst * ncol * dim;
     let expected_len = mesh_data_len + stage_data_len + 1;
-    
+
     if lc_state.len() != expected_len {
         bail!(
             "Invalid LC state length: expected {} got {}",
@@ -515,20 +524,20 @@ pub fn limit_cycle_setup_from_pd(
             lc_state.len()
         );
     }
-    
+
     // Extract original mesh states
     let mut mesh_states: Vec<Vec<f64>> = Vec::with_capacity(ntst);
     for i in 0..ntst {
         let start = i * dim;
         mesh_states.push(lc_state[start..start + dim].to_vec());
     }
-    
+
     // Extract original period
     let period = lc_state[mesh_data_len + stage_data_len];
-    
+
     // Build the collocation problem to get the Jacobian for monodromy
     let coeffs = CollocationCoefficients::new(ncol)?;
-    
+
     // Create phase condition from original cycle
     let phase_anchor = mesh_states[0].clone();
     let mut phase_direction = vec![0.0; dim];
@@ -541,10 +550,10 @@ pub fn limit_cycle_setup_from_pd(
             phase_direction[d] /= norm;
         }
     }
-    
+
     // Build stage states from mesh for creating the problem
     let stage_states = build_stage_states_from_mesh(dim, ntst, ncol, &coeffs.nodes, &mesh_states);
-    
+
     // Create the collocation problem
     let mut problem = PeriodicOrbitCollocationProblem::new(
         system,
@@ -554,19 +563,19 @@ pub fn limit_cycle_setup_from_pd(
         phase_anchor.clone(),
         phase_direction.clone(),
     )?;
-    
+
     // Build the augmented state vector [param, mesh, stages, period]
     let aug_len = 1 + mesh_data_len + stage_data_len + 1;
     let mut aug_state = DVector::zeros(aug_len);
     aug_state[0] = param_value;
-    
+
     // Copy mesh states
     for i in 0..ntst {
         for d in 0..dim {
             aug_state[1 + i * dim + d] = mesh_states[i][d];
         }
     }
-    
+
     // Copy stage states
     let stage_offset = 1 + mesh_data_len;
     for i in 0..ntst {
@@ -577,13 +586,13 @@ pub fn limit_cycle_setup_from_pd(
             }
         }
     }
-    
+
     // Period
     aug_state[aug_len - 1] = period;
-    
+
     // Get the extended Jacobian (with periodic BC [I, -I])
     let jac = problem.extended_jacobian(&aug_state)?;
-    
+
     // ========== OPTIMIZED: Direct bordered solve for PD eigenvector ==========
     // Instead of computing the full monodromy matrix, we use a bordered-solve approach:
     // 1. Modify the Jacobian to have flip BC [I, I] instead of periodic BC [I, -I]
@@ -592,20 +601,20 @@ pub fn limit_cycle_setup_from_pd(
     //
     // The flip BC changes the continuity equation from x(T) - x(0) = 0 to x(T) + x(0) = 0
     // In the Jacobian, this means changing the coefficient on x(0) from -I to +I.
-    
+
     // Jacobian layout (from extended_jacobian):
-    // - Rows 0 to ntst*ncol*dim - 1: Collocation equations  
+    // - Rows 0 to ntst*ncol*dim - 1: Collocation equations
     // - Rows ntst*ncol*dim to ntst*ncol*dim + ntst*dim - 1: Continuity equations
     // - Last row: Phase condition
     // - Column 0: Parameter derivatives
     // - Columns 1 to 1+ntst*dim: Mesh states (x_0, ..., x_{ntst-1})
     // - Columns 1+ntst*dim to end-1: Stage states
     // - Last column: Period
-    
+
     let ncol_coord = ncol * dim;
     let continuity_row_start = ntst * ncol_coord;
-    let mesh_col_start = 1;  // Skip parameter column
-    
+    let mesh_col_start = 1; // Skip parameter column
+
     // Create a copy of the Jacobian and modify BC for flip condition
     // The last continuity block links x_{ntst-1} to x_0
     // For periodic: C_{next} * dx_0 = -... (i.e., coefficient is -I on x_0)
@@ -613,7 +622,7 @@ pub fn limit_cycle_setup_from_pd(
     //
     // We need to change the sign of the x_0 column in the last continuity equation
     let mut jac_flip = jac.clone();
-    
+
     // The last continuity equation is at row continuity_row_start + (ntst-1)*dim
     // and has coefficients w.r.t. x_0 at columns mesh_col_start to mesh_col_start+dim
     let last_cont_row = continuity_row_start + (ntst - 1) * dim;
@@ -626,60 +635,63 @@ pub fn limit_cycle_setup_from_pd(
             jac_flip[(row_idx, col_idx)] = -jac_flip[(row_idx, col_idx)];
         }
     }
-    
+
     // Remove parameter and period columns for the bordered system
     // We only need the state part of the Jacobian (mesh + stages)
-    let state_dim = ntst * dim + ntst * ncol * dim;  // mesh + stages (no param, no period)
-    let n_rows = jac_flip.nrows() - 1;  // Exclude phase condition row
-    
+    let state_dim = ntst * dim + ntst * ncol * dim; // mesh + stages (no param, no period)
+    let n_rows = jac_flip.nrows() - 1; // Exclude phase condition row
+
     // Extract the state-only part of the Jacobian (skip param col 0 and period col at end)
     let mut jac_state = DMatrix::<f64>::zeros(n_rows, state_dim);
     for r in 0..n_rows {
         for c in 0..state_dim {
-            jac_state[(r, c)] = jac_flip[(r, c + 1)];  // Skip param column
+            jac_state[(r, c)] = jac_flip[(r, c + 1)]; // Skip param column
         }
     }
-    
+
     // Create bordered system: [J, b; b^T, 0] where b is a random-ish vector
     // We use a simple bordering vector with some structure
     let bordered_size = n_rows + 1;
     let mut bordered = DMatrix::<f64>::zeros(bordered_size, state_dim + 1);
-    
+
     // Copy Jacobian into bordered matrix
     for r in 0..n_rows {
         for c in 0..state_dim {
             bordered[(r, c)] = jac_state[(r, c)];
         }
     }
-    
+
     // Add bordering column (use alternating pattern for numerical stability)
     for r in 0..n_rows {
         bordered[(r, state_dim)] = if r % 2 == 0 { 1.0 } else { -1.0 };
     }
-    
+
     // Add bordering row
     for c in 0..state_dim {
         bordered[(n_rows, c)] = if c % 3 == 0 { 1.0 } else { 0.0 };
     }
     bordered[(n_rows, state_dim)] = 0.0;
-    
+
     // RHS: [0, 0, ..., 0, 1]
     let mut rhs = DVector::<f64>::zeros(bordered_size);
     rhs[bordered_size - 1] = 1.0;
-    
+
     // Solve the bordered system
-    let phi_full = bordered.clone().lu().solve(&rhs)
+    let phi_full = bordered
+        .clone()
+        .lu()
+        .solve(&rhs)
         .ok_or_else(|| anyhow!("Bordered solve failed for PD eigenvector"))?;
-    
+
     // Extract the mesh-state portion (first ntst*dim components)
     // This is the PD eigenvector projected onto mesh points
     let mesh_portion_len = ntst * dim;
     let phi_mesh: Vec<f64> = phi_full.iter().take(mesh_portion_len).cloned().collect();
-    
+
     // Reconstruct the eigenvector at x(0) - this is what we apply as the perturbation
     // The phi_mesh contains the eigenvector at each mesh point; use the first one
     let pd_eigenvector: Vec<f64> = phi_mesh[0..dim].to_vec();
-    
+
     // Normalize the eigenvector
     let eig_norm = pd_eigenvector.iter().map(|v| v * v).sum::<f64>().sqrt();
     let pd_eigenvector: Vec<f64> = if eig_norm > 1e-12 {
@@ -687,13 +699,13 @@ pub fn limit_cycle_setup_from_pd(
     } else {
         bail!("PD eigenvector is nearly zero - not at a period-doubling point");
     };
-    
+
     // Construct doubled-period mesh states
     // First half: original + h * phi
     // Second half: original - h * phi
     let new_ntst = 2 * ntst;
     let mut new_mesh_states: Vec<Vec<f64>> = Vec::with_capacity(new_ntst);
-    
+
     // First half: original orbit + perturbation
     for i in 0..ntst {
         let mut state = mesh_states[i].clone();
@@ -702,7 +714,7 @@ pub fn limit_cycle_setup_from_pd(
         }
         new_mesh_states.push(state);
     }
-    
+
     // Second half: original orbit - perturbation
     for i in 0..ntst {
         let mut state = mesh_states[i].clone();
@@ -711,32 +723,31 @@ pub fn limit_cycle_setup_from_pd(
         }
         new_mesh_states.push(state);
     }
-    
+
     // Build new stage states for doubled mesh
-    let new_stage_states = build_stage_states_from_mesh(
-        dim,
-        new_ntst,
-        ncol,
-        &coeffs.nodes,
-        &new_mesh_states,
-    );
-    
+    let new_stage_states =
+        build_stage_states_from_mesh(dim, new_ntst, ncol, &coeffs.nodes, &new_mesh_states);
+
     // New period is double the original
     let new_period = 2.0 * period;
-    
+
     // Phase condition from first point of new cycle
     let new_phase_anchor = new_mesh_states[0].clone();
     let mut new_phase_direction = vec![0.0; dim];
     for d in 0..dim {
         new_phase_direction[d] = new_mesh_states[1][d] - new_mesh_states[0][d];
     }
-    let norm = new_phase_direction.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let norm = new_phase_direction
+        .iter()
+        .map(|v| v * v)
+        .sum::<f64>()
+        .sqrt();
     if norm > 1e-12 {
         for d in 0..dim {
             new_phase_direction[d] /= norm;
         }
     }
-    
+
     Ok(LimitCycleSetup {
         guess: LimitCycleGuess {
             param_value,
@@ -764,16 +775,16 @@ fn compute_monodromy_matrix(
     let mesh_col_start = 1;
     let stage_col_start = mesh_col_start + ntst * dim;
     let continuity_row_start = ntst * ncol * dim;
-    
+
     let mut monodromy = DMatrix::<f64>::identity(dim, dim);
-    
+
     for interval in 0..ntst {
         let cont_row = continuity_row_start + interval * dim;
         let coll_row_start = interval * ncol_coord;
         let stage_col = stage_col_start + interval * ncol_coord;
         let mesh_col = mesh_col_start + interval * dim;
         let next_mesh_col = mesh_col_start + ((interval + 1) % ntst) * dim;
-        
+
         // Extract G_x, G_s
         let mut g_x = DMatrix::<f64>::zeros(ncol_coord, dim);
         for r in 0..ncol_coord {
@@ -781,19 +792,19 @@ fn compute_monodromy_matrix(
                 g_x[(r, c)] = jac[(coll_row_start + r, mesh_col + c)];
             }
         }
-        
+
         let mut g_s = DMatrix::<f64>::zeros(ncol_coord, ncol_coord);
         for r in 0..ncol_coord {
             for c in 0..ncol_coord {
                 g_s[(r, c)] = jac[(coll_row_start + r, stage_col + c)];
             }
         }
-        
+
         let ds_dx = match g_s.clone().lu().solve(&-&g_x) {
             Some(sol) => sol,
             None => bail!("Monodromy: singular stage block at interval {}", interval),
         };
-        
+
         // Extract C_x, C_s, C_next
         let mut c_x = DMatrix::<f64>::zeros(dim, dim);
         for r in 0..dim {
@@ -801,34 +812,33 @@ fn compute_monodromy_matrix(
                 c_x[(r, c)] = jac[(cont_row + r, mesh_col + c)];
             }
         }
-        
+
         let mut c_s = DMatrix::<f64>::zeros(dim, ncol_coord);
         for r in 0..dim {
             for c in 0..ncol_coord {
                 c_s[(r, c)] = jac[(cont_row + r, stage_col + c)];
             }
         }
-        
+
         let mut c_next = DMatrix::<f64>::zeros(dim, dim);
         for r in 0..dim {
             for c in 0..dim {
                 c_next[(r, c)] = jac[(cont_row + r, next_mesh_col + c)];
             }
         }
-        
+
         let effective_c_x = &c_x + &c_s * &ds_dx;
-        
+
         let t_i = match c_next.clone().lu().solve(&-&effective_c_x) {
             Some(t) => t,
             None => bail!("Monodromy: singular C_next at interval {}", interval),
         };
-        
+
         monodromy = &t_i * &monodromy;
     }
-    
+
     Ok(monodromy)
 }
-
 
 pub struct PeriodicOrbitCollocationProblem<'a> {
     context: FlowContext<'a>,
@@ -905,7 +915,12 @@ impl<'a> PeriodicOrbitCollocationProblem<'a> {
             .collect()
     }
 
-    fn stage_state_slice<'b>(&self, aug: &'b DVector<f64>, interval: usize, stage: usize) -> &'b [f64] {
+    fn stage_state_slice<'b>(
+        &self,
+        aug: &'b DVector<f64>,
+        interval: usize,
+        stage: usize,
+    ) -> &'b [f64] {
         let dim = self.state_dim();
         let index = interval * self.degree + stage;
         let start = self.stage_offset() + index * dim;
@@ -1039,8 +1054,8 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
             } else {
                 mesh_states[interval + 1]
             };
-            let dest = &mut out_slice[continuity_offset + interval * dim
-                ..continuity_offset + (interval + 1) * dim];
+            let dest = &mut out_slice
+                [continuity_offset + interval * dim..continuity_offset + (interval + 1) * dim];
             for r in 0..dim {
                 let mut sum = 0.0;
                 for k in 0..self.degree {
@@ -1108,9 +1123,8 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
                         let col_start = stage_col_start + stage_col_idx * dim_state;
                         let jac_slice = self.stage_jacobian(stage_col_idx);
                         for c in 0..dim_state {
-                            let mut value = -h
-                                * self.coeffs.a[stage][col_stage]
-                                * jac_slice[r * dim_state + c];
+                            let mut value =
+                                -h * self.coeffs.a[stage][col_stage] * jac_slice[r * dim_state + c];
                             if stage == col_stage && r == c {
                                 value += 1.0;
                             }
@@ -1183,24 +1197,17 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
     fn diagnostics(&mut self, aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
         // Get the full BVP Jacobian
         let jac = self.extended_jacobian(aug_state)?;
-        
+
         // Extract multipliers using shooting-based monodromy from Jacobian
-        let multipliers = extract_multipliers_shooting(
-            &jac,
-            self.state_dim(),
-            self.mesh_points,
-            self.degree,
-        )?;
-        
+        let multipliers =
+            extract_multipliers_shooting(&jac, self.state_dim(), self.mesh_points, self.degree)?;
+
         // Compute test functions from multipliers
-        let (cycle_fold, period_doubling, neimark, eig_vals) = cycle_tests_from_multipliers(&multipliers);
+        let (cycle_fold, period_doubling, neimark, eig_vals) =
+            cycle_tests_from_multipliers(&multipliers);
 
         Ok(PointDiagnostics {
-            test_values: TestFunctionValues::limit_cycle(
-                cycle_fold,
-                period_doubling,
-                neimark,
-            ),
+            test_values: TestFunctionValues::limit_cycle(cycle_fold, period_doubling, neimark),
             eigenvalues: eig_vals,
             cycle_points: None,
         })
@@ -1208,7 +1215,7 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
 }
 
 /// Shooting-based Floquet multiplier extraction from Jacobian.
-/// 
+///
 /// We compute the monodromy by chaining local transfer matrices through each interval:
 /// M = T_{ntst-1} * T_{ntst-2} * ... * T_1 * T_0
 ///
@@ -1221,36 +1228,36 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
 pub fn extract_multipliers_shooting(
     jac: &DMatrix<f64>,
     dim: usize,
-    ntst: usize, 
+    ntst: usize,
     ncol: usize,
 ) -> Result<Vec<Complex<f64>>> {
     // Our Jacobian layout:
     // - Rows 0 to ntst*ncol*dim - 1: Stage residuals (collocation equations)
     // - Rows ntst*ncol*dim to ntst*ncol*dim + ntst*dim - 1: Continuity equations
     // - Last row: Phase condition
-    // 
+    //
     // - Column 0: Parameter
     // - Columns 1 to ntst*dim: Mesh states (x_0, x_1, ..., x_{ntst-1})
     // - Columns ntst*dim+1 to ntst*dim + ntst*ncol*dim: Stages
     // - Last column: Period
-    
+
     let ncol_coord = ncol * dim;
     let mesh_col_start = 1;
     let stage_col_start = mesh_col_start + ntst * dim;
     let continuity_row_start = ntst * ncol * dim;
-    
+
     // Build monodromy by chaining local transfer matrices
     let mut monodromy = DMatrix::<f64>::identity(dim, dim);
-    
+
     for interval in 0..ntst {
         let cont_row = continuity_row_start + interval * dim;
         let coll_row_start = interval * ncol_coord;
         let stage_col = stage_col_start + interval * ncol_coord;
         let mesh_col = mesh_col_start + interval * dim;
-        
+
         // For the last interval, next mesh wraps to x_0
         let next_mesh_col = mesh_col_start + ((interval + 1) % ntst) * dim;
-        
+
         // Extract G_x (collocation w.r.t. current mesh)
         let mut g_x = DMatrix::<f64>::zeros(ncol_coord, dim);
         for r in 0..ncol_coord {
@@ -1258,7 +1265,7 @@ pub fn extract_multipliers_shooting(
                 g_x[(r, c)] = jac[(coll_row_start + r, mesh_col + c)];
             }
         }
-        
+
         // Extract G_s (collocation w.r.t. stages)
         let mut g_s = DMatrix::<f64>::zeros(ncol_coord, ncol_coord);
         for r in 0..ncol_coord {
@@ -1266,13 +1273,13 @@ pub fn extract_multipliers_shooting(
                 g_s[(r, c)] = jac[(coll_row_start + r, stage_col + c)];
             }
         }
-        
+
         // Solve: ds_dx = -G_s^{-1} * G_x
         let ds_dx = match g_s.clone().lu().solve(&-&g_x) {
             Some(sol) => sol,
             None => bail!("Monodromy: singular stage block at interval {}", interval),
         };
-        
+
         // Extract C_x (continuity w.r.t. current mesh)
         let mut c_x = DMatrix::<f64>::zeros(dim, dim);
         for r in 0..dim {
@@ -1280,7 +1287,7 @@ pub fn extract_multipliers_shooting(
                 c_x[(r, c)] = jac[(cont_row + r, mesh_col + c)];
             }
         }
-        
+
         // Extract C_s (continuity w.r.t. stages)
         let mut c_s = DMatrix::<f64>::zeros(dim, ncol_coord);
         for r in 0..dim {
@@ -1288,7 +1295,7 @@ pub fn extract_multipliers_shooting(
                 c_s[(r, c)] = jac[(cont_row + r, stage_col + c)];
             }
         }
-        
+
         // Extract C_next (continuity w.r.t. next mesh)
         let mut c_next = DMatrix::<f64>::zeros(dim, dim);
         for r in 0..dim {
@@ -1296,34 +1303,36 @@ pub fn extract_multipliers_shooting(
                 c_next[(r, c)] = jac[(cont_row + r, next_mesh_col + c)];
             }
         }
-        
+
         // Effective coefficient: C_x + C_s * ds_dx
         let effective_c_x = &c_x + &c_s * &ds_dx;
-        
+
         // Transfer matrix: T_i = -C_next^{-1} * effective_c_x
         let t_i = match c_next.clone().lu().solve(&-&effective_c_x) {
             Some(t) => t,
             None => bail!("Monodromy: singular C_next at interval {}", interval),
         };
-        
+
         // Chain: M = T_i * M
         monodromy = &t_i * &monodromy;
     }
-    
+
     let eigenvalues: Vec<Complex<f64>> = monodromy.complex_eigenvalues().iter().cloned().collect();
     Ok(eigenvalues)
 }
 
 /// Bifurcation tests from Floquet multipliers with sanity check.
-/// 
+///
 /// Returns (cycle_fold, period_doubling, neimark_sacker, eigenvalues).
-fn cycle_tests_from_multipliers(multipliers: &[Complex<f64>]) -> (f64, f64, f64, Vec<Complex<f64>>) {
+fn cycle_tests_from_multipliers(
+    multipliers: &[Complex<f64>],
+) -> (f64, f64, f64, Vec<Complex<f64>>) {
     if multipliers.is_empty() {
         return (1.0, 1.0, 1.0, Vec::new());
     }
-    
+
     let values = multipliers.to_vec();
-    
+
     // Find the trivial multiplier (should be closest to 1.0)
     let mut trivial_idx = None;
     let mut min_dist = f64::INFINITY;
@@ -1334,13 +1343,13 @@ fn cycle_tests_from_multipliers(multipliers: &[Complex<f64>]) -> (f64, f64, f64,
             trivial_idx = Some(idx);
         }
     }
-    
+
     const TRIVIAL_TOLERANCE: f64 = 0.5;
     if min_dist > TRIVIAL_TOLERANCE {
         // Multipliers are garbage - return NaN test values to avoid false sign crossings
         return (f64::NAN, f64::NAN, f64::NAN, values);
     }
-    
+
     // Period Doubling test: product of (╬╝ + 1) for non-trivial real multipliers
     let mut pd_test = 1.0;
     for (idx, mu) in values.iter().enumerate() {
@@ -1351,7 +1360,7 @@ fn cycle_tests_from_multipliers(multipliers: &[Complex<f64>]) -> (f64, f64, f64,
             pd_test *= mu.re + 1.0;
         }
     }
-    
+
     // Neimark-Sacker test: product of (|╬╝|┬▓ - 1) for complex pairs
     let mut ns_test = 1.0;
     for (idx, mu) in values.iter().enumerate() {
@@ -1362,18 +1371,14 @@ fn cycle_tests_from_multipliers(multipliers: &[Complex<f64>]) -> (f64, f64, f64,
             ns_test *= mu.norm_sqr() - 1.0;
         }
     }
-    
+
     // Cycle Fold: disabled (set to 1.0)
     let cf_test = 1.0;
-    
+
     (cf_test, pd_test, ns_test, values)
 }
 
-fn validate_mesh_states(
-    state_dim: usize,
-    mesh_points: usize,
-    states: &[Vec<f64>],
-) -> Result<()> {
+fn validate_mesh_states(state_dim: usize, mesh_points: usize, states: &[Vec<f64>]) -> Result<()> {
     if states.len() != mesh_points {
         bail!(
             "Initial guess must provide {} mesh states (got {})",
@@ -1710,7 +1715,6 @@ pub fn extend_limit_cycle_collocation(
     Ok(result)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1757,7 +1761,7 @@ mod tests {
             Complex::new(0.01, 0.0),
         ];
         let (_, pd_before, _, _) = cycle_tests(&multipliers_before);
-        
+
         // Case 2: At/After bifurcation (Unstable, multiplier past -1)
         // Triv: 1.0, Unstable: -1.01
         let multipliers_after = vec![
@@ -1768,8 +1772,11 @@ mod tests {
         let (_, pd_after, _, _) = cycle_tests(&multipliers_after);
 
         println!("PD Before: {}, PD After: {}", pd_before, pd_after);
-        assert!(pd_before * pd_after < 0.0, "Period doubling test function should change sign");
-        
+        assert!(
+            pd_before * pd_after < 0.0,
+            "Period doubling test function should change sign"
+        );
+
         // Case 3: Exact hit
         let multipliers_exact = vec![
             Complex::new(1.0, 0.0),
@@ -1778,7 +1785,10 @@ mod tests {
         ];
         let (_, pd_exact, _, _) = cycle_tests(&multipliers_exact);
         println!("PD Exact: {}", pd_exact);
-        assert!(pd_before * pd_exact <= 0.0, "Period doubling test should be zero or cross at exact hit");
+        assert!(
+            pd_before * pd_exact <= 0.0,
+            "Period doubling test should be zero or cross at exact hit"
+        );
     }
 
     #[test]
@@ -1787,7 +1797,7 @@ mod tests {
         // dx/dt = mu*x - y
         // dy/dt = x + mu*y
         // Hopf at mu = 0, omega = 1
-        
+
         // Eq 0: mu*x - y -> LoadParam(0) * LoadVar(0) - LoadVar(1)
         let mut ops0 = Vec::new();
         ops0.push(OpCode::LoadParam(0));
@@ -1795,7 +1805,7 @@ mod tests {
         ops0.push(OpCode::Mul);
         ops0.push(OpCode::LoadVar(1));
         ops0.push(OpCode::Sub);
-        
+
         // Eq 1: x + mu*y -> LoadVar(0) + LoadParam(0) * LoadVar(1)
         let mut ops1 = Vec::new();
         ops1.push(OpCode::LoadVar(0));
@@ -1803,18 +1813,18 @@ mod tests {
         ops1.push(OpCode::LoadVar(1));
         ops1.push(OpCode::Mul);
         ops1.push(OpCode::Add);
-        
+
         let equations = vec![Bytecode { ops: ops0 }, Bytecode { ops: ops1 }];
         let params = vec![0.0]; // mu = 0
         let mut system = EquationSystem::new(equations, params);
-        
+
         let hopf_state = vec![0.0, 0.0];
         let mu_index = 0;
         let mu_value = 0.0;
         let amplitude = 1e-4;
         let ntst = 10;
         let ncol = 4;
-        
+
         let setup = limit_cycle_setup_from_hopf(
             &mut system,
             mu_index,
@@ -1823,8 +1833,9 @@ mod tests {
             ntst,
             ncol,
             amplitude,
-        ).expect("Setup should succeed");
-        
+        )
+        .expect("Setup should succeed");
+
         // Correct the phase anchor to satisfy the point phase condition exactly at start
         let mut setup = setup;
         setup.phase_anchor = setup.guess.mesh_states[0].clone();
@@ -1837,25 +1848,32 @@ mod tests {
             ncol,
             setup.phase_anchor.clone(),
             setup.phase_direction.clone(),
-        ).expect("Problem creation should succeed");
-        
+        )
+        .expect("Problem creation should succeed");
+
         let flat_state = flatten_collocation_state(
             &setup.guess.mesh_states,
             &setup.guess.stage_states,
-            setup.guess.period
+            setup.guess.period,
         );
         let mut aug_state = DVector::zeros(problem.dimension() + 1);
         aug_state[0] = mu_value;
         for (i, &v) in flat_state.iter().enumerate() {
             aug_state[i + 1] = v;
         }
-        
+
         let mut res = DVector::zeros(problem.dimension());
-        problem.residual(&aug_state, &mut res).expect("Residual evaluation should succeed");
-        
+        problem
+            .residual(&aug_state, &mut res)
+            .expect("Residual evaluation should succeed");
+
         let res_norm = res.norm();
-        
-        assert!(res_norm < 1e-8, "Residual norm {} is too high for linear Hopf", res_norm);
+
+        assert!(
+            res_norm < 1e-8,
+            "Residual norm {} is too high for linear Hopf",
+            res_norm
+        );
     }
 
     #[test]
@@ -1864,62 +1882,56 @@ mod tests {
         // dx/dt = mu*x - y - x*(x^2 + y^2)
         // dy/dt = x + mu*y - y*(x^2 + y^2)
         // Hopf at mu = 0. Stable LC exists for mu > 0 with radius sqrt(mu).
-        
+
         // Bytecode for x equation: mu*x - y - x*(x^2 + y^2)
         let mut ops0 = Vec::new();
         ops0.push(OpCode::LoadParam(0)); // mu
-        ops0.push(OpCode::LoadVar(0));   // x
-        ops0.push(OpCode::Mul);          // mu*x
-        ops0.push(OpCode::LoadVar(1));   // y
-        ops0.push(OpCode::Sub);          // mu*x - y
-        ops0.push(OpCode::LoadVar(0));   // x
-        ops0.push(OpCode::LoadVar(0));   // x
-        ops0.push(OpCode::LoadVar(0));   // x
-        ops0.push(OpCode::Mul);          // x^2
-        ops0.push(OpCode::LoadVar(1));   // y
-        ops0.push(OpCode::LoadVar(1));   // y
-        ops0.push(OpCode::Mul);          // y^2
-        ops0.push(OpCode::Add);          // x^2 + y^2
-        ops0.push(OpCode::Mul);          // x*(x^2 + y^2)
-        ops0.push(OpCode::Sub);          // mu*x - y - x*(x^2 + y^2)
-        
+        ops0.push(OpCode::LoadVar(0)); // x
+        ops0.push(OpCode::Mul); // mu*x
+        ops0.push(OpCode::LoadVar(1)); // y
+        ops0.push(OpCode::Sub); // mu*x - y
+        ops0.push(OpCode::LoadVar(0)); // x
+        ops0.push(OpCode::LoadVar(0)); // x
+        ops0.push(OpCode::LoadVar(0)); // x
+        ops0.push(OpCode::Mul); // x^2
+        ops0.push(OpCode::LoadVar(1)); // y
+        ops0.push(OpCode::LoadVar(1)); // y
+        ops0.push(OpCode::Mul); // y^2
+        ops0.push(OpCode::Add); // x^2 + y^2
+        ops0.push(OpCode::Mul); // x*(x^2 + y^2)
+        ops0.push(OpCode::Sub); // mu*x - y - x*(x^2 + y^2)
+
         // Bytecode for y equation: x + mu*y - y*(x^2 + y^2)
         let mut ops1 = Vec::new();
-        ops1.push(OpCode::LoadVar(0));   // x
+        ops1.push(OpCode::LoadVar(0)); // x
         ops1.push(OpCode::LoadParam(0)); // mu
-        ops1.push(OpCode::LoadVar(1));   // y
-        ops1.push(OpCode::Mul);          // mu*y
-        ops1.push(OpCode::Add);          // x + mu*y
-        ops1.push(OpCode::LoadVar(1));   // y
-        ops1.push(OpCode::LoadVar(0));   // x
-        ops1.push(OpCode::LoadVar(0));   // x
-        ops1.push(OpCode::Mul);          // x^2
-        ops1.push(OpCode::LoadVar(1));   // y
-        ops1.push(OpCode::LoadVar(1));   // y
-        ops1.push(OpCode::Mul);          // y^2
-        ops1.push(OpCode::Add);          // x^2 + y^2
-        ops1.push(OpCode::Mul);          // y*(x^2 + y^2)
-        ops1.push(OpCode::Sub);          // x + mu*y - y*(x^2 + y^2)
-        
+        ops1.push(OpCode::LoadVar(1)); // y
+        ops1.push(OpCode::Mul); // mu*y
+        ops1.push(OpCode::Add); // x + mu*y
+        ops1.push(OpCode::LoadVar(1)); // y
+        ops1.push(OpCode::LoadVar(0)); // x
+        ops1.push(OpCode::LoadVar(0)); // x
+        ops1.push(OpCode::Mul); // x^2
+        ops1.push(OpCode::LoadVar(1)); // y
+        ops1.push(OpCode::LoadVar(1)); // y
+        ops1.push(OpCode::Mul); // y^2
+        ops1.push(OpCode::Add); // x^2 + y^2
+        ops1.push(OpCode::Mul); // y*(x^2 + y^2)
+        ops1.push(OpCode::Sub); // x + mu*y - y*(x^2 + y^2)
+
         let equations = vec![Bytecode { ops: ops0 }, Bytecode { ops: ops1 }];
         let params = vec![0.0]; // Start at Hopf point mu = 0
         let mut system = EquationSystem::new(equations, params);
-        
+
         let ntst = 10;
         let ncol = 4;
         let amplitude = 1e-4;
-        
+
         // 1. Setup LC guess from Hopf point at mu=0
-        let setup = limit_cycle_setup_from_hopf(
-            &mut system,
-            0,
-            &[0.0, 0.0],
-            0.0,
-            ntst,
-            ncol,
-            amplitude
-        ).expect("LC setup should succeed");
-        
+        let setup =
+            limit_cycle_setup_from_hopf(&mut system, 0, &[0.0, 0.0], 0.0, ntst, ncol, amplitude)
+                .expect("LC setup should succeed");
+
         // 2. Run forward continuation (should increase mu)
         let settings = ContinuationSettings {
             step_size: 0.1,
@@ -1930,28 +1942,40 @@ mod tests {
             corrector_tolerance: 1e-6,
             step_tolerance: 1e-6,
         };
-        
+
         let mut problem = setup.to_problem(&mut system, 0).expect("to_problem failed");
         let initial_aug = setup.guess.to_aug(problem.dimension());
-        let initial_tangent = super::super::compute_tangent_from_problem(&mut problem, &initial_aug).expect("tangent failed");
+        let initial_tangent =
+            super::super::compute_tangent_from_problem(&mut problem, &initial_aug)
+                .expect("tangent failed");
         println!("Initial tangent[0] (mu): {}", initial_tangent[0]);
-        
+
         let branch = continue_limit_cycle_collocation(
             &mut system,
             0,
             setup.collocation_config(),
             setup.guess,
             settings,
-            true // Forward (should be mu > 0)
-        ).expect("Continuation should succeed");
-        
-        assert!(branch.points.len() > 1, "Should have generated more than one point");
+            true, // Forward (should be mu > 0)
+        )
+        .expect("Continuation should succeed");
+
+        assert!(
+            branch.points.len() > 1,
+            "Should have generated more than one point"
+        );
         let last_point = branch.points.last().unwrap();
-        
-        println!("Initial mu: {}, Final mu: {}", branch.points[0].param_value, last_point.param_value);
-        assert!(last_point.param_value > branch.points[0].param_value, 
-                "Continuation moved backward! Initial mu: {}, Final mu: {}", 
-                branch.points[0].param_value, last_point.param_value);
+
+        println!(
+            "Initial mu: {}, Final mu: {}",
+            branch.points[0].param_value, last_point.param_value
+        );
+        assert!(
+            last_point.param_value > branch.points[0].param_value,
+            "Continuation moved backward! Initial mu: {}, Final mu: {}",
+            branch.points[0].param_value,
+            last_point.param_value
+        );
     }
 
     fn pd_test_system(mu: f64) -> EquationSystem {
@@ -1961,69 +1985,69 @@ mod tests {
         ops0.push(OpCode::LoadConst(1.0));
         ops0.push(OpCode::LoadVar(0)); // x
         ops0.push(OpCode::LoadVar(0)); // x
-        ops0.push(OpCode::Mul);        // x^2
+        ops0.push(OpCode::Mul); // x^2
         ops0.push(OpCode::LoadVar(1)); // y
         ops0.push(OpCode::LoadVar(1)); // y
-        ops0.push(OpCode::Mul);        // y^2
-        ops0.push(OpCode::Add);        // x^2 + y^2
-        ops0.push(OpCode::Sub);        // 1 - r^2
-        ops0.push(OpCode::Mul);        // x*(1 - r^2)
+        ops0.push(OpCode::Mul); // y^2
+        ops0.push(OpCode::Add); // x^2 + y^2
+        ops0.push(OpCode::Sub); // 1 - r^2
+        ops0.push(OpCode::Mul); // x*(1 - r^2)
         ops0.push(OpCode::LoadVar(1)); // y
-        ops0.push(OpCode::Sub);        // x*(1 - r^2) - y
+        ops0.push(OpCode::Sub); // x*(1 - r^2) - y
 
         let mut ops1 = Vec::new();
         ops1.push(OpCode::LoadVar(1)); // y
         ops1.push(OpCode::LoadConst(1.0));
         ops1.push(OpCode::LoadVar(0)); // x
         ops1.push(OpCode::LoadVar(0)); // x
-        ops1.push(OpCode::Mul);        // x^2
+        ops1.push(OpCode::Mul); // x^2
         ops1.push(OpCode::LoadVar(1)); // y
         ops1.push(OpCode::LoadVar(1)); // y
-        ops1.push(OpCode::Mul);        // y^2
-        ops1.push(OpCode::Add);        // x^2 + y^2
-        ops1.push(OpCode::Sub);        // 1 - r^2
-        ops1.push(OpCode::Mul);        // y*(1 - r^2)
+        ops1.push(OpCode::Mul); // y^2
+        ops1.push(OpCode::Add); // x^2 + y^2
+        ops1.push(OpCode::Sub); // 1 - r^2
+        ops1.push(OpCode::Mul); // y*(1 - r^2)
         ops1.push(OpCode::LoadVar(0)); // x
-        ops1.push(OpCode::Add);        // y*(1 - r^2) + x
+        ops1.push(OpCode::Add); // y*(1 - r^2) + x
 
         // Transverse subsystem with PD multiplier at mu=0 (omega = 0.5)
         let mut ops2 = Vec::new();
         ops2.push(OpCode::LoadParam(0)); // mu
-        ops2.push(OpCode::LoadVar(2));   // z1
-        ops2.push(OpCode::Mul);          // mu*z1
+        ops2.push(OpCode::LoadVar(2)); // z1
+        ops2.push(OpCode::Mul); // mu*z1
         ops2.push(OpCode::LoadConst(0.5));
-        ops2.push(OpCode::LoadVar(3));   // z2
-        ops2.push(OpCode::Mul);          // 0.5*z2
-        ops2.push(OpCode::Sub);          // mu*z1 - 0.5*z2
-        ops2.push(OpCode::LoadVar(2));   // z1
-        ops2.push(OpCode::LoadVar(2));   // z1
-        ops2.push(OpCode::Mul);          // z1^2
-        ops2.push(OpCode::LoadVar(3));   // z2
-        ops2.push(OpCode::LoadVar(3));   // z2
-        ops2.push(OpCode::Mul);          // z2^2
-        ops2.push(OpCode::Add);          // z1^2 + z2^2
-        ops2.push(OpCode::LoadVar(2));   // z1
-        ops2.push(OpCode::Mul);          // (z1^2 + z2^2) * z1
-        ops2.push(OpCode::Sub);          // mu*z1 - 0.5*z2 - r_z^2*z1
+        ops2.push(OpCode::LoadVar(3)); // z2
+        ops2.push(OpCode::Mul); // 0.5*z2
+        ops2.push(OpCode::Sub); // mu*z1 - 0.5*z2
+        ops2.push(OpCode::LoadVar(2)); // z1
+        ops2.push(OpCode::LoadVar(2)); // z1
+        ops2.push(OpCode::Mul); // z1^2
+        ops2.push(OpCode::LoadVar(3)); // z2
+        ops2.push(OpCode::LoadVar(3)); // z2
+        ops2.push(OpCode::Mul); // z2^2
+        ops2.push(OpCode::Add); // z1^2 + z2^2
+        ops2.push(OpCode::LoadVar(2)); // z1
+        ops2.push(OpCode::Mul); // (z1^2 + z2^2) * z1
+        ops2.push(OpCode::Sub); // mu*z1 - 0.5*z2 - r_z^2*z1
 
         let mut ops3 = Vec::new();
         ops3.push(OpCode::LoadConst(0.5));
-        ops3.push(OpCode::LoadVar(2));   // z1
-        ops3.push(OpCode::Mul);          // 0.5*z1
+        ops3.push(OpCode::LoadVar(2)); // z1
+        ops3.push(OpCode::Mul); // 0.5*z1
         ops3.push(OpCode::LoadParam(0)); // mu
-        ops3.push(OpCode::LoadVar(3));   // z2
-        ops3.push(OpCode::Mul);          // mu*z2
-        ops3.push(OpCode::Add);          // 0.5*z1 + mu*z2
-        ops3.push(OpCode::LoadVar(2));   // z1
-        ops3.push(OpCode::LoadVar(2));   // z1
-        ops3.push(OpCode::Mul);          // z1^2
-        ops3.push(OpCode::LoadVar(3));   // z2
-        ops3.push(OpCode::LoadVar(3));   // z2
-        ops3.push(OpCode::Mul);          // z2^2
-        ops3.push(OpCode::Add);          // z1^2 + z2^2
-        ops3.push(OpCode::LoadVar(3));   // z2
-        ops3.push(OpCode::Mul);          // (z1^2 + z2^2) * z2
-        ops3.push(OpCode::Sub);          // 0.5*z1 + mu*z2 - r_z^2*z2
+        ops3.push(OpCode::LoadVar(3)); // z2
+        ops3.push(OpCode::Mul); // mu*z2
+        ops3.push(OpCode::Add); // 0.5*z1 + mu*z2
+        ops3.push(OpCode::LoadVar(2)); // z1
+        ops3.push(OpCode::LoadVar(2)); // z1
+        ops3.push(OpCode::Mul); // z1^2
+        ops3.push(OpCode::LoadVar(3)); // z2
+        ops3.push(OpCode::LoadVar(3)); // z2
+        ops3.push(OpCode::Mul); // z2^2
+        ops3.push(OpCode::Add); // z1^2 + z2^2
+        ops3.push(OpCode::LoadVar(3)); // z2
+        ops3.push(OpCode::Mul); // (z1^2 + z2^2) * z2
+        ops3.push(OpCode::Sub); // 0.5*z1 + mu*z2 - r_z^2*z2
 
         let equations = vec![
             Bytecode { ops: ops0 },
@@ -2051,15 +2075,9 @@ mod tests {
         let stage_states = build_stage_states_from_mesh(4, ntst, ncol, &coeffs.nodes, &mesh_states);
         let lc_state = flatten_collocation_state(&mesh_states, &stage_states, base_period);
 
-        let setup = limit_cycle_setup_from_pd(
-            &mut system,
-            0,
-            &lc_state,
-            0.0,
-            ntst,
-            ncol,
-            amplitude,
-        ).expect("PD setup should succeed");
+        let setup =
+            limit_cycle_setup_from_pd(&mut system, 0, &lc_state, 0.0, ntst, ncol, amplitude)
+                .expect("PD setup should succeed");
 
         let settings = ContinuationSettings {
             step_size: 0.05,
@@ -2078,17 +2096,27 @@ mod tests {
             setup.guess,
             settings,
             true,
-        ).expect("PD continuation should succeed");
+        )
+        .expect("PD continuation should succeed");
 
-        assert!(branch.points.len() > 1, "PD continuation should advance beyond the seed point");
+        assert!(
+            branch.points.len() > 1,
+            "PD continuation should advance beyond the seed point"
+        );
 
         let (mesh_points, collocation_degree) = match branch.branch_type {
             BranchType::LimitCycle { ntst, ncol } => (ntst, ncol),
             _ => panic!("Expected limit cycle branch"),
         };
-        assert_eq!(mesh_points % 2, 0, "Doubled mesh should have even point count");
+        assert_eq!(
+            mesh_points % 2,
+            0,
+            "Doubled mesh should have even point count"
+        );
 
-        let target_point = branch.points.iter()
+        let target_point = branch
+            .points
+            .iter()
             .rev()
             .find(|point| point.param_value.abs() > 1e-4)
             .expect("Continuation did not move away from PD point");
@@ -2097,14 +2125,18 @@ mod tests {
         let mesh_data_len = mesh_points * dim;
         let stage_data_len = mesh_points * collocation_degree * dim;
         let expected_len = mesh_data_len + stage_data_len + 1;
-        assert_eq!(target_point.state.len(), expected_len, "Unexpected state length");
+        assert_eq!(
+            target_point.state.len(),
+            expected_len,
+            "Unexpected state length"
+        );
 
         let half_idx = mesh_points / 2;
         let state0 = &target_point.state[0..dim];
         let state_half = &target_point.state[half_idx * dim..(half_idx + 1) * dim];
 
-        let z_dist = ((state_half[2] - state0[2]).powi(2)
-            + (state_half[3] - state0[3]).powi(2)).sqrt();
+        let z_dist =
+            ((state_half[2] - state0[2]).powi(2) + (state_half[3] - state0[3]).powi(2)).sqrt();
 
         assert!(
             z_dist > 1e-2,

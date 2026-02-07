@@ -6,7 +6,7 @@ use fork_core::analysis::{
 };
 use fork_core::autodiff::TangentSystem;
 use fork_core::equation_engine::EquationSystem;
-use fork_core::solvers::{DiscreteMap, RK4, Tsit5};
+use fork_core::solvers::{DiscreteMap, Tsit5, RK4};
 use fork_core::traits::Steppable;
 use js_sys::Float64Array;
 use nalgebra::linalg::QR;
@@ -37,7 +37,11 @@ impl WasmSystem {
         if dt <= 0.0 {
             return Err(JsValue::from_str("dt must be positive."));
         }
-        let stride = if qr_stride == 0 { 1 } else { qr_stride as usize };
+        let stride = if qr_stride == 0 {
+            1
+        } else {
+            qr_stride as usize
+        };
         let step_count = steps as usize;
         let solver = match &self.solver {
             SolverType::RK4(_) => LyapunovStepper::Rk4,
@@ -94,7 +98,11 @@ impl WasmSystem {
             &start_state,
             start_time,
             dt,
-            if qr_stride == 0 { 1 } else { qr_stride as usize },
+            if qr_stride == 0 {
+                1
+            } else {
+                qr_stride as usize
+            },
             window_steps as usize,
             forward_transient as usize,
             backward_transient as usize,
@@ -319,7 +327,9 @@ impl WasmLyapunovRunner {
         console_error_panic_hook::set_once();
 
         if initial_state.is_empty() {
-            return Err(JsValue::from_str("Initial state must have positive dimension."));
+            return Err(JsValue::from_str(
+                "Initial state must have positive dimension.",
+            ));
         }
         if steps == 0 {
             return Err(JsValue::from_str(
@@ -329,7 +339,11 @@ impl WasmLyapunovRunner {
         if dt <= 0.0 {
             return Err(JsValue::from_str("dt must be positive."));
         }
-        let stride = if qr_stride == 0 { 1 } else { qr_stride as usize };
+        let stride = if qr_stride == 0 {
+            1
+        } else {
+            qr_stride as usize
+        };
 
         let system = build_system(equations, params, &param_names, &var_names)?;
         let dim = initial_state.len();
@@ -607,7 +621,9 @@ impl WasmCovariantLyapunovRunner {
         console_error_panic_hook::set_once();
 
         if initial_state.is_empty() {
-            return Err(JsValue::from_str("Initial state must have positive dimension."));
+            return Err(JsValue::from_str(
+                "Initial state must have positive dimension.",
+            ));
         }
         if dt <= 0.0 {
             return Err(JsValue::from_str("dt must be positive."));
@@ -615,13 +631,18 @@ impl WasmCovariantLyapunovRunner {
         if window_steps == 0 {
             return Err(JsValue::from_str("Window size must be at least one step."));
         }
-        let stride = if qr_stride == 0 { 1 } else { qr_stride as usize };
+        let stride = if qr_stride == 0 {
+            1
+        } else {
+            qr_stride as usize
+        };
 
-        let total_steps = forward_transient as usize
-            + window_steps as usize
-            + backward_transient as usize;
+        let total_steps =
+            forward_transient as usize + window_steps as usize + backward_transient as usize;
         if total_steps == 0 {
-            return Err(JsValue::from_str("Total integration steps must be positive."));
+            return Err(JsValue::from_str(
+                "Total integration steps must be positive.",
+            ));
         }
 
         let system = build_system(equations, params, &param_names, &var_names)?;
@@ -722,7 +743,9 @@ impl WasmCovariantLyapunovRunner {
         let window_count = state.q_history.len() / dim_sq;
         let total_r_count = state.r_history.len() / dim_sq;
         if total_r_count < window_count {
-            return Err(JsValue::from_str("Insufficient R-history for backward pass."));
+            return Err(JsValue::from_str(
+                "Insufficient R-history for backward pass.",
+            ));
         }
 
         let mut c_matrix = unit_upper_triangular(dim);

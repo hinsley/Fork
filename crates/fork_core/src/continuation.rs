@@ -33,7 +33,6 @@ pub mod homotopy_saddle;
 
 // Re-export types needed for external use
 pub use codim1_curves::{Codim2TestFunctions, FoldCurveProblem, HopfCurveProblem};
-pub use lc_codim1_curves::{LPCCurveProblem, NSCurveProblem, PDCurveProblem};
 pub use homoclinic::continue_homoclinic_curve;
 pub use homoclinic_init::{
     compute_homoclinic_basis, decode_homoclinic_state, homoclinic_setup_from_homoclinic_point,
@@ -42,6 +41,7 @@ pub use homoclinic_init::{
     HomoclinicBasis, HomoclinicExtraFlags, HomoclinicGuess, HomoclinicSetup, HomotopySaddleSetup,
 };
 pub use homotopy_saddle::{continue_homotopy_saddle_curve, homotopy_stage_d_to_homoclinic};
+pub use lc_codim1_curves::{LPCCurveProblem, NSCurveProblem, PDCurveProblem};
 pub use periodic::{
     continue_limit_cycle_collocation, extend_limit_cycle_collocation, limit_cycle_setup_from_hopf,
     limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd, CollocationConfig, LimitCycleGuess,
@@ -708,24 +708,53 @@ fn orient_extension_tangent(
     secant: Option<&DVector<f64>>,
     forward: bool,
 ) {
+    let forward_sign = if forward { 1.0 } else { -1.0 };
+
     if let Some(secant) = secant {
         if tangent.dot(secant) < 0.0 {
             *tangent = -tangent.clone();
         }
-    } else {
-        let forward_sign = if forward { 1.0 } else { -1.0 };
-        let tangent_norm = tangent.norm();
-        let param_component_threshold = 0.01 * tangent_norm;
+    }
 
-        if tangent[0].abs() < param_component_threshold {
-            tangent[0] = param_component_threshold * forward_sign;
-            let norm = tangent.norm();
-            if norm > 1e-12 {
-                *tangent = &*tangent / norm;
-            }
-        } else if tangent[0] * forward_sign < 0.0 {
-            *tangent = -tangent.clone();
+    let tangent_norm = tangent.norm();
+    let param_component_threshold = 0.01 * tangent_norm;
+
+    if tangent[0].abs() < param_component_threshold {
+        let desired_param_sign = secant
+            .and_then(|v| {
+                if v[0].abs() > 1e-12 {
+                    Some(v[0].signum())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(forward_sign);
+        tangent[0] = param_component_threshold * desired_param_sign;
+        let norm = tangent.norm();
+        if norm > 1e-12 {
+            *tangent = &*tangent / norm;
         }
+    } else if secant.is_none() && tangent[0] * forward_sign < 0.0 {
+        *tangent = -tangent.clone();
+    }
+}
+
+fn cap_extension_step_size(settings: &mut ContinuationSettings, secant_norm: Option<f64>) {
+    let Some(secant_norm) = secant_norm else {
+        return;
+    };
+    if !secant_norm.is_finite() || secant_norm <= 1e-12 {
+        return;
+    }
+
+    if settings.step_size > secant_norm {
+        settings.step_size = secant_norm;
+    }
+    if settings.max_step_size < settings.step_size {
+        settings.max_step_size = settings.step_size;
+    }
+    if settings.min_step_size > settings.step_size {
+        settings.min_step_size = settings.step_size;
     }
 }
 
@@ -814,7 +843,7 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
     }
 
     // Compute secant direction from neighbor to endpoint if we have two points
-    let secant_direction = if let Some(neighbor_pos) = neighbor_idx {
+    let (secant_direction, secant_norm) = if let Some(neighbor_pos) = neighbor_idx {
         let neighbor = &branch.points[neighbor_pos];
         let mut neighbor_aug = DVector::zeros(dim + 1);
         neighbor_aug[0] = neighbor.param_value;
@@ -825,14 +854,14 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
         // Secant from interior neighbor to selected endpoint.
         // This preserves outward continuation on the requested signed-index side.
         let secant = &end_aug - &neighbor_aug;
-
-        if secant.norm() > 1e-12 {
-            Some(secant.normalize())
+        let norm = secant.norm();
+        if norm > 1e-12 {
+            (Some(secant.normalize()), Some(norm))
         } else {
-            None
+            (None, None)
         }
     } else {
-        None
+        (None, None)
     };
 
     // With at least two points, secant provides a robust outward direction.
@@ -843,6 +872,8 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
     };
 
     orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
+    let mut settings = settings;
+    cap_extension_step_size(&mut settings, secant_norm);
 
     // Now run continuation with the correctly oriented tangent
     let initial_point = ContinuationPoint {
@@ -2474,6 +2505,43 @@ mod tests {
             "Expected backward tangent parameter component to be biased negative, got {}",
             backward_tangent[0]
         );
+    }
+
+    #[test]
+    fn test_orient_extension_tangent_biases_small_parameter_component_with_secant() {
+        let mut tangent = DVector::from_vec(vec![1e-12, 1.0, 0.0]);
+        let secant = DVector::from_vec(vec![-0.5, -2.0, 0.0]);
+
+        orient_extension_tangent(&mut tangent, Some(&secant), true);
+
+        assert!(
+            tangent[0] < -1e-3,
+            "Expected secant-oriented tangent parameter component to stay away from zero, got {}",
+            tangent[0]
+        );
+        assert!(
+            tangent.dot(&secant) > 0.0,
+            "Expected tangent to remain aligned with secant orientation"
+        );
+    }
+
+    #[test]
+    fn test_cap_extension_step_size_limits_predictor_to_local_secant_scale() {
+        let mut settings = ContinuationSettings {
+            step_size: 0.01,
+            min_step_size: 1e-6,
+            max_step_size: 0.1,
+            max_steps: 20,
+            corrector_steps: 8,
+            corrector_tolerance: 1e-7,
+            step_tolerance: 1e-7,
+        };
+
+        cap_extension_step_size(&mut settings, Some(0.003));
+
+        assert!((settings.step_size - 0.003).abs() < 1e-12);
+        assert!(settings.max_step_size >= settings.step_size);
+        assert!(settings.min_step_size <= settings.step_size);
     }
 
     #[test]

@@ -318,7 +318,8 @@ impl<'a> ContinuationProblem for FoldCurveProblem<'a> {
         })?;
 
         // Compute eigenvalues
-        let eigenvalues: Vec<Complex<f64>> = jac.clone().complex_eigenvalues().iter().cloned().collect();
+        let eigenvalues: Vec<Complex<f64>> =
+            jac.clone().complex_eigenvalues().iter().cloned().collect();
 
         // Compute codim-2 test functions
         self.codim2_tests = self.compute_codim2_tests(&jac)?;
@@ -363,7 +364,7 @@ fn initialize_fold_borders(jac: &DMatrix<f64>) -> Result<(DVector<f64>, DVector<
 
     // Use SVD to get right null vector (v) and left null vector (w)
     let svd = jac.clone().svd(true, true);
-    
+
     if let (Some(u), Some(vt)) = (svd.u, svd.v_t) {
         // v = last column of V (right singular vector for smallest singular value)
         let v: DVector<f64> = vt.row(n - 1).transpose().into();
@@ -406,8 +407,9 @@ fn compute_bialternate_determinant(jac: &DMatrix<f64>) -> f64 {
                     let d_il = if i == l { 1.0 } else { 0.0 };
                     let d_ik = if i == k { 1.0 } else { 0.0 };
 
-                    bialt[(row, col)] = jac[(i, k)] * d_jl - jac[(i, l)] * d_jk 
-                                      + jac[(j, l)] * d_ik - jac[(j, k)] * d_il;
+                    bialt[(row, col)] = jac[(i, k)] * d_jl - jac[(i, l)] * d_jk
+                        + jac[(j, l)] * d_ik
+                        - jac[(j, k)] * d_il;
                     col += 1;
                 }
             }

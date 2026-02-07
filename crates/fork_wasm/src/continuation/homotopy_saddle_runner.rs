@@ -66,13 +66,11 @@ impl WasmHomotopySaddleRunner {
             .setup
             .take()
             .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-        let branch = continue_homotopy_saddle_curve(
-            &mut system,
-            setup,
-            self.settings,
-            self.forward,
-        )
-        .map_err(|e| JsValue::from_str(&format!("Homotopy-saddle continuation failed: {}", e)))?;
+        let branch =
+            continue_homotopy_saddle_curve(&mut system, setup, self.settings, self.forward)
+                .map_err(|e| {
+                    JsValue::from_str(&format!("Homotopy-saddle continuation failed: {}", e))
+                })?;
         self.current_step = self.settings.max_steps;
         self.done = true;
         self.result = Some(branch);
@@ -112,4 +110,3 @@ impl WasmHomotopySaddleRunner {
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 }
-

@@ -3,7 +3,7 @@
 use fork_core::autodiff::Dual;
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
 use fork_core::isocline::{compile_scalar_expression, compute_isocline, IsoclineAxisSpec};
-use fork_core::solvers::{DiscreteMap, RK4, Tsit5};
+use fork_core::solvers::{DiscreteMap, Tsit5, RK4};
 use fork_core::traits::{DynamicalSystem, Steppable};
 use wasm_bindgen::prelude::*;
 

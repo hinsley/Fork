@@ -3,7 +3,9 @@ use super::homoclinic_init::{
     HomoclinicSetup, HomotopySaddleSetup,
 };
 use super::types::HomotopyStage;
-use super::{BifurcationType, BranchType, ContinuationBranch, ContinuationPoint, ContinuationSettings};
+use super::{
+    BifurcationType, BranchType, ContinuationBranch, ContinuationPoint, ContinuationSettings,
+};
 use crate::equation_engine::EquationSystem;
 use anyhow::{anyhow, bail, Result};
 
@@ -152,7 +154,9 @@ fn stage_ab_trigger(stable_params: &[f64], threshold: f64) -> bool {
     if stable_params.is_empty() {
         return true;
     }
-    let product = stable_params.iter().fold(1.0, |acc, value| acc * value.abs());
+    let product = stable_params
+        .iter()
+        .fold(1.0, |acc, value| acc * value.abs());
     product <= threshold
 }
 
@@ -367,8 +371,8 @@ mod tests {
         )
         .expect("setup");
         setup.s_params = vec![1e-5, 1e-5];
-        let branch = continue_homotopy_saddle_curve(&mut system, setup, settings(), true)
-            .expect("branch");
+        let branch =
+            continue_homotopy_saddle_curve(&mut system, setup, settings(), true).expect("branch");
 
         assert!(!branch.points.is_empty());
         assert!(!branch.bifurcations.is_empty());

@@ -64,31 +64,89 @@ impl Codim2TestFunctions {
     /// Check which test functions have changed sign between two points.
     pub fn detect_sign_changes(&self, prev: &Self) -> Vec<Codim2BifurcationType> {
         let mut detected = Vec::new();
-        
+
         let checks = [
             (self.cusp, prev.cusp, Codim2BifurcationType::Cusp),
-            (self.bogdanov_takens, prev.bogdanov_takens, Codim2BifurcationType::BogdanovTakens),
-            (self.zero_hopf, prev.zero_hopf, Codim2BifurcationType::ZeroHopf),
-            (self.double_hopf, prev.double_hopf, Codim2BifurcationType::DoubleHopf),
-            (self.generalized_hopf, prev.generalized_hopf, Codim2BifurcationType::GeneralizedHopf),
-            (self.cusp_cycles, prev.cusp_cycles, Codim2BifurcationType::CuspOfCycles),
-            (self.fold_flip, prev.fold_flip, Codim2BifurcationType::FoldFlip),
-            (self.fold_ns, prev.fold_ns, Codim2BifurcationType::FoldNeimarkSacker),
-            (self.flip_ns, prev.flip_ns, Codim2BifurcationType::FlipNeimarkSacker),
-            (self.double_ns, prev.double_ns, Codim2BifurcationType::DoubleNeimarkSacker),
-            (self.gpd, prev.gpd, Codim2BifurcationType::GeneralizedPeriodDoubling),
-            (self.chenciner, prev.chenciner, Codim2BifurcationType::Chenciner),
-            (self.resonance_1_1, prev.resonance_1_1, Codim2BifurcationType::Resonance1_1),
-            (self.resonance_1_2, prev.resonance_1_2, Codim2BifurcationType::Resonance1_2),
-            (self.resonance_1_3, prev.resonance_1_3, Codim2BifurcationType::Resonance1_3),
-            (self.resonance_1_4, prev.resonance_1_4, Codim2BifurcationType::Resonance1_4),
+            (
+                self.bogdanov_takens,
+                prev.bogdanov_takens,
+                Codim2BifurcationType::BogdanovTakens,
+            ),
+            (
+                self.zero_hopf,
+                prev.zero_hopf,
+                Codim2BifurcationType::ZeroHopf,
+            ),
+            (
+                self.double_hopf,
+                prev.double_hopf,
+                Codim2BifurcationType::DoubleHopf,
+            ),
+            (
+                self.generalized_hopf,
+                prev.generalized_hopf,
+                Codim2BifurcationType::GeneralizedHopf,
+            ),
+            (
+                self.cusp_cycles,
+                prev.cusp_cycles,
+                Codim2BifurcationType::CuspOfCycles,
+            ),
+            (
+                self.fold_flip,
+                prev.fold_flip,
+                Codim2BifurcationType::FoldFlip,
+            ),
+            (
+                self.fold_ns,
+                prev.fold_ns,
+                Codim2BifurcationType::FoldNeimarkSacker,
+            ),
+            (
+                self.flip_ns,
+                prev.flip_ns,
+                Codim2BifurcationType::FlipNeimarkSacker,
+            ),
+            (
+                self.double_ns,
+                prev.double_ns,
+                Codim2BifurcationType::DoubleNeimarkSacker,
+            ),
+            (
+                self.gpd,
+                prev.gpd,
+                Codim2BifurcationType::GeneralizedPeriodDoubling,
+            ),
+            (
+                self.chenciner,
+                prev.chenciner,
+                Codim2BifurcationType::Chenciner,
+            ),
+            (
+                self.resonance_1_1,
+                prev.resonance_1_1,
+                Codim2BifurcationType::Resonance1_1,
+            ),
+            (
+                self.resonance_1_2,
+                prev.resonance_1_2,
+                Codim2BifurcationType::Resonance1_2,
+            ),
+            (
+                self.resonance_1_3,
+                prev.resonance_1_3,
+                Codim2BifurcationType::Resonance1_3,
+            ),
+            (
+                self.resonance_1_4,
+                prev.resonance_1_4,
+                Codim2BifurcationType::Resonance1_4,
+            ),
         ];
 
         for (current, previous, bif_type) in checks {
             // Check for sign change (both values finite and different signs)
-            if current.is_finite() && previous.is_finite() 
-                && current * previous < 0.0 
-            {
+            if current.is_finite() && previous.is_finite() && current * previous < 0.0 {
                 detected.push(bif_type);
             }
         }
@@ -113,7 +171,7 @@ impl Borders {
     }
 
     /// Update borders after a continuation step to maintain regularity.
-    /// 
+    ///
     /// Algorithm (matches reference):
     /// 1. Build bordered matrix [A, w; v', 0]
     /// 2. Solve Bord * vext = [0; 1] to get new v
@@ -176,9 +234,9 @@ mod tests {
         };
 
         let curr = Codim2TestFunctions {
-            cusp: -0.5, // Sign change
+            cusp: -0.5,            // Sign change
             bogdanov_takens: -0.2, // No sign change
-            zero_hopf: -0.1, // Sign change
+            zero_hopf: -0.1,       // Sign change
             ..Default::default()
         };
 

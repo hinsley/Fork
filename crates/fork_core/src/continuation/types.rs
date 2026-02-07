@@ -47,7 +47,10 @@ pub struct ContinuationPoint {
 #[serde(tag = "type")]
 pub enum BranchType {
     Equilibrium,
-    LimitCycle { ntst: usize, ncol: usize },
+    LimitCycle {
+        ntst: usize,
+        ncol: usize,
+    },
     HomoclinicCurve {
         ntst: usize,
         ncol: usize,

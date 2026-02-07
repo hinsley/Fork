@@ -1,6 +1,4 @@
-use super::homoclinic_init::{
-    decode_homoclinic_state, pack_homoclinic_state, HomoclinicSetup,
-};
+use super::homoclinic_init::{decode_homoclinic_state, pack_homoclinic_state, HomoclinicSetup};
 use super::periodic::CollocationCoefficients;
 use super::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
 use super::{
@@ -242,11 +240,7 @@ impl<'a> HomoclinicProblem<'a> {
 impl<'a> ContinuationProblem for HomoclinicProblem<'a> {
     fn dimension(&self) -> usize {
         let dim = self.dim();
-        self.orbit_unknown_count()
-            + dim
-            + 1
-            + self.free_extra_count()
-            + 2 * self.riccati_size()
+        self.orbit_unknown_count() + dim + 1 + self.free_extra_count() + 2 * self.riccati_size()
     }
 
     fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
@@ -351,8 +345,8 @@ impl<'a> ContinuationProblem for HomoclinicProblem<'a> {
 
         if self.setup.basis.nneg > 0 && self.setup.basis.npos > 0 {
             let coeff_u = Self::riccati_coeff(&q0u, &a, self.setup.basis.npos)?;
-            let ru = &coeff_u.t22 * &yu - &yu * &coeff_u.t11 + &coeff_u.e21
-                - &yu * &coeff_u.t12 * &yu;
+            let ru =
+                &coeff_u.t22 * &yu - &yu * &coeff_u.t11 + &coeff_u.e21 - &yu * &coeff_u.t12 * &yu;
             for i in 0..ru.nrows() {
                 for j in 0..ru.ncols() {
                     out[row] = ru[(i, j)];
@@ -361,8 +355,8 @@ impl<'a> ContinuationProblem for HomoclinicProblem<'a> {
             }
 
             let coeff_s = Self::riccati_coeff(&q0s, &a, self.setup.basis.nneg)?;
-            let rs = &coeff_s.t22 * &ys - &ys * &coeff_s.t11 + &coeff_s.e21
-                - &ys * &coeff_s.t12 * &ys;
+            let rs =
+                &coeff_s.t22 * &ys - &ys * &coeff_s.t11 + &coeff_s.e21 - &ys * &coeff_s.t12 * &ys;
             for i in 0..rs.nrows() {
                 for j in 0..rs.ncols() {
                     out[row] = rs[(i, j)];

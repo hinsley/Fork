@@ -250,12 +250,7 @@ fn compute_single_step_jacobian(system: &EquationSystem, state: &[f64]) -> Resul
     Ok(jacobian)
 }
 
-fn iterate_map(
-    system: &EquationSystem,
-    state: &[f64],
-    iterations: usize,
-    out: &mut [f64],
-) {
+fn iterate_map(system: &EquationSystem, state: &[f64], iterations: usize, out: &mut [f64]) {
     let dim = out.len();
     let mut current = state.to_vec();
     let mut next = vec![0.0; dim];
@@ -531,7 +526,12 @@ mod tests {
     fn solve_equilibrium_rejects_invalid_settings() {
         let system = build_mu_system(2.0);
         assert_err_contains(
-            solve_equilibrium(&system, SystemKind::Flow, &[1.0, 2.0], NewtonSettings::default()),
+            solve_equilibrium(
+                &system,
+                SystemKind::Flow,
+                &[1.0, 2.0],
+                NewtonSettings::default(),
+            ),
             "dimension mismatch",
         );
         assert_err_contains(
@@ -575,13 +575,9 @@ mod tests {
     #[test]
     fn solve_equilibrium_converges_for_linear_flow() {
         let system = build_mu_system(1.0);
-        let result = solve_equilibrium(
-            &system,
-            SystemKind::Flow,
-            &[0.2],
-            NewtonSettings::default(),
-        )
-        .expect("linear flow equilibrium should converge");
+        let result =
+            solve_equilibrium(&system, SystemKind::Flow, &[0.2], NewtonSettings::default())
+                .expect("linear flow equilibrium should converge");
         assert_eq!(result.state.len(), 1);
         assert!(result.state[0].abs() < 1e-9);
         assert!(result.residual_norm <= 1e-9);

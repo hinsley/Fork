@@ -460,11 +460,8 @@ fn compute_isocline_triangles(
                     let (ax, ay, az) = corner_points[ca];
                     let (bx, by, bz) = corner_points[cb];
                     let t = interpolate_factor(corner_values[ca], corner_values[cb]);
-                    edge_vertices[edge] = (
-                        ax + (bx - ax) * t,
-                        ay + (by - ay) * t,
-                        az + (bz - az) * t,
-                    );
+                    edge_vertices[edge] =
+                        (ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t);
                 }
 
                 let tri_row = TRI_TABLE[cube_index];

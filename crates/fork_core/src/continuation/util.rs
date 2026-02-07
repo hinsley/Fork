@@ -12,7 +12,7 @@ use super::types::ContinuationPoint;
 const HOPF_IMAG_EPS: f64 = 1e-8;
 
 /// Computes the null space tangent from an extended Jacobian matrix.
-/// 
+///
 /// Uses Gram-Schmidt eigenvalue decomposition first, falling back to
 /// bordered linear solve if that fails.
 pub fn compute_nullspace_tangent(j_ext: &DMatrix<f64>) -> Result<DVector<f64>> {
@@ -234,7 +234,11 @@ pub fn neimark_sacker_test_function(eigenvalues: &[Complex<f64>]) -> f64 {
         product *= eig.norm_sqr() - 1.0;
     }
 
-    if found_pair { product } else { 0.0 }
+    if found_pair {
+        product
+    } else {
+        0.0
+    }
 }
 
 /// Period-doubling test function for map equilibria: product of (mu + 1)
@@ -259,7 +263,7 @@ pub fn period_doubling_test_function(eigenvalues: &[Complex<f64>]) -> f64 {
 mod tests_additional {
     use super::{
         compute_eigenvalues, compute_nullspace_tangent, continuation_point_to_aug,
-        hopf_test_function, neutral_saddle_test_function, neimark_sacker_test_function,
+        hopf_test_function, neimark_sacker_test_function, neutral_saddle_test_function,
         period_doubling_test_function,
     };
     use crate::continuation::types::{BifurcationType, ContinuationPoint};
@@ -421,10 +425,7 @@ mod tests {
     #[test]
     fn compute_nullspace_tangent_errors_on_empty_matrix() {
         let j_ext = DMatrix::<f64>::zeros(0, 0);
-        assert_err_contains(
-            compute_nullspace_tangent(&j_ext),
-            "zero-dimensional system",
-        );
+        assert_err_contains(compute_nullspace_tangent(&j_ext), "zero-dimensional system");
     }
 
     #[test]

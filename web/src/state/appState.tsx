@@ -3569,7 +3569,7 @@ export function AppProvider({
           }
         )
 
-        if (branchData.points.length <= 1) {
+        if (branchData.points.length === 0) {
           throw new Error(
             'Homoclinic continuation stopped at the seed point. Try Free T = off with Free eps0/eps1 = on, a smaller step size (for example 1e-3), or select an earlier large-cycle point.'
           )

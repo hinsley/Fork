@@ -501,9 +501,8 @@ mod tests {
     #[test]
     fn lyapunov_exponents_tracks_linear_rate() {
         let system = LinearSystem { rate: -1.0 };
-        let exponents =
-            lyapunov_exponents(system, LyapunovStepper::Rk4, &[1.0], 0.0, 100, 0.05, 1)
-                .expect("lyapunov exponents should compute");
+        let exponents = lyapunov_exponents(system, LyapunovStepper::Rk4, &[1.0], 0.0, 100, 0.05, 1)
+            .expect("lyapunov exponents should compute");
         assert!((exponents[0] + 1.0).abs() < 1e-2);
     }
 
@@ -562,10 +561,7 @@ mod tests {
     fn normalize_columns_rejects_zero_column() {
         let dim = 2;
         let mut matrix = vec![1.0, 0.0, 0.0, 0.0];
-        assert_err_contains(
-            normalize_columns(&mut matrix, dim),
-            "degenerate CLV column",
-        );
+        assert_err_contains(normalize_columns(&mut matrix, dim), "degenerate CLV column");
     }
 
     #[test]
@@ -573,75 +569,32 @@ mod tests {
         let dim = 2;
         let r = vec![0.0, 1.0, 0.0, 1.0];
         let rhs = vec![1.0, 0.0, 0.0, 1.0];
-        assert_err_contains(
-            solve_upper(&r, &rhs, dim),
-            "near-singular R matrix",
-        );
+        assert_err_contains(solve_upper(&r, &rhs, dim), "near-singular R matrix");
     }
 
     #[test]
     fn covariant_lyapunov_vectors_rejects_invalid_inputs() {
         let system = LinearSystem { rate: 1.0 };
         assert_err_contains(
-            covariant_lyapunov_vectors(
-                system,
-                LyapunovStepper::Rk4,
-                &[],
-                0.0,
-                0.1,
-                1,
-                1,
-                0,
-                0,
-            ),
+            covariant_lyapunov_vectors(system, LyapunovStepper::Rk4, &[], 0.0, 0.1, 1, 1, 0, 0),
             "Initial state",
         );
 
         let system = LinearSystem { rate: 1.0 };
         assert_err_contains(
-            covariant_lyapunov_vectors(
-                system,
-                LyapunovStepper::Rk4,
-                &[1.0],
-                0.0,
-                0.0,
-                1,
-                1,
-                0,
-                0,
-            ),
+            covariant_lyapunov_vectors(system, LyapunovStepper::Rk4, &[1.0], 0.0, 0.0, 1, 1, 0, 0),
             "dt must be positive",
         );
 
         let system = LinearSystem { rate: 1.0 };
         assert_err_contains(
-            covariant_lyapunov_vectors(
-                system,
-                LyapunovStepper::Rk4,
-                &[1.0],
-                0.0,
-                0.1,
-                0,
-                1,
-                0,
-                0,
-            ),
+            covariant_lyapunov_vectors(system, LyapunovStepper::Rk4, &[1.0], 0.0, 0.1, 0, 1, 0, 0),
             "qr_stride",
         );
 
         let system = LinearSystem { rate: 1.0 };
         assert_err_contains(
-            covariant_lyapunov_vectors(
-                system,
-                LyapunovStepper::Rk4,
-                &[1.0],
-                0.0,
-                0.1,
-                1,
-                0,
-                0,
-                0,
-            ),
+            covariant_lyapunov_vectors(system, LyapunovStepper::Rk4, &[1.0], 0.0, 0.1, 1, 0, 0, 0),
             "Window size",
         );
     }
@@ -649,18 +602,9 @@ mod tests {
     #[test]
     fn covariant_lyapunov_vectors_returns_normalized_vectors() {
         let system = LinearSystem { rate: -0.4 };
-        let result = covariant_lyapunov_vectors(
-            system,
-            LyapunovStepper::Rk4,
-            &[1.0],
-            0.0,
-            0.1,
-            1,
-            2,
-            0,
-            1,
-        )
-        .expect("covariant lyapunov vectors should compute");
+        let result =
+            covariant_lyapunov_vectors(system, LyapunovStepper::Rk4, &[1.0], 0.0, 0.1, 1, 2, 0, 1)
+                .expect("covariant lyapunov vectors should compute");
         assert_eq!(result.dimension, 1);
         assert_eq!(result.checkpoints, 2);
         assert_eq!(result.times.len(), 2);

@@ -268,7 +268,10 @@ impl Float for Dual {
         self.ln() / base.ln()
     }
     fn log2(self) -> Self {
-        Self::new(self.val.log2(), self.eps / (self.val * std::f64::consts::LN_2))
+        Self::new(
+            self.val.log2(),
+            self.eps / (self.val * std::f64::consts::LN_2),
+        )
     }
     fn log10(self) -> Self {
         Self::new(
@@ -306,10 +309,7 @@ impl Float for Dual {
     }
     fn hypot(self, _other: Self) -> Self {
         let val = self.val.hypot(_other.val);
-        Self::new(
-            val,
-            (self.val * self.eps + _other.val * _other.eps) / val,
-        )
+        Self::new(val, (self.val * self.eps + _other.val * _other.eps) / val)
     }
 
     fn sin(self) -> Self {

@@ -546,7 +546,8 @@ pub fn compute_homoclinic_basis(
 
     let dim = x0.len();
     let jac = DMatrix::from_row_slice(dim, dim, &jac_data);
-    let eigenvalues: Vec<Complex<f64>> = jac.clone().complex_eigenvalues().iter().copied().collect();
+    let eigenvalues: Vec<Complex<f64>> =
+        jac.clone().complex_eigenvalues().iter().copied().collect();
     let mut nneg = eigenvalues.iter().filter(|ev| ev.re < 0.0).count();
     if nneg == dim && eigenvalues.iter().any(|ev| ev.re.abs() < 1e-2) {
         nneg = nneg.saturating_sub(1);

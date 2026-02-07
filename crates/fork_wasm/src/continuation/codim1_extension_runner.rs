@@ -1,7 +1,7 @@
 //! Codimension-1 curve branch extension runner.
 
-use crate::system::build_system;
 use super::shared::compute_tangent_from_problem;
+use crate::system::build_system;
 use fork_core::continuation::codim1_curves::estimate_hopf_kappa_from_jacobian;
 use fork_core::continuation::{
     Codim2BifurcationType, Codim2TestFunctions, ContinuationBranch, ContinuationPoint,
@@ -214,7 +214,12 @@ impl WasmCodim1CurveExtensionRunner {
             } else {
                 None
             };
-            (min_idx_pos, branch.indices[min_idx_pos], next_idx_pos, false)
+            (
+                min_idx_pos,
+                branch.indices[min_idx_pos],
+                next_idx_pos,
+                false,
+            )
         };
 
         let sign = if is_append { 1 } else { -1 };
@@ -233,7 +238,9 @@ impl WasmCodim1CurveExtensionRunner {
 
         let mut system = build_system(equations, params, &param_names, &var_names)?;
         let kind = match system_type {
-            "map" => SystemKind::Map { iterations: map_iterations as usize },
+            "map" => SystemKind::Map {
+                iterations: map_iterations as usize,
+            },
             _ => SystemKind::Flow,
         };
 
@@ -300,13 +307,11 @@ impl WasmCodim1CurveExtensionRunner {
                     cycle_points: None,
                 };
 
-                let runner = ContinuationRunner::new_with_tangent(
-                    problem,
-                    initial_point,
-                    tangent,
-                    settings,
-                )
-                .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+                let runner =
+                    ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
+                        .map_err(|e| {
+                            JsValue::from_str(&format!("Continuation init failed: {}", e))
+                        })?;
 
                 Codim1ExtensionRunnerKind::Fold {
                     system: boxed_system,
@@ -386,13 +391,11 @@ impl WasmCodim1CurveExtensionRunner {
                     cycle_points: None,
                 };
 
-                let runner = ContinuationRunner::new_with_tangent(
-                    problem,
-                    initial_point,
-                    tangent,
-                    settings,
-                )
-                .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+                let runner =
+                    ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
+                        .map_err(|e| {
+                            JsValue::from_str(&format!("Continuation init failed: {}", e))
+                        })?;
 
                 Codim1ExtensionRunnerKind::Hopf {
                     system: boxed_system,
@@ -428,13 +431,8 @@ impl WasmCodim1CurveExtensionRunner {
                     is_append,
                     |pt| {
                         let param2 = pt.param2_value.unwrap_or(endpoint_param2);
-                        let (lc_state, pt_period) = unpack_lc_state(
-                            &pt.state,
-                            *ntst,
-                            *ncol,
-                            dim,
-                            LcLayout::StageFirst,
-                        )?;
+                        let (lc_state, pt_period) =
+                            unpack_lc_state(&pt.state, *ntst, *ncol, dim, LcLayout::StageFirst)?;
                         Ok(build_lc_state(&lc_state, pt_period, param2))
                     },
                 )?;
@@ -454,8 +452,7 @@ impl WasmCodim1CurveExtensionRunner {
                 )
                 .map_err(|e| JsValue::from_str(&format!("Failed to create LPC problem: {}", e)))?;
 
-                let mut problem: LPCCurveProblem<'static> =
-                    unsafe { std::mem::transmute(problem) };
+                let mut problem: LPCCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
                 let mut tangent = compute_tangent_from_problem(&mut problem, &end_aug)
                     .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
                 orient_tangent(&mut tangent, secant.as_ref(), forward);
@@ -468,13 +465,11 @@ impl WasmCodim1CurveExtensionRunner {
                     cycle_points: None,
                 };
 
-                let runner = ContinuationRunner::new_with_tangent(
-                    problem,
-                    initial_point,
-                    tangent,
-                    settings,
-                )
-                .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+                let runner =
+                    ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
+                        .map_err(|e| {
+                            JsValue::from_str(&format!("Continuation init failed: {}", e))
+                        })?;
 
                 Codim1ExtensionRunnerKind::LPC {
                     system: boxed_system,
@@ -508,13 +503,8 @@ impl WasmCodim1CurveExtensionRunner {
                     is_append,
                     |pt| {
                         let param2 = pt.param2_value.unwrap_or(endpoint_param2);
-                        let (lc_state, pt_period) = unpack_lc_state(
-                            &pt.state,
-                            *ntst,
-                            *ncol,
-                            dim,
-                            LcLayout::MeshFirst,
-                        )?;
+                        let (lc_state, pt_period) =
+                            unpack_lc_state(&pt.state, *ntst, *ncol, dim, LcLayout::MeshFirst)?;
                         Ok(build_lc_state(&lc_state, pt_period, param2))
                     },
                 )?;
@@ -534,8 +524,7 @@ impl WasmCodim1CurveExtensionRunner {
                 )
                 .map_err(|e| JsValue::from_str(&format!("Failed to create PD problem: {}", e)))?;
 
-                let mut problem: PDCurveProblem<'static> =
-                    unsafe { std::mem::transmute(problem) };
+                let mut problem: PDCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
                 let mut tangent = compute_tangent_from_problem(&mut problem, &end_aug)
                     .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
                 orient_tangent(&mut tangent, secant.as_ref(), forward);
@@ -548,13 +537,11 @@ impl WasmCodim1CurveExtensionRunner {
                     cycle_points: None,
                 };
 
-                let runner = ContinuationRunner::new_with_tangent(
-                    problem,
-                    initial_point,
-                    tangent,
-                    settings,
-                )
-                .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+                let runner =
+                    ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
+                        .map_err(|e| {
+                            JsValue::from_str(&format!("Continuation init failed: {}", e))
+                        })?;
 
                 Codim1ExtensionRunnerKind::PD {
                     system: boxed_system,
@@ -592,13 +579,8 @@ impl WasmCodim1CurveExtensionRunner {
                     |pt| {
                         let param2 = pt.param2_value.unwrap_or(endpoint_param2);
                         let k_value = pt.auxiliary.unwrap_or(endpoint_k);
-                        let (lc_state, pt_period) = unpack_lc_state(
-                            &pt.state,
-                            *ntst,
-                            *ncol,
-                            dim,
-                            LcLayout::StageFirst,
-                        )?;
+                        let (lc_state, pt_period) =
+                            unpack_lc_state(&pt.state, *ntst, *ncol, dim, LcLayout::StageFirst)?;
                         Ok(build_ns_state(&lc_state, pt_period, param2, k_value))
                     },
                 )?;
@@ -619,8 +601,7 @@ impl WasmCodim1CurveExtensionRunner {
                 )
                 .map_err(|e| JsValue::from_str(&format!("Failed to create NS problem: {}", e)))?;
 
-                let mut problem: NSCurveProblem<'static> =
-                    unsafe { std::mem::transmute(problem) };
+                let mut problem: NSCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
                 let mut tangent = compute_tangent_from_problem(&mut problem, &end_aug)
                     .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
                 orient_tangent(&mut tangent, secant.as_ref(), forward);
@@ -633,13 +614,11 @@ impl WasmCodim1CurveExtensionRunner {
                     cycle_points: None,
                 };
 
-                let runner = ContinuationRunner::new_with_tangent(
-                    problem,
-                    initial_point,
-                    tangent,
-                    settings,
-                )
-                .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+                let runner =
+                    ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
+                        .map_err(|e| {
+                            JsValue::from_str(&format!("Continuation init failed: {}", e))
+                        })?;
 
                 Codim1ExtensionRunnerKind::NS {
                     system: boxed_system,
@@ -716,14 +695,14 @@ impl WasmCodim1CurveExtensionRunner {
                 kind,
             } => {
                 let extension = runner.take_result();
-                let codim2_types =
-                    detect_codim2_fold(&extension, &merge.branch.branch_type, system.as_mut(), kind, dim)?;
-                (
-                    extension,
-                    merge,
-                    CurveDim::Equilibrium(dim),
-                    codim2_types,
-                )
+                let codim2_types = detect_codim2_fold(
+                    &extension,
+                    &merge.branch.branch_type,
+                    system.as_mut(),
+                    kind,
+                    dim,
+                )?;
+                (extension, merge, CurveDim::Equilibrium(dim), codim2_types)
             }
             Codim1ExtensionRunnerKind::Hopf {
                 runner,
@@ -733,14 +712,14 @@ impl WasmCodim1CurveExtensionRunner {
                 kind,
             } => {
                 let extension = runner.take_result();
-                let codim2_types =
-                    detect_codim2_hopf(&extension, &merge.branch.branch_type, system.as_mut(), kind, dim)?;
-                (
-                    extension,
-                    merge,
-                    CurveDim::Equilibrium(dim),
-                    codim2_types,
-                )
+                let codim2_types = detect_codim2_hopf(
+                    &extension,
+                    &merge.branch.branch_type,
+                    system.as_mut(),
+                    kind,
+                    dim,
+                )?;
+                (extension, merge, CurveDim::Equilibrium(dim), codim2_types)
             }
             Codim1ExtensionRunnerKind::LPC {
                 runner,
@@ -775,17 +754,13 @@ impl WasmCodim1CurveExtensionRunner {
         };
 
         let ExtensionMergeContext {
-            index_offset,
-            sign,
-            ..
+            index_offset, sign, ..
         } = merge;
 
         let mut codim2_iter = codim2_types.into_iter();
 
         for (i, pt) in extension.points.into_iter().enumerate().skip(1) {
-            let codim2_type = codim2_iter
-                .next()
-                .unwrap_or(Codim2BifurcationType::None);
+            let codim2_type = codim2_iter.next().unwrap_or(Codim2BifurcationType::None);
             let converted =
                 convert_extension_point(&merge.branch.branch_type, &pt, curve_dim, codim2_type)?;
             if codim2_type != Codim2BifurcationType::None {
@@ -796,7 +771,8 @@ impl WasmCodim1CurveExtensionRunner {
             merge.branch.indices.push(index_offset + idx * sign);
         }
 
-        to_value(&merge.branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        to_value(&merge.branch)
+            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 }
 
@@ -862,12 +838,7 @@ fn build_lc_state(lc_state: &[f64], period: f64, param2_value: f64) -> Vec<f64> 
     state
 }
 
-fn build_ns_state(
-    lc_state: &[f64],
-    period: f64,
-    param2_value: f64,
-    k_value: f64,
-) -> Vec<f64> {
+fn build_ns_state(lc_state: &[f64], period: f64, param2_value: f64, k_value: f64) -> Vec<f64> {
     let mut state = Vec::with_capacity(lc_state.len() + 3);
     state.extend_from_slice(lc_state);
     state.push(period);
@@ -1200,7 +1171,9 @@ fn detect_codim2_fold(
     let mut problem = FoldCurveProblem::new(system, kind, &state, param1_index, param2_index)
         .map_err(to_js_error)?;
 
-    detect_codim2_for_extension(extension, |point| codim2_tests_for_fold(&mut problem, point))
+    detect_codim2_for_extension(extension, |point| {
+        codim2_tests_for_fold(&mut problem, point)
+    })
 }
 
 fn detect_codim2_hopf(
@@ -1232,17 +1205,13 @@ fn detect_codim2_hopf(
     system.params[param1_index] = first.param_value;
     system.params[param2_index] = p2;
 
-    let mut problem = HopfCurveProblem::new(
-        system,
-        kind,
-        &state,
-        hopf_omega,
-        param1_index,
-        param2_index,
-    )
-    .map_err(to_js_error)?;
+    let mut problem =
+        HopfCurveProblem::new(system, kind, &state, hopf_omega, param1_index, param2_index)
+            .map_err(to_js_error)?;
 
-    detect_codim2_for_extension(extension, |point| codim2_tests_for_hopf(&mut problem, point))
+    detect_codim2_for_extension(extension, |point| {
+        codim2_tests_for_hopf(&mut problem, point)
+    })
 }
 
 fn detect_codim2_lpc(

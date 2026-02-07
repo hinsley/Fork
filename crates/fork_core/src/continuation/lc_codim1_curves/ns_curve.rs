@@ -1,5 +1,5 @@
 //! NS (Neimark-Sacker) curve continuation.
-//! 
+//!
 //! Continues Neimark-Sacker (torus) bifurcations of limit cycles in two-parameter space.
 //! The defining system is:
 //! - Standard BVP for the limit cycle: F(u, T, p) = 0
@@ -11,11 +11,9 @@
 //! - Bordered Jacobian includes rotation by e^{iθ}
 
 use super::LCBorders;
-use crate::continuation::periodic::{
-    CollocationCoefficients, extract_multipliers_shooting,
-};
-use crate::continuation::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
 use crate::continuation::codim1_curves::Codim2TestFunctions;
+use crate::continuation::periodic::{extract_multipliers_shooting, CollocationCoefficients};
+use crate::continuation::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
 use crate::equation_engine::EquationSystem;
 use crate::equilibrium::{compute_jacobian, SystemKind};
 use crate::traits::DynamicalSystem;
@@ -23,10 +21,10 @@ use anyhow::{bail, Result};
 use nalgebra::{DMatrix, DVector};
 
 /// NS curve continuation problem.
-/// 
+///
 /// Augmented state layout: [p1, stages..., meshes..., T, p2, k]
 /// where k = cos(θ) and θ is the argument of the critical Floquet multiplier.
-/// 
+///
 /// The additional variable k tracks the angle through its cosine.
 pub struct NSCurveProblem<'a> {
     /// The dynamical system
@@ -67,7 +65,7 @@ pub struct NSCurveProblem<'a> {
 
 impl<'a> NSCurveProblem<'a> {
     /// Create a new NS curve problem from a detected NS point.
-    /// 
+    ///
     /// The initial k value should be cos(θ) where θ = arg(μ) for the critical
     /// Floquet multiplier μ on the unit circle.
     pub fn new(
@@ -78,29 +76,29 @@ impl<'a> NSCurveProblem<'a> {
         param2_index: usize,
         _param1_value: f64,
         _param2_value: f64,
-        initial_k: f64,  // cos(θ) for the NS multiplier angle
+        initial_k: f64, // cos(θ) for the NS multiplier angle
         ntst: usize,
         ncol: usize,
     ) -> Result<Self> {
         let dim = system.equations.len();
         let coeffs = CollocationCoefficients::new(ncol)?;
-        
+
         let stage_count = ntst * ncol;
         let ncoords = stage_count * dim + (ntst + 1) * dim;
-        
+
         let work_f = vec![0.0; stage_count * dim];
         let work_j = vec![0.0; stage_count * dim * dim];
-        
-        // Phase anchor and direction 
+
+        // Phase anchor and direction
         let mesh_start = stage_count * dim;
         let phase_anchor = if lc_state.len() >= mesh_start + dim {
             lc_state[mesh_start..mesh_start + dim].to_vec()
         } else if lc_state.len() >= dim {
-            lc_state[0..dim].to_vec()  
+            lc_state[0..dim].to_vec()
         } else {
             vec![0.0; dim]
         };
-        
+
         let mut phase_direction = vec![0.0; dim];
         system.apply(0.0, &phase_anchor, &mut phase_direction);
         let norm: f64 = phase_direction.iter().map(|x| x * x).sum::<f64>().sqrt();
@@ -111,13 +109,13 @@ impl<'a> NSCurveProblem<'a> {
         } else {
             phase_direction = vec![1.0; dim];
         }
-        
+
         // Initialize two sets of border vectors for complex eigenspace
         // These span the 2D eigenspace corresponding to conjugate pair e^{±iθ}
         let phi1 = DVector::from_element(ncoords, 1.0 / (ncoords as f64).sqrt());
         let psi1 = phi1.clone();
         let borders1 = LCBorders::new(phi1, psi1);
-        
+
         let mut phi2 = DVector::from_element(ncoords, 1.0 / (ncoords as f64).sqrt());
         // Slight perturbation to avoid linear dependence
         if ncoords > 0 {
@@ -125,14 +123,14 @@ impl<'a> NSCurveProblem<'a> {
         }
         let psi2 = phi2.clone();
         let borders2 = LCBorders::new(phi2, psi2);
-        
+
         // Default indices for singularity function extraction
         let index1 = (0, 0);
         let index2 = (1, 1);
-        
+
         // Validate initial_k
         let _k = initial_k.clamp(-1.0, 1.0);
-        
+
         Ok(Self {
             system,
             param1_index,
@@ -219,7 +217,7 @@ impl<'a> NSCurveProblem<'a> {
     fn eval_f(&mut self, state: &[f64], p1: f64, p2: f64) -> Vec<f64> {
         self.system.params[self.param1_index] = p1;
         self.system.params[self.param2_index] = p2;
-        
+
         let mut result = vec![0.0; self.dim];
         self.system.apply(0.0, state, &mut result);
         result
@@ -232,27 +230,27 @@ impl<'a> NSCurveProblem<'a> {
     }
 
     /// Compute the two singularity functions G1, G2 from the NS bordered system.
-    /// 
+    ///
     /// The NS bordered system uses rotation by e^{iθ} where k = cos(θ).
     /// We solve a 2-column bordered system and extract specific components.
     fn compute_ns_singularities(&self, jac: &DMatrix<f64>, k: f64) -> (f64, f64) {
         let n = jac.nrows();
-        
+
         // The NS Jacobian is augmented with rotation: J * J + k * I
         // For the bordered system, we use a simplified approach aligned with the standard formulation
-        
+
         // Build bordered matrix [J, ψ1, ψ2; φ1', 0, 0; φ2', 0, 0]
         // But for NS, the Jacobian itself is modified to include the rotation term
-        
+
         // Simplified: use the standard bordered approach with k modulating
         let mut bordered = DMatrix::zeros(n + 2, n + 2);
         bordered.view_mut((0, 0), (n, n)).copy_from(jac);
-        
+
         // Add k * I to the diagonal (simplified rotation representation)
         for i in 0..n {
             bordered[(i, i)] += k;
         }
-        
+
         // Border columns
         for i in 0..n.min(self.borders1.psi.len()) {
             bordered[(i, n)] = self.borders1.psi[i];
@@ -260,7 +258,7 @@ impl<'a> NSCurveProblem<'a> {
         for i in 0..n.min(self.borders2.psi.len()) {
             bordered[(i, n + 1)] = self.borders2.psi[i];
         }
-        
+
         // Border rows
         for i in 0..n.min(self.borders1.phi.len()) {
             bordered[(n, i)] = self.borders1.phi[i];
@@ -268,12 +266,12 @@ impl<'a> NSCurveProblem<'a> {
         for i in 0..n.min(self.borders2.phi.len()) {
             bordered[(n + 1, i)] = self.borders2.phi[i];
         }
-        
+
         // RHS: 2 columns, identity in the border block
         let mut rhs = DMatrix::zeros(n + 2, 2);
         rhs[(n, 0)] = 1.0;
         rhs[(n + 1, 1)] = 1.0;
-        
+
         // Solve bordered system
         if let Some(sol) = bordered.lu().solve(&rhs) {
             // Extract G1 and G2 from the solution using indices
@@ -292,13 +290,13 @@ impl<'a> NSCurveProblem<'a> {
         let period = self.get_period(aug);
         let h = period / self.ntst as f64;
         let aug_slice = aug.as_slice();
-        
+
         let n_stages = self.ntst * self.ncol;
         let n_eqs = n_stages * self.dim + self.ntst * self.dim + 1;
         let n_vars = self.ncoords() + 1;
-        
+
         let mut jac = DMatrix::<f64>::zeros(n_eqs, n_vars);
-        
+
         // Evaluate stage Jacobians
         for interval in 0..self.ntst {
             for stage in 0..self.ncol {
@@ -311,29 +309,29 @@ impl<'a> NSCurveProblem<'a> {
                 }
             }
         }
-        
+
         // Collocation equations
         for interval in 0..self.ntst {
             for stage in 0..self.ncol {
                 let stage_idx = interval * self.ncol + stage;
                 let row = stage_idx * self.dim;
-                
+
                 for d in 0..self.dim {
                     let col = stage_idx * self.dim + d;
                     jac[(row + d, col)] = 1.0;
                 }
-                
+
                 let mesh_col = n_stages * self.dim + interval * self.dim;
                 for d in 0..self.dim {
                     jac[(row + d, mesh_col + d)] = -1.0;
                 }
-                
+
                 for k in 0..self.ncol {
                     let k_idx = interval * self.ncol + k;
                     let k_col = k_idx * self.dim;
                     let jac_start = k_idx * self.dim * self.dim;
                     let a = self.coeffs.a[stage][k];
-                    
+
                     for r in 0..self.dim {
                         for c in 0..self.dim {
                             let jv = self.work_j[jac_start + r * self.dim + c];
@@ -343,25 +341,25 @@ impl<'a> NSCurveProblem<'a> {
                 }
             }
         }
-        
+
         // Continuity equations
         let cont_row = n_stages * self.dim;
         for interval in 0..self.ntst {
             let row = cont_row + interval * self.dim;
             let mesh_col = n_stages * self.dim + interval * self.dim;
             let next_col = n_stages * self.dim + ((interval + 1) % (self.ntst + 1)) * self.dim;
-            
+
             for d in 0..self.dim {
                 jac[(row + d, mesh_col + d)] = -1.0;
                 jac[(row + d, next_col + d)] = 1.0;
             }
-            
+
             for k_stage in 0..self.ncol {
                 let k_idx = interval * self.ncol + k_stage;
                 let k_col = k_idx * self.dim;
                 let jac_start = k_idx * self.dim * self.dim;
                 let b = self.coeffs.b[k_stage];
-                
+
                 for r in 0..self.dim {
                     for c in 0..self.dim {
                         let jv = self.work_j[jac_start + r * self.dim + c];
@@ -370,14 +368,14 @@ impl<'a> NSCurveProblem<'a> {
                 }
             }
         }
-        
+
         // Phase condition
         let phase_row = cont_row + self.ntst * self.dim;
         let mesh0_col = n_stages * self.dim;
         for d in 0..self.dim {
             jac[(phase_row, mesh0_col + d)] = self.phase_direction[d];
         }
-        
+
         Ok(jac)
     }
 }
@@ -392,15 +390,15 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
         let p2 = self.get_p2(aug);
         let period = self.get_period(aug);
         let k = self.get_k(aug);
-        
+
         if period <= 0.0 {
             bail!("Period must be positive");
         }
-        
+
         let h = period / self.ntst as f64;
         let aug_slice = aug.as_slice();
         let n_stages = self.ntst * self.ncol;
-        
+
         // Evaluate stage functions
         for interval in 0..self.ntst {
             for stage in 0..self.ncol {
@@ -410,14 +408,14 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
                 self.work_f[start..start + self.dim].copy_from_slice(&f);
             }
         }
-        
+
         // Collocation equations
         for interval in 0..self.ntst {
             let mesh = self.mesh_slice(aug_slice, interval);
             for stage in 0..self.ncol {
                 let z = self.stage_slice(aug_slice, interval, stage);
                 let row = (interval * self.ncol + stage) * self.dim;
-                
+
                 for d in 0..self.dim {
                     let mut sum = 0.0;
                     for k_stage in 0..self.ncol {
@@ -428,14 +426,14 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
                 }
             }
         }
-        
+
         // Continuity equations
         let cont_row = n_stages * self.dim;
         for interval in 0..self.ntst {
             let mesh_i = self.mesh_slice(aug_slice, interval);
             let mesh_next = self.mesh_slice(aug_slice, interval + 1);
             let row = cont_row + interval * self.dim;
-            
+
             for d in 0..self.dim {
                 let mut sum = 0.0;
                 for k_stage in 0..self.ncol {
@@ -445,7 +443,7 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
                 out[row + d] = mesh_next[d] - mesh_i[d] - h * sum;
             }
         }
-        
+
         // Phase condition
         let phase_row = cont_row + self.ntst * self.dim;
         let mesh0 = self.mesh_slice(aug_slice, 0);
@@ -454,13 +452,13 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
             phase += (mesh0[d] - self.phase_anchor[d]) * self.phase_direction[d];
         }
         out[phase_row] = phase;
-        
+
         // Two NS singularity conditions
         let jac = self.build_periodic_jac(aug)?;
         let (g1, g2) = self.compute_ns_singularities(&jac, k);
         out[phase_row + 1] = g1;
         out[phase_row + 2] = g2;
-        
+
         self.cached_jac = Some(jac);
         Ok(())
     }
@@ -470,50 +468,50 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
         let n = self.dimension();
         let m = aug.len();
         let eps = 1e-7;
-        
+
         let mut jac = DMatrix::zeros(n, m);
         let mut res_base = DVector::zeros(n);
         self.residual(aug, &mut res_base)?;
-        
+
         for j in 0..m {
             let mut aug_p = aug.clone();
             aug_p[j] += eps;
             let mut res_p = DVector::zeros(n);
             self.residual(&aug_p, &mut res_p)?;
-            
+
             for i in 0..n {
                 jac[(i, j)] = (res_p[i] - res_base[i]) / eps;
             }
         }
-        
+
         Ok(jac)
     }
 
     fn diagnostics(&mut self, aug: &DVector<f64>) -> Result<PointDiagnostics> {
         let k = self.get_k(aug);
-        
+
         let jac = if let Some(ref j) = self.cached_jac {
             j.clone()
         } else {
             self.build_periodic_jac(aug)?
         };
-        
+
         let multipliers = extract_multipliers_shooting(&jac, self.dim, self.ntst, self.ncol)?;
-        
+
         // Codim-2 test functions for NS curve
         // R1, R2, R3, R4: strong resonances at k = 1, -1, -1/2, 0
         // LPNS, CH, PDNS, NSNS
         let mut tests = Codim2TestFunctions::default();
-        tests.resonance_1_1 = k - 1.0;     // R1: k = cos(0) = 1
-        tests.resonance_1_2 = k + 1.0;     // R2: k = cos(π) = -1
-        tests.resonance_1_3 = k + 0.5;     // R3: k = cos(2π/3) = -1/2
-        tests.resonance_1_4 = k;           // R4: k = cos(π/2) = 0
-        tests.fold_ns = 1.0;               // LPNS placeholder
-        tests.chenciner = 1.0;             // CH placeholder
-        tests.flip_ns = 1.0;               // PDNS placeholder
-        tests.double_ns = 1.0;             // NSNS placeholder
+        tests.resonance_1_1 = k - 1.0; // R1: k = cos(0) = 1
+        tests.resonance_1_2 = k + 1.0; // R2: k = cos(π) = -1
+        tests.resonance_1_3 = k + 0.5; // R3: k = cos(2π/3) = -1/2
+        tests.resonance_1_4 = k; // R4: k = cos(π/2) = 0
+        tests.fold_ns = 1.0; // LPNS placeholder
+        tests.chenciner = 1.0; // CH placeholder
+        tests.flip_ns = 1.0; // PDNS placeholder
+        tests.double_ns = 1.0; // NSNS placeholder
         self.codim2_tests = tests;
-        
+
         Ok(PointDiagnostics {
             test_values: TestFunctionValues::limit_cycle(1.0, 1.0, 1.0),
             eigenvalues: multipliers,
@@ -524,18 +522,18 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
     fn update_after_step(&mut self, aug: &DVector<f64>) -> Result<()> {
         let k = self.get_k(aug);
         let jac = self.build_periodic_jac(aug)?;
-        
+
         // Build the NS-modified Jacobian for border update
         let n = jac.nrows();
         let mut ns_jac = jac;
         for i in 0..n {
             ns_jac[(i, i)] += k;
         }
-        
+
         // Update both border vector pairs
         self.borders1.update(&ns_jac)?;
         self.borders2.update(&ns_jac)?;
-        
+
         Ok(())
     }
 }

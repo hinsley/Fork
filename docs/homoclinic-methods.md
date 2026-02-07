@@ -42,12 +42,13 @@ How to think about it:
 
 ## Shared Continuation Settings (All Methods and Extension)
 
-Current default predictor settings are aligned to the global continuation defaults:
+Current homoclinic/homotopy defaults:
 
 - `Initial step size = 0.01`
 - `Min step size = 1e-5`
 - `Max step size = 0.1`
 - `Max points = 300`
+- `Corrector steps = 32` (homoclinic/homotopy specific default)
 
 Field meanings:
 
@@ -59,7 +60,7 @@ Field meanings:
 | Max points | Maximum points computed in this run | Increase when branch is healthy and you want more length |
 | Min step size | Floor for adaptive step shrinking | Lower only if you need finer rescue steps; too low can be slow/noisy |
 | Max step size | Ceiling for adaptive growth | Lower if curve bends sharply or corrections fail after aggressive growth |
-| Corrector steps | Newton correction iteration cap per point | Increase if near-converged but iteration-limited |
+| Corrector steps | Newton correction iteration cap per point | Default is 32 for homoclinic/homotopy runs and extensions |
 | Corrector tolerance | Newton residual/solve strictness | Tighten for accuracy, loosen slightly for difficult starts |
 | Step tolerance | Acceptance tolerance for step update | Tighten for stability on sensitive branches |
 
@@ -122,6 +123,11 @@ Use the same extension workflow as other continuation branches.
 - CLI: `Extend Branch` from branch inspector
 
 Extension uses the branch's existing continuation settings as defaults and only changes direction/length unless you edit settings.
+
+Important behavior:
+
+- Extension does one continuation attempt with your selected settings.
+- There is no automatic retry and no automatic method switch during extension.
 
 ## Troubleshooting Playbook
 

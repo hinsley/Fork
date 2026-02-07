@@ -188,6 +188,20 @@ beforeAll(async () => {
       }
     }
 
+    type MockRunnerPoint = {
+      state: number[]
+      param_value: number
+      stability: string
+      eigenvalues: unknown[]
+    }
+
+    type MockRunnerResult = {
+      points: MockRunnerPoint[]
+      bifurcations?: number[]
+      indices?: number[]
+      branch_type?: { type: string }
+    }
+
     class MockContinuationRunner {
       private progress = {
         done: true,
@@ -204,8 +218,32 @@ beforeAll(async () => {
       get_progress() {
         return this.progress
       }
-      get_result() {
+      get_result(): MockRunnerResult {
         return { points: [] }
+      }
+    }
+
+    class MockHomoclinicRunner extends MockContinuationRunner {
+      override get_result(): MockRunnerResult {
+        return {
+          points: [
+            {
+              state: [0, 0],
+              param_value: 0.1,
+              stability: 'None',
+              eigenvalues: [],
+            },
+            {
+              state: [1, 1],
+              param_value: 0.2,
+              stability: 'None',
+              eigenvalues: [],
+            },
+          ],
+          bifurcations: [0, 1],
+          indices: [10, 11],
+          branch_type: { type: 'HomoclinicCurve' },
+        }
       }
     }
 
@@ -225,7 +263,7 @@ beforeAll(async () => {
       WasmFoldCurveRunner: MockContinuationRunner,
       WasmHopfCurveRunner: MockContinuationRunner,
       WasmLimitCycleRunner: MockLimitCycleRunner,
-      WasmHomoclinicRunner: MockContinuationRunner,
+      WasmHomoclinicRunner: MockHomoclinicRunner,
       WasmHomotopySaddleRunner: MockContinuationRunner,
       WasmContinuationExtensionRunner: MockContinuationRunner,
       WasmCodim1CurveExtensionRunner: MockContinuationRunner,
@@ -372,6 +410,28 @@ describe('forkCoreWorker', () => {
           (payload as { id?: string; ok?: boolean }).ok === true
       )
     ).toBe(true)
+    const h1Response = workerScope.postMessage.mock.calls
+      .map(
+        ([payload]) =>
+          payload as {
+            id?: string
+            ok?: boolean
+            result?: {
+              points?: Array<{ state?: number[]; param_value?: number }>
+              indices?: number[]
+              bifurcations?: number[]
+              upoldp?: number[][]
+            }
+          }
+      )
+      .find((payload) => payload.id === 'job-h1' && payload.ok === true)
+    expect(h1Response?.result?.points?.length).toBe(1)
+    expect(h1Response?.result?.indices).toEqual([0])
+    expect(h1Response?.result?.bifurcations).toEqual([0])
+    expect(h1Response?.result?.upoldp?.length).toBe(1)
+    const firstSeed = h1Response?.result?.upoldp?.[0] ?? []
+    expect(firstSeed[0]).toBe(0.1)
+    expect(firstSeed.slice(1)).toEqual([0, 0])
 
     workerScope.postMessage.mockClear()
 
@@ -402,6 +462,19 @@ describe('forkCoreWorker', () => {
           (payload as { id?: string; ok?: boolean }).ok === true
       )
     ).toBe(true)
+    const h2Response = workerScope.postMessage.mock.calls
+      .map(
+        ([payload]) =>
+          payload as {
+            id?: string
+            ok?: boolean
+            result?: { points?: unknown[]; indices?: number[]; bifurcations?: number[] }
+          }
+      )
+      .find((payload) => payload.id === 'job-h2' && payload.ok === true)
+    expect(h2Response?.result?.points?.length).toBe(2)
+    expect(h2Response?.result?.indices).toEqual([10, 11])
+    expect(h2Response?.result?.bifurcations).toEqual([0, 1])
 
     workerScope.postMessage.mockClear()
 
@@ -461,6 +534,19 @@ describe('forkCoreWorker', () => {
           (payload as { id?: string; ok?: boolean }).ok === true
       )
     ).toBe(true)
+    const h4Response = workerScope.postMessage.mock.calls
+      .map(
+        ([payload]) =>
+          payload as {
+            id?: string
+            ok?: boolean
+            result?: { points?: unknown[]; indices?: number[]; bifurcations?: number[] }
+          }
+      )
+      .find((payload) => payload.id === 'job-h4' && payload.ok === true)
+    expect(h4Response?.result?.points?.length).toBe(2)
+    expect(h4Response?.result?.indices).toEqual([10, 11])
+    expect(h4Response?.result?.bifurcations).toEqual([0, 1])
   })
 
   it('returns a clear error when homoclinic methods are missing from the wasm build', async () => {

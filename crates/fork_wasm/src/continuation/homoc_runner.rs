@@ -3,8 +3,8 @@
 use crate::system::build_system;
 use fork_core::continuation::homoclinic::HomoclinicProblem;
 use fork_core::continuation::{
-    pack_homoclinic_state, BranchType, ContinuationPoint, ContinuationRunner,
-    ContinuationSettings, HomoclinicSetup,
+    pack_homoclinic_state, BranchType, ContinuationPoint, ContinuationRunner, ContinuationSettings,
+    HomoclinicSetup,
 };
 use fork_core::equation_engine::EquationSystem;
 use serde_wasm_bindgen::{from_value, to_value};
@@ -40,8 +40,10 @@ impl WasmHomoclinicRunner {
         let mut boxed_system = Box::new(system);
         let system_ptr: *mut EquationSystem = &mut *boxed_system;
 
-        let problem = HomoclinicProblem::new(unsafe { &mut *system_ptr }, setup.clone())
-            .map_err(|e| JsValue::from_str(&format!("Failed to create homoclinic problem: {}", e)))?;
+        let problem =
+            HomoclinicProblem::new(unsafe { &mut *system_ptr }, setup.clone()).map_err(|e| {
+                JsValue::from_str(&format!("Failed to create homoclinic problem: {}", e))
+            })?;
         let problem: HomoclinicProblem<'static> = unsafe { std::mem::transmute(problem) };
 
         let initial_point = ContinuationPoint {
@@ -103,4 +105,3 @@ impl WasmHomoclinicRunner {
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 }
-

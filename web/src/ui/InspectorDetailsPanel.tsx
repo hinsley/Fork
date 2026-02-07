@@ -942,7 +942,7 @@ function makeHomoclinicFromLargeCycleDraft(
     maxSteps: '300',
     minStepSize: '1e-5',
     maxStepSize: '0.1',
-    correctorSteps: '12',
+    correctorSteps: '32',
     correctorTolerance: '1e-8',
     stepTolerance: '1e-8',
     forward: true,
@@ -961,7 +961,7 @@ function makeHomoclinicRestartDraft(): HomoclinicRestartDraft {
     maxSteps: '300',
     minStepSize: '1e-5',
     maxStepSize: '0.1',
-    correctorSteps: '12',
+    correctorSteps: '32',
     correctorTolerance: '1e-8',
     stepTolerance: '1e-8',
     forward: true,
@@ -1033,13 +1033,18 @@ function makeBranchExtensionDraft(
 ): ContinuationDraft {
   const base = makeContinuationDraft(system)
   const defaults = branch?.settings
+  const fallbackCorrectorSteps =
+    branch?.branchType === 'homoclinic_curve' ? '32' : base.correctorSteps
   return {
     ...base,
     stepSize: defaults?.step_size?.toString() ?? base.stepSize,
     maxSteps: '300',
     minStepSize: defaults?.min_step_size?.toString() ?? base.minStepSize,
     maxStepSize: defaults?.max_step_size?.toString() ?? base.maxStepSize,
-    correctorSteps: defaults?.corrector_steps?.toString() ?? base.correctorSteps,
+    correctorSteps:
+      branch?.branchType === 'homoclinic_curve'
+        ? '32'
+        : defaults?.corrector_steps?.toString() ?? fallbackCorrectorSteps,
     correctorTolerance: defaults?.corrector_tolerance?.toString() ?? base.correctorTolerance,
     stepTolerance: defaults?.step_tolerance?.toString() ?? base.stepTolerance,
     forward: true,

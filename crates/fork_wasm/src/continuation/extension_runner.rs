@@ -6,8 +6,7 @@ use fork_core::continuation::homoclinic::HomoclinicProblem;
 use fork_core::continuation::periodic::PeriodicOrbitCollocationProblem;
 use fork_core::continuation::{
     decode_homoclinic_state, homoclinic_setup_from_homoclinic_point, pack_homoclinic_state,
-    BranchType,
-    ContinuationBranch, ContinuationPoint, ContinuationProblem, ContinuationRunner,
+    BranchType, ContinuationBranch, ContinuationPoint, ContinuationProblem, ContinuationRunner,
     ContinuationSettings, HomoclinicExtraFlags, HomoclinicSetup,
 };
 use fork_core::equation_engine::EquationSystem;
@@ -45,25 +44,68 @@ fn orient_extension_tangent(
     secant: Option<&DVector<f64>>,
     forward: bool,
 ) {
+    let forward_sign = if forward { 1.0 } else { -1.0 };
+
     if let Some(secant) = secant {
         if tangent.dot(secant) < 0.0 {
             *tangent = -tangent.clone();
         }
-    } else {
-        let forward_sign = if forward { 1.0 } else { -1.0 };
-        let tangent_norm = tangent.norm();
-        let param_component_threshold = 0.01 * tangent_norm;
-
-        if tangent[0].abs() < param_component_threshold {
-            tangent[0] = param_component_threshold * forward_sign;
-            let norm = tangent.norm();
-            if norm > 1e-12 {
-                *tangent = &*tangent / norm;
-            }
-        } else if tangent[0] * forward_sign < 0.0 {
-            *tangent = -tangent.clone();
-        }
     }
+
+    let tangent_norm = tangent.norm();
+    let param_component_threshold = 0.01 * tangent_norm;
+
+    if tangent[0].abs() < param_component_threshold {
+        let desired_param_sign = secant
+            .and_then(|v| {
+                if v[0].abs() > 1e-12 {
+                    Some(v[0].signum())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(forward_sign);
+        tangent[0] = param_component_threshold * desired_param_sign;
+        let norm = tangent.norm();
+        if norm > 1e-12 {
+            *tangent = &*tangent / norm;
+        }
+    } else if secant.is_none() && tangent[0] * forward_sign < 0.0 {
+        *tangent = -tangent.clone();
+    }
+}
+
+fn cap_extension_step_size(settings: &mut ContinuationSettings, secant_norm: Option<f64>) {
+    let Some(secant_norm) = secant_norm else {
+        return;
+    };
+    if !secant_norm.is_finite() || secant_norm <= 1e-12 {
+        return;
+    }
+
+    if settings.step_size > secant_norm {
+        settings.step_size = secant_norm;
+    }
+    if settings.max_step_size < settings.step_size {
+        settings.max_step_size = settings.step_size;
+    }
+    if settings.min_step_size > settings.step_size {
+        settings.min_step_size = settings.step_size;
+    }
+}
+
+fn seed_anchor_aug_from_upoldp(
+    branch: &ContinuationBranch,
+    expected_aug_len: usize,
+) -> Option<DVector<f64>> {
+    let candidate = branch.upoldp.as_ref()?.first()?;
+    if candidate.len() != expected_aug_len {
+        return None;
+    }
+    if candidate.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    Some(DVector::from_vec(candidate.clone()))
 }
 
 fn try_warm_start_homoclinic_riccati(setup: &mut HomoclinicSetup, endpoint_state: &[f64]) -> bool {
@@ -124,6 +166,18 @@ fn hydrate_homoclinic_setup_from_endpoint(
         setup.guess.ys = decoded.ys;
     }
     true
+}
+
+fn canonicalize_homoclinic_point_state(
+    template: &HomoclinicSetup,
+    point_state: &[f64],
+    dim: usize,
+) -> Option<Vec<f64>> {
+    let mut setup = template.clone();
+    if !hydrate_homoclinic_setup_from_endpoint(&mut setup, point_state, dim) {
+        return None;
+    }
+    Some(pack_homoclinic_state(&setup))
 }
 
 #[wasm_bindgen]
@@ -250,7 +304,7 @@ impl WasmContinuationExtensionRunner {
                     end_aug[i + 1] = v;
                 }
 
-                let secant_direction = if let Some(neighbor_pos) = neighbor_idx {
+                let (secant_direction, secant_norm) = if let Some(neighbor_pos) = neighbor_idx {
                     let neighbor = &merge.branch.points[neighbor_pos];
                     let mut neighbor_aug = DVector::zeros(dim + 1);
                     neighbor_aug[0] = neighbor.param_value;
@@ -258,13 +312,14 @@ impl WasmContinuationExtensionRunner {
                         neighbor_aug[i + 1] = v;
                     }
                     let secant = &end_aug - &neighbor_aug;
-                    if secant.norm() > 1e-12 {
-                        Some(secant.normalize())
+                    let norm = secant.norm();
+                    if norm > 1e-12 {
+                        (Some(secant.normalize()), Some(norm))
                     } else {
-                        None
+                        (None, None)
                     }
                 } else {
-                    None
+                    (None, None)
                 };
 
                 let mut tangent = if let Some(secant) = secant_direction.as_ref() {
@@ -275,6 +330,8 @@ impl WasmContinuationExtensionRunner {
                 };
 
                 orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
+                let mut settings = settings;
+                cap_extension_step_size(&mut settings, secant_norm);
 
                 let initial_point = ContinuationPoint {
                     state: endpoint.state.clone(),
@@ -353,7 +410,7 @@ impl WasmContinuationExtensionRunner {
                     end_aug[i + 1] = v;
                 }
 
-                let secant_direction = if let Some(neighbor_pos) = neighbor_idx {
+                let (secant_direction, secant_norm) = if let Some(neighbor_pos) = neighbor_idx {
                     let neighbor = &merge.branch.points[neighbor_pos];
                     let mut neighbor_aug = DVector::zeros(dim + 1);
                     neighbor_aug[0] = neighbor.param_value;
@@ -361,13 +418,14 @@ impl WasmContinuationExtensionRunner {
                         neighbor_aug[i + 1] = v;
                     }
                     let secant = &end_aug - &neighbor_aug;
-                    if secant.norm() > 1e-12 {
-                        Some(secant.normalize())
+                    let norm = secant.norm();
+                    if norm > 1e-12 {
+                        (Some(secant.normalize()), Some(norm))
                     } else {
-                        None
+                        (None, None)
                     }
                 } else {
-                    None
+                    (None, None)
                 };
 
                 let mut tangent = if let Some(secant) = secant_direction.as_ref() {
@@ -378,6 +436,8 @@ impl WasmContinuationExtensionRunner {
                 };
 
                 orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
+                let mut settings = settings;
+                cap_extension_step_size(&mut settings, secant_norm);
 
                 let initial_point = ContinuationPoint {
                     state: endpoint.state.clone(),
@@ -448,18 +508,17 @@ impl WasmContinuationExtensionRunner {
                 .map_err(|e| {
                     JsValue::from_str(&format!("Failed to initialize homoclinic extension: {}", e))
                 })?;
+                let system_dim = system.equations.len();
                 // Keep the extension seed aligned with the selected endpoint.
                 // This avoids introducing a phase-reference mismatch before the first step.
-                let hydrated = hydrate_homoclinic_setup_from_endpoint(
-                    &mut setup,
-                    &endpoint.state,
-                    system.equations.len(),
-                );
+                let hydrated =
+                    hydrate_homoclinic_setup_from_endpoint(&mut setup, &endpoint.state, system_dim);
                 if !hydrated {
                     // Fallback: preserve Riccati state from the endpoint when full decode fails.
                     let _ = try_warm_start_homoclinic_riccati(&mut setup, &endpoint.state);
                 }
                 let packed_initial_state = pack_homoclinic_state(&setup);
+                let secant_template = setup.clone();
 
                 let mut boxed_system = Box::new(system);
                 let system_ptr: *mut EquationSystem = &mut *boxed_system;
@@ -486,21 +545,45 @@ impl WasmContinuationExtensionRunner {
                     end_aug[i + 1] = v;
                 }
 
-                let secant_direction = if let Some(neighbor_pos) = neighbor_idx {
-                    let neighbor = &merge.branch.points[neighbor_pos];
-                    let mut neighbor_aug = DVector::zeros(dim + 1);
-                    neighbor_aug[0] = neighbor.param_value;
-                    for (i, &v) in neighbor.state.iter().enumerate() {
-                        neighbor_aug[i + 1] = v;
-                    }
-                    let secant = &end_aug - &neighbor_aug;
-                    if secant.norm() > 1e-12 {
-                        Some(secant.normalize())
-                    } else {
-                        None
-                    }
+                let seed_anchor_aug = if neighbor_idx.is_none() {
+                    seed_anchor_aug_from_upoldp(&merge.branch, dim + 1)
                 } else {
                     None
+                };
+                let (secant_direction, secant_norm) = if let Some(neighbor_pos) = neighbor_idx {
+                    let neighbor = &merge.branch.points[neighbor_pos];
+                    let neighbor_state = canonicalize_homoclinic_point_state(
+                        &secant_template,
+                        &neighbor.state,
+                        system_dim,
+                    )
+                    .unwrap_or_else(|| neighbor.state.clone());
+                    if neighbor_state.len() != dim {
+                        (None, None)
+                    } else {
+                        let mut neighbor_aug = DVector::zeros(dim + 1);
+                        neighbor_aug[0] = neighbor.param_value;
+                        for (i, &v) in neighbor_state.iter().enumerate() {
+                            neighbor_aug[i + 1] = v;
+                        }
+                        let secant = &end_aug - &neighbor_aug;
+                        let norm = secant.norm();
+                        if norm > 1e-12 {
+                            (Some(secant.normalize()), Some(norm))
+                        } else {
+                            (None, None)
+                        }
+                    }
+                } else if let Some(anchor_aug) = seed_anchor_aug {
+                    let secant = &end_aug - &anchor_aug;
+                    let norm = secant.norm();
+                    if norm > 1e-12 {
+                        (Some(secant.normalize()), Some(norm))
+                    } else {
+                        (None, None)
+                    }
+                } else {
+                    (None, None)
                 };
 
                 let mut tangent = if let Some(secant) = secant_direction.as_ref() {
@@ -511,6 +594,8 @@ impl WasmContinuationExtensionRunner {
                 };
 
                 orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
+                let mut settings = settings;
+                cap_extension_step_size(&mut settings, secant_norm);
 
                 let initial_point = ContinuationPoint {
                     state: packed_initial_state,
@@ -593,9 +678,7 @@ impl WasmContinuationExtensionRunner {
         let (extension, merge) = match runner_kind {
             ExtensionRunnerKind::Equilibrium { runner, merge } => (runner.take_result(), merge),
             ExtensionRunnerKind::LimitCycle { runner, merge, .. } => (runner.take_result(), merge),
-            ExtensionRunnerKind::Homoclinic { runner, merge, .. } => {
-                (runner.take_result(), merge)
-            }
+            ExtensionRunnerKind::Homoclinic { runner, merge, .. } => (runner.take_result(), merge),
         };
 
         let mut branch = merge.branch;
@@ -966,11 +1049,13 @@ mod tests {
 #[cfg(test)]
 mod orientation_tests {
     use super::{
+        canonicalize_homoclinic_point_state, cap_extension_step_size,
         hydrate_homoclinic_setup_from_endpoint, orient_extension_tangent,
-        try_warm_start_homoclinic_riccati,
+        seed_anchor_aug_from_upoldp, try_warm_start_homoclinic_riccati,
     };
     use fork_core::continuation::{
-        pack_homoclinic_state, HomoclinicBasis, HomoclinicExtraFlags, HomoclinicGuess,
+        pack_homoclinic_state, BifurcationType, BranchType, ContinuationBranch, ContinuationPoint,
+        ContinuationSettings, HomoclinicBasis, HomoclinicExtraFlags, HomoclinicGuess,
         HomoclinicSetup,
     };
     use nalgebra::DVector;
@@ -998,6 +1083,24 @@ mod orientation_tests {
         assert!(
             tangent[0] < 0.0,
             "without secant, backward direction should enforce negative parameter component"
+        );
+    }
+
+    #[test]
+    fn orient_extension_tangent_with_secant_biases_tiny_parameter_component() {
+        let mut tangent = DVector::from_vec(vec![1e-12, 1.0, 0.0]);
+        let secant = DVector::from_vec(vec![-0.1, -2.0, 0.0]);
+
+        orient_extension_tangent(&mut tangent, Some(&secant), true);
+
+        assert!(
+            tangent[0] < -1e-3,
+            "secant-oriented tangent should get a non-trivial parameter component, got {}",
+            tangent[0]
+        );
+        assert!(
+            tangent.dot(&secant) > 0.0,
+            "tangent must stay aligned with secant"
         );
     }
 
@@ -1120,5 +1223,94 @@ mod orientation_tests {
         assert_eq!(setup.guess.eps1, 9.0);
         assert_eq!(setup.guess.yu, endpoint_setup.guess.yu);
         assert_eq!(setup.guess.ys, endpoint_setup.guess.ys);
+    }
+
+    #[test]
+    fn canonicalize_homoclinic_point_state_round_trips_valid_state() {
+        let setup = HomoclinicSetup {
+            guess: HomoclinicGuess {
+                mesh_states: vec![vec![0.0, 0.0], vec![0.5, 0.0], vec![1.0, 0.0]],
+                stage_states: vec![vec![vec![0.25, 0.0]], vec![vec![0.75, 0.0]]],
+                x0: vec![0.0, 0.0],
+                param1_value: 0.2,
+                param2_value: 0.1,
+                time: 2.0,
+                eps0: 0.1,
+                eps1: 0.2,
+                yu: vec![0.3],
+                ys: vec![0.4],
+            },
+            ntst: 2,
+            ncol: 1,
+            param1_index: 0,
+            param2_index: 1,
+            param1_name: "mu".to_string(),
+            param2_name: "nu".to_string(),
+            base_params: vec![0.2, 0.1],
+            extras: HomoclinicExtraFlags {
+                free_time: true,
+                free_eps0: true,
+                free_eps1: false,
+            },
+            basis: HomoclinicBasis {
+                stable_q: vec![1.0, 0.0, 0.0, 1.0],
+                unstable_q: vec![1.0, 0.0, 0.0, 1.0],
+                dim: 2,
+                nneg: 1,
+                npos: 1,
+            },
+        };
+
+        let state = pack_homoclinic_state(&setup);
+        let canonical =
+            canonicalize_homoclinic_point_state(&setup, &state, 2).expect("canonical state");
+        assert_eq!(canonical, state);
+    }
+
+    #[test]
+    fn cap_extension_step_size_limits_predictor_to_local_secant_scale() {
+        let mut settings = ContinuationSettings {
+            step_size: 0.01,
+            min_step_size: 1e-6,
+            max_step_size: 0.1,
+            max_steps: 10,
+            corrector_steps: 8,
+            corrector_tolerance: 1e-7,
+            step_tolerance: 1e-7,
+        };
+
+        cap_extension_step_size(&mut settings, Some(0.003));
+
+        assert!((settings.step_size - 0.003).abs() < 1e-12);
+        assert!(settings.max_step_size >= settings.step_size);
+        assert!(settings.min_step_size <= settings.step_size);
+    }
+
+    #[test]
+    fn seed_anchor_aug_from_upoldp_reads_single_augmented_seed() {
+        let branch = ContinuationBranch {
+            points: vec![ContinuationPoint {
+                state: vec![1.0, 2.0],
+                param_value: 0.5,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            }],
+            bifurcations: Vec::new(),
+            indices: vec![0],
+            branch_type: BranchType::HomoclinicCurve {
+                ntst: 2,
+                ncol: 1,
+                param1_name: "mu".to_string(),
+                param2_name: "nu".to_string(),
+                free_time: true,
+                free_eps0: true,
+                free_eps1: false,
+            },
+            upoldp: Some(vec![vec![0.4, 1.0, 2.0]]),
+        };
+
+        let anchor = seed_anchor_aug_from_upoldp(&branch, 3).expect("seed anchor");
+        assert_eq!(anchor.as_slice(), &[0.4, 1.0, 2.0]);
     }
 }

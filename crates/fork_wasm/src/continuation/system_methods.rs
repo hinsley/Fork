@@ -7,15 +7,15 @@ use fork_core::continuation::equilibrium::{
     extend_branch as core_extend_branch, map_cycle_seed_from_pd,
 };
 use fork_core::continuation::{
-    continue_limit_cycle_collocation, continue_with_problem, extend_limit_cycle_collocation,
-    continue_homoclinic_curve, continue_homotopy_saddle_curve,
-    homoclinic_setup_from_homoclinic_point, homoclinic_setup_from_homotopy_saddle_point,
-    homoclinic_setup_from_large_cycle, homotopy_saddle_setup_from_equilibrium,
-    limit_cycle_setup_from_hopf, limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd,
-    BranchType, Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType, Codim2BifurcationType,
-    CollocationConfig, ContinuationBranch, ContinuationSettings, FoldCurveProblem,
-    HomoclinicExtraFlags, HomoclinicSetup, HomotopySaddleSetup, HopfCurveProblem, LPCCurveProblem,
-    LimitCycleSetup, NSCurveProblem, OrbitTimeMode, PDCurveProblem, StepResult,
+    continue_homoclinic_curve, continue_homotopy_saddle_curve, continue_limit_cycle_collocation,
+    continue_with_problem, extend_limit_cycle_collocation, homoclinic_setup_from_homoclinic_point,
+    homoclinic_setup_from_homotopy_saddle_point, homoclinic_setup_from_large_cycle,
+    homotopy_saddle_setup_from_equilibrium, limit_cycle_setup_from_hopf,
+    limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd, BranchType, Codim1CurveBranch,
+    Codim1CurvePoint, Codim1CurveType, Codim2BifurcationType, CollocationConfig,
+    ContinuationBranch, ContinuationSettings, FoldCurveProblem, HomoclinicExtraFlags,
+    HomoclinicSetup, HomotopySaddleSetup, HopfCurveProblem, LPCCurveProblem, LimitCycleSetup,
+    NSCurveProblem, OrbitTimeMode, PDCurveProblem, StepResult,
 };
 use fork_core::equilibrium::{compute_jacobian, SystemKind};
 use fork_core::traits::DynamicalSystem;

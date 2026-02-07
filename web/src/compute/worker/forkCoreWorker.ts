@@ -608,6 +608,45 @@ function computeBatchSize(maxSteps: number): number {
   return Math.max(1, Math.ceil(maxSteps / DEFAULT_PROGRESS_UPDATES))
 }
 
+function discardInitialApproximationPoint(
+  branch: HomoclinicContinuationResult
+): HomoclinicContinuationResult {
+  if (!Array.isArray(branch.points) || branch.points.length <= 1) {
+    return branch
+  }
+  const seed = branch.points[0]
+  const seedAnchor =
+    seed &&
+    Array.isArray(seed.state) &&
+    seed.state.length > 0 &&
+    Number.isFinite(seed.param_value)
+      ? [seed.param_value, ...seed.state]
+      : null
+  const points = branch.points.slice(1)
+  const rawIndices =
+    Array.isArray(branch.indices) && branch.indices.length === branch.points.length
+      ? branch.indices.slice(1)
+      : points.map((_, index) => index)
+  const indexBase = rawIndices.length > 0 ? rawIndices[0] : 0
+  const indices = rawIndices.map((value, index) =>
+    Number.isFinite(value) ? value - indexBase : index
+  )
+  const bifurcations = (branch.bifurcations ?? [])
+    .filter((idx) => idx > 0)
+    .map((idx) => idx - 1)
+    .filter((idx) => idx >= 0 && idx < points.length)
+  const normalized: HomoclinicContinuationResult & { upoldp?: number[][] } = {
+    ...branch,
+    points,
+    indices,
+    bifurcations,
+  }
+  if (seedAnchor && seedAnchor.every(Number.isFinite)) {
+    normalized.upoldp = [seedAnchor]
+  }
+  return normalized
+}
+
 async function runEquilibriumContinuation(
   request: EquilibriumContinuationRequest,
   signal: AbortSignal,
@@ -1004,7 +1043,7 @@ async function runHomoclinicFromLargeCycle(
     onProgress(progress)
   }
 
-  return runner.get_result()
+  return discardInitialApproximationPoint(runner.get_result())
 }
 
 async function runHomoclinicFromHomoclinic(

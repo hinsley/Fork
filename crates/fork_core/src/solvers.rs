@@ -222,7 +222,7 @@ impl<T: Scalar> Steppable<T> for DiscreteMap<T> {
 
 #[cfg(test)]
 mod tests_accuracy {
-    use super::{DiscreteMap, RK4, Tsit5};
+    use super::{DiscreteMap, Tsit5, RK4};
     use crate::traits::{DynamicalSystem, Steppable};
 
     #[derive(Clone, Copy)]
@@ -316,9 +316,7 @@ mod tests_accuracy {
 
     #[test]
     fn rk4_step_matches_two_dimensional_linear_flow() {
-        let system = DiagonalLinearFlow {
-            rates: [1.0, -2.0],
-        };
+        let system = DiagonalLinearFlow { rates: [1.0, -2.0] };
         let mut solver = RK4::new(2);
         let mut t = 0.0;
         let mut state = vec![1.0, 2.0];

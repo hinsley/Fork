@@ -12,7 +12,7 @@
 //! where κ = ω² is the squared Hopf frequency, and we use the matrix
 //! RED = A·A + κ·I with 2x2 border structure.
 
-use super::{Codim2TestFunctions};
+use super::Codim2TestFunctions;
 use crate::autodiff::Dual;
 use crate::continuation::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
 use crate::equation_engine::EquationSystem;
@@ -155,7 +155,8 @@ fn select_hopf_pair(eigenvalues: &[Complex<f64>]) -> Option<(usize, usize)> {
             let sum = eigenvalues[i] + eigenvalues[j];
             let score = sum.norm();
             let im_score = eigenvalues[i].im.abs().max(eigenvalues[j].im.abs());
-            if score < best_sum - 1e-12 || ((score - best_sum).abs() < 1e-12 && im_score > best_im) {
+            if score < best_sum - 1e-12 || ((score - best_sum).abs() < 1e-12 && im_score > best_im)
+            {
                 best_sum = score;
                 best_im = im_score;
                 best = Some((i, j));
@@ -178,9 +179,7 @@ pub fn estimate_hopf_kappa_from_jacobian(jac: &DMatrix<f64>) -> Option<f64> {
     }
 }
 
-fn select_hopf_indices_from_jres(
-    jres: &DMatrix<f64>,
-) -> Option<((usize, usize), (usize, usize))> {
+fn select_hopf_indices_from_jres(jres: &DMatrix<f64>) -> Option<((usize, usize), (usize, usize))> {
     if jres.ncols() < 2 {
         return None;
     }
@@ -269,8 +268,8 @@ impl<'a> HopfCurveProblem<'a> {
         let jac = compute_jacobian(system, kind, hopf_state)?;
         let jac_mat = DMatrix::from_row_slice(n, n, &jac);
 
-        let kappa_seed = estimate_hopf_kappa_from_jacobian(&jac_mat)
-            .unwrap_or(hopf_omega * hopf_omega);
+        let kappa_seed =
+            estimate_hopf_kappa_from_jacobian(&jac_mat).unwrap_or(hopf_omega * hopf_omega);
         let kappa = if kappa_seed.is_finite() && kappa_seed > 0.0 {
             kappa_seed
         } else {
@@ -456,11 +455,19 @@ impl<'a> HopfCurveProblem<'a> {
         let n = self.nphase();
         let (vext, _) = solve_bordered(jac, kappa, &self.borders)?;
         let g = g_matrix_from_vext(&vext, n);
-        Ok(g_values_from_matrix(&g, self.borders.index1, self.borders.index2))
+        Ok(g_values_from_matrix(
+            &g,
+            self.borders.index1,
+            self.borders.index2,
+        ))
     }
 
     /// Compute codim-2 test functions for the Hopf curve.
-    fn compute_codim2_tests(&mut self, jac: &DMatrix<f64>, kappa: f64) -> Result<Codim2TestFunctions> {
+    fn compute_codim2_tests(
+        &mut self,
+        jac: &DMatrix<f64>,
+        kappa: f64,
+    ) -> Result<Codim2TestFunctions> {
         let mut tests = Codim2TestFunctions::default();
 
         // BT test: κ → 0 (Hopf frequency collapses)
@@ -631,7 +638,8 @@ impl<'a> ContinuationProblem for HopfCurveProblem<'a> {
                 Ok(DMatrix::from_row_slice(n, n, &j))
             })?;
             let g_xi = self.compute_g_matrix(&jac_xi, kappa)?;
-            let (g1_xi, g2_xi) = g_values_from_matrix(&g_xi, self.borders.index1, self.borders.index2);
+            let (g1_xi, g2_xi) =
+                g_values_from_matrix(&g_xi, self.borders.index1, self.borders.index2);
             jext[(n, i + 2)] = (g1_xi - g1_0) / step;
             jext[(n + 1, i + 2)] = (g2_xi - g2_0) / step;
         }
@@ -661,7 +669,8 @@ impl<'a> ContinuationProblem for HopfCurveProblem<'a> {
         })?;
 
         // Compute eigenvalues
-        let eigenvalues: Vec<Complex<f64>> = jac.clone().complex_eigenvalues().iter().cloned().collect();
+        let eigenvalues: Vec<Complex<f64>> =
+            jac.clone().complex_eigenvalues().iter().cloned().collect();
 
         // Compute codim-2 test functions
         self.codim2_tests = self.compute_codim2_tests(&jac, kappa)?;
@@ -699,10 +708,7 @@ impl<'a> ContinuationProblem for HopfCurveProblem<'a> {
 }
 
 /// Initialize Hopf curve borders from eigenvectors of critical eigenvalue pair.
-fn initialize_hopf_borders(
-    jac: &DMatrix<f64>,
-    kappa: f64,
-) -> Result<(DMatrix<f64>, DMatrix<f64>)> {
+fn initialize_hopf_borders(jac: &DMatrix<f64>, kappa: f64) -> Result<(DMatrix<f64>, DMatrix<f64>)> {
     let n = jac.nrows();
     if n < 2 {
         bail!("Hopf requires at least 2D system");
@@ -760,7 +766,8 @@ fn compute_bialternate_matrix(jac: &DMatrix<f64>) -> DMatrix<f64> {
                     let d_ik = if i == k { 1.0 } else { 0.0 };
 
                     bialt[(row, col)] = jac[(i, k)] * d_jl - jac[(i, l)] * d_jk
-                                      + jac[(j, l)] * d_ik - jac[(j, k)] * d_il;
+                        + jac[(j, l)] * d_ik
+                        - jac[(j, k)] * d_il;
                     col += 1;
                 }
             }
@@ -863,7 +870,11 @@ mod tests {
     fn test_estimate_hopf_kappa_from_jacobian() {
         let jac = DMatrix::from_row_slice(2, 2, &[0.0, -2.0, 2.0, 0.0]);
         let kappa = estimate_hopf_kappa_from_jacobian(&jac).expect("kappa estimate");
-        assert!((kappa - 4.0).abs() < 1e-8, "expected kappa ~4, got {}", kappa);
+        assert!(
+            (kappa - 4.0).abs() < 1e-8,
+            "expected kappa ~4, got {}",
+            kappa
+        );
     }
 
     #[test]
@@ -871,11 +882,7 @@ mod tests {
         let jres = DMatrix::from_row_slice(
             3,
             4,
-            &[
-                2.0, 0.1, 0.0, 0.0,
-                0.0, 0.0, 1.0, 0.05,
-                0.0, 0.0, 0.0, 0.0,
-            ],
+            &[2.0, 0.1, 0.0, 0.0, 0.0, 0.0, 1.0, 0.05, 0.0, 0.0, 0.0, 0.0],
         );
         let (idx1, idx2) = select_hopf_indices_from_jres(&jres).expect("index selection");
         assert_eq!(idx1, (0, 0));
@@ -950,8 +957,8 @@ mod tests {
             .expect("Jacobian should compute");
         let n = hopf_point.state.len();
         let jac_mat = DMatrix::from_row_slice(n, n, &jac);
-        let kappa_seed = estimate_hopf_kappa_from_jacobian(&jac_mat)
-            .unwrap_or(hopf_omega * hopf_omega);
+        let kappa_seed =
+            estimate_hopf_kappa_from_jacobian(&jac_mat).unwrap_or(hopf_omega * hopf_omega);
         let kappa = if kappa_seed.is_finite() && kappa_seed > 0.0 {
             kappa_seed
         } else {

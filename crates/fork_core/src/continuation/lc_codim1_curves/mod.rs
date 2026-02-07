@@ -7,18 +7,18 @@
 //! - NS (Neimark-Sacker) - torus bifurcation curve
 
 mod lpc_curve;
-mod pd_curve;
 mod ns_curve;
+mod pd_curve;
 
 pub use lpc_curve::LPCCurveProblem;
-pub use pd_curve::PDCurveProblem;
 pub use ns_curve::NSCurveProblem;
+pub use pd_curve::PDCurveProblem;
 
 use anyhow::Result;
 use nalgebra::{DMatrix, DVector};
 
 /// Border vectors for LC bifurcation curve continuation.
-/// 
+///
 /// These represent the null vectors of the singular BVP Jacobian that define
 /// the bifurcation condition. For LPC and PD, this is a single pair (φ, ψ).
 /// For NS, two pairs are needed for the complex eigenspace.
@@ -37,52 +37,60 @@ impl LCBorders {
     }
 
     /// Initialize borders from a singular BVP Jacobian.
-    /// 
+    ///
     /// Uses random bordering to find initial null vectors.
     #[allow(dead_code)]
     pub fn initialize_from_jacobian(jac: &DMatrix<f64>) -> Result<Self> {
         let n = jac.nrows();
-        
+
         // Build bordered system with random vectors
         let mut bordered = DMatrix::zeros(n + 1, n + 1);
         bordered.view_mut((0, 0), (n, n)).copy_from(jac);
-        
+
         // Use random border vectors for initial solve
         for i in 0..n {
             bordered[(i, n)] = rand_val(i);
             bordered[(n, i)] = rand_val(i + n);
         }
         bordered[(n, n)] = 0.0;
-        
+
         // RHS = [0, ..., 0, 1]
         let mut rhs = DVector::zeros(n + 1);
         rhs[n] = 1.0;
-        
+
         // Solve for φ
         let lu = bordered.clone().lu();
         let phi = if let Some(sol) = lu.solve(&rhs) {
             let phi_raw: DVector<f64> = sol.rows(0, n).into();
             let norm = phi_raw.norm();
-            if norm > 1e-12 { phi_raw / norm } else { DVector::zeros(n) }
+            if norm > 1e-12 {
+                phi_raw / norm
+            } else {
+                DVector::zeros(n)
+            }
         } else {
             DVector::zeros(n)
         };
-        
+
         // Solve for ψ using transpose
         let lu_t = bordered.transpose().lu();
         let psi = if let Some(sol) = lu_t.solve(&rhs) {
             let psi_raw: DVector<f64> = sol.rows(0, n).into();
             let norm = psi_raw.norm();
-            if norm > 1e-12 { psi_raw / norm } else { DVector::zeros(n) }
+            if norm > 1e-12 {
+                psi_raw / norm
+            } else {
+                DVector::zeros(n)
+            }
         } else {
             DVector::zeros(n)
         };
-        
+
         Ok(Self { phi, psi })
     }
 
     /// Update borders after a step using current φ/ψ as bordering.
-    /// 
+    ///
     /// This follows the standard adapt() pattern.
     pub fn update(&mut self, jac: &DMatrix<f64>) -> Result<()> {
         let n = jac.nrows();
@@ -131,7 +139,7 @@ impl LCBorders {
 /// Uses a fixed seed pattern for reproducibility.
 fn rand_val(i: usize) -> f64 {
     let x = ((i as f64 + 1.0) * 0.618033988749895) % 1.0;
-    2.0 * x - 1.0  // Map to [-1, 1]
+    2.0 * x - 1.0 // Map to [-1, 1]
 }
 
 #[cfg(test)]

@@ -1,11 +1,9 @@
 //! Shared continuation helpers.
 
+use fork_core::continuation::util::{neimark_sacker_test_function, period_doubling_test_function};
 use fork_core::continuation::{
-    compute_eigenvalues, hopf_test_function, neutral_saddle_test_function,
-    ContinuationProblem, PointDiagnostics, TestFunctionValues,
-};
-use fork_core::continuation::util::{
-    neimark_sacker_test_function, period_doubling_test_function,
+    compute_eigenvalues, hopf_test_function, neutral_saddle_test_function, ContinuationProblem,
+    PointDiagnostics, TestFunctionValues,
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::{
@@ -277,7 +275,8 @@ mod problem_tests {
     #[test]
     fn equilibrium_problem_residual_map_restores_param() {
         let system = build_linear_system(1.0);
-        let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Map { iterations: 1 }, 0);
+        let mut problem =
+            OwnedEquilibriumContinuationProblem::new(system, SystemKind::Map { iterations: 1 }, 0);
 
         let aug_state = DVector::from_vec(vec![2.0, 3.0]);
         let mut residual = DVector::zeros(1);
@@ -295,10 +294,9 @@ mod problem_tests {
         let system = build_linear_system(2.0);
         let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Flow, 0);
 
-        let result: anyhow::Result<()> =
-            problem.with_param(5.0, |_system| -> anyhow::Result<()> {
-                anyhow::bail!("fail")
-            });
+        let result: anyhow::Result<()> = problem.with_param(5.0, |_system| -> anyhow::Result<()> {
+            anyhow::bail!("fail")
+        });
         assert!(result.is_err());
         assert!((problem.system.params[0] - 2.0).abs() < 1e-12);
     }
@@ -325,7 +323,8 @@ mod problem_tests {
     #[test]
     fn equilibrium_problem_diagnostics_map_zeroes_hopf_and_neutral() {
         let system = build_two_param_system(2.0, 3.0);
-        let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Map { iterations: 1 }, 0);
+        let mut problem =
+            OwnedEquilibriumContinuationProblem::new(system, SystemKind::Map { iterations: 1 }, 0);
         let aug_state = DVector::from_vec(vec![2.0, 0.5, -0.25]);
 
         let diagnostics = problem.diagnostics(&aug_state).expect("diagnostics");
@@ -344,16 +343,13 @@ mod problem_tests {
 
     #[test]
     fn equilibrium_problem_diagnostics_map_neimark_sacker_crosses_unit_circle() {
-        let equations = vec![
-            "a * x - 0.5 * y".to_string(),
-            "0.5 * x + a * y".to_string(),
-        ];
+        let equations = vec!["a * x - 0.5 * y".to_string(), "0.5 * x + a * y".to_string()];
         let params = vec![0.5];
         let param_names = vec!["a".to_string()];
         let var_names = vec!["x".to_string(), "y".to_string()];
-        let system = build_system(equations, params, &param_names, &var_names)
-            .expect("system");
-        let mut problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Map { iterations: 1 }, 0);
+        let system = build_system(equations, params, &param_names, &var_names).expect("system");
+        let mut problem =
+            OwnedEquilibriumContinuationProblem::new(system, SystemKind::Map { iterations: 1 }, 0);
 
         let aug_inside = DVector::from_vec(vec![0.5, 0.0, 0.0]);
         let inside = problem.diagnostics(&aug_inside).expect("diagnostics");
@@ -417,10 +413,7 @@ mod tangent_tests {
             Ok(self.jac.clone())
         }
 
-        fn diagnostics(
-            &mut self,
-            _aug_state: &DVector<f64>,
-        ) -> anyhow::Result<PointDiagnostics> {
+        fn diagnostics(&mut self, _aug_state: &DVector<f64>) -> anyhow::Result<PointDiagnostics> {
             Ok(PointDiagnostics {
                 test_values: TestFunctionValues::equilibrium(0.0, 0.0, 0.0),
                 eigenvalues: Vec::new(),
@@ -439,7 +432,10 @@ mod tangent_tests {
         let tangent = compute_tangent_from_problem(&mut problem, &aug_state).expect("tangent");
         assert_eq!(tangent.len(), 2);
         assert!((tangent.norm() - 1.0).abs() < 1e-8);
-        assert!(tangent[1].abs() > 0.0, "expected non-zero secondary component");
+        assert!(
+            tangent[1].abs() > 0.0,
+            "expected non-zero secondary component"
+        );
     }
 
     #[test]
