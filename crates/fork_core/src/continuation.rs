@@ -1002,12 +1002,33 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
         end_aug[i + 1] = v;
     }
 
+    // Compute secant direction from neighbor to endpoint if we have two points.
+    // Secant from interior neighbor to selected endpoint preserves outward continuation
+    // on the requested signed-index side.
+    let (secant_direction, secant_norm) = if let Some(neighbor_pos) = neighbor_idx {
+        let neighbor = &branch.points[neighbor_pos];
+        let mut neighbor_aug = DVector::zeros(dim + 1);
+        neighbor_aug[0] = neighbor.param_value;
+        for (i, &v) in neighbor.state.iter().enumerate() {
+            neighbor_aug[i + 1] = v;
+        }
+
+        let secant = &end_aug - &neighbor_aug;
+        let norm = secant.norm();
+        if norm > 1e-12 {
+            (Some(secant.normalize()), Some(norm))
+        } else {
+            (None, None)
+        }
+    } else {
+        (None, None)
+    };
+
     let mut settings = settings;
+    cap_extension_step_size(&mut settings, secant_norm);
     let resume_seed = select_resume_seed(&branch, forward, last_index, dim + 1);
 
     let extension = if let Some(seed) = resume_seed {
-        let seeded_step = clamp_step_size(seed.step_size, settings);
-        settings.step_size = seeded_step;
         let initial_point = ContinuationPoint {
             state: seed.aug_state[1..].to_vec(),
             param_value: seed.aug_state[0],
@@ -1022,28 +1043,6 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
             settings,
         )?
     } else {
-        // Compute secant direction from neighbor to endpoint if we have two points
-        let (secant_direction, secant_norm) = if let Some(neighbor_pos) = neighbor_idx {
-            let neighbor = &branch.points[neighbor_pos];
-            let mut neighbor_aug = DVector::zeros(dim + 1);
-            neighbor_aug[0] = neighbor.param_value;
-            for (i, &v) in neighbor.state.iter().enumerate() {
-                neighbor_aug[i + 1] = v;
-            }
-
-            // Secant from interior neighbor to selected endpoint.
-            // This preserves outward continuation on the requested signed-index side.
-            let secant = &end_aug - &neighbor_aug;
-            let norm = secant.norm();
-            if norm > 1e-12 {
-                (Some(secant.normalize()), Some(norm))
-            } else {
-                (None, None)
-            }
-        } else {
-            (None, None)
-        };
-
         // With at least two points, secant provides a robust outward direction.
         let mut tangent = if let Some(secant) = secant_direction.as_ref() {
             secant.clone()
@@ -1052,7 +1051,6 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
         };
 
         orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
-        cap_extension_step_size(&mut settings, secant_norm);
 
         // Now run continuation with the correctly oriented tangent
         let initial_point = ContinuationPoint {
@@ -2699,7 +2697,7 @@ mod tests {
             indices: Vec::new(),
             branch_type: BranchType::default(),
             upoldp: None,
-        resume_state: None,
+            resume_state: None,
         };
 
         let extended = extend_branch_with_problem(&mut problem, branch, settings, true)
@@ -2859,6 +2857,63 @@ mod tests {
     }
 
     #[test]
+    fn test_resume_extension_caps_first_step_to_local_secant_scale() {
+        let settings = ContinuationSettings {
+            step_size: 1.0,
+            min_step_size: 1e-6,
+            max_step_size: 1.0,
+            max_steps: 1,
+            corrector_steps: 8,
+            corrector_tolerance: 1e-9,
+            step_tolerance: 1e-9,
+        };
+
+        let mut problem = LinearRelationProblem::default();
+        let branch = ContinuationBranch {
+            points: vec![
+                ContinuationPoint {
+                    state: vec![1.0],
+                    param_value: 1.0,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+                ContinuationPoint {
+                    state: vec![1.01],
+                    param_value: 1.01,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+            ],
+            bifurcations: Vec::new(),
+            indices: vec![0, 1],
+            branch_type: BranchType::default(),
+            upoldp: None,
+            resume_state: Some(ContinuationResumeState {
+                min_index_seed: None,
+                max_index_seed: Some(ContinuationEndpointSeed {
+                    endpoint_index: 1,
+                    aug_state: vec![1.01, 1.01],
+                    tangent: vec![1.0, 1.0],
+                    step_size: 0.2,
+                }),
+            }),
+        };
+
+        let extended =
+            extend_branch_with_problem(&mut problem, branch, settings, true).expect("extension");
+        let endpoint = extended.points[1].param_value;
+        let next = extended.points[2].param_value;
+        let delta = (next - endpoint).abs();
+        assert!(
+            delta < 0.05,
+            "resume-seeded extension should stay local to endpoint secant scale, got {}",
+            delta
+        );
+    }
+
+    #[test]
     fn test_extension_first_step_locality_guard_prevents_large_nonlocal_jump() {
         let settings = ContinuationSettings {
             step_size: 1.0,
@@ -2895,8 +2950,8 @@ mod tests {
             resume_state: None,
         };
 
-        let extended = extend_branch_with_problem(&mut problem, branch, settings, true)
-            .expect("extension");
+        let extended =
+            extend_branch_with_problem(&mut problem, branch, settings, true).expect("extension");
         let endpoint = extended.points[1].param_value;
         let next = extended.points[2].param_value;
         let delta = (next - endpoint).abs();

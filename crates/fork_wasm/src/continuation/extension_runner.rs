@@ -7,8 +7,8 @@ use fork_core::continuation::periodic::PeriodicOrbitCollocationProblem;
 use fork_core::continuation::{
     decode_homoclinic_state, homoclinic_setup_from_homoclinic_point, pack_homoclinic_state,
     BranchType, ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint,
-    ContinuationProblem, ContinuationRunner, ContinuationSettings, HomoclinicExtraFlags,
-    HomoclinicSetup,
+    ContinuationProblem, ContinuationResumeState, ContinuationRunner, ContinuationSettings,
+    HomoclinicExtraFlags, HomoclinicSetup,
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::SystemKind;
@@ -134,15 +134,69 @@ fn select_resume_seed(
     }
 }
 
-fn normalize_resume_step_size(step_size: f64, settings: ContinuationSettings) -> f64 {
-    let mut normalized = if step_size.is_finite() && step_size > 0.0 {
-        step_size
-    } else {
-        settings.step_size
+fn merge_extension_resume_state(
+    base_resume: Option<ContinuationResumeState>,
+    extension_resume: Option<ContinuationResumeState>,
+    index_offset: i32,
+    sign: i32,
+    merged_indices: &[i32],
+) -> Option<ContinuationResumeState> {
+    let mut merged_resume = base_resume.unwrap_or_default();
+    let Some(extension_resume) = extension_resume else {
+        return if merged_resume.min_index_seed.is_some() || merged_resume.max_index_seed.is_some() {
+            Some(merged_resume)
+        } else {
+            None
+        };
     };
-    normalized = normalized.max(settings.min_step_size);
-    normalized = normalized.min(settings.max_step_size);
-    normalized
+
+    let min_index = merged_indices.iter().copied().min();
+    let max_index = merged_indices.iter().copied().max();
+
+    let mut assign_mapped_seed = |mapped_seed: ContinuationEndpointSeed| {
+        if let (Some(min_index), Some(max_index)) = (min_index, max_index) {
+            if mapped_seed.endpoint_index <= min_index {
+                merged_resume.min_index_seed = Some(mapped_seed);
+                return;
+            }
+            if mapped_seed.endpoint_index >= max_index {
+                merged_resume.max_index_seed = Some(mapped_seed);
+                return;
+            }
+            // Interior seeds are stale carry-over metadata from the source branch;
+            // extension should only update boundary seeds.
+            return;
+        }
+
+        if sign > 0 {
+            merged_resume.max_index_seed = Some(mapped_seed);
+        } else {
+            merged_resume.min_index_seed = Some(mapped_seed);
+        }
+    };
+
+    if let Some(seed) = extension_resume.max_index_seed {
+        assign_mapped_seed(ContinuationEndpointSeed {
+            endpoint_index: index_offset + seed.endpoint_index * sign,
+            aug_state: seed.aug_state,
+            tangent: seed.tangent,
+            step_size: seed.step_size,
+        });
+    }
+    if let Some(seed) = extension_resume.min_index_seed {
+        assign_mapped_seed(ContinuationEndpointSeed {
+            endpoint_index: index_offset + seed.endpoint_index * sign,
+            aug_state: seed.aug_state,
+            tangent: seed.tangent,
+            step_size: seed.step_size,
+        });
+    }
+
+    if merged_resume.min_index_seed.is_some() || merged_resume.max_index_seed.is_some() {
+        Some(merged_resume)
+    } else {
+        None
+    }
 }
 
 fn hydrate_homoclinic_setup_from_endpoint(
@@ -337,8 +391,8 @@ impl WasmContinuationExtensionRunner {
                 };
 
                 let mut settings = settings;
+                cap_extension_step_size(&mut settings, secant_norm);
                 let mut runner = if let Some(seed) = resume_seed {
-                    settings.step_size = normalize_resume_step_size(seed.step_size, settings);
                     ContinuationRunner::new_from_seed(
                         problem,
                         seed.aug_state,
@@ -356,8 +410,6 @@ impl WasmContinuationExtensionRunner {
                     };
 
                     orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
-                    cap_extension_step_size(&mut settings, secant_norm);
-
                     let initial_point = ContinuationPoint {
                         state: endpoint.state.clone(),
                         param_value: endpoint.param_value,
@@ -373,7 +425,6 @@ impl WasmContinuationExtensionRunner {
                 };
                 runner.set_branch_type(merge.branch.branch_type.clone());
                 runner.set_upoldp(merge.branch.upoldp.clone());
-                runner.set_resume_state(merge.branch.resume_state.clone());
 
                 ExtensionRunnerKind::Equilibrium { runner, merge }
             }
@@ -456,12 +507,12 @@ impl WasmContinuationExtensionRunner {
                 };
 
                 let mut settings = settings;
+                cap_extension_step_size(&mut settings, secant_norm);
                 // SAFETY: The problem borrows the boxed system allocation, which lives
                 // for the lifetime of the runner.
                 let mut problem: PeriodicOrbitCollocationProblem<'static> =
                     unsafe { std::mem::transmute(problem) };
                 let mut runner = if let Some(seed) = resume_seed {
-                    settings.step_size = normalize_resume_step_size(seed.step_size, settings);
                     ContinuationRunner::new_from_seed(
                         problem,
                         seed.aug_state,
@@ -479,8 +530,6 @@ impl WasmContinuationExtensionRunner {
                     };
 
                     orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
-                    cap_extension_step_size(&mut settings, secant_norm);
-
                     let initial_point = ContinuationPoint {
                         state: endpoint.state.clone(),
                         param_value: endpoint.param_value,
@@ -496,7 +545,6 @@ impl WasmContinuationExtensionRunner {
                 };
                 runner.set_branch_type(merge.branch.branch_type.clone());
                 runner.set_upoldp(merge.branch.upoldp.clone());
-                runner.set_resume_state(merge.branch.resume_state.clone());
 
                 ExtensionRunnerKind::LimitCycle {
                     _system: boxed_system,
@@ -558,8 +606,8 @@ impl WasmContinuationExtensionRunner {
 
                 let mut boxed_system = Box::new(system);
                 let system_ptr: *mut EquationSystem = &mut *boxed_system;
-                let problem = HomoclinicProblem::new(unsafe { &mut *system_ptr }, setup)
-                    .map_err(|e| {
+                let problem =
+                    HomoclinicProblem::new(unsafe { &mut *system_ptr }, setup).map_err(|e| {
                         JsValue::from_str(&format!(
                             "Failed to create homoclinic extension problem: {}",
                             e
@@ -581,11 +629,36 @@ impl WasmContinuationExtensionRunner {
                     end_aug[i + 1] = v;
                 }
                 let resume_seed = select_resume_seed(&merge.branch, forward, last_index, dim + 1);
+                let mut secant_direction: Option<DVector<f64>> = None;
+                let mut secant_norm: Option<f64> = None;
+                let mut canonical_neighbor_state: Option<Vec<f64>> = None;
+                if let Some(neighbor_pos) = neighbor_idx {
+                    let neighbor = &merge.branch.points[neighbor_pos];
+                    if let Some(neighbor_state) = canonicalize_homoclinic_point_state(
+                        &secant_template,
+                        &neighbor.state,
+                        system_dim,
+                    ) {
+                        let mut neighbor_aug = DVector::zeros(dim + 1);
+                        neighbor_aug[0] = neighbor.param_value;
+                        for (i, &v) in neighbor_state.iter().enumerate() {
+                            neighbor_aug[i + 1] = v;
+                        }
+                        let secant = &end_aug - &neighbor_aug;
+                        let norm = secant.norm();
+                        if norm > 1e-12 {
+                            secant_direction = Some(secant.normalize());
+                            secant_norm = Some(norm);
+                        }
+                        canonical_neighbor_state = Some(neighbor_state);
+                    }
+                }
+
                 let mut settings = settings;
+                cap_extension_step_size(&mut settings, secant_norm);
                 let mut problem: HomoclinicProblem<'static> =
                     unsafe { std::mem::transmute(problem) };
                 let mut runner = if let Some(seed) = resume_seed {
-                    settings.step_size = normalize_resume_step_size(seed.step_size, settings);
                     ContinuationRunner::new_from_seed(
                         problem,
                         seed.aug_state,
@@ -595,36 +668,16 @@ impl WasmContinuationExtensionRunner {
                     )
                     .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?
                 } else {
-                    let neighbor_pos = neighbor_idx.ok_or_else(|| {
-                        JsValue::from_str(
+                    if neighbor_idx.is_none() {
+                        return Err(JsValue::from_str(
                             "Homoclinic extension needs at least two branch points when resume metadata is unavailable.",
-                        )
-                    })?;
-                    let neighbor = &merge.branch.points[neighbor_pos];
-                    let neighbor_state = canonicalize_homoclinic_point_state(
-                        &secant_template,
-                        &neighbor.state,
-                        system_dim,
-                    )
-                    .ok_or_else(|| {
-                        JsValue::from_str(
-                            "Failed to decode neighboring homoclinic point for local extension seed.",
-                        )
-                    })?;
-
-                    let mut neighbor_aug = DVector::zeros(dim + 1);
-                    neighbor_aug[0] = neighbor.param_value;
-                    for (i, &v) in neighbor_state.iter().enumerate() {
-                        neighbor_aug[i + 1] = v;
+                        ));
                     }
-
-                    let secant = &end_aug - &neighbor_aug;
-                    let secant_norm = secant.norm();
-                    let secant_direction = if secant_norm > 1e-12 {
-                        Some(secant.normalize())
-                    } else {
-                        None
-                    };
+                    if canonical_neighbor_state.is_none() {
+                        return Err(JsValue::from_str(
+                            "Failed to decode neighboring homoclinic point for local extension seed.",
+                        ));
+                    }
 
                     let mut tangent = if let Some(secant) = secant_direction.as_ref() {
                         secant.clone()
@@ -634,7 +687,6 @@ impl WasmContinuationExtensionRunner {
                     };
 
                     orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
-                    cap_extension_step_size(&mut settings, if secant_norm > 1e-12 { Some(secant_norm) } else { None });
 
                     let initial_point = ContinuationPoint {
                         state: packed_initial_state,
@@ -651,7 +703,6 @@ impl WasmContinuationExtensionRunner {
                 };
                 runner.set_branch_type(merge.branch.branch_type.clone());
                 runner.set_upoldp(merge.branch.upoldp.clone());
-                runner.set_resume_state(merge.branch.resume_state.clone());
 
                 ExtensionRunnerKind::Homoclinic {
                     _system: boxed_system,
@@ -716,12 +767,8 @@ impl WasmContinuationExtensionRunner {
 
         let (extension, merge) = match runner_kind {
             ExtensionRunnerKind::Equilibrium { runner, merge } => (runner.take_result(), merge),
-            ExtensionRunnerKind::LimitCycle { runner, merge, .. } => {
-                (runner.take_result(), merge)
-            }
-            ExtensionRunnerKind::Homoclinic { runner, merge, .. } => {
-                (runner.take_result(), merge)
-            }
+            ExtensionRunnerKind::LimitCycle { runner, merge, .. } => (runner.take_result(), merge),
+            ExtensionRunnerKind::Homoclinic { runner, merge, .. } => (runner.take_result(), merge),
         };
 
         let mut branch = merge.branch;
@@ -742,36 +789,13 @@ impl WasmContinuationExtensionRunner {
             }
         }
 
-        if let Some(extension_resume) = extension.resume_state {
-            let mut merged_resume = branch.resume_state.take().unwrap_or_default();
-            if let Some(seed) = extension_resume.max_index_seed {
-                let mapped_seed = ContinuationEndpointSeed {
-                    endpoint_index: index_offset + seed.endpoint_index * sign,
-                    aug_state: seed.aug_state,
-                    tangent: seed.tangent,
-                    step_size: seed.step_size,
-                };
-                if sign > 0 {
-                    merged_resume.max_index_seed = Some(mapped_seed);
-                } else {
-                    merged_resume.min_index_seed = Some(mapped_seed);
-                }
-            }
-            if let Some(seed) = extension_resume.min_index_seed {
-                let mapped_seed = ContinuationEndpointSeed {
-                    endpoint_index: index_offset + seed.endpoint_index * sign,
-                    aug_state: seed.aug_state,
-                    tangent: seed.tangent,
-                    step_size: seed.step_size,
-                };
-                if sign > 0 {
-                    merged_resume.max_index_seed = Some(mapped_seed);
-                } else {
-                    merged_resume.min_index_seed = Some(mapped_seed);
-                }
-            }
-            branch.resume_state = Some(merged_resume);
-        }
+        branch.resume_state = merge_extension_resume_state(
+            branch.resume_state.take(),
+            extension.resume_state,
+            index_offset,
+            sign,
+            &branch.indices,
+        );
 
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
@@ -914,6 +938,78 @@ mod tests {
         let result_branch: ContinuationBranch = from_value(result_val).expect("branch");
         assert_eq!(result_branch.indices.len(), 3);
         assert_eq!(result_branch.indices.last().copied(), Some(2));
+    }
+
+    #[wasm_bindgen_test]
+    fn extension_runner_caps_resume_seed_first_step_to_local_scale() {
+        let branch = ContinuationBranch {
+            points: vec![
+                ContinuationPoint {
+                    state: vec![1.0],
+                    param_value: 1.0,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+                ContinuationPoint {
+                    state: vec![1.01],
+                    param_value: 1.01,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+            ],
+            bifurcations: Vec::new(),
+            indices: vec![0, 1],
+            branch_type: BranchType::Equilibrium,
+            upoldp: None,
+            resume_state: Some(fork_core::continuation::ContinuationResumeState {
+                min_index_seed: None,
+                max_index_seed: Some(fork_core::continuation::ContinuationEndpointSeed {
+                    endpoint_index: 1,
+                    aug_state: vec![1.01, 1.01],
+                    tangent: vec![1.0, 1.0],
+                    step_size: 0.2,
+                }),
+            }),
+        };
+        let branch_val = to_value(&branch).expect("branch");
+
+        let settings = ContinuationSettings {
+            step_size: 1.0,
+            min_step_size: 1e-6,
+            max_step_size: 1.0,
+            max_steps: 1,
+            corrector_steps: 8,
+            corrector_tolerance: 1e-9,
+            step_tolerance: 1e-9,
+        };
+
+        let mut runner = WasmContinuationExtensionRunner::new(
+            vec!["x - a".to_string()],
+            vec![1.01],
+            vec!["a".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            1,
+            branch_val,
+            "a",
+            to_value(&settings).expect("settings"),
+            true,
+        )
+        .expect("runner");
+
+        runner.run_steps(1).expect("run steps");
+        let result_val = runner.get_result().expect("result");
+        let result_branch: ContinuationBranch = from_value(result_val).expect("branch");
+        let endpoint = result_branch.points[1].param_value;
+        let next = result_branch.points[2].param_value;
+        let delta = (next - endpoint).abs();
+        assert!(
+            delta < 0.05,
+            "resume-seeded extension should stay local to endpoint secant scale, got {}",
+            delta
+        );
     }
 
     #[wasm_bindgen_test]
@@ -1127,9 +1223,9 @@ mod orientation_tests {
         hydrate_homoclinic_setup_from_endpoint, orient_extension_tangent,
     };
     use fork_core::continuation::{
-        pack_homoclinic_state, BifurcationType, BranchType, ContinuationBranch, ContinuationPoint,
-        ContinuationSettings, HomoclinicBasis, HomoclinicExtraFlags, HomoclinicGuess,
-        HomoclinicSetup,
+        pack_homoclinic_state, BifurcationType, BranchType, ContinuationBranch,
+        ContinuationEndpointSeed, ContinuationPoint, ContinuationResumeState, ContinuationSettings,
+        HomoclinicBasis, HomoclinicExtraFlags, HomoclinicGuess, HomoclinicSetup,
     };
     use nalgebra::DVector;
 
@@ -1343,4 +1439,52 @@ mod orientation_tests {
         assert!(super::select_resume_seed(&branch, true, 4, 2).is_none());
     }
 
+    #[test]
+    fn merge_extension_resume_state_keeps_new_boundary_seed_when_stale_interior_seed_exists() {
+        let base = Some(ContinuationResumeState {
+            min_index_seed: Some(ContinuationEndpointSeed {
+                endpoint_index: -3,
+                aug_state: vec![0.0],
+                tangent: vec![1.0],
+                step_size: 0.01,
+            }),
+            max_index_seed: Some(ContinuationEndpointSeed {
+                endpoint_index: 5,
+                aug_state: vec![0.0],
+                tangent: vec![1.0],
+                step_size: 0.01,
+            }),
+        });
+        let extension = Some(ContinuationResumeState {
+            // New extension endpoint from runner-local index 2 maps to branch index 7.
+            max_index_seed: Some(ContinuationEndpointSeed {
+                endpoint_index: 2,
+                aug_state: vec![1.0],
+                tangent: vec![1.0],
+                step_size: 0.02,
+            }),
+            // Stale carry-over seed would map to interior index 2 and must be ignored.
+            min_index_seed: Some(ContinuationEndpointSeed {
+                endpoint_index: -3,
+                aug_state: vec![2.0],
+                tangent: vec![-1.0],
+                step_size: 0.03,
+            }),
+        });
+
+        let merged = super::merge_extension_resume_state(
+            base,
+            extension,
+            5,
+            1,
+            &[-3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7],
+        )
+        .expect("merged resume state");
+
+        let max = merged.max_index_seed.expect("max seed");
+        assert_eq!(max.endpoint_index, 7);
+        assert_eq!(max.aug_state, vec![1.0]);
+        let min = merged.min_index_seed.expect("min seed");
+        assert_eq!(min.endpoint_index, -3);
+    }
 }

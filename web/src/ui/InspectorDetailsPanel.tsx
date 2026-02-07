@@ -1033,18 +1033,11 @@ function makeBranchExtensionDraft(
 ): ContinuationDraft {
   const base = makeContinuationDraft(system)
   const defaults = branch?.settings
-  const resumeSeedStepSize =
-    branch?.data.resume_state?.max_index_seed?.step_size ??
-    branch?.data.resume_state?.min_index_seed?.step_size
-  const seededStepSize =
-    typeof resumeSeedStepSize === 'number' && Number.isFinite(resumeSeedStepSize)
-      ? resumeSeedStepSize.toString()
-      : undefined
   const fallbackCorrectorSteps =
     branch?.branchType === 'homoclinic_curve' ? '32' : base.correctorSteps
   return {
     ...base,
-    stepSize: seededStepSize ?? defaults?.step_size?.toString() ?? base.stepSize,
+    stepSize: defaults?.step_size?.toString() ?? base.stepSize,
     maxSteps: '300',
     minStepSize: defaults?.min_step_size?.toString() ?? base.minStepSize,
     maxStepSize: defaults?.max_step_size?.toString() ?? base.maxStepSize,

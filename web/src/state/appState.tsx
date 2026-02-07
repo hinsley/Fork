@@ -61,7 +61,6 @@ import {
   ensureBranchIndices,
   extractHopfOmega,
   getBranchParams,
-  buildSortedArrayOrder,
   normalizeEigenvalueArray,
   normalizeBranchEigenvalues,
   resolveContinuationPointParam2Value,
@@ -147,51 +146,6 @@ function isValidEndpointSeedForIndices(
   return true
 }
 
-function buildHomoclinicEndpointSeed(
-  data: ContinuationObject['data'],
-  side: 'min' | 'max'
-): ContinuationEndpointSeed | undefined {
-  if (!data.points || data.points.length < 2) return undefined
-  const indices = ensureBranchIndices(data)
-  if (indices.length < 2) return undefined
-  const sorted = buildSortedArrayOrder(indices)
-  if (sorted.length < 2) return undefined
-  const endpointArrayIndex = side === 'min' ? sorted[0] : sorted[sorted.length - 1]
-  const neighborArrayIndex = side === 'min' ? sorted[1] : sorted[sorted.length - 2]
-  if (endpointArrayIndex === undefined || neighborArrayIndex === undefined) return undefined
-
-  const endpointPoint = data.points[endpointArrayIndex]
-  const neighborPoint = data.points[neighborArrayIndex]
-  const endpointLogicalIndex = indices[endpointArrayIndex]
-  if (!endpointPoint || !neighborPoint || !Number.isFinite(endpointLogicalIndex)) {
-    return undefined
-  }
-  if (
-    !Array.isArray(endpointPoint.state) ||
-    !Array.isArray(neighborPoint.state) ||
-    endpointPoint.state.length !== neighborPoint.state.length
-  ) {
-    return undefined
-  }
-  const endpointAug = [endpointPoint.param_value, ...endpointPoint.state]
-  const neighborAug = [neighborPoint.param_value, ...neighborPoint.state]
-  const diff = endpointAug.map((value, i) => value - neighborAug[i])
-  const norm = Math.hypot(...diff)
-  if (!Number.isFinite(norm) || norm <= 1e-12) return undefined
-
-  const tangent = diff.map((value) => value / norm)
-  const localParamDelta = Math.abs(endpointPoint.param_value - neighborPoint.param_value)
-  const step_size = Number.isFinite(localParamDelta) && localParamDelta > 1e-6
-    ? localParamDelta
-    : 1e-6
-  return {
-    endpoint_index: endpointLogicalIndex,
-    aug_state: endpointAug,
-    tangent,
-    step_size,
-  }
-}
-
 function ensureHomoclinicEndpointResumeSeeds(
   data: ContinuationObject['data']
 ): ContinuationObject['data'] {
@@ -206,8 +160,8 @@ function ensureHomoclinicEndpointResumeSeeds(
     ? resume?.max_index_seed
     : undefined
 
-  const minSeed = existingMin ?? buildHomoclinicEndpointSeed(data, 'min')
-  const maxSeed = existingMax ?? buildHomoclinicEndpointSeed(data, 'max')
+  const minSeed = existingMin
+  const maxSeed = existingMax
   if (!minSeed && !maxSeed) {
     return { ...data, resume_state: undefined }
   }

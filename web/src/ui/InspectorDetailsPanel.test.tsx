@@ -3721,7 +3721,7 @@ describe('InspectorDetailsPanel', () => {
 
     await user.click(screen.getByTestId('branch-extend-toggle'))
     expect((screen.getByTestId('branch-extend-step-size') as HTMLInputElement).value).toBe(
-      '0.005'
+      '0.01'
     )
     await user.click(screen.getByTestId('branch-extend-submit'))
 

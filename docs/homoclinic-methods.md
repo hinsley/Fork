@@ -133,7 +133,7 @@ Important behavior:
 
 A large first-step jump at extension startup usually means the solver did not resume from a true continuation endpoint state and tangent. In that case, the predictor can launch from a less-local direction than the branch geometry near the endpoint.
 
-Fork now prefers endpoint resume metadata (`augmented state + tangent + adaptive step size`) when extending from either side of a branch. If that metadata is unavailable, fallback seeding uses only the local endpoint-neighbor secant. For homoclinic extension, if packed endpoint data cannot be decoded reliably, extension fails fast with an actionable error instead of silently switching methods.
+Fork now prefers endpoint resume metadata (`augmented state + tangent`) when extending from either side of a branch. If that metadata is unavailable, fallback seeding uses only the local endpoint-neighbor secant. For homoclinic extension, if packed endpoint data cannot be decoded reliably, extension fails fast with an actionable error instead of silently switching methods.
 
 This keeps extension behavior continuous with the existing branch and avoids hidden restart logic.
 

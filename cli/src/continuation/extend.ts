@@ -48,13 +48,7 @@ export async function extendBranch(
   // State for config menu
   let directionForward = true;
   let maxStepsInput = '300';
-  const resumeStep =
-    branch.data.resume_state?.max_index_seed?.step_size ??
-    branch.data.resume_state?.min_index_seed?.step_size;
-  let stepSizeInput =
-    (typeof resumeStep === 'number' && Number.isFinite(resumeStep)
-      ? resumeStep.toString()
-      : defaults.step_size?.toString()) || '0.01';
+  let stepSizeInput = defaults.step_size?.toString() || '0.01';
 
   const directionLabel = (forward: boolean) =>
     forward ? 'Forward (Append)' : 'Backward (Prepend)';
