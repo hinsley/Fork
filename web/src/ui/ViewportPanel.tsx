@@ -1120,30 +1120,46 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
   const traces: Data[] = []
   if (!state || state.length === 0 || dim <= 0) return traces
   const plotDim = Math.min(dim, 3)
-  const { profilePoints, period } = extractLimitCycleProfile(state, dim, ntst, ncol, {
-    layout,
-    allowPackedTail,
-  })
+  const { profilePoints, period, closurePoint } = extractLimitCycleProfile(
+    state,
+    dim,
+    ntst,
+    ncol,
+    {
+      layout,
+      allowPackedTail,
+    }
+  )
   const fallbackAxes: [number, number, number] = [0, 1, 2]
   const axes =
     axisIndices && axisIndices.every((index) => index >= 0 && index < dim)
       ? axisIndices
       : fallbackAxes
   const axisOrder = plotDim >= 3 ? axes : plotDim === 2 ? [0, 1] : [0]
+  const closureCoords =
+    closurePoint && closurePoint.length >= dim
+      ? axisOrder.map((axis) => closurePoint[axis])
+      : null
+  const hasFiniteClosureCoords =
+    closureCoords !== null &&
+    closureCoords.length === plotDim &&
+    closureCoords.every(Number.isFinite)
   const usablePoints = profilePoints
     .map((point, index) => ({
-      point,
       index,
       coords: axisOrder.map((axis) => point[axis]),
     }))
     .filter(({ coords }) => coords.length === plotDim && coords.every(Number.isFinite))
+  const cyclePoints = hasFiniteClosureCoords
+    ? [{ index: -1, coords: closureCoords }, ...usablePoints, { index: -1, coords: closureCoords }]
+    : usablePoints
 
-  if (usablePoints.length >= 2 && plotDim > 0) {
+  if (cyclePoints.length >= 2 && plotDim > 0) {
     if (plotDim >= 3) {
-      const x = usablePoints.map(({ coords }) => coords[0] ?? Number.NaN)
-      const y = usablePoints.map(({ coords }) => coords[1] ?? Number.NaN)
-      const z = usablePoints.map(({ coords }) => coords[2] ?? Number.NaN)
-      const customdata = usablePoints.map(({ index }) => index)
+      const x = cyclePoints.map(({ coords }) => coords[0] ?? Number.NaN)
+      const y = cyclePoints.map(({ coords }) => coords[1] ?? Number.NaN)
+      const z = cyclePoints.map(({ coords }) => coords[2] ?? Number.NaN)
+      const customdata = cyclePoints.map(({ index }) => (index >= 0 ? index : null))
       traces.push({
         type: 'scatter3d',
         mode: 'lines',
@@ -1156,10 +1172,24 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
         line: { color, width: lineWidth },
         ...(showLegend === undefined ? {} : { showlegend: showLegend }),
       })
+      if (hasFiniteClosureCoords) {
+        traces.push({
+          type: 'scatter3d',
+          mode: 'markers',
+          name: `${name} equilibrium`,
+          uid,
+          x: [closureCoords[0]],
+          y: [closureCoords[1]],
+          z: [closureCoords[2]],
+          customdata: [null],
+          marker: { color, size: pointSize },
+          showlegend: false,
+        })
+      }
     } else if (plotDim === 2) {
-      const x = usablePoints.map(({ coords }) => coords[0] ?? Number.NaN)
-      const y = usablePoints.map(({ coords }) => coords[1] ?? Number.NaN)
-      const customdata = usablePoints.map(({ index }) => index)
+      const x = cyclePoints.map(({ coords }) => coords[0] ?? Number.NaN)
+      const y = cyclePoints.map(({ coords }) => coords[1] ?? Number.NaN)
+      const customdata = cyclePoints.map(({ index }) => (index >= 0 ? index : null))
       traces.push({
         type: 'scatter',
         mode: 'lines',
@@ -1171,14 +1201,27 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
         line: { color, width: lineWidth },
         ...(showLegend === undefined ? {} : { showlegend: showLegend }),
       })
+      if (hasFiniteClosureCoords) {
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: `${name} equilibrium`,
+          uid,
+          x: [closureCoords[0]],
+          y: [closureCoords[1]],
+          customdata: [null],
+          marker: { color, size: pointSize },
+          showlegend: false,
+        })
+      }
     } else if (plotDim === 1) {
       const timeEnd = Number.isFinite(period)
         ? period
-        : Math.max(usablePoints.length - 1, 1)
-      const step = usablePoints.length > 1 ? timeEnd / (usablePoints.length - 1) : 1
-      const x = usablePoints.map((_, idx) => idx * step)
-      const y = usablePoints.map(({ coords }) => coords[0] ?? Number.NaN)
-      const customdata = usablePoints.map(({ index }) => index)
+        : Math.max(cyclePoints.length - 1, 1)
+      const step = cyclePoints.length > 1 ? timeEnd / (cyclePoints.length - 1) : 1
+      const x = cyclePoints.map((_, idx) => idx * step)
+      const y = cyclePoints.map(({ coords }) => coords[0] ?? Number.NaN)
+      const customdata = cyclePoints.map(({ index }) => (index >= 0 ? index : null))
       traces.push({
         type: 'scatter',
         mode: 'lines',
@@ -1190,6 +1233,19 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
         line: { color, width: lineWidth },
         ...(showLegend === undefined ? {} : { showlegend: showLegend }),
       })
+      if (hasFiniteClosureCoords) {
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: `${name} equilibrium`,
+          uid,
+          x: [0],
+          y: [closureCoords[0]],
+          customdata: [null],
+          marker: { color, size: pointSize },
+          showlegend: false,
+        })
+      }
     }
     return traces
   }

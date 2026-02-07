@@ -350,6 +350,23 @@ describe('ViewportPanel view state wiring', () => {
     expect(trace?.mode).toBe('lines')
     expect((trace?.x?.length ?? 0) > 2).toBe(true)
     expect((trace?.y?.length ?? 0) > 2).toBe(true)
+    expect(trace?.x?.[0]).toBe(0)
+    expect(trace?.y?.[0]).toBe(0)
+    expect(trace?.x?.[trace.x.length - 1]).toBe(0)
+    expect(trace?.y?.[trace.y.length - 1]).toBe(0)
+
+    const closureMarker = props?.data.find(
+      (entry) =>
+        'uid' in entry &&
+        entry.uid === addedObject.nodeId &&
+        'mode' in entry &&
+        entry.mode === 'markers' &&
+        'name' in entry &&
+        entry.name === `${lcObject.name} equilibrium`
+    ) as { x?: Array<number | null>; y?: Array<number | null> } | undefined
+    expect(closureMarker).toBeTruthy()
+    expect(closureMarker?.x?.[0]).toBe(0)
+    expect(closureMarker?.y?.[0]).toBe(0)
   })
 
   it('renders cached 1D isocline points as diagonal markers in map scenes', () => {

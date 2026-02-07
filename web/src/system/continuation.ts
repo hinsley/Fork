@@ -89,7 +89,7 @@ export function extractLimitCycleProfile(
   ntst: number,
   ncol: number,
   options?: { layout?: LimitCycleProfileLayout; allowPackedTail?: boolean }
-): { profilePoints: number[][]; period: number } {
+): { profilePoints: number[][]; period: number; closurePoint?: number[] } {
   const period = flatState.length > 0 ? flatState[flatState.length - 1] : Number.NaN
   const profilePoints: number[][] = []
   if (dim <= 0) {
@@ -143,7 +143,10 @@ export function extractLimitCycleProfile(
       }
     }
 
-    return { profilePoints, period }
+    const closurePoint = options?.allowPackedTail
+      ? readPackedEndpoint(rawState, dim, meshCount * dim, stageCount * dim)
+      : undefined
+    return { profilePoints, period, closurePoint }
   }
 
   if (options?.allowPackedTail && rawState.length > explicitLen && explicitLen > 0) {
@@ -185,7 +188,8 @@ export function extractLimitCycleProfile(
           profilePoints.push(nextMesh)
         }
       }
-      return { profilePoints, period: Number.NaN }
+      const closurePoint = readPackedEndpoint(rawState, dim, meshLen, stageRawLen)
+      return { profilePoints, period: Number.NaN, closurePoint }
     }
   }
 
@@ -198,7 +202,22 @@ export function extractLimitCycleProfile(
     }
   }
 
-  return { profilePoints, period }
+  const meshLen = implicitMeshCount * dim
+  const stageLen = stageCount * dim
+  const closurePoint = readPackedEndpoint(rawState, dim, meshLen, stageLen)
+  return { profilePoints, period, closurePoint }
+}
+
+function readPackedEndpoint(
+  rawState: number[],
+  dim: number,
+  meshLen: number,
+  stageLen: number
+): number[] | undefined {
+  const endpointStart = meshLen + stageLen
+  if (rawState.length < endpointStart + dim) return undefined
+  const closure = rawState.slice(endpointStart, endpointStart + dim)
+  return closure.length === dim && closure.every(Number.isFinite) ? closure : undefined
 }
 
 export function computeLimitCycleMetrics(

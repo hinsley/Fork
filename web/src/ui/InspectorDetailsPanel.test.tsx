@@ -1784,7 +1784,7 @@ describe('InspectorDetailsPanel', () => {
             ],
             param_value: 0.2,
             stability: 'None',
-            eigenvalues: [],
+            eigenvalues: [{ re: -0.1, im: 0.7 }, { re: -0.1, im: -0.7 }],
           },
         ],
         bifurcations: [0],
@@ -1851,6 +1851,7 @@ describe('InspectorDetailsPanel', () => {
     expect(yRow).toBeTruthy()
     expect(xRow?.querySelector('.inspector-metrics__value')?.textContent).toBe('1.25000')
     expect(yRow?.querySelector('.inspector-metrics__value')?.textContent).toBe('-0.750000')
+    expect(detailsScope.getByTestId('branch-eigenvalue-plot')).toBeVisible()
   })
 
   it('shows cycle point table for discrete map branch points', async () => {

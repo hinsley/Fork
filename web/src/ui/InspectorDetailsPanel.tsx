@@ -2822,7 +2822,8 @@ export function InspectorDetailsPanel({
     [selectedBranchPoint]
   )
   const branchEigenPlot = useMemo(() => {
-    if (branch?.branchType !== 'equilibrium') return null
+    if (branch?.branchType === 'limit_cycle') return null
+    if (branchEigenvalues.length === 0) return null
     return buildEigenvaluePlot(branchEigenvalues, plotlyTheme, {
       showRadiusLines: isDiscreteMap,
       showUnitDisc: isDiscreteMap,
