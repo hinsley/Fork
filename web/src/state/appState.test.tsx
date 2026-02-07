@@ -910,7 +910,57 @@ describe('appState homoclinic and homotopy actions', () => {
       params: [0.2, 0.1],
     }
     const branchResult = addBranch(added.system, branch, added.nodeId)
-    const { getContext } = setupApp(branchResult.system)
+    const client = new MockForkCoreClient(0)
+    client.runHomoclinicFromLargeCycle = async () =>
+      normalizeBranchEigenvalues({
+        points: [
+          {
+            state: [0, 0, 0.5, 0.5],
+            param_value: 0.1,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [1, 1, 0.6, 0.6],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [2, 2, 0.7, 0.7],
+            param_value: 0.3,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [0, 2],
+        indices: [0, 11, 12],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 8,
+          ncol: 2,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          free_time: true,
+          free_eps0: true,
+          free_eps1: false,
+        },
+        resume_state: {
+          min_index_seed: {
+            endpoint_index: 0,
+            aug_state: [0.1, 0, 0],
+            tangent: [1, 0, 0],
+            step_size: 0.01,
+          },
+          max_index_seed: {
+            endpoint_index: 12,
+            aug_state: [0.3, 2, 2],
+            tangent: [1, 0, 0],
+            step_size: 0.02,
+          },
+        },
+      })
+    const { getContext } = setupApp(branchResult.system, client)
 
     await act(async () => {
       await getContext().actions.createHomoclinicFromLargeCycle({
@@ -930,12 +980,16 @@ describe('appState homoclinic and homotopy actions', () => {
     })
 
     await waitFor(() => {
-      expect(findBranchIdByName(getContext().state.system!, 'homoc_m1')).toBeTruthy()
+      const branchId = findBranchIdByName(getContext().state.system!, 'homoc_m1')
+      expect(branchId).toBeTruthy()
+      const created = getContext().state.system!.branches[branchId]
       expect(
-        getContext().state.system!.branches[
-          findBranchIdByName(getContext().state.system!, 'homoc_m1')
-        ].branchType
+        created.branchType
       ).toBe('homoclinic_curve')
+      expect(created.data.indices).toEqual([11, 12])
+      expect(created.data.resume_state?.min_index_seed).toBeUndefined()
+      expect(created.data.resume_state?.max_index_seed?.endpoint_index).toBe(12)
+      expect(created.data.resume_state?.max_index_seed?.step_size).toBe(0.02)
     })
   })
 

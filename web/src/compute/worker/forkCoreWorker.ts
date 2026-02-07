@@ -608,6 +608,28 @@ function computeBatchSize(maxSteps: number): number {
   return Math.max(1, Math.ceil(maxSteps / DEFAULT_PROGRESS_UPDATES))
 }
 
+type EndpointSeed = NonNullable<
+  HomoclinicContinuationResult['resume_state']
+>[keyof NonNullable<HomoclinicContinuationResult['resume_state']>]
+
+function remapTrimmedEndpointSeed(
+  seed: EndpointSeed | undefined,
+  indexBase: number,
+  validIndices: Set<number>
+): EndpointSeed | undefined {
+  if (!seed || !Number.isFinite(seed.endpoint_index)) {
+    return undefined
+  }
+  const endpoint_index = seed.endpoint_index - indexBase
+  if (!validIndices.has(endpoint_index)) {
+    return undefined
+  }
+  return {
+    ...seed,
+    endpoint_index,
+  }
+}
+
 function discardInitialApproximationPoint(
   branch: HomoclinicContinuationResult
 ): HomoclinicContinuationResult {
@@ -631,15 +653,32 @@ function discardInitialApproximationPoint(
   const indices = rawIndices.map((value, index) =>
     Number.isFinite(value) ? value - indexBase : index
   )
+  const validIndices = new Set(indices.filter((idx) => Number.isFinite(idx)))
   const bifurcations = (branch.bifurcations ?? [])
     .filter((idx) => idx > 0)
     .map((idx) => idx - 1)
     .filter((idx) => idx >= 0 && idx < points.length)
+  const minSeed = remapTrimmedEndpointSeed(
+    branch.resume_state?.min_index_seed,
+    indexBase,
+    validIndices
+  )
+  const maxSeed = remapTrimmedEndpointSeed(
+    branch.resume_state?.max_index_seed,
+    indexBase,
+    validIndices
+  )
   const normalized: HomoclinicContinuationResult & { upoldp?: number[][] } = {
     ...branch,
     points,
     indices,
     bifurcations,
+    resume_state: minSeed || maxSeed
+      ? {
+          min_index_seed: minSeed,
+          max_index_seed: maxSeed,
+        }
+      : undefined,
   }
   if (seedAnchor && seedAnchor.every(Number.isFinite)) {
     normalized.upoldp = [seedAnchor]

@@ -200,6 +200,20 @@ beforeAll(async () => {
       bifurcations?: number[]
       indices?: number[]
       branch_type?: { type: string }
+      resume_state?: {
+        min_index_seed?: {
+          endpoint_index: number
+          aug_state: number[]
+          tangent: number[]
+          step_size: number
+        }
+        max_index_seed?: {
+          endpoint_index: number
+          aug_state: number[]
+          tangent: number[]
+          step_size: number
+        }
+      }
     }
 
     class MockContinuationRunner {
@@ -243,6 +257,14 @@ beforeAll(async () => {
           bifurcations: [0, 1],
           indices: [10, 11],
           branch_type: { type: 'HomoclinicCurve' },
+          resume_state: {
+            max_index_seed: {
+              endpoint_index: 11,
+              aug_state: [0.2, 1, 1],
+              tangent: [1, 0, 0],
+              step_size: 0.01,
+            },
+          },
         }
       }
     }
@@ -421,6 +443,12 @@ describe('forkCoreWorker', () => {
               indices?: number[]
               bifurcations?: number[]
               upoldp?: number[][]
+              resume_state?: {
+                max_index_seed?: {
+                  endpoint_index?: number
+                  step_size?: number
+                }
+              }
             }
           }
       )
@@ -432,6 +460,8 @@ describe('forkCoreWorker', () => {
     const firstSeed = h1Response?.result?.upoldp?.[0] ?? []
     expect(firstSeed[0]).toBe(0.1)
     expect(firstSeed.slice(1)).toEqual([0, 0])
+    expect(h1Response?.result?.resume_state?.max_index_seed?.endpoint_index).toBe(0)
+    expect(h1Response?.result?.resume_state?.max_index_seed?.step_size).toBe(0.01)
 
     workerScope.postMessage.mockClear()
 

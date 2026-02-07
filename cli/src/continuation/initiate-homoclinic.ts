@@ -36,6 +36,28 @@ type HomotopyBranchTypeData = {
   stage: 'StageA' | 'StageB' | 'StageC' | 'StageD';
 };
 
+type EndpointSeed = NonNullable<
+  ContinuationBranchData['resume_state']
+>[keyof NonNullable<ContinuationBranchData['resume_state']>];
+
+function remapTrimmedEndpointSeed(
+  seed: EndpointSeed | undefined,
+  indexBase: number,
+  validIndices: Set<number>
+): EndpointSeed | undefined {
+  if (!seed || !Number.isFinite(seed.endpoint_index)) {
+    return undefined;
+  }
+  const endpoint_index = seed.endpoint_index - indexBase;
+  if (!validIndices.has(endpoint_index)) {
+    return undefined;
+  }
+  return {
+    ...seed,
+    endpoint_index,
+  };
+}
+
 function continuationSettingsFromInputs(inputs: {
   stepSizeInput: string;
   maxStepsInput: string;
@@ -59,7 +81,7 @@ function continuationSettingsFromInputs(inputs: {
   };
 }
 
-function discardInitialApproximationPoint(data: ContinuationBranchData): ContinuationBranchData {
+export function discardInitialApproximationPoint(data: ContinuationBranchData): ContinuationBranchData {
   if (!Array.isArray(data.points) || data.points.length <= 1) {
     return data;
   }
@@ -80,15 +102,32 @@ function discardInitialApproximationPoint(data: ContinuationBranchData): Continu
   const indices = rawIndices.map((value, index) =>
     Number.isFinite(value) ? value - indexBase : index
   );
+  const validIndices = new Set(indices.filter((idx) => Number.isFinite(idx)));
   const bifurcations = (data.bifurcations ?? [])
     .filter((idx) => idx > 0)
     .map((idx) => idx - 1)
     .filter((idx) => idx >= 0 && idx < points.length);
+  const minSeed = remapTrimmedEndpointSeed(
+    data.resume_state?.min_index_seed,
+    indexBase,
+    validIndices
+  );
+  const maxSeed = remapTrimmedEndpointSeed(
+    data.resume_state?.max_index_seed,
+    indexBase,
+    validIndices
+  );
   const normalized: ContinuationBranchData & { upoldp?: number[][] } = {
     ...data,
     points,
     indices,
     bifurcations,
+    resume_state: minSeed || maxSeed
+      ? {
+          min_index_seed: minSeed,
+          max_index_seed: maxSeed,
+        }
+      : undefined,
   };
   if (seedAnchor && seedAnchor.every(Number.isFinite)) {
     normalized.upoldp = [seedAnchor];

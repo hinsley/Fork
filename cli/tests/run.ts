@@ -109,6 +109,7 @@ async function run() {
   const { Storage } = require('../src/storage') as typeof import('../src/storage');
   const naming = require('../src/naming') as typeof import('../src/naming');
   const serialization = require('../src/continuation/serialization') as typeof import('../src/continuation/serialization');
+  const homocInit = require('../src/continuation/initiate-homoclinic') as typeof import('../src/continuation/initiate-homoclinic');
   const utils = require('../src/continuation/utils') as typeof import('../src/continuation/utils');
   const format = require('../src/format') as typeof import('../src/format');
   const labels = require('../src/labels') as typeof import('../src/labels');
@@ -166,6 +167,53 @@ async function run() {
       normalized.resume_state?.max_index_seed?.endpoint_index,
       1
     );
+  });
+
+  test('homoclinic seed trim remaps resume_state endpoint indices', () => {
+    const data = {
+      points: [
+        {
+          state: [0, 0],
+          param_value: 0.1,
+          stability: 'None',
+          eigenvalues: []
+        },
+        {
+          state: [1, 1],
+          param_value: 0.2,
+          stability: 'None',
+          eigenvalues: []
+        },
+        {
+          state: [2, 2],
+          param_value: 0.3,
+          stability: 'None',
+          eigenvalues: []
+        }
+      ],
+      bifurcations: [0, 2],
+      indices: [10, 11, 12],
+      resume_state: {
+        min_index_seed: {
+          endpoint_index: 11,
+          aug_state: [0.2, 1, 1],
+          tangent: [1, 0, 0],
+          step_size: 0.01
+        },
+        max_index_seed: {
+          endpoint_index: 12,
+          aug_state: [0.3, 2, 2],
+          tangent: [1, 0, 0],
+          step_size: 0.02
+        }
+      }
+    } as any;
+
+    const trimmed = homocInit.discardInitialApproximationPoint(data);
+    assert.deepEqual(trimmed.indices, [0, 1]);
+    assert.equal(trimmed.resume_state?.min_index_seed?.endpoint_index, 0);
+    assert.equal(trimmed.resume_state?.max_index_seed?.endpoint_index, 1);
+    assert.equal(trimmed.resume_state?.max_index_seed?.step_size, 0.02);
   });
 
   test('serialization normalizes raw eigenvalue arrays', () => {

@@ -174,6 +174,20 @@ function ensureHomoclinicEndpointResumeSeeds(
   }
 }
 
+function remapTrimmedEndpointSeed(
+  seed: ContinuationEndpointSeed | undefined,
+  indexBase: number,
+  validIndices: Set<number>
+): ContinuationEndpointSeed | undefined {
+  if (!seed || !Number.isFinite(seed.endpoint_index)) return undefined
+  const endpoint_index = seed.endpoint_index - indexBase
+  if (!validIndices.has(endpoint_index)) return undefined
+  return {
+    ...seed,
+    endpoint_index,
+  }
+}
+
 function trimHomoclinicLargeCycleSeedPoint(
   data: ContinuationObject['data']
 ): ContinuationObject['data'] {
@@ -192,12 +206,16 @@ function trimHomoclinicLargeCycleSeedPoint(
     .map((value) => value - 1)
 
   const validIndices = new Set<number>(trimmedIndices.filter((idx) => Number.isFinite(idx)))
-  const minSeed = isValidEndpointSeedForIndices(data.resume_state?.min_index_seed, validIndices)
-    ? data.resume_state?.min_index_seed
-    : undefined
-  const maxSeed = isValidEndpointSeedForIndices(data.resume_state?.max_index_seed, validIndices)
-    ? data.resume_state?.max_index_seed
-    : undefined
+  const minSeed = remapTrimmedEndpointSeed(
+    data.resume_state?.min_index_seed,
+    firstLogical,
+    validIndices
+  )
+  const maxSeed = remapTrimmedEndpointSeed(
+    data.resume_state?.max_index_seed,
+    firstLogical,
+    validIndices
+  )
   const resume_state = minSeed || maxSeed
     ? {
         min_index_seed: minSeed,
