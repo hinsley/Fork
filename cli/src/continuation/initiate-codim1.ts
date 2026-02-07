@@ -116,8 +116,8 @@ export async function initiateFoldCurve(
   // Configuration
   let curveName = `fold_curve_${branch.name}`;
   let stepSizeInput = '0.01';
-  let maxStepsInput = '100';
-  let minStepSizeInput = '1e-6';
+  let maxStepsInput = '300';
+  let minStepSizeInput = '1e-5';
   let maxStepSizeInput = '0.1';
   let directionForward = true;
   let correctorStepsInput = '10';
@@ -268,9 +268,9 @@ export async function initiateFoldCurve(
 
   const continuationSettings = {
     step_size: Math.max(parseFloatOrDefault(stepSizeInput, 0.01), 1e-9),
-    min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-6), 1e-12),
+    min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-5), 1e-12),
     max_step_size: Math.max(parseFloatOrDefault(maxStepSizeInput, 0.1), 1e-9),
-    max_steps: Math.max(parseIntOrDefault(maxStepsInput, 100), 1),
+    max_steps: Math.max(parseIntOrDefault(maxStepsInput, 300), 1),
     corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
     corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-8), Number.EPSILON),
     step_tolerance: 1e-8
@@ -410,8 +410,8 @@ export async function initiateHopfCurve(
   // Configuration
   let curveName = `hopf_curve_${branch.name}`;
   let stepSizeInput = '0.01';
-  let maxStepsInput = '100';
-  let minStepSizeInput = '1e-6';
+  let maxStepsInput = '300';
+  let minStepSizeInput = '1e-5';
   let maxStepSizeInput = '0.1';
   let directionForward = true;
   let correctorStepsInput = '10';
@@ -572,9 +572,9 @@ export async function initiateHopfCurve(
 
   const continuationSettings = {
     step_size: Math.max(parseFloatOrDefault(stepSizeInput, 0.01), 1e-9),
-    min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-6), 1e-12),
+    min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-5), 1e-12),
     max_step_size: Math.max(parseFloatOrDefault(maxStepSizeInput, 0.1), 1e-9),
-    max_steps: Math.max(parseIntOrDefault(maxStepsInput, 100), 1),
+    max_steps: Math.max(parseIntOrDefault(maxStepsInput, 300), 1),
     corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
     corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-8), Number.EPSILON),
     step_tolerance: 1e-8
@@ -723,8 +723,8 @@ export async function initiateLPCCurve(
   // Configuration variables
   let curveName = `lpc_curve_${branch.name}`;
   let stepSizeInput = '0.01';
-  let maxStepsInput = '100';
-  let minStepSizeInput = '1e-6';
+  let maxStepsInput = '300';
+  let minStepSizeInput = '1e-5';
   let maxStepSizeInput = '0.1';
   let directionForward = true;
   let correctorStepsInput = '10';
@@ -875,9 +875,9 @@ export async function initiateLPCCurve(
 
   const continuationSettings = {
     step_size: Math.max(parseFloatOrDefault(stepSizeInput, 0.01), 1e-9),
-    min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-6), 1e-12),
+    min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-5), 1e-12),
     max_step_size: Math.max(parseFloatOrDefault(maxStepSizeInput, 0.1), 1e-9),
-    max_steps: Math.max(parseIntOrDefault(maxStepsInput, 100), 1),
+    max_steps: Math.max(parseIntOrDefault(maxStepsInput, 300), 1),
     corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
     corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-8), Number.EPSILON),
     step_tolerance: 1e-8
@@ -1005,8 +1005,8 @@ export async function initiatePDCurve(
   // Configuration variables
   let curveName = `pd_curve_${branch.name}`;
   let stepSizeInput = '0.01';
-  let maxStepsInput = '100';
-  let minStepSizeInput = '1e-6';
+  let maxStepsInput = '300';
+  let minStepSizeInput = '1e-5';
   let maxStepSizeInput = '0.1';
   let directionForward = true;
   let correctorStepsInput = '10';
@@ -1172,9 +1172,9 @@ export async function initiatePDCurve(
 
   const continuationSettings = {
     step_size: Math.max(parseFloatOrDefault(stepSizeInput, 0.01), 1e-9),
-    min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-6), 1e-12),
+    min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-5), 1e-12),
     max_step_size: Math.max(parseFloatOrDefault(maxStepSizeInput, 0.1), 1e-9),
-    max_steps: Math.max(parseIntOrDefault(maxStepsInput, 100), 1),
+    max_steps: Math.max(parseIntOrDefault(maxStepsInput, 300), 1),
     corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
     corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-8), Number.EPSILON),
     step_tolerance: 1e-8
@@ -1303,8 +1303,8 @@ export async function initiateNSCurve(
   // Configuration variables
   let curveName = `ns_curve_${branch.name}`;
   let stepSizeInput = '0.01';
-  let maxStepsInput = '100';
-  let minStepSizeInput = '1e-6';
+  let maxStepsInput = '300';
+  let minStepSizeInput = '1e-5';
   let maxStepSizeInput = '0.1';
   let directionForward = true;
   let correctorStepsInput = '10';
@@ -1470,9 +1470,9 @@ export async function initiateNSCurve(
 
   const continuationSettings = {
     step_size: Math.max(parseFloatOrDefault(stepSizeInput, 0.01), 1e-9),
-    min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-6), 1e-12),
+    min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-5), 1e-12),
     max_step_size: Math.max(parseFloatOrDefault(maxStepSizeInput, 0.1), 1e-9),
-    max_steps: Math.max(parseIntOrDefault(maxStepsInput, 100), 1),
+    max_steps: Math.max(parseIntOrDefault(maxStepsInput, 300), 1),
     corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
     corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-8), Number.EPSILON),
     step_tolerance: 1e-8

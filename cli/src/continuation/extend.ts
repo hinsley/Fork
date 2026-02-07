@@ -47,7 +47,7 @@ export async function extendBranch(
 
   // State for config menu
   let directionForward = true;
-  let maxStepsInput = '50';
+  let maxStepsInput = '300';
   let stepSizeInput = defaults.step_size?.toString() || '0.01';
 
   const directionLabel = (forward: boolean) =>
@@ -113,7 +113,7 @@ export async function extendBranch(
     step_size: parseFloatOrDefault(stepSizeInput, 0.01),
     min_step_size: defaults.min_step_size || 1e-5,
     max_step_size: defaults.max_step_size || 0.1,
-    max_steps: parseIntOrDefault(maxStepsInput, 50),
+    max_steps: parseIntOrDefault(maxStepsInput, 300),
     corrector_steps: defaults.corrector_steps || 4,
     corrector_tolerance: defaults.corrector_tolerance || 1e-6,
     step_tolerance: defaults.step_tolerance || 1e-6

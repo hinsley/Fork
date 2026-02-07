@@ -61,7 +61,7 @@ export async function initiateEquilibriumBranchFromPoint(
     || sysConfig.paramNames[0];
   let branchName = '';
   let stepSizeInput = '0.01';
-  let maxStepsInput = '100';
+  let maxStepsInput = '300';
   let minStepSizeInput = '1e-5';
   let maxStepSizeInput = '0.1';
   let directionForward = true;
@@ -263,7 +263,7 @@ export async function initiateEquilibriumBranchFromPoint(
     step_size: Math.max(parseFloatOrDefault(stepSizeInput, 0.01), 1e-9),
     min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-5), 1e-12),
     max_step_size: Math.max(parseFloatOrDefault(maxStepSizeInput, 0.1), 1e-9),
-    max_steps: Math.max(parseIntOrDefault(maxStepsInput, 100), 1),
+    max_steps: Math.max(parseIntOrDefault(maxStepsInput, 300), 1),
     corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 4), 1),
     corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-6), Number.EPSILON),
     step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON)
@@ -356,7 +356,7 @@ export async function initiateMapCycleFromPD(
   let branchName = `${cycleObjectName}_${sourceBranch.parameterName}`;
   let amplitudeInput = '0.01';
   let stepSizeInput = '0.01';
-  let maxStepsInput = '50';
+  let maxStepsInput = '300';
   let minStepSizeInput = '1e-5';
   let maxStepSizeInput = '0.1';
   let directionForward = true;
@@ -513,7 +513,7 @@ export async function initiateMapCycleFromPD(
     amplitude: parseFloatOrDefault(amplitudeInput, 0.01),
     settings: {
       step_size: parseFloatOrDefault(stepSizeInput, 0.01),
-      max_steps: parseIntOrDefault(maxStepsInput, 50),
+      max_steps: parseIntOrDefault(maxStepsInput, 300),
       min_step_size: parseFloatOrDefault(minStepSizeInput, 1e-5),
       max_step_size: parseFloatOrDefault(maxStepSizeInput, 0.1),
       corrector_steps: parseIntOrDefault(correctorStepsInput, 10),

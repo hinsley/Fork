@@ -47,9 +47,9 @@ function continuationSettingsFromInputs(inputs: {
 }) {
   return {
     step_size: Math.max(parseFloatOrDefault(inputs.stepSizeInput, 0.01), 1e-9),
-    min_step_size: Math.max(parseFloatOrDefault(inputs.minStepSizeInput, 1e-6), 1e-12),
+    min_step_size: Math.max(parseFloatOrDefault(inputs.minStepSizeInput, 1e-5), 1e-12),
     max_step_size: Math.max(parseFloatOrDefault(inputs.maxStepSizeInput, 0.1), 1e-9),
-    max_steps: Math.max(parseIntOrDefault(inputs.maxStepsInput, 80), 1),
+    max_steps: Math.max(parseIntOrDefault(inputs.maxStepsInput, 300), 1),
     corrector_steps: Math.max(parseIntOrDefault(inputs.correctorStepsInput, 8), 1),
     corrector_tolerance: Math.max(
       parseFloatOrDefault(inputs.correctorToleranceInput, 1e-7),
@@ -119,10 +119,10 @@ export async function initiateHomoclinicFromLargeCycle(
   let freeTime = false;
   let freeEps0 = true;
   let freeEps1 = true;
-  let stepSizeInput = '0.001';
-  let maxStepsInput = '80';
-  let minStepSizeInput = '1e-8';
-  let maxStepSizeInput = '0.01';
+  let stepSizeInput = '0.01';
+  let maxStepsInput = '300';
+  let minStepSizeInput = '1e-5';
+  let maxStepSizeInput = '0.1';
   let correctorStepsInput = '12';
   let correctorToleranceInput = '1e-8';
   let stepToleranceInput = '1e-8';
@@ -531,8 +531,8 @@ export async function initiateHomoclinicFromHomoclinic(
   let freeEps0 = source.free_eps0;
   let freeEps1 = source.free_eps1;
   let stepSizeInput = '0.01';
-  let maxStepsInput = '80';
-  let minStepSizeInput = '1e-6';
+  let maxStepsInput = '300';
+  let minStepSizeInput = '1e-5';
   let maxStepSizeInput = '0.1';
   let correctorStepsInput = '8';
   let correctorToleranceInput = '1e-7';
@@ -902,10 +902,10 @@ export async function initiateHomoclinicFromHomotopySaddle(
   let freeTime = false;
   let freeEps0 = true;
   let freeEps1 = true;
-  let stepSizeInput = '0.001';
-  let maxStepsInput = '80';
-  let minStepSizeInput = '1e-8';
-  let maxStepSizeInput = '0.01';
+  let stepSizeInput = '0.01';
+  let maxStepsInput = '300';
+  let minStepSizeInput = '1e-5';
+  let maxStepSizeInput = '0.1';
   let correctorStepsInput = '12';
   let correctorToleranceInput = '1e-8';
   let stepToleranceInput = '1e-8';
