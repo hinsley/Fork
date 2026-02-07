@@ -102,6 +102,31 @@ pub struct ContinuationBranch {
     /// LC-specific: velocity profile for phase condition
     #[serde(default)]
     pub upoldp: Option<Vec<Vec<f64>>>,
+    /// Optional extension resume metadata for min/max signed-index endpoints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_state: Option<ContinuationResumeState>,
+}
+
+/// Resume seed for a specific branch endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ContinuationEndpointSeed {
+    /// Signed branch index of the endpoint this seed belongs to.
+    pub endpoint_index: i32,
+    /// Augmented state [parameter, packed_state...].
+    pub aug_state: Vec<f64>,
+    /// Normalized tangent at the endpoint.
+    pub tangent: Vec<f64>,
+    /// Adaptive step size at the endpoint.
+    pub step_size: f64,
+}
+
+/// Optional resume seeds for each signed-index side of a branch.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ContinuationResumeState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_index_seed: Option<ContinuationEndpointSeed>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_index_seed: Option<ContinuationEndpointSeed>,
 }
 
 // ============================================================================

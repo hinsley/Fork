@@ -50,8 +50,8 @@ pub use periodic::{
 pub use problem::{PointDiagnostics, TestFunctionValues};
 pub use types::{
     BifurcationType, BranchType, Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType,
-    Codim2BifurcationType, ContinuationBranch, ContinuationPoint, ContinuationSettings,
-    HomotopyStage, StepResult,
+    Codim2BifurcationType, ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint,
+    ContinuationResumeState, ContinuationSettings, HomotopyStage, StepResult,
 };
 pub use util::{
     compute_eigenvalues, compute_nullspace_tangent, continuation_point_to_aug, hopf_pair_count,
@@ -102,6 +102,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
         indices: vec![0],
         branch_type: BranchType::default(),
         upoldp: None,
+        resume_state: None,
     };
 
     // Compute initial tangent and orient it based on requested parameter direction.
@@ -130,7 +131,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
 
     // Set direction
     let direction_sign = 1.0; // Direction is now encoded in the oriented tangent
-    let mut step_size = settings.step_size;
+    let mut step_size = clamp_step_size(settings.step_size, settings);
     let mut current_index: i32 = 0;
     let mut consecutive_failures = 0;
     const MAX_CONSECUTIVE_FAILURES: usize = 20;
@@ -279,7 +280,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             step_size = (step_size * 1.2).min(settings.max_step_size);
 
             prev_aug = continuation_aug;
-            prev_tangent = consistent_tangent;
+            prev_tangent = normalize_tangent_or_compute(problem, &prev_aug, consistent_tangent)?;
             prev_diag = continuation_diag;
         } else {
             // Failed to converge, reduce step size
@@ -293,6 +294,17 @@ pub fn continue_with_problem<P: ContinuationProblem>(
         }
     }
 
+    if let Some(seed) = build_resume_seed(current_index, &prev_aug, &prev_tangent, step_size) {
+        let mut resume_state = ContinuationResumeState::default();
+        if seed.endpoint_index <= 0 {
+            resume_state.min_index_seed = Some(seed.clone());
+        }
+        if seed.endpoint_index >= 0 {
+            resume_state.max_index_seed = Some(seed);
+        }
+        branch.resume_state = Some(resume_state);
+    }
+
     Ok(branch)
 }
 
@@ -301,6 +313,60 @@ pub fn continue_with_problem<P: ContinuationProblem>(
 // ============================================================================
 
 const MAX_CONSECUTIVE_FAILURES: usize = 20;
+
+fn clamp_step_size(step_size: f64, settings: ContinuationSettings) -> f64 {
+    let mut clamped = if step_size.is_finite() && step_size > 0.0 {
+        step_size
+    } else {
+        settings.step_size
+    };
+    clamped = clamped.max(settings.min_step_size);
+    clamped = clamped.min(settings.max_step_size);
+    clamped
+}
+
+fn normalize_tangent_or_compute<P: ContinuationProblem>(
+    problem: &mut P,
+    prev_aug: &DVector<f64>,
+    mut tangent: DVector<f64>,
+) -> Result<DVector<f64>> {
+    if tangent.norm() < 1e-12 {
+        tangent = compute_tangent_from_problem(problem, prev_aug)?;
+    }
+    let norm = tangent.norm();
+    if norm > 1e-12 {
+        Ok(tangent / norm)
+    } else {
+        Ok(tangent)
+    }
+}
+
+fn build_resume_seed(
+    endpoint_index: i32,
+    aug_state: &DVector<f64>,
+    tangent: &DVector<f64>,
+    step_size: f64,
+) -> Option<ContinuationEndpointSeed> {
+    if !step_size.is_finite() || step_size <= 0.0 {
+        return None;
+    }
+    if aug_state.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    if tangent.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    if tangent.norm() <= 1e-12 {
+        return None;
+    }
+    let tangent_norm = tangent / tangent.norm();
+    Some(ContinuationEndpointSeed {
+        endpoint_index,
+        aug_state: aug_state.iter().cloned().collect(),
+        tangent: tangent_norm.iter().cloned().collect(),
+        step_size,
+    })
+}
 
 /// A runner that holds continuation state and allows stepped execution for progress reporting.
 ///
@@ -331,6 +397,29 @@ pub struct ContinuationRunner<P: ContinuationProblem> {
 }
 
 impl<P: ContinuationProblem> ContinuationRunner<P> {
+    fn init_branch_from_aug(
+        problem: &mut P,
+        prev_aug: &DVector<f64>,
+        dim: usize,
+    ) -> Result<(PointDiagnostics, ContinuationBranch)> {
+        let initial_diag = problem.diagnostics(prev_aug)?;
+        let branch = ContinuationBranch {
+            points: vec![ContinuationPoint {
+                state: prev_aug.rows(1, dim).iter().cloned().collect(),
+                param_value: prev_aug[0],
+                stability: BifurcationType::None,
+                eigenvalues: initial_diag.eigenvalues.clone(),
+                cycle_points: initial_diag.cycle_points.clone(),
+            }],
+            bifurcations: Vec::new(),
+            indices: vec![0],
+            branch_type: BranchType::default(),
+            upoldp: None,
+            resume_state: None,
+        };
+        Ok((initial_diag, branch))
+    }
+
     /// Create a new continuation runner initialized from a starting point.
     pub fn new(
         mut problem: P,
@@ -349,22 +438,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             }
         }
 
-        // Initialize branch with starting point
-        let initial_diag = problem.diagnostics(&prev_aug)?;
-        let prev_diag = initial_diag.clone();
-        let branch = ContinuationBranch {
-            points: vec![ContinuationPoint {
-                state: initial_point.state.clone(),
-                param_value: initial_point.param_value,
-                stability: BifurcationType::None,
-                eigenvalues: initial_diag.eigenvalues,
-                cycle_points: initial_diag.cycle_points.clone(),
-            }],
-            bifurcations: Vec::new(),
-            indices: vec![0],
-            branch_type: BranchType::default(),
-            upoldp: None,
-        };
+        let (prev_diag, branch) = Self::init_branch_from_aug(&mut problem, &prev_aug, dim)?;
 
         // Compute initial tangent and orient it based on requested parameter direction.
         let mut prev_tangent = compute_tangent_from_problem(&mut problem, &prev_aug)?;
@@ -391,7 +465,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             prev_aug,
             prev_tangent,
             prev_diag,
-            step_size: settings.step_size,
+            step_size: clamp_step_size(settings.step_size, settings),
             current_index: 0,
             index_step,
             consecutive_failures: 0,
@@ -411,7 +485,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
     pub fn new_with_tangent(
         mut problem: P,
         initial_point: ContinuationPoint,
-        mut initial_tangent: DVector<f64>,
+        initial_tangent: DVector<f64>,
         settings: ContinuationSettings,
     ) -> Result<Self> {
         let dim = problem.dimension();
@@ -425,39 +499,65 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             }
         }
 
-        // Initialize branch with starting point
-        let initial_diag = problem.diagnostics(&prev_aug)?;
-        let prev_diag = initial_diag.clone();
-        let branch = ContinuationBranch {
-            points: vec![ContinuationPoint {
-                state: initial_point.state.clone(),
-                param_value: initial_point.param_value,
-                stability: BifurcationType::None,
-                eigenvalues: initial_diag.eigenvalues,
-                cycle_points: initial_diag.cycle_points.clone(),
-            }],
-            bifurcations: Vec::new(),
-            indices: vec![0],
-            branch_type: BranchType::default(),
-            upoldp: None,
-        };
-
-        if initial_tangent.norm() < 1e-12 {
-            initial_tangent = compute_tangent_from_problem(&mut problem, &prev_aug)?;
-        }
-        let tangent_norm = initial_tangent.norm();
-        let prev_tangent = if tangent_norm > 1e-12 {
-            initial_tangent / tangent_norm
-        } else {
-            initial_tangent
-        };
+        let (prev_diag, branch) = Self::init_branch_from_aug(&mut problem, &prev_aug, dim)?;
+        let prev_tangent = normalize_tangent_or_compute(&mut problem, &prev_aug, initial_tangent)?;
 
         Ok(Self {
             problem,
             prev_aug,
             prev_tangent,
             prev_diag,
-            step_size: settings.step_size,
+            step_size: clamp_step_size(settings.step_size, settings),
+            current_index: 0,
+            index_step: 1,
+            consecutive_failures: 0,
+            current_step: 0,
+            max_steps: settings.max_steps,
+            settings,
+            branch,
+            done: false,
+            dim,
+        })
+    }
+
+    /// Create a continuation runner from a saved endpoint seed.
+    ///
+    /// This resumes from the accepted augmented state/tangent/step size
+    /// captured at an endpoint of a previous run.
+    pub fn new_from_seed(
+        mut problem: P,
+        aug_state: Vec<f64>,
+        tangent: Vec<f64>,
+        seed_step_size: f64,
+        settings: ContinuationSettings,
+    ) -> Result<Self> {
+        let dim = problem.dimension();
+        if aug_state.len() != dim + 1 {
+            bail!(
+                "Resume seed dimension mismatch: expected {} values, got {}",
+                dim + 1,
+                aug_state.len()
+            );
+        }
+        if tangent.len() != dim + 1 {
+            bail!(
+                "Resume seed tangent dimension mismatch: expected {} values, got {}",
+                dim + 1,
+                tangent.len()
+            );
+        }
+
+        let prev_aug = DVector::from_vec(aug_state);
+        let seed_tangent = DVector::from_vec(tangent);
+        let prev_tangent = normalize_tangent_or_compute(&mut problem, &prev_aug, seed_tangent)?;
+        let (prev_diag, branch) = Self::init_branch_from_aug(&mut problem, &prev_aug, dim)?;
+
+        Ok(Self {
+            problem,
+            prev_aug,
+            prev_tangent,
+            prev_diag,
+            step_size: clamp_step_size(seed_step_size, settings),
             current_index: 0,
             index_step: 1,
             consecutive_failures: 0,
@@ -683,7 +783,22 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
     }
 
     /// Take the final branch result, consuming the runner.
-    pub fn take_result(self) -> ContinuationBranch {
+    pub fn take_result(mut self) -> ContinuationBranch {
+        if let Some(seed) = build_resume_seed(
+            self.current_index,
+            &self.prev_aug,
+            &self.prev_tangent,
+            self.step_size,
+        ) {
+            let mut resume_state = self.branch.resume_state.take().unwrap_or_default();
+            if seed.endpoint_index <= 0 {
+                resume_state.min_index_seed = Some(seed.clone());
+            }
+            if seed.endpoint_index >= 0 {
+                resume_state.max_index_seed = Some(seed);
+            }
+            self.branch.resume_state = Some(resume_state);
+        }
         self.branch
     }
 
@@ -701,6 +816,11 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
     pub fn set_upoldp(&mut self, upoldp: Option<Vec<Vec<f64>>>) {
         self.branch.upoldp = upoldp;
     }
+
+    /// Set extension resume metadata.
+    pub fn set_resume_state(&mut self, resume_state: Option<ContinuationResumeState>) {
+        self.branch.resume_state = resume_state;
+    }
 }
 
 fn orient_extension_tangent(
@@ -714,27 +834,19 @@ fn orient_extension_tangent(
         if tangent.dot(secant) < 0.0 {
             *tangent = -tangent.clone();
         }
+        return;
     }
 
     let tangent_norm = tangent.norm();
     let param_component_threshold = 0.01 * tangent_norm;
 
     if tangent[0].abs() < param_component_threshold {
-        let desired_param_sign = secant
-            .and_then(|v| {
-                if v[0].abs() > 1e-12 {
-                    Some(v[0].signum())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(forward_sign);
-        tangent[0] = param_component_threshold * desired_param_sign;
+        tangent[0] = param_component_threshold * forward_sign;
         let norm = tangent.norm();
         if norm > 1e-12 {
             *tangent = &*tangent / norm;
         }
-    } else if secant.is_none() && tangent[0] * forward_sign < 0.0 {
+    } else if tangent[0] * forward_sign < 0.0 {
         *tangent = -tangent.clone();
     }
 }
@@ -755,6 +867,54 @@ fn cap_extension_step_size(settings: &mut ContinuationSettings, secant_norm: Opt
     }
     if settings.min_step_size > settings.step_size {
         settings.min_step_size = settings.step_size;
+    }
+}
+
+fn validate_resume_seed(
+    seed: &ContinuationEndpointSeed,
+    endpoint_index: i32,
+    expected_aug_len: usize,
+) -> bool {
+    if seed.endpoint_index != endpoint_index {
+        return false;
+    }
+    if seed.aug_state.len() != expected_aug_len || seed.tangent.len() != expected_aug_len {
+        return false;
+    }
+    if seed.aug_state.iter().any(|v| !v.is_finite()) {
+        return false;
+    }
+    if seed.tangent.iter().any(|v| !v.is_finite()) {
+        return false;
+    }
+    if seed.step_size <= 0.0 || !seed.step_size.is_finite() {
+        return false;
+    }
+    let tangent_norm = DVector::from_vec(seed.tangent.clone()).norm();
+    tangent_norm > 1e-12
+}
+
+fn select_resume_seed(
+    branch: &ContinuationBranch,
+    forward: bool,
+    endpoint_index: i32,
+    expected_aug_len: usize,
+) -> Option<ContinuationEndpointSeed> {
+    let seed = if forward {
+        branch
+            .resume_state
+            .as_ref()
+            .and_then(|state| state.max_index_seed.clone())
+    } else {
+        branch
+            .resume_state
+            .as_ref()
+            .and_then(|state| state.min_index_seed.clone())
+    }?;
+    if validate_resume_seed(&seed, endpoint_index, expected_aug_len) {
+        Some(seed)
+    } else {
+        None
     }
 }
 
@@ -842,51 +1002,69 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
         end_aug[i + 1] = v;
     }
 
-    // Compute secant direction from neighbor to endpoint if we have two points
-    let (secant_direction, secant_norm) = if let Some(neighbor_pos) = neighbor_idx {
-        let neighbor = &branch.points[neighbor_pos];
-        let mut neighbor_aug = DVector::zeros(dim + 1);
-        neighbor_aug[0] = neighbor.param_value;
-        for (i, &v) in neighbor.state.iter().enumerate() {
-            neighbor_aug[i + 1] = v;
-        }
+    let mut settings = settings;
+    let resume_seed = select_resume_seed(&branch, forward, last_index, dim + 1);
 
-        // Secant from interior neighbor to selected endpoint.
-        // This preserves outward continuation on the requested signed-index side.
-        let secant = &end_aug - &neighbor_aug;
-        let norm = secant.norm();
-        if norm > 1e-12 {
-            (Some(secant.normalize()), Some(norm))
+    let extension = if let Some(seed) = resume_seed {
+        let seeded_step = clamp_step_size(seed.step_size, settings);
+        settings.step_size = seeded_step;
+        let initial_point = ContinuationPoint {
+            state: seed.aug_state[1..].to_vec(),
+            param_value: seed.aug_state[0],
+            stability: endpoint.stability,
+            eigenvalues: endpoint.eigenvalues.clone(),
+            cycle_points: endpoint.cycle_points.clone(),
+        };
+        continue_with_initial_tangent(
+            problem,
+            initial_point,
+            DVector::from_vec(seed.tangent),
+            settings,
+        )?
+    } else {
+        // Compute secant direction from neighbor to endpoint if we have two points
+        let (secant_direction, secant_norm) = if let Some(neighbor_pos) = neighbor_idx {
+            let neighbor = &branch.points[neighbor_pos];
+            let mut neighbor_aug = DVector::zeros(dim + 1);
+            neighbor_aug[0] = neighbor.param_value;
+            for (i, &v) in neighbor.state.iter().enumerate() {
+                neighbor_aug[i + 1] = v;
+            }
+
+            // Secant from interior neighbor to selected endpoint.
+            // This preserves outward continuation on the requested signed-index side.
+            let secant = &end_aug - &neighbor_aug;
+            let norm = secant.norm();
+            if norm > 1e-12 {
+                (Some(secant.normalize()), Some(norm))
+            } else {
+                (None, None)
+            }
         } else {
             (None, None)
-        }
-    } else {
-        (None, None)
+        };
+
+        // With at least two points, secant provides a robust outward direction.
+        let mut tangent = if let Some(secant) = secant_direction.as_ref() {
+            secant.clone()
+        } else {
+            compute_tangent_from_problem(problem, &end_aug)?
+        };
+
+        orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
+        cap_extension_step_size(&mut settings, secant_norm);
+
+        // Now run continuation with the correctly oriented tangent
+        let initial_point = ContinuationPoint {
+            state: endpoint.state.clone(),
+            param_value: endpoint.param_value,
+            stability: endpoint.stability.clone(),
+            eigenvalues: endpoint.eigenvalues.clone(),
+            cycle_points: endpoint.cycle_points.clone(),
+        };
+
+        continue_with_initial_tangent(problem, initial_point, tangent.clone(), settings)?
     };
-
-    // With at least two points, secant provides a robust outward direction.
-    let mut tangent = if let Some(secant) = secant_direction.as_ref() {
-        secant.clone()
-    } else {
-        compute_tangent_from_problem(problem, &end_aug)?
-    };
-
-    orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
-    let mut settings = settings;
-    cap_extension_step_size(&mut settings, secant_norm);
-
-    // Now run continuation with the correctly oriented tangent
-    let initial_point = ContinuationPoint {
-        state: endpoint.state.clone(),
-        param_value: endpoint.param_value,
-        stability: endpoint.stability.clone(),
-        eigenvalues: endpoint.eigenvalues.clone(),
-        cycle_points: endpoint.cycle_points.clone(),
-    };
-
-    // Use continue_with_initial_tangent to preserve direction
-    let extension =
-        continue_with_initial_tangent(problem, initial_point, tangent.clone(), settings)?;
 
     // Merge extension into main branch (skip first point as it's the endpoint)
     let index_offset = last_index;
@@ -909,6 +1087,39 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
         // ext_bif_idx == 0 is the overlap point which already exists in branch, skip it
     }
 
+    if let Some(ext_resume) = extension.resume_state {
+        let mut merged_resume = branch.resume_state.take().unwrap_or_default();
+        if let Some(seed) = ext_resume.max_index_seed {
+            let mapped_index = index_offset + seed.endpoint_index * sign;
+            let mapped_seed = ContinuationEndpointSeed {
+                endpoint_index: mapped_index,
+                aug_state: seed.aug_state,
+                tangent: seed.tangent,
+                step_size: seed.step_size,
+            };
+            if sign > 0 {
+                merged_resume.max_index_seed = Some(mapped_seed);
+            } else {
+                merged_resume.min_index_seed = Some(mapped_seed);
+            }
+        }
+        if let Some(seed) = ext_resume.min_index_seed {
+            let mapped_index = index_offset + seed.endpoint_index * sign;
+            let mapped_seed = ContinuationEndpointSeed {
+                endpoint_index: mapped_index,
+                aug_state: seed.aug_state,
+                tangent: seed.tangent,
+                step_size: seed.step_size,
+            };
+            if sign > 0 {
+                merged_resume.max_index_seed = Some(mapped_seed);
+            } else {
+                merged_resume.min_index_seed = Some(mapped_seed);
+            }
+        }
+        branch.resume_state = Some(merged_resume);
+    }
+
     Ok(branch)
 }
 
@@ -928,7 +1139,6 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
         prev_aug[i + 1] = v;
     }
 
-    // Initialize branch with starting point
     let initial_diag = problem.diagnostics(&prev_aug)?;
     let mut prev_diag = initial_diag.clone();
     let mut branch = ContinuationBranch {
@@ -943,15 +1153,13 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
         indices: vec![0],
         branch_type: BranchType::default(),
         upoldp: None,
+        resume_state: None,
     };
 
     // Use provided tangent (already oriented correctly)
-    let mut prev_tangent = initial_tangent;
-    if prev_tangent.norm() < 1e-12 {
-        prev_tangent = compute_tangent_from_problem(problem, &prev_aug)?;
-    }
+    let mut prev_tangent = normalize_tangent_or_compute(problem, &prev_aug, initial_tangent)?;
 
-    let mut step_size = settings.step_size;
+    let mut step_size = clamp_step_size(settings.step_size, settings);
     let mut current_index: i32 = 0;
     let mut consecutive_failures = 0;
     const MAX_CONSECUTIVE_FAILURES: usize = 20;
@@ -1076,7 +1284,7 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             problem.update_after_step(&continuation_aug)?;
 
             prev_aug = continuation_aug;
-            prev_tangent = new_tangent;
+            prev_tangent = normalize_tangent_or_compute(problem, &prev_aug, new_tangent)?;
             prev_diag = continuation_diag;
 
             // Adaptive step size
@@ -1090,6 +1298,17 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
                 break;
             }
         }
+    }
+
+    if let Some(seed) = build_resume_seed(current_index, &prev_aug, &prev_tangent, step_size) {
+        let mut resume_state = ContinuationResumeState::default();
+        if seed.endpoint_index <= 0 {
+            resume_state.min_index_seed = Some(seed.clone());
+        }
+        if seed.endpoint_index >= 0 {
+            resume_state.max_index_seed = Some(seed);
+        }
+        branch.resume_state = Some(resume_state);
     }
 
     Ok(branch)
@@ -1630,6 +1849,7 @@ pub fn continue_parameter(
         indices: vec![0],
         branch_type: BranchType::Equilibrium,
         upoldp: None,
+        resume_state: None,
     };
 
     extend_branch(system, kind, branch, param_index, settings, forward)
@@ -2479,6 +2699,7 @@ mod tests {
             indices: Vec::new(),
             branch_type: BranchType::default(),
             upoldp: None,
+        resume_state: None,
         };
 
         let extended = extend_branch_with_problem(&mut problem, branch, settings, true)
@@ -2508,20 +2729,113 @@ mod tests {
     }
 
     #[test]
-    fn test_orient_extension_tangent_biases_small_parameter_component_with_secant() {
+    fn test_orient_extension_tangent_with_secant_keeps_orientation_without_param_bias() {
         let mut tangent = DVector::from_vec(vec![1e-12, 1.0, 0.0]);
         let secant = DVector::from_vec(vec![-0.5, -2.0, 0.0]);
 
         orient_extension_tangent(&mut tangent, Some(&secant), true);
 
         assert!(
-            tangent[0] < -1e-3,
-            "Expected secant-oriented tangent parameter component to stay away from zero, got {}",
+            tangent[0].abs() < 1e-9,
+            "Expected secant-oriented tangent to preserve tiny parameter component, got {}",
             tangent[0]
         );
         assert!(
             tangent.dot(&secant) > 0.0,
             "Expected tangent to remain aligned with secant orientation"
+        );
+    }
+
+    #[test]
+    fn test_continuation_runner_emits_resume_state_for_endpoint() {
+        let settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-6,
+            max_step_size: 0.2,
+            max_steps: 2,
+            corrector_steps: 2,
+            corrector_tolerance: 1e-6,
+            step_tolerance: 1e-6,
+        };
+
+        let initial_point = ContinuationPoint {
+            state: vec![0.0],
+            param_value: 0.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+        };
+
+        let mut runner = ContinuationRunner::new(
+            ZeroResidualProblem::default(),
+            initial_point,
+            settings,
+            true,
+        )
+        .expect("runner init");
+        runner.run_steps(2).expect("run steps");
+        let branch = runner.take_result();
+
+        let resume = branch.resume_state.expect("resume state");
+        let seed = resume.max_index_seed.expect("max seed");
+        assert_eq!(seed.endpoint_index, 2);
+        assert_eq!(seed.aug_state.len(), 2);
+        assert_eq!(seed.tangent.len(), 2);
+        assert!(seed.step_size > 0.0);
+    }
+
+    #[test]
+    fn test_extension_uses_resume_seed_before_secant_fallback() {
+        let settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-6,
+            max_step_size: 0.2,
+            max_steps: 1,
+            corrector_steps: 2,
+            corrector_tolerance: 1e-6,
+            step_tolerance: 1e-6,
+        };
+
+        let mut problem = ZeroResidualProblem::default();
+        let branch = ContinuationBranch {
+            points: vec![
+                ContinuationPoint {
+                    state: vec![0.0],
+                    param_value: 0.0,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+                ContinuationPoint {
+                    state: vec![0.0],
+                    param_value: 1.0,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+            ],
+            bifurcations: Vec::new(),
+            indices: vec![0, 1],
+            branch_type: BranchType::default(),
+            upoldp: None,
+            resume_state: Some(ContinuationResumeState {
+                min_index_seed: None,
+                max_index_seed: Some(ContinuationEndpointSeed {
+                    endpoint_index: 1,
+                    aug_state: vec![1.0, 0.0],
+                    tangent: vec![-1.0, 0.0],
+                    step_size: 0.05,
+                }),
+            }),
+        };
+
+        let extended = extend_branch_with_problem(&mut problem, branch, settings, true)
+            .expect("extension with resume seed");
+        let new_param = extended.points.last().expect("new point").param_value;
+        assert!(
+            new_param < 1.0,
+            "resume seed should drive the first step direction, got param {}",
+            new_param
         );
     }
 
@@ -2542,6 +2856,55 @@ mod tests {
         assert!((settings.step_size - 0.003).abs() < 1e-12);
         assert!(settings.max_step_size >= settings.step_size);
         assert!(settings.min_step_size <= settings.step_size);
+    }
+
+    #[test]
+    fn test_extension_first_step_locality_guard_prevents_large_nonlocal_jump() {
+        let settings = ContinuationSettings {
+            step_size: 1.0,
+            min_step_size: 1e-6,
+            max_step_size: 1.0,
+            max_steps: 1,
+            corrector_steps: 4,
+            corrector_tolerance: 1e-8,
+            step_tolerance: 1e-8,
+        };
+
+        let mut problem = LinearRelationProblem::default();
+        let branch = ContinuationBranch {
+            points: vec![
+                ContinuationPoint {
+                    state: vec![1.0],
+                    param_value: 1.0,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+                ContinuationPoint {
+                    state: vec![1.01],
+                    param_value: 1.01,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+            ],
+            bifurcations: Vec::new(),
+            indices: vec![0, 1],
+            branch_type: BranchType::default(),
+            upoldp: None,
+            resume_state: None,
+        };
+
+        let extended = extend_branch_with_problem(&mut problem, branch, settings, true)
+            .expect("extension");
+        let endpoint = extended.points[1].param_value;
+        let next = extended.points[2].param_value;
+        let delta = (next - endpoint).abs();
+        assert!(
+            delta < 0.05,
+            "first extension step should remain local to the endpoint secant scale, got {}",
+            delta
+        );
     }
 
     #[test]

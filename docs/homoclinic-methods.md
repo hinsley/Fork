@@ -129,6 +129,27 @@ Important behavior:
 - Extension does one continuation attempt with your selected settings.
 - There is no automatic retry and no automatic method switch during extension.
 
+## Why Extension Can Jump (and How Fork Prevents It)
+
+A large first-step jump at extension startup usually means the solver did not resume from a true continuation endpoint state and tangent. In that case, the predictor can launch from a less-local direction than the branch geometry near the endpoint.
+
+Fork now prefers endpoint resume metadata (`augmented state + tangent + adaptive step size`) when extending from either side of a branch. If that metadata is unavailable, fallback seeding uses only the local endpoint-neighbor secant. For homoclinic extension, if packed endpoint data cannot be decoded reliably, extension fails fast with an actionable error instead of silently switching methods.
+
+This keeps extension behavior continuous with the existing branch and avoids hidden restart logic.
+
+## Endpoint Distance Interpretation (`eps0`, `eps1`)
+
+For homoclinic continuation, `eps0` and `eps1` are endpoint distances from the saddle equilibrium:
+
+- `eps0 = ||u(0) - x0||`
+- `eps1 = ||u(1) - x0||`
+
+Interpretation:
+
+- Smaller values mean endpoints lie closer to the local manifold neighborhood near the saddle.
+- If endpoint distances suddenly grow after extension starts, you likely launched with a nonlocal first predictor step or an under-resolved mesh.
+- Stable runs usually show gradual evolution of `eps0/eps1`, not abrupt jumps at the extension seam.
+
 ## Troubleshooting Playbook
 
 | Symptom | Likely Cause | What to Try (in order) |
@@ -139,6 +160,8 @@ Important behavior:
 | Branch is noisy or has poor geometric quality | Mesh too coarse for orbit shape | Increase `NTST` first, then `NCOL` if needed |
 | Method 5 does not reach StageD | Seed scaling/time window mismatched | 1) Increase `T` 2) Reduce `eps0`/`eps1` modestly 3) Increase max points |
 | Extension fails but branch itself is valid | Current branch settings/mesh not good for farther region | Create explicit restart (Method 2 or Method 4 path) with remeshed `NTST/NCOL` and then continue |
+| First extension point jumps far in parameter space | Local endpoint tangent/step was not appropriate | 1) Reduce initial step size 2) Ensure extension uses a branch with valid endpoint history 3) Re-seed via explicit Method 2 if needed |
+| `eps0/eps1` become much larger right after extension | First extension predictor left local manifold neighborhood | 1) Lower initial and max step sizes 2) Increase `NTST` 3) Reinitialize with explicit homoclinic restart |
 
 ## Recommended Operating Pattern
 

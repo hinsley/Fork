@@ -139,7 +139,15 @@ async function run() {
         }
       ],
       bifurcations: [],
-      indices: []
+      indices: [],
+      resume_state: {
+        max_index_seed: {
+          endpoint_index: 1,
+          aug_state: [1, 0],
+          tangent: [1, 0],
+          step_size: 0.02
+        }
+      }
     };
 
     const serialized = serialization.serializeBranchDataForWasm(data as any);
@@ -147,12 +155,17 @@ async function run() {
       [1, 2],
       [3, 4]
     ]);
+    assert.equal(serialized.resume_state.max_index_seed.step_size, 0.02);
 
     const normalized = serialization.normalizeBranchEigenvalues(serialized as any);
     assert.deepEqual(normalized.points[0].eigenvalues, [
       { re: 1, im: 2 },
       { re: 3, im: 4 }
     ]);
+    assert.equal(
+      normalized.resume_state?.max_index_seed?.endpoint_index,
+      1
+    );
   });
 
   test('serialization normalizes raw eigenvalue arrays', () => {

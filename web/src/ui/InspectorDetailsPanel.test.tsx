@@ -3556,6 +3556,14 @@ describe('InspectorDetailsPanel', () => {
         ],
         bifurcations: [0],
         indices: [0],
+        resume_state: {
+          max_index_seed: {
+            endpoint_index: 0,
+            aug_state: [0.2, ...new Array(24).fill(0)],
+            tangent: [1, ...new Array(24).fill(0)],
+            step_size: 0.005,
+          },
+        },
         branch_type: {
           type: 'HomoclinicCurve',
           ntst: 2,
@@ -3605,6 +3613,9 @@ describe('InspectorDetailsPanel', () => {
     )
 
     await user.click(screen.getByTestId('branch-extend-toggle'))
+    expect((screen.getByTestId('branch-extend-step-size') as HTMLInputElement).value).toBe(
+      '0.005'
+    )
     await user.click(screen.getByTestId('branch-extend-submit'))
 
     expect(onExtendBranch).toHaveBeenCalledWith(

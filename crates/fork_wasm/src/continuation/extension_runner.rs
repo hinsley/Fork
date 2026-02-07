@@ -6,8 +6,9 @@ use fork_core::continuation::homoclinic::HomoclinicProblem;
 use fork_core::continuation::periodic::PeriodicOrbitCollocationProblem;
 use fork_core::continuation::{
     decode_homoclinic_state, homoclinic_setup_from_homoclinic_point, pack_homoclinic_state,
-    BranchType, ContinuationBranch, ContinuationPoint, ContinuationProblem, ContinuationRunner,
-    ContinuationSettings, HomoclinicExtraFlags, HomoclinicSetup,
+    BranchType, ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint,
+    ContinuationProblem, ContinuationRunner, ContinuationSettings, HomoclinicExtraFlags,
+    HomoclinicSetup,
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::SystemKind;
@@ -20,6 +21,12 @@ struct ExtensionMergeContext {
     branch: ContinuationBranch,
     index_offset: i32,
     sign: i32,
+}
+
+#[derive(Clone, Copy)]
+struct FirstStepLocalityGuard {
+    endpoint_param: f64,
+    neighbor_param: f64,
 }
 
 enum ExtensionRunnerKind {
@@ -36,6 +43,7 @@ enum ExtensionRunnerKind {
         _system: Box<EquationSystem>,
         runner: ContinuationRunner<HomoclinicProblem<'static>>,
         merge: ExtensionMergeContext,
+        first_step_locality_guard: Option<FirstStepLocalityGuard>,
     },
 }
 
@@ -50,27 +58,19 @@ fn orient_extension_tangent(
         if tangent.dot(secant) < 0.0 {
             *tangent = -tangent.clone();
         }
+        return;
     }
 
     let tangent_norm = tangent.norm();
     let param_component_threshold = 0.01 * tangent_norm;
 
     if tangent[0].abs() < param_component_threshold {
-        let desired_param_sign = secant
-            .and_then(|v| {
-                if v[0].abs() > 1e-12 {
-                    Some(v[0].signum())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(forward_sign);
-        tangent[0] = param_component_threshold * desired_param_sign;
+        tangent[0] = param_component_threshold * forward_sign;
         let norm = tangent.norm();
         if norm > 1e-12 {
             *tangent = &*tangent / norm;
         }
-    } else if secant.is_none() && tangent[0] * forward_sign < 0.0 {
+    } else if tangent[0] * forward_sign < 0.0 {
         *tangent = -tangent.clone();
     }
 }
@@ -94,42 +94,74 @@ fn cap_extension_step_size(settings: &mut ContinuationSettings, secant_norm: Opt
     }
 }
 
-fn seed_anchor_aug_from_upoldp(
-    branch: &ContinuationBranch,
+fn validate_resume_seed(
+    seed: &ContinuationEndpointSeed,
+    endpoint_index: i32,
     expected_aug_len: usize,
-) -> Option<DVector<f64>> {
-    let candidate = branch.upoldp.as_ref()?.first()?;
-    if candidate.len() != expected_aug_len {
-        return None;
+) -> bool {
+    if seed.endpoint_index != endpoint_index {
+        return false;
     }
-    if candidate.iter().any(|v| !v.is_finite()) {
-        return None;
+    if seed.aug_state.len() != expected_aug_len || seed.tangent.len() != expected_aug_len {
+        return false;
     }
-    Some(DVector::from_vec(candidate.clone()))
+    if seed.aug_state.iter().any(|v| !v.is_finite()) {
+        return false;
+    }
+    if seed.tangent.iter().any(|v| !v.is_finite()) {
+        return false;
+    }
+    if !seed.step_size.is_finite() || seed.step_size <= 0.0 {
+        return false;
+    }
+    DVector::from_vec(seed.tangent.clone()).norm() > 1e-12
 }
 
-fn try_warm_start_homoclinic_riccati(setup: &mut HomoclinicSetup, endpoint_state: &[f64]) -> bool {
-    let dim = setup.guess.x0.len();
-    let Ok(decoded) = decode_homoclinic_state(
-        endpoint_state,
-        dim,
-        setup.ntst,
-        setup.ncol,
-        setup.extras,
-        setup.guess.time,
-        setup.guess.eps0,
-        setup.guess.eps1,
-    ) else {
-        return false;
-    };
+fn select_resume_seed(
+    branch: &ContinuationBranch,
+    forward: bool,
+    endpoint_index: i32,
+    expected_aug_len: usize,
+) -> Option<ContinuationEndpointSeed> {
+    let seed = if forward {
+        branch
+            .resume_state
+            .as_ref()
+            .and_then(|state| state.max_index_seed.clone())
+    } else {
+        branch
+            .resume_state
+            .as_ref()
+            .and_then(|state| state.min_index_seed.clone())
+    }?;
+    if validate_resume_seed(&seed, endpoint_index, expected_aug_len) {
+        Some(seed)
+    } else {
+        None
+    }
+}
 
-    if decoded.yu.len() != setup.guess.yu.len() || decoded.ys.len() != setup.guess.ys.len() {
+fn normalize_resume_step_size(step_size: f64, settings: ContinuationSettings) -> f64 {
+    let mut normalized = if step_size.is_finite() && step_size > 0.0 {
+        step_size
+    } else {
+        settings.step_size
+    };
+    normalized = normalized.max(settings.min_step_size);
+    normalized = normalized.min(settings.max_step_size);
+    normalized
+}
+
+fn violates_first_step_locality(
+    guard: FirstStepLocalityGuard,
+    first_extension_param: f64,
+) -> bool {
+    let secant_delta = (guard.endpoint_param - guard.neighbor_param).abs();
+    if !secant_delta.is_finite() || secant_delta <= 1e-12 {
         return false;
     }
-
-    setup.guess.yu = decoded.yu;
-    setup.guess.ys = decoded.ys;
-    true
+    let first_delta = (first_extension_param - guard.endpoint_param).abs();
+    first_delta > secant_delta * 10.0
 }
 
 fn hydrate_homoclinic_setup_from_endpoint(
@@ -303,6 +335,7 @@ impl WasmContinuationExtensionRunner {
                 for (i, &v) in endpoint.state.iter().enumerate() {
                     end_aug[i + 1] = v;
                 }
+                let resume_seed = select_resume_seed(&merge.branch, forward, last_index, dim + 1);
 
                 let (secant_direction, secant_norm) = if let Some(neighbor_pos) = neighbor_idx {
                     let neighbor = &merge.branch.points[neighbor_pos];
@@ -322,32 +355,44 @@ impl WasmContinuationExtensionRunner {
                     (None, None)
                 };
 
-                let mut tangent = if let Some(secant) = secant_direction.as_ref() {
-                    secant.clone()
-                } else {
-                    compute_tangent_from_problem(&mut problem, &end_aug)
-                        .map_err(|e| JsValue::from_str(&format!("{}", e)))?
-                };
-
-                orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
                 let mut settings = settings;
-                cap_extension_step_size(&mut settings, secant_norm);
+                let mut runner = if let Some(seed) = resume_seed {
+                    settings.step_size = normalize_resume_step_size(seed.step_size, settings);
+                    ContinuationRunner::new_from_seed(
+                        problem,
+                        seed.aug_state,
+                        seed.tangent,
+                        settings.step_size,
+                        settings,
+                    )
+                    .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?
+                } else {
+                    let mut tangent = if let Some(secant) = secant_direction.as_ref() {
+                        secant.clone()
+                    } else {
+                        compute_tangent_from_problem(&mut problem, &end_aug)
+                            .map_err(|e| JsValue::from_str(&format!("{}", e)))?
+                    };
 
-                let initial_point = ContinuationPoint {
-                    state: endpoint.state.clone(),
-                    param_value: endpoint.param_value,
-                    stability: endpoint.stability.clone(),
-                    eigenvalues: endpoint.eigenvalues.clone(),
-                    cycle_points: endpoint.cycle_points.clone(),
-                };
+                    orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
+                    cap_extension_step_size(&mut settings, secant_norm);
 
-                let mut runner =
+                    let initial_point = ContinuationPoint {
+                        state: endpoint.state.clone(),
+                        param_value: endpoint.param_value,
+                        stability: endpoint.stability.clone(),
+                        eigenvalues: endpoint.eigenvalues.clone(),
+                        cycle_points: endpoint.cycle_points.clone(),
+                    };
+
                     ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
                         .map_err(|e| {
                             JsValue::from_str(&format!("Continuation init failed: {}", e))
-                        })?;
+                        })?
+                };
                 runner.set_branch_type(merge.branch.branch_type.clone());
                 runner.set_upoldp(merge.branch.upoldp.clone());
+                runner.set_resume_state(merge.branch.resume_state.clone());
 
                 ExtensionRunnerKind::Equilibrium { runner, merge }
             }
@@ -385,7 +430,7 @@ impl WasmContinuationExtensionRunner {
 
                 let mut boxed_system = Box::new(system);
                 let system_ptr: *mut EquationSystem = &mut *boxed_system;
-                let mut problem = PeriodicOrbitCollocationProblem::new(
+                let problem = PeriodicOrbitCollocationProblem::new(
                     unsafe { &mut *system_ptr },
                     param_index,
                     *ntst,
@@ -409,6 +454,7 @@ impl WasmContinuationExtensionRunner {
                 for (i, &v) in endpoint.state.iter().enumerate() {
                     end_aug[i + 1] = v;
                 }
+                let resume_seed = select_resume_seed(&merge.branch, forward, last_index, dim + 1);
 
                 let (secant_direction, secant_norm) = if let Some(neighbor_pos) = neighbor_idx {
                     let neighbor = &merge.branch.points[neighbor_pos];
@@ -428,37 +474,48 @@ impl WasmContinuationExtensionRunner {
                     (None, None)
                 };
 
-                let mut tangent = if let Some(secant) = secant_direction.as_ref() {
-                    secant.clone()
-                } else {
-                    compute_tangent_from_problem(&mut problem, &end_aug)
-                        .map_err(|e| JsValue::from_str(&format!("{}", e)))?
-                };
-
-                orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
                 let mut settings = settings;
-                cap_extension_step_size(&mut settings, secant_norm);
-
-                let initial_point = ContinuationPoint {
-                    state: endpoint.state.clone(),
-                    param_value: endpoint.param_value,
-                    stability: endpoint.stability.clone(),
-                    eigenvalues: endpoint.eigenvalues.clone(),
-                    cycle_points: endpoint.cycle_points.clone(),
-                };
-
                 // SAFETY: The problem borrows the boxed system allocation, which lives
                 // for the lifetime of the runner.
-                let problem: PeriodicOrbitCollocationProblem<'static> =
+                let mut problem: PeriodicOrbitCollocationProblem<'static> =
                     unsafe { std::mem::transmute(problem) };
+                let mut runner = if let Some(seed) = resume_seed {
+                    settings.step_size = normalize_resume_step_size(seed.step_size, settings);
+                    ContinuationRunner::new_from_seed(
+                        problem,
+                        seed.aug_state,
+                        seed.tangent,
+                        settings.step_size,
+                        settings,
+                    )
+                    .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?
+                } else {
+                    let mut tangent = if let Some(secant) = secant_direction.as_ref() {
+                        secant.clone()
+                    } else {
+                        compute_tangent_from_problem(&mut problem, &end_aug)
+                            .map_err(|e| JsValue::from_str(&format!("{}", e)))?
+                    };
 
-                let mut runner =
+                    orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
+                    cap_extension_step_size(&mut settings, secant_norm);
+
+                    let initial_point = ContinuationPoint {
+                        state: endpoint.state.clone(),
+                        param_value: endpoint.param_value,
+                        stability: endpoint.stability.clone(),
+                        eigenvalues: endpoint.eigenvalues.clone(),
+                        cycle_points: endpoint.cycle_points.clone(),
+                    };
+
                     ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
                         .map_err(|e| {
                             JsValue::from_str(&format!("Continuation init failed: {}", e))
-                        })?;
+                        })?
+                };
                 runner.set_branch_type(merge.branch.branch_type.clone());
                 runner.set_upoldp(merge.branch.upoldp.clone());
+                runner.set_resume_state(merge.branch.resume_state.clone());
 
                 ExtensionRunnerKind::LimitCycle {
                     _system: boxed_system,
@@ -509,20 +566,18 @@ impl WasmContinuationExtensionRunner {
                     JsValue::from_str(&format!("Failed to initialize homoclinic extension: {}", e))
                 })?;
                 let system_dim = system.equations.len();
-                // Keep the extension seed aligned with the selected endpoint.
-                // This avoids introducing a phase-reference mismatch before the first step.
-                let hydrated =
-                    hydrate_homoclinic_setup_from_endpoint(&mut setup, &endpoint.state, system_dim);
-                if !hydrated {
-                    // Fallback: preserve Riccati state from the endpoint when full decode fails.
-                    let _ = try_warm_start_homoclinic_riccati(&mut setup, &endpoint.state);
+                if !hydrate_homoclinic_setup_from_endpoint(&mut setup, &endpoint.state, system_dim)
+                {
+                    return Err(JsValue::from_str(
+                        "Failed to decode the homoclinic endpoint state for extension. Use explicit Homoclinic from Homoclinic with a valid packed point.",
+                    ));
                 }
                 let packed_initial_state = pack_homoclinic_state(&setup);
                 let secant_template = setup.clone();
 
                 let mut boxed_system = Box::new(system);
                 let system_ptr: *mut EquationSystem = &mut *boxed_system;
-                let mut problem = HomoclinicProblem::new(unsafe { &mut *system_ptr }, setup)
+                let problem = HomoclinicProblem::new(unsafe { &mut *system_ptr }, setup)
                     .map_err(|e| {
                         JsValue::from_str(&format!(
                             "Failed to create homoclinic extension problem: {}",
@@ -544,80 +599,91 @@ impl WasmContinuationExtensionRunner {
                 for (i, &v) in packed_initial_state.iter().enumerate() {
                     end_aug[i + 1] = v;
                 }
+                let resume_seed = select_resume_seed(&merge.branch, forward, last_index, dim + 1);
+                let mut first_step_locality_guard = None;
 
-                let seed_anchor_aug = if neighbor_idx.is_none() {
-                    seed_anchor_aug_from_upoldp(&merge.branch, dim + 1)
+                let mut settings = settings;
+                let mut problem: HomoclinicProblem<'static> =
+                    unsafe { std::mem::transmute(problem) };
+                let mut runner = if let Some(seed) = resume_seed {
+                    settings.step_size = normalize_resume_step_size(seed.step_size, settings);
+                    ContinuationRunner::new_from_seed(
+                        problem,
+                        seed.aug_state,
+                        seed.tangent,
+                        settings.step_size,
+                        settings,
+                    )
+                    .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?
                 } else {
-                    None
-                };
-                let (secant_direction, secant_norm) = if let Some(neighbor_pos) = neighbor_idx {
+                    let neighbor_pos = neighbor_idx.ok_or_else(|| {
+                        JsValue::from_str(
+                            "Homoclinic extension needs at least two branch points when resume metadata is unavailable.",
+                        )
+                    })?;
                     let neighbor = &merge.branch.points[neighbor_pos];
                     let neighbor_state = canonicalize_homoclinic_point_state(
                         &secant_template,
                         &neighbor.state,
                         system_dim,
                     )
-                    .unwrap_or_else(|| neighbor.state.clone());
-                    if neighbor_state.len() != dim {
-                        (None, None)
-                    } else {
-                        let mut neighbor_aug = DVector::zeros(dim + 1);
-                        neighbor_aug[0] = neighbor.param_value;
-                        for (i, &v) in neighbor_state.iter().enumerate() {
-                            neighbor_aug[i + 1] = v;
-                        }
-                        let secant = &end_aug - &neighbor_aug;
-                        let norm = secant.norm();
-                        if norm > 1e-12 {
-                            (Some(secant.normalize()), Some(norm))
-                        } else {
-                            (None, None)
-                        }
+                    .ok_or_else(|| {
+                        JsValue::from_str(
+                            "Failed to decode neighboring homoclinic point for local extension seed.",
+                        )
+                    })?;
+
+                    let mut neighbor_aug = DVector::zeros(dim + 1);
+                    neighbor_aug[0] = neighbor.param_value;
+                    for (i, &v) in neighbor_state.iter().enumerate() {
+                        neighbor_aug[i + 1] = v;
                     }
-                } else if let Some(anchor_aug) = seed_anchor_aug {
-                    let secant = &end_aug - &anchor_aug;
-                    let norm = secant.norm();
-                    if norm > 1e-12 {
-                        (Some(secant.normalize()), Some(norm))
+
+                    let secant = &end_aug - &neighbor_aug;
+                    let secant_norm = secant.norm();
+                    let secant_direction = if secant_norm > 1e-12 {
+                        Some(secant.normalize())
                     } else {
-                        (None, None)
-                    }
-                } else {
-                    (None, None)
-                };
+                        None
+                    };
 
-                let mut tangent = if let Some(secant) = secant_direction.as_ref() {
-                    secant.clone()
-                } else {
-                    compute_tangent_from_problem(&mut problem, &end_aug)
-                        .map_err(|e| JsValue::from_str(&format!("{}", e)))?
-                };
+                    let mut tangent = if let Some(secant) = secant_direction.as_ref() {
+                        secant.clone()
+                    } else {
+                        compute_tangent_from_problem(&mut problem, &end_aug)
+                            .map_err(|e| JsValue::from_str(&format!("{}", e)))?
+                    };
 
-                orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
-                let mut settings = settings;
-                cap_extension_step_size(&mut settings, secant_norm);
+                    orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
+                    cap_extension_step_size(&mut settings, if secant_norm > 1e-12 { Some(secant_norm) } else { None });
 
-                let initial_point = ContinuationPoint {
-                    state: packed_initial_state,
-                    param_value: endpoint.param_value,
-                    stability: endpoint.stability.clone(),
-                    eigenvalues: endpoint.eigenvalues.clone(),
-                    cycle_points: endpoint.cycle_points.clone(),
-                };
+                    first_step_locality_guard = Some(FirstStepLocalityGuard {
+                        endpoint_param: endpoint.param_value,
+                        neighbor_param: neighbor.param_value,
+                    });
 
-                let problem: HomoclinicProblem<'static> = unsafe { std::mem::transmute(problem) };
-                let mut runner =
+                    let initial_point = ContinuationPoint {
+                        state: packed_initial_state,
+                        param_value: endpoint.param_value,
+                        stability: endpoint.stability.clone(),
+                        eigenvalues: endpoint.eigenvalues.clone(),
+                        cycle_points: endpoint.cycle_points.clone(),
+                    };
+
                     ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
                         .map_err(|e| {
                             JsValue::from_str(&format!("Continuation init failed: {}", e))
-                        })?;
+                        })?
+                };
                 runner.set_branch_type(merge.branch.branch_type.clone());
                 runner.set_upoldp(merge.branch.upoldp.clone());
+                runner.set_resume_state(merge.branch.resume_state.clone());
 
                 ExtensionRunnerKind::Homoclinic {
                     _system: boxed_system,
                     runner,
                     merge,
+                    first_step_locality_guard,
                 }
             }
             BranchType::HomotopySaddleCurve { .. } => {
@@ -675,11 +741,28 @@ impl WasmContinuationExtensionRunner {
             .take()
             .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
 
-        let (extension, merge) = match runner_kind {
-            ExtensionRunnerKind::Equilibrium { runner, merge } => (runner.take_result(), merge),
-            ExtensionRunnerKind::LimitCycle { runner, merge, .. } => (runner.take_result(), merge),
-            ExtensionRunnerKind::Homoclinic { runner, merge, .. } => (runner.take_result(), merge),
+        let (extension, merge, first_step_locality_guard) = match runner_kind {
+            ExtensionRunnerKind::Equilibrium { runner, merge } => (runner.take_result(), merge, None),
+            ExtensionRunnerKind::LimitCycle { runner, merge, .. } => {
+                (runner.take_result(), merge, None)
+            }
+            ExtensionRunnerKind::Homoclinic {
+                runner,
+                merge,
+                first_step_locality_guard,
+                ..
+            } => (runner.take_result(), merge, first_step_locality_guard),
         };
+
+        if let Some(guard) = first_step_locality_guard {
+            if let Some(first_extension_point) = extension.points.get(1) {
+                if violates_first_step_locality(guard, first_extension_point.param_value) {
+                    return Err(JsValue::from_str(
+                        "Homoclinic extension produced a nonlocal first step. Reduce the step size or use explicit Homoclinic from Homoclinic.",
+                    ));
+                }
+            }
+        }
 
         let mut branch = merge.branch;
         let orig_count = branch.points.len();
@@ -697,6 +780,37 @@ impl WasmContinuationExtensionRunner {
             if ext_bif_idx > 0 {
                 branch.bifurcations.push(orig_count + ext_bif_idx - 1);
             }
+        }
+
+        if let Some(extension_resume) = extension.resume_state {
+            let mut merged_resume = branch.resume_state.take().unwrap_or_default();
+            if let Some(seed) = extension_resume.max_index_seed {
+                let mapped_seed = ContinuationEndpointSeed {
+                    endpoint_index: index_offset + seed.endpoint_index * sign,
+                    aug_state: seed.aug_state,
+                    tangent: seed.tangent,
+                    step_size: seed.step_size,
+                };
+                if sign > 0 {
+                    merged_resume.max_index_seed = Some(mapped_seed);
+                } else {
+                    merged_resume.min_index_seed = Some(mapped_seed);
+                }
+            }
+            if let Some(seed) = extension_resume.min_index_seed {
+                let mapped_seed = ContinuationEndpointSeed {
+                    endpoint_index: index_offset + seed.endpoint_index * sign,
+                    aug_state: seed.aug_state,
+                    tangent: seed.tangent,
+                    step_size: seed.step_size,
+                };
+                if sign > 0 {
+                    merged_resume.max_index_seed = Some(mapped_seed);
+                } else {
+                    merged_resume.min_index_seed = Some(mapped_seed);
+                }
+            }
+            branch.resume_state = Some(merged_resume);
         }
 
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
@@ -1051,7 +1165,6 @@ mod orientation_tests {
     use super::{
         canonicalize_homoclinic_point_state, cap_extension_step_size,
         hydrate_homoclinic_setup_from_endpoint, orient_extension_tangent,
-        seed_anchor_aug_from_upoldp, try_warm_start_homoclinic_riccati,
     };
     use fork_core::continuation::{
         pack_homoclinic_state, BifurcationType, BranchType, ContinuationBranch, ContinuationPoint,
@@ -1087,67 +1200,21 @@ mod orientation_tests {
     }
 
     #[test]
-    fn orient_extension_tangent_with_secant_biases_tiny_parameter_component() {
+    fn orient_extension_tangent_with_secant_keeps_tiny_parameter_component() {
         let mut tangent = DVector::from_vec(vec![1e-12, 1.0, 0.0]);
         let secant = DVector::from_vec(vec![-0.1, -2.0, 0.0]);
 
         orient_extension_tangent(&mut tangent, Some(&secant), true);
 
         assert!(
-            tangent[0] < -1e-3,
-            "secant-oriented tangent should get a non-trivial parameter component, got {}",
+            tangent[0].abs() < 1e-9,
+            "secant-oriented tangent should preserve the parameter component, got {}",
             tangent[0]
         );
         assert!(
             tangent.dot(&secant) > 0.0,
             "tangent must stay aligned with secant"
         );
-    }
-
-    #[test]
-    fn warm_start_homoclinic_riccati_recovers_endpoint_values() {
-        let mut setup = HomoclinicSetup {
-            guess: HomoclinicGuess {
-                mesh_states: vec![vec![0.0, 0.0], vec![0.5, 0.0], vec![1.0, 0.0]],
-                stage_states: vec![vec![vec![0.25, 0.0]], vec![vec![0.75, 0.0]]],
-                x0: vec![0.0, 0.0],
-                param1_value: 0.2,
-                param2_value: 0.1,
-                time: 2.0,
-                eps0: 0.1,
-                eps1: 0.2,
-                yu: vec![0.3],
-                ys: vec![0.4],
-            },
-            ntst: 2,
-            ncol: 1,
-            param1_index: 0,
-            param2_index: 1,
-            param1_name: "mu".to_string(),
-            param2_name: "nu".to_string(),
-            base_params: vec![0.2, 0.1],
-            extras: HomoclinicExtraFlags {
-                free_time: true,
-                free_eps0: true,
-                free_eps1: false,
-            },
-            basis: HomoclinicBasis {
-                stable_q: vec![1.0, 0.0, 0.0, 1.0],
-                unstable_q: vec![1.0, 0.0, 0.0, 1.0],
-                dim: 2,
-                nneg: 1,
-                npos: 1,
-            },
-        };
-
-        let endpoint_state = pack_homoclinic_state(&setup);
-        setup.guess.yu = vec![0.0];
-        setup.guess.ys = vec![0.0];
-
-        let warmed = try_warm_start_homoclinic_riccati(&mut setup, &endpoint_state);
-        assert!(warmed, "expected warm-start to decode endpoint state");
-        assert_eq!(setup.guess.yu, vec![0.3]);
-        assert_eq!(setup.guess.ys, vec![0.4]);
     }
 
     #[test]
@@ -1287,30 +1354,42 @@ mod orientation_tests {
     }
 
     #[test]
-    fn seed_anchor_aug_from_upoldp_reads_single_augmented_seed() {
+    fn select_resume_seed_prefers_requested_side_and_validates_dimensions() {
         let branch = ContinuationBranch {
             points: vec![ContinuationPoint {
-                state: vec![1.0, 2.0],
-                param_value: 0.5,
+                state: vec![0.0],
+                param_value: 0.0,
                 stability: BifurcationType::None,
                 eigenvalues: Vec::new(),
                 cycle_points: None,
             }],
             bifurcations: Vec::new(),
-            indices: vec![0],
-            branch_type: BranchType::HomoclinicCurve {
-                ntst: 2,
-                ncol: 1,
-                param1_name: "mu".to_string(),
-                param2_name: "nu".to_string(),
-                free_time: true,
-                free_eps0: true,
-                free_eps1: false,
-            },
-            upoldp: Some(vec![vec![0.4, 1.0, 2.0]]),
+            indices: vec![3],
+            branch_type: BranchType::Equilibrium,
+            upoldp: None,
+            resume_state: Some(fork_core::continuation::ContinuationResumeState {
+                min_index_seed: None,
+                max_index_seed: Some(fork_core::continuation::ContinuationEndpointSeed {
+                    endpoint_index: 3,
+                    aug_state: vec![0.2, 0.0],
+                    tangent: vec![1.0, 0.0],
+                    step_size: 0.02,
+                }),
+            }),
         };
 
-        let anchor = seed_anchor_aug_from_upoldp(&branch, 3).expect("seed anchor");
-        assert_eq!(anchor.as_slice(), &[0.4, 1.0, 2.0]);
+        let seed = super::select_resume_seed(&branch, true, 3, 2).expect("seed");
+        assert_eq!(seed.step_size, 0.02);
+        assert!(super::select_resume_seed(&branch, true, 4, 2).is_none());
+    }
+
+    #[test]
+    fn first_step_locality_detects_nonlocal_jump() {
+        let guard = super::FirstStepLocalityGuard {
+            endpoint_param: 1.0,
+            neighbor_param: 0.99,
+        };
+        assert!(super::violates_first_step_locality(guard, 1.2));
+        assert!(!super::violates_first_step_locality(guard, 1.01));
     }
 }

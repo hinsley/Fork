@@ -290,6 +290,29 @@ describe('continuation helpers', () => {
     expect(serialized.points[1].eigenvalues).toEqual([[3, 4]])
   })
 
+  it('preserves resume_state metadata when serializing branch data', () => {
+    const branch: ContinuationObject = {
+      ...baseBranch,
+      data: {
+        ...baseBranch.data,
+        points: [basePoint, { ...basePoint, param_value: 1 }],
+        indices: [0, 1],
+        resume_state: {
+          max_index_seed: {
+            endpoint_index: 1,
+            aug_state: [1, 0],
+            tangent: [1, 0],
+            step_size: 0.02,
+          },
+        },
+      },
+    }
+
+    const serialized = serializeBranchDataForWasm(branch)
+    expect(serialized.resume_state?.max_index_seed?.step_size).toBe(0.02)
+    expect(serialized.resume_state?.max_index_seed?.endpoint_index).toBe(1)
+  })
+
   it('preserves explicit indices when they match the point count', () => {
     const branch: ContinuationObject = {
       ...baseBranch,

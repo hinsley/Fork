@@ -33,6 +33,7 @@ pub fn continue_homotopy_saddle_curve(
             stage: setup.stage,
         },
         upoldp: None,
+        resume_state: None,
     };
 
     let sign = if forward { 1.0 } else { -1.0 };

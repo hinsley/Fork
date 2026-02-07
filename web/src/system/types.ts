@@ -99,6 +99,18 @@ export interface ContinuationPoint {
   auxiliary?: number
 }
 
+export interface ContinuationEndpointSeed {
+  endpoint_index: number
+  aug_state: number[]
+  tangent: number[]
+  step_size: number
+}
+
+export interface ContinuationResumeState {
+  min_index_seed?: ContinuationEndpointSeed
+  max_index_seed?: ContinuationEndpointSeed
+}
+
 export type BranchType =
   | { type: 'Equilibrium' }
   | { type: 'LimitCycle'; ntst: number; ncol: number }
@@ -132,6 +144,7 @@ export interface ContinuationBranchData {
   indices: number[]
   branch_type?: BranchType
   upoldp?: number[][]
+  resume_state?: ContinuationResumeState
 }
 
 export interface ContinuationObject {
