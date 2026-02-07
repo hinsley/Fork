@@ -1264,6 +1264,104 @@ describe('appState homoclinic and homotopy actions', () => {
     expect(updated.data.points[1].param2_value).toBeCloseTo(p2, 12)
   })
 
+  it('extends homoclinic branches backward via generic extension', async () => {
+    const base = makeTwoParamSystem('Homoc_Extend_Backward_Success')
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_A',
+      systemName: base.config.name,
+    }
+    const added = addObject(base, equilibrium)
+    const p2 = 0.3
+    const packedState = [
+      0, 0, 1, 1, 2, 2, // mesh
+      0.5, 0.5, 1.5, 1.5, // stages
+      0, 0, // x0
+      p2, // p2
+      8, 0.01, 0, 0, // extras + Riccati tail
+    ]
+
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'homoc_source_backward',
+      systemName: base.config.name,
+      parameterName: 'mu, nu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'homoclinic_curve',
+      data: {
+        points: [
+          {
+            state: packedState,
+            param_value: 0.19,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: packedState,
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 2,
+          ncol: 1,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          free_time: true,
+          free_eps0: true,
+          free_eps1: false,
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2, p2],
+    }
+    const branchResult = addBranch(added.system, sourceBranch, added.nodeId)
+
+    const client = new MockForkCoreClient(0)
+    let receivedBackward = false
+    client.runContinuationExtension = async (request) => {
+      receivedBackward = request.forward === false
+      return normalizeBranchEigenvalues(
+        {
+          ...request.branchData,
+          points: [
+            {
+              state: packedState,
+              param_value: 0.18,
+              stability: 'None',
+              eigenvalues: [],
+            },
+            ...request.branchData.points,
+          ],
+          indices: [-1, 0, 1],
+        },
+        { stateDimension: request.system.varNames.length }
+      )
+    }
+
+    const { getContext } = setupApp(branchResult.system, client)
+
+    await act(async () => {
+      await getContext().actions.extendBranch({
+        branchId: branchResult.nodeId,
+        settings: continuationSettings,
+        forward: false,
+      })
+    })
+
+    expect(receivedBackward).toBe(true)
+    const updated = getContext().state.system!.branches[branchResult.nodeId]
+    expect(updated.data.points.length).toBe(3)
+    expect(updated.data.indices).toEqual([-1, 0, 1])
+    expect(updated.data.points[0].param2_value).toBeCloseTo(p2, 12)
+  })
+
   it('does not auto-restart homoc extension when the extension runner cannot advance', async () => {
     const base = makeTwoParamSystem('Homoc_Extend_Backward')
     const equilibrium: EquilibriumObject = {
@@ -1354,7 +1452,7 @@ describe('appState homoclinic and homotopy actions', () => {
       })
     })
 
-    expect(getContext().state.error).toContain('Automatic restart is disabled for extension')
+    expect(getContext().state.error).toContain('Homoclinic extension stopped at the endpoint')
     expect(attemptedStepSizes).toEqual([continuationSettings.step_size])
     expect(restartCalled).toBe(false)
     const updated = getContext().state.system!.branches[branchResult.nodeId]

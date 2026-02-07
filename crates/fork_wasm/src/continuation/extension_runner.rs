@@ -5,7 +5,8 @@ use crate::system::build_system;
 use fork_core::continuation::homoclinic::HomoclinicProblem;
 use fork_core::continuation::periodic::PeriodicOrbitCollocationProblem;
 use fork_core::continuation::{
-    decode_homoclinic_state, homoclinic_setup_from_homoclinic_point, BranchType,
+    decode_homoclinic_state, homoclinic_setup_from_homoclinic_point, pack_homoclinic_state,
+    BranchType,
     ContinuationBranch, ContinuationPoint, ContinuationProblem, ContinuationRunner,
     ContinuationSettings, HomoclinicExtraFlags, HomoclinicSetup,
 };
@@ -86,6 +87,42 @@ fn try_warm_start_homoclinic_riccati(setup: &mut HomoclinicSetup, endpoint_state
 
     setup.guess.yu = decoded.yu;
     setup.guess.ys = decoded.ys;
+    true
+}
+
+fn hydrate_homoclinic_setup_from_endpoint(
+    setup: &mut HomoclinicSetup,
+    endpoint_state: &[f64],
+    dim: usize,
+) -> bool {
+    let Ok(decoded) = decode_homoclinic_state(
+        endpoint_state,
+        dim,
+        setup.ntst,
+        setup.ncol,
+        setup.extras,
+        setup.guess.time,
+        setup.guess.eps0,
+        setup.guess.eps1,
+    ) else {
+        return false;
+    };
+
+    if decoded.nneg != setup.basis.nneg || decoded.npos != setup.basis.npos {
+        return false;
+    }
+
+    setup.guess.mesh_states = decoded.mesh_states;
+    setup.guess.stage_states = decoded.stage_states;
+    setup.guess.x0 = decoded.x0;
+    setup.guess.param2_value = decoded.param2_value;
+    setup.guess.time = decoded.time;
+    setup.guess.eps0 = decoded.eps0;
+    setup.guess.eps1 = decoded.eps1;
+    if decoded.yu.len() == setup.guess.yu.len() && decoded.ys.len() == setup.guess.ys.len() {
+        setup.guess.yu = decoded.yu;
+        setup.guess.ys = decoded.ys;
+    }
     true
 }
 
@@ -411,9 +448,18 @@ impl WasmContinuationExtensionRunner {
                 .map_err(|e| {
                     JsValue::from_str(&format!("Failed to initialize homoclinic extension: {}", e))
                 })?;
-                // Preserve Riccati state from the endpoint whenever possible.
-                // Resetting these to zero can stall extension for short branches.
-                let _ = try_warm_start_homoclinic_riccati(&mut setup, &endpoint.state);
+                // Keep the extension seed aligned with the selected endpoint.
+                // This avoids introducing a phase-reference mismatch before the first step.
+                let hydrated = hydrate_homoclinic_setup_from_endpoint(
+                    &mut setup,
+                    &endpoint.state,
+                    system.equations.len(),
+                );
+                if !hydrated {
+                    // Fallback: preserve Riccati state from the endpoint when full decode fails.
+                    let _ = try_warm_start_homoclinic_riccati(&mut setup, &endpoint.state);
+                }
+                let packed_initial_state = pack_homoclinic_state(&setup);
 
                 let mut boxed_system = Box::new(system);
                 let system_ptr: *mut EquationSystem = &mut *boxed_system;
@@ -426,17 +472,17 @@ impl WasmContinuationExtensionRunner {
                     })?;
 
                 let dim = problem.dimension();
-                if endpoint.state.len() != dim {
+                if packed_initial_state.len() != dim {
                     return Err(JsValue::from_str(&format!(
                         "Dimension mismatch: branch point state has length {}, problem expects {}",
-                        endpoint.state.len(),
+                        packed_initial_state.len(),
                         dim
                     )));
                 }
 
                 let mut end_aug = DVector::zeros(dim + 1);
                 end_aug[0] = endpoint.param_value;
-                for (i, &v) in endpoint.state.iter().enumerate() {
+                for (i, &v) in packed_initial_state.iter().enumerate() {
                     end_aug[i + 1] = v;
                 }
 
@@ -467,7 +513,7 @@ impl WasmContinuationExtensionRunner {
                 orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
 
                 let initial_point = ContinuationPoint {
-                    state: endpoint.state.clone(),
+                    state: packed_initial_state,
                     param_value: endpoint.param_value,
                     stability: endpoint.stability.clone(),
                     eigenvalues: endpoint.eigenvalues.clone(),
@@ -919,7 +965,10 @@ mod tests {
 
 #[cfg(test)]
 mod orientation_tests {
-    use super::{orient_extension_tangent, try_warm_start_homoclinic_riccati};
+    use super::{
+        hydrate_homoclinic_setup_from_endpoint, orient_extension_tangent,
+        try_warm_start_homoclinic_riccati,
+    };
     use fork_core::continuation::{
         pack_homoclinic_state, HomoclinicBasis, HomoclinicExtraFlags, HomoclinicGuess,
         HomoclinicSetup,
@@ -996,5 +1045,80 @@ mod orientation_tests {
         assert!(warmed, "expected warm-start to decode endpoint state");
         assert_eq!(setup.guess.yu, vec![0.3]);
         assert_eq!(setup.guess.ys, vec![0.4]);
+    }
+
+    #[test]
+    fn hydrate_setup_from_endpoint_recovers_endpoint_mesh_and_riccati() {
+        let mut setup = HomoclinicSetup {
+            guess: HomoclinicGuess {
+                mesh_states: vec![vec![9.0, 9.0], vec![9.0, 9.0], vec![9.0, 9.0]],
+                stage_states: vec![vec![vec![9.0, 9.0]], vec![vec![9.0, 9.0]]],
+                x0: vec![9.0, 9.0],
+                param1_value: 0.2,
+                param2_value: 0.9,
+                time: 9.0,
+                eps0: 9.0,
+                eps1: 9.0,
+                yu: vec![0.0],
+                ys: vec![0.0],
+            },
+            ntst: 2,
+            ncol: 1,
+            param1_index: 0,
+            param2_index: 1,
+            param1_name: "mu".to_string(),
+            param2_name: "nu".to_string(),
+            base_params: vec![0.2, 0.1],
+            extras: HomoclinicExtraFlags {
+                free_time: true,
+                free_eps0: true,
+                free_eps1: false,
+            },
+            basis: HomoclinicBasis {
+                stable_q: vec![1.0, 0.0, 0.0, 1.0],
+                unstable_q: vec![1.0, 0.0, 0.0, 1.0],
+                dim: 2,
+                nneg: 1,
+                npos: 1,
+            },
+        };
+
+        let endpoint_setup = HomoclinicSetup {
+            guess: HomoclinicGuess {
+                mesh_states: vec![vec![0.0, 0.0], vec![0.5, 0.0], vec![1.0, 0.0]],
+                stage_states: vec![vec![vec![0.25, 0.0]], vec![vec![0.75, 0.0]]],
+                x0: vec![0.0, 0.0],
+                param1_value: 0.2,
+                param2_value: 0.1,
+                time: 2.0,
+                eps0: 0.1,
+                eps1: 0.2,
+                yu: vec![0.3],
+                ys: vec![0.4],
+            },
+            ntst: setup.ntst,
+            ncol: setup.ncol,
+            param1_index: setup.param1_index,
+            param2_index: setup.param2_index,
+            param1_name: setup.param1_name.clone(),
+            param2_name: setup.param2_name.clone(),
+            base_params: setup.base_params.clone(),
+            extras: setup.extras,
+            basis: setup.basis.clone(),
+        };
+        let endpoint_state = pack_homoclinic_state(&endpoint_setup);
+
+        let hydrated = hydrate_homoclinic_setup_from_endpoint(&mut setup, &endpoint_state, 2);
+        assert!(hydrated, "expected endpoint decode to hydrate setup");
+        assert_eq!(setup.guess.mesh_states, endpoint_setup.guess.mesh_states);
+        assert_eq!(setup.guess.stage_states, endpoint_setup.guess.stage_states);
+        assert_eq!(setup.guess.x0, endpoint_setup.guess.x0);
+        assert_eq!(setup.guess.param2_value, endpoint_setup.guess.param2_value);
+        assert_eq!(setup.guess.time, endpoint_setup.guess.time);
+        assert_eq!(setup.guess.eps0, endpoint_setup.guess.eps0);
+        // free_eps1 is disabled in this setup, so eps1 remains at the configured fixed value.
+        assert_eq!(setup.guess.eps1, 9.0);
+        assert_eq!(setup.guess.yu, endpoint_setup.guess.yu);
+        assert_eq!(setup.guess.ys, endpoint_setup.guess.ys);
     }
 }

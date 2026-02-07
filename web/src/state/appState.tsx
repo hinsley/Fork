@@ -2117,7 +2117,7 @@ export function AppProvider({
 
           if (updatedData.points.length <= sourceBranch.data.points.length) {
             throw new Error(
-              'Homoclinic extension stopped at the endpoint. Automatic restart is disabled for extension; adjust step/mesh settings or use explicit Homoclinic from Homoclinic.'
+              'Homoclinic extension stopped at the endpoint. Adjust step/mesh settings or use explicit Homoclinic from Homoclinic.'
             )
           }
         } else {
