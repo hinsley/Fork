@@ -3245,6 +3245,113 @@ describe('InspectorDetailsPanel', () => {
     })
   })
 
+  it('tracks newest homoclinic endpoints for initial selection and backward extension', async () => {
+    const user = userEvent.setup()
+    const { system, branchNodeId } = createDemoSystem()
+    const seededBranch: ContinuationObject = {
+      ...system.branches[branchNodeId],
+      branchType: 'homoclinic_curve',
+      data: {
+        points: [
+          {
+            state: new Array(24).fill(0),
+            param_value: 0.11,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: new Array(24).fill(0),
+            param_value: 0.12,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [1, 2],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 2,
+          ncol: 1,
+          param1_name: 'p1',
+          param2_name: 'p2',
+          free_time: true,
+          free_eps0: true,
+          free_eps1: false,
+        },
+      },
+      settings: continuationSettings,
+      params: [0.11, 0.2],
+    }
+
+    function Wrapper() {
+      const [state, setState] = useState(updateBranch(system, branchNodeId, seededBranch))
+      return (
+        <InspectorDetailsPanel
+          system={state}
+          selectedNodeId={branchNodeId}
+          view="selection"
+          theme="light"
+          onRename={vi.fn()}
+          onToggleVisibility={vi.fn()}
+          onUpdateRender={vi.fn()}
+          onUpdateScene={vi.fn()}
+          onUpdateBifurcationDiagram={vi.fn()}
+          onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+          onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+          onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+          onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+          onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+          onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+          onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+          onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onExtendBranch={async () => {
+            setState((prev) => {
+              const source = prev.branches[branchNodeId]
+              const nextPoints = [
+                ...source.data.points,
+                {
+                  state: new Array(24).fill(0),
+                  param_value: 0.109,
+                  stability: 'None',
+                  eigenvalues: [],
+                },
+              ]
+              const nextIndices = [...(source.data.indices ?? []), 0]
+              return updateBranch(prev, branchNodeId, {
+                ...source,
+                data: {
+                  ...source.data,
+                  points: nextPoints,
+                  indices: nextIndices,
+                },
+              })
+            })
+          }}
+          onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+          onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        />
+      )
+    }
+
+    render(<Wrapper />)
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    expect((screen.getByTestId('branch-point-input') as HTMLInputElement).value).toBe('2')
+
+    await user.click(screen.getByTestId('branch-extend-toggle'))
+    await user.selectOptions(screen.getByTestId('branch-extend-direction'), 'backward')
+    await user.click(screen.getByTestId('branch-extend-submit'))
+
+    await waitFor(() => {
+      expect((screen.getByTestId('branch-point-input') as HTMLInputElement).value).toBe('0')
+    })
+  })
+
   it('selects the most negative endpoint for backward-only equilibrium branches', async () => {
     const user = userEvent.setup()
     const { system, branchNodeId } = createDemoSystem()

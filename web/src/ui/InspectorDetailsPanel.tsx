@@ -1613,6 +1613,8 @@ export function InspectorDetailsPanel({
   const stableSystemConfigRef = useRef(system.config)
   const prevBranchIdRef = useRef<string | null>(null)
   const prevBranchPointCountRef = useRef(0)
+  const prevBranchMinLogicalIndexRef = useRef<number | null>(null)
+  const prevBranchMaxLogicalIndexRef = useRef<number | null>(null)
   const internalBranchPointSelectionRef = useRef(false)
   const [branchPointIndex, setBranchPointIndex] = useState<number | null>(null)
   const [branchNavigatorOpen, setBranchNavigatorOpen] = useState(false)
@@ -2442,6 +2444,8 @@ export function InspectorDetailsPanel({
     if (!hasBranch) {
       prevBranchIdRef.current = branchId
       prevBranchPointCountRef.current = 0
+      prevBranchMinLogicalIndexRef.current = null
+      prevBranchMaxLogicalIndexRef.current = null
       setBranchPointIndex(null)
       setBranchPointInput('')
       syncBranchPointSelection(null)
@@ -2450,16 +2454,55 @@ export function InspectorDetailsPanel({
     if (branchSortedOrder.length === 0) {
       prevBranchIdRef.current = branchId
       prevBranchPointCountRef.current = 0
+      prevBranchMinLogicalIndexRef.current = null
+      prevBranchMaxLogicalIndexRef.current = null
       setBranchPointIndex(null)
       setBranchPointInput('')
       syncBranchPointSelection(null)
       return
     }
+    const minLogicalArrayIndex = branchSortedOrder[0]
+    const maxLogicalArrayIndex = branchSortedOrder[branchSortedOrder.length - 1]
+    const minLogicalIndex = branchIndices[minLogicalArrayIndex]
+    const maxLogicalIndex = branchIndices[maxLogicalArrayIndex]
+    const hasNegativeLogicalSide =
+      typeof minLogicalIndex === 'number' && Number.isFinite(minLogicalIndex) && minLogicalIndex < 0
+    const hasPositiveLogicalSide =
+      typeof maxLogicalIndex === 'number' && Number.isFinite(maxLogicalIndex) && maxLogicalIndex > 0
+    const useEndpointDefaultForSelection = branch?.branchType !== 'limit_cycle'
+    const endpointDefaultArrayIndex =
+      useEndpointDefaultForSelection
+        ? hasNegativeLogicalSide && !hasPositiveLogicalSide
+          ? minLogicalArrayIndex
+          : hasPositiveLogicalSide && !hasNegativeLogicalSide
+            ? maxLogicalArrayIndex
+            : maxLogicalArrayIndex
+        : branchSortedOrder[0]
+
     const pointCount = branchIndices.length
     const branchChanged = prevBranchIdRef.current !== branchId
     const pointsExtended = !branchChanged && pointCount > prevBranchPointCountRef.current
     if (pointsExtended) {
-      const newestIndex = pointCount - 1
+      const previousMinLogical = prevBranchMinLogicalIndexRef.current
+      const previousMaxLogical = prevBranchMaxLogicalIndexRef.current
+      let newestIndex = endpointDefaultArrayIndex
+      if (
+        typeof previousMinLogical === 'number' &&
+        Number.isFinite(previousMinLogical) &&
+        typeof minLogicalIndex === 'number' &&
+        Number.isFinite(minLogicalIndex) &&
+        minLogicalIndex < previousMinLogical
+      ) {
+        newestIndex = minLogicalArrayIndex
+      } else if (
+        typeof previousMaxLogical === 'number' &&
+        Number.isFinite(previousMaxLogical) &&
+        typeof maxLogicalIndex === 'number' &&
+        Number.isFinite(maxLogicalIndex) &&
+        maxLogicalIndex > previousMaxLogical
+      ) {
+        newestIndex = maxLogicalArrayIndex
+      }
       setBranchPointIndex(newestIndex)
       const logicalIndex = branchIndices[newestIndex]
       setBranchPointInput(
@@ -2469,6 +2512,14 @@ export function InspectorDetailsPanel({
       syncBranchPointSelection(newestIndex)
       prevBranchIdRef.current = branchId
       prevBranchPointCountRef.current = pointCount
+      prevBranchMinLogicalIndexRef.current =
+        typeof minLogicalIndex === 'number' && Number.isFinite(minLogicalIndex)
+          ? minLogicalIndex
+          : null
+      prevBranchMaxLogicalIndexRef.current =
+        typeof maxLogicalIndex === 'number' && Number.isFinite(maxLogicalIndex)
+          ? maxLogicalIndex
+          : null
       return
     }
     const hasValidIndex =
@@ -2478,6 +2529,14 @@ export function InspectorDetailsPanel({
     if (!branchChanged && hasValidIndex) {
       prevBranchIdRef.current = branchId
       prevBranchPointCountRef.current = pointCount
+      prevBranchMinLogicalIndexRef.current =
+        typeof minLogicalIndex === 'number' && Number.isFinite(minLogicalIndex)
+          ? minLogicalIndex
+          : null
+      prevBranchMaxLogicalIndexRef.current =
+        typeof maxLogicalIndex === 'number' && Number.isFinite(maxLogicalIndex)
+          ? maxLogicalIndex
+          : null
       return
     }
     const renderTargetIndex =
@@ -2488,28 +2547,9 @@ export function InspectorDetailsPanel({
       renderTargetIndex !== null &&
       renderTargetIndex >= 0 &&
       renderTargetIndex < branchIndices.length
-    const minLogicalArrayIndex = branchSortedOrder[0]
-    const maxLogicalArrayIndex = branchSortedOrder[branchSortedOrder.length - 1]
-    const minLogicalIndex = branchIndices[minLogicalArrayIndex]
-    const maxLogicalIndex = branchIndices[maxLogicalArrayIndex]
-    const hasNegativeLogicalSide =
-      typeof minLogicalIndex === 'number' && Number.isFinite(minLogicalIndex) && minLogicalIndex < 0
-    const hasPositiveLogicalSide =
-      typeof maxLogicalIndex === 'number' && Number.isFinite(maxLogicalIndex) && maxLogicalIndex > 0
-    const newestEndpointArrayIndex =
-      maxLogicalArrayIndex >= minLogicalArrayIndex
-        ? maxLogicalArrayIndex
-        : minLogicalArrayIndex
-    const equilibriumInitialIndex = hasNegativeLogicalSide && !hasPositiveLogicalSide
-      ? minLogicalArrayIndex
-      : hasPositiveLogicalSide && !hasNegativeLogicalSide
-        ? maxLogicalArrayIndex
-        : newestEndpointArrayIndex
     const initialIndex = renderTargetValid
       ? renderTargetIndex
-      : branch?.branchType === 'equilibrium'
-        ? equilibriumInitialIndex
-        : branchSortedOrder[0]
+      : endpointDefaultArrayIndex
     setBranchPointIndex(initialIndex)
     const logicalIndex = branchIndices[initialIndex]
     setBranchPointInput(
@@ -2519,6 +2559,14 @@ export function InspectorDetailsPanel({
     syncBranchPointSelection(initialIndex)
     prevBranchIdRef.current = branchId
     prevBranchPointCountRef.current = pointCount
+    prevBranchMinLogicalIndexRef.current =
+      typeof minLogicalIndex === 'number' && Number.isFinite(minLogicalIndex)
+        ? minLogicalIndex
+        : null
+    prevBranchMaxLogicalIndexRef.current =
+      typeof maxLogicalIndex === 'number' && Number.isFinite(maxLogicalIndex)
+        ? maxLogicalIndex
+        : null
   }, [
     branchIndices,
     branchPointIndex,

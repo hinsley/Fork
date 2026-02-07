@@ -14,6 +14,7 @@ import type {
 import type { JobTiming } from '../compute/jobQueue'
 import { createSystem } from '../system/model'
 import type {
+  ContinuationEndpointSeed,
   BifurcationDiagram,
   ContinuationObject,
   ContinuationPoint,
@@ -60,6 +61,7 @@ import {
   ensureBranchIndices,
   extractHopfOmega,
   getBranchParams,
+  buildSortedArrayOrder,
   normalizeEigenvalueArray,
   normalizeBranchEigenvalues,
   resolveContinuationPointParam2Value,
@@ -126,6 +128,136 @@ function resolveHomoclinicSeedState(point: ContinuationPoint, stateDimension: nu
     return [...packed]
   }
   return [...point.state]
+}
+
+function isValidEndpointSeedForIndices(
+  seed: ContinuationEndpointSeed | undefined,
+  validIndices: Set<number>
+): seed is ContinuationEndpointSeed {
+  if (!seed) return false
+  if (!Number.isFinite(seed.endpoint_index)) return false
+  if (!validIndices.has(seed.endpoint_index)) return false
+  if (!Array.isArray(seed.aug_state) || seed.aug_state.some((value) => !Number.isFinite(value))) {
+    return false
+  }
+  if (!Array.isArray(seed.tangent) || seed.tangent.some((value) => !Number.isFinite(value))) {
+    return false
+  }
+  if (!Number.isFinite(seed.step_size) || seed.step_size <= 0) return false
+  return true
+}
+
+function buildHomoclinicEndpointSeed(
+  data: ContinuationObject['data'],
+  side: 'min' | 'max'
+): ContinuationEndpointSeed | undefined {
+  if (!data.points || data.points.length < 2) return undefined
+  const indices = ensureBranchIndices(data)
+  if (indices.length < 2) return undefined
+  const sorted = buildSortedArrayOrder(indices)
+  if (sorted.length < 2) return undefined
+  const endpointArrayIndex = side === 'min' ? sorted[0] : sorted[sorted.length - 1]
+  const neighborArrayIndex = side === 'min' ? sorted[1] : sorted[sorted.length - 2]
+  if (endpointArrayIndex === undefined || neighborArrayIndex === undefined) return undefined
+
+  const endpointPoint = data.points[endpointArrayIndex]
+  const neighborPoint = data.points[neighborArrayIndex]
+  const endpointLogicalIndex = indices[endpointArrayIndex]
+  if (!endpointPoint || !neighborPoint || !Number.isFinite(endpointLogicalIndex)) {
+    return undefined
+  }
+  if (
+    !Array.isArray(endpointPoint.state) ||
+    !Array.isArray(neighborPoint.state) ||
+    endpointPoint.state.length !== neighborPoint.state.length
+  ) {
+    return undefined
+  }
+  const endpointAug = [endpointPoint.param_value, ...endpointPoint.state]
+  const neighborAug = [neighborPoint.param_value, ...neighborPoint.state]
+  const diff = endpointAug.map((value, i) => value - neighborAug[i])
+  const norm = Math.hypot(...diff)
+  if (!Number.isFinite(norm) || norm <= 1e-12) return undefined
+
+  const tangent = diff.map((value) => value / norm)
+  const localParamDelta = Math.abs(endpointPoint.param_value - neighborPoint.param_value)
+  const step_size = Number.isFinite(localParamDelta) && localParamDelta > 1e-6
+    ? localParamDelta
+    : 1e-6
+  return {
+    endpoint_index: endpointLogicalIndex,
+    aug_state: endpointAug,
+    tangent,
+    step_size,
+  }
+}
+
+function ensureHomoclinicEndpointResumeSeeds(
+  data: ContinuationObject['data']
+): ContinuationObject['data'] {
+  const indices = ensureBranchIndices(data)
+  const validIndices = new Set<number>(indices.filter((idx) => Number.isFinite(idx)))
+  const resume = data.resume_state
+
+  const existingMin = isValidEndpointSeedForIndices(resume?.min_index_seed, validIndices)
+    ? resume?.min_index_seed
+    : undefined
+  const existingMax = isValidEndpointSeedForIndices(resume?.max_index_seed, validIndices)
+    ? resume?.max_index_seed
+    : undefined
+
+  const minSeed = existingMin ?? buildHomoclinicEndpointSeed(data, 'min')
+  const maxSeed = existingMax ?? buildHomoclinicEndpointSeed(data, 'max')
+  if (!minSeed && !maxSeed) {
+    return { ...data, resume_state: undefined }
+  }
+  return {
+    ...data,
+    resume_state: {
+      min_index_seed: minSeed,
+      max_index_seed: maxSeed,
+    },
+  }
+}
+
+function trimHomoclinicLargeCycleSeedPoint(
+  data: ContinuationObject['data']
+): ContinuationObject['data'] {
+  if (!data.points || data.points.length <= 1) return data
+  const indices = ensureBranchIndices(data)
+  if (indices.length <= 1) return data
+  const firstLogical = indices[0] ?? 0
+  const secondLogical = indices[1] ?? firstLogical
+  const looksLikeRawSeed = firstLogical === 0 && secondLogical !== 0
+  if (!looksLikeRawSeed) return data
+
+  const points = data.points.slice(1)
+  const trimmedIndices = indices.slice(1)
+  const bifurcations = (data.bifurcations ?? [])
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .map((value) => value - 1)
+
+  const validIndices = new Set<number>(trimmedIndices.filter((idx) => Number.isFinite(idx)))
+  const minSeed = isValidEndpointSeedForIndices(data.resume_state?.min_index_seed, validIndices)
+    ? data.resume_state?.min_index_seed
+    : undefined
+  const maxSeed = isValidEndpointSeedForIndices(data.resume_state?.max_index_seed, validIndices)
+    ? data.resume_state?.max_index_seed
+    : undefined
+  const resume_state = minSeed || maxSeed
+    ? {
+        min_index_seed: minSeed,
+        max_index_seed: maxSeed,
+      }
+    : undefined
+
+  return {
+    ...data,
+    points,
+    indices: trimmedIndices,
+    bifurcations,
+    resume_state,
+  }
 }
 
 function getNodeLabel(node: TreeNode | undefined, systemType: SystemConfig['type']): string {
@@ -2067,8 +2199,12 @@ export function AppProvider({
         }
 
         let updatedData: ContinuationObject['data'] | null = null
+        const homocSourceData =
+          sourceBranch.branchType === 'homoclinic_curve'
+            ? ensureHomoclinicEndpointResumeSeeds(sourceBranch.data)
+            : null
         if (sourceBranch.branchType === 'homoclinic_curve') {
-          const sourceType = sourceBranch.data.branch_type
+          const sourceType = homocSourceData?.branch_type
           if (!sourceType || sourceType.type !== 'HomoclinicCurve') {
             throw new Error(
               'Homoclinic branch metadata is missing. Reinitialize from a valid homoclinic point.'
@@ -2096,7 +2232,10 @@ export function AppProvider({
             runConfig.params[param2Idx] = endpointParam2 as number
           }
 
-          const branchData = serializeBranchDataForWasm(sourceBranch)
+          const branchData = serializeBranchDataForWasm({
+            ...sourceBranch,
+            data: homocSourceData,
+          })
           updatedData = await client.runContinuationExtension(
             {
               system: runConfig,
@@ -2145,9 +2284,13 @@ export function AppProvider({
           throw new Error('Branch extension did not return updated continuation data.')
         }
 
-        const normalized = normalizeBranchEigenvalues(updatedData, {
+        const normalizedRaw = normalizeBranchEigenvalues(updatedData, {
           stateDimension: system.varNames.length,
         })
+        const normalized =
+          sourceBranch.branchType === 'homoclinic_curve'
+            ? ensureHomoclinicEndpointResumeSeeds(normalizedRaw)
+            : normalizedRaw
         const updatedBranch: ContinuationObject = {
           ...sourceBranch,
           data: normalized,
@@ -3580,7 +3723,7 @@ export function AppProvider({
             ? branchData.indices
             : branchData.points.map((_, index) => index)
 
-        const normalized = normalizeBranchEigenvalues(
+        const normalizedRaw = normalizeBranchEigenvalues(
           {
             ...branchData,
             indices,
@@ -3597,6 +3740,9 @@ export function AppProvider({
               },
           },
           { stateDimension: system.varNames.length }
+        )
+        const normalized = ensureHomoclinicEndpointResumeSeeds(
+          trimHomoclinicLargeCycleSeedPoint(normalizedRaw)
         )
 
         const branch: ContinuationObject = {
@@ -3739,7 +3885,8 @@ export function AppProvider({
             ? branchData.indices
             : branchData.points.map((_, index) => index)
 
-        const normalized = normalizeBranchEigenvalues(
+        const normalized = ensureHomoclinicEndpointResumeSeeds(
+          normalizeBranchEigenvalues(
           {
             ...branchData,
             indices,
@@ -3756,7 +3903,7 @@ export function AppProvider({
               },
           },
           { stateDimension: system.varNames.length }
-        )
+        ))
 
         const branch: ContinuationObject = {
           type: 'continuation',
@@ -3906,7 +4053,8 @@ export function AppProvider({
             ? branchData.indices
             : branchData.points.map((_, index) => index)
 
-        const normalized = normalizeBranchEigenvalues(
+        const normalized = ensureHomoclinicEndpointResumeSeeds(
+          normalizeBranchEigenvalues(
           {
             ...branchData,
             indices,
@@ -3921,7 +4069,7 @@ export function AppProvider({
               },
           },
           { stateDimension: system.varNames.length }
-        )
+        ))
 
         const branch: ContinuationObject = {
           type: 'continuation',

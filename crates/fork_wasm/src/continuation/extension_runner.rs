@@ -23,12 +23,6 @@ struct ExtensionMergeContext {
     sign: i32,
 }
 
-#[derive(Clone, Copy)]
-struct FirstStepLocalityGuard {
-    endpoint_param: f64,
-    neighbor_param: f64,
-}
-
 enum ExtensionRunnerKind {
     Equilibrium {
         runner: ContinuationRunner<OwnedEquilibriumContinuationProblem>,
@@ -43,7 +37,6 @@ enum ExtensionRunnerKind {
         _system: Box<EquationSystem>,
         runner: ContinuationRunner<HomoclinicProblem<'static>>,
         merge: ExtensionMergeContext,
-        first_step_locality_guard: Option<FirstStepLocalityGuard>,
     },
 }
 
@@ -150,18 +143,6 @@ fn normalize_resume_step_size(step_size: f64, settings: ContinuationSettings) ->
     normalized = normalized.max(settings.min_step_size);
     normalized = normalized.min(settings.max_step_size);
     normalized
-}
-
-fn violates_first_step_locality(
-    guard: FirstStepLocalityGuard,
-    first_extension_param: f64,
-) -> bool {
-    let secant_delta = (guard.endpoint_param - guard.neighbor_param).abs();
-    if !secant_delta.is_finite() || secant_delta <= 1e-12 {
-        return false;
-    }
-    let first_delta = (first_extension_param - guard.endpoint_param).abs();
-    first_delta > secant_delta * 10.0
 }
 
 fn hydrate_homoclinic_setup_from_endpoint(
@@ -600,8 +581,6 @@ impl WasmContinuationExtensionRunner {
                     end_aug[i + 1] = v;
                 }
                 let resume_seed = select_resume_seed(&merge.branch, forward, last_index, dim + 1);
-                let mut first_step_locality_guard = None;
-
                 let mut settings = settings;
                 let mut problem: HomoclinicProblem<'static> =
                     unsafe { std::mem::transmute(problem) };
@@ -657,11 +636,6 @@ impl WasmContinuationExtensionRunner {
                     orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
                     cap_extension_step_size(&mut settings, if secant_norm > 1e-12 { Some(secant_norm) } else { None });
 
-                    first_step_locality_guard = Some(FirstStepLocalityGuard {
-                        endpoint_param: endpoint.param_value,
-                        neighbor_param: neighbor.param_value,
-                    });
-
                     let initial_point = ContinuationPoint {
                         state: packed_initial_state,
                         param_value: endpoint.param_value,
@@ -683,7 +657,6 @@ impl WasmContinuationExtensionRunner {
                     _system: boxed_system,
                     runner,
                     merge,
-                    first_step_locality_guard,
                 }
             }
             BranchType::HomotopySaddleCurve { .. } => {
@@ -741,28 +714,15 @@ impl WasmContinuationExtensionRunner {
             .take()
             .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
 
-        let (extension, merge, first_step_locality_guard) = match runner_kind {
-            ExtensionRunnerKind::Equilibrium { runner, merge } => (runner.take_result(), merge, None),
+        let (extension, merge) = match runner_kind {
+            ExtensionRunnerKind::Equilibrium { runner, merge } => (runner.take_result(), merge),
             ExtensionRunnerKind::LimitCycle { runner, merge, .. } => {
-                (runner.take_result(), merge, None)
+                (runner.take_result(), merge)
             }
-            ExtensionRunnerKind::Homoclinic {
-                runner,
-                merge,
-                first_step_locality_guard,
-                ..
-            } => (runner.take_result(), merge, first_step_locality_guard),
+            ExtensionRunnerKind::Homoclinic { runner, merge, .. } => {
+                (runner.take_result(), merge)
+            }
         };
-
-        if let Some(guard) = first_step_locality_guard {
-            if let Some(first_extension_point) = extension.points.get(1) {
-                if violates_first_step_locality(guard, first_extension_point.param_value) {
-                    return Err(JsValue::from_str(
-                        "Homoclinic extension produced a nonlocal first step. Reduce the step size or use explicit Homoclinic from Homoclinic.",
-                    ));
-                }
-            }
-        }
 
         let mut branch = merge.branch;
         let orig_count = branch.points.len();
@@ -1383,13 +1343,4 @@ mod orientation_tests {
         assert!(super::select_resume_seed(&branch, true, 4, 2).is_none());
     }
 
-    #[test]
-    fn first_step_locality_detects_nonlocal_jump() {
-        let guard = super::FirstStepLocalityGuard {
-            endpoint_param: 1.0,
-            neighbor_param: 0.99,
-        };
-        assert!(super::violates_first_step_locality(guard, 1.2));
-        assert!(!super::violates_first_step_locality(guard, 1.01));
-    }
 }
