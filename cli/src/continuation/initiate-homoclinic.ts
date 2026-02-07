@@ -40,6 +40,68 @@ type EndpointSeed = NonNullable<
   ContinuationBranchData['resume_state']
 >[keyof NonNullable<ContinuationBranchData['resume_state']>];
 
+function buildAugmentedState(point: { param_value: number; state: number[] }): number[] | null {
+  if (!Number.isFinite(point.param_value)) return null;
+  if (!Array.isArray(point.state) || point.state.length === 0) return null;
+  if (point.state.some((value) => !Number.isFinite(value))) return null;
+  return [point.param_value, ...point.state];
+}
+
+function normalizeVector(values: number[]): number[] | null {
+  const norm = Math.hypot(...values);
+  if (!Number.isFinite(norm) || norm <= 1e-12) return null;
+  return values.map((value) => value / norm);
+}
+
+function buildTrimmedBoundarySeed(
+  originalPoints: ContinuationBranchData['points'],
+  trimmedPoints: ContinuationBranchData['points'],
+  stepSizeHint: number
+): EndpointSeed | undefined {
+  const retained = trimmedPoints[0];
+  if (!retained) return undefined;
+
+  const retainedAug = buildAugmentedState(retained);
+  if (!retainedAug) return undefined;
+
+  let tangent: number[] | null = null;
+  const prev = originalPoints[0];
+  const next = originalPoints[2];
+  if (prev && next) {
+    const prevAug = buildAugmentedState(prev);
+    const nextAug = buildAugmentedState(next);
+    if (
+      prevAug &&
+      nextAug &&
+      prevAug.length === retainedAug.length &&
+      nextAug.length === retainedAug.length
+    ) {
+      const centered = nextAug.map((value, index) => value - prevAug[index]);
+      tangent = normalizeVector(centered);
+    }
+  }
+
+  if (!tangent && trimmedPoints[1]) {
+    const neighborAug = buildAugmentedState(trimmedPoints[1]);
+    if (neighborAug && neighborAug.length === retainedAug.length) {
+      const secant = retainedAug.map((value, index) => value - neighborAug[index]);
+      tangent = normalizeVector(secant);
+    }
+  }
+
+  if (!tangent) return undefined;
+
+  const step_size =
+    Number.isFinite(stepSizeHint) && stepSizeHint > 0 ? stepSizeHint : 0.01;
+
+  return {
+    endpoint_index: 0,
+    aug_state: retainedAug,
+    tangent,
+    step_size,
+  };
+}
+
 function remapTrimmedEndpointSeed(
   seed: EndpointSeed | undefined,
   indexBase: number,
@@ -117,15 +179,32 @@ export function discardInitialApproximationPoint(data: ContinuationBranchData): 
     indexBase,
     validIndices
   );
+  const finiteIndices = indices.filter((idx) => Number.isFinite(idx));
+  const minLogicalIndex = finiteIndices.length > 0 ? Math.min(...finiteIndices) : 0;
+  const maxLogicalIndex = finiteIndices.length > 0 ? Math.max(...finiteIndices) : 0;
+  const boundaryStepHint =
+    data.resume_state?.min_index_seed?.step_size ??
+    data.resume_state?.max_index_seed?.step_size ??
+    0.01;
+  const synthesizedBoundarySeed =
+    points.length > 1 ? buildTrimmedBoundarySeed(data.points, points, boundaryStepHint) : undefined;
+  const minBoundarySeed =
+    !minSeed && synthesizedBoundarySeed && minLogicalIndex === 0
+      ? synthesizedBoundarySeed
+      : minSeed;
+  const maxBoundarySeed =
+    !maxSeed && synthesizedBoundarySeed && maxLogicalIndex === 0
+      ? synthesizedBoundarySeed
+      : maxSeed;
   const normalized: ContinuationBranchData & { upoldp?: number[][] } = {
     ...data,
     points,
     indices,
     bifurcations,
-    resume_state: minSeed || maxSeed
+    resume_state: minBoundarySeed || maxBoundarySeed
       ? {
-          min_index_seed: minSeed,
-          max_index_seed: maxSeed,
+          min_index_seed: minBoundarySeed,
+          max_index_seed: maxBoundarySeed,
         }
       : undefined,
   };

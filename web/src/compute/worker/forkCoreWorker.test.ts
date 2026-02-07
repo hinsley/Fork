@@ -200,6 +200,21 @@ beforeAll(async () => {
       bifurcations?: number[]
       indices?: number[]
       branch_type?: { type: string }
+      homoc_context?: {
+        base_params: number[]
+        param1_index: number
+        param2_index: number
+        fixed_time: number
+        fixed_eps0: number
+        fixed_eps1: number
+        basis: {
+          stable_q: number[]
+          unstable_q: number[]
+          dim: number
+          nneg: number
+          npos: number
+        }
+      }
       resume_state?: {
         min_index_seed?: {
           endpoint_index: number
@@ -253,14 +268,35 @@ beforeAll(async () => {
               stability: 'None',
               eigenvalues: [],
             },
+            {
+              state: [2, 2],
+              param_value: 0.3,
+              stability: 'None',
+              eigenvalues: [],
+            },
           ],
-          bifurcations: [0, 1],
-          indices: [10, 11],
+          bifurcations: [0, 1, 2],
+          indices: [10, 11, 12],
           branch_type: { type: 'HomoclinicCurve' },
+          homoc_context: {
+            base_params: [0.1, 0.2],
+            param1_index: 0,
+            param2_index: 1,
+            fixed_time: 1.0,
+            fixed_eps0: 0.01,
+            fixed_eps1: 0.02,
+            basis: {
+              stable_q: [1, 0, 0, 1],
+              unstable_q: [1, 0, 0, 1],
+              dim: 2,
+              nneg: 1,
+              npos: 1,
+            },
+          },
           resume_state: {
             max_index_seed: {
-              endpoint_index: 11,
-              aug_state: [0.2, 1, 1],
+              endpoint_index: 12,
+              aug_state: [0.3, 2, 2],
               tangent: [1, 0, 0],
               step_size: 0.01,
             },
@@ -444,24 +480,36 @@ describe('forkCoreWorker', () => {
               bifurcations?: number[]
               upoldp?: number[][]
               resume_state?: {
+                min_index_seed?: {
+                  endpoint_index?: number
+                  step_size?: number
+                }
                 max_index_seed?: {
                   endpoint_index?: number
                   step_size?: number
+                }
+              }
+              homoc_context?: {
+                basis?: {
+                  dim?: number
                 }
               }
             }
           }
       )
       .find((payload) => payload.id === 'job-h1' && payload.ok === true)
-    expect(h1Response?.result?.points?.length).toBe(1)
-    expect(h1Response?.result?.indices).toEqual([0])
-    expect(h1Response?.result?.bifurcations).toEqual([0])
+    expect(h1Response?.result?.points?.length).toBe(2)
+    expect(h1Response?.result?.indices).toEqual([0, 1])
+    expect(h1Response?.result?.bifurcations).toEqual([0, 1])
     expect(h1Response?.result?.upoldp?.length).toBe(1)
     const firstSeed = h1Response?.result?.upoldp?.[0] ?? []
     expect(firstSeed[0]).toBe(0.1)
     expect(firstSeed.slice(1)).toEqual([0, 0])
-    expect(h1Response?.result?.resume_state?.max_index_seed?.endpoint_index).toBe(0)
+    expect(h1Response?.result?.resume_state?.min_index_seed?.endpoint_index).toBe(0)
+    expect(h1Response?.result?.resume_state?.min_index_seed?.step_size).toBe(0.01)
+    expect(h1Response?.result?.resume_state?.max_index_seed?.endpoint_index).toBe(1)
     expect(h1Response?.result?.resume_state?.max_index_seed?.step_size).toBe(0.01)
+    expect(h1Response?.result?.homoc_context?.basis?.dim).toBe(2)
 
     workerScope.postMessage.mockClear()
 
@@ -502,9 +550,9 @@ describe('forkCoreWorker', () => {
           }
       )
       .find((payload) => payload.id === 'job-h2' && payload.ok === true)
-    expect(h2Response?.result?.points?.length).toBe(2)
-    expect(h2Response?.result?.indices).toEqual([10, 11])
-    expect(h2Response?.result?.bifurcations).toEqual([0, 1])
+    expect(h2Response?.result?.points?.length).toBe(3)
+    expect(h2Response?.result?.indices).toEqual([10, 11, 12])
+    expect(h2Response?.result?.bifurcations).toEqual([0, 1, 2])
 
     workerScope.postMessage.mockClear()
 
@@ -574,9 +622,9 @@ describe('forkCoreWorker', () => {
           }
       )
       .find((payload) => payload.id === 'job-h4' && payload.ok === true)
-    expect(h4Response?.result?.points?.length).toBe(2)
-    expect(h4Response?.result?.indices).toEqual([10, 11])
-    expect(h4Response?.result?.bifurcations).toEqual([0, 1])
+    expect(h4Response?.result?.points?.length).toBe(3)
+    expect(h4Response?.result?.indices).toEqual([10, 11, 12])
+    expect(h4Response?.result?.bifurcations).toEqual([0, 1, 2])
   })
 
   it('returns a clear error when homoclinic methods are missing from the wasm build', async () => {

@@ -986,9 +986,10 @@ describe('appState homoclinic and homotopy actions', () => {
       expect(
         created.branchType
       ).toBe('homoclinic_curve')
-      expect(created.data.indices).toEqual([11, 12])
-      expect(created.data.resume_state?.min_index_seed).toBeUndefined()
-      expect(created.data.resume_state?.max_index_seed?.endpoint_index).toBe(12)
+      expect(created.data.indices).toEqual([0, 1])
+      expect(created.data.resume_state?.min_index_seed?.endpoint_index).toBe(0)
+      expect(created.data.resume_state?.min_index_seed?.step_size).toBe(0.01)
+      expect(created.data.resume_state?.max_index_seed?.endpoint_index).toBe(1)
       expect(created.data.resume_state?.max_index_seed?.step_size).toBe(0.02)
     })
   })
@@ -1054,6 +1055,123 @@ describe('appState homoclinic and homotopy actions', () => {
           findBranchIdByName(getContext().state.system!, 'homotopy_m5')
         ].branchType
       ).toBe('homotopy_saddle_curve')
+    })
+  })
+
+  it('does not double-trim already normalized homoclinic large-cycle results', async () => {
+    const base = makeTwoParamSystem('Homoc_App_M1_NoDoubleTrim')
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Seed',
+      systemName: base.config.name,
+      origin: {
+        type: 'hopf',
+        equilibriumObjectName: 'EQ_A',
+        equilibriumBranchName: 'eq_branch',
+        pointIndex: 0,
+      },
+      ntst: 4,
+      ncol: 2,
+      period: 10,
+      state: [0.2, -0.1, 10],
+      parameters: [0.2, 0.1],
+      parameterName: 'mu',
+      paramValue: 0.2,
+      floquetMultipliers: [],
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(base, limitCycle)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_branch',
+      systemName: base.config.name,
+      parameterName: 'mu',
+      parentObject: limitCycle.name,
+      startObject: 'eq_branch',
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          {
+            state: [0, 0, 0.5, 0.5],
+            param_value: 0.1,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+        branch_type: { type: 'LimitCycle', ntst: 4, ncol: 2 },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2, 0.1],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+    const client = new MockForkCoreClient(0)
+    client.runHomoclinicFromLargeCycle = async () =>
+      normalizeBranchEigenvalues({
+        points: [
+          {
+            state: [1, 1, 0.6, 0.6],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [2, 2, 0.7, 0.7],
+            param_value: 0.3,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [0, 1],
+        indices: [0, 1],
+        upoldp: [[0.1, 0, 0, 0.5, 0.5]],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 8,
+          ncol: 2,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          free_time: true,
+          free_eps0: true,
+          free_eps1: false,
+        },
+        resume_state: {
+          max_index_seed: {
+            endpoint_index: 1,
+            aug_state: [0.3, 2, 2],
+            tangent: [1, 0, 0],
+            step_size: 0.02,
+          },
+        },
+      })
+    const { getContext } = setupApp(branchResult.system, client)
+
+    await act(async () => {
+      await getContext().actions.createHomoclinicFromLargeCycle({
+        branchId: branchResult.nodeId,
+        pointIndex: 0,
+        name: 'homoc_no_double_trim',
+        parameterName: 'mu',
+        param2Name: 'nu',
+        targetNtst: 8,
+        targetNcol: 2,
+        freeTime: true,
+        freeEps0: true,
+        freeEps1: false,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      const branchId = findBranchIdByName(getContext().state.system!, 'homoc_no_double_trim')
+      expect(branchId).toBeTruthy()
+      const created = getContext().state.system!.branches[branchId]
+      expect(created.data.indices).toEqual([0, 1])
+      expect(created.data.points).toHaveLength(2)
+      expect(created.data.resume_state?.max_index_seed?.endpoint_index).toBe(1)
     })
   })
 

@@ -6,6 +6,14 @@
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
 
+fn default_homoclinic_time() -> f64 {
+    1.0
+}
+
+fn default_homoclinic_eps() -> f64 {
+    1e-2
+}
+
 /// Settings controlling the pseudo-arclength continuation algorithm.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ContinuationSettings {
@@ -102,9 +110,39 @@ pub struct ContinuationBranch {
     /// LC-specific: velocity profile for phase condition
     #[serde(default)]
     pub upoldp: Option<Vec<Vec<f64>>>,
+    /// Optional homoclinic extension context needed to resume with the
+    /// same defining-system basis across branch extension runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub homoc_context: Option<HomoclinicResumeContext>,
     /// Optional extension resume metadata for min/max signed-index endpoints.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_state: Option<ContinuationResumeState>,
+}
+
+/// Basis snapshot for homoclinic continuation restart/extension.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HomoclinicBasisSnapshot {
+    pub stable_q: Vec<f64>,
+    pub unstable_q: Vec<f64>,
+    pub dim: usize,
+    pub nneg: usize,
+    pub npos: usize,
+}
+
+/// Persisted homoclinic context used to reconstruct extension problems
+/// without recomputing a different saddle basis.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HomoclinicResumeContext {
+    pub base_params: Vec<f64>,
+    pub param1_index: usize,
+    pub param2_index: usize,
+    pub basis: HomoclinicBasisSnapshot,
+    #[serde(default = "default_homoclinic_time")]
+    pub fixed_time: f64,
+    #[serde(default = "default_homoclinic_eps")]
+    pub fixed_eps0: f64,
+    #[serde(default = "default_homoclinic_eps")]
+    pub fixed_eps1: f64,
 }
 
 /// Resume seed for a specific branch endpoint.

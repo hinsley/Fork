@@ -91,6 +91,24 @@ export interface ContinuationResumeState {
   max_index_seed?: ContinuationEndpointSeed;
 }
 
+export interface HomoclinicBasisSnapshot {
+  stable_q: number[];
+  unstable_q: number[];
+  dim: number;
+  nneg: number;
+  npos: number;
+}
+
+export interface HomoclinicResumeContext {
+  base_params: number[];
+  param1_index: number;
+  param2_index: number;
+  basis: HomoclinicBasisSnapshot;
+  fixed_time: number;
+  fixed_eps0: number;
+  fixed_eps1: number;
+}
+
 export type BranchType =
   | { type: 'Equilibrium' }
   | { type: 'LimitCycle'; ntst: number; ncol: number }
@@ -124,6 +142,7 @@ export interface ContinuationBranchData {
   indices: number[];
   branch_type?: BranchType;
   upoldp?: number[][];  // LC-specific velocity profile
+  homoc_context?: HomoclinicResumeContext;
   resume_state?: ContinuationResumeState;
 }
 

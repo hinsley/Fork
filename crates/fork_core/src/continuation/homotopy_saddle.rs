@@ -33,6 +33,7 @@ pub fn continue_homotopy_saddle_curve(
             stage: setup.stage,
         },
         upoldp: None,
+        homoc_context: None,
         resume_state: None,
     };
 

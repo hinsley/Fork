@@ -4,7 +4,7 @@ use crate::system::build_system;
 use fork_core::continuation::homoclinic::HomoclinicProblem;
 use fork_core::continuation::{
     pack_homoclinic_state, BranchType, ContinuationPoint, ContinuationRunner, ContinuationSettings,
-    HomoclinicSetup,
+    HomoclinicBasisSnapshot, HomoclinicResumeContext, HomoclinicSetup,
 };
 use fork_core::equation_engine::EquationSystem;
 use serde_wasm_bindgen::{from_value, to_value};
@@ -65,6 +65,21 @@ impl WasmHomoclinicRunner {
             free_eps0: setup.extras.free_eps0,
             free_eps1: setup.extras.free_eps1,
         });
+        runner.set_homoc_context(Some(HomoclinicResumeContext {
+            base_params: setup.base_params.clone(),
+            param1_index: setup.param1_index,
+            param2_index: setup.param2_index,
+            basis: HomoclinicBasisSnapshot {
+                stable_q: setup.basis.stable_q.clone(),
+                unstable_q: setup.basis.unstable_q.clone(),
+                dim: setup.basis.dim,
+                nneg: setup.basis.nneg,
+                npos: setup.basis.npos,
+            },
+            fixed_time: setup.guess.time,
+            fixed_eps0: setup.guess.eps0,
+            fixed_eps1: setup.guess.eps1,
+        }));
 
         Ok(WasmHomoclinicRunner {
             system: boxed_system,

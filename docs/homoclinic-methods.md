@@ -128,12 +128,13 @@ Important behavior:
 
 - Extension does one continuation attempt with your selected settings.
 - There is no automatic retry and no automatic method switch during extension.
+- For runs with any fixed homoclinic extras (`Free T`/`Free eps0`/`Free eps1` off), extension requires saved branch metadata from current builds. Older branches without this metadata must be recomputed once before extension.
 
 ## Why Extension Can Jump (and How Fork Prevents It)
 
 A large first-step jump at extension startup usually means the solver did not resume from a true continuation endpoint state and tangent. In that case, the predictor can launch from a less-local direction than the branch geometry near the endpoint.
 
-Fork now prefers endpoint resume metadata (`augmented state + tangent`) when extending from either side of a branch. If that metadata is unavailable, fallback seeding uses only the local endpoint-neighbor secant. For homoclinic extension, if packed endpoint data cannot be decoded reliably, extension fails fast with an actionable error instead of silently switching methods.
+Fork now prefers endpoint resume metadata (`augmented state + tangent`) when extending from either side of a branch. For fixed-extra homoclinic runs, extension also uses saved fixed scalar metadata (`T`, `eps0`, `eps1`) so the restarted defining system matches the original run. If required endpoint/metadata decoding is unavailable, extension fails fast with an actionable error instead of silently switching methods.
 
 This keeps extension behavior continuous with the existing branch and avoids hidden restart logic.
 

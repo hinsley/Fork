@@ -3,7 +3,7 @@ use super::periodic::CollocationCoefficients;
 use super::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
 use super::{
     continue_with_problem, BifurcationType, BranchType, ContinuationBranch, ContinuationPoint,
-    ContinuationSettings,
+    ContinuationSettings, HomoclinicBasisSnapshot, HomoclinicResumeContext,
 };
 use crate::equation_engine::EquationSystem;
 use crate::equilibrium::{compute_jacobian, SystemKind};
@@ -38,6 +38,21 @@ pub fn continue_homoclinic_curve(
         free_eps0: setup.extras.free_eps0,
         free_eps1: setup.extras.free_eps1,
     };
+    branch.homoc_context = Some(HomoclinicResumeContext {
+        base_params: setup.base_params.clone(),
+        param1_index: setup.param1_index,
+        param2_index: setup.param2_index,
+        basis: HomoclinicBasisSnapshot {
+            stable_q: setup.basis.stable_q.clone(),
+            unstable_q: setup.basis.unstable_q.clone(),
+            dim: setup.basis.dim,
+            nneg: setup.basis.nneg,
+            npos: setup.basis.npos,
+        },
+        fixed_time: setup.guess.time,
+        fixed_eps0: setup.guess.eps0,
+        fixed_eps1: setup.guess.eps1,
+    });
     Ok(branch)
 }
 
@@ -259,9 +274,6 @@ impl<'a> ContinuationProblem for HomoclinicProblem<'a> {
         }
         if decoded.time <= 0.0 {
             bail!("Homoclinic time must be positive");
-        }
-        if decoded.eps0 <= 0.0 || decoded.eps1 <= 0.0 {
-            bail!("Endpoint distances must be positive");
         }
 
         let params = self.current_params(aug_state[0], decoded.p2)?;

@@ -8,7 +8,8 @@ use fork_core::continuation::{
     decode_homoclinic_state, homoclinic_setup_from_homoclinic_point, pack_homoclinic_state,
     BranchType, ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint,
     ContinuationProblem, ContinuationResumeState, ContinuationRunner, ContinuationSettings,
-    HomoclinicExtraFlags, HomoclinicSetup,
+    HomoclinicBasis, HomoclinicBasisSnapshot, HomoclinicExtraFlags, HomoclinicResumeContext,
+    HomoclinicSetup,
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::SystemKind;
@@ -87,6 +88,79 @@ fn cap_extension_step_size(settings: &mut ContinuationSettings, secant_norm: Opt
     }
 }
 
+fn cap_homoclinic_step_size_in_parameter_plane(
+    settings: &mut ContinuationSettings,
+    tangent: &DVector<f64>,
+    secant_param_norm: Option<f64>,
+    p2_aug_index: usize,
+) {
+    let Some(local_param_span) = secant_param_norm else {
+        return;
+    };
+    if !local_param_span.is_finite() || local_param_span <= 1e-12 {
+        return;
+    }
+    if p2_aug_index >= tangent.len() {
+        return;
+    }
+
+    let tangent_param_norm =
+        (tangent[0] * tangent[0] + tangent[p2_aug_index] * tangent[p2_aug_index]).sqrt();
+    if !tangent_param_norm.is_finite() || tangent_param_norm <= 1e-12 {
+        return;
+    }
+
+    let capped = ((2.0 * local_param_span) / tangent_param_norm)
+        .clamp(settings.min_step_size, settings.max_step_size);
+    if settings.step_size > capped {
+        settings.step_size = capped;
+    }
+}
+
+fn homoclinic_tangent_is_nonlocal_in_parameter_plane(
+    tangent: &DVector<f64>,
+    secant_direction: Option<&DVector<f64>>,
+    secant_param_norm: Option<f64>,
+    p2_aug_index: usize,
+    step_size: f64,
+) -> bool {
+    let Some(secant) = secant_direction else {
+        return false;
+    };
+    let Some(local_param_span) = secant_param_norm else {
+        return false;
+    };
+    if p2_aug_index >= tangent.len() || p2_aug_index >= secant.len() {
+        return false;
+    }
+    if !local_param_span.is_finite()
+        || local_param_span <= 1e-12
+        || !step_size.is_finite()
+        || step_size <= 0.0
+    {
+        return false;
+    }
+
+    let t0 = tangent[0];
+    let tp2 = tangent[p2_aug_index];
+    let tangent_param_norm = (t0 * t0 + tp2 * tp2).sqrt();
+    if !tangent_param_norm.is_finite() || tangent_param_norm <= 1e-12 {
+        return false;
+    }
+
+    let s0 = secant[0];
+    let sp2 = secant[p2_aug_index];
+    let secant_param_dir_norm = (s0 * s0 + sp2 * sp2).sqrt();
+    if !secant_param_dir_norm.is_finite() || secant_param_dir_norm <= 1e-12 {
+        return false;
+    }
+
+    let alignment = ((t0 * s0 + tp2 * sp2) / (tangent_param_norm * secant_param_dir_norm)).abs();
+    let predicted_jump = tangent_param_norm * step_size;
+
+    alignment < 0.6 || predicted_jump > 3.0 * local_param_span
+}
+
 fn validate_resume_seed(
     seed: &ContinuationEndpointSeed,
     endpoint_index: i32,
@@ -132,6 +206,34 @@ fn select_resume_seed(
     } else {
         None
     }
+}
+
+fn prepare_resume_seed_for_extension(
+    seed: ContinuationEndpointSeed,
+    endpoint_aug: &DVector<f64>,
+    secant_direction: Option<&DVector<f64>>,
+    forward: bool,
+) -> (Vec<f64>, Vec<f64>) {
+    let resume_aug = if seed.aug_state.len() == endpoint_aug.len() {
+        seed.aug_state
+    } else {
+        endpoint_aug.iter().copied().collect()
+    };
+
+    let mut resume_tangent = DVector::from_vec(seed.tangent);
+    if let Some(secant) = secant_direction {
+        orient_extension_tangent(&mut resume_tangent, Some(secant), forward);
+    } else {
+        orient_extension_tangent(&mut resume_tangent, None, forward);
+    }
+
+    if resume_tangent.norm() <= 1e-12 {
+        let mut fallback = DVector::zeros(endpoint_aug.len());
+        fallback[0] = if forward { 1.0 } else { -1.0 };
+        resume_tangent = fallback;
+    }
+
+    (resume_aug, resume_tangent.iter().copied().collect())
 }
 
 fn merge_extension_resume_state(
@@ -233,6 +335,148 @@ fn hydrate_homoclinic_setup_from_endpoint(
         setup.guess.ys = decoded.ys;
     }
     true
+}
+
+fn homoc_context_from_setup(setup: &HomoclinicSetup) -> HomoclinicResumeContext {
+    HomoclinicResumeContext {
+        base_params: setup.base_params.clone(),
+        param1_index: setup.param1_index,
+        param2_index: setup.param2_index,
+        basis: HomoclinicBasisSnapshot {
+            stable_q: setup.basis.stable_q.clone(),
+            unstable_q: setup.basis.unstable_q.clone(),
+            dim: setup.basis.dim,
+            nneg: setup.basis.nneg,
+            npos: setup.basis.npos,
+        },
+        fixed_time: setup.guess.time,
+        fixed_eps0: setup.guess.eps0,
+        fixed_eps1: setup.guess.eps1,
+    }
+}
+
+fn apply_homoc_context_to_setup(
+    setup: &mut HomoclinicSetup,
+    context: &HomoclinicResumeContext,
+) -> bool {
+    if context.param1_index >= context.base_params.len()
+        || context.param2_index >= context.base_params.len()
+    {
+        return false;
+    }
+    let dim = setup.guess.x0.len();
+    if context.basis.dim != dim {
+        return false;
+    }
+    if context.basis.stable_q.len() != dim * dim || context.basis.unstable_q.len() != dim * dim {
+        return false;
+    }
+    if context.basis.nneg == 0
+        || context.basis.npos == 0
+        || context.basis.nneg + context.basis.npos != dim
+    {
+        return false;
+    }
+    if !context.fixed_time.is_finite() || context.fixed_time <= 0.0 {
+        return false;
+    }
+    if !context.fixed_eps0.is_finite() || context.fixed_eps0 <= 0.0 {
+        return false;
+    }
+    if !context.fixed_eps1.is_finite() || context.fixed_eps1 <= 0.0 {
+        return false;
+    }
+    let y_size = context.basis.nneg * context.basis.npos;
+    if setup.guess.yu.len() != y_size || setup.guess.ys.len() != y_size {
+        return false;
+    }
+
+    setup.base_params = context.base_params.clone();
+    setup.param1_index = context.param1_index;
+    setup.param2_index = context.param2_index;
+    setup.basis = HomoclinicBasis {
+        stable_q: context.basis.stable_q.clone(),
+        unstable_q: context.basis.unstable_q.clone(),
+        dim: context.basis.dim,
+        nneg: context.basis.nneg,
+        npos: context.basis.npos,
+    };
+    setup.guess.time = context.fixed_time;
+    setup.guess.eps0 = context.fixed_eps0;
+    setup.guess.eps1 = context.fixed_eps1;
+    true
+}
+
+fn synthesize_homoc_context_from_branch_seed(
+    system: &mut EquationSystem,
+    branch: &ContinuationBranch,
+    ntst: usize,
+    ncol: usize,
+    param1_index: usize,
+    param2_index: usize,
+    param1_name: &str,
+    param2_name: &str,
+    extras: HomoclinicExtraFlags,
+) -> Option<HomoclinicResumeContext> {
+    let mut endpoint_state: Option<Vec<f64>> = None;
+    let mut param1_value: Option<f64> = None;
+
+    if let Some(seed) = branch
+        .resume_state
+        .as_ref()
+        .and_then(|state| state.min_index_seed.as_ref())
+        .or_else(|| {
+            branch
+                .resume_state
+                .as_ref()
+                .and_then(|state| state.max_index_seed.as_ref())
+        })
+    {
+        if seed.aug_state.len() > 1 {
+            endpoint_state = Some(seed.aug_state[1..].to_vec());
+            param1_value = Some(seed.aug_state[0]);
+        }
+    }
+
+    let seed_pos = branch
+        .indices
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, &idx)| idx)
+        .map(|(pos, _)| pos)?;
+    let seed_point = branch.points.get(seed_pos)?;
+
+    let endpoint_state = endpoint_state.unwrap_or_else(|| seed_point.state.clone());
+    let param1_value = param1_value.unwrap_or(seed_point.param_value);
+
+    let mut base_params = system.params.clone();
+    if param1_index >= base_params.len() || param2_index >= base_params.len() {
+        return None;
+    }
+    base_params[param1_index] = param1_value;
+
+    let mut setup = homoclinic_setup_from_homoclinic_point(
+        system,
+        &endpoint_state,
+        ntst,
+        ncol,
+        ntst,
+        ncol,
+        &base_params,
+        param1_index,
+        param2_index,
+        param1_name,
+        param2_name,
+        extras,
+    )
+    .ok()?;
+
+    let dim = system.equations.len();
+    if !hydrate_homoclinic_setup_from_endpoint(&mut setup, &endpoint_state, dim) {
+        return None;
+    }
+
+    Some(homoc_context_from_setup(&setup))
 }
 
 fn canonicalize_homoclinic_point_state(
@@ -393,10 +637,16 @@ impl WasmContinuationExtensionRunner {
                 let mut settings = settings;
                 cap_extension_step_size(&mut settings, secant_norm);
                 let mut runner = if let Some(seed) = resume_seed {
+                    let (resume_aug, resume_tangent) = prepare_resume_seed_for_extension(
+                        seed,
+                        &end_aug,
+                        secant_direction.as_ref(),
+                        forward,
+                    );
                     ContinuationRunner::new_from_seed(
                         problem,
-                        seed.aug_state,
-                        seed.tangent,
+                        resume_aug,
+                        resume_tangent,
                         settings.step_size,
                         settings,
                     )
@@ -513,10 +763,16 @@ impl WasmContinuationExtensionRunner {
                 let mut problem: PeriodicOrbitCollocationProblem<'static> =
                     unsafe { std::mem::transmute(problem) };
                 let mut runner = if let Some(seed) = resume_seed {
+                    let (resume_aug, resume_tangent) = prepare_resume_seed_for_extension(
+                        seed,
+                        &end_aug,
+                        secant_direction.as_ref(),
+                        forward,
+                    );
                     ContinuationRunner::new_from_seed(
                         problem,
-                        seed.aug_state,
-                        seed.tangent,
+                        resume_aug,
+                        resume_tangent,
                         settings.step_size,
                         settings,
                     )
@@ -572,6 +828,30 @@ impl WasmContinuationExtensionRunner {
                     return Err(JsValue::from_str("Homoclinic parameter index out of range"));
                 }
                 base_params[param1_index] = endpoint.param_value;
+                let extras = HomoclinicExtraFlags {
+                    free_time: *free_time,
+                    free_eps0: *free_eps0,
+                    free_eps1: *free_eps1,
+                };
+                let has_saved_homoc_context = merge.branch.homoc_context.is_some();
+                if !has_saved_homoc_context && (!free_time || !free_eps0 || !free_eps1) {
+                    return Err(JsValue::from_str(
+                        "Homoclinic extension needs saved fixed time/endpoint-distance metadata. Recompute the homoclinic branch with the current build and try extending again.",
+                    ));
+                }
+                let homoc_context = merge.branch.homoc_context.clone().or_else(|| {
+                    synthesize_homoc_context_from_branch_seed(
+                        &mut system,
+                        &merge.branch,
+                        *ntst,
+                        *ncol,
+                        param1_index,
+                        param2_index,
+                        param1_name,
+                        param2_name,
+                        extras,
+                    )
+                });
 
                 let mut setup = homoclinic_setup_from_homoclinic_point(
                     &mut system,
@@ -585,11 +865,7 @@ impl WasmContinuationExtensionRunner {
                     param2_index,
                     param1_name,
                     param2_name,
-                    HomoclinicExtraFlags {
-                        free_time: *free_time,
-                        free_eps0: *free_eps0,
-                        free_eps1: *free_eps1,
-                    },
+                    extras,
                 )
                 .map_err(|e| {
                     JsValue::from_str(&format!("Failed to initialize homoclinic extension: {}", e))
@@ -600,6 +876,13 @@ impl WasmContinuationExtensionRunner {
                     return Err(JsValue::from_str(
                         "Failed to decode the homoclinic endpoint state for extension. Use explicit Homoclinic from Homoclinic with a valid packed point.",
                     ));
+                }
+                if let Some(context) = homoc_context.as_ref() {
+                    if !apply_homoc_context_to_setup(&mut setup, context) {
+                        return Err(JsValue::from_str(
+                            "Homoclinic extension context is incompatible with this endpoint state. Recompute the branch from the original initialization and try extending again.",
+                        ));
+                    }
                 }
                 let packed_initial_state = pack_homoclinic_state(&setup);
                 let secant_template = setup.clone();
@@ -631,7 +914,26 @@ impl WasmContinuationExtensionRunner {
                 let resume_seed = select_resume_seed(&merge.branch, forward, last_index, dim + 1);
                 let mut secant_direction: Option<DVector<f64>> = None;
                 let mut secant_norm: Option<f64> = None;
+                let mut secant_param_norm: Option<f64> = None;
+                let mut bootstrap_direction: Option<DVector<f64>> = None;
                 let mut canonical_neighbor_state: Option<Vec<f64>> = None;
+                let second_neighbor_idx = if merge.branch.points.len() > 2 {
+                    let candidates = merge
+                        .branch
+                        .indices
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| *i != endpoint_idx && Some(*i) != neighbor_idx);
+                    if forward {
+                        candidates.max_by_key(|(_, &idx)| idx).map(|(i, _)| i)
+                    } else {
+                        candidates.min_by_key(|(_, &idx)| idx).map(|(i, _)| i)
+                    }
+                } else {
+                    None
+                };
+                let p2_aug_index =
+                    1 + ((*ntst + 1) * system_dim + *ntst * *ncol * system_dim + system_dim);
                 if let Some(neighbor_pos) = neighbor_idx {
                     let neighbor = &merge.branch.points[neighbor_pos];
                     if let Some(neighbor_state) = canonicalize_homoclinic_point_state(
@@ -649,8 +951,36 @@ impl WasmContinuationExtensionRunner {
                         if norm > 1e-12 {
                             secant_direction = Some(secant.normalize());
                             secant_norm = Some(norm);
+                            bootstrap_direction = secant_direction.clone();
+                            if p2_aug_index < neighbor_aug.len() && p2_aug_index < end_aug.len() {
+                                let dp1 = end_aug[0] - neighbor_aug[0];
+                                let dp2 = end_aug[p2_aug_index] - neighbor_aug[p2_aug_index];
+                                secant_param_norm = Some((dp1 * dp1 + dp2 * dp2).sqrt());
+                            }
                         }
                         canonical_neighbor_state = Some(neighbor_state);
+
+                        if let Some(second_pos) = second_neighbor_idx {
+                            let second = &merge.branch.points[second_pos];
+                            if let Some(second_state) = canonicalize_homoclinic_point_state(
+                                &secant_template,
+                                &second.state,
+                                system_dim,
+                            ) {
+                                let mut second_aug = DVector::zeros(dim + 1);
+                                second_aug[0] = second.param_value;
+                                for (i, &v) in second_state.iter().enumerate() {
+                                    second_aug[i + 1] = v;
+                                }
+
+                                let d1 = &end_aug - &neighbor_aug;
+                                let d2 = &neighbor_aug - &second_aug;
+                                let extrapolated = d1 * 1.5 - d2 * 0.5;
+                                if extrapolated.norm() > 1e-12 {
+                                    bootstrap_direction = Some(extrapolated.normalize());
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -658,11 +988,53 @@ impl WasmContinuationExtensionRunner {
                 cap_extension_step_size(&mut settings, secant_norm);
                 let mut problem: HomoclinicProblem<'static> =
                     unsafe { std::mem::transmute(problem) };
+                let phase_reference_aug = resume_seed
+                    .as_ref()
+                    .and_then(|seed| {
+                        if seed.aug_state.len() == dim + 1 {
+                            Some(DVector::from_vec(seed.aug_state.clone()))
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| end_aug.clone());
+                problem
+                    .update_after_step(&phase_reference_aug)
+                    .map_err(|e| {
+                        JsValue::from_str(&format!(
+                            "Failed to prepare homoclinic extension phase reference: {}",
+                            e
+                        ))
+                    })?;
                 let mut runner = if let Some(seed) = resume_seed {
+                    let (resume_aug, resume_tangent) = prepare_resume_seed_for_extension(
+                        seed,
+                        &end_aug,
+                        secant_direction.as_ref(),
+                        forward,
+                    );
+                    let mut resume_tangent_vec = DVector::from_vec(resume_tangent);
+                    if homoclinic_tangent_is_nonlocal_in_parameter_plane(
+                        &resume_tangent_vec,
+                        secant_direction.as_ref(),
+                        secant_param_norm,
+                        p2_aug_index,
+                        settings.step_size,
+                    ) {
+                        if let Some(secant) = secant_direction.as_ref() {
+                            resume_tangent_vec = secant.clone();
+                        }
+                    }
+                    cap_homoclinic_step_size_in_parameter_plane(
+                        &mut settings,
+                        &resume_tangent_vec,
+                        secant_param_norm,
+                        p2_aug_index,
+                    );
                     ContinuationRunner::new_from_seed(
                         problem,
-                        seed.aug_state,
-                        seed.tangent,
+                        resume_aug,
+                        resume_tangent_vec.iter().copied().collect(),
                         settings.step_size,
                         settings,
                     )
@@ -679,7 +1051,9 @@ impl WasmContinuationExtensionRunner {
                         ));
                     }
 
-                    let mut tangent = if let Some(secant) = secant_direction.as_ref() {
+                    let mut tangent = if let Some(bootstrap) = bootstrap_direction.as_ref() {
+                        bootstrap.clone()
+                    } else if let Some(secant) = secant_direction.as_ref() {
                         secant.clone()
                     } else {
                         compute_tangent_from_problem(&mut problem, &end_aug)
@@ -687,6 +1061,12 @@ impl WasmContinuationExtensionRunner {
                     };
 
                     orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
+                    cap_homoclinic_step_size_in_parameter_plane(
+                        &mut settings,
+                        &tangent,
+                        secant_param_norm,
+                        p2_aug_index,
+                    );
 
                     let initial_point = ContinuationPoint {
                         state: packed_initial_state,
@@ -703,6 +1083,9 @@ impl WasmContinuationExtensionRunner {
                 };
                 runner.set_branch_type(merge.branch.branch_type.clone());
                 runner.set_upoldp(merge.branch.upoldp.clone());
+                let homoc_context =
+                    homoc_context.or_else(|| Some(homoc_context_from_setup(&secant_template)));
+                runner.set_homoc_context(homoc_context);
 
                 ExtensionRunnerKind::Homoclinic {
                     _system: boxed_system,
@@ -796,6 +1179,9 @@ impl WasmContinuationExtensionRunner {
             sign,
             &branch.indices,
         );
+        if branch.homoc_context.is_none() {
+            branch.homoc_context = extension.homoc_context;
+        }
 
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
@@ -963,6 +1349,7 @@ mod tests {
             indices: vec![0, 1],
             branch_type: BranchType::Equilibrium,
             upoldp: None,
+            homoc_context: None,
             resume_state: Some(fork_core::continuation::ContinuationResumeState {
                 min_index_seed: None,
                 max_index_seed: Some(fork_core::continuation::ContinuationEndpointSeed {
@@ -1142,6 +1529,57 @@ mod tests {
         );
     }
 
+    #[wasm_bindgen_test]
+    fn homoclinic_extension_requires_saved_fixed_metadata_when_extras_not_free() {
+        let branch = ContinuationBranch {
+            points: vec![ContinuationPoint {
+                state: vec![0.0],
+                param_value: 0.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            }],
+            bifurcations: Vec::new(),
+            indices: vec![0],
+            branch_type: BranchType::HomoclinicCurve {
+                ntst: 2,
+                ncol: 1,
+                param1_name: "a".to_string(),
+                param2_name: "b".to_string(),
+                free_time: false,
+                free_eps0: true,
+                free_eps1: true,
+            },
+            upoldp: None,
+            homoc_context: None,
+            resume_state: None,
+        };
+        let branch_val = to_value(&branch).expect("branch");
+
+        let err = WasmContinuationExtensionRunner::new(
+            vec!["x".to_string()],
+            vec![0.0, 0.0],
+            vec!["a".to_string(), "b".to_string()],
+            vec!["x".to_string()],
+            "flow",
+            1,
+            branch_val,
+            "a",
+            settings_value(1),
+            true,
+        )
+        .expect_err("legacy branch should require fixed metadata");
+
+        let msg = err
+            .as_string()
+            .unwrap_or_else(|| "missing error message".to_string());
+        assert!(
+            msg.contains("saved fixed time/endpoint-distance metadata"),
+            "unexpected error message: {}",
+            msg
+        );
+    }
+
     #[test]
     fn limit_cycle_extension_recovers_upoldp_from_signed_index_endpoint() {
         // Intentional non-monotonic storage order:
@@ -1219,13 +1657,16 @@ mod tests {
 #[cfg(test)]
 mod orientation_tests {
     use super::{
-        canonicalize_homoclinic_point_state, cap_extension_step_size,
-        hydrate_homoclinic_setup_from_endpoint, orient_extension_tangent,
+        apply_homoc_context_to_setup, canonicalize_homoclinic_point_state, cap_extension_step_size,
+        cap_homoclinic_step_size_in_parameter_plane,
+        homoclinic_tangent_is_nonlocal_in_parameter_plane, hydrate_homoclinic_setup_from_endpoint,
+        orient_extension_tangent, prepare_resume_seed_for_extension,
     };
     use fork_core::continuation::{
         pack_homoclinic_state, BifurcationType, BranchType, ContinuationBranch,
         ContinuationEndpointSeed, ContinuationPoint, ContinuationResumeState, ContinuationSettings,
-        HomoclinicBasis, HomoclinicExtraFlags, HomoclinicGuess, HomoclinicSetup,
+        HomoclinicBasis, HomoclinicBasisSnapshot, HomoclinicExtraFlags, HomoclinicGuess,
+        HomoclinicResumeContext, HomoclinicSetup,
     };
     use nalgebra::DVector;
 
@@ -1349,6 +1790,64 @@ mod orientation_tests {
     }
 
     #[test]
+    fn apply_homoc_context_restores_fixed_scalars() {
+        let mut setup = HomoclinicSetup {
+            guess: HomoclinicGuess {
+                mesh_states: vec![vec![0.0, 0.0], vec![0.5, 0.0], vec![1.0, 0.0]],
+                stage_states: vec![vec![vec![0.25, 0.0]], vec![vec![0.75, 0.0]]],
+                x0: vec![0.0, 0.0],
+                param1_value: 0.2,
+                param2_value: 0.1,
+                time: 1.0,
+                eps0: 1e-2,
+                eps1: 1e-2,
+                yu: vec![0.0],
+                ys: vec![0.0],
+            },
+            ntst: 2,
+            ncol: 1,
+            param1_index: 0,
+            param2_index: 1,
+            param1_name: "mu".to_string(),
+            param2_name: "nu".to_string(),
+            base_params: vec![0.2, 0.1],
+            extras: HomoclinicExtraFlags {
+                free_time: false,
+                free_eps0: true,
+                free_eps1: true,
+            },
+            basis: HomoclinicBasis {
+                stable_q: vec![1.0, 0.0, 0.0, 1.0],
+                unstable_q: vec![1.0, 0.0, 0.0, 1.0],
+                dim: 2,
+                nneg: 1,
+                npos: 1,
+            },
+        };
+
+        let context = HomoclinicResumeContext {
+            base_params: vec![0.2, 0.1],
+            param1_index: 0,
+            param2_index: 1,
+            basis: HomoclinicBasisSnapshot {
+                stable_q: vec![1.0, 0.0, 0.0, 1.0],
+                unstable_q: vec![1.0, 0.0, 0.0, 1.0],
+                dim: 2,
+                nneg: 1,
+                npos: 1,
+            },
+            fixed_time: 42.0,
+            fixed_eps0: 0.03,
+            fixed_eps1: 0.04,
+        };
+
+        assert!(apply_homoc_context_to_setup(&mut setup, &context));
+        assert_eq!(setup.guess.time, 42.0);
+        assert_eq!(setup.guess.eps0, 0.03);
+        assert_eq!(setup.guess.eps1, 0.04);
+    }
+
+    #[test]
     fn canonicalize_homoclinic_point_state_round_trips_valid_state() {
         let setup = HomoclinicSetup {
             guess: HomoclinicGuess {
@@ -1410,6 +1909,82 @@ mod orientation_tests {
     }
 
     #[test]
+    fn cap_homoclinic_step_size_limits_parameter_plane_jump() {
+        let mut settings = ContinuationSettings {
+            step_size: 0.01,
+            min_step_size: 1e-6,
+            max_step_size: 0.1,
+            max_steps: 10,
+            corrector_steps: 8,
+            corrector_tolerance: 1e-7,
+            step_tolerance: 1e-7,
+        };
+        let tangent = DVector::from_vec(vec![0.0, 0.0, 5.0]);
+
+        cap_homoclinic_step_size_in_parameter_plane(&mut settings, &tangent, Some(0.001), 2);
+
+        assert!(settings.step_size < 0.01, "expected step size clamp");
+        assert!(settings.step_size >= settings.min_step_size);
+    }
+
+    #[test]
+    fn homoclinic_tangent_nonlocal_detector_flags_large_parameter_jump() {
+        let tangent = DVector::from_vec(vec![0.0, 0.0, 3.0]);
+        let secant = DVector::from_vec(vec![0.1, 0.0, 0.1]);
+        let nonlocal = homoclinic_tangent_is_nonlocal_in_parameter_plane(
+            &tangent,
+            Some(&secant),
+            Some(0.001),
+            2,
+            0.01,
+        );
+        assert!(nonlocal, "expected nonlocal tangent detection");
+    }
+
+    #[test]
+    fn prepare_resume_seed_keeps_saved_aug_state_and_orients_tangent() {
+        let seed = ContinuationEndpointSeed {
+            endpoint_index: 5,
+            aug_state: vec![0.0, 10.0, -10.0],
+            tangent: vec![0.0, 1.0, 0.0],
+            step_size: 0.01,
+        };
+        let endpoint_aug = DVector::from_vec(vec![1.0, 2.0, 3.0]);
+        let secant = DVector::from_vec(vec![1.0, 0.0, 0.0]);
+        let (resume_aug, resume_tangent) =
+            prepare_resume_seed_for_extension(seed, &endpoint_aug, Some(&secant), true);
+
+        assert_eq!(resume_aug, vec![0.0, 10.0, -10.0]);
+        assert!(
+            (resume_tangent[0] - 0.0).abs() < 1e-12
+                && (resume_tangent[1] - 1.0).abs() < 1e-12
+                && resume_tangent[2].abs() < 1e-12,
+            "expected saved tangent orientation to be preserved, got {:?}",
+            resume_tangent
+        );
+    }
+
+    #[test]
+    fn prepare_resume_seed_keeps_local_seed_alignment() {
+        let seed = ContinuationEndpointSeed {
+            endpoint_index: 5,
+            aug_state: vec![1.001, 2.001, 3.001],
+            tangent: vec![0.0, 1.0, 0.1],
+            step_size: 0.01,
+        };
+        let endpoint_aug = DVector::from_vec(vec![1.0, 2.0, 3.0]);
+        let secant = DVector::from_vec(vec![0.0, 1.0, 0.0]);
+        let (resume_aug, resume_tangent) =
+            prepare_resume_seed_for_extension(seed, &endpoint_aug, Some(&secant), true);
+
+        assert_eq!(resume_aug, vec![1.001, 2.001, 3.001]);
+        assert!(
+            resume_tangent[1] > 0.0,
+            "aligned tangent should preserve local direction"
+        );
+    }
+
+    #[test]
     fn select_resume_seed_prefers_requested_side_and_validates_dimensions() {
         let branch = ContinuationBranch {
             points: vec![ContinuationPoint {
@@ -1423,6 +1998,7 @@ mod orientation_tests {
             indices: vec![3],
             branch_type: BranchType::Equilibrium,
             upoldp: None,
+            homoc_context: None,
             resume_state: Some(fork_core::continuation::ContinuationResumeState {
                 min_index_seed: None,
                 max_index_seed: Some(fork_core::continuation::ContinuationEndpointSeed {

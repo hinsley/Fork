@@ -313,6 +313,37 @@ describe('continuation helpers', () => {
     expect(serialized.resume_state?.max_index_seed?.endpoint_index).toBe(1)
   })
 
+  it('preserves homoc_context metadata when serializing branch data', () => {
+    const branch: ContinuationObject = {
+      ...baseBranch,
+      data: {
+        ...baseBranch.data,
+        points: [basePoint, { ...basePoint, param_value: 1 }],
+        indices: [0, 1],
+        homoc_context: {
+          base_params: [0.1, 0.2],
+          param1_index: 0,
+          param2_index: 1,
+          fixed_time: 1.0,
+          fixed_eps0: 0.01,
+          fixed_eps1: 0.02,
+          basis: {
+            stable_q: [1, 0, 0, 1],
+            unstable_q: [1, 0, 0, 1],
+            dim: 2,
+            nneg: 1,
+            npos: 1,
+          },
+        },
+      },
+    }
+
+    const serialized = serializeBranchDataForWasm(branch)
+    expect(serialized.homoc_context?.basis?.dim).toBe(2)
+    expect(serialized.homoc_context?.param1_index).toBe(0)
+    expect(serialized.homoc_context?.fixed_time).toBe(1)
+  })
+
   it('preserves explicit indices when they match the point count', () => {
     const branch: ContinuationObject = {
       ...baseBranch,

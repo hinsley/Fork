@@ -216,6 +216,90 @@ async function run() {
     assert.equal(trimmed.resume_state?.max_index_seed?.step_size, 0.02);
   });
 
+  test('homoclinic seed trim synthesizes boundary seed when min seed is dropped', () => {
+    const data = {
+      points: [
+        {
+          state: [0, 0],
+          param_value: 0.1,
+          stability: 'None',
+          eigenvalues: []
+        },
+        {
+          state: [1, 1],
+          param_value: 0.2,
+          stability: 'None',
+          eigenvalues: []
+        },
+        {
+          state: [2, 2],
+          param_value: 0.3,
+          stability: 'None',
+          eigenvalues: []
+        }
+      ],
+      bifurcations: [0, 1, 2],
+      indices: [0, 1, 2],
+      resume_state: {
+        max_index_seed: {
+          endpoint_index: 2,
+          aug_state: [0.3, 2, 2],
+          tangent: [1, 0, 0],
+          step_size: 0.02
+        }
+      }
+    } as any;
+
+    const trimmed = homocInit.discardInitialApproximationPoint(data);
+    assert.deepEqual(trimmed.indices, [0, 1]);
+    assert.equal(trimmed.resume_state?.min_index_seed?.endpoint_index, 0);
+    assert.equal(trimmed.resume_state?.max_index_seed?.endpoint_index, 1);
+    assert.ok(
+      (trimmed.resume_state?.min_index_seed?.tangent?.length ?? 0) > 0,
+      'expected synthesized boundary tangent'
+    );
+  });
+
+  test('homoclinic seed trim preserves homoc_context metadata', () => {
+    const data = {
+      points: [
+        {
+          state: [0, 0],
+          param_value: 0.1,
+          stability: 'None',
+          eigenvalues: []
+        },
+        {
+          state: [1, 1],
+          param_value: 0.2,
+          stability: 'None',
+          eigenvalues: []
+        }
+      ],
+      bifurcations: [0],
+      indices: [5, 6],
+      homoc_context: {
+        base_params: [0.1, 0.2],
+        param1_index: 0,
+        param2_index: 1,
+        fixed_time: 1.0,
+        fixed_eps0: 0.01,
+        fixed_eps1: 0.02,
+        basis: {
+          stable_q: [1, 0, 0, 1],
+          unstable_q: [1, 0, 0, 1],
+          dim: 2,
+          nneg: 1,
+          npos: 1
+        }
+      }
+    } as any;
+
+    const trimmed = homocInit.discardInitialApproximationPoint(data);
+    assert.deepEqual(trimmed.indices, [0]);
+    assert.deepEqual(trimmed.homoc_context, data.homoc_context);
+  });
+
   test('serialization normalizes raw eigenvalue arrays', () => {
     assert.deepEqual(serialization.normalizeEigenvalueArray(null), []);
 
