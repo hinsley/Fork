@@ -5,8 +5,9 @@ use crate::system::build_system;
 use fork_core::continuation::homoclinic::HomoclinicProblem;
 use fork_core::continuation::periodic::PeriodicOrbitCollocationProblem;
 use fork_core::continuation::{
-    homoclinic_setup_from_homoclinic_point, BranchType, ContinuationBranch, ContinuationPoint,
-    ContinuationProblem, ContinuationRunner, ContinuationSettings, HomoclinicExtraFlags,
+    decode_homoclinic_state, homoclinic_setup_from_homoclinic_point, BranchType,
+    ContinuationBranch, ContinuationPoint, ContinuationProblem, ContinuationRunner,
+    ContinuationSettings, HomoclinicExtraFlags, HomoclinicSetup,
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::SystemKind;
@@ -62,6 +63,30 @@ fn orient_extension_tangent(
             *tangent = -tangent.clone();
         }
     }
+}
+
+fn try_warm_start_homoclinic_riccati(setup: &mut HomoclinicSetup, endpoint_state: &[f64]) -> bool {
+    let dim = setup.guess.x0.len();
+    let Ok(decoded) = decode_homoclinic_state(
+        endpoint_state,
+        dim,
+        setup.ntst,
+        setup.ncol,
+        setup.extras,
+        setup.guess.time,
+        setup.guess.eps0,
+        setup.guess.eps1,
+    ) else {
+        return false;
+    };
+
+    if decoded.yu.len() != setup.guess.yu.len() || decoded.ys.len() != setup.guess.ys.len() {
+        return false;
+    }
+
+    setup.guess.yu = decoded.yu;
+    setup.guess.ys = decoded.ys;
+    true
 }
 
 #[wasm_bindgen]
@@ -365,7 +390,7 @@ impl WasmContinuationExtensionRunner {
                 }
                 base_params[param1_index] = endpoint.param_value;
 
-                let setup = homoclinic_setup_from_homoclinic_point(
+                let mut setup = homoclinic_setup_from_homoclinic_point(
                     &mut system,
                     &endpoint.state,
                     *ntst,
@@ -386,6 +411,9 @@ impl WasmContinuationExtensionRunner {
                 .map_err(|e| {
                     JsValue::from_str(&format!("Failed to initialize homoclinic extension: {}", e))
                 })?;
+                // Preserve Riccati state from the endpoint whenever possible.
+                // Resetting these to zero can stall extension for short branches.
+                let _ = try_warm_start_homoclinic_riccati(&mut setup, &endpoint.state);
 
                 let mut boxed_system = Box::new(system);
                 let system_ptr: *mut EquationSystem = &mut *boxed_system;
@@ -891,7 +919,11 @@ mod tests {
 
 #[cfg(test)]
 mod orientation_tests {
-    use super::orient_extension_tangent;
+    use super::{orient_extension_tangent, try_warm_start_homoclinic_riccati};
+    use fork_core::continuation::{
+        pack_homoclinic_state, HomoclinicBasis, HomoclinicExtraFlags, HomoclinicGuess,
+        HomoclinicSetup,
+    };
     use nalgebra::DVector;
 
     #[test]
@@ -918,5 +950,51 @@ mod orientation_tests {
             tangent[0] < 0.0,
             "without secant, backward direction should enforce negative parameter component"
         );
+    }
+
+    #[test]
+    fn warm_start_homoclinic_riccati_recovers_endpoint_values() {
+        let mut setup = HomoclinicSetup {
+            guess: HomoclinicGuess {
+                mesh_states: vec![vec![0.0, 0.0], vec![0.5, 0.0], vec![1.0, 0.0]],
+                stage_states: vec![vec![vec![0.25, 0.0]], vec![vec![0.75, 0.0]]],
+                x0: vec![0.0, 0.0],
+                param1_value: 0.2,
+                param2_value: 0.1,
+                time: 2.0,
+                eps0: 0.1,
+                eps1: 0.2,
+                yu: vec![0.3],
+                ys: vec![0.4],
+            },
+            ntst: 2,
+            ncol: 1,
+            param1_index: 0,
+            param2_index: 1,
+            param1_name: "mu".to_string(),
+            param2_name: "nu".to_string(),
+            base_params: vec![0.2, 0.1],
+            extras: HomoclinicExtraFlags {
+                free_time: true,
+                free_eps0: true,
+                free_eps1: false,
+            },
+            basis: HomoclinicBasis {
+                stable_q: vec![1.0, 0.0, 0.0, 1.0],
+                unstable_q: vec![1.0, 0.0, 0.0, 1.0],
+                dim: 2,
+                nneg: 1,
+                npos: 1,
+            },
+        };
+
+        let endpoint_state = pack_homoclinic_state(&setup);
+        setup.guess.yu = vec![0.0];
+        setup.guess.ys = vec![0.0];
+
+        let warmed = try_warm_start_homoclinic_riccati(&mut setup, &endpoint_state);
+        assert!(warmed, "expected warm-start to decode endpoint state");
+        assert_eq!(setup.guess.yu, vec![0.3]);
+        assert_eq!(setup.guess.ys, vec![0.4]);
     }
 }
