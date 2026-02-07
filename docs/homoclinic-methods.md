@@ -1,119 +1,143 @@
-# Homoclinic and Homotopy-Saddle Methods (Methods 1, 2, 4, 5)
+# Homoclinic and Homotopy-Saddle User Guide (Methods 1, 2, 4, 5)
 
-This guide explains how to run the four homoclinic-related workflows implemented in Fork:
+This guide explains the four homoclinic-related workflows in Fork and how to tune them for stable continuation runs.
 
-- Method 1: Homoclinic continuation from a large-period limit cycle branch point
-- Method 2: Homoclinic continuation restart from an existing homoclinic branch point
-- Method 4: Homoclinic continuation from a StageD homotopy-saddle branch point
+- Method 1: Homoclinic continuation from a large-period limit cycle point
+- Method 2: Homoclinic continuation from an existing homoclinic branch point
+- Method 4: Homoclinic continuation from a StageD homotopy-saddle point
 - Method 5: Homotopy-saddle continuation from an equilibrium branch point
 
-All numerical computation runs in Fork Core (Rust + WASM) through the existing continuation/autodiff machinery.
+All numerical work is done in Fork Core (Rust/WASM) with the continuation engine and autodiff-based derivatives.
 
-## Requirements
+## Prerequisites
 
-- System type must be `flow` (ODE), not `map`
-- At least two system parameters are required for these methods
-- Select a branch point before running any of these workflows
+- System type must be `flow` (ODE)
+- At least two system parameters must exist
+- You must select a source branch point before launching any method
 
-## Method 1: Homoclinic from Large Cycle
+## What Is a Homotopy-Saddle?
 
-Start from a point on a `limit_cycle` continuation branch.
+A homotopy-saddle branch is a staged continuation object used to build a reliable seed for a true homoclinic continuation.
 
-CLI:
-1. Open the limit cycle branch and inspect a point.
-2. Choose `Continue Homoclinic Curve (Method 1)`.
-3. Configure `param1`, `param2`, target `NTST/NCOL`, free variables (`T`, `eps0`, `eps1`), and continuation settings.
+The idea is:
 
-Web:
-1. Select a limit cycle branch and a branch point.
-2. Open `Homoclinic from Large Cycle` in Inspector.
-3. Fill parameters and settings, then submit.
+1. Start from an equilibrium and construct an easier boundary-value connection problem.
+2. Continue that problem while progressively enforcing homoclinic endpoint/manifold structure.
+3. Stop at `StageD`, which is treated as a ready seed for Method 4.
 
-Output: a new `homoclinic_curve` branch.
+How to think about it:
 
-Recommended seed settings for robust starts from long cycles:
+- It is a bridge workflow, not the final homoclinic curve you usually analyze.
+- It is useful when Method 1 is hard to start robustly from your current large-cycle seed.
+- Stage progression is automatic; you do not manually drive StageA/B/C/D.
 
-- `Free T = false`
-- `Free eps0 = true`
-- `Free eps1 = true`
-- Small predictor step (for example `1e-3`) and tighter corrector tolerances.
+## Which Method to Use
 
-## Method 2: Homoclinic from Homoclinic
+| Method | Start From | Primary Use | Output |
+|---|---|---|---|
+| 1 | `limit_cycle` branch point | First homoclinic branch from a large cycle | `homoclinic_curve` |
+| 2 | `homoclinic_curve` branch point | Restart/remesh/continue an existing homoclinic branch | `homoclinic_curve` |
+| 4 | `homotopy_saddle_curve` StageD point | Convert staged seed into homoclinic continuation | `homoclinic_curve` |
+| 5 | `equilibrium` branch point | Build StageD seed through staged continuation | `homotopy_saddle_curve` |
 
-Start from a point on an existing `homoclinic_curve` branch.
+## Shared Continuation Settings (All Methods and Extension)
 
-CLI:
-1. Open the homoclinic branch point.
-2. Choose `Continue Homoclinic Curve (Method 2)`.
-3. Set target mesh, free variables, and continuation settings.
+Current default predictor settings are aligned to the global continuation defaults:
 
-Web:
-1. Select a homoclinic branch and branch point.
-2. Open `Homoclinic from Homoclinic`.
-3. Configure restart settings and submit.
+- `Initial step size = 0.01`
+- `Min step size = 1e-5`
+- `Max step size = 0.1`
+- `Max points = 300`
 
-Output: a new `homoclinic_curve` branch (restart/continuation).
+Field meanings:
 
-## Extending Existing Homoclinic Branches
+| Field | What It Controls | When to Change It |
+|---|---|---|
+| Branch name | Name of the output continuation object | Use meaningful names that encode source and parameter plane |
+| Direction (`Forward`/`Backward`) | Sign of continuation step along branch orientation | Explore opposite direction or extend both sides |
+| Initial step size | First predictor step magnitude | Reduce first when Newton fails near seed/endpoint |
+| Max points | Maximum points computed in this run | Increase when branch is healthy and you want more length |
+| Min step size | Floor for adaptive step shrinking | Lower only if you need finer rescue steps; too low can be slow/noisy |
+| Max step size | Ceiling for adaptive growth | Lower if curve bends sharply or corrections fail after aggressive growth |
+| Corrector steps | Newton correction iteration cap per point | Increase if near-converged but iteration-limited |
+| Corrector tolerance | Newton residual/solve strictness | Tighten for accuracy, loosen slightly for difficult starts |
+| Step tolerance | Acceptance tolerance for step update | Tighten for stability on sensitive branches |
 
-Homoclinic branches can be extended with the same `Extend Branch` workflow used for equilibrium and limit-cycle branches.
+## Method-Specific Fields
 
-CLI:
-1. Open a `homoclinic_curve` branch.
-2. Choose `Extend Branch`.
-3. Set direction (`Forward` or `Backward`) and continuation settings.
+### Method 1: Homoclinic from Large Cycle
 
-Web:
-1. Select a `homoclinic_curve` branch.
-2. Open `Extend Branch` in Inspector.
-3. Choose direction and submit.
+Source: selected limit-cycle branch point.
 
-Notes:
+| Field | Meaning | Practical Guidance |
+|---|---|---|
+| First parameter / Second parameter | Parameter plane for codim-1 homoclinic continuation | Choose two parameters with visible effect in your model |
+| Target NTST | Number of mesh intervals for the orbit profile | Increase for long/steep orbits; lower for quick scouting |
+| Target NCOL | Collocation polynomial order per interval | Usually keep moderate; increase only when profile needs higher local fidelity |
+| Free T | Whether total homoclinic time is solved as unknown | Keep off initially unless continuation needs time re-adjustment |
+| Free eps0 | Free start-endpoint distance from equilibrium | Usually on for robust starts |
+| Free eps1 | Free end-endpoint distance from equilibrium | Usually on for robust starts |
 
-- Forward/backward extension always follows branch index orientation, independent of how the branch was originally created.
-- Two-parameter homoclinic curves decode the second parameter from packed homoclinic state when needed for plotting/inspection.
+### Method 2: Homoclinic from Homoclinic
 
-## Method 5: Homotopy-Saddle from Equilibrium
+Source: selected homoclinic branch point.
 
-Start from a point on an `equilibrium` branch.
+| Field | Meaning | Practical Guidance |
+|---|---|---|
+| Branch name | Name of the restarted branch | Use a restart suffix so provenance is obvious |
+| Target NTST / Target NCOL | Restart mesh for the homoclinic profile | Use to remesh before long extension or after repeated failures |
+| Free T / Free eps0 / Free eps1 | Which homoclinic extras remain unknowns | Start with same choices as source branch, then change one at a time |
+| Parameter plane | Inherited from source homoclinic branch metadata | If you need a different parameter pair, start a new branch in the desired plane |
 
-CLI:
-1. Open an equilibrium branch point.
-2. Choose `Continue Homotopy-Saddle (Method 5)`.
-3. Configure active parameters, `NTST/NCOL`, `eps0`, `eps1`, `T`, `eps1_tol`, and continuation settings.
+### Method 4: Homoclinic from Homotopy-Saddle
 
-Web:
-1. Select an equilibrium branch point.
-2. Open `Homotopy-Saddle from Equilibrium`.
-3. Enter initialization and continuation settings, then submit.
+Source: selected StageD point on `homotopy_saddle_curve`.
 
-Output: a new `homotopy_saddle_curve` branch with stage metadata.
+| Field | Meaning | Practical Guidance |
+|---|---|---|
+| Branch name | Name of the converted homoclinic branch | Keep stage/source info in name for traceability |
+| Target NTST / Target NCOL | Mesh used for conversion and continuation | Start moderate; raise if endpoint geometry is poorly resolved |
+| Free T / Free eps0 / Free eps1 | Homoclinic extras in the converted problem | Same tuning logic as Method 2 |
+| Parameter plane | Inherited from source homotopy-saddle branch metadata | Use a different StageD seed if you want a different continuation plane |
 
-## Method 4: Homoclinic from Homotopy-Saddle
+### Method 5: Homotopy-Saddle from Equilibrium
 
-Start from a point on a `homotopy_saddle_curve` branch that has reached `StageD`.
+Source: selected equilibrium branch point.
 
-CLI:
-1. Open a StageD homotopy-saddle branch point.
-2. Choose `Continue Homoclinic Curve (Method 4)`.
-3. Configure target mesh, free variables, and continuation settings.
+| Field | Meaning | Practical Guidance |
+|---|---|---|
+| Branch name | Name of the staged branch | Include source equilibrium/plane in name |
+| First parameter / Second parameter | Parameter plane for staged continuation | Pick parameters that move the equilibrium and global geometry measurably |
+| NTST / NCOL | Collocation discretization for staged orbit profile | Use moderate start; increase if stage progression is unstable |
+| eps0 | Initial distance from equilibrium at one endpoint | Too large can destabilize seed; too small can be overly stiff |
+| eps1 | Initial distance at the opposite endpoint | Start moderate, stage logic drives toward smaller values |
+| T | Initial orbit time window | Too short misses excursion; too long can make corrections stiff |
+| eps1_tol | StageC->StageD completion threshold | Smaller means stricter StageD readiness, usually needs more continuation |
 
-Web:
-1. Select a homotopy-saddle branch point.
-2. Verify stage is `StageD` in `Homoclinic from Homotopy-Saddle`.
-3. Submit the homoclinic continuation settings.
+## Extension of Existing Homoclinic Branches
 
-Output: a new `homoclinic_curve` branch seeded from the StageD point.
+Use the same extension workflow as other continuation branches.
 
-## Interpreting Branch Point Diagnostics
+- Web: `Extend Branch` panel on the selected homoclinic branch
+- CLI: `Extend Branch` from branch inspector
 
-For homoclinic/homotopy branches, Inspector/CLI expose branch metadata and point diagnostics, including:
+Extension uses the branch's existing continuation settings as defaults and only changes direction/length unless you edit settings.
 
-- Active parameters (`param1`, `param2`)
-- Homotopy stage (for `homotopy_saddle_curve`)
-- Packed-state endpoint diagnostics (`T`, `eps0`, `eps1`, and endpoint distances when available)
+## Troubleshooting Playbook
 
-## Notes
+| Symptom | Likely Cause | What to Try (in order) |
+|---|---|---|
+| Stops at seed point or endpoint | Predictor step too large for local geometry | 1) Lower initial step by 10x (`0.01 -> 0.001`) 2) Increase corrector steps 3) Tighten mesh (`NTST`) |
+| Continuation seems to vary mostly one parameter | Chosen parameter pair has weak sensitivity in current region | 1) Confirm both parameters are distinct and active 2) Restart from same point with a different parameter pair |
+| Frequent correction failures after a few points | Step growth too aggressive or local curvature high | 1) Lower max step size 2) Increase corrector steps 3) Tighten tolerances |
+| Branch is noisy or has poor geometric quality | Mesh too coarse for orbit shape | Increase `NTST` first, then `NCOL` if needed |
+| Method 5 does not reach StageD | Seed scaling/time window mismatched | 1) Increase `T` 2) Reduce `eps0`/`eps1` modestly 3) Increase max points |
+| Extension fails but branch itself is valid | Current branch settings/mesh not good for farther region | Create explicit restart (Method 2 or Method 4 path) with remeshed `NTST/NCOL` and then continue |
 
-- If continuation stops at or near the seed point, lower initial step size and/or tighten mesh/corrector settings.
-- For Method 4, StageD is required by design before conversion to homoclinic continuation.
+## Recommended Operating Pattern
+
+1. Build a clean source branch point (good cycle/equilibrium quality).
+2. Start with default continuation settings.
+3. If it fails, reduce initial step size first.
+4. If failures persist, remesh (`NTST` up) before changing many tolerances.
+5. Use Method 2 (or 4 from StageD) for controlled restarts instead of repeatedly forcing extension through a bad local discretization.
