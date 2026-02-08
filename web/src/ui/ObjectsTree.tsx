@@ -9,7 +9,7 @@ import {
   useState,
 } from 'react'
 import type { CSSProperties } from 'react'
-import type { System, TreeNode } from '../system/types'
+import type { ContinuationObject, System, TreeNode } from '../system/types'
 import { DEFAULT_RENDER } from '../system/model'
 import { hasCustomObjectParams } from '../system/parameters'
 import { formatEquilibriumLabel } from '../system/labels'
@@ -34,8 +34,29 @@ type ObjectsTreeProps = {
   onDeleteNode: (id: string) => void
 }
 
+function getBranchTypeLabel(branch: ContinuationObject, system: System): string {
+  if (branch.branchType === 'equilibrium') {
+    return formatEquilibriumLabel(system.config.type, {
+      lowercase: true,
+      mapIterations: branch.mapIterations,
+    })
+  }
+  if (branch.branchType === 'limit_cycle') return 'limit cycle'
+  if (branch.branchType === 'homoclinic_curve') return 'homoclinic curve'
+  if (branch.branchType === 'homotopy_saddle_curve') return 'homotopy saddle curve'
+  if (branch.branchType === 'fold_curve') return 'fold curve'
+  if (branch.branchType === 'hopf_curve') return 'hopf curve'
+  if (branch.branchType === 'lpc_curve') return 'lpc curve'
+  if (branch.branchType === 'pd_curve') return 'pd curve'
+  if (branch.branchType === 'ns_curve') return 'ns curve'
+  return 'branch'
+}
+
 function getNodeLabel(node: TreeNode, system: System) {
-  if (node.kind === 'branch') return `Branch: ${node.name}`
+  if (node.kind === 'branch') {
+    const branch = system.branches[node.id]
+    return `${node.name} (${branch ? getBranchTypeLabel(branch, system) : 'branch'})`
+  }
   if (node.objectType === 'equilibrium') {
     const object = system.objects[node.id]
     const mapIterations =

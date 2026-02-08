@@ -225,6 +225,54 @@ describe('ObjectsTree', () => {
     expect(branchPadding).toBeGreaterThan(parentPadding)
   })
 
+  it('shows parenthetical labels for continuation branches', () => {
+    const demo = createDemoSystem()
+    const periodDoubling = createPeriodDoublingSystem()
+    const limitCycleBranchId = Object.keys(periodDoubling.system.branches)[0]
+
+    if (!limitCycleBranchId) {
+      throw new Error('Missing limit cycle branch fixture data.')
+    }
+
+    render(
+      <ObjectsTree
+        system={demo.system}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={vi.fn()}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    expect(screen.getByTestId(`object-tree-node-${demo.branchNodeId}`)).toHaveTextContent(
+      'eq_branch (equilibrium)'
+    )
+
+    render(
+      <ObjectsTree
+        system={periodDoubling.system}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={vi.fn()}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    expect(screen.getByTestId(`object-tree-node-${limitCycleBranchId}`)).toHaveTextContent(
+      'lc_pd_mu (limit cycle)'
+    )
+  })
+
   it('highlights only the selected node row', () => {
     const { system } = createPeriodDoublingSystem()
     const branchId = Object.keys(system.branches)[0]
