@@ -264,14 +264,12 @@ pub fn homoclinic_setup_from_large_cycle(
     eps0 = eps0.max(1e-8);
     eps1 = eps1.max(1e-8);
 
-    let mut params = base_params.to_vec();
+    let params = base_params.to_vec();
     if param1_index >= params.len() || param2_index >= params.len() {
         bail!("Parameter index out of range");
     }
     let param1_value = params[param1_index];
     let param2_value = params[param2_index];
-    params[param1_index] = param1_value;
-    params[param2_index] = param2_value;
 
     let basis = compute_homoclinic_basis(system, &x0, &params)?;
     let y_size = basis.nneg * basis.npos;
@@ -336,12 +334,12 @@ pub fn homoclinic_setup_from_homoclinic_point(
         target_ncol,
     )?;
 
-    let mut params = base_params.to_vec();
+    let params = base_params.to_vec();
     if param1_index >= params.len() || param2_index >= params.len() {
         bail!("Parameter index out of range");
     }
     let param1_value = params[param1_index];
-    params[param2_index] = decoded.param2_value;
+    let param2_value = params[param2_index];
 
     let basis = compute_homoclinic_basis(system, &decoded.x0, &params)?;
     let y_size = basis.nneg * basis.npos;
@@ -352,7 +350,7 @@ pub fn homoclinic_setup_from_homoclinic_point(
             stage_states: remeshed.stage_states,
             x0: decoded.x0,
             param1_value,
-            param2_value: decoded.param2_value,
+            param2_value,
             time: decoded.time,
             eps0: decoded.eps0,
             eps1: decoded.eps1,
@@ -1301,6 +1299,61 @@ mod tests {
         assert!(
             (restarted.guess.eps1 - 1e-2).abs() > 1e-3,
             "eps1 should not fall back to placeholder defaults"
+        );
+    }
+
+    #[test]
+    fn homoclinic_restart_uses_selected_parameter_plane_values() {
+        let mut system = linear_system();
+        let state = synthetic_lc_state(2, 6, 2);
+        let setup = homoclinic_setup_from_large_cycle(
+            &mut system,
+            &state,
+            6,
+            2,
+            5,
+            2,
+            &[0.4, 0.2],
+            0,
+            1,
+            "mu",
+            "nu",
+            HomoclinicExtraFlags {
+                free_time: true,
+                free_eps0: true,
+                free_eps1: true,
+            },
+        )
+        .expect("setup");
+
+        let point_state = pack_homoclinic_state(&setup);
+        let restarted = homoclinic_setup_from_homoclinic_point(
+            &mut system,
+            &point_state,
+            setup.ntst,
+            setup.ncol,
+            setup.ntst,
+            setup.ncol,
+            &[0.4, 0.2],
+            1,
+            0,
+            "nu",
+            "mu",
+            HomoclinicExtraFlags {
+                free_time: true,
+                free_eps0: true,
+                free_eps1: true,
+            },
+        )
+        .expect("restart");
+
+        assert!(
+            (restarted.guess.param1_value - 0.2).abs() < 1e-12,
+            "expected selected first parameter value from base params"
+        );
+        assert!(
+            (restarted.guess.param2_value - 0.4).abs() < 1e-12,
+            "expected selected second parameter value from base params"
         );
     }
 }

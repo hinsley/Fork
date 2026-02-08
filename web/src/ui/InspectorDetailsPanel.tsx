@@ -248,6 +248,8 @@ type HomoclinicFromLargeCycleDraft = {
 
 type HomoclinicRestartDraft = {
   name: string
+  parameterName: string
+  param2Name: string
   targetNtst: string
   targetNcol: string
   freeTime: boolean
@@ -949,9 +951,14 @@ function makeHomoclinicFromLargeCycleDraft(
   }
 }
 
-function makeHomoclinicRestartDraft(): HomoclinicRestartDraft {
+function makeHomoclinicRestartDraft(system: SystemConfig): HomoclinicRestartDraft {
+  const parameterName = system.paramNames[0] ?? ''
+  const param2Name =
+    system.paramNames.find((name) => name !== parameterName) ?? system.paramNames[0] ?? ''
   return {
     name: '',
+    parameterName,
+    param2Name,
     targetNtst: '40',
     targetNcol: '4',
     freeTime: false,
@@ -1790,7 +1797,7 @@ export function InspectorDetailsPanel({
     string | null
   >(null)
   const [homoclinicFromHomoclinicDraft, setHomoclinicFromHomoclinicDraft] =
-    useState<HomoclinicRestartDraft>(() => makeHomoclinicRestartDraft())
+    useState<HomoclinicRestartDraft>(() => makeHomoclinicRestartDraft(system.config))
   const [homoclinicFromHomoclinicError, setHomoclinicFromHomoclinicError] = useState<
     string | null
   >(null)
@@ -1803,7 +1810,7 @@ export function InspectorDetailsPanel({
   const [homotopySaddleFromEquilibriumError, setHomotopySaddleFromEquilibriumError] =
     useState<string | null>(null)
   const [homoclinicFromHomotopySaddleDraft, setHomoclinicFromHomotopySaddleDraft] =
-    useState<HomoclinicRestartDraft>(() => makeHomoclinicRestartDraft())
+    useState<HomoclinicRestartDraft>(() => makeHomoclinicRestartDraft(system.config))
   const [homoclinicFromHomotopySaddleError, setHomoclinicFromHomotopySaddleError] = useState<
     string | null
   >(null)
@@ -2068,6 +2075,20 @@ export function InspectorDetailsPanel({
       return { ...prev, parameterName: systemDraft.paramNames[0] ?? '' }
     })
     setHomoclinicFromLargeCycleDraft((prev) => {
+      if (systemDraft.paramNames.length === 0) {
+        if (!prev.parameterName && !prev.param2Name) return prev
+        return { ...prev, parameterName: '', param2Name: '' }
+      }
+      const parameterName = systemDraft.paramNames.includes(prev.parameterName)
+        ? prev.parameterName
+        : firstParam
+      const param2Name =
+        systemDraft.paramNames.includes(prev.param2Name) && prev.param2Name !== parameterName
+          ? prev.param2Name
+          : resolveDistinctParam(parameterName)
+      return { ...prev, parameterName, param2Name }
+    })
+    setHomoclinicFromHomoclinicDraft((prev) => {
       if (systemDraft.paramNames.length === 0) {
         if (!prev.parameterName && !prev.param2Name) return prev
         return { ...prev, parameterName: '', param2Name: '' }
@@ -2390,7 +2411,36 @@ export function InspectorDetailsPanel({
       const safeBranchName = toCliSafeName(branchName)
       const suggestedName = `homoc_${safeBranchName}_from_homoc`
       const name = prev.name.trim().length > 0 ? prev.name : suggestedName
-      return { ...prev, name }
+      const sourceType = branch?.data.branch_type
+      const sourceParam1 =
+        sourceType &&
+        typeof sourceType === 'object' &&
+        'type' in sourceType &&
+        sourceType.type === 'HomoclinicCurve' &&
+        systemDraft.paramNames.includes(sourceType.param1_name)
+          ? sourceType.param1_name
+          : systemDraft.paramNames[0] ?? ''
+      const parameterName = systemDraft.paramNames.includes(prev.parameterName)
+        ? prev.parameterName
+        : sourceParam1
+      const fallbackParam2 =
+        systemDraft.paramNames.find((value) => value !== parameterName) ??
+        systemDraft.paramNames[0] ??
+        ''
+      const sourceParam2 =
+        sourceType &&
+        typeof sourceType === 'object' &&
+        'type' in sourceType &&
+        sourceType.type === 'HomoclinicCurve' &&
+        systemDraft.paramNames.includes(sourceType.param2_name) &&
+        sourceType.param2_name !== parameterName
+          ? sourceType.param2_name
+          : fallbackParam2
+      const param2Name =
+        systemDraft.paramNames.includes(prev.param2Name) && prev.param2Name !== parameterName
+          ? prev.param2Name
+          : sourceParam2
+      return { ...prev, name, parameterName, param2Name }
     })
     setHomotopySaddleFromEquilibriumDraft((prev) => {
       const safeBranchName = toCliSafeName(branchName)
@@ -4318,6 +4368,24 @@ export function InspectorDetailsPanel({
       setHomoclinicFromHomoclinicError('Source homoclinic branch is missing metadata.')
       return
     }
+    if (systemDraft.paramNames.length < 2) {
+      setHomoclinicFromHomoclinicError('Add another parameter before continuing.')
+      return
+    }
+    if (!systemDraft.paramNames.includes(homoclinicFromHomoclinicDraft.parameterName)) {
+      setHomoclinicFromHomoclinicError('Select a valid first continuation parameter.')
+      return
+    }
+    if (!systemDraft.paramNames.includes(homoclinicFromHomoclinicDraft.param2Name)) {
+      setHomoclinicFromHomoclinicError('Select a valid second continuation parameter.')
+      return
+    }
+    if (homoclinicFromHomoclinicDraft.parameterName === homoclinicFromHomoclinicDraft.param2Name) {
+      setHomoclinicFromHomoclinicError(
+        'Second parameter must be different from the continuation parameter.'
+      )
+      return
+    }
 
     const name =
       homoclinicFromHomoclinicDraft.name.trim() ||
@@ -4354,7 +4422,7 @@ export function InspectorDetailsPanel({
 
     const { settings, error } = buildContinuationSettings({
       name: '',
-      parameterName: branch.parameterName,
+      parameterName: homoclinicFromHomoclinicDraft.parameterName,
       stepSize: homoclinicFromHomoclinicDraft.stepSize,
       maxSteps: homoclinicFromHomoclinicDraft.maxSteps,
       minStepSize: homoclinicFromHomoclinicDraft.minStepSize,
@@ -4374,6 +4442,8 @@ export function InspectorDetailsPanel({
       branchId: selectedNodeId,
       pointIndex: branchPointIndex,
       name,
+      parameterName: homoclinicFromHomoclinicDraft.parameterName,
+      param2Name: homoclinicFromHomoclinicDraft.param2Name,
       targetNtst,
       targetNcol,
       freeTime: homoclinicFromHomoclinicDraft.freeTime,
@@ -9943,6 +10013,9 @@ export function InspectorDetailsPanel({
                           Apply valid system changes before continuing.
                         </div>
                       ) : null}
+                      {systemDraft.paramNames.length < 2 ? (
+                        <p className="empty-state">Add a second parameter to continue.</p>
+                      ) : null}
                       {!selectedBranchPoint ? (
                         <p className="empty-state">Select a branch point to continue.</p>
                       ) : (
@@ -10246,6 +10319,57 @@ export function InspectorDetailsPanel({
                               placeholder={`homoc_${toCliSafeName(branch.name)}_from_homoc`}
                               data-testid="homoclinic-from-homoclinic-name"
                             />
+                          </label>
+                          <label>
+                            First parameter
+                            <select
+                              value={homoclinicFromHomoclinicDraft.parameterName}
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => {
+                                  const parameterName = event.target.value
+                                  const fallbackParam2 =
+                                    systemDraft.paramNames.find(
+                                      (name) => name !== parameterName
+                                    ) ??
+                                    systemDraft.paramNames[0] ??
+                                    ''
+                                  const param2Name =
+                                    prev.param2Name !== parameterName &&
+                                    systemDraft.paramNames.includes(prev.param2Name)
+                                      ? prev.param2Name
+                                      : fallbackParam2
+                                  return { ...prev, parameterName, param2Name }
+                                })
+                              }
+                              data-testid="homoclinic-from-homoclinic-parameter"
+                            >
+                              {systemDraft.paramNames.map((name) => (
+                                <option key={`homoc-homoc-param1-${name}`} value={name}>
+                                  {name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Second parameter
+                            <select
+                              value={homoclinicFromHomoclinicDraft.param2Name}
+                              onChange={(event) =>
+                                setHomoclinicFromHomoclinicDraft((prev) => ({
+                                  ...prev,
+                                  param2Name: event.target.value,
+                                }))
+                              }
+                              data-testid="homoclinic-from-homoclinic-param2"
+                            >
+                              {systemDraft.paramNames
+                                .filter((name) => name !== homoclinicFromHomoclinicDraft.parameterName)
+                                .map((name) => (
+                                  <option key={`homoc-homoc-param2-${name}`} value={name}>
+                                    {name}
+                                  </option>
+                                ))}
+                            </select>
                           </label>
                           <div className="inspector-divider">Initialization</div>
                           <label>

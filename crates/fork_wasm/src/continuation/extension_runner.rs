@@ -454,6 +454,12 @@ fn synthesize_homoc_context_from_branch_seed(
         return None;
     }
     base_params[param1_index] = param1_value;
+    let dim = system.equations.len();
+    if let Some(param2_value) =
+        extract_homoclinic_param2_from_packed_state(&endpoint_state, ntst, ncol, dim)
+    {
+        base_params[param2_index] = param2_value;
+    }
 
     let mut setup = homoclinic_setup_from_homoclinic_point(
         system,
@@ -489,6 +495,27 @@ fn canonicalize_homoclinic_point_state(
         return None;
     }
     Some(pack_homoclinic_state(&setup))
+}
+
+fn extract_homoclinic_param2_from_packed_state(
+    point_state: &[f64],
+    ntst: usize,
+    ncol: usize,
+    dim: usize,
+) -> Option<f64> {
+    if dim == 0 {
+        return None;
+    }
+    let mesh_len = (ntst + 1).checked_mul(dim)?;
+    let stage_len = ntst.checked_mul(ncol)?.checked_mul(dim)?;
+    let x0_len = dim;
+    let param2_index = mesh_len.checked_add(stage_len)?.checked_add(x0_len)?;
+    let value = *point_state.get(param2_index)?;
+    if value.is_finite() {
+        Some(value)
+    } else {
+        None
+    }
 }
 
 #[wasm_bindgen]
@@ -828,6 +855,14 @@ impl WasmContinuationExtensionRunner {
                     return Err(JsValue::from_str("Homoclinic parameter index out of range"));
                 }
                 base_params[param1_index] = endpoint.param_value;
+                if let Some(param2_value) = extract_homoclinic_param2_from_packed_state(
+                    &endpoint.state,
+                    *ntst,
+                    *ncol,
+                    system.equations.len(),
+                ) {
+                    base_params[param2_index] = param2_value;
+                }
                 let extras = HomoclinicExtraFlags {
                     free_time: *free_time,
                     free_eps0: *free_eps0,

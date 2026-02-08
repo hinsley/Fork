@@ -1226,6 +1226,8 @@ describe('appState homoclinic and homotopy actions', () => {
         branchId: branchResult.nodeId,
         pointIndex: 0,
         name: 'homoc_m2',
+        parameterName: 'nu',
+        param2Name: 'mu',
         targetNtst: 8,
         targetNcol: 2,
         freeTime: true,
@@ -1237,12 +1239,19 @@ describe('appState homoclinic and homotopy actions', () => {
     })
 
     await waitFor(() => {
-      expect(findBranchIdByName(getContext().state.system!, 'homoc_m2')).toBeTruthy()
-      expect(
-        getContext().state.system!.branches[
-          findBranchIdByName(getContext().state.system!, 'homoc_m2')
-        ].branchType
-      ).toBe('homoclinic_curve')
+      const branchId = findBranchIdByName(getContext().state.system!, 'homoc_m2')
+      expect(branchId).toBeTruthy()
+      const created = getContext().state.system!.branches[branchId]
+      expect(created.branchType).toBe('homoclinic_curve')
+      expect(created.parameterName).toBe('nu, mu')
+      const branchType = created.data.branch_type as {
+        type: 'HomoclinicCurve'
+        param1_name: string
+        param2_name: string
+      }
+      expect(branchType.type).toBe('HomoclinicCurve')
+      expect(branchType.param1_name).toBe('nu')
+      expect(branchType.param2_name).toBe('mu')
     })
   })
 
@@ -1721,6 +1730,8 @@ describe('appState homoclinic and homotopy actions', () => {
         branchId: branchResult.nodeId,
         pointIndex: 0,
         name: 'homoc_restart',
+        parameterName: 'mu',
+        param2Name: 'nu',
         targetNtst: 2,
         targetNcol: 1,
         freeTime: true,

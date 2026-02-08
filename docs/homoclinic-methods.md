@@ -86,9 +86,9 @@ Source: selected homoclinic branch point.
 | Field | Meaning | Practical Guidance |
 |---|---|---|
 | Branch name | Name of the restarted branch | Use a restart suffix so provenance is obvious |
+| First parameter / Second parameter | Parameter plane for the restarted homoclinic continuation | You can switch to a new parameter pair; the two selections must be distinct |
 | Target NTST / Target NCOL | Restart mesh for the homoclinic profile | Use to remesh before long extension or after repeated failures |
 | Free T / Free eps0 / Free eps1 | Which homoclinic extras remain unknowns | Start with same choices as source branch, then change one at a time |
-| Parameter plane | Inherited from source homoclinic branch metadata | If you need a different parameter pair, start a new branch in the desired plane |
 
 ### Method 3: Homotopy-Saddle from Equilibrium
 

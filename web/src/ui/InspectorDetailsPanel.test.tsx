@@ -3614,12 +3614,18 @@ describe('InspectorDetailsPanel', () => {
     await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-0'))
     await user.click(screen.getByTestId('homoclinic-from-homoclinic-toggle'))
+    await user.selectOptions(
+      screen.getByTestId('homoclinic-from-homoclinic-parameter'),
+      'nu'
+    )
     await user.click(screen.getByTestId('homoclinic-from-homoclinic-submit'))
 
     expect(onCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         branchId: branchResult.nodeId,
         pointIndex: 0,
+        parameterName: 'nu',
+        param2Name: 'mu',
       })
     )
   })

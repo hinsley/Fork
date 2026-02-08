@@ -505,6 +505,8 @@ export type HomoclinicFromHomoclinicRequest = {
   branchId: string
   pointIndex: number
   name: string
+  parameterName: string
+  param2Name: string
   targetNtst: number
   targetNcol: number
   freeTime: boolean
@@ -3663,6 +3665,9 @@ export function AppProvider({
         if (system.type === 'map') {
           throw new Error('Homoclinic continuation is only available for flow systems.')
         }
+        if (system.paramNames.length < 2) {
+          throw new Error('Method 2 requires at least two system parameters.')
+        }
 
         const sourceBranch = state.system.branches[request.branchId]
         if (!sourceBranch) {
@@ -3692,6 +3697,15 @@ export function AppProvider({
         if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
+        if (!system.paramNames.includes(request.parameterName)) {
+          throw new Error('Select a valid first continuation parameter.')
+        }
+        if (!system.paramNames.includes(request.param2Name)) {
+          throw new Error('Select a valid second continuation parameter.')
+        }
+        if (request.param2Name === request.parameterName) {
+          throw new Error('Second parameter must be different from the continuation parameter.')
+        }
 
         if (
           !Number.isFinite(request.targetNtst) ||
@@ -3713,9 +3727,18 @@ export function AppProvider({
 
         const runConfig: SystemConfig = { ...system }
         runConfig.params = getBranchParams(state.system, sourceBranch)
-        const param1Idx = system.paramNames.indexOf(sourceType.param1_name)
-        if (param1Idx >= 0) {
-          runConfig.params[param1Idx] = point.param_value
+        const sourceParam1Idx = system.paramNames.indexOf(sourceType.param1_name)
+        if (sourceParam1Idx >= 0) {
+          runConfig.params[sourceParam1Idx] = point.param_value
+        }
+        const sourceParam2Idx = system.paramNames.indexOf(sourceType.param2_name)
+        const sourceParam2Value = resolveContinuationPointParam2Value(
+          point,
+          sourceType,
+          system.varNames.length
+        )
+        if (sourceParam2Idx >= 0 && Number.isFinite(sourceParam2Value)) {
+          runConfig.params[sourceParam2Idx] = sourceParam2Value as number
         }
 
         const seedState = resolveHomoclinicSeedState(point, system.varNames.length)
@@ -3725,8 +3748,8 @@ export function AppProvider({
             pointState: seedState,
             sourceNtst: sourceType.ntst,
             sourceNcol: sourceType.ncol,
-            parameterName: sourceType.param1_name,
-            param2Name: sourceType.param2_name,
+            parameterName: request.parameterName,
+            param2Name: request.param2Name,
             targetNtst: Math.round(request.targetNtst),
             targetNcol: Math.round(request.targetNcol),
             freeTime: request.freeTime,
@@ -3765,8 +3788,8 @@ export function AppProvider({
                 type: 'HomoclinicCurve' as const,
                 ntst: Math.round(request.targetNtst),
                 ncol: Math.round(request.targetNcol),
-                param1_name: sourceType.param1_name,
-                param2_name: sourceType.param2_name,
+                param1_name: request.parameterName,
+                param2_name: request.param2Name,
                 free_time: request.freeTime,
                 free_eps0: request.freeEps0,
                 free_eps1: request.freeEps1,
@@ -3779,7 +3802,7 @@ export function AppProvider({
           type: 'continuation',
           name,
           systemName: system.name,
-          parameterName: `${sourceType.param1_name}, ${sourceType.param2_name}`,
+          parameterName: `${request.parameterName}, ${request.param2Name}`,
           parentObject: sourceBranch.parentObject,
           startObject: sourceBranch.name,
           branchType: 'homoclinic_curve',

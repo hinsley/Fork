@@ -238,6 +238,25 @@ function resolveLimitCycleMesh(branch: ContinuationObject): { ntst: number; ncol
   return { ntst: 20, ncol: 4 };
 }
 
+function resolveHomoclinicPointParam2Value(
+  point: ContinuationPoint,
+  source: HomoclinicBranchTypeData,
+  stateDimension: number
+): number | undefined {
+  if (Number.isFinite(point.param2_value)) {
+    return point.param2_value;
+  }
+  if (!Array.isArray(point.state) || point.state.length === 0) {
+    return undefined;
+  }
+  const dim = Math.max(1, Math.round(stateDimension));
+  const meshLen = (source.ntst + 1) * dim;
+  const stageLen = source.ntst * source.ncol * dim;
+  const param2Index = meshLen + stageLen + dim;
+  const value = point.state[param2Index];
+  return Number.isFinite(value) ? value : undefined;
+}
+
 export async function initiateHomoclinicFromLargeCycle(
   sysName: string,
   branch: ContinuationObject,
@@ -665,6 +684,10 @@ export async function initiateHomoclinicFromHomoclinic(
     printError('Homoclinic continuation is only available for flow systems.');
     return null;
   }
+  if (sysConfig.paramNames.length < 2) {
+    printError('Method 2 requires at least two system parameters.');
+    return null;
+  }
 
   if (branch.branchType !== 'homoclinic_curve') {
     printError('Method 2 requires an existing homoclinic branch.');
@@ -682,6 +705,17 @@ export async function initiateHomoclinicFromHomoclinic(
   let curveName = `homoc_${branch.name}_from_homoc`;
   let targetNtstInput = `${source.ntst}`;
   let targetNcolInput = `${source.ncol}`;
+  let parameterName =
+    sysConfig.paramNames.includes(source.param1_name)
+      ? source.param1_name
+      : sysConfig.paramNames[0] ?? '';
+  let param2Name =
+    sysConfig.paramNames.includes(source.param2_name) &&
+    source.param2_name !== parameterName
+      ? source.param2_name
+      : sysConfig.paramNames.find((name) => name !== parameterName) ??
+        sysConfig.paramNames[0] ??
+        '';
   let freeTime = source.free_time;
   let freeEps0 = source.free_eps0;
   let freeEps1 = source.free_eps1;
@@ -710,6 +744,57 @@ export async function initiateHomoclinicFromHomoclinic(
           validate: (val: string) => isValidName(val)
         });
         curveName = value;
+      }
+    },
+    {
+      id: 'parameterName',
+      label: 'First parameter',
+      section: 'Output',
+      getDisplay: () => formatUnset(parameterName),
+      edit: async () => {
+        const currentIndex = Math.max(
+          0,
+          sysConfig.paramNames.findIndex((name) => name === parameterName)
+        );
+        const { value } = await inquirer.prompt({
+          type: 'rawlist',
+          name: 'value',
+          message: 'First continuation parameter:',
+          choices: sysConfig.paramNames.map((name) => ({ name, value: name })),
+          default: currentIndex
+        });
+        parameterName = value;
+        if (param2Name === parameterName || !sysConfig.paramNames.includes(param2Name)) {
+          param2Name =
+            sysConfig.paramNames.find((name) => name !== parameterName) ??
+            sysConfig.paramNames[0] ??
+            '';
+        }
+      }
+    },
+    {
+      id: 'param2Name',
+      label: 'Second parameter',
+      section: 'Output',
+      getDisplay: () => formatUnset(param2Name),
+      edit: async () => {
+        const available = sysConfig.paramNames.filter((name) => name !== parameterName);
+        const choices = (available.length > 0 ? available : sysConfig.paramNames).map((name) => ({
+          name,
+          value: name
+        }));
+        const currentIndex = Math.max(
+          0,
+          choices.findIndex((choice) => choice.value === param2Name)
+        );
+        const { value } = await inquirer.prompt({
+          type: 'rawlist',
+          name: 'value',
+          message: 'Second continuation parameter:',
+          choices,
+          default: currentIndex
+        });
+        param2Name = value;
       }
     },
     {
@@ -931,6 +1016,18 @@ export async function initiateHomoclinicFromHomoclinic(
     printError(`Branch "${curveName}" already exists.`);
     return null;
   }
+  if (!sysConfig.paramNames.includes(parameterName)) {
+    printError('Select a valid first continuation parameter.');
+    return null;
+  }
+  if (!sysConfig.paramNames.includes(param2Name)) {
+    printError('Select a valid second continuation parameter.');
+    return null;
+  }
+  if (parameterName === param2Name) {
+    printError('Second parameter must be different from the continuation parameter.');
+    return null;
+  }
 
   if (!freeTime && !freeEps0 && !freeEps1) {
     printError('At least one of T, eps0, or eps1 must be free.');
@@ -955,9 +1052,18 @@ export async function initiateHomoclinicFromHomoclinic(
     const runConfig = { ...sysConfig };
     runConfig.params = [...branchParams];
 
-    const p1Idx = sysConfig.paramNames.indexOf(source.param1_name);
-    if (p1Idx >= 0) {
-      runConfig.params[p1Idx] = point.param_value;
+    const sourceP1Idx = sysConfig.paramNames.indexOf(source.param1_name);
+    if (sourceP1Idx >= 0) {
+      runConfig.params[sourceP1Idx] = point.param_value;
+    }
+    const sourceP2Idx = sysConfig.paramNames.indexOf(source.param2_name);
+    const sourceP2Value = resolveHomoclinicPointParam2Value(
+      point,
+      source,
+      sysConfig.varNames.length
+    );
+    if (sourceP2Idx >= 0 && Number.isFinite(sourceP2Value)) {
+      runConfig.params[sourceP2Idx] = sourceP2Value as number;
     }
 
     const bridge = new WasmBridge(runConfig);
@@ -965,8 +1071,8 @@ export async function initiateHomoclinicFromHomoclinic(
       point.state,
       source.ntst,
       source.ncol,
-      source.param1_name,
-      source.param2_name,
+      parameterName,
+      param2Name,
       targetNtst,
       targetNcol,
       freeTime,
@@ -988,8 +1094,8 @@ export async function initiateHomoclinicFromHomoclinic(
         type: 'HomoclinicCurve',
         ntst: targetNtst,
         ncol: targetNcol,
-        param1_name: source.param1_name,
-        param2_name: source.param2_name,
+        param1_name: parameterName,
+        param2_name: param2Name,
         free_time: freeTime,
         free_eps0: freeEps0,
         free_eps1: freeEps1
@@ -1000,7 +1106,7 @@ export async function initiateHomoclinicFromHomoclinic(
       type: 'continuation',
       name: curveName,
       systemName: sysConfig.name,
-      parameterName: `${source.param1_name}, ${source.param2_name}`,
+      parameterName: `${parameterName}, ${param2Name}`,
       parentObject: branch.parentObject,
       startObject: branch.name,
       branchType: 'homoclinic_curve',
