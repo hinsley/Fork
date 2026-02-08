@@ -4,8 +4,8 @@ This guide explains the four homoclinic-related workflows in Fork and how to tun
 
 - Method 1: Homoclinic continuation from a large-period limit cycle point
 - Method 2: Homoclinic continuation from an existing homoclinic branch point
-- Method 3: Homoclinic continuation from a StageD homotopy-saddle point
-- Method 4: Homotopy-saddle continuation from an equilibrium branch point
+- Method 3: Homotopy-saddle continuation from an equilibrium branch point
+- Method 4: Homoclinic continuation from a StageD homotopy-saddle point
 
 All numerical work is done in Fork Core (Rust/WASM) with the continuation engine and autodiff-based derivatives.
 
@@ -23,7 +23,7 @@ The idea is:
 
 1. Start from an equilibrium and construct an easier boundary-value connection problem.
 2. Continue that problem while progressively enforcing homoclinic endpoint/manifold structure.
-3. Stop at `StageD`, which is treated as a ready seed for Method 3.
+3. Stop at `StageD`, which is treated as a ready seed for Method 4.
 
 How to think about it:
 
@@ -37,8 +37,8 @@ How to think about it:
 |---|---|---|---|
 | 1 | `limit_cycle` branch point | First homoclinic branch from a large cycle | `homoclinic_curve` |
 | 2 | `homoclinic_curve` branch point | Restart/remesh/continue an existing homoclinic branch | `homoclinic_curve` |
-| 3 | `homotopy_saddle_curve` StageD point | Convert staged seed into homoclinic continuation | `homoclinic_curve` |
-| 4 | `equilibrium` branch point | Build StageD seed through staged continuation | `homotopy_saddle_curve` |
+| 3 | `equilibrium` branch point | Build StageD seed through staged continuation | `homotopy_saddle_curve` |
+| 4 | `homotopy_saddle_curve` StageD point | Convert staged seed into homoclinic continuation | `homoclinic_curve` |
 
 ## Shared Continuation Settings (All Methods and Extension)
 
@@ -90,18 +90,7 @@ Source: selected homoclinic branch point.
 | Free T / Free eps0 / Free eps1 | Which homoclinic extras remain unknowns | Start with same choices as source branch, then change one at a time |
 | Parameter plane | Inherited from source homoclinic branch metadata | If you need a different parameter pair, start a new branch in the desired plane |
 
-### Method 3: Homoclinic from Homotopy-Saddle
-
-Source: selected StageD point on `homotopy_saddle_curve`.
-
-| Field | Meaning | Practical Guidance |
-|---|---|---|
-| Branch name | Name of the converted homoclinic branch | Keep stage/source info in name for traceability |
-| Target NTST / Target NCOL | Mesh used for conversion and continuation | Start moderate; raise if endpoint geometry is poorly resolved |
-| Free T / Free eps0 / Free eps1 | Homoclinic extras in the converted problem | Same tuning logic as Method 2 |
-| Parameter plane | Inherited from source homotopy-saddle branch metadata | Use a different StageD seed if you want a different continuation plane |
-
-### Method 4: Homotopy-Saddle from Equilibrium
+### Method 3: Homotopy-Saddle from Equilibrium
 
 Source: selected equilibrium branch point.
 
@@ -114,6 +103,17 @@ Source: selected equilibrium branch point.
 | eps1 | Initial distance at the opposite endpoint | Start moderate, stage logic drives toward smaller values |
 | T | Initial orbit time window | Too short misses excursion; too long can make corrections stiff |
 | eps1_tol | StageC->StageD completion threshold | Smaller means stricter StageD readiness, usually needs more continuation |
+
+### Method 4: Homoclinic from Homotopy-Saddle
+
+Source: selected StageD point on `homotopy_saddle_curve`.
+
+| Field | Meaning | Practical Guidance |
+|---|---|---|
+| Branch name | Name of the converted homoclinic branch | Keep stage/source info in name for traceability |
+| Target NTST / Target NCOL | Mesh used for conversion and continuation | Start moderate; raise if endpoint geometry is poorly resolved |
+| Free T / Free eps0 / Free eps1 | Homoclinic extras in the converted problem | Same tuning logic as Method 2 |
+| Parameter plane | Inherited from source homotopy-saddle branch metadata | Use a different StageD seed if you want a different continuation plane |
 
 ## Extension of Existing Homoclinic Branches
 
@@ -128,13 +128,13 @@ Important behavior:
 
 - Extension does one continuation attempt with your selected settings.
 - There is no automatic retry and no automatic method switch during extension.
-- For runs with any fixed homoclinic extras (`Free T`/`Free eps0`/`Free eps1` off), extension requires saved branch metadata from current builds. Older branches without this metadata must be recomputed once before extension.
+- For runs with any fixed homoclinic extras (`Free T`/`Free eps0`/`Free eps1` off), extension requires saved branch metadata.
 
 ## Why Extension Can Jump (and How Fork Prevents It)
 
 A large first-step jump at extension startup usually means the solver did not resume from a true continuation endpoint state and tangent. In that case, the predictor can launch from a less-local direction than the branch geometry near the endpoint.
 
-Fork now prefers endpoint resume metadata (`augmented state + tangent`) when extending from either side of a branch. For fixed-extra homoclinic runs, extension also uses saved fixed scalar metadata (`T`, `eps0`, `eps1`) so the restarted defining system matches the original run. If required endpoint/metadata decoding is unavailable, extension fails fast with an actionable error instead of silently switching methods.
+Fork uses endpoint resume metadata (`augmented state + tangent`) when extending from either side of a branch. For fixed-extra homoclinic runs, extension also uses saved fixed scalar metadata (`T`, `eps0`, `eps1`) so the defining system remains consistent across continuation and extension. If required endpoint/metadata decoding is unavailable, extension fails fast with an actionable error instead of silently switching methods.
 
 This keeps extension behavior continuous with the existing branch and avoids hidden restart logic.
 
@@ -159,8 +159,8 @@ Interpretation:
 | Continuation seems to vary mostly one parameter | Chosen parameter pair has weak sensitivity in current region | 1) Confirm both parameters are distinct and active 2) Restart from same point with a different parameter pair |
 | Frequent correction failures after a few points | Step growth too aggressive or local curvature high | 1) Lower max step size 2) Increase corrector steps 3) Tighten tolerances |
 | Branch is noisy or has poor geometric quality | Mesh too coarse for orbit shape | Increase `NTST` first, then `NCOL` if needed |
-| Method 4 does not reach StageD | Seed scaling/time window mismatched | 1) Increase `T` 2) Reduce `eps0`/`eps1` modestly 3) Increase max points |
-| Extension fails but branch itself is valid | Current branch settings/mesh not good for farther region | Create explicit restart (Method 2 or Method 3 path) with remeshed `NTST/NCOL` and then continue |
+| Method 3 does not reach StageD | Seed scaling/time window mismatched | 1) Increase `T` 2) Reduce `eps0`/`eps1` modestly 3) Increase max points |
+| Extension fails but branch itself is valid | Current branch settings/mesh not good for farther region | Create explicit restart (Method 2 or Method 4 path) with remeshed `NTST/NCOL` and then continue |
 | First extension point jumps far in parameter space | Local endpoint tangent/step was not appropriate | 1) Reduce initial step size 2) Ensure extension uses a branch with valid endpoint history 3) Re-seed via explicit Method 2 if needed |
 | `eps0/eps1` become much larger right after extension | First extension predictor left local manifold neighborhood | 1) Lower initial and max step sizes 2) Increase `NTST` 3) Reinitialize with explicit homoclinic restart |
 
@@ -170,4 +170,4 @@ Interpretation:
 2. Start with default continuation settings.
 3. If it fails, reduce initial step size first.
 4. If failures persist, remesh (`NTST` up) before changing many tolerances.
-5. Use Method 2 (or Method 3 from StageD) for controlled restarts instead of repeatedly forcing extension through a bad local discretization.
+5. Use Method 2 (or Method 4 from StageD) for controlled restarts instead of repeatedly forcing extension through a bad local discretization.
