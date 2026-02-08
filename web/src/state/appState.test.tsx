@@ -406,6 +406,183 @@ describe('appState limit cycle render targets', () => {
       })
     })
   })
+
+  it('uses continuation extension when continuing a limit cycle from a selected point', async () => {
+    const base = createSystem({ name: 'LC_From_Point' })
+    const configured = withParam(base, 'mu', 0.2)
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Seed',
+      systemName: configured.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_Seed' },
+      ntst: 4,
+      ncol: 2,
+      period: 6,
+      state: [0, 1, 1, 0, 0, -1, -1, 0, 6],
+      parameters: [...configured.config.params],
+      parameterName: 'mu',
+      paramValue: 0.2,
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(configured, limitCycle)
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_seed_mu',
+      systemName: configured.config.name,
+      parameterName: 'mu',
+      parentObject: limitCycle.name,
+      startObject: limitCycle.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          {
+            state: [0, 1, 1, 0, 0, -1, -1, 0, 6],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: { type: 'LimitCycle', ntst: 4, ncol: 2 },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...configured.config.params],
+    }
+    const branchResult = addBranch(added.system, sourceBranch, added.nodeId)
+    const client = new MockForkCoreClient(0)
+    let capturedSeedPointCount: number | null = null
+    let capturedSeedParamValue: number | null = null
+    client.runContinuationExtension = async (request) => {
+      capturedSeedPointCount = request.branchData.points.length
+      const seed = request.branchData.points[0]
+      if (!seed) {
+        throw new Error('Expected a seed point for continuation extension.')
+      }
+      capturedSeedParamValue = seed.param_value
+      return normalizeBranchEigenvalues({
+        ...request.branchData,
+        points: [
+          seed,
+          {
+            ...seed,
+            param_value: seed.param_value + request.settings.step_size,
+          },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+      })
+    }
+    const { getContext } = setupApp(branchResult.system, client)
+
+    await act(async () => {
+      await getContext().actions.createBranchFromPoint({
+        branchId: branchResult.nodeId,
+        pointIndex: 0,
+        name: 'lc_restart_mu',
+        parameterName: 'mu',
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      const next = getContext().state.system
+      expect(next).not.toBeNull()
+      expect(getContext().state.error).toBeNull()
+      expect(capturedSeedPointCount).toBe(1)
+      expect(capturedSeedParamValue).toBeCloseTo(0.2, 12)
+      const branchId = findBranchIdByName(next!, 'lc_restart_mu')
+      expect(next!.branches[branchId].branchType).toBe('limit_cycle')
+      expect(next!.branches[branchId].data.points[0]?.param_value).toBeCloseTo(0.2, 12)
+      expect(next!.branches[branchId].data.points[1]?.param_value).toBeCloseTo(
+        0.2 + continuationSettings.step_size,
+        12
+      )
+      const lcId = findObjectIdByName(next!, 'LC_Seed')
+      const lastIndex = next!.branches[branchId].data.points.length - 1
+      expect(next!.ui.limitCycleRenderTargets?.[lcId]).toEqual({
+        type: 'branch',
+        branchId,
+        pointIndex: lastIndex,
+      })
+    })
+  })
+
+  it('does not continue limit-cycle branches from a point for map systems', async () => {
+    const base = createSystem({
+      name: 'Map_LC_From_Point',
+      config: {
+        name: 'Map_LC_From_Point',
+        equations: ['mu * x * (1 - x)'],
+        params: [2.9],
+        paramNames: ['mu'],
+        varNames: ['x'],
+        solver: 'discrete',
+        type: 'map',
+      },
+    })
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'Map_LC_Seed',
+      systemName: base.config.name,
+      origin: { type: 'orbit', orbitName: 'Map_Orbit_Seed' },
+      ntst: 4,
+      ncol: 2,
+      period: 2,
+      state: [0.2, 0.8, 2],
+      parameters: [...base.config.params],
+      parameterName: 'mu',
+      paramValue: 2.9,
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(base, limitCycle)
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'map_lc_seed_mu',
+      systemName: base.config.name,
+      parameterName: 'mu',
+      parentObject: limitCycle.name,
+      startObject: limitCycle.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          {
+            state: [0.2, 0.8, 2],
+            param_value: 2.9,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: { type: 'LimitCycle', ntst: 4, ncol: 2 },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...base.config.params],
+    }
+    const branchResult = addBranch(added.system, sourceBranch, added.nodeId)
+    const { getContext } = setupApp(branchResult.system)
+
+    await act(async () => {
+      await getContext().actions.createBranchFromPoint({
+        branchId: branchResult.nodeId,
+        pointIndex: 0,
+        name: 'map_lc_restart_mu',
+        parameterName: 'mu',
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      expect(getContext().state.error).toContain('Branch continuation is only available')
+      const branchNames = Object.values(getContext().state.system!.branches).map((b) => b.name)
+      expect(branchNames).not.toContain('map_lc_restart_mu')
+    })
+  })
 })
 
 describe('appState Hopf curve continuation', () => {

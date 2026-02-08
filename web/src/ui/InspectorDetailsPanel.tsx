@@ -2908,10 +2908,17 @@ export function InspectorDetailsPanel({
       : true)
   const isPeriodDoublingPointSelected =
     selectedBranchPoint?.stability === 'PeriodDoubling'
-  const showLimitCycleFromHopf = !isDiscreteMap
+  const showLimitCycleFromHopf =
+    !isDiscreteMap &&
+    hasSelectedBranchPoint &&
+    isHopfSourceBranch &&
+    isHopfPointSelected
   const showLimitCycleFromPD = isPeriodDoublingPointSelected
+  const branchSupportsContinueFromPoint =
+    branch?.branchType === 'equilibrium' ||
+    (systemDraft.type === 'flow' && branch?.branchType === 'limit_cycle')
   const showBranchContinueFromPoint =
-    branch?.branchType === 'equilibrium' && hasSelectedBranchPoint
+    branchSupportsContinueFromPoint && hasSelectedBranchPoint
   const showCodim1CurveContinuations =
     branch?.branchType === 'equilibrium' &&
     hasSelectedBranchPoint &&
@@ -3663,8 +3670,14 @@ export function InspectorDetailsPanel({
       setBranchContinuationError('Select a branch to continue.')
       return
     }
-    if (branch.branchType !== 'equilibrium') {
-      setBranchContinuationError(`Continuation is only available for ${equilibriumLabelLower} branches.`)
+    if (!branchSupportsContinueFromPoint) {
+      const supportedLabel =
+        systemDraft.type === 'flow'
+          ? `${equilibriumLabelLower} or limit cycle`
+          : equilibriumLabelLower
+      setBranchContinuationError(
+        `Continuation is only available for ${supportedLabel} branches.`
+      )
       return
     }
     if (!selectedBranchPoint || branchPointIndex === null) {
@@ -8872,7 +8885,7 @@ export function InspectorDetailsPanel({
                         disabled={
                           runDisabled ||
                           !selectedBranchPoint ||
-                          branch.branchType !== 'equilibrium'
+                          !branchSupportsContinueFromPoint
                         }
                         data-testid="branch-from-point-submit"
                       >
@@ -10313,7 +10326,7 @@ export function InspectorDetailsPanel({
                 {showHomoclinicFromHomoclinic ? (
                   <InspectorDisclosure
                     key={`${selectionKey}-homoclinic-homoclinic`}
-                    title="Homoclinic from Homoclinic"
+                    title="Continue from Point"
                     testId="homoclinic-from-homoclinic-toggle"
                     defaultOpen={false}
                   >

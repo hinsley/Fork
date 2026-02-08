@@ -3,7 +3,7 @@
 This guide explains the four homoclinic-related workflows in Fork and how to tune them for stable continuation runs.
 
 - Method 1: Homoclinic continuation from a large-period limit cycle point
-- Method 2: Homoclinic continuation from an existing homoclinic branch point
+- Method 2: Homoclinic continuation from an existing homoclinic branch point (`Continue from Point` on a homoclinic branch)
 - Method 3: Homotopy-saddle continuation from an equilibrium branch point
 - Method 4: Homoclinic continuation from a StageD homotopy-saddle point
 
@@ -79,7 +79,7 @@ Source: selected limit-cycle branch point.
 | Free eps0 | Free start-endpoint distance from equilibrium | Usually on for robust starts |
 | Free eps1 | Free end-endpoint distance from equilibrium | Usually on for robust starts |
 
-### Method 2: Homoclinic from Homoclinic
+### Method 2: Continue from Point (Homoclinic Restart)
 
 Source: selected homoclinic branch point.
 
@@ -91,6 +91,8 @@ Source: selected homoclinic branch point.
 | Free T / Free eps0 / Free eps1 | Which homoclinic extras remain unknowns | Start with same choices as source branch, then change one at a time |
 
 Method 2 seed reconstruction uses the source branch encoding (`NTST/NCOL` and source free/fixed-extra flags), then applies your target extras for the restarted run. This keeps the restart local even when you change continuation parameters or free/fixed-extra choices.
+
+UI note: in the Inspector menu this method appears as `Continue from Point` when a homoclinic branch point is selected.
 
 ### Method 3: Homotopy-Saddle from Equilibrium
 

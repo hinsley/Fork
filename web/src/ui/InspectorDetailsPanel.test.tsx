@@ -1478,6 +1478,105 @@ describe('InspectorDetailsPanel', () => {
     })
   })
 
+  it('submits "Continue from Point" requests for flow limit-cycle branches', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({
+      name: 'LC_Continue_From_Point',
+      config: {
+        name: 'LC_Continue_From_Point',
+        equations: ['y', '-x'],
+        params: [0.2],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Seed',
+      systemName: baseSystem.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_Seed' },
+      ntst: 4,
+      ncol: 2,
+      period: 6,
+      state: [0, 1, 1, 0, 0, -1, -1, 0, 6],
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(baseSystem, limitCycle)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_seed_mu',
+      systemName: baseSystem.config.name,
+      parameterName: 'mu',
+      parentObject: limitCycle.name,
+      startObject: limitCycle.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          {
+            state: [0, 1, 1, 0, 0, -1, -1, 0, 6],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: { type: 'LimitCycle', ntst: 4, ncol: 2 },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...baseSystem.config.params],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+    const onCreateBranchFromPoint = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <InspectorDetailsPanel
+        system={branchResult.system}
+        selectedNodeId={branchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={onCreateBranchFromPoint}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-continue-toggle'))
+    await user.clear(screen.getByTestId('branch-from-point-name'))
+    await user.type(screen.getByTestId('branch-from-point-name'), 'lc_restart_mu')
+    await user.click(screen.getByTestId('branch-from-point-submit'))
+
+    expect(onCreateBranchFromPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        branchId: branchResult.nodeId,
+        pointIndex: 0,
+        name: 'lc_restart_mu',
+        parameterName: 'mu',
+      })
+    )
+  })
+
   it('labels limit cycle point details as Floquet Multipliers', async () => {
     const user = userEvent.setup()
     const baseSystem = createSystem({ name: 'LC_Label_System' })
@@ -2673,11 +2772,11 @@ describe('InspectorDetailsPanel', () => {
           {
             state: [0.1, 0.2],
             param_value: 0.2,
-            stability: 'None',
+            stability: 'Hopf',
             eigenvalues: [],
           },
         ],
-        bifurcations: [],
+        bifurcations: [0],
         indices: [0],
         branch_type: { type: 'Equilibrium' },
       },
@@ -2731,6 +2830,250 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.queryByTestId('limit-cycle-from-pd-toggle')).toBeNull()
     expect(screen.queryByText('Cycle from NS')).toBeNull()
     expect(screen.queryByText('Cycle from PD')).toBeNull()
+  })
+
+  it('hides "Limit Cycle from Hopf" for non-Hopf equilibrium points', () => {
+    const config: SystemConfig = {
+      name: 'Flow_Menu_No_Hopf',
+      equations: ['x', '-x'],
+      params: [0.2],
+      paramNames: ['mu'],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const baseSystem = createSystem({ name: config.name, config })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq_Flow_No_Hopf',
+      systemName: config.name,
+    }
+    const added = addObject(baseSystem, equilibrium)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_flow_no_hopf_mu',
+      systemName: config.name,
+      parameterName: 'mu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          {
+            state: [0.1, 0.2],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: { type: 'Equilibrium' },
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-5,
+        max_step_size: 0.1,
+        max_steps: 50,
+        corrector_steps: 4,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: new Date().toISOString(),
+      params: [...config.params],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+
+    render(
+      <InspectorDetailsPanel
+        system={branchResult.system}
+        selectedNodeId={branchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    expect(screen.queryByTestId('limit-cycle-from-hopf-toggle')).toBeNull()
+  })
+
+  it('hides "Limit Cycle from Hopf" for limit-cycle and homoclinic branches', () => {
+    const config: SystemConfig = {
+      name: 'Flow_Menu_Non_Hopf_Branches',
+      equations: ['x', '-x'],
+      params: [0.2, 0.1],
+      paramNames: ['mu', 'nu'],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const baseSystem = createSystem({ name: config.name, config })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq_Flow_Non_Hopf_Branches',
+      systemName: config.name,
+    }
+    const withEq = addObject(baseSystem, equilibrium)
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Flow_Non_Hopf',
+      systemName: config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_Flow_Non_Hopf' },
+      ntst: 4,
+      ncol: 2,
+      period: 6,
+      state: [0, 1, 1, 0, 0, -1, -1, 0, 6],
+      createdAt: new Date().toISOString(),
+    }
+    const withLc = addObject(withEq.system, limitCycle)
+    const limitCycleBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_flow_mu',
+      systemName: config.name,
+      parameterName: 'mu',
+      parentObject: limitCycle.name,
+      startObject: limitCycle.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          {
+            state: [0, 1, 1, 0, 0, -1, -1, 0, 6],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+        branch_type: { type: 'LimitCycle', ntst: 4, ncol: 2 },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...config.params],
+    }
+    const lcBranchResult = addBranch(withLc.system, limitCycleBranch, withLc.nodeId)
+    const homoclinicBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'homoc_flow_mu_nu',
+      systemName: config.name,
+      parameterName: 'mu, nu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'homoclinic_curve',
+      data: {
+        points: [
+          {
+            state: new Array(80).fill(0),
+            param_value: 0.2,
+            param2_value: 0.1,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 6,
+          ncol: 2,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          free_time: true,
+          free_eps0: true,
+          free_eps1: true,
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...config.params],
+    }
+    const homocBranchResult = addBranch(
+      lcBranchResult.system,
+      homoclinicBranch,
+      withEq.nodeId
+    )
+
+    const rendered = render(
+      <InspectorDetailsPanel
+        system={homocBranchResult.system}
+        selectedNodeId={lcBranchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+    expect(screen.queryByTestId('limit-cycle-from-hopf-toggle')).toBeNull()
+
+    rendered.rerender(
+      <InspectorDetailsPanel
+        system={homocBranchResult.system}
+        selectedNodeId={homocBranchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+    expect(screen.queryByTestId('limit-cycle-from-hopf-toggle')).toBeNull()
   })
 
   it('renders map cycle menu titles for equilibrium branches', () => {
@@ -3613,6 +3956,9 @@ describe('InspectorDetailsPanel', () => {
 
     await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-bifurcation-0'))
+    expect(screen.getByTestId('homoclinic-from-homoclinic-toggle')).toHaveTextContent(
+      'Continue from Point'
+    )
     await user.click(screen.getByTestId('homoclinic-from-homoclinic-toggle'))
     await user.selectOptions(
       screen.getByTestId('homoclinic-from-homoclinic-parameter'),

@@ -1940,9 +1940,16 @@ export function AppProvider({
         if (!sourceBranch) {
           throw new Error('Select a valid branch to continue.')
         }
-        if (sourceBranch.branchType !== 'equilibrium') {
+        const canContinueEquilibrium = sourceBranch.branchType === 'equilibrium'
+        const canContinueLimitCycle =
+          system.type === 'flow' && sourceBranch.branchType === 'limit_cycle'
+        if (!canContinueEquilibrium && !canContinueLimitCycle) {
+          const supportedLabel =
+            system.type === 'flow'
+              ? `${equilibriumLabelLower} or limit cycle`
+              : equilibriumLabelLower
           throw new Error(
-            `Branch continuation is only available for ${equilibriumLabelLower} branches.`
+            `Branch continuation is only available for ${supportedLabel} branches.`
           )
         }
 
@@ -1963,9 +1970,13 @@ export function AppProvider({
         if (!system.paramNames.includes(request.parameterName)) {
           throw new Error('Select a valid continuation parameter.')
         }
+        const continuationParamIdx = system.paramNames.indexOf(request.parameterName)
+        if (continuationParamIdx < 0) {
+          throw new Error('Select a valid continuation parameter.')
+        }
 
         let mapIterations: number | undefined
-        if (system.type === 'map') {
+        if (canContinueEquilibrium && system.type === 'map') {
           const iterations = sourceBranch.mapIterations ?? 1
           if (
             !Number.isFinite(iterations) ||
@@ -1985,25 +1996,66 @@ export function AppProvider({
           runConfig.params[sourceParamIdx] = point.param_value
         }
 
-        const branchData = await client.runEquilibriumContinuation(
-          {
-            system: runConfig,
-            equilibriumState: point.state,
-            parameterName: request.parameterName,
-            mapIterations,
-            settings: request.settings,
-            forward: request.forward,
-          },
-          {
-            onProgress: (progress) =>
-              dispatch({
-                type: 'SET_CONTINUATION_PROGRESS',
-                progress: { label: `${equilibriumLabel} continuation`, progress },
-              }),
-          }
-        )
+        const branchType: ContinuationObject['branchType'] = canContinueEquilibrium
+          ? 'equilibrium'
+          : 'limit_cycle'
+        const normalized = canContinueEquilibrium
+          ? normalizeBranchEigenvalues(
+              await client.runEquilibriumContinuation(
+                {
+                  system: runConfig,
+                  equilibriumState: point.state,
+                  parameterName: request.parameterName,
+                  mapIterations,
+                  settings: request.settings,
+                  forward: request.forward,
+                },
+                {
+                  onProgress: (progress) =>
+                    dispatch({
+                      type: 'SET_CONTINUATION_PROGRESS',
+                      progress: { label: `${equilibriumLabel} continuation`, progress },
+                    }),
+                }
+              )
+            )
+          : normalizeBranchEigenvalues(
+              await client.runContinuationExtension(
+                {
+                  system: runConfig,
+                  branchData: serializeBranchDataForWasm({
+                    ...sourceBranch,
+                    data: {
+                      ...sourceBranch.data,
+                      points: [
+                        {
+                          ...point,
+                          // Remap seed point param_value to the selected continuation parameter.
+                          // The source branch may have been continued in a different parameter.
+                          param_value: runConfig.params[continuationParamIdx],
+                        },
+                      ],
+                      bifurcations: [],
+                      indices: [0],
+                      upoldp: undefined,
+                      resume_state: undefined,
+                    },
+                  }),
+                  parameterName: request.parameterName,
+                  settings: request.settings,
+                  forward: request.forward,
+                },
+                {
+                  onProgress: (progress) =>
+                    dispatch({
+                      type: 'SET_CONTINUATION_PROGRESS',
+                      progress: { label: 'Limit Cycle continuation', progress },
+                    }),
+                }
+              ),
+              { stateDimension: system.varNames.length }
+            )
 
-        const normalized = normalizeBranchEigenvalues(branchData)
         const branch: ContinuationObject = {
           type: 'continuation',
           name,
@@ -2011,7 +2063,7 @@ export function AppProvider({
           parameterName: request.parameterName,
           parentObject: sourceBranch.parentObject,
           startObject: sourceBranch.name,
-          branchType: 'equilibrium',
+          branchType,
           data: normalized,
           settings: request.settings,
           timestamp: new Date().toISOString(),
@@ -2025,7 +2077,15 @@ export function AppProvider({
         }
 
         const created = addBranch(state.system, branch, parentNodeId)
-        const selected = selectNode(created.system, created.nodeId)
+        const nextSystem =
+          branchType === 'limit_cycle' && normalized.points.length > 0
+            ? updateLimitCycleRenderTarget(created.system, parentNodeId, {
+                type: 'branch',
+                branchId: created.nodeId,
+                pointIndex: normalized.points.length - 1,
+              })
+            : created.system
+        const selected = selectNode(nextSystem, created.nodeId)
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
@@ -2155,7 +2215,7 @@ export function AppProvider({
 
           if (updatedData.points.length <= sourceBranch.data.points.length) {
             throw new Error(
-              'Homoclinic extension stopped at the endpoint. Adjust step/mesh settings or initialize a new Homoclinic from Homoclinic branch from the selected point.'
+              'Homoclinic extension stopped at the endpoint. Adjust step/mesh settings or initialize a new homoclinic branch from the selected point.'
             )
           }
         } else {
