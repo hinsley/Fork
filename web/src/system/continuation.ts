@@ -1,5 +1,6 @@
 import type {
   ContinuationBranchData,
+  ContinuationEndpointSeed,
   ContinuationEigenvalue,
   ContinuationObject,
   ContinuationPoint,
@@ -438,6 +439,201 @@ export function ensureBranchIndices(data: ContinuationBranchData): number[] {
   return raw.map((value, index) =>
     Number.isFinite(value) ? Number(value) : index
   )
+}
+
+function isValidEndpointSeedForIndices(
+  seed: ContinuationEndpointSeed | undefined,
+  validIndices: Set<number>
+): seed is ContinuationEndpointSeed {
+  if (!seed) return false
+  if (!Number.isFinite(seed.endpoint_index) || !validIndices.has(seed.endpoint_index)) {
+    return false
+  }
+  if (!Array.isArray(seed.aug_state) || seed.aug_state.some((value) => !Number.isFinite(value))) {
+    return false
+  }
+  if (!Array.isArray(seed.tangent) || seed.tangent.some((value) => !Number.isFinite(value))) {
+    return false
+  }
+  if (!Number.isFinite(seed.step_size) || seed.step_size <= 0) return false
+  return true
+}
+
+function remapTrimmedEndpointSeed(
+  seed: ContinuationEndpointSeed | undefined,
+  indexBase: number,
+  validIndices: Set<number>
+): ContinuationEndpointSeed | undefined {
+  if (!seed || !Number.isFinite(seed.endpoint_index)) return undefined
+  const endpoint_index = seed.endpoint_index - indexBase
+  if (!validIndices.has(endpoint_index)) return undefined
+  return {
+    ...seed,
+    endpoint_index,
+  }
+}
+
+function buildAugmentedSeedState(point: ContinuationPoint): number[] | null {
+  if (!Number.isFinite(point.param_value)) return null
+  if (!Array.isArray(point.state) || point.state.length === 0) return null
+  if (point.state.some((value) => !Number.isFinite(value))) return null
+  return [point.param_value, ...point.state]
+}
+
+function normalizeSeedVector(values: number[]): number[] | null {
+  const norm = Math.hypot(...values)
+  if (!Number.isFinite(norm) || norm <= 1e-12) return null
+  return values.map((value) => value / norm)
+}
+
+function buildTrimmedBoundarySeed(
+  originalPoints: ContinuationPoint[],
+  trimmedPoints: ContinuationPoint[],
+  stepSizeHint: number
+): ContinuationEndpointSeed | undefined {
+  const retained = trimmedPoints[0]
+  if (!retained) return undefined
+  const retainedAug = buildAugmentedSeedState(retained)
+  if (!retainedAug) return undefined
+
+  let tangent: number[] | null = null
+  const prev = originalPoints[0]
+  const next = originalPoints[2]
+  if (prev && next) {
+    const prevAug = buildAugmentedSeedState(prev)
+    const nextAug = buildAugmentedSeedState(next)
+    if (
+      prevAug &&
+      nextAug &&
+      prevAug.length === retainedAug.length &&
+      nextAug.length === retainedAug.length
+    ) {
+      const centered = nextAug.map((value, index) => value - prevAug[index])
+      tangent = normalizeSeedVector(centered)
+    }
+  }
+
+  if (!tangent && trimmedPoints[1]) {
+    const neighborAug = buildAugmentedSeedState(trimmedPoints[1])
+    if (neighborAug && neighborAug.length === retainedAug.length) {
+      const secant = retainedAug.map((value, index) => value - neighborAug[index])
+      tangent = normalizeSeedVector(secant)
+    }
+  }
+
+  if (!tangent) return undefined
+  const step_size = Number.isFinite(stepSizeHint) && stepSizeHint > 0 ? stepSizeHint : 0.01
+  return {
+    endpoint_index: 0,
+    aug_state: retainedAug,
+    tangent,
+    step_size,
+  }
+}
+
+function trimHomoclinicSeedPoint(data: ContinuationBranchData): ContinuationBranchData {
+  const seedAnchor = buildAugmentedSeedState(data.points[0])
+  const points = data.points.slice(1)
+  const rawIndices =
+    data.indices && data.indices.length === data.points.length
+      ? data.indices.slice(1)
+      : points.map((_, index) => index)
+  const indexBase = rawIndices.length > 0 ? rawIndices[0] : 0
+  const indices = rawIndices.map((value, index) =>
+    Number.isFinite(value) ? value - indexBase : index
+  )
+  const validIndices = new Set<number>(indices.filter((idx) => Number.isFinite(idx)))
+  const bifurcations = (data.bifurcations ?? [])
+    .filter((idx) => idx > 0)
+    .map((idx) => idx - 1)
+    .filter((idx) => idx >= 0 && idx < points.length)
+
+  const minSeed = remapTrimmedEndpointSeed(data.resume_state?.min_index_seed, indexBase, validIndices)
+  const maxSeed = remapTrimmedEndpointSeed(data.resume_state?.max_index_seed, indexBase, validIndices)
+  const finiteIndices = indices.filter((idx) => Number.isFinite(idx))
+  const minLogicalIndex = finiteIndices.length > 0 ? Math.min(...finiteIndices) : 0
+  const maxLogicalIndex = finiteIndices.length > 0 ? Math.max(...finiteIndices) : 0
+  const boundaryStepHint =
+    data.resume_state?.min_index_seed?.step_size ??
+    data.resume_state?.max_index_seed?.step_size ??
+    0.01
+  const synthesizedBoundarySeed =
+    points.length > 1 ? buildTrimmedBoundarySeed(data.points, points, boundaryStepHint) : undefined
+  const minBoundarySeed =
+    !minSeed && synthesizedBoundarySeed && minLogicalIndex === 0
+      ? synthesizedBoundarySeed
+      : minSeed
+  const maxBoundarySeed =
+    !maxSeed && synthesizedBoundarySeed && maxLogicalIndex === 0
+      ? synthesizedBoundarySeed
+      : maxSeed
+
+  const normalized: ContinuationBranchData & { upoldp?: number[][] } = {
+    ...data,
+    points,
+    indices,
+    bifurcations,
+    resume_state: minBoundarySeed || maxBoundarySeed
+      ? {
+          min_index_seed: minBoundarySeed,
+          max_index_seed: maxBoundarySeed,
+        }
+      : undefined,
+  }
+  if (seedAnchor && seedAnchor.every(Number.isFinite)) {
+    normalized.upoldp = [seedAnchor]
+  }
+  return normalized
+}
+
+export function ensureHomoclinicEndpointResumeSeeds(
+  data: ContinuationBranchData
+): ContinuationBranchData {
+  const validIndices = new Set<number>(ensureBranchIndices(data))
+  const resume = data.resume_state
+  const minSeed = isValidEndpointSeedForIndices(resume?.min_index_seed, validIndices)
+    ? resume?.min_index_seed
+    : undefined
+  const maxSeed = isValidEndpointSeedForIndices(resume?.max_index_seed, validIndices)
+    ? resume?.max_index_seed
+    : undefined
+  if (!minSeed && !maxSeed) {
+    return { ...data, resume_state: undefined }
+  }
+  return {
+    ...data,
+    resume_state: {
+      min_index_seed: minSeed,
+      max_index_seed: maxSeed,
+    },
+  }
+}
+
+export function discardHomoclinicInitialApproximationPoint(
+  data: ContinuationBranchData
+): ContinuationBranchData {
+  if (!Array.isArray(data.points) || data.points.length <= 1) {
+    return data
+  }
+  return trimHomoclinicSeedPoint(data)
+}
+
+export function trimHomoclinicLargeCycleSeedPoint(
+  data: ContinuationBranchData
+): ContinuationBranchData {
+  if (!Array.isArray(data.points) || data.points.length <= 1) return data
+  const hasSeedAnchor =
+    Array.isArray(data.upoldp) &&
+    data.upoldp.length > 0 &&
+    Array.isArray(data.upoldp[0]) &&
+    data.upoldp[0].length > 1
+  if (hasSeedAnchor) return data
+  const indices = ensureBranchIndices(data)
+  if (indices.length <= 1) return data
+  const firstLogical = indices[0] ?? 0
+  const secondLogical = indices[1] ?? firstLogical
+  if (!(firstLogical === 0 && secondLogical !== 0)) return data
+  return trimHomoclinicSeedPoint(data)
 }
 
 export function buildSortedArrayOrder(indices: number[]): number[] {

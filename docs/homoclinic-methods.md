@@ -1,11 +1,11 @@
-# Homoclinic and Homotopy-Saddle User Guide (Methods 1, 2, 4, 5)
+# Homoclinic and Homotopy-Saddle User Guide (Methods 1, 2, 3, 4)
 
 This guide explains the four homoclinic-related workflows in Fork and how to tune them for stable continuation runs.
 
 - Method 1: Homoclinic continuation from a large-period limit cycle point
 - Method 2: Homoclinic continuation from an existing homoclinic branch point
-- Method 4: Homoclinic continuation from a StageD homotopy-saddle point
-- Method 5: Homotopy-saddle continuation from an equilibrium branch point
+- Method 3: Homoclinic continuation from a StageD homotopy-saddle point
+- Method 4: Homotopy-saddle continuation from an equilibrium branch point
 
 All numerical work is done in Fork Core (Rust/WASM) with the continuation engine and autodiff-based derivatives.
 
@@ -23,7 +23,7 @@ The idea is:
 
 1. Start from an equilibrium and construct an easier boundary-value connection problem.
 2. Continue that problem while progressively enforcing homoclinic endpoint/manifold structure.
-3. Stop at `StageD`, which is treated as a ready seed for Method 4.
+3. Stop at `StageD`, which is treated as a ready seed for Method 3.
 
 How to think about it:
 
@@ -37,8 +37,8 @@ How to think about it:
 |---|---|---|---|
 | 1 | `limit_cycle` branch point | First homoclinic branch from a large cycle | `homoclinic_curve` |
 | 2 | `homoclinic_curve` branch point | Restart/remesh/continue an existing homoclinic branch | `homoclinic_curve` |
-| 4 | `homotopy_saddle_curve` StageD point | Convert staged seed into homoclinic continuation | `homoclinic_curve` |
-| 5 | `equilibrium` branch point | Build StageD seed through staged continuation | `homotopy_saddle_curve` |
+| 3 | `homotopy_saddle_curve` StageD point | Convert staged seed into homoclinic continuation | `homoclinic_curve` |
+| 4 | `equilibrium` branch point | Build StageD seed through staged continuation | `homotopy_saddle_curve` |
 
 ## Shared Continuation Settings (All Methods and Extension)
 
@@ -90,7 +90,7 @@ Source: selected homoclinic branch point.
 | Free T / Free eps0 / Free eps1 | Which homoclinic extras remain unknowns | Start with same choices as source branch, then change one at a time |
 | Parameter plane | Inherited from source homoclinic branch metadata | If you need a different parameter pair, start a new branch in the desired plane |
 
-### Method 4: Homoclinic from Homotopy-Saddle
+### Method 3: Homoclinic from Homotopy-Saddle
 
 Source: selected StageD point on `homotopy_saddle_curve`.
 
@@ -101,7 +101,7 @@ Source: selected StageD point on `homotopy_saddle_curve`.
 | Free T / Free eps0 / Free eps1 | Homoclinic extras in the converted problem | Same tuning logic as Method 2 |
 | Parameter plane | Inherited from source homotopy-saddle branch metadata | Use a different StageD seed if you want a different continuation plane |
 
-### Method 5: Homotopy-Saddle from Equilibrium
+### Method 4: Homotopy-Saddle from Equilibrium
 
 Source: selected equilibrium branch point.
 
@@ -159,8 +159,8 @@ Interpretation:
 | Continuation seems to vary mostly one parameter | Chosen parameter pair has weak sensitivity in current region | 1) Confirm both parameters are distinct and active 2) Restart from same point with a different parameter pair |
 | Frequent correction failures after a few points | Step growth too aggressive or local curvature high | 1) Lower max step size 2) Increase corrector steps 3) Tighten tolerances |
 | Branch is noisy or has poor geometric quality | Mesh too coarse for orbit shape | Increase `NTST` first, then `NCOL` if needed |
-| Method 5 does not reach StageD | Seed scaling/time window mismatched | 1) Increase `T` 2) Reduce `eps0`/`eps1` modestly 3) Increase max points |
-| Extension fails but branch itself is valid | Current branch settings/mesh not good for farther region | Create explicit restart (Method 2 or Method 4 path) with remeshed `NTST/NCOL` and then continue |
+| Method 4 does not reach StageD | Seed scaling/time window mismatched | 1) Increase `T` 2) Reduce `eps0`/`eps1` modestly 3) Increase max points |
+| Extension fails but branch itself is valid | Current branch settings/mesh not good for farther region | Create explicit restart (Method 2 or Method 3 path) with remeshed `NTST/NCOL` and then continue |
 | First extension point jumps far in parameter space | Local endpoint tangent/step was not appropriate | 1) Reduce initial step size 2) Ensure extension uses a branch with valid endpoint history 3) Re-seed via explicit Method 2 if needed |
 | `eps0/eps1` become much larger right after extension | First extension predictor left local manifold neighborhood | 1) Lower initial and max step sizes 2) Increase `NTST` 3) Reinitialize with explicit homoclinic restart |
 
@@ -170,4 +170,4 @@ Interpretation:
 2. Start with default continuation settings.
 3. If it fails, reduce initial step size first.
 4. If failures persist, remesh (`NTST` up) before changing many tolerances.
-5. Use Method 2 (or 4 from StageD) for controlled restarts instead of repeatedly forcing extension through a bad local discretization.
+5. Use Method 2 (or Method 3 from StageD) for controlled restarts instead of repeatedly forcing extension through a bad local discretization.

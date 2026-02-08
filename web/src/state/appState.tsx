@@ -14,7 +14,6 @@ import type {
 import type { JobTiming } from '../compute/jobQueue'
 import { createSystem } from '../system/model'
 import type {
-  ContinuationEndpointSeed,
   BifurcationDiagram,
   ContinuationObject,
   ContinuationPoint,
@@ -58,11 +57,13 @@ import {
   updateSystem,
 } from '../system/model'
 import {
+  ensureHomoclinicEndpointResumeSeeds,
   ensureBranchIndices,
   extractHopfOmega,
   getBranchParams,
   normalizeEigenvalueArray,
   normalizeBranchEigenvalues,
+  trimHomoclinicLargeCycleSeedPoint,
   resolveContinuationPointParam2Value,
   serializeBranchDataForWasm,
 } from '../system/continuation'
@@ -127,194 +128,6 @@ function resolveHomoclinicSeedState(point: ContinuationPoint, stateDimension: nu
     return [...packed]
   }
   return [...point.state]
-}
-
-function isValidEndpointSeedForIndices(
-  seed: ContinuationEndpointSeed | undefined,
-  validIndices: Set<number>
-): seed is ContinuationEndpointSeed {
-  if (!seed) return false
-  if (!Number.isFinite(seed.endpoint_index)) return false
-  if (!validIndices.has(seed.endpoint_index)) return false
-  if (!Array.isArray(seed.aug_state) || seed.aug_state.some((value) => !Number.isFinite(value))) {
-    return false
-  }
-  if (!Array.isArray(seed.tangent) || seed.tangent.some((value) => !Number.isFinite(value))) {
-    return false
-  }
-  if (!Number.isFinite(seed.step_size) || seed.step_size <= 0) return false
-  return true
-}
-
-function ensureHomoclinicEndpointResumeSeeds(
-  data: ContinuationObject['data']
-): ContinuationObject['data'] {
-  const indices = ensureBranchIndices(data)
-  const validIndices = new Set<number>(indices.filter((idx) => Number.isFinite(idx)))
-  const resume = data.resume_state
-
-  const existingMin = isValidEndpointSeedForIndices(resume?.min_index_seed, validIndices)
-    ? resume?.min_index_seed
-    : undefined
-  const existingMax = isValidEndpointSeedForIndices(resume?.max_index_seed, validIndices)
-    ? resume?.max_index_seed
-    : undefined
-
-  const minSeed = existingMin
-  const maxSeed = existingMax
-  if (!minSeed && !maxSeed) {
-    return { ...data, resume_state: undefined }
-  }
-  return {
-    ...data,
-    resume_state: {
-      min_index_seed: minSeed,
-      max_index_seed: maxSeed,
-    },
-  }
-}
-
-function remapTrimmedEndpointSeed(
-  seed: ContinuationEndpointSeed | undefined,
-  indexBase: number,
-  validIndices: Set<number>
-): ContinuationEndpointSeed | undefined {
-  if (!seed || !Number.isFinite(seed.endpoint_index)) return undefined
-  const endpoint_index = seed.endpoint_index - indexBase
-  if (!validIndices.has(endpoint_index)) return undefined
-  return {
-    ...seed,
-    endpoint_index,
-  }
-}
-
-function buildAugmentedSeedState(point: ContinuationPoint): number[] | null {
-  if (!Number.isFinite(point.param_value)) return null
-  if (!Array.isArray(point.state) || point.state.length === 0) return null
-  if (point.state.some((value) => !Number.isFinite(value))) return null
-  return [point.param_value, ...point.state]
-}
-
-function normalizeSeedVector(values: number[]): number[] | null {
-  const norm = Math.hypot(...values)
-  if (!Number.isFinite(norm) || norm <= 1e-12) return null
-  return values.map((value) => value / norm)
-}
-
-function buildTrimmedBoundarySeed(
-  originalPoints: ContinuationPoint[],
-  trimmedPoints: ContinuationPoint[],
-  stepSizeHint: number
-): ContinuationEndpointSeed | undefined {
-  const retained = trimmedPoints[0]
-  if (!retained) return undefined
-  const retainedAug = buildAugmentedSeedState(retained)
-  if (!retainedAug) return undefined
-
-  let tangent: number[] | null = null
-  const prev = originalPoints[0]
-  const next = originalPoints[2]
-  if (prev && next) {
-    const prevAug = buildAugmentedSeedState(prev)
-    const nextAug = buildAugmentedSeedState(next)
-    if (
-      prevAug &&
-      nextAug &&
-      prevAug.length === retainedAug.length &&
-      nextAug.length === retainedAug.length
-    ) {
-      const centered = nextAug.map((value, index) => value - prevAug[index])
-      tangent = normalizeSeedVector(centered)
-    }
-  }
-
-  if (!tangent && trimmedPoints[1]) {
-    const neighborAug = buildAugmentedSeedState(trimmedPoints[1])
-    if (neighborAug && neighborAug.length === retainedAug.length) {
-      const secant = retainedAug.map((value, index) => value - neighborAug[index])
-      tangent = normalizeSeedVector(secant)
-    }
-  }
-
-  if (!tangent) return undefined
-  const step_size = Number.isFinite(stepSizeHint) && stepSizeHint > 0 ? stepSizeHint : 0.01
-  return {
-    endpoint_index: 0,
-    aug_state: retainedAug,
-    tangent,
-    step_size,
-  }
-}
-
-function trimHomoclinicLargeCycleSeedPoint(
-  data: ContinuationObject['data']
-): ContinuationObject['data'] {
-  if (!data.points || data.points.length <= 1) return data
-  const hasSeedAnchor =
-    Array.isArray(data.upoldp) &&
-    data.upoldp.length > 0 &&
-    Array.isArray(data.upoldp[0]) &&
-    data.upoldp[0].length > 1
-  if (hasSeedAnchor) return data
-  const indices = ensureBranchIndices(data)
-  if (indices.length <= 1) return data
-  const firstLogical = indices[0] ?? 0
-  const secondLogical = indices[1] ?? firstLogical
-  const looksLikeRawSeed = firstLogical === 0 && secondLogical !== 0
-  if (!looksLikeRawSeed) return data
-
-  const points = data.points.slice(1)
-  const rawIndices = indices.slice(1)
-  const indexBase = rawIndices.length > 0 ? rawIndices[0] : 0
-  const trimmedIndices = rawIndices.map((value, index) =>
-    Number.isFinite(value) ? value - indexBase : index
-  )
-  const bifurcations = (data.bifurcations ?? [])
-    .filter((value) => Number.isFinite(value) && value > 0)
-    .map((value) => value - 1)
-
-  const validIndices = new Set<number>(trimmedIndices.filter((idx) => Number.isFinite(idx)))
-  const minSeed = remapTrimmedEndpointSeed(
-    data.resume_state?.min_index_seed,
-    indexBase,
-    validIndices
-  )
-  const maxSeed = remapTrimmedEndpointSeed(
-    data.resume_state?.max_index_seed,
-    indexBase,
-    validIndices
-  )
-  const finiteIndices = trimmedIndices.filter((idx) => Number.isFinite(idx))
-  const minLogicalIndex = finiteIndices.length > 0 ? Math.min(...finiteIndices) : 0
-  const maxLogicalIndex = finiteIndices.length > 0 ? Math.max(...finiteIndices) : 0
-  const boundaryStepHint =
-    data.resume_state?.min_index_seed?.step_size ??
-    data.resume_state?.max_index_seed?.step_size ??
-    0.01
-  const synthesizedBoundarySeed =
-    points.length > 1 ? buildTrimmedBoundarySeed(data.points, points, boundaryStepHint) : undefined
-  const minBoundarySeed =
-    !minSeed && synthesizedBoundarySeed && minLogicalIndex === 0
-      ? synthesizedBoundarySeed
-      : minSeed
-  const maxBoundarySeed =
-    !maxSeed && synthesizedBoundarySeed && maxLogicalIndex === 0
-      ? synthesizedBoundarySeed
-      : maxSeed
-  const resume_state = minBoundarySeed || maxBoundarySeed
-    ? {
-        min_index_seed: minBoundarySeed,
-        max_index_seed: maxBoundarySeed,
-      }
-    : undefined
-
-  return {
-    ...data,
-    points,
-    indices: trimmedIndices,
-    bifurcations,
-    resume_state,
-  }
 }
 
 function getNodeLabel(node: TreeNode | undefined, systemType: SystemConfig['type']): string {
@@ -2313,7 +2126,7 @@ export function AppProvider({
 
           if (updatedData.points.length <= sourceBranch.data.points.length) {
             throw new Error(
-              'Homoclinic extension stopped at the endpoint. Adjust step/mesh settings or use explicit Homoclinic from Homoclinic.'
+              'Homoclinic extension stopped at the endpoint. Adjust step/mesh settings or initialize a new Homoclinic from Homoclinic branch from the selected point.'
             )
           }
         } else {
@@ -4198,7 +4011,7 @@ export function AppProvider({
           throw new Error('Source homotopy-saddle branch is missing metadata.')
         }
         if (sourceType.stage !== 'StageD') {
-          throw new Error('Method 4 initialization requires a StageD homotopy-saddle branch.')
+          throw new Error('Method 3 initialization requires a StageD homotopy-saddle branch.')
         }
 
         const name = request.name.trim()

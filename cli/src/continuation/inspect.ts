@@ -759,7 +759,7 @@ export async function showPointDetails(
     choices.push({ name: `Create New ${equilibriumLabel} Branch`, value: 'NEW_EQ_BRANCH' });
     if (sysConfig.type === 'flow') {
       choices.push({
-        name: 'Continue Homotopy-Saddle (Method 5)',
+        name: 'Continue Homotopy-Saddle (Method 4)',
         value: 'CONTINUE_HOMOTOPY_SADDLE'
       });
     }
@@ -809,7 +809,7 @@ export async function showPointDetails(
     const stage = (branch.data.branch_type as any)?.stage;
     if (stage === 'StageD') {
       choices.push({
-        name: 'Continue Homoclinic Curve (Method 4)',
+        name: 'Continue Homoclinic Curve (Method 3)',
         value: 'CONTINUE_HOMOCLINIC_FROM_HOMOTOPY'
       });
     }

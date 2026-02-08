@@ -74,12 +74,12 @@ export async function initiateHomotopySaddleFromEquilibrium(
   }
 
   if (branch.branchType !== 'equilibrium') {
-    printError('Method 5 requires an equilibrium branch point.');
+    printError('Method 4 requires an equilibrium branch point.');
     return null;
   }
 
   if (sysConfig.paramNames.length < 2) {
-    printError('Method 5 requires at least two system parameters.');
+    printError('Method 4 requires at least two system parameters.');
     return null;
   }
 
@@ -365,7 +365,7 @@ export async function initiateHomotopySaddleFromEquilibrium(
     }
   ];
 
-  const menuResult = await runConfigMenu('Method 5: Homotopy-Saddle from Equilibrium', entries);
+  const menuResult = await runConfigMenu('Method 4: Homotopy-Saddle from Equilibrium', entries);
   if (menuResult === 'back') {
     return null;
   }
@@ -465,7 +465,7 @@ export async function initiateHomotopySaddleFromEquilibrium(
 
     return newBranch;
   } catch (error) {
-    printError(`Method 5 failed: ${error}`);
+    printError(`Method 4 failed: ${error}`);
     return null;
   }
 }

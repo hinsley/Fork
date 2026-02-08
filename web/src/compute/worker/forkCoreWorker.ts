@@ -34,6 +34,7 @@ import type {
   ValidateSystemRequest,
   ValidateSystemResult,
 } from '../ForkCoreClient'
+import { discardHomoclinicInitialApproximationPoint } from '../../system/continuation'
 
 type WorkerRequest =
   | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
@@ -608,164 +609,6 @@ function computeBatchSize(maxSteps: number): number {
   return Math.max(1, Math.ceil(maxSteps / DEFAULT_PROGRESS_UPDATES))
 }
 
-type EndpointSeed = NonNullable<
-  HomoclinicContinuationResult['resume_state']
->[keyof NonNullable<HomoclinicContinuationResult['resume_state']>]
-
-function buildAugmentedState(point: { param_value: number; state: number[] }): number[] | null {
-  if (!Number.isFinite(point.param_value)) return null
-  if (!Array.isArray(point.state) || point.state.length === 0) return null
-  if (point.state.some((value) => !Number.isFinite(value))) return null
-  return [point.param_value, ...point.state]
-}
-
-function normalizeVector(values: number[]): number[] | null {
-  const norm = Math.hypot(...values)
-  if (!Number.isFinite(norm) || norm <= 1e-12) return null
-  return values.map((value) => value / norm)
-}
-
-function buildTrimmedBoundarySeed(
-  originalPoints: HomoclinicContinuationResult['points'],
-  trimmedPoints: HomoclinicContinuationResult['points'],
-  stepSizeHint: number
-): EndpointSeed | undefined {
-  const retained = trimmedPoints[0]
-  if (!retained) return undefined
-
-  const retainedAug = buildAugmentedState(retained)
-  if (!retainedAug) return undefined
-
-  let tangent: number[] | null = null
-  const prev = originalPoints[0]
-  const next = originalPoints[2]
-  if (prev && next) {
-    const prevAug = buildAugmentedState(prev)
-    const nextAug = buildAugmentedState(next)
-    if (
-      prevAug &&
-      nextAug &&
-      prevAug.length === retainedAug.length &&
-      nextAug.length === retainedAug.length
-    ) {
-      const centered = nextAug.map((value, index) => value - prevAug[index])
-      tangent = normalizeVector(centered)
-    }
-  }
-
-  if (!tangent && trimmedPoints[1]) {
-    const neighborAug = buildAugmentedState(trimmedPoints[1])
-    if (neighborAug && neighborAug.length === retainedAug.length) {
-      const secant = retainedAug.map((value, index) => value - neighborAug[index])
-      tangent = normalizeVector(secant)
-    }
-  }
-
-  if (!tangent) return undefined
-
-  const step_size =
-    Number.isFinite(stepSizeHint) && stepSizeHint > 0 ? stepSizeHint : 0.01
-
-  return {
-    endpoint_index: 0,
-    aug_state: retainedAug,
-    tangent,
-    step_size,
-  }
-}
-
-function remapTrimmedEndpointSeed(
-  seed: EndpointSeed | undefined,
-  indexBase: number,
-  validIndices: Set<number>
-): EndpointSeed | undefined {
-  if (!seed || !Number.isFinite(seed.endpoint_index)) {
-    return undefined
-  }
-  const endpoint_index = seed.endpoint_index - indexBase
-  if (!validIndices.has(endpoint_index)) {
-    return undefined
-  }
-  return {
-    ...seed,
-    endpoint_index,
-  }
-}
-
-function discardInitialApproximationPoint(
-  branch: HomoclinicContinuationResult
-): HomoclinicContinuationResult {
-  if (!Array.isArray(branch.points) || branch.points.length <= 1) {
-    return branch
-  }
-  const seed = branch.points[0]
-  const seedAnchor =
-    seed &&
-    Array.isArray(seed.state) &&
-    seed.state.length > 0 &&
-    Number.isFinite(seed.param_value)
-      ? [seed.param_value, ...seed.state]
-      : null
-  const points = branch.points.slice(1)
-  const rawIndices =
-    Array.isArray(branch.indices) && branch.indices.length === branch.points.length
-      ? branch.indices.slice(1)
-      : points.map((_, index) => index)
-  const indexBase = rawIndices.length > 0 ? rawIndices[0] : 0
-  const indices = rawIndices.map((value, index) =>
-    Number.isFinite(value) ? value - indexBase : index
-  )
-  const validIndices = new Set(indices.filter((idx) => Number.isFinite(idx)))
-  const bifurcations = (branch.bifurcations ?? [])
-    .filter((idx) => idx > 0)
-    .map((idx) => idx - 1)
-    .filter((idx) => idx >= 0 && idx < points.length)
-  const minSeed = remapTrimmedEndpointSeed(
-    branch.resume_state?.min_index_seed,
-    indexBase,
-    validIndices
-  )
-  const maxSeed = remapTrimmedEndpointSeed(
-    branch.resume_state?.max_index_seed,
-    indexBase,
-    validIndices
-  )
-  const minLogicalIndex =
-    indices.length > 0 ? Math.min(...indices.filter((idx) => Number.isFinite(idx))) : 0
-  const maxLogicalIndex =
-    indices.length > 0 ? Math.max(...indices.filter((idx) => Number.isFinite(idx))) : 0
-  const boundaryStepHint =
-    branch.resume_state?.min_index_seed?.step_size ??
-    branch.resume_state?.max_index_seed?.step_size ??
-    0.01
-  const synthesizedBoundarySeed =
-    points.length > 1 ? buildTrimmedBoundarySeed(branch.points, points, boundaryStepHint) : undefined
-  const minBoundarySeed =
-    !minSeed && synthesizedBoundarySeed && minLogicalIndex === 0
-      ? synthesizedBoundarySeed
-      : minSeed
-  const maxBoundarySeed =
-    !maxSeed && synthesizedBoundarySeed && maxLogicalIndex === 0
-      ? synthesizedBoundarySeed
-      : maxSeed
-  const normalized: HomoclinicContinuationResult & { upoldp?: number[][] } = {
-    ...branch,
-    points,
-    indices,
-    bifurcations,
-    resume_state: minBoundarySeed || maxBoundarySeed
-      ? {
-          min_index_seed: minBoundarySeed,
-          max_index_seed: maxBoundarySeed,
-        }
-      : undefined,
-  }
-  if (seedAnchor && seedAnchor.every(Number.isFinite)) {
-    normalized.upoldp = [seedAnchor]
-  }
-  return normalized
-}
-
 async function runEquilibriumContinuation(
   request: EquilibriumContinuationRequest,
   signal: AbortSignal,
@@ -1162,7 +1005,7 @@ async function runHomoclinicFromLargeCycle(
     onProgress(progress)
   }
 
-  return discardInitialApproximationPoint(runner.get_result())
+  return discardHomoclinicInitialApproximationPoint(runner.get_result())
 }
 
 async function runHomoclinicFromHomoclinic(

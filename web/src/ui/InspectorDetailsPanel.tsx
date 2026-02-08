@@ -2388,7 +2388,7 @@ export function InspectorDetailsPanel({
     })
     setHomoclinicFromHomoclinicDraft((prev) => {
       const safeBranchName = toCliSafeName(branchName)
-      const suggestedName = `homoc_${safeBranchName}_restart`
+      const suggestedName = `homoc_${safeBranchName}_from_homoc`
       const name = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, name }
     })
@@ -4321,7 +4321,7 @@ export function InspectorDetailsPanel({
 
     const name =
       homoclinicFromHomoclinicDraft.name.trim() ||
-      `homoc_${toCliSafeName(branch.name)}_restart`
+      `homoc_${toCliSafeName(branch.name)}_from_homoc`
     if (!name) {
       setHomoclinicFromHomoclinicError('Branch name is required.')
       return
@@ -4545,7 +4545,7 @@ export function InspectorDetailsPanel({
     }
     if (branch.data.branch_type.stage !== 'StageD') {
       setHomoclinicFromHomotopySaddleError(
-        'Method 4 initialization requires selecting a StageD homotopy-saddle branch.'
+        'Method 3 initialization requires selecting a StageD homotopy-saddle branch.'
       )
       return
     }
@@ -10243,7 +10243,7 @@ export function InspectorDetailsPanel({
                                   name: event.target.value,
                                 }))
                               }
-                              placeholder={`homoc_${toCliSafeName(branch.name)}_restart`}
+                              placeholder={`homoc_${toCliSafeName(branch.name)}_from_homoc`}
                               data-testid="homoclinic-from-homoclinic-name"
                             />
                           </label>

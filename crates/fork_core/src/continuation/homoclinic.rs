@@ -242,11 +242,11 @@ impl<'a> HomoclinicProblem<'a> {
         if nsub > th.nrows() {
             bail!("Invalid invariant-subspace dimension");
         }
-        let t11 = th.slice((0, 0), (nsub, nsub)).into_owned();
-        let t12 = th.slice((0, nsub), (nsub, th.ncols() - nsub)).into_owned();
-        let e21 = th.slice((nsub, 0), (th.nrows() - nsub, nsub)).into_owned();
+        let t11 = th.view((0, 0), (nsub, nsub)).into_owned();
+        let t12 = th.view((0, nsub), (nsub, th.ncols() - nsub)).into_owned();
+        let e21 = th.view((nsub, 0), (th.nrows() - nsub, nsub)).into_owned();
         let t22 = th
-            .slice((nsub, nsub), (th.nrows() - nsub, th.ncols() - nsub))
+            .view((nsub, nsub), (th.nrows() - nsub, th.ncols() - nsub))
             .into_owned();
         Ok(RiccatiCoeff { t11, t12, e21, t22 })
     }
