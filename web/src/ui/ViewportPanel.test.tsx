@@ -117,11 +117,36 @@ describe('ViewportPanel view state wiring', () => {
     expect(props?.layout?.scene).toBeUndefined()
     expect(props?.layout?.xaxis?.range).toBeUndefined()
     expect(props?.layout?.yaxis?.range).toBeUndefined()
+    expect(props?.layout?.xaxis?.title).toMatchObject({ text: 'x' })
+    expect(props?.layout?.yaxis?.title).toMatchObject({ text: 'y' })
     expect(props?.viewRevision).toBe(5)
     expect(props?.initialView).toMatchObject({
       'xaxis.range': [-2, 2],
       'yaxis.range': [1, 3],
     })
+  })
+
+  it('renders 2D map scene axis titles from state variable names', () => {
+    const config: SystemConfig = {
+      name: 'Map2D',
+      equations: ['x', 'y'],
+      params: [],
+      paramNames: [],
+      varNames: ['u', 'v'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    let system = createSystem({ name: 'Map2D_System', config })
+    const sceneResult = addScene(system, 'Scene Map 2D')
+    system = sceneResult.system
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    expect(props?.layout?.scene).toBeUndefined()
+    expect(props?.layout?.xaxis?.title).toMatchObject({ text: 'u' })
+    expect(props?.layout?.yaxis?.title).toMatchObject({ text: 'v' })
   })
 
   it('marks autorange when a stored axis range is null', () => {

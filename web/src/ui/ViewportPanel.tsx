@@ -3342,6 +3342,23 @@ function buildSceneBaseLayout(
     }
   }
 
+  if (varNames.length === 2) {
+    return {
+      ...base,
+      ...panMode,
+      xaxis: {
+        title: { text: varNames[0] ?? 'x', font: { color: plotlyTheme.text } },
+        zerolinecolor: 'rgba(120,120,120,0.3)',
+        tickfont: { color: plotlyTheme.text },
+      },
+      yaxis: {
+        title: { text: varNames[1] ?? 'y', font: { color: plotlyTheme.text } },
+        zerolinecolor: 'rgba(120,120,120,0.3)',
+        tickfont: { color: plotlyTheme.text },
+      },
+    }
+  }
+
   return {
     ...base,
     ...panMode,
