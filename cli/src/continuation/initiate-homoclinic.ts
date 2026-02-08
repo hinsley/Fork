@@ -257,6 +257,35 @@ function resolveHomoclinicPointParam2Value(
   return Number.isFinite(value) ? value : undefined;
 }
 
+function inferHomoclinicFixedEpsFromPoint(
+  pointState: number[],
+  ntst: number,
+  ncol: number,
+  stateDimension: number
+): { eps0: number; eps1: number } {
+  const dim = Math.max(1, Math.round(stateDimension));
+  if (!Array.isArray(pointState) || pointState.length === 0 || ntst <= 0 || ncol <= 0) {
+    return { eps0: 1e-2, eps1: 1e-2 };
+  }
+  const meshLen = (ntst + 1) * dim;
+  const stageLen = ntst * ncol * dim;
+  const x0Start = meshLen + stageLen;
+  const x0End = x0Start + dim;
+  if (pointState.length < x0End || meshLen < dim) {
+    return { eps0: 1e-2, eps1: 1e-2 };
+  }
+
+  const first = pointState.slice(0, dim);
+  const last = pointState.slice(meshLen - dim, meshLen);
+  const x0 = pointState.slice(x0Start, x0End);
+  const distance = (a: number[], b: number[]) =>
+    Math.sqrt(a.reduce((acc, value, index) => acc + (value - (b[index] ?? 0)) ** 2, 0));
+  return {
+    eps0: Math.max(1e-8, distance(first, x0)),
+    eps1: Math.max(1e-8, distance(last, x0)),
+  };
+}
+
 export async function initiateHomoclinicFromLargeCycle(
   sysName: string,
   branch: ContinuationObject,
@@ -1066,11 +1095,46 @@ export async function initiateHomoclinicFromHomoclinic(
       runConfig.params[sourceP2Idx] = sourceP2Value as number;
     }
 
+    const sourceContext = branch.data.homoc_context;
+    const inferredFixed = inferHomoclinicFixedEpsFromPoint(
+      point.state,
+      source.ntst,
+      source.ncol,
+      sysConfig.varNames.length
+    );
+    const sourceFixedTime = sourceContext?.fixed_time ?? Number.NaN;
+    const sourceFixedEps0 = sourceContext?.fixed_eps0 ?? inferredFixed.eps0;
+    const sourceFixedEps1 = sourceContext?.fixed_eps1 ?? inferredFixed.eps1;
+    if (!source.free_time && (!Number.isFinite(sourceFixedTime) || sourceFixedTime <= 0)) {
+      printError(
+        'Source homoclinic branch is missing fixed time metadata. Recompute the source branch with the current build and retry Method 2.'
+      );
+      return null;
+    }
+    if (!source.free_eps0 && (!Number.isFinite(sourceFixedEps0) || sourceFixedEps0 <= 0)) {
+      printError(
+        'Source homoclinic branch is missing fixed eps0 metadata. Recompute the source branch with the current build and retry Method 2.'
+      );
+      return null;
+    }
+    if (!source.free_eps1 && (!Number.isFinite(sourceFixedEps1) || sourceFixedEps1 <= 0)) {
+      printError(
+        'Source homoclinic branch is missing fixed eps1 metadata. Recompute the source branch with the current build and retry Method 2.'
+      );
+      return null;
+    }
+
     const bridge = new WasmBridge(runConfig);
     const setup = bridge.initHomoclinicFromHomoclinic(
       point.state,
       source.ntst,
       source.ncol,
+      source.free_time,
+      source.free_eps0,
+      source.free_eps1,
+      Number.isFinite(sourceFixedTime) ? sourceFixedTime : 1.0,
+      sourceFixedEps0,
+      sourceFixedEps1,
       parameterName,
       param2Name,
       targetNtst,

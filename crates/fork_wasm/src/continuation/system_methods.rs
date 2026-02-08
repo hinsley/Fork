@@ -8,14 +8,15 @@ use fork_core::continuation::equilibrium::{
 };
 use fork_core::continuation::{
     continue_homoclinic_curve, continue_homotopy_saddle_curve, continue_limit_cycle_collocation,
-    continue_with_problem, extend_limit_cycle_collocation, homoclinic_setup_from_homoclinic_point,
+    continue_with_problem, extend_limit_cycle_collocation,
+    homoclinic_setup_from_homoclinic_point_with_source_extras,
     homoclinic_setup_from_homotopy_saddle_point, homoclinic_setup_from_large_cycle,
     homotopy_saddle_setup_from_equilibrium, limit_cycle_setup_from_hopf,
     limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd, BranchType, Codim1CurveBranch,
     Codim1CurvePoint, Codim1CurveType, Codim2BifurcationType, CollocationConfig,
     ContinuationBranch, ContinuationSettings, FoldCurveProblem, HomoclinicExtraFlags,
-    HomoclinicSetup, HomotopySaddleSetup, HopfCurveProblem, LPCCurveProblem, LimitCycleSetup,
-    NSCurveProblem, OrbitTimeMode, PDCurveProblem, StepResult,
+    HomoclinicFixedScalars, HomoclinicSetup, HomotopySaddleSetup, HopfCurveProblem,
+    LPCCurveProblem, LimitCycleSetup, NSCurveProblem, OrbitTimeMode, PDCurveProblem, StepResult,
 };
 use fork_core::equilibrium::{compute_jacobian, SystemKind};
 use fork_core::traits::DynamicalSystem;
@@ -476,6 +477,12 @@ impl WasmSystem {
         point_state: Vec<f64>,
         source_ntst: u32,
         source_ncol: u32,
+        source_free_time: bool,
+        source_free_eps0: bool,
+        source_free_eps1: bool,
+        source_fixed_time: f64,
+        source_fixed_eps0: f64,
+        source_fixed_eps1: f64,
         parameter_name: &str,
         param2_name: &str,
         target_ntst: u32,
@@ -495,7 +502,24 @@ impl WasmSystem {
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
         let base_params = self.system.params.clone();
 
-        let setup = homoclinic_setup_from_homoclinic_point(
+        let source_extras = HomoclinicExtraFlags {
+            free_time: source_free_time,
+            free_eps0: source_free_eps0,
+            free_eps1: source_free_eps1,
+        };
+        let target_extras = HomoclinicExtraFlags {
+            free_time,
+            free_eps0,
+            free_eps1,
+        };
+
+        let source_fixed = HomoclinicFixedScalars {
+            time: source_fixed_time,
+            eps0: source_fixed_eps0,
+            eps1: source_fixed_eps1,
+        };
+
+        let setup = homoclinic_setup_from_homoclinic_point_with_source_extras(
             &mut self.system,
             &point_state,
             source_ntst as usize,
@@ -507,11 +531,9 @@ impl WasmSystem {
             param2_index,
             parameter_name,
             param2_name,
-            HomoclinicExtraFlags {
-                free_time,
-                free_eps0,
-                free_eps1,
-            },
+            target_extras,
+            source_extras,
+            Some(source_fixed),
         )
         .map_err(|e| {
             JsValue::from_str(&format!(

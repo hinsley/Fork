@@ -36,9 +36,11 @@ pub use codim1_curves::{Codim2TestFunctions, FoldCurveProblem, HopfCurveProblem}
 pub use homoclinic::continue_homoclinic_curve;
 pub use homoclinic_init::{
     compute_homoclinic_basis, decode_homoclinic_state, homoclinic_setup_from_homoclinic_point,
+    homoclinic_setup_from_homoclinic_point_with_source_extras,
     homoclinic_setup_from_homotopy_saddle_point, homoclinic_setup_from_large_cycle,
     homotopy_saddle_setup_from_equilibrium, pack_homoclinic_state, DecodedHomoclinicState,
-    HomoclinicBasis, HomoclinicExtraFlags, HomoclinicGuess, HomoclinicSetup, HomotopySaddleSetup,
+    HomoclinicBasis, HomoclinicExtraFlags, HomoclinicFixedScalars, HomoclinicGuess,
+    HomoclinicSetup, HomotopySaddleSetup,
 };
 pub use homotopy_saddle::{continue_homotopy_saddle_curve, homotopy_stage_d_to_homoclinic};
 pub use lc_codim1_curves::{LPCCurveProblem, NSCurveProblem, PDCurveProblem};

@@ -2440,7 +2440,28 @@ export function InspectorDetailsPanel({
         systemDraft.paramNames.includes(prev.param2Name) && prev.param2Name !== parameterName
           ? prev.param2Name
           : sourceParam2
-      return { ...prev, name, parameterName, param2Name }
+      const freeTime =
+        sourceType &&
+        typeof sourceType === 'object' &&
+        'type' in sourceType &&
+        sourceType.type === 'HomoclinicCurve'
+          ? sourceType.free_time
+          : prev.freeTime
+      const freeEps0 =
+        sourceType &&
+        typeof sourceType === 'object' &&
+        'type' in sourceType &&
+        sourceType.type === 'HomoclinicCurve'
+          ? sourceType.free_eps0
+          : prev.freeEps0
+      const freeEps1 =
+        sourceType &&
+        typeof sourceType === 'object' &&
+        'type' in sourceType &&
+        sourceType.type === 'HomoclinicCurve'
+          ? sourceType.free_eps1
+          : prev.freeEps1
+      return { ...prev, name, parameterName, param2Name, freeTime, freeEps0, freeEps1 }
     })
     setHomotopySaddleFromEquilibriumDraft((prev) => {
       const safeBranchName = toCliSafeName(branchName)

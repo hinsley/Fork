@@ -130,6 +130,33 @@ function resolveHomoclinicSeedState(point: ContinuationPoint, stateDimension: nu
   return [...point.state]
 }
 
+function inferHomoclinicFixedEpsFromPoint(
+  pointState: number[],
+  ntst: number,
+  ncol: number,
+  dim: number
+): { eps0: number; eps1: number } {
+  if (!Number.isInteger(ntst) || !Number.isInteger(ncol) || ntst <= 0 || ncol <= 0 || dim <= 0) {
+    return { eps0: 1e-2, eps1: 1e-2 }
+  }
+  const meshLen = (ntst + 1) * dim
+  const stageLen = ntst * ncol * dim
+  const x0Start = meshLen + stageLen
+  const x0End = x0Start + dim
+  if (pointState.length < x0End || meshLen < dim) {
+    return { eps0: 1e-2, eps1: 1e-2 }
+  }
+  const first = pointState.slice(0, dim)
+  const last = pointState.slice(meshLen - dim, meshLen)
+  const x0 = pointState.slice(x0Start, x0End)
+  const dist = (a: number[], b: number[]) =>
+    Math.sqrt(a.reduce((acc, value, index) => acc + (value - (b[index] ?? 0)) ** 2, 0))
+  return {
+    eps0: Math.max(1e-8, dist(first, x0)),
+    eps1: Math.max(1e-8, dist(last, x0)),
+  }
+}
+
 function getNodeLabel(node: TreeNode | undefined, systemType: SystemConfig['type']): string {
   if (!node) return 'Item'
   if (node.kind === 'branch') return 'Branch'
@@ -3688,6 +3715,10 @@ export function AppProvider({
         if (!sourceType || sourceType.type !== 'HomoclinicCurve') {
           throw new Error('Source homoclinic branch is missing metadata.')
         }
+        const sourceFreeTime = sourceType.free_time
+        const sourceFreeEps0 = sourceType.free_eps0
+        const sourceFreeEps1 = sourceType.free_eps1
+        const sourceContext = sourceBranch.data.homoc_context
 
         const name = request.name.trim()
         const nameError = validateBranchName(name)
@@ -3742,12 +3773,53 @@ export function AppProvider({
         }
 
         const seedState = resolveHomoclinicSeedState(point, system.varNames.length)
+        const inferredFixed = inferHomoclinicFixedEpsFromPoint(
+          seedState,
+          sourceType.ntst,
+          sourceType.ncol,
+          system.varNames.length
+        )
+        const sourceFixedTime = sourceContext?.fixed_time ?? Number.NaN
+        const sourceFixedEps0 = sourceContext?.fixed_eps0 ?? inferredFixed.eps0
+        const sourceFixedEps1 = sourceContext?.fixed_eps1 ?? inferredFixed.eps1
+
+        if (
+          !sourceFreeTime &&
+          (!Number.isFinite(sourceFixedTime) || sourceFixedTime <= 0)
+        ) {
+          throw new Error(
+            'Source homoclinic branch is missing fixed time metadata. Recompute the source branch with the current build and retry Method 2.'
+          )
+        }
+        if (
+          !sourceFreeEps0 &&
+          (!Number.isFinite(sourceFixedEps0) || sourceFixedEps0 <= 0)
+        ) {
+          throw new Error(
+            'Source homoclinic branch is missing fixed eps0 metadata. Recompute the source branch with the current build and retry Method 2.'
+          )
+        }
+        if (
+          !sourceFreeEps1 &&
+          (!Number.isFinite(sourceFixedEps1) || sourceFixedEps1 <= 0)
+        ) {
+          throw new Error(
+            'Source homoclinic branch is missing fixed eps1 metadata. Recompute the source branch with the current build and retry Method 2.'
+          )
+        }
+
         const branchData = await client.runHomoclinicFromHomoclinic(
           {
             system: runConfig,
             pointState: seedState,
             sourceNtst: sourceType.ntst,
             sourceNcol: sourceType.ncol,
+            sourceFreeTime,
+            sourceFreeEps0,
+            sourceFreeEps1,
+            sourceFixedTime: Number.isFinite(sourceFixedTime) ? sourceFixedTime : 1.0,
+            sourceFixedEps0,
+            sourceFixedEps1,
             parameterName: request.parameterName,
             param2Name: request.param2Name,
             targetNtst: Math.round(request.targetNtst),

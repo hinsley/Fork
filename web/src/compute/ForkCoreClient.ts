@@ -255,6 +255,12 @@ export type HomoclinicFromHomoclinicRequest = {
   pointState: number[]
   sourceNtst: number
   sourceNcol: number
+  sourceFreeTime: boolean
+  sourceFreeEps0: boolean
+  sourceFreeEps1: boolean
+  sourceFixedTime: number
+  sourceFixedEps0: number
+  sourceFixedEps1: number
   parameterName: string
   param2Name: string
   targetNtst: number

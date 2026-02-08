@@ -92,6 +92,13 @@ pub struct DecodedHomoclinicState {
     pub npos: usize,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct HomoclinicFixedScalars {
+    pub time: f64,
+    pub eps0: f64,
+    pub eps1: f64,
+}
+
 pub fn pack_homoclinic_state(setup: &HomoclinicSetup) -> Vec<f64> {
     let mut flat = Vec::new();
     flat.extend(setup.guess.mesh_states.iter().flatten().copied());
@@ -313,17 +320,70 @@ pub fn homoclinic_setup_from_homoclinic_point(
     param2_name: &str,
     extras: HomoclinicExtraFlags,
 ) -> Result<HomoclinicSetup> {
+    homoclinic_setup_from_homoclinic_point_with_source_extras(
+        system,
+        point_state,
+        source_ntst,
+        source_ncol,
+        target_ntst,
+        target_ncol,
+        base_params,
+        param1_index,
+        param2_index,
+        param1_name,
+        param2_name,
+        extras,
+        extras,
+        None,
+    )
+}
+
+pub fn homoclinic_setup_from_homoclinic_point_with_source_extras(
+    system: &mut EquationSystem,
+    point_state: &[f64],
+    source_ntst: usize,
+    source_ncol: usize,
+    target_ntst: usize,
+    target_ncol: usize,
+    base_params: &[f64],
+    param1_index: usize,
+    param2_index: usize,
+    param1_name: &str,
+    param2_name: &str,
+    target_extras: HomoclinicExtraFlags,
+    source_extras: HomoclinicExtraFlags,
+    source_fixed: Option<HomoclinicFixedScalars>,
+) -> Result<HomoclinicSetup> {
     let dim = system.equations.len();
     let inferred = infer_fixed_homoclinic_extras(point_state, dim, source_ntst, source_ncol);
+    let source_scalars = source_fixed.unwrap_or(HomoclinicFixedScalars {
+        time: inferred.time,
+        eps0: inferred.eps0,
+        eps1: inferred.eps1,
+    });
+
+    if !source_extras.free_time && (!source_scalars.time.is_finite() || source_scalars.time <= 0.0)
+    {
+        bail!("Homoclinic restart requires finite positive source time for fixed-time seeds");
+    }
+    if !source_extras.free_eps0 && (!source_scalars.eps0.is_finite() || source_scalars.eps0 <= 0.0)
+    {
+        bail!("Homoclinic restart requires finite positive source eps0 for fixed-eps0 seeds");
+    }
+    if !source_extras.free_eps1 && (!source_scalars.eps1.is_finite() || source_scalars.eps1 <= 0.0)
+    {
+        bail!("Homoclinic restart requires finite positive source eps1 for fixed-eps1 seeds");
+    }
+
     let decoded = decode_homoclinic_state(
         point_state,
         dim,
         source_ntst,
         source_ncol,
-        extras,
-        inferred.time,
-        inferred.eps0,
-        inferred.eps1,
+        source_extras,
+        source_scalars.time,
+        source_scalars.eps0,
+        source_scalars.eps1,
     )?;
 
     let remeshed = remesh_open_orbit(
@@ -364,7 +424,7 @@ pub fn homoclinic_setup_from_homoclinic_point(
         param1_name: param1_name.to_string(),
         param2_name: param2_name.to_string(),
         base_params: params,
-        extras,
+        extras: target_extras,
         basis,
     })
 }
@@ -1354,6 +1414,71 @@ mod tests {
         assert!(
             (restarted.guess.param2_value - 0.4).abs() < 1e-12,
             "expected selected second parameter value from base params"
+        );
+    }
+
+    #[test]
+    fn homoclinic_restart_decodes_source_state_using_source_extras() {
+        let mut system = linear_system();
+        let state = synthetic_lc_state(2, 6, 2);
+        let source_setup = homoclinic_setup_from_large_cycle(
+            &mut system,
+            &state,
+            6,
+            2,
+            5,
+            2,
+            &[0.2, 0.1],
+            0,
+            1,
+            "mu",
+            "nu",
+            HomoclinicExtraFlags {
+                free_time: false,
+                free_eps0: true,
+                free_eps1: true,
+            },
+        )
+        .expect("source setup");
+
+        let point_state = pack_homoclinic_state(&source_setup);
+        let restarted = homoclinic_setup_from_homoclinic_point_with_source_extras(
+            &mut system,
+            &point_state,
+            source_setup.ntst,
+            source_setup.ncol,
+            source_setup.ntst,
+            source_setup.ncol,
+            &[0.2, 0.1],
+            0,
+            1,
+            "mu",
+            "nu",
+            HomoclinicExtraFlags {
+                free_time: true,
+                free_eps0: true,
+                free_eps1: true,
+            },
+            HomoclinicExtraFlags {
+                free_time: false,
+                free_eps0: true,
+                free_eps1: true,
+            },
+            Some(HomoclinicFixedScalars {
+                time: source_setup.guess.time,
+                eps0: source_setup.guess.eps0,
+                eps1: source_setup.guess.eps1,
+            }),
+        )
+        .expect("restart");
+
+        assert!(
+            (restarted.guess.time - source_setup.guess.time).abs() < 1e-8,
+            "expected restart guess to preserve source fixed-time scalar"
+        );
+        assert!(
+            restarted.extras.free_time,
+            "target extras should be applied"
         );
     }
 }

@@ -1744,4 +1744,204 @@ describe('appState homoclinic and homotopy actions', () => {
 
     expect(capturedPointState).toEqual(packedState)
   })
+
+  it('passes source homoc encoding metadata into Method 2 requests', async () => {
+    const base = makeTwoParamSystem('Homoc_M2_Source_Metadata')
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_A',
+      systemName: base.config.name,
+    }
+    const added = addObject(base, equilibrium)
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'homoc_source_meta',
+      systemName: base.config.name,
+      parameterName: 'mu, nu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'homoclinic_curve',
+      data: {
+        points: [
+          {
+            state: new Array(40).fill(0),
+            param_value: 0.2,
+            param2_value: 0.1,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 4,
+          ncol: 1,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          free_time: false,
+          free_eps0: true,
+          free_eps1: true,
+        },
+        homoc_context: {
+          base_params: [0.2, 0.1],
+          param1_index: 0,
+          param2_index: 1,
+          basis: {
+            stable_q: [1, 0, 0, 1],
+            unstable_q: [1, 0, 0, 1],
+            dim: 2,
+            nneg: 1,
+            npos: 1,
+          },
+          fixed_time: 12.5,
+          fixed_eps0: 0.02,
+          fixed_eps1: 0.03,
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2, 0.1],
+    }
+    const branchResult = addBranch(added.system, sourceBranch, added.nodeId)
+    const client = new MockForkCoreClient(0)
+    let capturedSourceFreeTime: boolean | undefined
+    let capturedSourceFreeEps0: boolean | undefined
+    let capturedSourceFreeEps1: boolean | undefined
+    let capturedSourceFixedTime: number | undefined
+    let capturedSourceFixedEps0: number | undefined
+    let capturedSourceFixedEps1: number | undefined
+    client.runHomoclinicFromHomoclinic = async (request) => {
+      capturedSourceFreeTime = request.sourceFreeTime
+      capturedSourceFreeEps0 = request.sourceFreeEps0
+      capturedSourceFreeEps1 = request.sourceFreeEps1
+      capturedSourceFixedTime = request.sourceFixedTime
+      capturedSourceFixedEps0 = request.sourceFixedEps0
+      capturedSourceFixedEps1 = request.sourceFixedEps1
+      return normalizeBranchEigenvalues(
+        {
+          points: [
+            {
+              state: new Array(40).fill(0),
+              param_value: 0.2,
+              stability: 'None',
+              eigenvalues: [],
+            },
+            {
+              state: new Array(40).fill(0),
+              param_value: 0.21,
+              stability: 'None',
+              eigenvalues: [],
+            },
+          ],
+          bifurcations: [],
+          indices: [0, 1],
+          branch_type: sourceBranch.data.branch_type,
+        },
+        { stateDimension: base.config.varNames.length }
+      )
+    }
+    const { getContext } = setupApp(branchResult.system, client)
+
+    await act(async () => {
+      await getContext().actions.createHomoclinicFromHomoclinic({
+        branchId: branchResult.nodeId,
+        pointIndex: 0,
+        name: 'homoc_restart_meta',
+        parameterName: 'mu',
+        param2Name: 'nu',
+        targetNtst: 4,
+        targetNcol: 1,
+        freeTime: true,
+        freeEps0: true,
+        freeEps1: true,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    expect(capturedSourceFreeTime).toBe(false)
+    expect(capturedSourceFreeEps0).toBe(true)
+    expect(capturedSourceFreeEps1).toBe(true)
+    expect(capturedSourceFixedTime).toBeCloseTo(12.5, 8)
+    expect(capturedSourceFixedEps0).toBeCloseTo(0.02, 8)
+    expect(capturedSourceFixedEps1).toBeCloseTo(0.03, 8)
+  })
+
+  it('fails Method 2 early when fixed-time source metadata is missing', async () => {
+    const base = makeTwoParamSystem('Homoc_M2_Missing_Fixed_Time')
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_A',
+      systemName: base.config.name,
+    }
+    const added = addObject(base, equilibrium)
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'homoc_source_missing_meta',
+      systemName: base.config.name,
+      parameterName: 'mu, nu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'homoclinic_curve',
+      data: {
+        points: [
+          {
+            state: new Array(40).fill(0),
+            param_value: 0.2,
+            param2_value: 0.1,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 4,
+          ncol: 1,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          free_time: false,
+          free_eps0: true,
+          free_eps1: true,
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2, 0.1],
+    }
+    const branchResult = addBranch(added.system, sourceBranch, added.nodeId)
+    const client = new MockForkCoreClient(0)
+    const homocSpy = vi.fn()
+    client.runHomoclinicFromHomoclinic = async () => {
+      homocSpy()
+      return {
+        points: [],
+        bifurcations: [],
+        indices: [],
+      }
+    }
+    const { getContext } = setupApp(branchResult.system, client)
+
+    await act(async () => {
+      await getContext().actions.createHomoclinicFromHomoclinic({
+        branchId: branchResult.nodeId,
+        pointIndex: 0,
+        name: 'homoc_restart_should_fail',
+        parameterName: 'mu',
+        param2Name: 'nu',
+        targetNtst: 4,
+        targetNcol: 1,
+        freeTime: true,
+        freeEps0: true,
+        freeEps1: true,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    expect(homocSpy).not.toHaveBeenCalled()
+    expect(getContext().state.error).toContain('missing fixed time metadata')
+  })
 })

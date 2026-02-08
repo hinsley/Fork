@@ -90,6 +90,8 @@ Source: selected homoclinic branch point.
 | Target NTST / Target NCOL | Restart mesh for the homoclinic profile | Use to remesh before long extension or after repeated failures |
 | Free T / Free eps0 / Free eps1 | Which homoclinic extras remain unknowns | Start with same choices as source branch, then change one at a time |
 
+Method 2 seed reconstruction uses the source branch encoding (`NTST/NCOL` and source free/fixed-extra flags), then applies your target extras for the restarted run. This keeps the restart local even when you change continuation parameters or free/fixed-extra choices.
+
 ### Method 3: Homotopy-Saddle from Equilibrium
 
 Source: selected equilibrium branch point.
