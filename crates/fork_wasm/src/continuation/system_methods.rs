@@ -1009,11 +1009,18 @@ impl WasmSystem {
         let implicit_ncoords = ntst * ncol * dim + ntst * dim;
 
         let full_lc_state = if lc_state.len() == implicit_ncoords {
-            let mut padded = lc_state.clone();
-            let stages_len = ntst * ncol * dim;
-            let u0: Vec<f64> = lc_state[stages_len..stages_len + dim].to_vec();
-            padded.extend(u0);
-            padded
+            // Limit-cycle branches store mesh-first implicit periodic data:
+            // [mesh_0 .. mesh_(ntst-1), stages...].
+            // Isochrone expects stage-first explicit periodic data:
+            // [stages..., mesh_0 .. mesh_ntst], where mesh_ntst = mesh_0.
+            let mesh_len = ntst * dim;
+            let mesh = &lc_state[..mesh_len];
+            let stages = &lc_state[mesh_len..];
+            let mut reordered = Vec::with_capacity(expected_ncoords);
+            reordered.extend_from_slice(stages);
+            reordered.extend_from_slice(mesh);
+            reordered.extend_from_slice(&mesh[..dim]);
+            reordered
         } else if lc_state.len() == expected_ncoords {
             lc_state.clone()
         } else {

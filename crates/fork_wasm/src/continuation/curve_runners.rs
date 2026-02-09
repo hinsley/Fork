@@ -272,6 +272,41 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
+    fn isochrone_curve_runner_reorders_mesh_first_lc_state_to_stage_first() {
+        // ntst=2, ncol=1, dim=1
+        // Input layout (mesh-first implicit): [mesh0, mesh1, stage0, stage1]
+        // Expected internal/output layout (stage-first explicit):
+        // [stage0, stage1, mesh0, mesh1, mesh0]
+        let period = 3.0;
+        let mut runner = WasmIsochroneCurveRunner::new(
+            vec!["a * x + b".to_string()],
+            vec![1.0, 2.0],
+            vec!["a".to_string(), "b".to_string()],
+            vec!["x".to_string()],
+            vec![10.0, 20.0, 30.0, 40.0],
+            period,
+            "a",
+            1.0,
+            "b",
+            2.0,
+            2,
+            1,
+            settings_value(0),
+            true,
+        )
+        .expect("runner");
+
+        runner.run_steps(1).expect("run steps");
+        let branch_val = runner.get_result().expect("result");
+        let branch: Codim1CurveBranch = from_value(branch_val).expect("branch");
+
+        assert_eq!(branch.curve_type, Codim1CurveType::Isochrone);
+        assert_eq!(branch.points.len(), 1);
+        let point = &branch.points[0];
+        assert_eq!(point.state, vec![30.0, 40.0, 10.0, 20.0, 10.0, period]);
+    }
+
+    #[wasm_bindgen_test]
     fn ns_curve_runner_rejects_invalid_state_len() {
         let result = WasmNSCurveRunner::new(
             vec!["x".to_string()],
@@ -651,11 +686,18 @@ impl WasmLPCCurveRunner {
         let implicit_ncoords = ntst * ncol * dim + ntst * dim;
 
         let full_lc_state = if lc_state.len() == implicit_ncoords {
-            let mut padded = lc_state.clone();
-            let stages_len = ntst * ncol * dim;
-            let u0: Vec<f64> = lc_state[stages_len..stages_len + dim].to_vec();
-            padded.extend(u0);
-            padded
+            // Limit-cycle branches store mesh-first implicit periodic data:
+            // [mesh_0 .. mesh_(ntst-1), stages...].
+            // Isochrone expects stage-first explicit periodic data:
+            // [stages..., mesh_0 .. mesh_ntst], where mesh_ntst = mesh_0.
+            let mesh_len = ntst * dim;
+            let mesh = &lc_state[..mesh_len];
+            let stages = &lc_state[mesh_len..];
+            let mut reordered = Vec::with_capacity(expected_ncoords);
+            reordered.extend_from_slice(stages);
+            reordered.extend_from_slice(mesh);
+            reordered.extend_from_slice(&mesh[..dim]);
+            reordered
         } else if lc_state.len() == expected_ncoords {
             lc_state.clone()
         } else {
