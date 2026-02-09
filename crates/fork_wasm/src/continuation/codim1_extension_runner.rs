@@ -1022,7 +1022,7 @@ fn build_secant_direction<F>(
     branch: &Codim1BranchData,
     neighbor_idx: Option<usize>,
     end_aug: &DVector<f64>,
-    is_append: bool,
+    _is_append: bool,
     mut state_builder: F,
 ) -> Result<Option<DVector<f64>>, JsValue>
 where
@@ -1039,11 +1039,10 @@ where
         for (i, v) in neighbor_state.iter().enumerate() {
             neighbor_aug[i + 1] = *v;
         }
-        let secant = if is_append {
-            end_aug - neighbor_aug
-        } else {
-            neighbor_aug - end_aug
-        };
+        // Always orient secant from interior neighbor -> selected endpoint.
+        // This preserves outward continuation on both append (max-index) and
+        // prepend (min-index) extension sides.
+        let secant = end_aug - neighbor_aug;
         if secant.norm() > 1e-12 {
             Some(secant.normalize())
         } else {
@@ -1575,8 +1574,12 @@ fn split_lc_continuation_state(
 
 #[cfg(test)]
 mod tests {
-    use super::{convert_extension_point, Codim1BranchType, CurveDim};
+    use super::{
+        build_secant_direction, convert_extension_point, Codim1BranchData, Codim1BranchPoint,
+        Codim1BranchType, CurveDim,
+    };
     use fork_core::continuation::{BifurcationType, Codim2BifurcationType, ContinuationPoint};
+    use nalgebra::DVector;
 
     #[test]
     fn convert_isochrone_extension_point_keeps_period_and_param2() {
@@ -1607,6 +1610,55 @@ mod tests {
         assert_eq!(converted.param2_value, Some(0.12));
         assert_eq!(converted.state, vec![0.3, -0.4, 5.5]);
         assert_eq!(converted.stability.as_deref(), Some("None"));
+    }
+
+    #[test]
+    fn backward_extension_secant_points_outward_from_neighbor_to_endpoint() {
+        let branch = Codim1BranchData {
+            points: vec![
+                Codim1BranchPoint {
+                    state: vec![0.0],
+                    param_value: -0.3,
+                    param2_value: Some(0.2),
+                    stability: None,
+                    eigenvalues: Vec::new(),
+                    auxiliary: None,
+                },
+                Codim1BranchPoint {
+                    state: vec![0.0],
+                    param_value: -0.2,
+                    param2_value: Some(0.2),
+                    stability: None,
+                    eigenvalues: Vec::new(),
+                    auxiliary: None,
+                },
+            ],
+            bifurcations: Vec::new(),
+            indices: vec![-3, -2],
+            branch_type: Codim1BranchType::FoldCurve {
+                param1_name: "a".to_string(),
+                param2_name: "b".to_string(),
+            },
+        };
+
+        let end_aug = DVector::from_vec(vec![-0.3, 0.0]);
+        let secant = build_secant_direction(
+            &branch,
+            Some(1),
+            &end_aug,
+            false,
+            |pt| Ok(pt.state.clone()),
+        )
+        .expect("build secant")
+        .expect("secant");
+
+        // Endpoint is at smaller parameter than interior neighbor, so outward
+        // direction for backward extension should be negative in param component.
+        assert!(
+            secant[0] < 0.0,
+            "Expected backward secant param component < 0, got {}",
+            secant[0]
+        );
     }
 
     #[cfg(target_arch = "wasm32")]
