@@ -315,6 +315,20 @@ type Codim1CurveDraft = {
   forward: boolean
 }
 
+type IsochroneCurveDraft = {
+  name: string
+  parameterName: string
+  param2Name: string
+  stepSize: string
+  maxSteps: string
+  minStepSize: string
+  maxStepSize: string
+  correctorSteps: string
+  correctorTolerance: string
+  stepTolerance: string
+  forward: boolean
+}
+
 type BranchEntry = {
   id: string
   name: string
@@ -1125,6 +1139,25 @@ function makeCodim1CurveDraft(system: SystemConfig): Codim1CurveDraft {
   }
 }
 
+function makeIsochroneCurveDraft(system: SystemConfig): IsochroneCurveDraft {
+  const parameterName = system.paramNames[0] ?? ''
+  const param2Name =
+    system.paramNames.find((name) => name !== parameterName) ?? system.paramNames[0] ?? ''
+  return {
+    name: '',
+    parameterName,
+    param2Name,
+    stepSize: '0.01',
+    maxSteps: '300',
+    minStepSize: '1e-5',
+    maxStepSize: '0.1',
+    correctorSteps: '10',
+    correctorTolerance: '1e-8',
+    stepTolerance: '1e-8',
+    forward: true,
+  }
+}
+
 function makeSystemDraft(system: SystemConfig): SystemDraft {
   return {
     name: system.name,
@@ -1871,8 +1904,8 @@ export function InspectorDetailsPanel({
     makeCodim1CurveDraft(system.config)
   )
   const [hopfCurveError, setHopfCurveError] = useState<string | null>(null)
-  const [isochroneCurveDraft, setIsochroneCurveDraft] = useState<Codim1CurveDraft>(() =>
-    makeCodim1CurveDraft(system.config)
+  const [isochroneCurveDraft, setIsochroneCurveDraft] = useState<IsochroneCurveDraft>(() =>
+    makeIsochroneCurveDraft(system.config)
   )
   const [isochroneCurveError, setIsochroneCurveError] = useState<string | null>(null)
   const [nsCurveDraft, setNSCurveDraft] = useState<Codim1CurveDraft>(() =>
@@ -2206,6 +2239,20 @@ export function InspectorDetailsPanel({
       }
       return { ...prev, param2Name: systemDraft.paramNames[0] ?? '' }
     })
+    setIsochroneCurveDraft((prev) => {
+      if (systemDraft.paramNames.length === 0) {
+        if (!prev.parameterName && !prev.param2Name) return prev
+        return { ...prev, parameterName: '', param2Name: '' }
+      }
+      const parameterName = systemDraft.paramNames.includes(prev.parameterName)
+        ? prev.parameterName
+        : firstParam
+      const param2Name =
+        systemDraft.paramNames.includes(prev.param2Name) && prev.param2Name !== parameterName
+          ? prev.param2Name
+          : resolveDistinctParam(parameterName)
+      return { ...prev, parameterName, param2Name }
+    })
     setNSCurveDraft((prev) => {
       if (systemDraft.paramNames.length === 0) {
         if (!prev.param2Name) return prev
@@ -2421,16 +2468,26 @@ export function InspectorDetailsPanel({
         hopfCodim1Params &&
         systemDraft.paramNames.includes(hopfCodim1Params.param1)
           ? hopfCodim1Params.param1
-          : branchParameterName
+          : systemDraft.paramNames.includes(branchParameterName)
+            ? branchParameterName
+            : systemDraft.paramNames[0] ?? ''
+      const parameterName =
+        systemDraft.paramNames.includes(prev.parameterName)
+          ? prev.parameterName
+          : sourceParam1Name
+      const fallbackParam2 =
+        systemDraft.paramNames.find((name) => name !== parameterName) ??
+        systemDraft.paramNames[0] ??
+        ''
       const param2Name =
         systemDraft.paramNames.includes(prev.param2Name) &&
-        prev.param2Name !== sourceParam1Name
+        prev.param2Name !== parameterName
           ? prev.param2Name
-          : fallbackParam
+          : fallbackParam2
       const safeBranchName = toCliSafeName(branchName)
       const suggestedName = `isochrone_curve_${safeBranchName}`
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
-      return { ...prev, param2Name, name: nextName }
+      return { ...prev, parameterName, param2Name, name: nextName }
     })
     setNSCurveDraft((prev) => {
       const param2Name =
@@ -2973,6 +3030,12 @@ export function InspectorDetailsPanel({
         : branchParameterName
     return systemDraft.paramNames.filter((name) => name !== sourceParam1Name)
   }, [systemDraft.paramNames, branch?.branchType, branchParameterName, isochroneSourceParam1Name])
+  const isochroneParam1Options = systemDraft.paramNames
+  const isochroneParam2Options = useMemo(
+    () =>
+      systemDraft.paramNames.filter((name) => name !== isochroneCurveDraft.parameterName),
+    [systemDraft.paramNames, isochroneCurveDraft.parameterName]
+  )
   const branchStartIndex = branchSortedOrder[0]
   const branchEndIndex = branchSortedOrder[branchSortedOrder.length - 1]
   const branchStartPoint = branchStartIndex !== undefined ? branch?.data.points[branchStartIndex] : null
@@ -4011,22 +4074,24 @@ export function InspectorDetailsPanel({
       setIsochroneCurveError('Add another parameter before continuing.')
       return
     }
+    if (!isochroneCurveDraft.parameterName) {
+      setIsochroneCurveError('Select a first continuation parameter.')
+      return
+    }
+    if (!systemDraft.paramNames.includes(isochroneCurveDraft.parameterName)) {
+      setIsochroneCurveError('Select a valid first continuation parameter.')
+      return
+    }
     if (!isochroneCurveDraft.param2Name) {
       setIsochroneCurveError('Select a second continuation parameter.')
       return
     }
-    const sourceParam1Name =
-      branch.branchType === 'isochrone_curve'
-        ? codim1ParamNames?.param1 ?? ''
-        : branchParameterName
-    if (!systemDraft.paramNames.includes(sourceParam1Name)) {
-      setIsochroneCurveError('Source continuation parameter is not defined in this system.')
+    if (!systemDraft.paramNames.includes(isochroneCurveDraft.param2Name)) {
+      setIsochroneCurveError('Select a valid second continuation parameter.')
       return
     }
-    if (isochroneCurveDraft.param2Name === sourceParam1Name) {
-      setIsochroneCurveError(
-        'Second parameter must be different from the continuation parameter.'
-      )
+    if (isochroneCurveDraft.param2Name === isochroneCurveDraft.parameterName) {
+      setIsochroneCurveError('Second parameter must be different from the first continuation parameter.')
       return
     }
 
@@ -4053,6 +4118,7 @@ export function InspectorDetailsPanel({
       branchId: selectedNodeId,
       pointIndex: branchPointIndex,
       name,
+      parameterName: isochroneCurveDraft.parameterName,
       param2Name: isochroneCurveDraft.param2Name,
       settings,
       forward: isochroneCurveDraft.forward,
@@ -9669,6 +9735,46 @@ export function InspectorDetailsPanel({
                         />
                       </label>
                       <label>
+                        First parameter
+                        <select
+                          value={isochroneCurveDraft.parameterName}
+                          onChange={(event) =>
+                            setIsochroneCurveDraft((prev) => {
+                              const parameterName = event.target.value
+                              const fallbackParam2 =
+                                systemDraft.paramNames.find((name) => name !== parameterName) ?? ''
+                              const param2Name =
+                                prev.param2Name !== parameterName &&
+                                systemDraft.paramNames.includes(prev.param2Name)
+                                  ? prev.param2Name
+                                  : fallbackParam2
+                              return { ...prev, parameterName, param2Name }
+                            })
+                          }
+                          disabled={isochroneParam1Options.length === 0}
+                          data-testid="isochrone-curve-param1"
+                        >
+                          {isochroneParam1Options.map((name) => {
+                            const idx = systemDraft.paramNames.indexOf(name)
+                            const branchValue =
+                              branchParams.length === systemDraft.paramNames.length
+                                ? branchParams[idx]
+                                : undefined
+                            const fallbackValue = parseNumber(systemDraft.params[idx] ?? '')
+                            const value = branchValue ?? fallbackValue
+                            const label = `${name} (current: ${formatNumber(
+                              value ?? Number.NaN,
+                              6
+                            )})`
+                            return (
+                              <option key={name} value={name}>
+                                {label}
+                              </option>
+                            )
+                          })}
+                        </select>
+                      </label>
+                      <label>
                         Second parameter
                         <select
                           value={isochroneCurveDraft.param2Name}
@@ -9678,10 +9784,10 @@ export function InspectorDetailsPanel({
                               param2Name: event.target.value,
                             }))
                           }
-                          disabled={codim1ParamOptions.length === 0}
+                          disabled={isochroneParam2Options.length === 0}
                           data-testid="isochrone-curve-param2"
                         >
-                          {codim1ParamOptions.map((name) => {
+                          {isochroneParam2Options.map((name) => {
                             const idx = systemDraft.paramNames.indexOf(name)
                             const branchValue =
                               branchParams.length === systemDraft.paramNames.length

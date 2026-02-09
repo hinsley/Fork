@@ -1669,8 +1669,10 @@ describe('InspectorDetailsPanel', () => {
 
     await user.click(screen.getByTestId('isochrone-curve-toggle'))
     await user.clear(screen.getByTestId('isochrone-curve-name'))
-    await user.type(screen.getByTestId('isochrone-curve-name'), 'iso_curve_mu_nu')
-    await user.selectOptions(screen.getByTestId('isochrone-curve-param2'), 'nu')
+    await user.type(screen.getByTestId('isochrone-curve-name'), 'iso_curve_nu_mu')
+    expect(screen.getByTestId('isochrone-curve-param1')).toHaveValue('mu')
+    await user.selectOptions(screen.getByTestId('isochrone-curve-param1'), 'nu')
+    await user.selectOptions(screen.getByTestId('isochrone-curve-param2'), 'mu')
     await user.selectOptions(screen.getByTestId('isochrone-curve-direction'), 'backward')
     await user.click(screen.getByTestId('isochrone-curve-submit'))
 
@@ -1678,8 +1680,9 @@ describe('InspectorDetailsPanel', () => {
       expect.objectContaining({
         branchId: branchResult.nodeId,
         pointIndex: 0,
-        name: 'iso_curve_mu_nu',
-        param2Name: 'nu',
+        name: 'iso_curve_nu_mu',
+        parameterName: 'nu',
+        param2Name: 'mu',
         forward: false,
       })
     )
@@ -1783,16 +1786,19 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.getByTestId('isochrone-curve-toggle')).toHaveTextContent('Continue from Point')
     await user.click(screen.getByTestId('isochrone-curve-toggle'))
     await user.clear(screen.getByTestId('isochrone-curve-name'))
-    await user.type(screen.getByTestId('isochrone-curve-name'), 'iso_curve_mu_kappa')
-    await user.selectOptions(screen.getByTestId('isochrone-curve-param2'), 'kappa')
+    await user.type(screen.getByTestId('isochrone-curve-name'), 'iso_curve_kappa_mu')
+    expect(screen.getByTestId('isochrone-curve-param1')).toHaveValue('mu')
+    await user.selectOptions(screen.getByTestId('isochrone-curve-param1'), 'kappa')
+    await user.selectOptions(screen.getByTestId('isochrone-curve-param2'), 'mu')
     await user.click(screen.getByTestId('isochrone-curve-submit'))
 
     expect(onCreateIsochroneCurveFromPoint).toHaveBeenCalledWith(
       expect.objectContaining({
         branchId: branchResult.nodeId,
         pointIndex: 0,
-        name: 'iso_curve_mu_kappa',
-        param2Name: 'kappa',
+        name: 'iso_curve_kappa_mu',
+        parameterName: 'kappa',
+        param2Name: 'mu',
       })
     )
   })

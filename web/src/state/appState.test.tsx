@@ -595,8 +595,9 @@ describe('appState limit cycle render targets', () => {
       await getContext().actions.createIsochroneCurveFromPoint({
         branchId: withBranch.nodeId,
         pointIndex: 0,
-        name: 'iso_curve_mu_nu',
-        param2Name: 'nu',
+        name: 'iso_curve_nu_mu',
+        parameterName: 'nu',
+        param2Name: 'mu',
         settings: continuationSettings,
         forward: true,
       })
@@ -607,14 +608,14 @@ describe('appState limit cycle render targets', () => {
       expect(next).not.toBeNull()
       expect(getContext().state.error).toBeNull()
       expect(capturedPeriod).toBeCloseTo(6, 12)
-      const branchId = findBranchIdByName(next!, 'iso_curve_mu_nu')
+      const branchId = findBranchIdByName(next!, 'iso_curve_nu_mu')
       const created = next!.branches[branchId]
       expect(created.branchType).toBe('isochrone_curve')
       expect(created.parentObject).toBe('LC_Iso')
       expect(created.data.branch_type).toMatchObject({
         type: 'IsochroneCurve',
-        param1_name: 'mu',
-        param2_name: 'nu',
+        param1_name: 'nu',
+        param2_name: 'mu',
       })
       expect(created.data.points[0]?.state.at(-1)).toBeCloseTo(6, 12)
     })
@@ -714,8 +715,9 @@ describe('appState limit cycle render targets', () => {
       await getContext().actions.createIsochroneCurveFromPoint({
         branchId: withBranch.nodeId,
         pointIndex: 0,
-        name: 'iso_curve_mu_kappa',
-        param2Name: 'kappa',
+        name: 'iso_curve_kappa_mu',
+        parameterName: 'kappa',
+        param2Name: 'mu',
         settings: continuationSettings,
         forward: true,
       })
@@ -726,18 +728,18 @@ describe('appState limit cycle render targets', () => {
       expect(next).not.toBeNull()
       expect(getContext().state.error).toBeNull()
       expect(capturedRequest).not.toBeNull()
-      expect(capturedRequest?.param1Name).toBe('mu')
-      expect(capturedRequest?.param1Value).toBeCloseTo(0.25, 12)
-      expect(capturedRequest?.param2Name).toBe('kappa')
-      expect(capturedRequest?.system.params[0]).toBeCloseTo(0.25, 12)
+      expect(capturedRequest?.param1Name).toBe('kappa')
+      expect(capturedRequest?.param1Value).toBeCloseTo(0.3, 12)
+      expect(capturedRequest?.param2Name).toBe('mu')
+      expect(capturedRequest?.param2Value).toBeCloseTo(0.25, 12)
       expect(capturedRequest?.system.params[1]).toBeCloseTo(0.35, 12)
-      const branchId = findBranchIdByName(next!, 'iso_curve_mu_kappa')
+      const branchId = findBranchIdByName(next!, 'iso_curve_kappa_mu')
       const created = next!.branches[branchId]
       expect(created.branchType).toBe('isochrone_curve')
       expect(created.data.branch_type).toMatchObject({
         type: 'IsochroneCurve',
-        param1_name: 'mu',
-        param2_name: 'kappa',
+        param1_name: 'kappa',
+        param2_name: 'mu',
       })
     })
   })

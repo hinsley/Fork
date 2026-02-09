@@ -470,6 +470,7 @@ export type IsochroneCurveContinuationRequest = {
   branchId: string
   pointIndex: number
   name: string
+  parameterName: string
   param2Name: string
   settings: ContinuationSettings
   forward: boolean
@@ -2662,26 +2663,26 @@ export function AppProvider({
           throw new Error(`Branch "${name}" already exists.`)
         }
 
-        const param1Name =
-          sourceBranch.branchType === 'isochrone_curve' && branchType.type === 'IsochroneCurve'
-            ? branchType.param1_name
-            : sourceBranch.parameterName
+        const param1Name = request.parameterName
         if (!system.paramNames.includes(param1Name)) {
-          throw new Error('Source continuation parameter is not defined in this system.')
+          throw new Error('Select a valid first continuation parameter.')
         }
-
         const param2Name = request.param2Name
         if (!system.paramNames.includes(param2Name)) {
           throw new Error('Select a valid second continuation parameter.')
         }
         if (param2Name === param1Name) {
-          throw new Error('Second parameter must be different from the continuation parameter.')
+          throw new Error('Second parameter must be different from the first continuation parameter.')
         }
 
         const runConfig: SystemConfig = { ...system }
         runConfig.params = getBranchParams(state.system, sourceBranch)
 
         if (sourceBranch.branchType === 'isochrone_curve' && branchType.type === 'IsochroneCurve') {
+          const sourceParam1Idx = system.paramNames.indexOf(branchType.param1_name)
+          if (sourceParam1Idx >= 0) {
+            runConfig.params[sourceParam1Idx] = point.param_value
+          }
           const sourceParam2Idx = system.paramNames.indexOf(branchType.param2_name)
           const sourceParam2Value = resolveContinuationPointParam2Value(
             point,
@@ -2693,9 +2694,20 @@ export function AppProvider({
           }
         }
 
+        if (sourceBranch.branchType === 'limit_cycle') {
+          const sourceParam1Idx = system.paramNames.indexOf(sourceBranch.parameterName)
+          if (sourceParam1Idx >= 0) {
+            runConfig.params[sourceParam1Idx] = point.param_value
+          }
+        }
+
         const param1Idx = system.paramNames.indexOf(param1Name)
-        if (param1Idx >= 0) {
-          runConfig.params[param1Idx] = point.param_value
+        if (param1Idx < 0) {
+          throw new Error('Select a valid first continuation parameter.')
+        }
+        const param1Value = runConfig.params[param1Idx]
+        if (!Number.isFinite(param1Value)) {
+          throw new Error('Selected first continuation parameter has no valid value.')
         }
 
         const param2Idx = system.paramNames.indexOf(param2Name)
@@ -2703,6 +2715,9 @@ export function AppProvider({
           throw new Error('Select a valid second continuation parameter.')
         }
         const param2Value = runConfig.params[param2Idx]
+        if (!Number.isFinite(param2Value)) {
+          throw new Error('Selected second continuation parameter has no valid value.')
+        }
 
         const curveData = await client.runIsochroneCurveContinuation(
           {
@@ -2710,7 +2725,7 @@ export function AppProvider({
             lcState: point.state.slice(0, -1),
             period,
             param1Name,
-            param1Value: point.param_value,
+            param1Value,
             param2Name,
             param2Value,
             ntst,

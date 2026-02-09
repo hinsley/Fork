@@ -1009,21 +1009,30 @@ export async function initiateIsochroneCurve(
   const ntst = lcBranchType.ntst || 20;
   const ncol = lcBranchType.ncol || 4;
 
-  const param1Name =
+  const sourceParam1Name =
     lcBranchType.type === 'IsochroneCurve' ? lcBranchType.param1_name : branch.parameterName;
-  if (!paramNames.includes(param1Name)) {
+  if (!paramNames.includes(sourceParam1Name)) {
     printError('Source continuation parameter is not defined in this system.');
     return null;
   }
-  const param1Value = point.param_value;
-  let param2Name = paramNames.find(p => p !== param1Name) || paramNames[0];
-  let param2Idx = paramNames.indexOf(param2Name);
+
+  const sourceParam1Idx = paramNames.indexOf(sourceParam1Name);
+  if (sourceParam1Idx >= 0) {
+    branchParams[sourceParam1Idx] = point.param_value;
+  }
   if (lcBranchType.type === 'IsochroneCurve' && Number.isFinite(point.param2_value)) {
     const sourceParam2Idx = paramNames.indexOf(lcBranchType.param2_name);
     if (sourceParam2Idx >= 0) {
       branchParams[sourceParam2Idx] = point.param2_value as number;
     }
   }
+
+  let param1Name = sourceParam1Name;
+  let param1Idx = paramNames.indexOf(param1Name);
+  let param1Value = branchParams[param1Idx];
+
+  let param2Name = paramNames.find(p => p !== param1Name) || paramNames[0];
+  let param2Idx = paramNames.indexOf(param2Name);
   let param2Value = branchParams[param2Idx];
 
   const period = point.state[point.state.length - 1];
@@ -1046,6 +1055,34 @@ export async function initiateIsochroneCurve(
     forward ? 'Forward' : 'Backward';
 
   const entries: ConfigEntry[] = [
+    {
+      id: 'param1',
+      label: 'First parameter',
+      section: 'Two-Parameter Setup',
+      getDisplay: () => `${param1Name} = ${param1Value}`,
+      edit: async () => {
+        const choices = paramNames.map(p => {
+          const idx = paramNames.indexOf(p);
+          return { name: `${p} (current: ${branchParams[idx]})`, value: p };
+        });
+        const { value } = await inquirer.prompt({
+          type: 'rawlist',
+          name: 'value',
+          message: 'Select first continuation parameter:',
+          choices,
+          default: param1Name,
+          pageSize: MENU_PAGE_SIZE
+        });
+        param1Name = value;
+        param1Idx = paramNames.indexOf(param1Name);
+        param1Value = branchParams[param1Idx];
+        if (param2Name === param1Name) {
+          param2Name = paramNames.find(p => p !== param1Name) || param1Name;
+        }
+        param2Idx = paramNames.indexOf(param2Name);
+        param2Value = branchParams[param2Idx];
+      }
+    },
     {
       id: 'param2',
       label: 'Second parameter',
@@ -1185,6 +1222,19 @@ export async function initiateIsochroneCurve(
     break;
   }
 
+  if (param1Name === param2Name) {
+    printError('Second parameter must be different from the first continuation parameter.');
+    return null;
+  }
+  if (!Number.isFinite(param1Value)) {
+    printError('Selected first continuation parameter has no valid value.');
+    return null;
+  }
+  if (!Number.isFinite(param2Value)) {
+    printError('Selected second continuation parameter has no valid value.');
+    return null;
+  }
+
   const continuationSettings = {
     step_size: Math.max(parseFloatOrDefault(stepSizeInput, 0.01), 1e-9),
     min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-5), 1e-12),
@@ -1200,7 +1250,8 @@ export async function initiateIsochroneCurve(
   try {
     const runConfig = { ...sysConfig };
     runConfig.params = [...branchParams];
-    runConfig.params[paramNames.indexOf(param1Name)] = param1Value;
+    runConfig.params[param1Idx] = param1Value;
+    runConfig.params[param2Idx] = param2Value;
 
     const bridge = new WasmBridge(runConfig);
     const lcCoords = point.state.slice(0, -1);
