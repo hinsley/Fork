@@ -293,6 +293,53 @@ impl<'a> IsochroneCurveProblem<'a> {
 
         Ok(jac)
     }
+
+    /// Remap this problem's stage-first explicit Jacobian layout to the
+    /// mesh-first implicit layout expected by `extract_multipliers_shooting`.
+    fn remap_jac_for_multiplier_extraction(&self, jac: &DMatrix<f64>) -> DMatrix<f64> {
+        let n_stages = self.ntst * self.ncol;
+        let stage_cols = n_stages * self.dim;
+        let mesh_cols = (self.ntst + 1) * self.dim;
+        let current_mesh_start = stage_cols;
+        let current_period_col = stage_cols + mesh_cols;
+
+        // Expected by extract_multipliers_shooting:
+        // [param_dummy, mesh_0..mesh_(ntst-1), stages..., period]
+        let expected_mesh_cols = self.ntst * self.dim;
+        let expected_stage_start = 1 + expected_mesh_cols;
+        let expected_period_col = expected_stage_start + stage_cols;
+        let expected_cols = expected_period_col + 1;
+
+        let mut remapped = DMatrix::<f64>::zeros(jac.nrows(), expected_cols);
+
+        for row in 0..jac.nrows() {
+            // Stages: keep interval-major ordering, just move after mesh block.
+            for stage_col in 0..stage_cols {
+                remapped[(row, expected_stage_start + stage_col)] = jac[(row, stage_col)];
+            }
+
+            // Mesh_0..mesh_(ntst-1): map directly.
+            for interval in 0..self.ntst {
+                for d in 0..self.dim {
+                    let src = current_mesh_start + interval * self.dim + d;
+                    let dst = 1 + interval * self.dim + d;
+                    remapped[(row, dst)] += jac[(row, src)];
+                }
+            }
+
+            // Mesh_ntst in explicit layout is periodic image of mesh_0.
+            // Fold its derivative contribution into mesh_0 for implicit layout.
+            for d in 0..self.dim {
+                let src = current_mesh_start + self.ntst * self.dim + d;
+                let dst = 1 + d;
+                remapped[(row, dst)] += jac[(row, src)];
+            }
+
+            remapped[(row, expected_period_col)] = jac[(row, current_period_col)];
+        }
+
+        remapped
+    }
 }
 
 impl<'a> ContinuationProblem for IsochroneCurveProblem<'a> {
@@ -413,10 +460,13 @@ impl<'a> ContinuationProblem for IsochroneCurveProblem<'a> {
             self.build_bvp_jac(aug)?
         };
 
-        // Multiplier extraction can fail on numerically poor seeds (e.g. singular
-        // local stage blocks). This should not prevent continuation startup.
+        // Multiplier extraction expects mesh-first implicit Jacobian ordering.
+        // Isochrone stores stage-first explicit, so remap before extraction.
+        // Keep this non-fatal so continuation can still proceed on poor points.
+        let remapped_jac = self.remap_jac_for_multiplier_extraction(&jac);
         let multipliers =
-            extract_multipliers_shooting(&jac, self.dim, self.ntst, self.ncol).unwrap_or_default();
+            extract_multipliers_shooting(&remapped_jac, self.dim, self.ntst, self.ncol)
+                .unwrap_or_default();
 
         Ok(PointDiagnostics {
             test_values: TestFunctionValues::limit_cycle(1.0, 1.0, 1.0),
@@ -453,22 +503,13 @@ mod tests {
         let mut system = make_two_dim_flow_system();
         let lc_state = vec![0.1; 6];
 
-        let err = IsochroneCurveProblem::new(
-            &mut system,
-            lc_state,
-            0.0,
-            0,
-            1,
-            0.0,
-            0.0,
-            1,
-            1,
-        )
-        .err()
-        .expect("expected invalid period to fail");
+        let err = IsochroneCurveProblem::new(&mut system, lc_state, 0.0, 0, 1, 0.0, 0.0, 1, 1)
+            .err()
+            .expect("expected invalid period to fail");
 
         assert!(
-            err.to_string().contains("Selected point has no valid period"),
+            err.to_string()
+                .contains("Selected point has no valid period"),
             "unexpected error: {}",
             err
         );
@@ -479,19 +520,9 @@ mod tests {
         let mut system = make_two_dim_flow_system();
         let lc_state = vec![0.1; 6];
 
-        let err = IsochroneCurveProblem::new(
-            &mut system,
-            lc_state,
-            1.0,
-            0,
-            0,
-            0.0,
-            0.0,
-            1,
-            1,
-        )
-        .err()
-        .expect("expected identical parameters to fail");
+        let err = IsochroneCurveProblem::new(&mut system, lc_state, 1.0, 0, 0, 0.0, 0.0, 1, 1)
+            .err()
+            .expect("expected identical parameters to fail");
 
         assert!(
             err.to_string()
@@ -506,22 +537,13 @@ mod tests {
         let mut system = make_two_dim_flow_system();
         let lc_state = vec![0.1; 6];
 
-        let err = IsochroneCurveProblem::new(
-            &mut system,
-            lc_state,
-            1.0,
-            0,
-            2,
-            0.0,
-            0.0,
-            1,
-            1,
-        )
-        .err()
-        .expect("expected unknown parameter index to fail");
+        let err = IsochroneCurveProblem::new(&mut system, lc_state, 1.0, 0, 2, 0.0, 0.0, 1, 1)
+            .err()
+            .expect("expected unknown parameter index to fail");
 
         assert!(
-            err.to_string().contains("Unknown continuation parameter index"),
+            err.to_string()
+                .contains("Unknown continuation parameter index"),
             "unexpected error: {}",
             err
         );
@@ -532,18 +554,9 @@ mod tests {
         let mut system = make_two_dim_flow_system();
         let lc_state = vec![0.1, 0.2, 0.1, 0.2, 0.1, 0.2];
 
-        let mut problem = IsochroneCurveProblem::new(
-            &mut system,
-            lc_state,
-            2.0,
-            0,
-            1,
-            0.0,
-            0.0,
-            1,
-            1,
-        )
-        .expect("create isochrone problem");
+        let mut problem =
+            IsochroneCurveProblem::new(&mut system, lc_state, 2.0, 0, 1, 0.0, 0.0, 1, 1)
+                .expect("create isochrone problem");
 
         // Build [p1, lc_state..., T, p2] with T != T_seed.
         let mut aug = DVector::zeros(problem.dimension() + 1);
@@ -568,18 +581,9 @@ mod tests {
         let mut system = make_two_dim_flow_system();
         let lc_state = vec![0.1, 0.2, 0.1, 0.2, 0.1, 0.2];
 
-        let mut problem = IsochroneCurveProblem::new(
-            &mut system,
-            lc_state,
-            2.0,
-            0,
-            1,
-            0.0,
-            0.0,
-            1,
-            1,
-        )
-        .expect("create isochrone problem");
+        let mut problem =
+            IsochroneCurveProblem::new(&mut system, lc_state, 2.0, 0, 1, 0.0, 0.0, 1, 1)
+                .expect("create isochrone problem");
 
         let n_stages = 1usize;
         let n_eqs = n_stages * 2 + 1 * 2 + 1 + 2;
@@ -587,10 +591,47 @@ mod tests {
         problem.cached_jac = Some(DMatrix::<f64>::zeros(n_eqs, n_vars));
 
         let aug = DVector::zeros(problem.dimension() + 1);
-        let diag = problem.diagnostics(&aug).expect("diagnostics should not fail");
+        let diag = problem
+            .diagnostics(&aug)
+            .expect("diagnostics should not fail");
         assert!(
             diag.eigenvalues.is_empty(),
             "singular monodromy should yield empty multipliers"
+        );
+    }
+
+    #[test]
+    fn diagnostics_produces_multipliers_for_regular_seed() {
+        let mut system = make_two_dim_flow_system();
+        // ntst=2, ncol=1, dim=2:
+        // [stages(4), mesh(6)]
+        let lc_state = vec![0.1; 10];
+
+        let mut problem =
+            IsochroneCurveProblem::new(&mut system, lc_state, 1.0, 0, 1, 0.0, 0.0, 2, 1)
+                .expect("create isochrone problem");
+
+        // Augmented state layout: [p1, lc_state..., T, p2]
+        let mut aug = DVector::zeros(problem.dimension() + 1);
+        aug[0] = 0.0;
+        for i in 0..10 {
+            aug[i + 1] = 0.1;
+        }
+        let t_idx = 1 + 10;
+        aug[t_idx] = 1.0;
+        aug[t_idx + 1] = 0.0;
+
+        // Populate cached Jacobian via residual, then verify diagnostics extraction.
+        let mut out = DVector::zeros(problem.dimension());
+        problem
+            .residual(&aug, &mut out)
+            .expect("residual should evaluate");
+        let diag = problem
+            .diagnostics(&aug)
+            .expect("diagnostics should evaluate");
+        assert!(
+            !diag.eigenvalues.is_empty(),
+            "regular seed should produce floquet multipliers"
         );
     }
 }
