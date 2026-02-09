@@ -258,20 +258,51 @@ export function runIsochroneCurveWithProgress(
   forward: boolean,
   label: string
 ): any {
-  const runner = bridge.createIsochroneCurveRunner(
-    lcState,
-    period,
-    param1Name,
-    param1Value,
-    param2Name,
-    param2Value,
-    ntst,
-    ncol,
-    settings,
-    forward
-  );
+  try {
+    const runner = bridge.createIsochroneCurveRunner(
+      lcState,
+      period,
+      param1Name,
+      param1Value,
+      param2Name,
+      param2Value,
+      ntst,
+      ncol,
+      settings,
+      forward
+    );
 
-  return runContinuationRunnerWithProgress(runner, label);
+    return runContinuationRunnerWithProgress(runner, label);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const shouldFallback =
+      message.includes('Isochrone continuation runner is unavailable') ||
+      message.includes('WasmIsochroneCurveRunner');
+
+    if (!shouldFallback) {
+      throw error;
+    }
+
+    const maxSteps =
+      typeof settings?.max_steps === 'number' && Number.isFinite(settings.max_steps)
+        ? settings.max_steps
+        : 0;
+    printProgress(0, maxSteps, label);
+    const result = bridge.continueIsochroneCurve(
+      lcState,
+      period,
+      param1Name,
+      param1Value,
+      param2Name,
+      param2Value,
+      ntst,
+      ncol,
+      settings,
+      forward
+    );
+    printProgressComplete(label);
+    return result;
+  }
 }
 
 /**

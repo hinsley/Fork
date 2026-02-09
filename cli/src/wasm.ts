@@ -305,6 +305,11 @@ export class WasmBridge {
         forward: boolean
     ): Codim1CurveRunner {
         if (!wasmModule) throw new Error("WASM module not loaded");
+        if (typeof (wasmModule as any).WasmIsochroneCurveRunner !== 'function') {
+            throw new Error(
+                "Isochrone continuation runner is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
 
         return new wasmModule.WasmIsochroneCurveRunner(
             this.config.equations,
@@ -1011,6 +1016,11 @@ export class WasmBridge {
         settings: any,
         forward: boolean
     ): any {
+        if (typeof this.instance.continue_isochrone_curve !== 'function') {
+            throw new Error(
+                "Isochrone continuation is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
         return this.instance.continue_isochrone_curve(
             new Float64Array(lcState),
             period,

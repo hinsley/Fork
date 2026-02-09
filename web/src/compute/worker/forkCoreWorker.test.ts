@@ -15,6 +15,8 @@ const wasmState = {
   throwMode: 'none' as 'none' | 'validate' | 'abort',
   useCamelCaseIsoclineMethod: false,
   disableHomoclinicLargeCycleInit: false,
+  disableIsochroneRunner: false,
+  isochroneFallbackCalls: 0,
   lastRunStepsArg: null as number | null,
   lastSystemType: null as string | null,
   lastLimitCycleRunnerSystemType: null as string | null,
@@ -157,6 +159,17 @@ beforeAll(async () => {
       }
       init_homoclinic_from_homotopy_saddle() {
         return {}
+      }
+      continue_isochrone_curve() {
+        wasmState.isochroneFallbackCalls += 1
+        return {
+          curve_type: 'Isochrone',
+          param1_index: 0,
+          param2_index: 1,
+          points: [],
+          codim2_bifurcations: [],
+          indices: [],
+        }
       }
     }
 
@@ -320,7 +333,9 @@ beforeAll(async () => {
       WasmEquilibriumRunner: MockWasmEquilibriumRunner,
       WasmFoldCurveRunner: MockContinuationRunner,
       WasmHopfCurveRunner: MockContinuationRunner,
-      WasmIsochroneCurveRunner: MockContinuationRunner,
+      get WasmIsochroneCurveRunner() {
+        return wasmState.disableIsochroneRunner ? undefined : MockContinuationRunner
+      },
       WasmLimitCycleRunner: MockLimitCycleRunner,
       WasmHomoclinicRunner: MockHomoclinicRunner,
       WasmHomotopySaddleRunner: MockContinuationRunner,
@@ -341,6 +356,8 @@ beforeEach(() => {
   wasmState.throwMode = 'none'
   wasmState.useCamelCaseIsoclineMethod = false
   wasmState.disableHomoclinicLargeCycleInit = false
+  wasmState.disableIsochroneRunner = false
+  wasmState.isochroneFallbackCalls = 0
   wasmState.lastRunStepsArg = null
   wasmState.lastSystemType = null
   wasmState.lastLimitCycleRunnerSystemType = null
@@ -956,6 +973,53 @@ describe('forkCoreWorker', () => {
     })
     expect(workerScope.postMessage.mock.calls[1][0]).toMatchObject({
       id: 'job-isochrone',
+      ok: true,
+      result: { points: [] },
+    })
+  })
+
+  it('falls back to WasmSystem isochrone continuation when runner constructor is unavailable', async () => {
+    const handler = requireHandler()
+    wasmState.disableIsochroneRunner = true
+
+    await handler({
+      data: {
+        id: 'job-isochrone-fallback',
+        kind: 'runIsochroneCurveContinuation',
+        payload: {
+          system: {
+            ...baseSystem,
+            params: [0.1, 0.2],
+            paramNames: ['mu', 'nu'],
+          },
+          lcState: [0, 1, 1, 0],
+          period: 6,
+          param1Name: 'mu',
+          param1Value: 0.1,
+          param2Name: 'nu',
+          param2Value: 0.2,
+          ntst: 2,
+          ncol: 2,
+          settings: continuationSettings,
+          forward: true,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(wasmState.isochroneFallbackCalls).toBe(1)
+    expect(workerScope.postMessage).toHaveBeenCalledTimes(3)
+    expect(workerScope.postMessage.mock.calls[0][0]).toMatchObject({
+      id: 'job-isochrone-fallback',
+      kind: 'progress',
+      progress: { done: false },
+    })
+    expect(workerScope.postMessage.mock.calls[1][0]).toMatchObject({
+      id: 'job-isochrone-fallback',
+      kind: 'progress',
+      progress: { done: true },
+    })
+    expect(workerScope.postMessage.mock.calls[2][0]).toMatchObject({
+      id: 'job-isochrone-fallback',
       ok: true,
       result: { points: [] },
     })

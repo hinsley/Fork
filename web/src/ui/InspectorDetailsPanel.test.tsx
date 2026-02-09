@@ -1579,7 +1579,7 @@ describe('InspectorDetailsPanel', () => {
     )
   })
 
-  it('shows and submits "Continue isochrone" for limit-cycle branches', async () => {
+  it('shows and submits "Continue Isochrone" for limit-cycle branches', async () => {
     const user = userEvent.setup()
     const baseSystem = createSystem({
       name: 'Isochrone_Menu_System',
@@ -1685,7 +1685,7 @@ describe('InspectorDetailsPanel', () => {
     )
   })
 
-  it('hides "Continue isochrone" outside limit-cycle branch context', () => {
+  it('hides "Continue Isochrone" outside limit-cycle branch context', () => {
     const baseSystem = createSystem({ name: 'Isochrone_Hidden_System' })
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',

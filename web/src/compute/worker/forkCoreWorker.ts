@@ -828,7 +828,79 @@ async function runIsochroneCurveContinuation(
   abortIfNeeded(signal)
   const wasm = await loadWasm()
   const settings: Record<string, number> = { ...request.settings }
-  const runner = new wasm.WasmIsochroneCurveRunner(
+  const runnerCtor = (wasm as { WasmIsochroneCurveRunner?: WasmModule['WasmIsochroneCurveRunner'] })
+    .WasmIsochroneCurveRunner
+  if (typeof runnerCtor !== 'function') {
+    const system = new wasm.WasmSystem(
+      request.system.equations,
+      new Float64Array(request.system.params),
+      request.system.paramNames,
+      request.system.varNames,
+      request.system.solver,
+      request.system.type
+    )
+    const continueIsochrone = (
+      system as unknown as {
+        continue_isochrone_curve?: (
+          lcState: Float64Array,
+          period: number,
+          param1Name: string,
+          param1Value: number,
+          param2Name: string,
+          param2Value: number,
+          ntst: number,
+          ncol: number,
+          settings: Record<string, number>,
+          forward: boolean
+        ) => Codim1CurveBranch
+      }
+    ).continue_isochrone_curve
+    if (typeof continueIsochrone !== 'function') {
+      throw new Error(
+        'Isochrone continuation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+      )
+    }
+
+    const maxSteps =
+      Number.isFinite(settings.max_steps) && settings.max_steps > 0
+        ? settings.max_steps
+        : 0
+    onProgress({
+      done: false,
+      current_step: 0,
+      max_steps: maxSteps,
+      points_computed: 0,
+      bifurcations_found: 0,
+      current_param: request.param1Value,
+    })
+    abortIfNeeded(signal)
+    const result = continueIsochrone.call(
+      system as unknown as object,
+      new Float64Array(request.lcState),
+      request.period,
+      request.param1Name,
+      request.param1Value,
+      request.param2Name,
+      request.param2Value,
+      request.ntst,
+      request.ncol,
+      settings,
+      request.forward
+    )
+    const finalParam =
+      result.points[result.points.length - 1]?.param1_value ?? request.param1Value
+    onProgress({
+      done: true,
+      current_step: maxSteps,
+      max_steps: maxSteps,
+      points_computed: result.points.length,
+      bifurcations_found: result.codim2_bifurcations?.length ?? 0,
+      current_param: finalParam,
+    })
+    return result
+  }
+
+  const runner = new runnerCtor(
     request.system.equations,
     new Float64Array(request.system.params),
     request.system.paramNames,

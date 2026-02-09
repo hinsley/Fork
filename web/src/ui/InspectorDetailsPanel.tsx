@@ -9612,7 +9612,7 @@ export function InspectorDetailsPanel({
                 {showIsochroneContinuation ? (
                   <InspectorDisclosure
                     key={`${selectionKey}-isochrone-curve`}
-                    title="Continue isochrone"
+                    title="Continue Isochrone"
                     testId="isochrone-curve-toggle"
                     defaultOpen={false}
                   >
@@ -9796,7 +9796,7 @@ export function InspectorDetailsPanel({
                         disabled={runDisabled || !selectedBranchPoint || branch.branchType !== 'limit_cycle'}
                         data-testid="isochrone-curve-submit"
                       >
-                        Continue isochrone
+                        Continue Isochrone
                       </button>
                     </div>
                   </InspectorDisclosure>

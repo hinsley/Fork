@@ -798,7 +798,7 @@ export async function showPointDetails(
   } else if (branchType === 'limit_cycle') {
     // For limit cycle branches, offer to create a new limit cycle branch
     choices.push({ name: 'Create New Limit Cycle Branch', value: 'NEW_LC_BRANCH' });
-    choices.push({ name: 'Continue isochrone', value: 'CONTINUE_ISOCHRONE_CURVE' });
+    choices.push({ name: 'Continue Isochrone', value: 'CONTINUE_ISOCHRONE_CURVE' });
     choices.push({
       name: 'Continue Homoclinic Curve (Method 1)',
       value: 'CONTINUE_HOMOCLINIC_FROM_LC'
