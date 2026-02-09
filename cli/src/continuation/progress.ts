@@ -242,6 +242,39 @@ export function runLPCCurveWithProgress(
 }
 
 /**
+ * Continue an isochrone curve with stepped progress updates.
+ */
+export function runIsochroneCurveWithProgress(
+  bridge: WasmBridge,
+  lcState: number[],
+  period: number,
+  param1Name: string,
+  param1Value: number,
+  param2Name: string,
+  param2Value: number,
+  ntst: number,
+  ncol: number,
+  settings: any,
+  forward: boolean,
+  label: string
+): any {
+  const runner = bridge.createIsochroneCurveRunner(
+    lcState,
+    period,
+    param1Name,
+    param1Value,
+    param2Name,
+    param2Value,
+    ntst,
+    ncol,
+    settings,
+    forward
+  );
+
+  return runContinuationRunnerWithProgress(runner, label);
+}
+
+/**
  * Continue a PD curve with stepped progress updates.
  */
 export function runPDCurveWithProgress(

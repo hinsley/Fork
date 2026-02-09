@@ -306,4 +306,35 @@ describe('WasmForkCoreClient', () => {
     worker.emit({ id: message.id, ok: true, result: { points: [], bifurcations: [], indices: [] } })
     await expect(p4).resolves.toEqual({ points: [], bifurcations: [], indices: [] })
   })
+
+  it('sends isochrone continuation worker request kind', async () => {
+    const client = new WasmForkCoreClient()
+    const request = {
+      system: {
+        ...baseSystem,
+        params: [0.2, 0.1],
+        paramNames: ['mu', 'nu'],
+      },
+      lcState: [0, 1, 1, 0],
+      period: 5,
+      param1Name: 'mu',
+      param1Value: 0.2,
+      param2Name: 'nu',
+      param2Value: 0.1,
+      ntst: 2,
+      ncol: 2,
+      settings: continuationSettings,
+      forward: true,
+    }
+
+    const promise = client.runIsochroneCurveContinuation(request)
+    await flushQueue()
+
+    const worker = MockWorker.instances[0]
+    const message = worker.posted.at(-1) as { id: string; kind: string; payload: unknown }
+    expect(message.kind).toBe('runIsochroneCurveContinuation')
+    expect(message.payload).toEqual(request)
+    worker.emit({ id: message.id, ok: true, result: { points: [], bifurcations: [], indices: [] } })
+    await expect(promise).resolves.toEqual({ points: [], bifurcations: [], indices: [] })
+  })
 })

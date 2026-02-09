@@ -1020,6 +1020,7 @@ function resolveAxisValue(
 
 const LIMIT_CYCLE_BRANCH_TYPES = new Set([
   'limit_cycle',
+  'isochrone_curve',
   'homoclinic_curve',
   'homotopy_saddle_curve',
   'pd_curve',
@@ -1045,6 +1046,7 @@ function resolveLimitCycleMesh(
         'LimitCycle',
         'HomoclinicCurve',
         'HomotopySaddleCurve',
+        'IsochroneCurve',
         'PDCurve',
         'LPCCurve',
         'NSCurve',
@@ -1110,7 +1112,11 @@ function resolveLimitCycleEnvelope(
 function resolveLimitCycleLayout(
   branchType: ContinuationObject['branchType']
 ): LimitCycleProfileLayout {
-  if (branchType === 'lpc_curve' || branchType === 'ns_curve') {
+  if (
+    branchType === 'lpc_curve' ||
+    branchType === 'ns_curve' ||
+    branchType === 'isochrone_curve'
+  ) {
     return 'stage-first'
   }
   return 'mesh-first'

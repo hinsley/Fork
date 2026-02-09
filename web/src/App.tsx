@@ -291,6 +291,7 @@ function App() {
         onExtendBranch={actions.extendBranch}
         onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
         onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
+        onCreateIsochroneCurveFromPoint={actions.createIsochroneCurveFromPoint}
         onCreateNSCurveFromPoint={actions.createNSCurveFromPoint}
         onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
         onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
@@ -445,6 +446,7 @@ function App() {
                 onExtendBranch={actions.extendBranch}
                 onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
                 onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
+                onCreateIsochroneCurveFromPoint={actions.createIsochroneCurveFromPoint}
                 onCreateNSCurveFromPoint={actions.createNSCurveFromPoint}
                 onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
                 onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}

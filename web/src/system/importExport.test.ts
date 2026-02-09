@@ -503,6 +503,19 @@ const branchCases: Array<{
     stability: 'CycleFold',
   },
   {
+    name: 'isochrone_curve',
+    branchType: 'isochrone_curve',
+    branchTypeData: {
+      type: 'IsochroneCurve',
+      param1_name: 'mu',
+      param2_name: 'nu',
+      ntst: 4,
+      ncol: 2,
+    },
+    parentKind: 'limit_cycle',
+    stability: 'None',
+  },
+  {
     name: 'pd_curve',
     branchType: 'pd_curve',
     branchTypeData: { type: 'PDCurve', param1_name: 'mu', param2_name: 'nu', ntst: 4, ncol: 2 },

@@ -178,6 +178,8 @@ pub enum Codim1CurveType {
     Fold,
     /// Hopf curve for equilibria
     Hopf,
+    /// Isochrone curve for limit cycles (fixed period)
+    Isochrone,
     /// Limit point of cycles (fold of limit cycles)
     LimitPointCycle,
     /// Period-doubling curve

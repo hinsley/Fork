@@ -16,6 +16,7 @@ import type {
   HomoclinicFromHomotopySaddleRequest,
   HomoclinicFromLargeCycleRequest,
   HopfCurveContinuationRequest,
+  IsochroneCurveContinuationRequest,
   HomotopySaddleContinuationResult,
   HomotopySaddleFromEquilibriumRequest,
   LimitCycleContinuationFromHopfRequest,
@@ -47,6 +48,11 @@ type WorkerRequest =
   | { id: string; kind: 'runContinuationExtension'; payload: ContinuationExtensionRequest }
   | { id: string; kind: 'runFoldCurveContinuation'; payload: FoldCurveContinuationRequest }
   | { id: string; kind: 'runHopfCurveContinuation'; payload: HopfCurveContinuationRequest }
+  | {
+      id: string
+      kind: 'runIsochroneCurveContinuation'
+      payload: IsochroneCurveContinuationRequest
+    }
   | {
       id: string
       kind: 'runLimitCycleContinuationFromHopf'
@@ -289,6 +295,24 @@ export class WasmForkCoreClient implements ForkCoreClient {
     return await job.promise
   }
 
+  async runIsochroneCurveContinuation(
+    request: IsochroneCurveContinuationRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<Codim1CurveBranch> {
+    const job = this.queue.enqueue(
+      'runIsochroneCurveContinuation',
+      (signal) =>
+        this.runWorker(
+          'runIsochroneCurveContinuation',
+          request,
+          signal,
+          opts?.onProgress
+        ),
+      opts
+    )
+    return await job.promise
+  }
+
   async runLimitCycleContinuationFromHopf(
     request: LimitCycleContinuationFromHopfRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
@@ -494,6 +518,12 @@ export class WasmForkCoreClient implements ForkCoreClient {
     onProgress?: (progress: ContinuationProgress) => void
   ): Promise<Codim1CurveBranch>
   private runWorker(
+    kind: 'runIsochroneCurveContinuation',
+    payload: IsochroneCurveContinuationRequest,
+    signal: AbortSignal,
+    onProgress?: (progress: ContinuationProgress) => void
+  ): Promise<Codim1CurveBranch>
+  private runWorker(
     kind: 'runLimitCycleContinuationFromHopf',
     payload: LimitCycleContinuationFromHopfRequest,
     signal: AbortSignal,
@@ -558,6 +588,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | 'runContinuationExtension'
       | 'runFoldCurveContinuation'
       | 'runHopfCurveContinuation'
+      | 'runIsochroneCurveContinuation'
       | 'runLimitCycleContinuationFromHopf'
       | 'runLimitCycleContinuationFromOrbit'
       | 'runLimitCycleContinuationFromPD'
@@ -578,6 +609,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | ContinuationExtensionRequest
       | FoldCurveContinuationRequest
       | HopfCurveContinuationRequest
+      | IsochroneCurveContinuationRequest
       | LimitCycleContinuationFromHopfRequest
       | LimitCycleContinuationFromOrbitRequest
       | LimitCycleContinuationFromPDRequest
@@ -626,6 +658,8 @@ export class WasmForkCoreClient implements ForkCoreClient {
                 ? { id, kind, payload: payload as FoldCurveContinuationRequest }
         : kind === 'runHopfCurveContinuation'
           ? { id, kind, payload: payload as HopfCurveContinuationRequest }
+          : kind === 'runIsochroneCurveContinuation'
+            ? { id, kind, payload: payload as IsochroneCurveContinuationRequest }
           : kind === 'runLimitCycleContinuationFromHopf'
             ? { id, kind, payload: payload as LimitCycleContinuationFromHopfRequest }
             : kind === 'runLimitCycleContinuationFromOrbit'

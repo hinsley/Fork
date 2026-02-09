@@ -19,6 +19,7 @@ import type {
   HomoclinicFromLargeCycleRequest,
   HopfCurveContinuationRequest,
   HomotopySaddleFromEquilibriumRequest,
+  IsochroneCurveContinuationRequest,
   IsoclineComputeRequest,
   MapNSCurveContinuationRequest,
   LimitCycleHopfContinuationRequest,
@@ -81,6 +82,9 @@ type InspectorPanelProps = {
   onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
+  onCreateIsochroneCurveFromPoint?: (
+    request: IsochroneCurveContinuationRequest
+  ) => Promise<void>
   onCreateNSCurveFromPoint: (request: MapNSCurveContinuationRequest) => Promise<void>
   onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
   onCreateLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
@@ -130,6 +134,7 @@ export function InspectorPanel({
   onExtendBranch,
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
+  onCreateIsochroneCurveFromPoint,
   onCreateNSCurveFromPoint,
   onCreateLimitCycleFromHopf,
   onCreateLimitCycleFromOrbit,
@@ -174,6 +179,7 @@ export function InspectorPanel({
           onExtendBranch={onExtendBranch}
           onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
           onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
+          onCreateIsochroneCurveFromPoint={onCreateIsochroneCurveFromPoint}
           onCreateNSCurveFromPoint={onCreateNSCurveFromPoint}
           onCreateLimitCycleFromHopf={onCreateLimitCycleFromHopf}
           onCreateLimitCycleFromOrbit={onCreateLimitCycleFromOrbit}

@@ -320,6 +320,7 @@ beforeAll(async () => {
       WasmEquilibriumRunner: MockWasmEquilibriumRunner,
       WasmFoldCurveRunner: MockContinuationRunner,
       WasmHopfCurveRunner: MockContinuationRunner,
+      WasmIsochroneCurveRunner: MockContinuationRunner,
       WasmLimitCycleRunner: MockLimitCycleRunner,
       WasmHomoclinicRunner: MockHomoclinicRunner,
       WasmHomotopySaddleRunner: MockContinuationRunner,
@@ -916,6 +917,45 @@ describe('forkCoreWorker', () => {
     })
     expect(workerScope.postMessage.mock.calls[1][0]).toMatchObject({
       id: 'job-extension',
+      ok: true,
+      result: { points: [] },
+    })
+  })
+
+  it('posts progress and results for isochrone continuation runners', async () => {
+    const handler = requireHandler()
+
+    await handler({
+      data: {
+        id: 'job-isochrone',
+        kind: 'runIsochroneCurveContinuation',
+        payload: {
+          system: {
+            ...baseSystem,
+            params: [0.1, 0.2],
+            paramNames: ['mu', 'nu'],
+          },
+          lcState: [0, 1, 1, 0],
+          period: 6,
+          param1Name: 'mu',
+          param1Value: 0.1,
+          param2Name: 'nu',
+          param2Value: 0.2,
+          ntst: 2,
+          ncol: 2,
+          settings: continuationSettings,
+          forward: true,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(workerScope.postMessage).toHaveBeenCalledTimes(2)
+    expect(workerScope.postMessage.mock.calls[0][0]).toMatchObject({
+      id: 'job-isochrone',
+      kind: 'progress',
+    })
+    expect(workerScope.postMessage.mock.calls[1][0]).toMatchObject({
+      id: 'job-isochrone',
       ok: true,
       result: { points: [] },
     })

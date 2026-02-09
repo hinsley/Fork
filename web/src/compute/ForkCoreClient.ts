@@ -195,6 +195,20 @@ export type HopfCurveContinuationRequest = {
   forward: boolean
 }
 
+export type IsochroneCurveContinuationRequest = {
+  system: SystemConfig
+  lcState: number[]
+  period: number
+  param1Name: string
+  param1Value: number
+  param2Name: string
+  param2Value: number
+  ntst: number
+  ncol: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
 export type LimitCycleContinuationFromHopfRequest = {
   system: SystemConfig
   hopfState: number[]
@@ -363,6 +377,10 @@ export interface ForkCoreClient {
   ): Promise<Codim1CurveBranch>
   runHopfCurveContinuation(
     request: HopfCurveContinuationRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<Codim1CurveBranch>
+  runIsochroneCurveContinuation(
+    request: IsochroneCurveContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<Codim1CurveBranch>
   runLimitCycleContinuationFromHopf(

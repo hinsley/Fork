@@ -983,8 +983,8 @@ async function limitCycleBranchesMenu(
         }
 
         const branchNames = Storage.listBranches(sysName, obj.name);
-        // Include limit_cycle branches and codim1 LC curves (pd_curve, lpc_curve, ns_curve)
-        const lcBranchTypes = ['limit_cycle', 'pd_curve', 'lpc_curve', 'ns_curve'];
+        // Include limit_cycle branches and codim1 LC curves.
+        const lcBranchTypes = ['limit_cycle', 'isochrone_curve', 'pd_curve', 'lpc_curve', 'ns_curve'];
         const branches = branchNames
             .map(name => Storage.loadBranch(sysName, obj.name, name))
             .filter((b): b is ContinuationObject => (b as any)?.type === 'continuation')

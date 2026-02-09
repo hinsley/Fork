@@ -47,6 +47,7 @@ function getBranchTypeLabel(branch: ContinuationObject, system: System): string 
   if (branch.branchType === 'fold_curve') return 'fold curve'
   if (branch.branchType === 'hopf_curve') return 'hopf curve'
   if (branch.branchType === 'lpc_curve') return 'lpc curve'
+  if (branch.branchType === 'isochrone_curve') return 'isochrone curve'
   if (branch.branchType === 'pd_curve') return 'pd curve'
   if (branch.branchType === 'ns_curve') return 'ns curve'
   return 'branch'

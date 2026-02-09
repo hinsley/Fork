@@ -45,6 +45,7 @@ import type {
   HomoclinicFromLargeCycleRequest,
   HopfCurveContinuationRequest,
   HomotopySaddleFromEquilibriumRequest,
+  IsochroneCurveContinuationRequest,
   IsoclineComputeRequest,
   MapNSCurveContinuationRequest,
   LimitCycleHopfContinuationRequest,
@@ -124,6 +125,9 @@ type InspectorDetailsPanelProps = {
   onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
+  onCreateIsochroneCurveFromPoint?: (
+    request: IsochroneCurveContinuationRequest
+  ) => Promise<void>
   onCreateNSCurveFromPoint: (request: MapNSCurveContinuationRequest) => Promise<void>
   onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
   onCreateLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
@@ -599,7 +603,14 @@ function formatBranchType(
 
 function summarizeEigenvalues(point: ContinuationPoint, branchType?: string): string {
   const eigenvalues = normalizeEigenvalueArray(point.eigenvalues)
-  const label = branchType === 'limit_cycle' ? 'Multipliers' : 'Eigenvalues'
+  const label =
+    branchType === 'limit_cycle' ||
+    branchType === 'isochrone_curve' ||
+    branchType === 'lpc_curve' ||
+    branchType === 'pd_curve' ||
+    branchType === 'ns_curve'
+      ? 'Multipliers'
+      : 'Eigenvalues'
   if (eigenvalues.length === 0) return `${label}: []`
   const formatted = eigenvalues
     .slice(0, 3)
@@ -1426,6 +1437,7 @@ export function InspectorDetailsPanel({
   onExtendBranch,
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
+  onCreateIsochroneCurveFromPoint = async () => {},
   onCreateNSCurveFromPoint,
   onCreateLimitCycleFromHopf,
   onCreateLimitCycleFromOrbit,
@@ -1506,12 +1518,14 @@ export function InspectorDetailsPanel({
         'fold_curve',
         'hopf_curve',
         'lpc_curve',
+        'isochrone_curve',
         'pd_curve',
         'ns_curve',
       ].includes(branch.branchType)
   )
   const hasBranch = Boolean(branch)
-  const isLimitCycleBranch = branch?.branchType === 'limit_cycle'
+  const isLimitCycleBranch =
+    branch?.branchType === 'limit_cycle' || branch?.branchType === 'isochrone_curve'
   const nodeRender = selectionNode
     ? { ...DEFAULT_RENDER, ...(selectionNode.render ?? {}) }
     : DEFAULT_RENDER
@@ -1857,6 +1871,10 @@ export function InspectorDetailsPanel({
     makeCodim1CurveDraft(system.config)
   )
   const [hopfCurveError, setHopfCurveError] = useState<string | null>(null)
+  const [isochroneCurveDraft, setIsochroneCurveDraft] = useState<Codim1CurveDraft>(() =>
+    makeCodim1CurveDraft(system.config)
+  )
+  const [isochroneCurveError, setIsochroneCurveError] = useState<string | null>(null)
   const [nsCurveDraft, setNSCurveDraft] = useState<Codim1CurveDraft>(() =>
     makeCodim1CurveDraft(system.config)
   )
@@ -1967,11 +1985,14 @@ export function InspectorDetailsPanel({
       ? limitCycleProfilePoints[selectedLimitCyclePointIndex]
       : null
   const limitCycleMesh = useMemo(() => {
-    if (!branch || branch.branchType !== 'limit_cycle') {
+    if (
+      !branch ||
+      (branch.branchType !== 'limit_cycle' && branch.branchType !== 'isochrone_curve')
+    ) {
       return { ntst: 20, ncol: 4 }
     }
     const branchType = branch.data.branch_type
-    if (branchType?.type === 'LimitCycle') {
+    if (branchType?.type === 'LimitCycle' || branchType?.type === 'IsochroneCurve') {
       return { ntst: branchType.ntst, ncol: branchType.ncol }
     }
     return { ntst: 20, ncol: 4 }
@@ -1985,7 +2006,11 @@ export function InspectorDetailsPanel({
   }, [branch, limitCycleMesh.ncol])
 
   const limitCyclePointMetrics = useMemo(() => {
-    if (!branch || branch.branchType !== 'limit_cycle' || !selectedBranchPoint) {
+    if (
+      !branch ||
+      (branch.branchType !== 'limit_cycle' && branch.branchType !== 'isochrone_curve') ||
+      !selectedBranchPoint
+    ) {
       return null
     }
     const dim = systemDraft.varNames.length
@@ -1995,7 +2020,7 @@ export function InspectorDetailsPanel({
       dim,
       limitCycleMesh.ntst,
       limitCycleMesh.ncol,
-      { layout: 'mesh-first' }
+      { layout: branch.branchType === 'isochrone_curve' ? 'stage-first' : 'mesh-first' }
     )
     if (profilePoints.length === 0) return null
     const metrics = computeLimitCycleMetrics(profilePoints, period)
@@ -2387,6 +2412,17 @@ export function InspectorDetailsPanel({
           : fallbackParam
       const safeBranchName = toCliSafeName(branchName)
       const suggestedName = `hopf_curve_${safeBranchName}`
+      const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
+      return { ...prev, param2Name, name: nextName }
+    })
+    setIsochroneCurveDraft((prev) => {
+      const param2Name =
+        systemDraft.paramNames.includes(prev.param2Name) &&
+        prev.param2Name !== branchParameterName
+          ? prev.param2Name
+          : fallbackParam
+      const safeBranchName = toCliSafeName(branchName)
+      const suggestedName = `isochrone_curve_${safeBranchName}`
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, param2Name, name: nextName }
     })
@@ -2964,6 +3000,8 @@ export function InspectorDetailsPanel({
     showCodim1CurveContinuations && !isDiscreteMap && isHopfCurvePointSelected
   const showNSCurveContinuation =
     showCodim1CurveContinuations && isDiscreteMap && isNSCurvePointSelected
+  const showIsochroneContinuation =
+    branch?.branchType === 'limit_cycle' && hasSelectedBranchPoint
   const homotopyBranchStage =
     branch?.data.branch_type &&
     typeof branch.data.branch_type === 'object' &&
@@ -2988,20 +3026,20 @@ export function InspectorDetailsPanel({
     [selectedBranchPoint]
   )
   const branchEigenPlot = useMemo(() => {
-    if (branch?.branchType === 'limit_cycle') return null
+    if (isLimitCycleBranch) return null
     if (branchEigenvalues.length === 0) return null
     return buildEigenvaluePlot(branchEigenvalues, plotlyTheme, {
       showRadiusLines: isDiscreteMap,
       showUnitDisc: isDiscreteMap,
     })
-  }, [branch?.branchType, branchEigenvalues, isDiscreteMap, plotlyTheme])
+  }, [branchEigenvalues, isDiscreteMap, isLimitCycleBranch, plotlyTheme])
   const branchMultiplierPlot = useMemo(() => {
-    if (branch?.branchType !== 'limit_cycle') return null
+    if (!isLimitCycleBranch) return null
     if (branchEigenvalues.length === 0) return null
     return buildEigenvaluePlot(branchEigenvalues, plotlyTheme, {
       showUnitCircle: true,
     })
-  }, [branch?.branchType, branchEigenvalues, plotlyTheme])
+  }, [branchEigenvalues, isLimitCycleBranch, plotlyTheme])
   const selectedBranchPointParams = useMemo(() => {
     if (!branch || !selectedBranchPoint) return []
     return resolveBranchPointParams(
@@ -3921,6 +3959,76 @@ export function InspectorDetailsPanel({
       param2Name: hopfCurveDraft.param2Name,
       settings,
       forward: hopfCurveDraft.forward,
+    })
+  }
+
+  const handleCreateIsochroneCurve = async () => {
+    if (runDisabled) {
+      setIsochroneCurveError('Apply valid system settings before continuing.')
+      return
+    }
+    if (isDiscreteMap) {
+      setIsochroneCurveError('Isochrone continuation is only available for flow systems.')
+      return
+    }
+    if (!branch || !selectedNodeId) {
+      setIsochroneCurveError('Select a branch to continue.')
+      return
+    }
+    if (branch.branchType !== 'limit_cycle') {
+      setIsochroneCurveError('Isochrone continuation is only available for limit cycle branches.')
+      return
+    }
+    if (!selectedBranchPoint || branchPointIndex === null) {
+      setIsochroneCurveError('Select a branch point to continue from.')
+      return
+    }
+    const pointPeriod = selectedBranchPoint.state[selectedBranchPoint.state.length - 1]
+    if (!Number.isFinite(pointPeriod) || pointPeriod <= 0) {
+      setIsochroneCurveError('Selected point has no valid period.')
+      return
+    }
+    if (systemDraft.paramNames.length < 2) {
+      setIsochroneCurveError('Add another parameter before continuing.')
+      return
+    }
+    if (!isochroneCurveDraft.param2Name) {
+      setIsochroneCurveError('Select a second continuation parameter.')
+      return
+    }
+    if (isochroneCurveDraft.param2Name === branchParameterName) {
+      setIsochroneCurveError(
+        'Second parameter must be different from the continuation parameter.'
+      )
+      return
+    }
+
+    const safeBranchName = toCliSafeName(branch.name)
+    const suggestedName = `isochrone_curve_${safeBranchName}`
+    const name = isochroneCurveDraft.name.trim() || suggestedName
+    if (!name.trim()) {
+      setIsochroneCurveError('Curve name is required.')
+      return
+    }
+    if (!isCliSafeName(name)) {
+      setIsochroneCurveError('Curve names must be alphanumeric with underscores only.')
+      return
+    }
+
+    const { settings, error } = buildCodim1ContinuationSettings(isochroneCurveDraft)
+    if (!settings) {
+      setIsochroneCurveError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setIsochroneCurveError(null)
+    await onCreateIsochroneCurveFromPoint({
+      branchId: selectedNodeId,
+      pointIndex: branchPointIndex,
+      name,
+      param2Name: isochroneCurveDraft.param2Name,
+      settings,
+      forward: isochroneCurveDraft.forward,
     })
   }
 
@@ -9497,6 +9605,199 @@ export function InspectorDetailsPanel({
                           </button>
                         </>
                       ) : null}
+                    </div>
+                  </InspectorDisclosure>
+                ) : null}
+
+                {showIsochroneContinuation ? (
+                  <InspectorDisclosure
+                    key={`${selectionKey}-isochrone-curve`}
+                    title="Continue isochrone"
+                    testId="isochrone-curve-toggle"
+                    defaultOpen={false}
+                  >
+                    <div className="inspector-section">
+                      {runDisabled ? (
+                        <div className="field-warning">
+                          Apply valid system changes before continuing.
+                        </div>
+                      ) : null}
+                      {systemDraft.paramNames.length < 2 ? (
+                        <p className="empty-state">
+                          Add a second parameter to enable isochrone continuation.
+                        </p>
+                      ) : null}
+                      <label>
+                        Curve name
+                        <input
+                          value={isochroneCurveDraft.name}
+                          onChange={(event) =>
+                            setIsochroneCurveDraft((prev) => ({
+                              ...prev,
+                              name: event.target.value,
+                            }))
+                          }
+                          placeholder={`isochrone_curve_${toCliSafeName(branch.name)}`}
+                          data-testid="isochrone-curve-name"
+                        />
+                      </label>
+                      <label>
+                        Second parameter
+                        <select
+                          value={isochroneCurveDraft.param2Name}
+                          onChange={(event) =>
+                            setIsochroneCurveDraft((prev) => ({
+                              ...prev,
+                              param2Name: event.target.value,
+                            }))
+                          }
+                          disabled={codim1ParamOptions.length === 0}
+                          data-testid="isochrone-curve-param2"
+                        >
+                          {codim1ParamOptions.map((name) => {
+                            const idx = systemDraft.paramNames.indexOf(name)
+                            const branchValue =
+                              branchParams.length === systemDraft.paramNames.length
+                                ? branchParams[idx]
+                                : undefined
+                            const fallbackValue = parseNumber(systemDraft.params[idx] ?? '')
+                            const value = branchValue ?? fallbackValue
+                            const label = `${name} (current: ${formatNumber(
+                              value ?? Number.NaN,
+                              6
+                            )})`
+                            return (
+                              <option key={name} value={name}>
+                                {label}
+                              </option>
+                            )
+                          })}
+                        </select>
+                      </label>
+                      <label>
+                        Direction
+                        <select
+                          value={isochroneCurveDraft.forward ? 'forward' : 'backward'}
+                          onChange={(event) =>
+                            setIsochroneCurveDraft((prev) => ({
+                              ...prev,
+                              forward: event.target.value === 'forward',
+                            }))
+                          }
+                          data-testid="isochrone-curve-direction"
+                        >
+                          <option value="forward">Forward</option>
+                          <option value="backward">Backward</option>
+                        </select>
+                      </label>
+                      <label>
+                        Initial step size
+                        <input
+                          type="number"
+                          value={isochroneCurveDraft.stepSize}
+                          onChange={(event) =>
+                            setIsochroneCurveDraft((prev) => ({
+                              ...prev,
+                              stepSize: event.target.value,
+                            }))
+                          }
+                          data-testid="isochrone-curve-step-size"
+                        />
+                      </label>
+                      <label>
+                        Min step size
+                        <input
+                          type="number"
+                          value={isochroneCurveDraft.minStepSize}
+                          onChange={(event) =>
+                            setIsochroneCurveDraft((prev) => ({
+                              ...prev,
+                              minStepSize: event.target.value,
+                            }))
+                          }
+                          data-testid="isochrone-curve-min-step-size"
+                        />
+                      </label>
+                      <label>
+                        Max step size
+                        <input
+                          type="number"
+                          value={isochroneCurveDraft.maxStepSize}
+                          onChange={(event) =>
+                            setIsochroneCurveDraft((prev) => ({
+                              ...prev,
+                              maxStepSize: event.target.value,
+                            }))
+                          }
+                          data-testid="isochrone-curve-max-step-size"
+                        />
+                      </label>
+                      <label>
+                        Max points
+                        <input
+                          type="number"
+                          value={isochroneCurveDraft.maxSteps}
+                          onChange={(event) =>
+                            setIsochroneCurveDraft((prev) => ({
+                              ...prev,
+                              maxSteps: event.target.value,
+                            }))
+                          }
+                          data-testid="isochrone-curve-max-steps"
+                        />
+                      </label>
+                      <label>
+                        Corrector steps
+                        <input
+                          type="number"
+                          value={isochroneCurveDraft.correctorSteps}
+                          onChange={(event) =>
+                            setIsochroneCurveDraft((prev) => ({
+                              ...prev,
+                              correctorSteps: event.target.value,
+                            }))
+                          }
+                          data-testid="isochrone-curve-corrector-steps"
+                        />
+                      </label>
+                      <label>
+                        Corrector tolerance
+                        <input
+                          type="number"
+                          value={isochroneCurveDraft.correctorTolerance}
+                          onChange={(event) =>
+                            setIsochroneCurveDraft((prev) => ({
+                              ...prev,
+                              correctorTolerance: event.target.value,
+                            }))
+                          }
+                          data-testid="isochrone-curve-corrector-tolerance"
+                        />
+                      </label>
+                      <label>
+                        Step tolerance
+                        <input
+                          type="number"
+                          value={isochroneCurveDraft.stepTolerance}
+                          onChange={(event) =>
+                            setIsochroneCurveDraft((prev) => ({
+                              ...prev,
+                              stepTolerance: event.target.value,
+                            }))
+                          }
+                          data-testid="isochrone-curve-step-tolerance"
+                        />
+                      </label>
+                      {isochroneCurveError ? (
+                        <div className="field-error">{isochroneCurveError}</div>
+                      ) : null}
+                      <button
+                        onClick={handleCreateIsochroneCurve}
+                        disabled={runDisabled || !selectedBranchPoint || branch.branchType !== 'limit_cycle'}
+                        data-testid="isochrone-curve-submit"
+                      >
+                        Continue isochrone
+                      </button>
                     </div>
                   </InspectorDisclosure>
                 ) : null}

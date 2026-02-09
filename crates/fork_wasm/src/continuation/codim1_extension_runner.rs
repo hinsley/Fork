@@ -6,7 +6,7 @@ use fork_core::continuation::codim1_curves::estimate_hopf_kappa_from_jacobian;
 use fork_core::continuation::{
     Codim2BifurcationType, Codim2TestFunctions, ContinuationBranch, ContinuationPoint,
     ContinuationProblem, ContinuationRunner, ContinuationSettings, FoldCurveProblem,
-    HopfCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
+    HopfCurveProblem, IsochroneCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::{compute_jacobian, SystemKind};
@@ -28,6 +28,12 @@ enum Codim1BranchType {
         param2_name: String,
     },
     LPCCurve {
+        param1_name: String,
+        param2_name: String,
+        ntst: usize,
+        ncol: usize,
+    },
+    IsochroneCurve {
         param1_name: String,
         param2_name: String,
         ntst: usize,
@@ -59,6 +65,11 @@ impl Codim1BranchType {
                 param2_name,
             }
             | Codim1BranchType::LPCCurve {
+                param1_name,
+                param2_name,
+                ..
+            }
+            | Codim1BranchType::IsochroneCurve {
                 param1_name,
                 param2_name,
                 ..
@@ -125,6 +136,11 @@ enum Codim1ExtensionRunnerKind {
     LPC {
         system: Box<EquationSystem>,
         runner: ContinuationRunner<LPCCurveProblem<'static>>,
+        merge: ExtensionMergeContext,
+    },
+    Isochrone {
+        system: Box<EquationSystem>,
+        runner: ContinuationRunner<IsochroneCurveProblem<'static>>,
         merge: ExtensionMergeContext,
     },
     PD {
@@ -477,6 +493,81 @@ impl WasmCodim1CurveExtensionRunner {
                     merge,
                 }
             }
+            Codim1BranchType::IsochroneCurve { ntst, ncol, .. } => {
+                let dim = system.equations.len();
+                let endpoint_param2 = endpoint
+                    .param2_value
+                    .ok_or_else(|| JsValue::from_str("Isochrone curve point missing param2_value"))?;
+                let (full_lc_state, period) =
+                    unpack_lc_state(&endpoint.state, *ntst, *ncol, dim, LcLayout::StageFirst)
+                        .map_err(to_js_error)?;
+
+                system.params[param1_index] = endpoint.param_value;
+                system.params[param2_index] = endpoint_param2;
+
+                let end_state = build_lc_state(&full_lc_state, period, endpoint_param2);
+                let mut end_aug = DVector::zeros(end_state.len() + 1);
+                end_aug[0] = endpoint.param_value;
+                for (i, v) in end_state.iter().enumerate() {
+                    end_aug[i + 1] = *v;
+                }
+
+                let secant = build_secant_direction(
+                    &merge.branch,
+                    neighbor_idx,
+                    &end_aug,
+                    is_append,
+                    |pt| {
+                        let param2 = pt.param2_value.unwrap_or(endpoint_param2);
+                        let (lc_state, pt_period) =
+                            unpack_lc_state(&pt.state, *ntst, *ncol, dim, LcLayout::StageFirst)?;
+                        Ok(build_lc_state(&lc_state, pt_period, param2))
+                    },
+                )?;
+
+                let mut boxed_system = Box::new(system);
+                let system_ptr: *mut EquationSystem = &mut *boxed_system;
+                let problem = IsochroneCurveProblem::new(
+                    unsafe { &mut *system_ptr },
+                    full_lc_state.clone(),
+                    period,
+                    param1_index,
+                    param2_index,
+                    endpoint.param_value,
+                    endpoint_param2,
+                    *ntst,
+                    *ncol,
+                )
+                .map_err(|e| {
+                    JsValue::from_str(&format!("Failed to create isochrone problem: {}", e))
+                })?;
+
+                let mut problem: IsochroneCurveProblem<'static> =
+                    unsafe { std::mem::transmute(problem) };
+                let mut tangent = compute_tangent_from_problem(&mut problem, &end_aug)
+                    .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+                orient_tangent(&mut tangent, secant.as_ref(), forward);
+
+                let initial_point = ContinuationPoint {
+                    state: end_state.clone(),
+                    param_value: endpoint.param_value,
+                    stability: fork_core::continuation::BifurcationType::None,
+                    eigenvalues: endpoint.eigenvalues.clone(),
+                    cycle_points: None,
+                };
+
+                let runner =
+                    ContinuationRunner::new_with_tangent(problem, initial_point, tangent, settings)
+                        .map_err(|e| {
+                            JsValue::from_str(&format!("Continuation init failed: {}", e))
+                        })?;
+
+                Codim1ExtensionRunnerKind::Isochrone {
+                    system: boxed_system,
+                    runner,
+                    merge,
+                }
+            }
             Codim1BranchType::PDCurve { ntst, ncol, .. } => {
                 let dim = system.equations.len();
                 let endpoint_param2 = endpoint
@@ -638,6 +729,7 @@ impl WasmCodim1CurveExtensionRunner {
             Some(Codim1ExtensionRunnerKind::Fold { runner, .. }) => runner.is_done(),
             Some(Codim1ExtensionRunnerKind::Hopf { runner, .. }) => runner.is_done(),
             Some(Codim1ExtensionRunnerKind::LPC { runner, .. }) => runner.is_done(),
+            Some(Codim1ExtensionRunnerKind::Isochrone { runner, .. }) => runner.is_done(),
             Some(Codim1ExtensionRunnerKind::PD { runner, .. }) => runner.is_done(),
             Some(Codim1ExtensionRunnerKind::NS { runner, .. }) => runner.is_done(),
             None => true,
@@ -653,6 +745,9 @@ impl WasmCodim1CurveExtensionRunner {
                 .run_steps(batch_size as usize)
                 .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
             Some(Codim1ExtensionRunnerKind::LPC { runner, .. }) => runner
+                .run_steps(batch_size as usize)
+                .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
+            Some(Codim1ExtensionRunnerKind::Isochrone { runner, .. }) => runner
                 .run_steps(batch_size as usize)
                 .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?,
             Some(Codim1ExtensionRunnerKind::PD { runner, .. }) => runner
@@ -672,6 +767,7 @@ impl WasmCodim1CurveExtensionRunner {
             Some(Codim1ExtensionRunnerKind::Fold { runner, .. }) => runner.step_result(),
             Some(Codim1ExtensionRunnerKind::Hopf { runner, .. }) => runner.step_result(),
             Some(Codim1ExtensionRunnerKind::LPC { runner, .. }) => runner.step_result(),
+            Some(Codim1ExtensionRunnerKind::Isochrone { runner, .. }) => runner.step_result(),
             Some(Codim1ExtensionRunnerKind::PD { runner, .. }) => runner.step_result(),
             Some(Codim1ExtensionRunnerKind::NS { runner, .. }) => runner.step_result(),
             None => return Err(JsValue::from_str("Runner not initialized")),
@@ -729,6 +825,16 @@ impl WasmCodim1CurveExtensionRunner {
                 let extension = runner.take_result();
                 let codim2_types =
                     detect_codim2_lpc(&extension, &merge.branch.branch_type, system.as_mut())?;
+                (extension, merge, CurveDim::LimitCycle, codim2_types)
+            }
+            Codim1ExtensionRunnerKind::Isochrone {
+                runner,
+                merge,
+                system: _system,
+            } => {
+                let extension = runner.take_result();
+                let codim2_types =
+                    vec![Codim2BifurcationType::None; extension.points.len().saturating_sub(1)];
                 (extension, merge, CurveDim::LimitCycle, codim2_types)
             }
             Codim1ExtensionRunnerKind::PD {
@@ -1091,7 +1197,9 @@ fn convert_extension_point(
             }
             _ => Err(JsValue::from_str("Hopf curve conversion missing dimension")),
         },
-        Codim1BranchType::LPCCurve { .. } | Codim1BranchType::PDCurve { .. } => {
+        Codim1BranchType::LPCCurve { .. }
+        | Codim1BranchType::IsochroneCurve { .. }
+        | Codim1BranchType::PDCurve { .. } => {
             if point.state.len() < 2 {
                 return Err(JsValue::from_str(
                     "LC curve extension point has unexpected state length",
@@ -1462,6 +1570,76 @@ fn split_lc_continuation_state(
         let (full_lc_state, period) =
             unpack_lc_state(state_with_period, ntst, ncol, dim, layout).map_err(to_js_error)?;
         Ok((full_lc_state, period, p2, None))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{convert_extension_point, Codim1BranchType, CurveDim};
+    use fork_core::continuation::{BifurcationType, Codim2BifurcationType, ContinuationPoint};
+
+    #[test]
+    fn convert_isochrone_extension_point_keeps_period_and_param2() {
+        let branch_type = Codim1BranchType::IsochroneCurve {
+            param1_name: "mu".to_string(),
+            param2_name: "nu".to_string(),
+            ntst: 4,
+            ncol: 2,
+        };
+        let point = ContinuationPoint {
+            // LC state + period + param2
+            state: vec![0.3, -0.4, 5.5, 0.12],
+            param_value: 0.2,
+            stability: BifurcationType::None,
+            eigenvalues: vec![],
+            cycle_points: None,
+        };
+
+        let converted = convert_extension_point(
+            &branch_type,
+            &point,
+            CurveDim::LimitCycle,
+            Codim2BifurcationType::None,
+        )
+        .expect("convert isochrone point");
+
+        assert_eq!(converted.param_value, 0.2);
+        assert_eq!(converted.param2_value, Some(0.12));
+        assert_eq!(converted.state, vec![0.3, -0.4, 5.5]);
+        assert_eq!(converted.stability.as_deref(), Some("None"));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    fn convert_isochrone_extension_point_rejects_short_state() {
+        let branch_type = Codim1BranchType::IsochroneCurve {
+            param1_name: "mu".to_string(),
+            param2_name: "nu".to_string(),
+            ntst: 4,
+            ncol: 2,
+        };
+        let point = ContinuationPoint {
+            state: vec![1.0],
+            param_value: 0.2,
+            stability: BifurcationType::None,
+            eigenvalues: vec![],
+            cycle_points: None,
+        };
+
+        let err = convert_extension_point(
+            &branch_type,
+            &point,
+            CurveDim::LimitCycle,
+            Codim2BifurcationType::None,
+        )
+        .expect_err("short state should fail");
+
+        let message = err.as_string().unwrap_or_default();
+        assert!(
+            message.contains("LC curve extension point has unexpected state length"),
+            "unexpected error: {}",
+            message
+        );
     }
 }
 

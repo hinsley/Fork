@@ -9,10 +9,12 @@
 mod lpc_curve;
 mod ns_curve;
 mod pd_curve;
+mod isochrone_curve;
 
 pub use lpc_curve::LPCCurveProblem;
 pub use ns_curve::NSCurveProblem;
 pub use pd_curve::PDCurveProblem;
+pub use isochrone_curve::IsochroneCurveProblem;
 
 use anyhow::Result;
 use nalgebra::{DMatrix, DVector};

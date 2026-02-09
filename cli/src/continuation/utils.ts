@@ -167,7 +167,15 @@ export function formatArray(values: number[]): string {
  */
 export function summarizeEigenvalues(point: ContinuationPoint, branchType?: string): string {
   const eigenvalues = point.eigenvalues || [];
-  const label = branchType === 'limit_cycle' ? 'Multipliers' : 'Eigenvalues';
+  const label = (
+    branchType === 'limit_cycle' ||
+    branchType === 'isochrone_curve' ||
+    branchType === 'lpc_curve' ||
+    branchType === 'pd_curve' ||
+    branchType === 'ns_curve'
+  )
+    ? 'Multipliers'
+    : 'Eigenvalues';
   if (eigenvalues.length === 0) {
     return `${label}: []`;
   }

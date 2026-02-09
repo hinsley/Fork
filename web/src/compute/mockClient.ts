@@ -16,6 +16,7 @@ import type {
   HomoclinicFromHomotopySaddleRequest,
   HomoclinicFromLargeCycleRequest,
   HopfCurveContinuationRequest,
+  IsochroneCurveContinuationRequest,
   HomotopySaddleContinuationResult,
   HomotopySaddleFromEquilibriumRequest,
   LimitCycleContinuationFromHopfRequest,
@@ -506,6 +507,54 @@ export class MockForkCoreClient implements ForkCoreClient {
               codim2_type: 'None',
               eigenvalues: [],
               auxiliary: request.hopfOmega * request.hopfOmega,
+            },
+          ],
+          codim2_bifurcations: [],
+          indices: [0],
+        }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runIsochroneCurveContinuation(
+    request: IsochroneCurveContinuationRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<Codim1CurveBranch> {
+    const job = this.queue.enqueue(
+      'runIsochroneCurveContinuation',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const progress: ContinuationProgress = {
+          done: false,
+          current_step: 0,
+          max_steps: request.settings.max_steps,
+          points_computed: 0,
+          bifurcations_found: 0,
+          current_param: request.param1Value,
+        }
+        opts?.onProgress?.(progress)
+
+        progress.done = true
+        progress.current_step = request.settings.max_steps
+        progress.points_computed = 3
+        opts?.onProgress?.({ ...progress })
+
+        return {
+          points: [
+            {
+              state: [...request.lcState, request.period],
+              param1_value: request.param1Value,
+              param2_value: request.param2Value,
+              codim2_type: 'None',
+              eigenvalues: [],
             },
           ],
           codim2_bifurcations: [],

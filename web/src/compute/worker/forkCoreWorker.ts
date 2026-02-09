@@ -15,6 +15,7 @@ import type {
   HomoclinicFromLargeCycleRequest,
   HomotopySaddleContinuationResult,
   HomotopySaddleFromEquilibriumRequest,
+  IsochroneCurveContinuationRequest,
   LimitCycleContinuationFromHopfRequest,
   LimitCycleContinuationFromOrbitRequest,
   LimitCycleContinuationFromPDRequest,
@@ -47,6 +48,11 @@ type WorkerRequest =
   | { id: string; kind: 'runContinuationExtension'; payload: ContinuationExtensionRequest }
   | { id: string; kind: 'runFoldCurveContinuation'; payload: FoldCurveContinuationRequest }
   | { id: string; kind: 'runHopfCurveContinuation'; payload: HopfCurveContinuationRequest }
+  | {
+      id: string
+      kind: 'runIsochroneCurveContinuation'
+      payload: IsochroneCurveContinuationRequest
+    }
   | {
       id: string
       kind: 'runLimitCycleContinuationFromHopf'
@@ -305,6 +311,26 @@ type WasmModule = {
     param1Value: number,
     param2Name: string,
     param2Value: number,
+    settings: Record<string, number>,
+    forward: boolean
+  ) => {
+    run_steps: (batchSize: number) => ContinuationProgress
+    get_progress: () => ContinuationProgress
+    get_result: () => Codim1CurveBranch
+  }
+  WasmIsochroneCurveRunner: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    lcState: Float64Array,
+    period: number,
+    param1Name: string,
+    param1Value: number,
+    param2Name: string,
+    param2Value: number,
+    ntst: number,
+    ncol: number,
     settings: Record<string, number>,
     forward: boolean
   ) => {
@@ -660,6 +686,7 @@ function isCodim1BranchType(branchType: unknown): boolean {
     type === 'FoldCurve' ||
     type === 'HopfCurve' ||
     type === 'LPCCurve' ||
+    type === 'IsochroneCurve' ||
     type === 'PDCurve' ||
     type === 'NSCurve'
   )
@@ -776,6 +803,44 @@ async function runHopfCurveContinuation(
     request.param1Value,
     request.param2Name,
     request.param2Value,
+    settings,
+    request.forward
+  )
+
+  let progress = runner.get_progress()
+  onProgress(progress)
+
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+
+  return runner.get_result()
+}
+
+async function runIsochroneCurveContinuation(
+  request: IsochroneCurveContinuationRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<Codim1CurveBranch> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const settings: Record<string, number> = { ...request.settings }
+  const runner = new wasm.WasmIsochroneCurveRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    new Float64Array(request.lcState),
+    request.period,
+    request.param1Name,
+    request.param1Value,
+    request.param2Name,
+    request.param2Value,
+    request.ntst,
+    request.ncol,
     settings,
     request.forward
   )
@@ -1444,6 +1509,24 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     if (message.kind === 'runHopfCurveContinuation') {
       const result = await runHopfCurveContinuation(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runIsochroneCurveContinuation') {
+      const result = await runIsochroneCurveContinuation(
         message.payload,
         controller.signal,
         (progress) => {

@@ -30,7 +30,7 @@ import {
 import { formatEquilibriumLabel } from '../labels';
 import { initiateLCBranchFromPoint, initiateLCFromPD } from './initiate-lc';
 import { initiateEquilibriumBranchFromPoint, initiateMapCycleFromPD } from './initiate-eq';
-import { initiateFoldCurve, initiateHopfCurve, initiateLPCCurve, initiatePDCurve, initiateNSCurve } from './initiate-codim1';
+import { initiateFoldCurve, initiateHopfCurve, initiateIsochroneCurve, initiateLPCCurve, initiatePDCurve, initiateNSCurve } from './initiate-codim1';
 import {
   initiateHomoclinicFromHomoclinic,
   initiateHomoclinicFromHomotopySaddle,
@@ -248,11 +248,18 @@ export function buildSummaryChoices(branch: ContinuationObject, indices: number[
   const startArrayIdx = sortedOrder[0];
   const endArrayIdx = sortedOrder[sortedOrder.length - 1];
   const pName = branch.parameterName;
+  const includePeriod = branch.branchType === 'isochrone_curve';
+  const formatPeriod = (arrayIdx: number) => {
+    const period = pts[arrayIdx]?.state?.[pts[arrayIdx].state.length - 1];
+    if (!Number.isFinite(period)) return null;
+    return `Period=${formatNumber(period)}`;
+  };
   const formatEntry = (label: string, arrayIdx: number) => {
     const logicalIdx = indices[arrayIdx];
     const paramVal = formatNumber(pts[arrayIdx].param_value);
     const stability = pts[arrayIdx].stability;
-    const text = `${label} • Index ${logicalIdx} • ${pName}=${paramVal} • ${stability}`;
+    const periodText = includePeriod ? formatPeriod(arrayIdx) : null;
+    const text = `${label} • Index ${logicalIdx} • ${pName}=${paramVal}${periodText ? ` • ${periodText}` : ''} • ${stability}`;
     return { name: text, value: `POINT:${arrayIdx}` };
   };
 
@@ -266,13 +273,14 @@ export function buildSummaryChoices(branch: ContinuationObject, indices: number[
       arrayIdx,
       logicalIdx: indices[arrayIdx],
       param: formatNumber(pts[arrayIdx].param_value),
+      period: includePeriod ? formatPeriod(arrayIdx) : null,
       stability: pts[arrayIdx].stability
     }))
     .sort((a, b) => a.logicalIdx - b.logicalIdx);
 
   bifEntries.forEach((entry, idx) => {
     const label = chalk.red(
-      `Bifurcation ${idx + 1} • Index ${entry.logicalIdx} • ${pName}=${entry.param} • ${entry.stability}`
+      `Bifurcation ${idx + 1} • Index ${entry.logicalIdx} • ${pName}=${entry.param}${entry.period ? ` • ${entry.period}` : ''} • ${entry.stability}`
     );
     choices.push({ name: label, value: `POINT:${entry.arrayIdx}` });
   });
@@ -318,6 +326,7 @@ export function formatPointRow(
     branch.branchType === 'fold_curve' ||
     branch.branchType === 'hopf_curve' ||
     branch.branchType === 'lpc_curve' ||
+    branch.branchType === 'isochrone_curve' ||
     branch.branchType === 'pd_curve' ||
     branch.branchType === 'ns_curve' ||
     branch.branchType === 'homoclinic_curve' ||
@@ -337,7 +346,14 @@ export function formatPointRow(
   }
 
   const prefix = bifurcationSet.has(arrayIdx) ? '*' : ' ';
-  let label = `${prefix} Index ${logicalIdx} | ${paramDisplay} | ${descriptor}${typeLabel}`;
+  const periodText =
+    branch.branchType === 'isochrone_curve'
+      ? (() => {
+          const period = pt.state?.[pt.state.length - 1];
+          return Number.isFinite(period) ? ` | Period=${formatNumber(period)}` : '';
+        })()
+      : '';
+  let label = `${prefix} Index ${logicalIdx} | ${paramDisplay}${periodText} | ${descriptor}${typeLabel}`;
 
   if (arrayIdx === focusIdx) {
     label = chalk.cyan(label);
@@ -477,6 +493,7 @@ export async function hydrateEigenvalues(sysName: string, branch: ContinuationOb
     branch.branchType === 'fold_curve' ||
     branch.branchType === 'hopf_curve' ||
     branch.branchType === 'lpc_curve' ||
+    branch.branchType === 'isochrone_curve' ||
     branch.branchType === 'pd_curve' ||
     branch.branchType === 'ns_curve' ||
     branch.branchType === 'homoclinic_curve' ||
@@ -603,6 +620,7 @@ export async function showPointDetails(
     branchType === 'fold_curve' ||
     branchType === 'hopf_curve' ||
     branchType === 'lpc_curve' ||
+    branchType === 'isochrone_curve' ||
     branchType === 'pd_curve' ||
     branchType === 'ns_curve' ||
     branchType === 'homoclinic_curve' ||
@@ -645,7 +663,7 @@ export async function showPointDetails(
 
 
   // All LC-based branches (limit_cycle plus codim1 LC curves) get enhanced LC display
-  const lcBasedBranches = ['limit_cycle', 'pd_curve', 'lpc_curve', 'ns_curve'];
+  const lcBasedBranches = ['limit_cycle', 'isochrone_curve', 'pd_curve', 'lpc_curve', 'ns_curve'];
   if (lcBasedBranches.includes(branchType)) {
     // Enhanced LC display
     const dim = sysConfig.equations.length;
@@ -657,7 +675,7 @@ export async function showPointDetails(
     if (branchTypeData && typeof branchTypeData === 'object' && 'type' in branchTypeData) {
       const bt = branchTypeData as { type: string; ntst?: number; ncol?: number };
       // Handle LimitCycle and all codim1 LC curve types
-      const lcTypes = ['LimitCycle', 'PDCurve', 'LPCCurve', 'NSCurve'];
+      const lcTypes = ['LimitCycle', 'IsochroneCurve', 'PDCurve', 'LPCCurve', 'NSCurve'];
       if (lcTypes.includes(bt.type) && bt.ntst && bt.ncol) {
         ntst = bt.ntst;
         ncol = bt.ncol;
@@ -780,6 +798,7 @@ export async function showPointDetails(
   } else if (branchType === 'limit_cycle') {
     // For limit cycle branches, offer to create a new limit cycle branch
     choices.push({ name: 'Create New Limit Cycle Branch', value: 'NEW_LC_BRANCH' });
+    choices.push({ name: 'Continue isochrone', value: 'CONTINUE_ISOCHRONE_CURVE' });
     choices.push({
       name: 'Continue Homoclinic Curve (Method 1)',
       value: 'CONTINUE_HOMOCLINIC_FROM_LC'
@@ -944,6 +963,19 @@ export async function showPointDetails(
   }
 
   // LC codim-1 curve continuation handlers
+  if (action === 'CONTINUE_ISOCHRONE_CURVE') {
+    const newBranch = await initiateIsochroneCurve(sysName, branch, pt, arrayIdx);
+    if (newBranch) {
+      return {
+        kind: 'OPEN_BRANCH' as const,
+        objectName: newBranch.parentObject,
+        branchName: newBranch.name,
+        autoInspect: true,
+      };
+    }
+    return 'BACK';
+  }
+
   if (action === 'CONTINUE_LPC_CURVE') {
     const newBranch = await initiateLPCCurve(sysName, branch, pt, arrayIdx);
     if (newBranch) {

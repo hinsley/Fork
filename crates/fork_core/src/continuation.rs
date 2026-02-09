@@ -43,7 +43,7 @@ pub use homoclinic_init::{
     HomoclinicSetup, HomotopySaddleSetup,
 };
 pub use homotopy_saddle::{continue_homotopy_saddle_curve, homotopy_stage_d_to_homoclinic};
-pub use lc_codim1_curves::{LPCCurveProblem, NSCurveProblem, PDCurveProblem};
+pub use lc_codim1_curves::{IsochroneCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem};
 pub use periodic::{
     continue_limit_cycle_collocation, extend_limit_cycle_collocation, limit_cycle_setup_from_hopf,
     limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd, CollocationConfig, LimitCycleGuess,

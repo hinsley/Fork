@@ -23,6 +23,7 @@ import { isValidName, getBranchParams } from './utils';
 import {
   runFoldCurveWithProgress,
   runHopfCurveWithProgress,
+  runIsochroneCurveWithProgress,
   runLPCCurveWithProgress,
   runPDCurveWithProgress,
   runNSCurveWithProgress
@@ -964,6 +965,290 @@ export async function initiateLPCCurve(
 
   } catch (e) {
     printError(`LPC Curve Continuation Failed: ${e}`);
+    return null;
+  }
+}
+
+/**
+ * Initiates isochrone continuation from a limit-cycle point.
+ */
+export async function initiateIsochroneCurve(
+  sysName: string,
+  branch: ContinuationObject,
+  point: ContinuationPoint,
+  pointIndex: number
+): Promise<ContinuationObject | null> {
+  const sysConfig = Storage.loadSystem(sysName);
+  const paramNames = sysConfig.paramNames;
+
+  if (paramNames.length < 2) {
+    printError("Two-parameter continuation requires at least 2 parameters.");
+    return null;
+  }
+
+  const branchParams = getBranchParams(sysName, branch, sysConfig);
+
+  const bt = branch.branchType;
+  if (bt !== 'limit_cycle' || !branch.data?.branch_type) {
+    printError("Isochrone continuation requires a limit cycle branch");
+    return null;
+  }
+  const lcBranchType = branch.data.branch_type as { type: 'LimitCycle'; ntst: number; ncol: number };
+  const ntst = lcBranchType.ntst || 20;
+  const ncol = lcBranchType.ncol || 4;
+
+  const param1Name = branch.parameterName;
+  const param1Value = point.param_value;
+  let param2Name = paramNames.find(p => p !== param1Name) || paramNames[0];
+  let param2Idx = paramNames.indexOf(param2Name);
+  let param2Value = branchParams[param2Idx];
+
+  const period = point.state[point.state.length - 1];
+  if (!Number.isFinite(period) || period <= 0) {
+    printError("Selected point has no valid period");
+    return null;
+  }
+
+  // Configuration variables
+  let curveName = `isochrone_curve_${branch.name}`;
+  let stepSizeInput = '0.01';
+  let maxStepsInput = '300';
+  let minStepSizeInput = '1e-5';
+  let maxStepSizeInput = '0.1';
+  let directionForward = true;
+  let correctorStepsInput = '10';
+  let correctorToleranceInput = '1e-8';
+
+  const directionLabel = (forward: boolean) =>
+    forward ? 'Forward' : 'Backward';
+
+  const entries: ConfigEntry[] = [
+    {
+      id: 'param2',
+      label: 'Second parameter',
+      section: 'Two-Parameter Setup',
+      getDisplay: () => `${param2Name} = ${param2Value}`,
+      edit: async () => {
+        const choices = paramNames
+          .filter(p => p !== param1Name)
+          .map(p => {
+            const idx = paramNames.indexOf(p);
+            return { name: `${p} (current: ${branchParams[idx]})`, value: p };
+          });
+        const { value } = await inquirer.prompt({
+          type: 'rawlist',
+          name: 'value',
+          message: 'Select second continuation parameter:',
+          choices,
+          default: param2Name,
+          pageSize: MENU_PAGE_SIZE
+        });
+        param2Name = value;
+        param2Idx = paramNames.indexOf(param2Name);
+        param2Value = branchParams[param2Idx];
+      }
+    },
+    {
+      id: 'curveName',
+      label: 'Curve name',
+      section: 'Output Settings',
+      getDisplay: () => curveName || '(required)',
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Name for the isochrone curve:',
+          default: curveName,
+          validate: (val: string) => isValidName(val)
+        });
+        curveName = value;
+      }
+    },
+    {
+      id: 'direction',
+      label: 'Direction',
+      section: 'Continuation Settings',
+      getDisplay: () => directionLabel(directionForward),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          type: 'rawlist',
+          name: 'value',
+          message: 'Direction:',
+          choices: [
+            { name: 'Forward', value: true },
+            { name: 'Backward', value: false }
+          ],
+          default: directionForward,
+          pageSize: MENU_PAGE_SIZE
+        });
+        directionForward = value;
+      }
+    },
+    {
+      id: 'stepSize',
+      label: 'Initial step size',
+      section: 'Continuation Settings',
+      getDisplay: () => formatUnset(stepSizeInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Initial Step Size:',
+          default: stepSizeInput
+        });
+        stepSizeInput = value;
+      }
+    },
+    {
+      id: 'maxSteps',
+      label: 'Max points',
+      section: 'Continuation Settings',
+      getDisplay: () => formatUnset(maxStepsInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Max Points:',
+          default: maxStepsInput
+        });
+        maxStepsInput = value;
+      }
+    },
+    {
+      id: 'correctorSteps',
+      label: 'Corrector steps',
+      section: 'Corrector Settings',
+      getDisplay: () => formatUnset(correctorStepsInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Corrector steps:',
+          default: correctorStepsInput
+        });
+        correctorStepsInput = value;
+      }
+    },
+    {
+      id: 'correctorTolerance',
+      label: 'Corrector tolerance',
+      section: 'Corrector Settings',
+      getDisplay: () => formatUnset(correctorToleranceInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Corrector tolerance:',
+          default: correctorToleranceInput
+        });
+        correctorToleranceInput = value;
+      }
+    }
+  ];
+
+  // Show info header
+  console.log('');
+  console.log(chalk.yellow('Isochrone Continuation (Two-Parameter)'));
+  console.log(chalk.gray(`Tracking fixed-period curve in (${param1Name}, ${param2Name}) space`));
+  console.log(chalk.gray(`Starting point: ${param1Name}=${param1Value}, period=${period}`));
+  console.log('');
+
+  while (true) {
+    const result = await runConfigMenu('Configure Isochrone Continuation', entries);
+    if (result === 'back') {
+      return null;
+    }
+
+    if (!curveName) {
+      printError('Please provide a curve name.');
+      continue;
+    }
+
+    break;
+  }
+
+  const continuationSettings = {
+    step_size: Math.max(parseFloatOrDefault(stepSizeInput, 0.01), 1e-9),
+    min_step_size: Math.max(parseFloatOrDefault(minStepSizeInput, 1e-5), 1e-12),
+    max_step_size: Math.max(parseFloatOrDefault(maxStepSizeInput, 0.1), 1e-9),
+    max_steps: Math.max(parseIntOrDefault(maxStepsInput, 300), 1),
+    corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
+    corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-8), Number.EPSILON),
+    step_tolerance: 1e-8
+  };
+
+  printInfo(`Running isochrone continuation (max ${continuationSettings.max_steps} steps)...`);
+
+  try {
+    const runConfig = { ...sysConfig };
+    runConfig.params = [...branchParams];
+    runConfig.params[paramNames.indexOf(param1Name)] = param1Value;
+
+    const bridge = new WasmBridge(runConfig);
+    const lcCoords = point.state.slice(0, -1);
+
+    const curveData = runIsochroneCurveWithProgress(
+      bridge,
+      lcCoords,
+      period,
+      param1Name,
+      param1Value,
+      param2Name,
+      param2Value,
+      ntst,
+      ncol,
+      continuationSettings,
+      directionForward,
+      'Isochrone'
+    );
+
+    if (!curveData || !curveData.points || curveData.points.length === 0) {
+      printError('Isochrone continuation returned no points');
+      return null;
+    }
+
+    printSuccess(`Isochrone computed: ${curveData.points.length} points`);
+
+    const branchData = {
+      points: curveData.points.map((pt: any) => ({
+        state: pt.state || point.state,
+        param_value: pt.param1_value,
+        param2_value: pt.param2_value,
+        stability: pt.codim2_type || 'None',
+        eigenvalues: (pt.eigenvalues || []).map((eig: any) => {
+          if (Array.isArray(eig)) {
+            return { re: eig[0] ?? 0, im: eig[1] ?? 0 };
+          }
+          return eig;
+        }),
+        auxiliary: pt.auxiliary
+      })),
+      bifurcations: curveData.codim2_bifurcations?.map((b: any) => b.index) || [],
+      indices: curveData.points.map((_: any, i: number) => i),
+      branch_type: {
+        type: 'IsochroneCurve' as const,
+        param1_name: param1Name,
+        param2_name: param2Name,
+        ntst,
+        ncol
+      }
+    };
+
+    const newBranch: ContinuationObject = {
+      type: 'continuation',
+      name: curveName,
+      systemName: sysName,
+      parameterName: `${param1Name}, ${param2Name}`,
+      parentObject: branch.parentObject,
+      startObject: branch.name,
+      branchType: 'isochrone_curve',
+      data: branchData,
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...runConfig.params]
+    };
+
+    Storage.saveBranch(sysName, branch.parentObject, newBranch);
+    printSuccess(`Saved isochrone curve branch: ${curveName}`);
+    return newBranch;
+
+  } catch (e) {
+    printError(`Isochrone Continuation Failed: ${e}`);
     return null;
   }
 }

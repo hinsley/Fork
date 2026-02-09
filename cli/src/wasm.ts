@@ -292,6 +292,38 @@ export class WasmBridge {
         ) as Codim1CurveRunner;
     }
 
+    createIsochroneCurveRunner(
+        lcState: number[],
+        period: number,
+        param1Name: string,
+        param1Value: number,
+        param2Name: string,
+        param2Value: number,
+        ntst: number,
+        ncol: number,
+        settings: any,
+        forward: boolean
+    ): Codim1CurveRunner {
+        if (!wasmModule) throw new Error("WASM module not loaded");
+
+        return new wasmModule.WasmIsochroneCurveRunner(
+            this.config.equations,
+            new Float64Array(this.config.params),
+            this.config.paramNames,
+            this.config.varNames,
+            new Float64Array(lcState),
+            period,
+            param1Name,
+            param1Value,
+            param2Name,
+            param2Value,
+            ntst,
+            ncol,
+            settings,
+            forward
+        ) as Codim1CurveRunner;
+    }
+
     createPDCurveRunner(
         lcState: number[],
         period: number,
@@ -965,6 +997,35 @@ export class WasmBridge {
     }
 
     /**
+     * Continues an isochrone curve in two-parameter space.
+     */
+    continueIsochroneCurve(
+        lcState: number[],
+        period: number,
+        param1Name: string,
+        param1Value: number,
+        param2Name: string,
+        param2Value: number,
+        ntst: number,
+        ncol: number,
+        settings: any,
+        forward: boolean
+    ): any {
+        return this.instance.continue_isochrone_curve(
+            new Float64Array(lcState),
+            period,
+            param1Name,
+            param1Value,
+            param2Name,
+            param2Value,
+            ntst,
+            ncol,
+            settings,
+            forward
+        );
+    }
+
+    /**
      * Continues a PD (Period-Doubling) curve in two-parameter space.
      */
     continuePDCurve(
@@ -1034,6 +1095,7 @@ function isCodim1BranchType(branchType: any): boolean {
         type === 'FoldCurve' ||
         type === 'HopfCurve' ||
         type === 'LPCCurve' ||
+        type === 'IsochroneCurve' ||
         type === 'PDCurve' ||
         type === 'NSCurve'
     );
