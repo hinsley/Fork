@@ -311,9 +311,12 @@ impl WasmCodim1CurveExtensionRunner {
 
                 let mut problem: FoldCurveProblem<'static> =
                     unsafe { std::mem::transmute(problem) };
-                let mut tangent = compute_tangent_from_problem(&mut problem, &end_aug)
-                    .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
-                orient_tangent(&mut tangent, secant.as_ref(), forward);
+                let tangent = initial_tangent_from_secant_or_problem(
+                    &mut problem,
+                    &end_aug,
+                    secant.as_ref(),
+                    forward,
+                )?;
 
                 let initial_point = ContinuationPoint {
                     state: end_state.clone(),
@@ -395,9 +398,12 @@ impl WasmCodim1CurveExtensionRunner {
 
                 let mut problem: HopfCurveProblem<'static> =
                     unsafe { std::mem::transmute(problem) };
-                let mut tangent = compute_tangent_from_problem(&mut problem, &end_aug)
-                    .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
-                orient_tangent(&mut tangent, secant.as_ref(), forward);
+                let tangent = initial_tangent_from_secant_or_problem(
+                    &mut problem,
+                    &end_aug,
+                    secant.as_ref(),
+                    forward,
+                )?;
 
                 let initial_point = ContinuationPoint {
                     state: end_state.clone(),
@@ -469,9 +475,12 @@ impl WasmCodim1CurveExtensionRunner {
                 .map_err(|e| JsValue::from_str(&format!("Failed to create LPC problem: {}", e)))?;
 
                 let mut problem: LPCCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
-                let mut tangent = compute_tangent_from_problem(&mut problem, &end_aug)
-                    .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
-                orient_tangent(&mut tangent, secant.as_ref(), forward);
+                let tangent = initial_tangent_from_secant_or_problem(
+                    &mut problem,
+                    &end_aug,
+                    secant.as_ref(),
+                    forward,
+                )?;
 
                 let initial_point = ContinuationPoint {
                     state: end_state.clone(),
@@ -544,9 +553,12 @@ impl WasmCodim1CurveExtensionRunner {
 
                 let mut problem: IsochroneCurveProblem<'static> =
                     unsafe { std::mem::transmute(problem) };
-                let mut tangent = compute_tangent_from_problem(&mut problem, &end_aug)
-                    .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
-                orient_tangent(&mut tangent, secant.as_ref(), forward);
+                let tangent = initial_tangent_from_secant_or_problem(
+                    &mut problem,
+                    &end_aug,
+                    secant.as_ref(),
+                    forward,
+                )?;
 
                 let initial_point = ContinuationPoint {
                     state: end_state.clone(),
@@ -616,9 +628,12 @@ impl WasmCodim1CurveExtensionRunner {
                 .map_err(|e| JsValue::from_str(&format!("Failed to create PD problem: {}", e)))?;
 
                 let mut problem: PDCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
-                let mut tangent = compute_tangent_from_problem(&mut problem, &end_aug)
-                    .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
-                orient_tangent(&mut tangent, secant.as_ref(), forward);
+                let tangent = initial_tangent_from_secant_or_problem(
+                    &mut problem,
+                    &end_aug,
+                    secant.as_ref(),
+                    forward,
+                )?;
 
                 let initial_point = ContinuationPoint {
                     state: end_state.clone(),
@@ -693,9 +708,12 @@ impl WasmCodim1CurveExtensionRunner {
                 .map_err(|e| JsValue::from_str(&format!("Failed to create NS problem: {}", e)))?;
 
                 let mut problem: NSCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
-                let mut tangent = compute_tangent_from_problem(&mut problem, &end_aug)
-                    .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
-                orient_tangent(&mut tangent, secant.as_ref(), forward);
+                let tangent = initial_tangent_from_secant_or_problem(
+                    &mut problem,
+                    &end_aug,
+                    secant.as_ref(),
+                    forward,
+                )?;
 
                 let initial_point = ContinuationPoint {
                     state: end_state.clone(),
@@ -899,6 +917,22 @@ fn orient_tangent(tangent: &mut DVector<f64>, secant: Option<&DVector<f64>>, for
             *tangent = -tangent.clone();
         }
     }
+}
+
+fn initial_tangent_from_secant_or_problem<P: ContinuationProblem>(
+    problem: &mut P,
+    end_aug: &DVector<f64>,
+    secant: Option<&DVector<f64>>,
+    forward: bool,
+) -> Result<DVector<f64>, JsValue> {
+    let mut tangent = if let Some(secant_vec) = secant {
+        secant_vec.clone()
+    } else {
+        compute_tangent_from_problem(problem, end_aug)
+            .map_err(|e| JsValue::from_str(&format!("{}", e)))?
+    };
+    orient_tangent(&mut tangent, secant, forward);
+    Ok(tangent)
 }
 
 fn to_js_error(err: anyhow::Error) -> JsValue {
