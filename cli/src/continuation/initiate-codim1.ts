@@ -1293,7 +1293,10 @@ export async function initiateIsochroneCurve(
         auxiliary: pt.auxiliary
       })),
       bifurcations: curveData.codim2_bifurcations?.map((b: any) => b.index) || [],
-      indices: curveData.points.map((_: any, i: number) => i),
+      indices:
+        Array.isArray(curveData.indices) && curveData.indices.length === curveData.points.length
+          ? curveData.indices
+          : curveData.points.map((_: any, i: number) => (directionForward || i === 0 ? i : -i)),
       branch_type: {
         type: 'IsochroneCurve' as const,
         param1_name: param1Name,

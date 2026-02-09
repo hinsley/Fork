@@ -2757,7 +2757,10 @@ export function AppProvider({
             auxiliary: pt.auxiliary ?? undefined,
           })),
           bifurcations: curveData.codim2_bifurcations?.map((b) => b.index) || [],
-          indices: curveData.points.map((_, i) => i),
+          indices:
+            curveData.indices && curveData.indices.length === curveData.points.length
+              ? curveData.indices
+              : curveData.points.map((_, i) => (request.forward || i === 0 ? i : -i)),
           branch_type: {
             type: 'IsochroneCurve' as const,
             param1_name: param1Name,

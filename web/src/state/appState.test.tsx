@@ -744,6 +744,112 @@ describe('appState limit cycle render targets', () => {
     })
   })
 
+  it('uses negative logical indices for backward isochrone continuation', async () => {
+    const base = createSystem({
+      name: 'Isochrone_Backward_Indices',
+      config: {
+        name: 'Isochrone_Backward_Indices',
+        equations: ['y', '-x + mu + nu'],
+        params: [0.2, 0.1],
+        paramNames: ['mu', 'nu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Backward_Idx',
+      systemName: base.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_Backward_Idx' },
+      ntst: 4,
+      ncol: 2,
+      period: 6,
+      state: [0, 1, 1, 0, 0, -1, -1, 0, 6],
+      parameters: [...base.config.params],
+      parameterName: 'mu',
+      paramValue: 0.2,
+      createdAt: new Date().toISOString(),
+    }
+    const withObject = addObject(base, limitCycle)
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_seed_mu',
+      systemName: base.config.name,
+      parameterName: 'mu',
+      parentObject: limitCycle.name,
+      startObject: limitCycle.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          {
+            state: [0, 1, 1, 0, 0, -1, -1, 0, 6],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: { type: 'LimitCycle', ntst: 4, ncol: 2 },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...base.config.params],
+    }
+    const withBranch = addBranch(withObject.system, sourceBranch, withObject.nodeId)
+    const client = new MockForkCoreClient(0)
+    client.runIsochroneCurveContinuation = async (request) => ({
+      points: [
+        {
+          state: [...request.lcState, request.period],
+          param1_value: request.param1Value,
+          param2_value: request.param2Value,
+          codim2_type: 'None',
+          eigenvalues: [],
+        },
+        {
+          state: [...request.lcState, request.period],
+          param1_value: request.param1Value - request.settings.step_size,
+          param2_value: request.param2Value,
+          codim2_type: 'None',
+          eigenvalues: [],
+        },
+        {
+          state: [...request.lcState, request.period],
+          param1_value: request.param1Value - 2 * request.settings.step_size,
+          param2_value: request.param2Value,
+          codim2_type: 'None',
+          eigenvalues: [],
+        },
+      ],
+      codim2_bifurcations: [],
+    })
+    const { getContext } = setupApp(withBranch.system, client)
+
+    await act(async () => {
+      await getContext().actions.createIsochroneCurveFromPoint({
+        branchId: withBranch.nodeId,
+        pointIndex: 0,
+        name: 'iso_curve_backward_indices',
+        parameterName: 'mu',
+        param2Name: 'nu',
+        settings: continuationSettings,
+        forward: false,
+      })
+    })
+
+    await waitFor(() => {
+      const next = getContext().state.system
+      expect(next).not.toBeNull()
+      expect(getContext().state.error).toBeNull()
+      const branchId = findBranchIdByName(next!, 'iso_curve_backward_indices')
+      const created = next!.branches[branchId]
+      expect(created.branchType).toBe('isochrone_curve')
+      expect(created.data.indices).toEqual([0, -1, -2])
+    })
+  })
+
   it('does not continue limit-cycle branches from a point for map systems', async () => {
     const base = createSystem({
       name: 'Map_LC_From_Point',
