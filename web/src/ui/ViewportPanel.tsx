@@ -3304,7 +3304,7 @@ function buildSceneBaseLayout(
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
         bgcolor: plotlyTheme.background,
-        aspectmode: 'data',
+        aspectmode: 'cube',
       },
     }
   }

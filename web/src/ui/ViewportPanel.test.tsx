@@ -193,6 +193,7 @@ describe('ViewportPanel view state wiring', () => {
     const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
     expect(props).toBeTruthy()
     expect(props?.layout?.scene?.camera).toBeUndefined()
+    expect(props?.layout?.scene?.aspectmode).toBe('cube')
     expect(props?.viewRevision).toBe(2)
     expect(props?.initialView).toMatchObject({
       'scene.camera': {
