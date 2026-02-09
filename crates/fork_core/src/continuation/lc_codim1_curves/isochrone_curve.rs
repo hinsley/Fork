@@ -413,7 +413,10 @@ impl<'a> ContinuationProblem for IsochroneCurveProblem<'a> {
             self.build_bvp_jac(aug)?
         };
 
-        let multipliers = extract_multipliers_shooting(&jac, self.dim, self.ntst, self.ncol)?;
+        // Multiplier extraction can fail on numerically poor seeds (e.g. singular
+        // local stage blocks). This should not prevent continuation startup.
+        let multipliers =
+            extract_multipliers_shooting(&jac, self.dim, self.ntst, self.ncol).unwrap_or_default();
 
         Ok(PointDiagnostics {
             test_values: TestFunctionValues::limit_cycle(1.0, 1.0, 1.0),
@@ -432,7 +435,7 @@ mod tests {
     use super::IsochroneCurveProblem;
     use crate::continuation::ContinuationProblem;
     use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
-    use nalgebra::DVector;
+    use nalgebra::{DMatrix, DVector};
 
     fn make_two_dim_flow_system() -> EquationSystem {
         // x' = x, y' = y (simple linear flow).
@@ -558,5 +561,36 @@ mod tests {
 
         let isochrone_row = problem.fixed_period_row();
         assert!((out[isochrone_row] - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn diagnostics_tolerates_singular_monodromy_blocks() {
+        let mut system = make_two_dim_flow_system();
+        let lc_state = vec![0.1, 0.2, 0.1, 0.2, 0.1, 0.2];
+
+        let mut problem = IsochroneCurveProblem::new(
+            &mut system,
+            lc_state,
+            2.0,
+            0,
+            1,
+            0.0,
+            0.0,
+            1,
+            1,
+        )
+        .expect("create isochrone problem");
+
+        let n_stages = 1usize;
+        let n_eqs = n_stages * 2 + 1 * 2 + 1 + 2;
+        let n_vars = (n_stages * 2 + (1 + 1) * 2) + 1;
+        problem.cached_jac = Some(DMatrix::<f64>::zeros(n_eqs, n_vars));
+
+        let aug = DVector::zeros(problem.dimension() + 1);
+        let diag = problem.diagnostics(&aug).expect("diagnostics should not fail");
+        assert!(
+            diag.eigenvalues.is_empty(),
+            "singular monodromy should yield empty multipliers"
+        );
     }
 }
