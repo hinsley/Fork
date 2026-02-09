@@ -620,6 +620,128 @@ describe('appState limit cycle render targets', () => {
     })
   })
 
+  it('creates an isochrone branch from a selected isochrone point', async () => {
+    const base = createSystem({
+      name: 'Isochrone_From_Isochrone_Point',
+      config: {
+        name: 'Isochrone_From_Isochrone_Point',
+        equations: ['y', '-x + mu + nu + kappa'],
+        params: [0.2, 0.1, 0.3],
+        paramNames: ['mu', 'nu', 'kappa'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Iso_Source',
+      systemName: base.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_Iso_Source' },
+      ntst: 1,
+      ncol: 1,
+      period: 6,
+      state: [0.2, 0.3, 0.2, 0.3, 6],
+      parameters: [...base.config.params],
+      parameterName: 'mu',
+      paramValue: 0.2,
+      createdAt: new Date().toISOString(),
+    }
+    const withObject = addObject(base, limitCycle)
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'iso_seed_mu_nu',
+      systemName: base.config.name,
+      parameterName: 'mu, nu',
+      parentObject: limitCycle.name,
+      startObject: limitCycle.name,
+      branchType: 'isochrone_curve',
+      data: {
+        points: [
+          {
+            state: [0.5, -0.1, 0.2, 0.3, 0.2, 0.3, 6],
+            param_value: 0.25,
+            param2_value: 0.35,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: {
+          type: 'IsochroneCurve',
+          param1_name: 'mu',
+          param2_name: 'nu',
+          ntst: 1,
+          ncol: 1,
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...base.config.params],
+    }
+    const withBranch = addBranch(withObject.system, sourceBranch, withObject.nodeId)
+    const client = new MockForkCoreClient(0)
+    let capturedRequest:
+      | Parameters<NonNullable<MockForkCoreClient['runIsochroneCurveContinuation']>>[0]
+      | null = null
+    client.runIsochroneCurveContinuation = async (request) => {
+      capturedRequest = request
+      return {
+        points: [
+          {
+            state: [...request.lcState, request.period],
+            param1_value: request.param1Value,
+            param2_value: request.param2Value,
+            codim2_type: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [...request.lcState, request.period],
+            param1_value: request.param1Value + request.settings.step_size,
+            param2_value: request.param2Value,
+            codim2_type: 'None',
+            eigenvalues: [],
+          },
+        ],
+        codim2_bifurcations: [],
+        indices: [0, 1],
+      }
+    }
+    const { getContext } = setupApp(withBranch.system, client)
+
+    await act(async () => {
+      await getContext().actions.createIsochroneCurveFromPoint({
+        branchId: withBranch.nodeId,
+        pointIndex: 0,
+        name: 'iso_curve_mu_kappa',
+        param2Name: 'kappa',
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      const next = getContext().state.system
+      expect(next).not.toBeNull()
+      expect(getContext().state.error).toBeNull()
+      expect(capturedRequest).not.toBeNull()
+      expect(capturedRequest?.param1Name).toBe('mu')
+      expect(capturedRequest?.param1Value).toBeCloseTo(0.25, 12)
+      expect(capturedRequest?.param2Name).toBe('kappa')
+      expect(capturedRequest?.system.params[0]).toBeCloseTo(0.25, 12)
+      expect(capturedRequest?.system.params[1]).toBeCloseTo(0.35, 12)
+      const branchId = findBranchIdByName(next!, 'iso_curve_mu_kappa')
+      const created = next!.branches[branchId]
+      expect(created.branchType).toBe('isochrone_curve')
+      expect(created.data.branch_type).toMatchObject({
+        type: 'IsochroneCurve',
+        param1_name: 'mu',
+        param2_name: 'kappa',
+      })
+    })
+  })
+
   it('does not continue limit-cycle branches from a point for map systems', async () => {
     const base = createSystem({
       name: 'Map_LC_From_Point',

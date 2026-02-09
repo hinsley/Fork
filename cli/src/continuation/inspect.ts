@@ -819,6 +819,8 @@ export async function showPointDetails(
     if (pt.stability === 'NeimarkSacker') {
       choices.push({ name: 'Continue NS Curve (2-parameter)', value: 'CONTINUE_NS_CURVE' });
     }
+  } else if (branchType === 'isochrone_curve') {
+    choices.push({ name: 'Continue from Point', value: 'CONTINUE_ISOCHRONE_CURVE' });
   } else if (branchType === 'homoclinic_curve') {
     choices.push({
       name: 'Continue Homoclinic Curve (Method 2)',

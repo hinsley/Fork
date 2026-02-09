@@ -970,7 +970,7 @@ export async function initiateLPCCurve(
 }
 
 /**
- * Initiates isochrone continuation from a limit-cycle point.
+ * Initiates isochrone continuation from a limit-cycle or isochrone point.
  */
 export async function initiateIsochroneCurve(
   sysName: string,
@@ -989,18 +989,41 @@ export async function initiateIsochroneCurve(
   const branchParams = getBranchParams(sysName, branch, sysConfig);
 
   const bt = branch.branchType;
-  if (bt !== 'limit_cycle' || !branch.data?.branch_type) {
-    printError("Isochrone continuation requires a limit cycle branch");
+  if ((bt !== 'limit_cycle' && bt !== 'isochrone_curve') || !branch.data?.branch_type) {
+    printError("Isochrone continuation requires a limit cycle or isochrone branch");
     return null;
   }
-  const lcBranchType = branch.data.branch_type as { type: 'LimitCycle'; ntst: number; ncol: number };
+  const lcBranchType = branch.data.branch_type as
+    | { type: 'LimitCycle'; ntst: number; ncol: number }
+    | {
+        type: 'IsochroneCurve';
+        param1_name: string;
+        param2_name: string;
+        ntst: number;
+        ncol: number;
+      };
+  if (lcBranchType.type !== 'LimitCycle' && lcBranchType.type !== 'IsochroneCurve') {
+    printError('Limit cycle mesh metadata is missing for this branch');
+    return null;
+  }
   const ntst = lcBranchType.ntst || 20;
   const ncol = lcBranchType.ncol || 4;
 
-  const param1Name = branch.parameterName;
+  const param1Name =
+    lcBranchType.type === 'IsochroneCurve' ? lcBranchType.param1_name : branch.parameterName;
+  if (!paramNames.includes(param1Name)) {
+    printError('Source continuation parameter is not defined in this system.');
+    return null;
+  }
   const param1Value = point.param_value;
   let param2Name = paramNames.find(p => p !== param1Name) || paramNames[0];
   let param2Idx = paramNames.indexOf(param2Name);
+  if (lcBranchType.type === 'IsochroneCurve' && Number.isFinite(point.param2_value)) {
+    const sourceParam2Idx = paramNames.indexOf(lcBranchType.param2_name);
+    if (sourceParam2Idx >= 0) {
+      branchParams[sourceParam2Idx] = point.param2_value as number;
+    }
+  }
   let param2Value = branchParams[param2Idx];
 
   const period = point.state[point.state.length - 1];

@@ -2416,9 +2416,15 @@ export function InspectorDetailsPanel({
       return { ...prev, param2Name, name: nextName }
     })
     setIsochroneCurveDraft((prev) => {
+      const sourceParam1Name =
+        branch?.branchType === 'isochrone_curve' &&
+        hopfCodim1Params &&
+        systemDraft.paramNames.includes(hopfCodim1Params.param1)
+          ? hopfCodim1Params.param1
+          : branchParameterName
       const param2Name =
         systemDraft.paramNames.includes(prev.param2Name) &&
-        prev.param2Name !== branchParameterName
+        prev.param2Name !== sourceParam1Name
           ? prev.param2Name
           : fallbackParam
       const safeBranchName = toCliSafeName(branchName)
@@ -2954,9 +2960,19 @@ export function InspectorDetailsPanel({
     () => (branch ? branch.data.bifurcations ?? [] : []),
     [branch]
   )
+  const isochroneSourceParam1Name = useMemo(() => {
+    if (branch?.branchType !== 'isochrone_curve') {
+      return branchParameterName
+    }
+    return codim1ParamNames?.param1 ?? ''
+  }, [branch?.branchType, branchParameterName, codim1ParamNames])
   const codim1ParamOptions = useMemo(() => {
-    return systemDraft.paramNames.filter((name) => name !== branchParameterName)
-  }, [systemDraft.paramNames, branchParameterName])
+    const sourceParam1Name =
+      branch?.branchType === 'isochrone_curve'
+        ? isochroneSourceParam1Name
+        : branchParameterName
+    return systemDraft.paramNames.filter((name) => name !== sourceParam1Name)
+  }, [systemDraft.paramNames, branch?.branchType, branchParameterName, isochroneSourceParam1Name])
   const branchStartIndex = branchSortedOrder[0]
   const branchEndIndex = branchSortedOrder[branchSortedOrder.length - 1]
   const branchStartPoint = branchStartIndex !== undefined ? branch?.data.points[branchStartIndex] : null
@@ -3001,7 +3017,8 @@ export function InspectorDetailsPanel({
   const showNSCurveContinuation =
     showCodim1CurveContinuations && isDiscreteMap && isNSCurvePointSelected
   const showIsochroneContinuation =
-    branch?.branchType === 'limit_cycle' && hasSelectedBranchPoint
+    (branch?.branchType === 'limit_cycle' || branch?.branchType === 'isochrone_curve') &&
+    hasSelectedBranchPoint
   const homotopyBranchStage =
     branch?.data.branch_type &&
     typeof branch.data.branch_type === 'object' &&
@@ -3975,8 +3992,10 @@ export function InspectorDetailsPanel({
       setIsochroneCurveError('Select a branch to continue.')
       return
     }
-    if (branch.branchType !== 'limit_cycle') {
-      setIsochroneCurveError('Isochrone continuation is only available for limit cycle branches.')
+    if (branch.branchType !== 'limit_cycle' && branch.branchType !== 'isochrone_curve') {
+      setIsochroneCurveError(
+        'Isochrone continuation is only available for limit cycle or isochrone branches.'
+      )
       return
     }
     if (!selectedBranchPoint || branchPointIndex === null) {
@@ -3996,7 +4015,15 @@ export function InspectorDetailsPanel({
       setIsochroneCurveError('Select a second continuation parameter.')
       return
     }
-    if (isochroneCurveDraft.param2Name === branchParameterName) {
+    const sourceParam1Name =
+      branch.branchType === 'isochrone_curve'
+        ? codim1ParamNames?.param1 ?? ''
+        : branchParameterName
+    if (!systemDraft.paramNames.includes(sourceParam1Name)) {
+      setIsochroneCurveError('Source continuation parameter is not defined in this system.')
+      return
+    }
+    if (isochroneCurveDraft.param2Name === sourceParam1Name) {
       setIsochroneCurveError(
         'Second parameter must be different from the continuation parameter.'
       )
@@ -9612,7 +9639,7 @@ export function InspectorDetailsPanel({
                 {showIsochroneContinuation ? (
                   <InspectorDisclosure
                     key={`${selectionKey}-isochrone-curve`}
-                    title="Continue Isochrone"
+                    title={branch.branchType === 'isochrone_curve' ? 'Continue from Point' : 'Continue Isochrone'}
                     testId="isochrone-curve-toggle"
                     defaultOpen={false}
                   >
@@ -9793,10 +9820,17 @@ export function InspectorDetailsPanel({
                       ) : null}
                       <button
                         onClick={handleCreateIsochroneCurve}
-                        disabled={runDisabled || !selectedBranchPoint || branch.branchType !== 'limit_cycle'}
+                        disabled={
+                          runDisabled ||
+                          !selectedBranchPoint ||
+                          (branch.branchType !== 'limit_cycle' &&
+                            branch.branchType !== 'isochrone_curve')
+                        }
                         data-testid="isochrone-curve-submit"
                       >
-                        Continue Isochrone
+                        {branch.branchType === 'isochrone_curve'
+                          ? 'Continue from Point'
+                          : 'Continue Isochrone'}
                       </button>
                     </div>
                   </InspectorDisclosure>

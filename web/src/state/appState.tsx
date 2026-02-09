@@ -2624,8 +2624,13 @@ export function AppProvider({
         if (!sourceBranch) {
           throw new Error('Select a valid branch to continue.')
         }
-        if (sourceBranch.branchType !== 'limit_cycle') {
-          throw new Error('Isochrone continuation is only available for limit cycle branches.')
+        if (
+          sourceBranch.branchType !== 'limit_cycle' &&
+          sourceBranch.branchType !== 'isochrone_curve'
+        ) {
+          throw new Error(
+            'Isochrone continuation is only available for limit cycle or isochrone branches.'
+          )
         }
 
         const point: ContinuationPoint | undefined =
@@ -2639,7 +2644,10 @@ export function AppProvider({
         }
 
         const branchType = sourceBranch.data.branch_type
-        if (!branchType || branchType.type !== 'LimitCycle') {
+        if (
+          !branchType ||
+          (branchType.type !== 'LimitCycle' && branchType.type !== 'IsochroneCurve')
+        ) {
           throw new Error('Limit cycle mesh metadata is missing for this branch.')
         }
         const ntst = Math.max(1, Math.trunc(branchType.ntst ?? 20))
@@ -2654,7 +2662,10 @@ export function AppProvider({
           throw new Error(`Branch "${name}" already exists.`)
         }
 
-        const param1Name = sourceBranch.parameterName
+        const param1Name =
+          sourceBranch.branchType === 'isochrone_curve' && branchType.type === 'IsochroneCurve'
+            ? branchType.param1_name
+            : sourceBranch.parameterName
         if (!system.paramNames.includes(param1Name)) {
           throw new Error('Source continuation parameter is not defined in this system.')
         }
@@ -2669,6 +2680,18 @@ export function AppProvider({
 
         const runConfig: SystemConfig = { ...system }
         runConfig.params = getBranchParams(state.system, sourceBranch)
+
+        if (sourceBranch.branchType === 'isochrone_curve' && branchType.type === 'IsochroneCurve') {
+          const sourceParam2Idx = system.paramNames.indexOf(branchType.param2_name)
+          const sourceParam2Value = resolveContinuationPointParam2Value(
+            point,
+            sourceBranch.data.branch_type,
+            system.varNames.length
+          )
+          if (sourceParam2Idx >= 0 && Number.isFinite(sourceParam2Value)) {
+            runConfig.params[sourceParam2Idx] = sourceParam2Value as number
+          }
+        }
 
         const param1Idx = system.paramNames.indexOf(param1Name)
         if (param1Idx >= 0) {

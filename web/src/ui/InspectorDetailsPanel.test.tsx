@@ -1685,6 +1685,118 @@ describe('InspectorDetailsPanel', () => {
     )
   })
 
+  it('shows "Continue from Point" for isochrone branches and submits continuation', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({
+      name: 'Isochrone_From_Isochrone_Menu_System',
+      config: {
+        name: 'Isochrone_From_Isochrone_Menu_System',
+        equations: ['y', '-x + mu + nu + kappa'],
+        params: [0.2, 0.1, 0.3],
+        paramNames: ['mu', 'nu', 'kappa'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Isochrone_Source',
+      systemName: baseSystem.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_Isochrone_Source' },
+      ntst: 1,
+      ncol: 1,
+      period: 6,
+      state: [0.2, 0.3, 0.2, 0.3, 6],
+      parameters: [...baseSystem.config.params],
+      parameterName: 'mu',
+      paramValue: 0.2,
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(baseSystem, limitCycle)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'isochrone_seed_mu_nu',
+      systemName: baseSystem.config.name,
+      parameterName: 'mu, nu',
+      parentObject: limitCycle.name,
+      startObject: 'lc_iso_seed',
+      branchType: 'isochrone_curve',
+      data: {
+        points: [
+          {
+            state: [0.5, -0.1, 0.2, 0.3, 0.2, 0.3, 6],
+            param_value: 0.25,
+            param2_value: 0.35,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: {
+          type: 'IsochroneCurve',
+          param1_name: 'mu',
+          param2_name: 'nu',
+          ntst: 1,
+          ncol: 1,
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...baseSystem.config.params],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+    const onCreateIsochroneCurveFromPoint = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <InspectorDetailsPanel
+        system={branchResult.system}
+        selectedNodeId={branchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateIsochroneCurveFromPoint={onCreateIsochroneCurveFromPoint}
+      />
+    )
+
+    expect(screen.getByTestId('isochrone-curve-toggle')).toHaveTextContent('Continue from Point')
+    await user.click(screen.getByTestId('isochrone-curve-toggle'))
+    await user.clear(screen.getByTestId('isochrone-curve-name'))
+    await user.type(screen.getByTestId('isochrone-curve-name'), 'iso_curve_mu_kappa')
+    await user.selectOptions(screen.getByTestId('isochrone-curve-param2'), 'kappa')
+    await user.click(screen.getByTestId('isochrone-curve-submit'))
+
+    expect(onCreateIsochroneCurveFromPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        branchId: branchResult.nodeId,
+        pointIndex: 0,
+        name: 'iso_curve_mu_kappa',
+        param2Name: 'kappa',
+      })
+    )
+  })
+
   it('hides "Continue Isochrone" outside limit-cycle branch context', () => {
     const baseSystem = createSystem({ name: 'Isochrone_Hidden_System' })
     const equilibrium: EquilibriumObject = {
