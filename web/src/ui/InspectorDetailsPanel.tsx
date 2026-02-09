@@ -20,7 +20,7 @@ import type {
   SystemConfig,
   TreeNode,
 } from '../system/types'
-import { DEFAULT_RENDER } from '../system/model'
+import { DEFAULT_RENDER, DEFAULT_SCENE_CAMERA } from '../system/model'
 import { defaultClvIndices, resolveClvColors, resolveClvRender } from '../system/clv'
 import {
   defaultEquilibriumEigenvectorIndices,
@@ -30,7 +30,7 @@ import {
   resolveEquilibriumEigenspaceIndices,
   resolveEquilibriumEigenvectorRender,
 } from '../system/equilibriumEigenvectors'
-import { resolveSceneAxisSelection } from '../system/sceneAxes'
+import { maxSceneAxisCount, resolveSceneAxisSelection } from '../system/sceneAxes'
 import { formatEquilibriumLabel } from '../system/labels'
 import { PlotlyViewport } from '../viewports/plotly/PlotlyViewport'
 import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
@@ -1596,11 +1596,46 @@ export function InspectorDetailsPanel({
     }))
     return [...paramOptions, ...stateOptions]
   }, [system.config.paramNames, system.config.varNames])
+  const maxSceneAxes = useMemo(
+    () => maxSceneAxisCount(system.config.varNames),
+    [system.config.varNames]
+  )
   const sceneAxisSelection = useMemo(() => {
     if (!scene) return null
     return resolveSceneAxisSelection(system.config.varNames, scene.axisVariables)
   }, [scene, system.config.varNames])
-  const showSceneAxisPicker = Boolean(scene && system.config.varNames.length >= 4)
+  const showSceneAxisPicker = Boolean(scene && maxSceneAxes >= 2 && sceneAxisSelection)
+  const updateSceneAxisCount = useCallback(
+    (count: number) => {
+      if (!scene) return
+      const nextAxes = resolveSceneAxisSelection(system.config.varNames, null, count)
+      if (!nextAxes) return
+      onUpdateScene(scene.id, {
+        axisVariables: nextAxes,
+        viewRevision: scene.viewRevision + 1,
+        axisRanges: {},
+        camera: structuredClone(DEFAULT_SCENE_CAMERA),
+      })
+    },
+    [onUpdateScene, scene, system.config.varNames]
+  )
+  const updateSceneAxisVariable = useCallback(
+    (axisIndex: number, value: string) => {
+      if (!scene || !sceneAxisSelection) return
+      const nextAxes = [...sceneAxisSelection] as NonNullable<Scene['axisVariables']>
+      nextAxes[axisIndex] = value
+      const resolved = resolveSceneAxisSelection(
+        system.config.varNames,
+        nextAxes,
+        nextAxes.length
+      )
+      if (!resolved) return
+      onUpdateScene(scene.id, {
+        axisVariables: resolved,
+      })
+    },
+    [onUpdateScene, scene, sceneAxisSelection, system.config.varNames]
+  )
   const branchIndices = useMemo(() => {
     if (!branch) return []
     return ensureBranchIndices(branch.data)
@@ -7328,92 +7363,87 @@ export function InspectorDetailsPanel({
                 <div className="inspector-subsection">
                   <h4 className="inspector-subheading">State space axes</h4>
                   <label>
+                    Axis count
+                    <select
+                      value={sceneAxisSelection.length}
+                      onChange={(event) => updateSceneAxisCount(Number(event.target.value))}
+                      data-testid="scene-axis-count"
+                    >
+                      {Array.from({ length: maxSceneAxes }, (_, index) => index + 1).map(
+                        (count) => (
+                          <option key={`scene-axis-count-${count}`} value={count}>
+                            {count}
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </label>
+                  <label>
                     X axis
                     <select
-                      value={sceneAxisSelection.x}
-                      onChange={(event) =>
-                        onUpdateScene(scene.id, {
-                          axisVariables: {
-                            ...sceneAxisSelection,
-                            x: event.target.value,
-                          },
-                        })
-                      }
+                      value={sceneAxisSelection[0]}
+                      onChange={(event) => updateSceneAxisVariable(0, event.target.value)}
                       data-testid="scene-axis-x"
                     >
                       {system.config.varNames.map((name) => (
                         <option
                           key={`scene-axis-x-${name}`}
                           value={name}
-                          disabled={
-                            name !== sceneAxisSelection.x &&
-                            (name === sceneAxisSelection.y ||
-                              name === sceneAxisSelection.z)
-                          }
+                          disabled={name !== sceneAxisSelection[0] && sceneAxisSelection.includes(name)}
                         >
                           {name}
                         </option>
                       ))}
                     </select>
                   </label>
-                  <label>
-                    Y axis
-                    <select
-                      value={sceneAxisSelection.y}
-                      onChange={(event) =>
-                        onUpdateScene(scene.id, {
-                          axisVariables: {
-                            ...sceneAxisSelection,
-                            y: event.target.value,
-                          },
-                        })
-                      }
-                      data-testid="scene-axis-y"
-                    >
-                      {system.config.varNames.map((name) => (
-                        <option
-                          key={`scene-axis-y-${name}`}
-                          value={name}
-                          disabled={
-                            name !== sceneAxisSelection.y &&
-                            (name === sceneAxisSelection.x ||
-                              name === sceneAxisSelection.z)
-                          }
-                        >
-                          {name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Z axis
-                    <select
-                      value={sceneAxisSelection.z}
-                      onChange={(event) =>
-                        onUpdateScene(scene.id, {
-                          axisVariables: {
-                            ...sceneAxisSelection,
-                            z: event.target.value,
-                          },
-                        })
-                      }
-                      data-testid="scene-axis-z"
-                    >
-                      {system.config.varNames.map((name) => (
-                        <option
-                          key={`scene-axis-z-${name}`}
-                          value={name}
-                          disabled={
-                            name !== sceneAxisSelection.z &&
-                            (name === sceneAxisSelection.x ||
-                              name === sceneAxisSelection.y)
-                          }
-                        >
-                          {name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  {sceneAxisSelection.length >= 2 ? (
+                    <label>
+                      Y axis
+                      <select
+                        value={sceneAxisSelection[1]}
+                        onChange={(event) => updateSceneAxisVariable(1, event.target.value)}
+                        data-testid="scene-axis-y"
+                      >
+                        {system.config.varNames.map((name) => (
+                          <option
+                            key={`scene-axis-y-${name}`}
+                            value={name}
+                            disabled={
+                              name !== sceneAxisSelection[1] && sceneAxisSelection.includes(name)
+                            }
+                          >
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                  {sceneAxisSelection.length >= 3 ? (
+                    <label>
+                      Z axis
+                      <select
+                        value={sceneAxisSelection[2]}
+                        onChange={(event) => updateSceneAxisVariable(2, event.target.value)}
+                        data-testid="scene-axis-z"
+                      >
+                        {system.config.varNames.map((name) => (
+                          <option
+                            key={`scene-axis-z-${name}`}
+                            value={name}
+                            disabled={
+                              name !== sceneAxisSelection[2] && sceneAxisSelection.includes(name)
+                            }
+                          >
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                  <p className="empty-state">
+                    For multi-dimensional maps, 1-axis mode renders the selected variable as a
+                    cobweb projection ({`x_n`} vs {`x_{n+1}`}) without a governing map curve.
+                  </p>
                 </div>
               ) : null}
               <div className="inspector-subsection">

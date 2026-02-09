@@ -149,6 +149,274 @@ describe('ViewportPanel view state wiring', () => {
     expect(props?.layout?.yaxis?.title).toMatchObject({ text: 'v' })
   })
 
+  it('renders 4D flow scenes as time series when axis count is 1', () => {
+    const config: SystemConfig = {
+      name: 'Flow4D',
+      equations: ['x', 'y', 'z', 'w'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z', 'w'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: 'Flow4D_System', config })
+    const sceneResult = addScene(system, 'Flow Scene 1D')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['w'],
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit4D',
+      systemName: config.name,
+      data: [
+        [0, 0, 1, 2, 3],
+        [0.1, 0.2, 1.1, 2.1, 3.2],
+        [0.2, 0.4, 1.2, 2.2, 3.4],
+      ],
+      t_start: 0,
+      t_end: 0.2,
+      dt: 0.1,
+    }
+    system = addObject(system, orbit).system
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    expect(props?.layout?.scene).toBeUndefined()
+    expect(props?.layout?.xaxis?.title).toMatchObject({ text: 't' })
+    expect(props?.layout?.yaxis?.title).toMatchObject({ text: 'w' })
+    const orbitTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === orbit.name &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    ) as { x?: number[]; y?: number[] } | undefined
+    expect(orbitTrace?.x).toEqual([0, 0.1, 0.2])
+    expect(orbitTrace?.y).toEqual([3, 3.2, 3.4])
+  })
+
+  it('renders 4D flow scenes as 2D projections when axis count is 2', () => {
+    const config: SystemConfig = {
+      name: 'Flow4D',
+      equations: ['x', 'y', 'z', 'w'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z', 'w'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: 'Flow4D_System', config })
+    const sceneResult = addScene(system, 'Flow Scene 2D')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['z', 'x'],
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit4D',
+      systemName: config.name,
+      data: [
+        [0, 0, 1, 2, 3],
+        [0.1, 0.2, 1.1, 2.1, 3.2],
+        [0.2, 0.4, 1.2, 2.2, 3.4],
+      ],
+      t_start: 0,
+      t_end: 0.2,
+      dt: 0.1,
+    }
+    system = addObject(system, orbit).system
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    expect(props?.layout?.scene).toBeUndefined()
+    expect(props?.layout?.xaxis?.title).toMatchObject({ text: 'z' })
+    expect(props?.layout?.yaxis?.title).toMatchObject({ text: 'x' })
+    const orbitTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === orbit.name &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    ) as { x?: number[]; y?: number[] } | undefined
+    expect(orbitTrace?.x).toEqual([2, 2.1, 2.2])
+    expect(orbitTrace?.y).toEqual([0, 0.2, 0.4])
+  })
+
+  it('renders 4D map scenes as 1D cobweb projections without map function curve', () => {
+    const config: SystemConfig = {
+      name: 'Map4D',
+      equations: ['x + y', 'y + z', 'z + w', 'w + x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z', 'w'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    let system = createSystem({ name: 'Map4D_System', config })
+    const sceneResult = addScene(system, 'Map Scene 1D')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['z'],
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'MapOrbit4D',
+      systemName: config.name,
+      data: [
+        [0, 0, 1, 2, 3],
+        [1, 0.2, 1.1, 2.1, 3.2],
+        [2, 0.4, 1.3, 2.4, 3.4],
+      ],
+      t_start: 0,
+      t_end: 2,
+      dt: 1,
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    expect(props?.layout?.scene).toBeUndefined()
+    expect(props?.layout?.xaxis?.title).toMatchObject({ text: 'z_n' })
+    expect(props?.layout?.yaxis?.title).toMatchObject({ text: 'z_{n+1}' })
+    const hasDiagonal = props?.data.some(
+      (trace) =>
+        'line' in trace &&
+        trace.line &&
+        typeof trace.line === 'object' &&
+        'dash' in trace.line &&
+        trace.line.dash === 'dot'
+    )
+    expect(hasDiagonal).toBe(true)
+    const cobwebTrace = props?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === orbitResult.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    )
+    expect(cobwebTrace).toBeTruthy()
+    const hasFunctionCurve = props?.data.some(
+      (trace) =>
+        'line' in trace &&
+        trace.line &&
+        typeof trace.line === 'object' &&
+        'color' in trace.line &&
+        trace.line.color === '#6f7a89'
+    )
+    expect(hasFunctionCurve).toBe(false)
+  })
+
+  it('suppresses CLV and eigenvector overlays in 1D scene projections', () => {
+    const config: SystemConfig = {
+      name: 'Flow4D',
+      equations: ['x', 'y', 'z', 'w'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z', 'w'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: 'Flow4D_System', config })
+    const sceneResult = addScene(system, 'Flow Scene 1D')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['w'],
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit4D',
+      systemName: config.name,
+      data: [
+        [0, 0, 1, 2, 3],
+        [0.1, 0.2, 1.1, 2.1, 3.2],
+        [0.2, 0.4, 1.2, 2.2, 3.4],
+      ],
+      t_start: 0,
+      t_end: 0.2,
+      dt: 0.1,
+      covariantVectors: {
+        dim: 4,
+        times: [0, 0.1, 0.2],
+        vectors: [
+          [[1, 0, 0, 0]],
+          [[1, 0, 0, 0]],
+          [[1, 0, 0, 0]],
+        ],
+      },
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+    system.nodes[orbitResult.nodeId].render.clv = {
+      enabled: true,
+      stride: 1,
+      lengthScale: 1,
+      headScale: 1,
+      thickness: 1,
+      vectorIndices: [0],
+      colors: ['#ff0000'],
+    }
+
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq4D',
+      systemName: config.name,
+      solution: {
+        state: [0.1, 0.2, 0.3, 0.4],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [
+          {
+            value: { re: 0.5, im: 0 },
+            vector: [
+              { re: 1, im: 0 },
+              { re: 0, im: 0 },
+              { re: 0, im: 0 },
+              { re: 0, im: 0 },
+            ],
+          },
+        ],
+      },
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+    system.nodes[equilibriumResult.nodeId].render.equilibriumEigenvectors = {
+      enabled: true,
+      vectorIndices: [0],
+      colors: ['#00ff00'],
+      lineLengthScale: 1,
+      lineThickness: 1,
+      discRadiusScale: 1,
+      discThickness: 1,
+    }
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const orbitTraces = props?.data.filter(
+      (trace) => 'uid' in trace && trace.uid === orbitResult.nodeId
+    )
+    expect(orbitTraces?.length).toBe(1)
+    const hasEigenvectorColorTrace = props?.data.some(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === equilibriumResult.nodeId &&
+        'line' in trace &&
+        trace.line &&
+        typeof trace.line === 'object' &&
+        'color' in trace.line &&
+        trace.line.color === '#00ff00'
+    )
+    const hasConeTrace = props?.data.some((trace) => trace.type === 'cone')
+    expect(hasEigenvectorColorTrace).toBe(false)
+    expect(hasConeTrace).toBe(false)
+  })
+
   it('marks autorange when a stored axis range is null', () => {
     let system = createSystem({ name: 'Auto_System' })
     const sceneResult = addScene(system, 'Scene Auto')
@@ -884,6 +1152,7 @@ describe('ViewportPanel view state wiring', () => {
       type: 'map',
     }
     let system = createSystem({ name: 'Map_System', config })
+    system = addScene(system, 'Scene 1').system
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
       name: 'Cycle_FP',
@@ -938,6 +1207,7 @@ describe('ViewportPanel view state wiring', () => {
       type: 'map',
     }
     let system = createSystem({ name: 'Map_System', config })
+    system = addScene(system, 'Scene 1').system
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
       name: 'Cycle_FP',

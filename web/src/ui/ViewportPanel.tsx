@@ -49,6 +49,7 @@ import {
   resolveEquilibriumEigenvectorRender,
 } from '../system/equilibriumEigenvectors'
 import { resolveSceneAxisIndices, resolveSceneAxisSelection } from '../system/sceneAxes'
+import { resolveSceneProjection } from '../system/sceneProjection'
 import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/PlotlyViewport'
 import type { PlotlyRelayoutEvent } from '../viewports/plotly/usePlotViewport'
 import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
@@ -173,6 +174,45 @@ const COBWEB_FUNCTION_COLOR = '#6f7a89'
 const MAP_FUNCTION_SAMPLE_COUNT = 256
 const EMPTY_TRACES: Data[] = []
 
+function resolveAxisOrder(
+  dimension: number,
+  plotDim: number,
+  axisIndices?: number[] | null
+): number[] {
+  const count = Math.max(1, Math.min(Math.trunc(plotDim), Math.max(1, Math.trunc(dimension)), 3))
+  const ordered: number[] = []
+  const used = new Set<number>()
+  for (const index of axisIndices ?? []) {
+    if (!Number.isInteger(index)) continue
+    if (index < 0 || index >= dimension) continue
+    if (used.has(index)) continue
+    ordered.push(index)
+    used.add(index)
+    if (ordered.length === count) return ordered
+  }
+  for (let index = 0; index < dimension; index += 1) {
+    if (used.has(index)) continue
+    ordered.push(index)
+    used.add(index)
+    if (ordered.length === count) return ordered
+  }
+  return ordered
+}
+
+function extractOrbitValue(row: number[], variableIndex: number): number {
+  return row[variableIndex + 1]
+}
+
+function buildCobwebRowsFromOrbitRows(rows: number[][], variableIndex: number): number[][] {
+  const projected: number[][] = []
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]
+    const value = extractOrbitValue(row, variableIndex)
+    projected.push([row[0], value])
+  }
+  return projected
+}
+
 function interpolateOrbitState(
   times: number[],
   states: Array<[number, number, number]>,
@@ -249,11 +289,12 @@ function buildCobwebLineTrace(
 
 function buildCobwebRowsFromStates(
   states: number[][],
-  options?: { closeCycle?: boolean }
+  options?: { closeCycle?: boolean; variableIndex?: number }
 ): number[][] {
-  const rows = states.map((state, index) => [index, state[0]])
+  const variableIndex = options?.variableIndex ?? 0
+  const rows = states.map((state, index) => [index, state[variableIndex]])
   if (options?.closeCycle && states.length > 1) {
-    const firstValue = states[0]?.[0]
+    const firstValue = states[0]?.[variableIndex]
     if (Number.isFinite(firstValue)) {
       rows.push([states.length, firstValue])
     }
@@ -315,28 +356,24 @@ function buildClvTraces(
   nodeId: string,
   orbit: OrbitObject,
   clv: ClvRenderStyle,
-  axisIndices: [number, number, number] | null,
+  axisIndices: number[] | null,
+  plotDim: number,
   plotSize?: PlotSize | null
 ): Data[] {
   const covariant = orbit.covariantVectors
   if (!covariant || covariant.vectors.length === 0) return []
   if (orbit.data.length === 0) return []
   const orbitDim = orbit.data[0]?.length ? orbit.data[0].length - 1 : 0
-  const plotDim = Math.min(covariant.dim, orbitDim)
-  if (plotDim < 2) return []
+  const maxPlotDim = Math.min(covariant.dim, orbitDim, 3)
+  const targetPlotDim = Math.min(Math.max(1, Math.trunc(plotDim)), maxPlotDim)
+  if (targetPlotDim < 2) return []
   if (clv.vectorIndices.length === 0) return []
 
-  const use3d = plotDim >= 3
-  const fallbackAxes: [number, number, number] = [0, 1, 2]
-  const axes =
-    use3d &&
-    axisIndices &&
-    axisIndices.every((index) => index >= 0 && index < orbitDim)
-      ? axisIndices
-      : fallbackAxes
-  const axisX = axes[0]
-  const axisY = axes[1]
-  const axisZ = axes[2]
+  const use3d = targetPlotDim >= 3
+  const axisOrder = resolveAxisOrder(orbitDim, targetPlotDim, axisIndices)
+  const axisX = axisOrder[0] ?? 0
+  const axisY = axisOrder[1] ?? Math.min(1, Math.max(0, orbitDim - 1))
+  const axisZ = axisOrder[2] ?? Math.min(2, Math.max(0, orbitDim - 1))
   const orbitTimes: number[] = []
   const orbitStates: Array<[number, number, number]> = []
   let minX = Number.POSITIVE_INFINITY
@@ -347,10 +384,12 @@ function buildClvTraces(
   let maxZ = Number.NEGATIVE_INFINITY
 
   for (const row of orbit.data) {
-    if (row.length < (use3d ? 4 : 3)) continue
     const x = row[axisX + 1]
     const y = row[axisY + 1]
     const z = use3d ? row[axisZ + 1] : 0
+    if (!Number.isFinite(x) || !Number.isFinite(y) || (use3d && !Number.isFinite(z))) {
+      continue
+    }
     orbitTimes.push(row[0])
     orbitStates.push([x, y, z])
     minX = Math.min(minX, x)
@@ -554,7 +593,8 @@ type PendingEigenvector = {
   discRadiusScale: number
   discThickness: number
   highlight: boolean
-  axisIndices: [number, number, number] | null
+  axisIndices: number[] | null
+  plotDim: 2 | 3
 }
 
 function updateSceneBounds(bounds: SceneBounds, x: number, y: number, z?: number) {
@@ -574,17 +614,13 @@ function buildEquilibriumEigenvectorTraces(
   plotSize?: PlotSize | null
 ): Data[] {
   if (entry.state.length < 2 || entry.eigenpairs.length === 0) return []
-  const plotDim = entry.state.length >= 3 ? 3 : 2
+  const plotDim = Math.min(entry.plotDim, 3, entry.state.length)
+  if (plotDim < 2) return []
   const use3d = plotDim === 3
-  const fallbackAxes: [number, number, number] = [0, 1, 2]
-  const axes =
-    entry.axisIndices &&
-    entry.axisIndices.every((index) => index >= 0 && index < entry.state.length)
-      ? entry.axisIndices
-      : fallbackAxes
-  const axisX = axes[0]
-  const axisY = axes[1]
-  const axisZ = axes[2]
+  const axes = resolveAxisOrder(entry.state.length, plotDim, entry.axisIndices)
+  const axisX = axes[0] ?? 0
+  const axisY = axes[1] ?? Math.min(1, Math.max(0, entry.state.length - 1))
+  const axisZ = axes[2] ?? Math.min(2, Math.max(0, entry.state.length - 1))
   const stateX = entry.state[axisX]
   const stateY = entry.state[axisY]
   const stateZ = use3d ? entry.state[axisZ] : 0
@@ -869,7 +905,8 @@ function collectVisibleBranchIds(system: System): string[] {
   return ids
 }
 
-function collectMap1DRange(system: System): [number, number] | null {
+function collectMap1DRange(system: System, axisIndex: number): [number, number] | null {
+  const safeAxisIndex = Number.isInteger(axisIndex) ? Math.max(0, axisIndex) : 0
   let min = Number.POSITIVE_INFINITY
   let max = Number.NEGATIVE_INFINITY
   const ids = collectVisibleObjectIds(system)
@@ -878,7 +915,7 @@ function collectMap1DRange(system: System): [number, number] | null {
     if (!object) continue
     if (object.type === 'orbit') {
       for (const row of object.data) {
-        const value = row[1]
+        const value = row[safeAxisIndex + 1]
         if (!Number.isFinite(value)) continue
         min = Math.min(min, value)
         max = Math.max(max, value)
@@ -893,7 +930,7 @@ function collectMap1DRange(system: System): [number, number] | null {
           ? solution.cycle_points
           : [solution.state]
       for (const point of cyclePoints) {
-        const value = point?.[0]
+        const value = point?.[safeAxisIndex]
         if (typeof value !== 'number' || !Number.isFinite(value)) continue
         min = Math.min(min, value)
         max = Math.max(max, value)
@@ -901,7 +938,7 @@ function collectMap1DRange(system: System): [number, number] | null {
       continue
     }
     if (object.type === 'limit_cycle') {
-      const value = object.state?.[0]
+      const value = object.state?.[safeAxisIndex]
       if (typeof value !== 'number' || !Number.isFinite(value)) continue
       min = Math.min(min, value)
       max = Math.max(max, value)
@@ -1097,7 +1134,8 @@ type LimitCycleTraceConfig = {
   pointSize: number
   layout?: LimitCycleProfileLayout
   showLegend?: boolean
-  axisIndices?: [number, number, number] | null
+  axisIndices?: number[] | null
+  plotDim?: 1 | 2 | 3
   allowPackedTail?: boolean
 }
 
@@ -1115,11 +1153,15 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
     layout,
     showLegend,
     axisIndices,
+    plotDim: requestedPlotDim,
     allowPackedTail,
   } = config
   const traces: Data[] = []
   if (!state || state.length === 0 || dim <= 0) return traces
-  const plotDim = Math.min(dim, 3)
+  const plotDim = Math.max(
+    1,
+    Math.min(dim, Math.max(1, Math.trunc(requestedPlotDim ?? Math.min(dim, 3))), 3)
+  )
   const { profilePoints, period, closurePoint } = extractLimitCycleProfile(
     state,
     dim,
@@ -1130,12 +1172,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
       allowPackedTail,
     }
   )
-  const fallbackAxes: [number, number, number] = [0, 1, 2]
-  const axes =
-    axisIndices && axisIndices.every((index) => index >= 0 && index < dim)
-      ? axisIndices
-      : fallbackAxes
-  const axisOrder = plotDim >= 3 ? axes : plotDim === 2 ? [0, 1] : [0]
+  const axisOrder = resolveAxisOrder(dim, plotDim, axisIndices)
   const closureCoords =
     closurePoint && closurePoint.length >= dim
       ? axisOrder.map((axis) => closurePoint[axis])
@@ -1305,7 +1342,8 @@ function buildObjectNameIndex(system: System): Map<string, string> {
 function buildLimitCyclePreviewTraces(
   system: System,
   selection: BranchPointSelection | null,
-  axisIndices: [number, number, number] | null
+  axisIndices: number[] | null,
+  plotDim: 1 | 2 | 3
 ): Data[] {
   if (!selection) return EMPTY_TRACES
   const branch = system.branches[selection.branchId]
@@ -1351,6 +1389,7 @@ function buildLimitCyclePreviewTraces(
     allowPackedTail,
     showLegend: false,
     axisIndices,
+    plotDim,
   })
 }
 
@@ -1373,7 +1412,8 @@ function buildIsoclineTraces(config: {
   pointSize: number
   highlight: boolean
   geometry: ComputeIsoclineResult
-  axisIndices: [number, number, number] | null
+  axisIndices: number[] | null
+  plotDim: 1 | 2 | 3
   isMap1D: boolean
   isTimeSeries: boolean
   timeRange: [number, number] | null
@@ -1387,6 +1427,7 @@ function buildIsoclineTraces(config: {
     highlight,
     geometry,
     axisIndices,
+    plotDim: requestedPlotDim,
     isMap1D,
     isTimeSeries,
     timeRange,
@@ -1396,7 +1437,8 @@ function buildIsoclineTraces(config: {
   if (!Number.isFinite(dim) || dim <= 0) return traces
   const pointCount = Math.floor(geometry.points.length / dim)
   if (pointCount <= 0) return traces
-  const axes: [number, number, number] = axisIndices ?? [0, 1, 2]
+  const plotDim = Math.max(1, Math.min(requestedPlotDim, dim, 3))
+  const axes = resolveAxisOrder(dim, plotDim, axisIndices)
   const width = highlight ? lineWidth + 1 : lineWidth
   const markerSize = highlight ? pointSize + 2 : pointSize
   const readPoint = (index: number): number[] | null => {
@@ -1408,26 +1450,26 @@ function buildIsoclineTraces(config: {
   const projectPoint = (
     point: number[]
   ): [number, number, number] | [number, number] | [number] | null => {
-    if (dim >= 3) {
-      const x = point[axes[0]]
-      const y = point[axes[1]]
-      const z = point[axes[2]]
+    if (plotDim >= 3) {
+      const x = point[axes[0] ?? 0]
+      const y = point[axes[1] ?? 1]
+      const z = point[axes[2] ?? 2]
       if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null
       return [x, y, z]
     }
-    if (dim === 2) {
-      const x = point[0]
-      const y = point[1]
+    if (plotDim === 2) {
+      const x = point[axes[0] ?? 0]
+      const y = point[axes[1] ?? 1]
       if (!Number.isFinite(x) || !Number.isFinite(y)) return null
       return [x, y]
     }
-    const value = point[0]
+    const value = point[axes[0] ?? 0]
     if (!Number.isFinite(value)) return null
     return [value]
   }
 
   if (geometry.geometry === 'points') {
-    if (dim >= 3) {
+    if (plotDim >= 3) {
       const x: number[] = []
       const y: number[] = []
       const z: number[] = []
@@ -1452,7 +1494,7 @@ function buildIsoclineTraces(config: {
       }
       return traces
     }
-    if (dim === 2) {
+    if (plotDim === 2) {
       const x: number[] = []
       const y: number[] = []
       for (let index = 0; index < pointCount; index += 1) {
@@ -1506,7 +1548,7 @@ function buildIsoclineTraces(config: {
   }
 
   if (geometry.geometry === 'segments') {
-    if (dim >= 3) {
+    if (plotDim >= 3) {
       const x: Array<number | null> = []
       const y: Array<number | null> = []
       const z: Array<number | null> = []
@@ -1535,7 +1577,7 @@ function buildIsoclineTraces(config: {
       }
       return traces
     }
-    if (dim !== 2) return traces
+    if (plotDim !== 2) return traces
     const x: Array<number | null> = []
     const y: Array<number | null> = []
     for (let edge = 0; edge + 1 < geometry.segments.length; edge += 2) {
@@ -1562,7 +1604,7 @@ function buildIsoclineTraces(config: {
     return traces
   }
 
-  if (dim < 3) return traces
+  if (plotDim < 3) return traces
   const x: number[] = []
   const y: number[] = []
   const z: number[] = []
@@ -1620,23 +1662,17 @@ function buildSceneTraces(
   const traces: Data[] = []
   const isoclineCache = isoclineGeometryCache ?? {}
   const limitCycleRenderTargets = system.ui.limitCycleRenderTargets ?? {}
-  const isMap = system.config.type === 'map'
-  const isTimeSeries = system.config.varNames.length === 1 && !isMap
-  const isMap1D = isMap && system.config.varNames.length === 1
-  const sceneAxisIndices = resolveSceneAxisIndices(
-    system.config.varNames,
-    scene.axisVariables
+  const projection = resolveSceneProjection(system.config, scene.axisVariables)
+  const defaultPlotDim = Math.max(1, Math.min(system.config.varNames.length, 3)) as 1 | 2 | 3
+  const projectionPlotDim = projection?.axisCount ?? defaultPlotDim
+  const projectionAxisIndices = projection?.axisIndices ?? resolveAxisOrder(
+    Math.max(1, system.config.varNames.length),
+    projectionPlotDim,
+    null
   )
-  const sceneAxes =
-    sceneAxisIndices &&
-    sceneAxisIndices.every(
-      (index) => index >= 0 && index < system.config.varNames.length
-    )
-      ? sceneAxisIndices
-      : null
-  const axisX = sceneAxes?.[0] ?? 0
-  const axisY = sceneAxes?.[1] ?? 1
-  const axisZ = sceneAxes?.[2] ?? 2
+  const isMap = system.config.type === 'map'
+  const isTimeSeries = projection?.kind === 'flow_timeseries_1d'
+  const isMap1D = projection?.kind === 'map_cobweb_1d'
   const manualSelection = scene.selectedNodeIds ?? []
   const candidateIds =
     manualSelection.length > 0
@@ -1644,7 +1680,7 @@ function buildSceneTraces(
       : scene.display === 'selection' && selectedNodeId
         ? [selectedNodeId]
         : collectVisibleObjectIds(system)
-  const canPlotEigenvectors = !isTimeSeries && !isMap1D
+  const canPlotEigenvectors = !isMap1D && !isTimeSeries && projectionPlotDim >= 2
   let timeRange: [number, number] | null = null
   const pendingEquilibria: Array<{
     nodeId: string
@@ -1669,7 +1705,7 @@ function buildSceneTraces(
   let maxEquilibrium = Number.NEGATIVE_INFINITY
   if (isMap1D) {
     const cobwebRange = mapRange ?? mapFunctionSamples?.range ?? null
-    const baseSamples = mapFunctionSamples
+    const baseSamples = projection?.showMapFunctionCurve && mapFunctionSamples
       ? { x: mapFunctionSamples.x, y: mapFunctionSamples.y }
       : null
     traces.push(...buildCobwebBaseTraces(cobwebRange, baseSamples))
@@ -1713,7 +1749,8 @@ function buildSceneTraces(
           pointSize: node.render.pointSize,
           highlight,
           geometry: cached.geometry,
-          axisIndices: sceneAxes,
+          axisIndices: projectionAxisIndices,
+          plotDim: projectionPlotDim,
           isMap1D,
           isTimeSeries,
           timeRange,
@@ -1728,6 +1765,15 @@ function buildSceneTraces(
       const dimension = state.length
       const highlight = nodeId === selectedNodeId
       const size = highlight ? node.render.pointSize + 2 : node.render.pointSize
+      const axisOrder = resolveAxisOrder(
+        Math.max(1, dimension),
+        Math.min(projectionPlotDim, Math.max(1, dimension)),
+        projectionAxisIndices
+      )
+      const objectPlotDim = axisOrder.length as 1 | 2 | 3
+      const axisX = axisOrder[0] ?? 0
+      const axisY = axisOrder[1] ?? Math.min(1, Math.max(0, dimension - 1))
+      const axisZ = axisOrder[2] ?? Math.min(2, Math.max(0, dimension - 1))
       const cycleStates =
         isMap && object.solution?.cycle_points?.length
           ? object.solution.cycle_points
@@ -1735,17 +1781,16 @@ function buildSceneTraces(
       const hasCyclePoints = isMap && cycleStates.length > 1
       const representativeState = cycleStates[0] ?? state
       const cycleTailStates = hasCyclePoints ? cycleStates.slice(1) : []
-      if (canPlotEigenvectors && dimension >= 2) {
-        const eigenX = dimension >= 3 ? state[axisX] : state[0]
-        const eigenY = dimension >= 3 ? state[axisY] : state[1]
-        const eigenZ = dimension >= 3 ? state[axisZ] : 0
+      if (canPlotEigenvectors && objectPlotDim >= 2 && dimension >= 2) {
+        const eigenX = state[axisX]
+        const eigenY = state[axisY]
+        const eigenZ = objectPlotDim >= 3 ? state[axisZ] : 0
         updateSceneBounds(sceneBounds, eigenX, eigenY, eigenZ)
         if (hasCyclePoints) {
-          const axisIndices = dimension >= 3 ? [axisX, axisY, axisZ] : [0, 1, 0]
           for (const cycleState of cycleTailStates) {
-            const valueX = cycleState[axisIndices[0]]
-            const valueY = cycleState[axisIndices[1]]
-            const valueZ = dimension >= 3 ? cycleState[axisIndices[2]] : 0
+            const valueX = cycleState[axisX]
+            const valueY = cycleState[axisY]
+            const valueZ = objectPlotDim >= 3 ? cycleState[axisZ] : 0
             updateSceneBounds(sceneBounds, valueX, valueY, valueZ)
           }
         }
@@ -1755,9 +1800,13 @@ function buildSceneTraces(
           node.render?.equilibriumEigenvectors,
           eigenspaceIndices
         )
-        const eigenvectorPlotDim = dimension >= 3 ? 3 : 2
+        const eigenvectorPlotDim = objectPlotDim >= 3 ? 3 : 2
+        const minVectorLength =
+          eigenvectorPlotDim >= 3
+            ? Math.max(axisX, axisY, axisZ) + 1
+            : Math.max(axisX, axisY) + 1
         const hasEigenvectors = eigenpairs.some(
-          (pair) => pair.vector.length >= eigenvectorPlotDim
+          (pair) => pair.vector.length >= minVectorLength
         )
         if (eigenvectorRender.enabled && hasEigenvectors && eigenvectorRender.vectorIndices.length > 0) {
           pendingEigenvectors.push({
@@ -1771,11 +1820,12 @@ function buildSceneTraces(
             discRadiusScale: eigenvectorRender.discRadiusScale,
             discThickness: eigenvectorRender.discThickness,
             highlight,
-            axisIndices: sceneAxes,
+            axisIndices: axisOrder,
+            plotDim: eigenvectorPlotDim,
           })
         }
       }
-      if (dimension >= 3) {
+      if (objectPlotDim >= 3) {
         const repX = representativeState[axisX]
         const repY = representativeState[axisY]
         const repZ = representativeState[axisZ]
@@ -1833,15 +1883,15 @@ function buildSceneTraces(
             },
           })
         }
-      } else if (dimension >= 2) {
-        const repX = representativeState[0]
-        const repY = representativeState[1]
+      } else if (objectPlotDim >= 2) {
+        const repX = representativeState[axisX]
+        const repY = representativeState[axisY]
         if (hasCyclePoints) {
           const cycleX: number[] = []
           const cycleY: number[] = []
           for (const cycleState of cycleTailStates) {
-            cycleX.push(cycleState[0])
-            cycleY.push(cycleState[1])
+            cycleX.push(cycleState[axisX])
+            cycleY.push(cycleState[axisY])
           }
           if (cycleX.length > 0) {
             traces.push({
@@ -1886,12 +1936,12 @@ function buildSceneTraces(
           })
         }
       } else if (isMap1D) {
-        const repValue = representativeState[0]
+        const repValue = representativeState[axisX]
         const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
         if (hasCyclePoints) {
           const diagonal: number[] = []
           for (const cycleState of cycleTailStates) {
-            const value = cycleState[0]
+            const value = cycleState[axisX]
             if (typeof value !== 'number' || !Number.isFinite(value)) continue
             diagonal.push(value)
           }
@@ -1924,7 +1974,10 @@ function buildSceneTraces(
             showlegend: false,
           })
           const cobwebTrace = buildCobwebLineTrace(
-            buildCobwebRowsFromStates(cycleStates, { closeCycle: true }),
+            buildCobwebRowsFromStates(cycleStates, {
+              closeCycle: true,
+              variableIndex: axisX,
+            }),
             {
               name: object.name,
               uid: nodeId,
@@ -1953,13 +2006,13 @@ function buildSceneTraces(
         pendingEquilibria.push({
           nodeId,
           name: object.name,
-          value: state[0],
+          value: state[axisX],
           color: node.render.color,
           lineWidth: node.render.lineWidth,
           highlight,
         })
-        minEquilibrium = Math.min(minEquilibrium, state[0])
-        maxEquilibrium = Math.max(maxEquilibrium, state[0])
+        minEquilibrium = Math.min(minEquilibrium, state[axisX])
+        maxEquilibrium = Math.max(maxEquilibrium, state[axisX])
       } else {
         const time = timeRange ? timeRange[0] : 0
         traces.push({
@@ -1968,7 +2021,7 @@ function buildSceneTraces(
           name: object.name,
           uid: nodeId,
           x: [time],
-          y: [state[0]],
+          y: [state[axisX]],
           marker: {
             color: node.render.color,
             size,
@@ -2012,7 +2065,8 @@ function buildSceneTraces(
           pointSize: node.render.pointSize + (highlight ? 2 : 0),
           layout,
           allowPackedTail,
-          axisIndices: sceneAxes,
+          axisIndices: projectionAxisIndices,
+          plotDim: projectionPlotDim,
         })
       )
       continue
@@ -2022,13 +2076,59 @@ function buildSceneTraces(
 
     const rows = object.data
     if (rows.length === 0) continue
-    // Use the scene-selected axes for 3D systems (fallback to the first three variables).
     const dimension = rows[0].length - 1
     const highlight = nodeId === selectedNodeId
-    if (isMap) {
+    const objectPlotDim = Math.max(1, Math.min(projectionPlotDim, Math.max(1, dimension), 3))
+    const axisOrder = resolveAxisOrder(
+      Math.max(1, dimension),
+      objectPlotDim,
+      projectionAxisIndices
+    )
+    const axisX = axisOrder[0] ?? 0
+    const axisY = axisOrder[1] ?? Math.min(1, Math.max(0, dimension - 1))
+    const axisZ = axisOrder[2] ?? Math.min(2, Math.max(0, dimension - 1))
+    if (isMap1D) {
       const size = highlight ? node.render.pointSize + 2 : node.render.pointSize
       const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
-      if (dimension >= 3) {
+      const diagonal: number[] = []
+      const customdata: number[] = []
+      for (let index = 0; index < rows.length; index += 1) {
+        const row = rows[index]
+        const value = row[axisX + 1]
+        if (typeof value !== 'number' || !Number.isFinite(value)) continue
+        diagonal.push(value)
+        customdata.push(index)
+      }
+      if (diagonal.length > 0) {
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: object.name,
+          uid: nodeId,
+          x: diagonal,
+          y: diagonal,
+          customdata,
+          marker: {
+            color: node.render.color,
+            size,
+          },
+        })
+      }
+      const cobwebTrace = buildCobwebLineTrace(
+        buildCobwebRowsFromOrbitRows(rows, axisX),
+        {
+          name: object.name,
+          uid: nodeId,
+          color: node.render.color,
+          lineWidth,
+        }
+      )
+      if (cobwebTrace) {
+        traces.push(cobwebTrace)
+      }
+    } else if (isMap) {
+      const size = highlight ? node.render.pointSize + 2 : node.render.pointSize
+      if (objectPlotDim >= 3) {
         const x: number[] = []
         const y: number[] = []
         const z: number[] = []
@@ -2060,17 +2160,19 @@ function buildSceneTraces(
             size,
           },
         })
-      } else if (dimension >= 2) {
+      } else if (objectPlotDim >= 2) {
         const x: number[] = []
         const y: number[] = []
         const customdata: number[] = []
         for (let index = 0; index < rows.length; index += 1) {
           const row = rows[index]
-          x.push(row[1])
-          y.push(row[2])
+          const valueX = row[axisX + 1]
+          const valueY = row[axisY + 1]
+          x.push(valueX)
+          y.push(valueY)
           customdata.push(index)
           if (canPlotEigenvectors) {
-            updateSceneBounds(sceneBounds, row[1], row[2], 0)
+            updateSceneBounds(sceneBounds, valueX, valueY, 0)
           }
         }
         traces.push({
@@ -2086,47 +2188,13 @@ function buildSceneTraces(
             size,
           },
         })
-      } else if (isMap1D) {
-        const diagonal: number[] = []
-        const customdata: number[] = []
-        for (let index = 0; index < rows.length; index += 1) {
-          const row = rows[index]
-          const value = row[1]
-          if (typeof value !== 'number' || !Number.isFinite(value)) continue
-          diagonal.push(value)
-          customdata.push(index)
-        }
-        if (diagonal.length > 0) {
-          traces.push({
-            type: 'scatter',
-            mode: 'markers',
-            name: object.name,
-            uid: nodeId,
-            x: diagonal,
-            y: diagonal,
-            customdata,
-            marker: {
-              color: node.render.color,
-              size,
-            },
-          })
-        }
-        const cobwebTrace = buildCobwebLineTrace(rows, {
-          name: object.name,
-          uid: nodeId,
-          color: node.render.color,
-          lineWidth,
-        })
-        if (cobwebTrace) {
-          traces.push(cobwebTrace)
-        }
       }
     } else {
       const x: number[] = []
       const y: number[] = []
       const z: number[] = []
       const customdata: number[] = []
-      if (dimension >= 3) {
+      if (objectPlotDim >= 3) {
         for (let index = 0; index < rows.length; index += 1) {
           const row = rows[index]
           const valueX = row[axisX + 1]
@@ -2140,20 +2208,22 @@ function buildSceneTraces(
             updateSceneBounds(sceneBounds, valueX, valueY, valueZ)
           }
         }
-      } else if (dimension >= 2) {
+      } else if (objectPlotDim >= 2) {
         for (let index = 0; index < rows.length; index += 1) {
           const row = rows[index]
-          x.push(row[1])
-          y.push(row[2])
+          const valueX = row[axisX + 1]
+          const valueY = row[axisY + 1]
+          x.push(valueX)
+          y.push(valueY)
           customdata.push(index)
           if (canPlotEigenvectors) {
-            updateSceneBounds(sceneBounds, row[1], row[2], 0)
+            updateSceneBounds(sceneBounds, valueX, valueY, 0)
           }
         }
       } else {
         for (let index = 0; index < rows.length; index += 1) {
           const row = rows[index]
-          const value = row[1]
+          const value = row[axisX + 1]
           x.push(row[0])
           y.push(value)
           customdata.push(index)
@@ -2164,7 +2234,7 @@ function buildSceneTraces(
         }
       }
 
-      if (dimension >= 3) {
+      if (objectPlotDim >= 3) {
         traces.push({
           type: 'scatter3d',
           mode: 'lines',
@@ -2196,7 +2266,7 @@ function buildSceneTraces(
       }
     }
 
-    if (dimension >= 2 && system.config.varNames.length >= 2) {
+    if (objectPlotDim >= 2 && canPlotEigenvectors && system.config.varNames.length >= 2) {
       const clvRender = resolveClvRender(node.render?.clv, object.covariantVectors?.dim)
       if (clvRender.enabled) {
         traces.push(
@@ -2204,7 +2274,8 @@ function buildSceneTraces(
             nodeId,
             object,
             clvRender,
-            sceneAxes,
+            axisOrder,
+            objectPlotDim,
             plotSize
           )
         )
@@ -3276,30 +3347,31 @@ function buildSceneBaseLayout(
     font: { color: plotlyTheme.text },
   } satisfies Partial<Layout>
 
-  const varNames = config.varNames
-  const axisSelection = resolveSceneAxisSelection(varNames, axisVariables)
-  const axisLabels = axisSelection ?? {
-    x: varNames[0] ?? 'x',
-    y: varNames[1] ?? 'y',
-    z: varNames[2] ?? 'z',
-  }
-  const panMode = varNames.length === 2 ? { dragmode: 'pan' as const } : {}
-  if (varNames.length >= 3) {
+  const projection = resolveSceneProjection(config, axisVariables)
+  const resolvedAxisVariables =
+    projection?.axisVariables ??
+    resolveSceneAxisSelection(config.varNames, axisVariables) ??
+    ([config.varNames[0] ?? 'x'] as SceneAxisVariables)
+  const xLabel = resolvedAxisVariables[0] ?? config.varNames[0] ?? 'x'
+  const yLabel = resolvedAxisVariables[1] ?? config.varNames[1] ?? 'y'
+  const zLabel = resolvedAxisVariables[2] ?? config.varNames[2] ?? 'z'
+
+  if (projection?.kind === 'phase_3d') {
     return {
       ...base,
       scene: {
         xaxis: {
-          title: { text: axisLabels.x, font: { color: plotlyTheme.text } },
+          title: { text: xLabel, font: { color: plotlyTheme.text } },
           tickfont: { color: plotlyTheme.text },
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
         yaxis: {
-          title: { text: axisLabels.y, font: { color: plotlyTheme.text } },
+          title: { text: yLabel, font: { color: plotlyTheme.text } },
           tickfont: { color: plotlyTheme.text },
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
         zaxis: {
-          title: { text: axisLabels.z, font: { color: plotlyTheme.text } },
+          title: { text: zLabel, font: { color: plotlyTheme.text } },
           tickfont: { color: plotlyTheme.text },
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
@@ -3309,24 +3381,23 @@ function buildSceneBaseLayout(
     }
   }
 
-  if (varNames.length === 1 && config.type === 'map') {
-    const name = varNames[0] ?? 'x'
+  if (projection?.kind === 'map_cobweb_1d') {
     return {
       ...base,
       xaxis: {
-        title: { text: `${name}_n`, font: { color: plotlyTheme.text } },
+        title: { text: `${xLabel}_n`, font: { color: plotlyTheme.text } },
         tickfont: { color: plotlyTheme.text },
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },
       yaxis: {
-        title: { text: `${name}_{n+1}`, font: { color: plotlyTheme.text } },
+        title: { text: `${xLabel}_{n+1}`, font: { color: plotlyTheme.text } },
         tickfont: { color: plotlyTheme.text },
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },
     }
   }
 
-  if (varNames.length === 1) {
+  if (projection?.kind === 'flow_timeseries_1d') {
     return {
       ...base,
       xaxis: {
@@ -3335,24 +3406,24 @@ function buildSceneBaseLayout(
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },
       yaxis: {
-        title: { text: varNames[0] ?? 'x', font: { color: plotlyTheme.text } },
+        title: { text: xLabel, font: { color: plotlyTheme.text } },
         tickfont: { color: plotlyTheme.text },
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },
     }
   }
 
-  if (varNames.length === 2) {
+  if (projection?.kind === 'phase_2d') {
     return {
       ...base,
-      ...panMode,
+      dragmode: 'pan',
       xaxis: {
-        title: { text: varNames[0] ?? 'x', font: { color: plotlyTheme.text } },
+        title: { text: xLabel, font: { color: plotlyTheme.text } },
         zerolinecolor: 'rgba(120,120,120,0.3)',
         tickfont: { color: plotlyTheme.text },
       },
       yaxis: {
-        title: { text: varNames[1] ?? 'y', font: { color: plotlyTheme.text } },
+        title: { text: yLabel, font: { color: plotlyTheme.text } },
         zerolinecolor: 'rgba(120,120,120,0.3)',
         tickfont: { color: plotlyTheme.text },
       },
@@ -3361,7 +3432,6 @@ function buildSceneBaseLayout(
 
   return {
     ...base,
-    ...panMode,
     xaxis: {
       zerolinecolor: 'rgba(120,120,120,0.3)',
       tickfont: { color: plotlyTheme.text },
@@ -3479,7 +3549,8 @@ function isCameraSpec(camera: unknown): camera is PlotlyCameraSpec {
 
 function buildSceneInitialView(system: System, scene: Scene): PlotlyRelayoutEvent | null {
   const snapshot: PlotlyRelayoutEvent = {}
-  if (system.config.varNames.length >= 3) {
+  const projection = resolveSceneProjection(system.config, scene.axisVariables)
+  if (projection?.kind === 'phase_3d') {
     if (isCameraSpec(scene.camera)) {
       snapshot['scene.camera'] = {
         eye: { ...scene.camera.eye },
@@ -3545,6 +3616,10 @@ function ViewportTile({
   }))
   const [plotSize, setPlotSize] = useState<PlotSize | null>(null)
   const activeSceneId = scene?.id ?? null
+  const sceneProjection = useMemo(() => {
+    if (!scene) return null
+    return resolveSceneProjection(system.config, scene.axisVariables)
+  }, [scene, system.config])
   const timeSeriesRange =
     timeSeriesState.sceneId === activeSceneId ? timeSeriesState.range : null
   const plotHeight =
@@ -3603,7 +3678,7 @@ function ViewportTile({
         }
         return { width: size.width, height: size.height }
       })
-      if (system.config.varNames.length !== 1 || system.config.type === 'map') return
+      if (sceneProjection?.kind !== 'flow_timeseries_1d') return
       const height = size.height
       const sceneId = scene.id
       setTimeSeriesState((prev) => {
@@ -3616,13 +3691,19 @@ function ViewportTile({
         return { ...prev, height }
       })
     },
-    [scene, system.config.type, system.config.varNames.length]
+    [scene, sceneProjection]
   )
 
   const timeSeriesMeta = useMemo(() => {
-    if (!scene || system.config.varNames.length !== 1 || system.config.type === 'map') return null
+    if (!scene || sceneProjection?.kind !== 'flow_timeseries_1d') return null
     return { yRange: timeSeriesRange, height: plotHeight }
-  }, [plotHeight, scene, system.config.type, system.config.varNames.length, timeSeriesRange])
+  }, [plotHeight, scene, sceneProjection, timeSeriesRange])
+
+  const sceneMapRange = useMemo(() => {
+    if (!sceneProjection || sceneProjection.kind !== 'map_cobweb_1d') return null
+    const axisIndex = sceneProjection.axisIndices[0] ?? 0
+    return collectMap1DRange(system, axisIndex)
+  }, [sceneProjection, system])
 
   const diagramTraceState = useMemo(() => {
     if (!diagram) return null
@@ -3676,13 +3757,14 @@ function ViewportTile({
       selectedNodeId,
       isoclineGeometryCache,
       timeSeriesMeta,
-      mapRange,
+      sceneMapRange ?? mapRange,
       mapFunctionSamples,
       plotAreaSize
     )
   }, [
     mapFunctionSamples,
     mapRange,
+    sceneMapRange,
     plotAreaSize,
     scene,
     selectedNodeId,
@@ -3693,16 +3775,17 @@ function ViewportTile({
 
   const limitCyclePreviewTraces = useMemo(() => {
     if (!scene) return EMPTY_TRACES
-    const axisIndices = resolveSceneAxisIndices(
-      system.config.varNames,
-      scene.axisVariables
-    )
+    const axisIndices =
+      sceneProjection?.axisIndices ??
+      resolveSceneAxisIndices(system.config.varNames, scene.axisVariables)
+    const plotDim = sceneProjection?.axisCount ?? 3
     return buildLimitCyclePreviewTraces(
       system,
       branchPointSelection ?? null,
-      axisIndices
+      axisIndices,
+      plotDim
     )
-  }, [branchPointSelection, scene, system])
+  }, [branchPointSelection, scene, sceneProjection, system])
 
   const data = useMemo(() => {
     if (scene) {
@@ -3898,13 +3981,23 @@ export function ViewportPanel({
     return entries
   }, [system])
 
-  const isMap1D = system.config.type === 'map' && system.config.varNames.length === 1
+  const hasMapCobwebScene = useMemo(() => {
+    return viewports.some((entry) => {
+      if (!entry.scene) return false
+      const projection = resolveSceneProjection(system.config, entry.scene.axisVariables)
+      return projection?.kind === 'map_cobweb_1d'
+    })
+  }, [system.config, viewports])
+  const shouldSampleMapFunction =
+    system.config.type === 'map' &&
+    system.config.varNames.length === 1 &&
+    hasMapCobwebScene
   const mapRangeKey = useMemo(() => {
-    if (!isMap1D) return null
-    const range = collectMap1DRange(system)
+    if (!shouldSampleMapFunction) return null
+    const range = collectMap1DRange(system, 0)
     if (!range) return null
     return `${range[0]}|${range[1]}`
-  }, [isMap1D, system])
+  }, [shouldSampleMapFunction, system])
   const mapRangeValues = useMemo(() => {
     if (!mapRangeKey) return null
     const parts = mapRangeKey.split('|').map((value) => Number(value))
@@ -3913,7 +4006,7 @@ export function ViewportPanel({
     }
     return [parts[0], parts[1]] as [number, number]
   }, [mapRangeKey])
-  const mapConfigJson = isMap1D
+  const mapConfigJson = shouldSampleMapFunction
     ? JSON.stringify({
         ...system.config,
         equations: [...system.config.equations],
@@ -3937,7 +4030,13 @@ export function ViewportPanel({
 
   useEffect(() => {
     let disposed = false
-    if (!isMap1D || !mapKey || !mapConfig || !mapRangeValues || !onSampleMap1DFunction) {
+    if (
+      !shouldSampleMapFunction ||
+      !mapKey ||
+      !mapConfig ||
+      !mapRangeValues ||
+      !onSampleMap1DFunction
+    ) {
       mapRequestKeyRef.current = null
       return
     }
@@ -3987,7 +4086,7 @@ export function ViewportPanel({
     }
   }, [
     hasMapSamples,
-    isMap1D,
+    shouldSampleMapFunction,
     mapConfig,
     mapKey,
     mapRangeValues,

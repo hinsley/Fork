@@ -40,14 +40,16 @@ const DEFAULT_UI: SystemUiState = {
   limitCycleRenderTargets: {},
 }
 
+export const DEFAULT_SCENE_CAMERA: Scene['camera'] = {
+  eye: { x: 1.6, y: 1.4, z: 0.8 },
+  center: { x: 0, y: 0, z: 0 },
+  up: { x: 0, y: 0, z: 1 },
+}
+
 const DEFAULT_SCENE: Scene = {
   id: 'scene-main',
   name: 'Main_Scene',
-  camera: {
-    eye: { x: 1.6, y: 1.4, z: 0.8 },
-    center: { x: 0, y: 0, z: 0 },
-    up: { x: 0, y: 0, z: 1 },
-  },
+  camera: structuredClone(DEFAULT_SCENE_CAMERA),
   axisRanges: {},
   viewRevision: 0,
   axisVariables: null,

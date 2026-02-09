@@ -205,3 +205,40 @@ export function createAxisPickerSystem(): { system: System } {
   system = addScene(system, 'Scene B').system
   return { system }
 }
+
+export function createAxisPickerMapSystem(): { system: System } {
+  let system = createSystem({
+    name: 'Axis_Picker_Map_Fixture',
+    config: {
+      name: 'Axis_Picker_Map_Fixture',
+      equations: ['x + y', 'y + z', 'z + w', 'w + x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z', 'w'],
+      solver: 'discrete',
+      type: 'map',
+    },
+  })
+
+  const orbit: OrbitObject = {
+    type: 'orbit',
+    name: 'Orbit Map Axes',
+    systemName: system.config.name,
+    data: [
+      [0, 0, 1, 2, 3],
+      [1, 0.2, 1.1, 2.1, 3.1],
+      [2, 0.35, 1.25, 2.2, 3.25],
+      [3, 0.5, 1.4, 2.35, 3.3],
+    ],
+    t_start: 0,
+    t_end: 3,
+    dt: 1,
+    parameters: [],
+  }
+
+  const added = addObject(system, orbit)
+  system = added.system
+  system = addScene(system, 'Map Scene A').system
+  system = addScene(system, 'Map Scene B').system
+  return { system }
+}

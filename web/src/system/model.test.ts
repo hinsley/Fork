@@ -166,4 +166,53 @@ describe('system model', () => {
       )?.viewRevision
     ).toBe(5)
   })
+
+  it('initializes scene axes to defaults for 2D and 4D systems', () => {
+    const twoD = createSystem({ name: 'TwoD' })
+    const twoDScene = addScene(twoD, 'Scene2D')
+    expect(twoDScene.system.scenes[0]?.axisVariables).toEqual(['x', 'y'])
+
+    const fourD = createSystem({
+      name: 'FourD',
+      config: {
+        name: 'FourD',
+        equations: ['x', 'y', 'z', 'w'],
+        params: [],
+        paramNames: [],
+        varNames: ['x', 'y', 'z', 'w'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const fourDScene = addScene(fourD, 'Scene4D')
+    expect(fourDScene.system.scenes[0]?.axisVariables).toEqual(['x', 'y', 'z'])
+  })
+
+  it('normalizes legacy axis object payloads into ordered axis arrays', () => {
+    const system = createSystem({
+      name: 'LegacyAxes',
+      config: {
+        name: 'LegacyAxes',
+        equations: ['x', 'y', 'z', 'w'],
+        params: [],
+        paramNames: [],
+        varNames: ['x', 'y', 'z', 'w'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const withScene = addScene(system, 'Scene')
+    const legacy = structuredClone(withScene.system) as typeof withScene.system & {
+      scenes: Array<(typeof withScene.system.scenes)[number] & { axisVariables?: unknown }>
+    }
+    ;(legacy.scenes[0] as { axisVariables?: unknown }).axisVariables = {
+      x: 'w',
+      y: 'x',
+      z: 'y',
+    }
+
+    const normalized = normalizeSystem(legacy)
+
+    expect(normalized.scenes[0]?.axisVariables).toEqual(['w', 'x', 'y'])
+  })
 })

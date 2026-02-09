@@ -53,12 +53,24 @@ behavior.
 
 ### Layout/state overrides that influence view state
 - `web/src/ui/ViewportPanel.tsx`: `buildSceneBaseLayout()` and
-  `buildDiagramBaseLayout()` set `dragmode: 'pan'` for 2D scenes/diagrams and
-  only include declarative layout (axis titles, grids, styling). They do not
-  inject camera or axis ranges.
+  `buildDiagramBaseLayout()` only include declarative layout (axis titles,
+  grids, styling). Scene layout mode is resolved from per-scene axis selection:
+  3-axis scenes use Plotly `scene` camera layouts; 1-axis and 2-axis scenes use
+  2D `xaxis`/`yaxis` layouts (`dragmode: 'pan'` for 2-axis projections).
+- `web/src/ui/ViewportPanel.tsx`: scene projection mode is now selected by
+  scene axis count (`Scene.axisVariables`), not by system dimension:
+  `flow_timeseries_1d`, `map_cobweb_1d`, `phase_2d`, `phase_3d`.
+- `web/src/ui/ViewportPanel.tsx`: 1-axis map scenes for systems with more than
+  one variable render cobweb projection (`x_n` vs `x_{n+1}`) for the selected
+  variable and intentionally do **not** render a governing map function graph.
 - `web/src/ui/ViewportPanel.tsx`: `buildSceneInitialView()` and
-  `buildDiagramInitialView()` translate stored `scene.camera` / `axisRanges` (if
-  present) into a one-time `initialView` payload for `usePlotViewport`.
+  `buildDiagramInitialView()` translate stored `scene.camera` / `axisRanges`
+  (if present) into a one-time `initialView` payload for `usePlotViewport`.
+  `scene.camera` is only restored for 3-axis projections; 1-axis and 2-axis
+  projections restore axis ranges.
+- `web/src/ui/ViewportPanel.tsx`: map function sampling requests are limited to
+  true 1D map systems (`varNames.length === 1`) and only when at least one
+  visible scene is currently in `map_cobweb_1d` mode.
 - `web/src/ui/ViewportPanel.tsx`: `buildDiagramBaseLayout()` disables legend
   item click/double-click toggles (`legend.itemclick`/`legend.itemdoubleclick`)
   so bifurcation visibility is managed only via the object tree.

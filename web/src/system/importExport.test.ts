@@ -608,7 +608,7 @@ function buildUiConfigSystem(): System {
       up: { x: 0, y: 1, z: 0 },
     },
     axisRanges: { x: [-1, 1], y: [-2, 2], z: [0, 3] },
-    axisVariables: { x: 'x', y: 'y', z: 'z' },
+    axisVariables: ['x', 'y', 'z'],
     selectedNodeIds: [orbitResult.nodeId, branchResult.nodeId],
     display: 'selection',
     viewRevision: 2,

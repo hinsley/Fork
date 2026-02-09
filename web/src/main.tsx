@@ -5,6 +5,7 @@ import App from './App'
 import { AppProvider } from './state/appState'
 import { MemorySystemStore, type SystemStore } from './system/store'
 import {
+  createAxisPickerMapSystem,
   createAxisPickerSystem,
   createDemoSystem,
   createPeriodDoublingSystem,
@@ -70,6 +71,11 @@ async function bootstrap() {
   } else if (fixture === 'axis-picker') {
     const memory = new MemorySystemStore()
     const { system } = createAxisPickerSystem()
+    await memory.save(system)
+    store = memory
+  } else if (fixture === 'axis-picker-map') {
+    const memory = new MemorySystemStore()
+    const { system } = createAxisPickerMapSystem()
     await memory.save(system)
     store = memory
   } else {

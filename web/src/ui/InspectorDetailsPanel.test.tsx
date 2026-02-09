@@ -5,6 +5,8 @@ import { createDemoSystem, createPeriodDoublingSystem } from '../system/fixtures
 import { InspectorDetailsPanel } from './InspectorDetailsPanel'
 import { useState } from 'react'
 import {
+  DEFAULT_SCENE_CAMERA,
+  addScene,
   addBranch,
   addObject,
   createSystem,
@@ -4276,5 +4278,160 @@ describe('InspectorDetailsPanel', () => {
         pointIndex: 0,
       })
     )
+  })
+
+  it('shows scene axis-count controls for 2D systems', () => {
+    let system = createSystem({ name: 'Scene2D' })
+    const sceneResult = addScene(system, 'Scene 2D')
+    system = sceneResult.system
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={sceneResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    expect(screen.getByTestId('scene-axis-count')).toHaveValue('2')
+    expect(screen.getByTestId('scene-axis-x')).toHaveValue('x')
+    expect(screen.getByTestId('scene-axis-y')).toHaveValue('y')
+    expect(screen.queryByTestId('scene-axis-z')).toBeNull()
+  })
+
+  it('resets scene view state when axis count changes', () => {
+    let system = createSystem({
+      name: 'Scene4D',
+      config: {
+        name: 'Scene4D',
+        equations: ['x', 'y', 'z', 'w'],
+        params: [],
+        paramNames: [],
+        varNames: ['x', 'y', 'z', 'w'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const sceneResult = addScene(system, 'Scene 4D')
+    system = sceneResult.system
+    const onUpdateScene = vi.fn()
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={sceneResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={onUpdateScene}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    fireEvent.change(screen.getByTestId('scene-axis-count'), { target: { value: '1' } })
+
+    expect(onUpdateScene).toHaveBeenCalledWith(
+      sceneResult.nodeId,
+      expect.objectContaining({
+        axisVariables: ['x'],
+        viewRevision: 1,
+        axisRanges: {},
+        camera: DEFAULT_SCENE_CAMERA,
+      })
+    )
+  })
+
+  it('updates axis variables without bumping viewRevision', () => {
+    let system = createSystem({
+      name: 'Scene4D',
+      config: {
+        name: 'Scene4D',
+        equations: ['x', 'y', 'z', 'w'],
+        params: [],
+        paramNames: [],
+        varNames: ['x', 'y', 'z', 'w'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const sceneResult = addScene(system, 'Scene 4D')
+    system = sceneResult.system
+    const onUpdateScene = vi.fn()
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={sceneResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={onUpdateScene}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    fireEvent.change(screen.getByTestId('scene-axis-x'), { target: { value: 'w' } })
+
+    expect(onUpdateScene).toHaveBeenCalledWith(sceneResult.nodeId, {
+      axisVariables: ['w', 'y', 'z'],
+    })
   })
 })

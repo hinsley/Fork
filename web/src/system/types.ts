@@ -329,11 +329,7 @@ export type AxisRanges = {
   z?: AxisRange | null
 }
 
-export type SceneAxisVariables = {
-  x: string
-  y: string
-  z: string
-}
+export type SceneAxisVariables = [string] | [string, string] | [string, string, string]
 
 export interface Scene {
   id: string
