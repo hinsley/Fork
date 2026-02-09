@@ -13,6 +13,73 @@ use nalgebra::DMatrix;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 
+fn normalize_lc_seed_for_stage_first_explicit(
+    lc_state: &[f64],
+    ntst: usize,
+    ncol: usize,
+    dim: usize,
+) -> Result<Vec<f64>, String> {
+    let expected_ncoords = ntst * ncol * dim + (ntst + 1) * dim;
+    let implicit_ncoords = ntst * ncol * dim + ntst * dim;
+
+    if lc_state.len() == implicit_ncoords {
+        // Limit-cycle branches store mesh-first implicit periodic data:
+        // [mesh_0 .. mesh_(ntst-1), stages...].
+        // Isochrone expects stage-first explicit periodic data:
+        // [stages..., mesh_0 .. mesh_ntst], where mesh_ntst = mesh_0.
+        let mesh_len = ntst * dim;
+        let mesh = &lc_state[..mesh_len];
+        let stages = &lc_state[mesh_len..];
+        let mut reordered = Vec::with_capacity(expected_ncoords);
+        reordered.extend_from_slice(stages);
+        reordered.extend_from_slice(mesh);
+        reordered.extend_from_slice(&mesh[..dim]);
+        return Ok(reordered);
+    }
+
+    if lc_state.len() == expected_ncoords {
+        return Ok(lc_state.to_vec());
+    }
+
+    Err(format!(
+        "Invalid lc_state.len()={}, expected {} or {} (ntst={}, ncol={}, dim={})",
+        lc_state.len(),
+        expected_ncoords,
+        implicit_ncoords,
+        ntst,
+        ncol,
+        dim
+    ))
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::normalize_lc_seed_for_stage_first_explicit;
+
+    #[test]
+    fn normalizes_mesh_first_implicit_state_for_isochrone_seed() {
+        let normalized =
+            normalize_lc_seed_for_stage_first_explicit(&[10.0, 20.0, 30.0, 40.0], 2, 1, 1)
+                .expect("normalize state");
+        assert_eq!(normalized, vec![30.0, 40.0, 10.0, 20.0, 10.0]);
+    }
+
+    #[test]
+    fn accepts_stage_first_explicit_state_unchanged() {
+        let normalized =
+            normalize_lc_seed_for_stage_first_explicit(&[30.0, 40.0, 10.0, 20.0, 10.0], 2, 1, 1)
+                .expect("normalize state");
+        assert_eq!(normalized, vec![30.0, 40.0, 10.0, 20.0, 10.0]);
+    }
+
+    #[test]
+    fn rejects_incorrect_state_length() {
+        let err =
+            normalize_lc_seed_for_stage_first_explicit(&[1.0, 2.0, 3.0], 2, 1, 1).unwrap_err();
+        assert!(err.contains("Invalid lc_state.len()"));
+    }
+}
+
 #[wasm_bindgen]
 pub struct WasmFoldCurveRunner {
     #[allow(dead_code)]
@@ -885,28 +952,8 @@ impl WasmIsochroneCurveRunner {
         system.params[param2_index] = param2_value;
 
         let dim = system.equations.len();
-        let expected_ncoords = ntst * ncol * dim + (ntst + 1) * dim;
-        let implicit_ncoords = ntst * ncol * dim + ntst * dim;
-
-        let full_lc_state = if lc_state.len() == implicit_ncoords {
-            let mut padded = lc_state.clone();
-            let stages_len = ntst * ncol * dim;
-            let u0: Vec<f64> = lc_state[stages_len..stages_len + dim].to_vec();
-            padded.extend(u0);
-            padded
-        } else if lc_state.len() == expected_ncoords {
-            lc_state.clone()
-        } else {
-            return Err(JsValue::from_str(&format!(
-                "Invalid lc_state.len()={}, expected {} or {} (ntst={}, ncol={}, dim={})",
-                lc_state.len(),
-                expected_ncoords,
-                implicit_ncoords,
-                ntst,
-                ncol,
-                dim
-            )));
-        };
+        let full_lc_state = normalize_lc_seed_for_stage_first_explicit(&lc_state, ntst, ncol, dim)
+            .map_err(|message| JsValue::from_str(&message))?;
 
         let mut boxed_system = Box::new(system);
         let system_ptr: *mut EquationSystem = &mut *boxed_system;
