@@ -89,6 +89,49 @@ describe('ObjectsTree', () => {
     expect(screen.getByTestId(`object-tree-custom-${nodeId}`)).toBeInTheDocument()
   })
 
+  it('shows a frozen-variable badge for objects with frozen vars', () => {
+    const system = createSystem({
+      name: 'Frozen_Vars',
+      config: {
+        name: 'Frozen_Vars',
+        equations: ['y', '-x'],
+        params: [0.1],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Frozen',
+      systemName: system.config.name,
+      data: [],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+      frozenVariables: { frozenValuesByVarName: { x: 0.25 } },
+    }
+    const { system: next, nodeId } = addObject(system, orbit)
+
+    render(
+      <ObjectsTree
+        system={next}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={vi.fn()}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    expect(screen.getByTestId(`object-tree-frozen-${nodeId}`)).toBeInTheDocument()
+  })
+
   it('opens a context menu and deletes a node', async () => {
     const user = userEvent.setup()
     const { system, objectNodeId } = createDemoSystem()

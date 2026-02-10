@@ -940,6 +940,46 @@ function resolveBranchSnapshot(system: System, branch: ContinuationObject): Subs
   return branch.subsystemSnapshot
 }
 
+function resolveBranchPointDisplayProjection(
+  branch: ContinuationObject,
+  point: ContinuationPoint,
+  packedStateDimension: number
+):
+  | {
+      parameterRef?: ContinuationObject['parameterRef']
+      paramValue?: number
+      parameter2Ref?: ContinuationObject['parameter2Ref']
+      param2Value?: number
+    }
+  | undefined {
+  const projection: {
+    parameterRef?: ContinuationObject['parameterRef']
+    paramValue?: number
+    parameter2Ref?: ContinuationObject['parameter2Ref']
+    param2Value?: number
+  } = {}
+  if (branch.parameterRef?.kind === 'frozen_var' && Number.isFinite(point.param_value)) {
+    projection.parameterRef = branch.parameterRef
+    projection.paramValue = point.param_value
+  }
+  const branchType = branch.data.branch_type
+  if (
+    branchType &&
+    typeof branchType === 'object' &&
+    'param2_ref' in branchType &&
+    branchType.param2_ref?.kind === 'frozen_var'
+  ) {
+    const param2Value = Number.isFinite(point.param2_value)
+      ? point.param2_value
+      : resolveContinuationPointParam2Value(point, branchType, packedStateDimension)
+    if (Number.isFinite(param2Value)) {
+      projection.parameter2Ref = branchType.param2_ref
+      projection.param2Value = param2Value as number
+    }
+  }
+  return Object.keys(projection).length > 0 ? projection : undefined
+}
+
 function collectMap1DRange(system: System, axisIndex: number): [number, number] | null {
   const safeAxisIndex = Number.isInteger(axisIndex) ? Math.max(0, axisIndex) : 0
   let min = Number.POSITIVE_INFINITY
@@ -1004,19 +1044,23 @@ function resolveAxisValue(
   axis: BifurcationAxis,
   branchParams: number[]
 ): number | null {
+  const branchSnapshot = resolveBranchSnapshot(system, branch)
+  const packedStateDimension =
+    branchSnapshot?.freeVariableNames.length ?? system.config.varNames.length
+  const projection = resolveBranchPointDisplayProjection(branch, point, packedStateDimension)
   if (axis.kind === 'state') {
     const index = system.config.varNames.indexOf(axis.name)
     if (index < 0) return null
     const equilibriumState = resolveContinuationPointEquilibriumState(
       point,
       branch.data.branch_type,
-      system.config.varNames.length
+      packedStateDimension
     )
-    if (equilibriumState && index < equilibriumState.length) {
-      const value = equilibriumState[index]
-      return Number.isFinite(value) ? value : null
-    }
-    const value = point.state[index]
+    const state = equilibriumState && equilibriumState.length > 0 ? equilibriumState : point.state
+    const displayState = branchSnapshot
+      ? stateVectorToDisplay(branchSnapshot, state, projection)
+      : state
+    const value = displayState[index]
     return Number.isFinite(value) ? value : null
   }
 
@@ -1035,7 +1079,7 @@ function resolveAxisValue(
       const inferred = resolveContinuationPointParam2Value(
         point,
         branchType,
-        system.config.varNames.length
+        packedStateDimension
       )
       if (Number.isFinite(inferred)) {
         return inferred ?? null
@@ -2381,7 +2425,12 @@ function buildSceneTraces(
       const source =
         equilibriumState && equilibriumState.length > 0 ? equilibriumState : point.state
       if (!branchSnapshot) return source
-      return stateVectorToDisplay(branchSnapshot, source)
+      const projection = resolveBranchPointDisplayProjection(
+        branch,
+        point,
+        packedStateDimension
+      )
+      return stateVectorToDisplay(branchSnapshot, source, projection)
     }
 
     const resolveParamValueForVariable = (
@@ -2504,7 +2553,11 @@ function buildSceneTraces(
           if (profilePoints.length > 0) {
             for (const profilePoint of profilePoints) {
               const displayPoint = branchSnapshot
-                ? stateVectorToDisplay(branchSnapshot, profilePoint)
+                ? stateVectorToDisplay(
+                    branchSnapshot,
+                    profilePoint,
+                    resolveBranchPointDisplayProjection(branch, point, packedStateDimension)
+                  )
                 : profilePoint
               const value = displayPoint[stateAxisIndex]
               if (!Number.isFinite(value)) continue
@@ -2648,10 +2701,17 @@ function buildSceneTraces(
     }
 
     if (pointIndices.length === 0) continue
+    const isEquilibriumBranch = branch.branchType === 'equilibrium'
+    const positionByPointIndex = new Map<number, number>()
+    pointIndices.forEach((pointIndex, position) => {
+      if (!positionByPointIndex.has(pointIndex)) {
+        positionByPointIndex.set(pointIndex, position)
+      }
+    })
     if (projectionPlotDim >= 3) {
       traces.push({
         type: 'scatter3d',
-        mode: 'lines+markers',
+        mode: isEquilibriumBranch ? 'lines' : 'lines+markers',
         name: branch.name,
         uid: nodeId,
         x,
@@ -2659,20 +2719,108 @@ function buildSceneTraces(
         z,
         customdata: pointIndices,
         line: { color: node.render.color, width: lineWidth, dash: lineDash },
-        marker: { color: node.render.color, size: markerSize },
+        ...(isEquilibriumBranch
+          ? {}
+          : { marker: { color: node.render.color, size: markerSize } }),
       })
+      if (isEquilibriumBranch && branch.data.bifurcations.length > 0) {
+        const bx: number[] = []
+        const by: number[] = []
+        const bz: number[] = []
+        const labels: string[] = []
+        const bifIndices: number[] = []
+        for (const bifIndex of branch.data.bifurcations) {
+          const point = branch.data.points[bifIndex]
+          const position = positionByPointIndex.get(bifIndex)
+          if (!point || position === undefined) continue
+          const xValue = x[position]
+          const yValue = y[position]
+          const zValue = z[position]
+          if (!Number.isFinite(xValue) || !Number.isFinite(yValue) || !Number.isFinite(zValue)) {
+            continue
+          }
+          bx.push(xValue)
+          by.push(yValue)
+          bz.push(zValue)
+          bifIndices.push(bifIndex)
+          const logicalIndex = indices[bifIndex]
+          const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : bifIndex
+          labels.push(formatBifurcationLabel(displayIndex, point.stability))
+        }
+        if (bx.length > 0) {
+          traces.push({
+            type: 'scatter3d',
+            mode: 'markers',
+            name: `${branch.name} bifurcations`,
+            uid: nodeId,
+            x: bx,
+            y: by,
+            z: bz,
+            customdata: bifIndices,
+            marker: {
+              color: node.render.color,
+              size: markerSize + 2,
+              symbol: 'diamond',
+            },
+            text: labels,
+            showlegend: false,
+            hovertemplate: '%{text}<extra></extra>',
+          })
+        }
+      }
     } else if (projectionPlotDim === 2 || isMap1D || isTimeSeries) {
       traces.push({
         type: 'scatter',
-        mode: 'lines+markers',
+        mode: isEquilibriumBranch ? 'lines' : 'lines+markers',
         name: branch.name,
         uid: nodeId,
         x,
         y,
         customdata: pointIndices,
         line: { color: node.render.color, width: lineWidth, dash: lineDash },
-        marker: { color: node.render.color, size: markerSize },
+        ...(isEquilibriumBranch
+          ? {}
+          : { marker: { color: node.render.color, size: markerSize } }),
       })
+      if (isEquilibriumBranch && branch.data.bifurcations.length > 0) {
+        const bx: number[] = []
+        const by: number[] = []
+        const labels: string[] = []
+        const bifIndices: number[] = []
+        for (const bifIndex of branch.data.bifurcations) {
+          const point = branch.data.points[bifIndex]
+          const position = positionByPointIndex.get(bifIndex)
+          if (!point || position === undefined) continue
+          const xValue = x[position]
+          const yValue = y[position]
+          if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) continue
+          bx.push(xValue)
+          by.push(yValue)
+          bifIndices.push(bifIndex)
+          const logicalIndex = indices[bifIndex]
+          const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : bifIndex
+          labels.push(formatBifurcationLabel(displayIndex, point.stability))
+        }
+        if (bx.length > 0) {
+          traces.push({
+            type: 'scatter',
+            mode: 'markers',
+            name: `${branch.name} bifurcations`,
+            uid: nodeId,
+            x: bx,
+            y: by,
+            customdata: bifIndices,
+            marker: {
+              color: node.render.color,
+              size: markerSize + 2,
+              symbol: 'diamond',
+            },
+            text: labels,
+            showlegend: false,
+            hovertemplate: '%{text}<extra></extra>',
+          })
+        }
+      }
     }
   }
 

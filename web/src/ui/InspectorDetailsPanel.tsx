@@ -2996,6 +2996,39 @@ export function InspectorDetailsPanel({
     return branch.subsystemSnapshot
   }, [branch?.subsystemSnapshot, system.config])
   const branchStateDimension = branchSnapshot?.freeVariableNames.length ?? systemDraft.varNames.length
+  const selectedBranchPointDisplayProjection = useMemo(() => {
+    if (!branch || !selectedBranchPoint) return undefined
+    const projection: {
+      parameterRef?: ContinuationObject['parameterRef']
+      paramValue?: number
+      parameter2Ref?: ContinuationObject['parameter2Ref']
+      param2Value?: number
+    } = {}
+    if (branch.parameterRef?.kind === 'frozen_var' && Number.isFinite(selectedBranchPoint.param_value)) {
+      projection.parameterRef = branch.parameterRef
+      projection.paramValue = selectedBranchPoint.param_value
+    }
+    const branchType = branch.data.branch_type
+    if (
+      branchType &&
+      typeof branchType === 'object' &&
+      'param2_ref' in branchType &&
+      branchType.param2_ref?.kind === 'frozen_var'
+    ) {
+      const param2Value = Number.isFinite(selectedBranchPoint.param2_value)
+        ? selectedBranchPoint.param2_value
+        : resolveContinuationPointParam2Value(
+            selectedBranchPoint,
+            branchType,
+            branchStateDimension
+          )
+      if (Number.isFinite(param2Value)) {
+        projection.parameter2Ref = branchType.param2_ref
+        projection.param2Value = param2Value as number
+      }
+    }
+    return Object.keys(projection).length > 0 ? projection : undefined
+  }, [branch, branchStateDimension, selectedBranchPoint])
   const equilibriumDisplayState = useMemo(() => {
     if (!equilibrium?.solution?.state) return null
     if (!equilibriumSnapshot) return equilibrium.solution.state
@@ -3017,9 +3050,19 @@ export function InspectorDetailsPanel({
     isDiscreteMap && branch?.branchType === 'equilibrium' && selectedBranchPoint?.state
       ? selectedBranchPoint.cycle_points && selectedBranchPoint.cycle_points.length > 0
         ? selectedBranchPoint.cycle_points.map((point) =>
-            branchSnapshot ? stateVectorToDisplay(branchSnapshot, point) : point
+            branchSnapshot
+              ? stateVectorToDisplay(branchSnapshot, point, selectedBranchPointDisplayProjection)
+              : point
           )
-        : [branchSnapshot ? stateVectorToDisplay(branchSnapshot, selectedBranchPoint.state) : selectedBranchPoint.state]
+        : [
+            branchSnapshot
+              ? stateVectorToDisplay(
+                  branchSnapshot,
+                  selectedBranchPoint.state,
+                  selectedBranchPointDisplayProjection
+                )
+              : selectedBranchPoint.state,
+          ]
       : null
   const plotlyTheme = useMemo(() => resolvePlotlyThemeTokens(theme), [theme])
   const equilibriumEigenPlot = useMemo(() => {
@@ -3383,11 +3426,17 @@ export function InspectorDetailsPanel({
     )
     const state =
       equilibriumState && equilibriumState.length > 0
-      ? equilibriumState
-      : selectedBranchPoint.state
+        ? equilibriumState
+        : selectedBranchPoint.state
     if (!branchSnapshot) return state
-    return stateVectorToDisplay(branchSnapshot, state)
-  }, [branch, branchSnapshot, branchStateDimension, selectedBranchPoint])
+    return stateVectorToDisplay(branchSnapshot, state, selectedBranchPointDisplayProjection)
+  }, [
+    branch,
+    branchSnapshot,
+    branchStateDimension,
+    selectedBranchPoint,
+    selectedBranchPointDisplayProjection,
+  ])
   const limitCycleRenderData = useMemo(() => {
     if (!limitCycleRenderPoint || !limitCycleRenderBranch) return null
     const baseParams = getBranchParams(system, limitCycleRenderBranch)

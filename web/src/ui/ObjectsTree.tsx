@@ -233,6 +233,10 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const object = system.objects[nodeId]
     const customParameters =
       object && object.type !== 'continuation' ? object.customParameters : null
+    const hasFrozenVariables =
+      object &&
+      object.type !== 'continuation' &&
+      Object.keys(object.frozenVariables?.frozenValuesByVarName ?? {}).length > 0
 
     return (
       <div key={nodeId} className="tree-node">
@@ -325,6 +329,16 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
                     data-testid={`object-tree-custom-${nodeId}`}
                   >
                     custom
+                  </span>
+                ) : null}
+                {hasFrozenVariables ? (
+                  <span
+                    className="tree-node__tag"
+                    data-testid={`object-tree-frozen-${nodeId}`}
+                    title="Frozen variables configured"
+                    aria-label="Frozen variables configured"
+                  >
+                    ❄️
                   </span>
                 ) : null}
               </span>

@@ -25,6 +25,7 @@ import type {
 } from '../system/types'
 import type { BranchPointSelection } from './branchPointSelection'
 import { nowIso } from '../utils/determinism'
+import { buildSubsystemSnapshot } from '../system/subsystemGateway'
 
 type PlotlyProps = {
   plotId: string
@@ -899,6 +900,188 @@ describe('ViewportPanel view state wiring', () => {
     expect(selectedTrace?.x).toEqual([1.3])
     expect(selectedTrace?.y).toEqual([0.8])
     expect(selectedTrace?.customdata).toEqual([1])
+  })
+
+  it('renders frozen state-axis values from continuation parameter refs', () => {
+    const config: SystemConfig = {
+      name: 'Frozen_Axis_Diagram',
+      equations: ['y', 'x - z', '0.1 * (x - z)'],
+      params: [0.2],
+      paramNames: ['mu'],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: config.name, config })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_Seed',
+      systemName: config.name,
+      solution: {
+        state: [0.2, 0.1, -1.5],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [],
+        eigenpairs: [],
+      },
+      frozenVariables: { frozenValuesByVarName: { x: 0.2, z: -1.5 } },
+      subsystemSnapshot: buildSubsystemSnapshot(config, {
+        frozenValuesByVarName: { x: 0.2, z: -1.5 },
+      }),
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_frozen_branch',
+      systemName: config.name,
+      parameterName: 'var:x',
+      parameterRef: { kind: 'frozen_var', variableName: 'x' },
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          { state: [0.1], param_value: 0.25, stability: 'None', eigenvalues: [] },
+          { state: [0.3], param_value: 0.55, stability: 'None', eigenvalues: [] },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: { type: 'Equilibrium' },
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-6,
+        max_step_size: 0.1,
+        max_steps: 10,
+        corrector_steps: 4,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: nowIso(),
+      params: [...config.params],
+      subsystemSnapshot: equilibrium.subsystemSnapshot,
+    }
+    const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
+    system = branchResult.system
+    const diagramResult = addBifurcationDiagram(system, 'Diagram 1')
+    system = updateBifurcationDiagram(diagramResult.system, diagramResult.nodeId, {
+      xAxis: { kind: 'state', name: 'x' },
+      yAxis: { kind: 'state', name: 'y' },
+    })
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === diagramResult.nodeId)
+    expect(props).toBeTruthy()
+    const mainTrace = props?.data.find(
+      (trace) => 'name' in trace && trace.name === branch.name && 'mode' in trace && trace.mode === 'lines'
+    ) as { x?: number[]; y?: number[] } | undefined
+    expect(mainTrace?.x).toEqual([0.25, 0.55])
+    expect(mainTrace?.y).toEqual([0.1, 0.3])
+  })
+
+  it('renders scene equilibrium branches as lines with dedicated bifurcation markers', () => {
+    const config: SystemConfig = {
+      name: 'Scene_Equilibrium_Branch',
+      equations: ['y', '-x + mu'],
+      params: [0.3],
+      paramNames: ['mu'],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['x', 'y'],
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_Seed',
+      systemName: config.name,
+      solution: {
+        state: [0.1, 0],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [0, 1, -1, 0],
+        eigenpairs: [],
+      },
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+    const continuationSettings: ContinuationSettings = {
+      step_size: 0.01,
+      min_step_size: 1e-6,
+      max_step_size: 0.1,
+      max_steps: 10,
+      corrector_steps: 4,
+      corrector_tolerance: 1e-6,
+      step_tolerance: 1e-6,
+    }
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_scene_branch',
+      systemName: config.name,
+      parameterName: 'mu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          { state: [0.1, 0], param_value: 0.3, stability: 'Stable', eigenvalues: [] },
+          { state: [0.4, 0], param_value: 0.6, stability: 'Hopf', eigenvalues: [] },
+          { state: [0.7, 0], param_value: 0.9, stability: 'None', eigenvalues: [] },
+        ],
+        bifurcations: [1],
+        indices: [0, 1, 2],
+        branch_type: { type: 'Equilibrium' },
+      },
+      settings: continuationSettings,
+      timestamp: nowIso(),
+      params: [...config.params],
+    }
+    const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
+    system = branchResult.system
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const branchLineTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === branch.name &&
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    ) as { x?: number[]; y?: number[] } | undefined
+    expect(branchLineTrace).toBeTruthy()
+    expect(branchLineTrace?.x).toEqual([0.1, 0.4, 0.7])
+    expect(branchLineTrace?.y).toEqual([0, 0, 0])
+
+    const bifTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === `${branch.name} bifurcations` &&
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'markers'
+    ) as
+      | {
+          x?: number[]
+          y?: number[]
+          customdata?: number[]
+          marker?: { symbol?: string }
+        }
+      | undefined
+    expect(bifTrace).toBeTruthy()
+    expect(bifTrace?.x).toEqual([0.4])
+    expect(bifTrace?.y).toEqual([0])
+    expect(bifTrace?.customdata).toEqual([1])
+    expect(bifTrace?.marker?.symbol).toBe('diamond')
   })
 
   it('renders full limit cycles on state-variable bifurcation diagrams for flows', () => {
