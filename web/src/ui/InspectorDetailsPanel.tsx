@@ -1927,6 +1927,7 @@ export function InspectorDetailsPanel({
   )
   const [paramOverrideError, setParamOverrideError] = useState<string | null>(null)
   const [frozenVariableDrafts, setFrozenVariableDrafts] = useState<Record<string, string>>({})
+  const activeFrozenVariableRef = useRef<string | null>(null)
 
   const [continuationDraft, setContinuationDraft] = useState<ContinuationDraft>(() =>
     makeContinuationDraft(system.config)
@@ -2229,20 +2230,34 @@ export function InspectorDetailsPanel({
   )
 
   useEffect(() => {
+    activeFrozenVariableRef.current = null
+  }, [selectedNodeId])
+
+  useEffect(() => {
     if (!paramOverrideTarget || paramOverrideTarget.type === 'isocline') {
       setFrozenVariableDrafts({})
       return
     }
-    const next: Record<string, string> = {}
-    for (let index = 0; index < systemDraft.varNames.length; index += 1) {
-      const name = systemDraft.varNames[index]
-      if (!name) continue
-      const value =
-        currentObjectFrozenValues[name] ??
-        (paramOverrideTarget.subsystemSnapshot?.frozenValuesByVarName?.[name] ?? 0)
-      next[name] = value.toString()
-    }
-    setFrozenVariableDrafts(next)
+    setFrozenVariableDrafts((prev) => {
+      const next: Record<string, string> = {}
+      for (let index = 0; index < systemDraft.varNames.length; index += 1) {
+        const name = systemDraft.varNames[index]
+        if (!name) continue
+        const value =
+          currentObjectFrozenValues[name] ??
+          (paramOverrideTarget.subsystemSnapshot?.frozenValuesByVarName?.[name] ?? 0)
+        const committed = value.toString()
+        if (
+          activeFrozenVariableRef.current === name &&
+          Object.prototype.hasOwnProperty.call(prev, name)
+        ) {
+          next[name] = prev[name]
+        } else {
+          next[name] = committed
+        }
+      }
+      return next
+    })
   }, [currentObjectFrozenValues, paramOverrideTarget, systemDraft.varNames])
 
   useEffect(() => {
@@ -5873,6 +5888,14 @@ export function InspectorDetailsPanel({
                                   value.toString()
                                 }
                                 disabled={!isFrozen}
+                                onFocus={() => {
+                                  activeFrozenVariableRef.current = name
+                                }}
+                                onBlur={() => {
+                                  if (activeFrozenVariableRef.current === name) {
+                                    activeFrozenVariableRef.current = null
+                                  }
+                                }}
                                 onChange={(event) =>
                                   handleFrozenVariableValueChange(name, event.target.value)
                                 }

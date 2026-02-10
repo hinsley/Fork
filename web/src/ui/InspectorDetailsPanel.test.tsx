@@ -411,6 +411,75 @@ describe('InspectorDetailsPanel', () => {
     )
   })
 
+  it('applies decimal frozen-variable values for selected objects', async () => {
+    const user = userEvent.setup()
+    const system = createSystem({
+      name: 'Frozen_Decimal',
+      config: {
+        name: 'Frozen_Decimal',
+        equations: ['y', '-x'],
+        params: [0.1],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Frozen',
+      systemName: system.config.name,
+      data: [],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+      frozenVariables: { frozenValuesByVarName: { x: 0 } },
+    }
+    const { system: next, nodeId } = addObject(system, orbit)
+    const onUpdateObjectFrozenVariables = vi.fn()
+
+    render(
+      <InspectorDetailsPanel
+        system={next}
+        selectedNodeId={nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateObjectParams={vi.fn()}
+        onUpdateObjectFrozenVariables={onUpdateObjectFrozenVariables}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('frozen-variables-toggle'))
+    const xFrozenValueInput = screen.getByTestId('frozen-variable-value-x')
+    await user.clear(xFrozenValueInput)
+    await user.type(xFrozenValueInput, '0.25')
+
+    await waitFor(() =>
+      expect(onUpdateObjectFrozenVariables).toHaveBeenLastCalledWith(nodeId, { x: 0.25 })
+    )
+  })
+
   it('shows the custom parameters tag in the parameters header when overrides exist', () => {
     const systemConfig = {
       name: 'Custom_Param_System',
