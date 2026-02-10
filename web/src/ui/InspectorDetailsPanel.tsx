@@ -7641,10 +7641,6 @@ export function InspectorDetailsPanel({
                       </select>
                     </label>
                   ) : null}
-                  <p className="empty-state">
-                    For multi-dimensional maps, 1-axis mode renders the selected variable as a
-                    cobweb projection ({`x_n`} vs {`x_{n+1}`}) without a governing map curve.
-                  </p>
                 </div>
               ) : null}
               <div className="inspector-subsection">
