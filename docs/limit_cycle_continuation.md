@@ -18,6 +18,7 @@ Note: This document has not been fully human-reviewed; treat it as guidance and 
 11. [Floquet Multiplier Extraction](#floquet-multiplier-extraction)
 12. [Best Practices for Accurate Floquet Multipliers](#best-practices-for-accurate-floquet-multipliers)
 13. [Branching to Period-Doubled Limit Cycles](#branching-to-period-doubled-limit-cycles)
+14. [Related: Isochrone Continuation](#related-isochrone-continuation)
 
 ---
 
@@ -27,6 +28,9 @@ Fork supports two methods for initiating limit cycle continuation:
 
 1. **From Orbit Data**: If you have an orbit that converges to a stable limit cycle (e.g., from numerical integration), Fork can extract one period and use it to initialize limit cycle continuation.
 2. **From Period-Doubling (PD) Bifurcation**: When a limit cycle undergoes a period-doubling bifurcation, a new limit cycle family emerges with double the period. Fork can branch from a detected PD point to this new family.
+
+For fixed-period continuation in a two-parameter plane (isochrones), see
+[`docs/isochrone_continuation.md`](./isochrone_continuation.md).
 
 Note: Hopf-based initialization exists in the core but is not currently exposed in the UI or CLI.
 
@@ -820,6 +824,19 @@ Once the doubled-period guess is constructed (with $ntst_{new} = 2 \cdot ntst_{o
 | **New Period** | $\approx 2\pi/\omega$ | Sampler period | $\approx 2 \times$ original period |
 | **Mesh (ntst)** | User-defined | User-defined | $2 \times$ original ntst |
 | **Stability** | Any | Stable only | Any |
+
+## Related: Isochrone Continuation
+
+Isochrone continuation is implemented as a separate branch type (`isochrone_curve`) that starts
+from a limit-cycle or isochrone branch point and continues in a two-parameter plane while keeping
+the period fixed to the seed point period.
+
+See [`docs/isochrone_continuation.md`](./isochrone_continuation.md) for:
+- Inspector workflows (`Continue Isochrone`, `Continue from Point`)
+- parameter selection defaults and constraints
+- direction/index semantics and backward extension behavior
+- Floquet multiplier handling on isochrone points
+- troubleshooting for common initialization and extension errors
 
 ---
 
