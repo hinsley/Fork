@@ -292,6 +292,7 @@ impl WasmCodim1CurveExtensionRunner {
 
                 let secant = build_secant_direction(
                     &merge.branch,
+                    endpoint_idx,
                     neighbor_idx,
                     &end_aug,
                     is_append,
@@ -374,6 +375,7 @@ impl WasmCodim1CurveExtensionRunner {
 
                 let secant = build_secant_direction(
                     &merge.branch,
+                    endpoint_idx,
                     neighbor_idx,
                     &end_aug,
                     is_append,
@@ -448,6 +450,7 @@ impl WasmCodim1CurveExtensionRunner {
 
                 let secant = build_secant_direction(
                     &merge.branch,
+                    endpoint_idx,
                     neighbor_idx,
                     &end_aug,
                     is_append,
@@ -504,9 +507,9 @@ impl WasmCodim1CurveExtensionRunner {
             }
             Codim1BranchType::IsochroneCurve { ntst, ncol, .. } => {
                 let dim = system.equations.len();
-                let endpoint_param2 = endpoint
-                    .param2_value
-                    .ok_or_else(|| JsValue::from_str("Isochrone curve point missing param2_value"))?;
+                let endpoint_param2 = endpoint.param2_value.ok_or_else(|| {
+                    JsValue::from_str("Isochrone curve point missing param2_value")
+                })?;
                 let (full_lc_state, period) =
                     unpack_lc_state(&endpoint.state, *ntst, *ncol, dim, LcLayout::StageFirst)
                         .map_err(to_js_error)?;
@@ -523,6 +526,7 @@ impl WasmCodim1CurveExtensionRunner {
 
                 let secant = build_secant_direction(
                     &merge.branch,
+                    endpoint_idx,
                     neighbor_idx,
                     &end_aug,
                     is_append,
@@ -601,6 +605,7 @@ impl WasmCodim1CurveExtensionRunner {
 
                 let secant = build_secant_direction(
                     &merge.branch,
+                    endpoint_idx,
                     neighbor_idx,
                     &end_aug,
                     is_append,
@@ -679,6 +684,7 @@ impl WasmCodim1CurveExtensionRunner {
 
                 let secant = build_secant_direction(
                     &merge.branch,
+                    endpoint_idx,
                     neighbor_idx,
                     &end_aug,
                     is_append,
@@ -1054,6 +1060,7 @@ fn unpack_lc_state(
 
 fn build_secant_direction<F>(
     branch: &Codim1BranchData,
+    endpoint_idx: usize,
     neighbor_idx: Option<usize>,
     end_aug: &DVector<f64>,
     _is_append: bool,
@@ -1076,7 +1083,10 @@ where
         // Always orient secant from interior neighbor -> selected endpoint.
         // This preserves outward continuation on both append (max-index) and
         // prepend (min-index) extension sides.
-        let secant = end_aug - neighbor_aug;
+        let mut secant = end_aug - neighbor_aug;
+        if should_reverse_secant_for_outward_param_plane(branch, endpoint_idx, neighbor_pos) {
+            secant = -secant;
+        }
         if secant.norm() > 1e-12 {
             Some(secant.normalize())
         } else {
@@ -1086,6 +1096,45 @@ where
         None
     };
     Ok(secant)
+}
+
+fn should_reverse_secant_for_outward_param_plane(
+    branch: &Codim1BranchData,
+    endpoint_idx: usize,
+    neighbor_idx: usize,
+) -> bool {
+    let endpoint = match branch.points.get(endpoint_idx) {
+        Some(point) => point,
+        None => return false,
+    };
+    let neighbor = match branch.points.get(neighbor_idx) {
+        Some(point) => point,
+        None => return false,
+    };
+    let seed_pos = match branch.indices.iter().position(|&idx| idx == 0) {
+        Some(pos) => pos,
+        None => return false,
+    };
+    if seed_pos == endpoint_idx {
+        return false;
+    }
+    let seed = match branch.points.get(seed_pos) {
+        Some(point) => point,
+        None => return false,
+    };
+
+    let endpoint_p2 = endpoint
+        .param2_value
+        .or(neighbor.param2_value)
+        .or(seed.param2_value)
+        .unwrap_or(0.0);
+    let neighbor_p2 = neighbor.param2_value.unwrap_or(endpoint_p2);
+    let seed_p2 = seed.param2_value.unwrap_or(endpoint_p2);
+
+    let endpoint_distance = (endpoint.param_value - seed.param_value).hypot(endpoint_p2 - seed_p2);
+    let neighbor_distance = (neighbor.param_value - seed.param_value).hypot(neighbor_p2 - seed_p2);
+
+    endpoint_distance + 1e-12 < neighbor_distance
 }
 
 fn resolve_hopf_kappa_and_omega(
@@ -1676,13 +1725,9 @@ mod tests {
         };
 
         let end_aug = DVector::from_vec(vec![-0.3, 0.0]);
-        let secant = build_secant_direction(
-            &branch,
-            Some(1),
-            &end_aug,
-            false,
-            |pt| Ok(pt.state.clone()),
-        )
+        let secant = build_secant_direction(&branch, 0, Some(1), &end_aug, false, |pt| {
+            Ok(pt.state.clone())
+        })
         .expect("build secant")
         .expect("secant");
 
@@ -1691,6 +1736,63 @@ mod tests {
         assert!(
             secant[0] < 0.0,
             "Expected backward secant param component < 0, got {}",
+            secant[0]
+        );
+    }
+
+    #[test]
+    fn secant_reverses_when_edge_turns_toward_seed_index() {
+        // The minimum-index endpoint (-2) is closer to seed index 0 than its interior
+        // neighbor (-1), so extending backward should reverse the local secant and
+        // move farther away from index 0 rather than retracing back.
+        let branch = Codim1BranchData {
+            points: vec![
+                Codim1BranchPoint {
+                    state: vec![0.0],
+                    param_value: 0.0,
+                    param2_value: Some(0.0),
+                    stability: None,
+                    eigenvalues: Vec::new(),
+                    auxiliary: None,
+                },
+                Codim1BranchPoint {
+                    state: vec![0.0],
+                    param_value: -1.0,
+                    param2_value: Some(0.0),
+                    stability: None,
+                    eigenvalues: Vec::new(),
+                    auxiliary: None,
+                },
+                Codim1BranchPoint {
+                    state: vec![0.0],
+                    param_value: -2.0,
+                    param2_value: Some(0.0),
+                    stability: None,
+                    eigenvalues: Vec::new(),
+                    auxiliary: None,
+                },
+            ],
+            bifurcations: Vec::new(),
+            indices: vec![0, -2, -1],
+            branch_type: Codim1BranchType::FoldCurve {
+                param1_name: "a".to_string(),
+                param2_name: "b".to_string(),
+            },
+        };
+
+        // Endpoint at index -2 (array position 1), interior neighbor index -1 (position 2).
+        // Raw neighbor->endpoint secant points toward seed (+param), so the outward
+        // correction should flip it to negative param direction.
+        let end_aug = DVector::from_vec(vec![-1.0, 0.0]);
+        let secant = build_secant_direction(&branch, 1, Some(2), &end_aug, false, |pt| {
+            Ok(pt.state.clone())
+        })
+        .expect("build secant")
+        .expect("secant");
+
+        assert!(
+            secant[0] < 0.0,
+            "Expected reversed secant with negative param component, got {}",
             secant[0]
         );
     }
