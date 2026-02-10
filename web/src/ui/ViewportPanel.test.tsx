@@ -1409,6 +1409,153 @@ describe('ViewportPanel view state wiring', () => {
     expect(flippedMinTrace?.y).toEqual([0.2, 0.6])
   })
 
+  it('renders envelopes when plotted state axes include one free variable even with multi-free subsystems', () => {
+    const config: SystemConfig = {
+      name: 'Frozen_LC_MultiFree_Axes_Envelope',
+      equations: ['0', '0', 'c', 'd'],
+      params: [0.1],
+      paramNames: ['mu'],
+      varNames: ['a', 'b', 'c', 'd'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['a', 'b', 'c'],
+    })
+    const seedOrbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit Seed',
+      systemName: config.name,
+      data: [
+        [0, 0, 0, 0, 0],
+        [0.1, 0, 0, 0, 0],
+      ],
+      t_start: 0,
+      t_end: 0.1,
+      dt: 0.1,
+      parameters: [...config.params],
+      frozenVariables: { frozenValuesByVarName: { a: 1.5, b: 0.2 } },
+      subsystemSnapshot: buildSubsystemSnapshot(config, {
+        frozenValuesByVarName: { a: 1.5, b: 0.2 },
+      }),
+    }
+    const orbitResult = addObject(system, seedOrbit)
+    system = orbitResult.system
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_frozen_multifree_envelope',
+      systemName: config.name,
+      parameterName: 'var:b',
+      parameterRef: { kind: 'frozen_var', variableName: 'b' },
+      parentObject: seedOrbit.name,
+      startObject: seedOrbit.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          {
+            state: [10, 100, 20, 200, 15, 150, 9],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [30, 300, 40, 400, 35, 350, 9],
+            param_value: 0.6,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: { type: 'LimitCycle', ntst: 1, ncol: 1 },
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-6,
+        max_step_size: 0.1,
+        max_steps: 10,
+        corrector_steps: 4,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: nowIso(),
+      params: [...config.params],
+      subsystemSnapshot: seedOrbit.subsystemSnapshot,
+    }
+    const branchResult = addBranch(system, branch, orbitResult.nodeId)
+    system = branchResult.system
+
+    renderPanel(system)
+
+    const sceneProps = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(sceneProps).toBeTruthy()
+    const sceneMaxTrace = sceneProps?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        'type' in trace &&
+        trace.type === 'scatter3d' &&
+        'mode' in trace &&
+        trace.mode === 'lines' &&
+        'name' in trace &&
+        trace.name === branch.name
+    ) as { x?: number[]; y?: number[]; z?: number[] } | undefined
+    const sceneMinTrace = sceneProps?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        'type' in trace &&
+        trace.type === 'scatter3d' &&
+        'mode' in trace &&
+        trace.mode === 'lines' &&
+        'name' in trace &&
+        trace.name === `${branch.name} min`
+    ) as { x?: number[]; y?: number[]; z?: number[] } | undefined
+
+    expect(sceneMaxTrace?.x).toEqual([1.5, 1.5])
+    expect(sceneMinTrace?.x).toEqual([1.5, 1.5])
+    expect(sceneMaxTrace?.y).toEqual([0.2, 0.6])
+    expect(sceneMinTrace?.y).toEqual([0.2, 0.6])
+    expect(sceneMaxTrace?.z).toEqual([20, 40])
+    expect(sceneMinTrace?.z).toEqual([10, 30])
+
+    plotlyCalls.length = 0
+    const diagramResult = addBifurcationDiagram(system, 'Diagram 1')
+    system = updateBifurcationDiagram(diagramResult.system, diagramResult.nodeId, {
+      xAxis: { kind: 'state', name: 'b' },
+      yAxis: { kind: 'state', name: 'c' },
+    })
+    renderPanel(system)
+
+    const diagramProps = plotlyCalls.find((entry) => entry.plotId === diagramResult.nodeId)
+    expect(diagramProps).toBeTruthy()
+    const diagramMaxTrace = diagramProps?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        'name' in trace &&
+        trace.name === branch.name &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    ) as { x?: number[]; y?: number[] } | undefined
+    const diagramMinTrace = diagramProps?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        'name' in trace &&
+        trace.name === `${branch.name} min` &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    ) as { x?: number[]; y?: number[] } | undefined
+
+    expect(diagramMaxTrace?.x).toEqual([0.2, 0.6])
+    expect(diagramMinTrace?.x).toEqual([0.2, 0.6])
+    expect(diagramMaxTrace?.y).toEqual([20, 40])
+    expect(diagramMinTrace?.y).toEqual([10, 30])
+  })
+
   it('renders full limit cycles on state-variable bifurcation diagrams for flows', () => {
     const config: SystemConfig = {
       name: 'LimitCycle_Diagram',

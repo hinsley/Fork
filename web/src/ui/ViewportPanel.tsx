@@ -1152,10 +1152,32 @@ function resolveLimitCycleMesh(
 type LimitCycleEnvelope = { min: number; max: number }
 type LimitCycleEnvelopeStates = { minState: number[]; maxState: number[] }
 
-function resolveOneFreeLimitCycleEnvelopeStates(
+function resolveSingleFreeAxisPosition(
+  snapshot: SubsystemSnapshot | null | undefined,
+  axisVariableNames: string[]
+): number | null {
+  if (!snapshot) return null
+  let freeAxisPosition = -1
+  let freeCount = 0
+  for (let position = 0; position < axisVariableNames.length; position += 1) {
+    const variableName = axisVariableNames[position]
+    if (!variableName) continue
+    const isFrozen = Object.prototype.hasOwnProperty.call(
+      snapshot.frozenValuesByVarName,
+      variableName
+    )
+    if (isFrozen) continue
+    freeCount += 1
+    freeAxisPosition = position
+  }
+  return freeCount === 1 ? freeAxisPosition : null
+}
+
+function resolveLimitCycleEnvelopeStates(
   system: System,
   branch: ContinuationObject,
   point: ContinuationPoint,
+  envelopeAxisIndex: number,
   options?: {
     branchSnapshot?: SubsystemSnapshot | null
     packedStateDimension?: number
@@ -1165,9 +1187,8 @@ function resolveOneFreeLimitCycleEnvelopeStates(
   const packedStateDimension =
     options?.packedStateDimension ??
     (branchSnapshot?.freeVariableNames.length ?? system.config.varNames.length)
-  if (packedStateDimension !== 1) return null
-  const freeVariableIndex = branchSnapshot?.freeVariableIndices[0] ?? 0
-  if (!Number.isInteger(freeVariableIndex) || freeVariableIndex < 0) return null
+  if (packedStateDimension <= 0) return null
+  if (!Number.isInteger(envelopeAxisIndex) || envelopeAxisIndex < 0) return null
 
   const projection = resolveBranchPointDisplayProjection(
     branch,
@@ -1194,7 +1215,7 @@ function resolveOneFreeLimitCycleEnvelopeStates(
     const displayPoint = branchSnapshot
       ? stateVectorToDisplay(branchSnapshot, rawPoint, projection)
       : rawPoint
-    const value = displayPoint[freeVariableIndex]
+    const value = displayPoint[envelopeAxisIndex]
     if (!Number.isFinite(value)) return
     if (value <= minValue) {
       minValue = value
@@ -1238,55 +1259,17 @@ function resolveLimitCycleEnvelope(
   const packedStateDimension =
     branchSnapshot?.freeVariableNames.length ?? system.config.varNames.length
   if (packedStateDimension <= 0) return null
-  const oneFreeEnvelope = resolveOneFreeLimitCycleEnvelopeStates(system, branch, point, {
+  const envelopeStates = resolveLimitCycleEnvelopeStates(system, branch, point, index, {
     branchSnapshot,
     packedStateDimension,
   })
-  if (oneFreeEnvelope) {
-    const min = oneFreeEnvelope.minState[index]
-    const max = oneFreeEnvelope.maxState[index]
+  if (envelopeStates) {
+    const min = envelopeStates.minState[index]
+    const max = envelopeStates.maxState[index]
     if (!Number.isFinite(min) || !Number.isFinite(max)) return null
     return { min, max }
   }
-  const projection = resolveBranchPointDisplayProjection(branch, point, packedStateDimension)
-  const { ntst, ncol } = resolveLimitCycleMesh(branch)
-  const layout = resolveLimitCycleLayout(branch.branchType)
-  const { profilePoints } = extractLimitCycleProfile(
-    point.state,
-    packedStateDimension,
-    ntst,
-    ncol,
-    {
-      layout,
-      allowPackedTail: allowsPackedTailLimitCycleProfile(branch.branchType),
-    }
-  )
-  let min = Number.POSITIVE_INFINITY
-  let max = Number.NEGATIVE_INFINITY
-
-  if (profilePoints.length > 0) {
-    for (const profilePoint of profilePoints) {
-      const displayPoint = branchSnapshot
-        ? stateVectorToDisplay(branchSnapshot, profilePoint, projection)
-        : profilePoint
-      const value = displayPoint[index]
-      if (!Number.isFinite(value)) continue
-      min = Math.min(min, value)
-      max = Math.max(max, value)
-    }
-  } else {
-    const displayState = branchSnapshot
-      ? stateVectorToDisplay(branchSnapshot, point.state, projection)
-      : point.state
-    const value = displayState[index]
-    if (Number.isFinite(value)) {
-      min = value
-      max = value
-    }
-  }
-
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return null
-  return { min, max }
+  return null
 }
 
 function resolveLimitCycleLayout(
@@ -2559,6 +2542,7 @@ function buildSceneTraces(
     const axisZ = projectionAxisIndices[2] ?? Math.min(2, Math.max(0, system.config.varNames.length - 1))
     const axisVarX = system.config.varNames[axisX] ?? ''
     const axisVarY = system.config.varNames[axisY] ?? ''
+    const axisVarZ = system.config.varNames[axisZ] ?? ''
     const branchSnapshot = resolveBranchSnapshot(system, branch)
     const packedStateDimension =
       branchSnapshot?.freeVariableNames.length ?? system.config.varNames.length
@@ -2628,7 +2612,17 @@ function buildSceneTraces(
       continue
     }
 
-    if (isCycleLikeBranch && packedStateDimension === 1 && projectionPlotDim >= 2) {
+    const sceneAxisVariableNames =
+      projectionPlotDim >= 3 ? [axisVarX, axisVarY, axisVarZ] : [axisVarX, axisVarY]
+    const singleSceneFreeAxisPosition =
+      isCycleLikeBranch && projectionPlotDim >= 2
+        ? resolveSingleFreeAxisPosition(branchSnapshot, sceneAxisVariableNames)
+        : null
+    const sceneAxisIndices =
+      projectionPlotDim >= 3 ? [axisX, axisY, axisZ] : [axisX, axisY]
+
+    if (isCycleLikeBranch && singleSceneFreeAxisPosition !== null) {
+      const envelopeAxisIndex = sceneAxisIndices[singleSceneFreeAxisPosition] ?? -1
       const xMax: number[] = []
       const yMax: number[] = []
       const zMax: number[] = []
@@ -2642,10 +2636,16 @@ function buildSceneTraces(
         if (!shouldRenderPoint(orderIndex, idx)) continue
         const point = branch.data.points[idx]
         if (!point) continue
-        const envelopeStates = resolveOneFreeLimitCycleEnvelopeStates(system, branch, point, {
+        const envelopeStates = resolveLimitCycleEnvelopeStates(
+          system,
+          branch,
+          point,
+          envelopeAxisIndex,
+          {
           branchSnapshot,
           packedStateDimension,
-        })
+          }
+        )
         if (!envelopeStates) continue
 
         const minX = envelopeStates.minState[axisX]
@@ -3449,8 +3449,14 @@ function buildDiagramTraces(
       const axisY = stateAxisIndices[1]
       const stateSpaceStride = resolveStateSpaceStride(node.render.stateSpaceStride)
       const bifSet = new Set(branch.data.bifurcations ?? [])
+      const singleDiagramFreeAxisPosition = resolveSingleFreeAxisPosition(branchSnapshot, [
+        xAxis.name,
+        yAxis.name,
+      ])
 
-      if (packedStateDimension === 1) {
+      if (singleDiagramFreeAxisPosition !== null) {
+        const envelopeAxisIndex =
+          (singleDiagramFreeAxisPosition === 0 ? axisX : axisY) ?? -1
         const xMin: number[] = []
         const yMin: number[] = []
         const xMax: number[] = []
@@ -3474,10 +3480,13 @@ function buildDiagramTraces(
           }
           const point = branch.data.points[idx]
           if (!point) continue
-          const envelopeStates = resolveOneFreeLimitCycleEnvelopeStates(system, branch, point, {
-            branchSnapshot,
-            packedStateDimension,
-          })
+          const envelopeStates = resolveLimitCycleEnvelopeStates(
+            system,
+            branch,
+            point,
+            envelopeAxisIndex,
+            { branchSnapshot, packedStateDimension }
+          )
           if (!envelopeStates) continue
 
           const minX = envelopeStates.minState[axisX]
