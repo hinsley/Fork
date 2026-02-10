@@ -1084,6 +1084,97 @@ describe('ViewportPanel view state wiring', () => {
     expect(bifTrace?.marker?.symbol).toBe('diamond')
   })
 
+  it('renders frozen limit-cycle scene axes from embedded full-state values', () => {
+    const config: SystemConfig = {
+      name: 'Frozen_LC_Scene',
+      equations: ['y', '-y', '0'],
+      params: [0.2],
+      paramNames: ['mu'],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['y', 'z'],
+    })
+    const seedOrbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit Seed',
+      systemName: config.name,
+      data: [
+        [0, 0, 0, 0],
+        [0.1, 0, 0, 0],
+      ],
+      t_start: 0,
+      t_end: 0.1,
+      dt: 0.1,
+      parameters: [...config.params],
+      frozenVariables: { frozenValuesByVarName: { x: 0, z: 2.2 } },
+      subsystemSnapshot: buildSubsystemSnapshot(config, {
+        frozenValuesByVarName: { x: 0, z: 2.2 },
+      }),
+    }
+    const orbitResult = addObject(system, seedOrbit)
+    system = orbitResult.system
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_frozen_branch',
+      systemName: config.name,
+      parameterName: 'var:x',
+      parameterRef: { kind: 'frozen_var', variableName: 'x' },
+      parentObject: seedOrbit.name,
+      startObject: seedOrbit.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          { state: [1.5, 1.8, 9], param_value: 0.3, stability: 'None', eigenvalues: [] },
+          { state: [2.5, 2.9, 9], param_value: 0.5, stability: 'None', eigenvalues: [] },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: { type: 'LimitCycle', ntst: 1, ncol: 1 },
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-6,
+        max_step_size: 0.1,
+        max_steps: 10,
+        corrector_steps: 4,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: nowIso(),
+      params: [...config.params],
+      subsystemSnapshot: seedOrbit.subsystemSnapshot,
+    }
+    const branchResult = addBranch(system, branch, orbitResult.nodeId)
+    system = branchResult.system
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const lcLines = (props?.data ?? []).filter(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    ) as Array<{ x?: Array<number | null>; y?: Array<number | null> }>
+    expect(lcLines.length).toBeGreaterThan(0)
+    for (const line of lcLines) {
+      const numericY = (line.y ?? []).filter(
+        (value): value is number => typeof value === 'number'
+      )
+      expect(numericY.length).toBeGreaterThan(0)
+      for (const yValue of numericY) {
+        expect(yValue).toBeCloseTo(2.2)
+      }
+    }
+  })
+
   it('renders full limit cycles on state-variable bifurcation diagrams for flows', () => {
     const config: SystemConfig = {
       name: 'LimitCycle_Diagram',

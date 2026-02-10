@@ -31,6 +31,8 @@ Fork supports two methods for initiating limit cycle continuation:
 
 For fixed-period continuation in a two-parameter plane (isochrones), see
 [`docs/isochrone_continuation.md`](./isochrone_continuation.md).
+For frozen-variable subsystem semantics and reduced/full-state projection rules, see
+[`docs/frozen_variable_subsystems.md`](./frozen_variable_subsystems.md).
 
 Note: Hopf-based initialization exists in the core but is not currently exposed in the UI or CLI.
 

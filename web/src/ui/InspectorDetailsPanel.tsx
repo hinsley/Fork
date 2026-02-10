@@ -2096,9 +2096,31 @@ export function InspectorDetailsPanel({
       ? orbitDisplayRows[selectedOrbitPointIndex]
       : null
   const selectedOrbitState = selectedOrbitPoint ? selectedOrbitPoint.slice(1) : null
+  const limitCycleSnapshot = useMemo(() => {
+    if (!limitCycle) return null
+    if (
+      limitCycle.subsystemSnapshot &&
+      isSubsystemSnapshotCompatible(system.config, limitCycle.subsystemSnapshot)
+    ) {
+      return limitCycle.subsystemSnapshot
+    }
+    return buildSubsystemSnapshot(system.config, limitCycle.frozenVariables)
+  }, [limitCycle, system.config])
+  const limitCycleStateDimension =
+    limitCycleSnapshot?.freeVariableNames.length ?? system.config.varNames.length
+  const limitCycleDisplayProjection = useMemo(() => {
+    if (!limitCycle) return undefined
+    if (limitCycle.parameterRef?.kind === 'frozen_var' && Number.isFinite(limitCycle.paramValue)) {
+      return {
+        parameterRef: limitCycle.parameterRef,
+        paramValue: limitCycle.paramValue,
+      }
+    }
+    return undefined
+  }, [limitCycle])
   const limitCycleProfilePoints = useMemo(() => {
     if (!limitCycle) return []
-    const dim = system.config.varNames.length
+    const dim = limitCycleStateDimension
     if (dim <= 0) return []
     const { profilePoints } = extractLimitCycleProfile(
       limitCycle.state,
@@ -2107,8 +2129,16 @@ export function InspectorDetailsPanel({
       limitCycle.ncol,
       { layout: 'mesh-first' }
     )
-    return profilePoints
-  }, [limitCycle, system.config.varNames.length])
+    if (!limitCycleSnapshot) return profilePoints
+    return profilePoints.map((point) =>
+      stateVectorToDisplay(limitCycleSnapshot, point, limitCycleDisplayProjection)
+    )
+  }, [
+    limitCycle,
+    limitCycleDisplayProjection,
+    limitCycleSnapshot,
+    limitCycleStateDimension,
+  ])
   const selectedLimitCyclePoint =
     selectedLimitCyclePointIndex !== null &&
     selectedLimitCyclePointIndex >= 0 &&
@@ -2144,17 +2174,54 @@ export function InspectorDetailsPanel({
     ) {
       return null
     }
-    const dim = systemDraft.varNames.length
-    if (dim <= 0) return null
+    const snapshot =
+      branch.subsystemSnapshot &&
+      isSubsystemSnapshotCompatible(system.config, branch.subsystemSnapshot)
+        ? branch.subsystemSnapshot
+        : null
+    const stateDimension = snapshot?.freeVariableNames.length ?? systemDraft.varNames.length
+    if (stateDimension <= 0) return null
+    const projection: {
+      parameterRef?: ContinuationObject['parameterRef']
+      paramValue?: number
+      parameter2Ref?: ContinuationObject['parameter2Ref']
+      param2Value?: number
+    } = {}
+    if (branch.parameterRef?.kind === 'frozen_var' && Number.isFinite(selectedBranchPoint.param_value)) {
+      projection.parameterRef = branch.parameterRef
+      projection.paramValue = selectedBranchPoint.param_value
+    }
+    const pointBranchType = branch.data.branch_type
+    if (
+      pointBranchType &&
+      typeof pointBranchType === 'object' &&
+      'param2_ref' in pointBranchType &&
+      pointBranchType.param2_ref?.kind === 'frozen_var'
+    ) {
+      const param2Value = Number.isFinite(selectedBranchPoint.param2_value)
+        ? selectedBranchPoint.param2_value
+        : resolveContinuationPointParam2Value(
+            selectedBranchPoint,
+            pointBranchType,
+            stateDimension
+          )
+      if (Number.isFinite(param2Value)) {
+        projection.parameter2Ref = pointBranchType.param2_ref
+        projection.param2Value = param2Value as number
+      }
+    }
     const { profilePoints, period } = extractLimitCycleProfile(
       selectedBranchPoint.state,
-      dim,
+      stateDimension,
       limitCycleMesh.ntst,
       limitCycleMesh.ncol,
       { layout: branch.branchType === 'isochrone_curve' ? 'stage-first' : 'mesh-first' }
     )
     if (profilePoints.length === 0) return null
-    const metrics = computeLimitCycleMetrics(profilePoints, period)
+    const displayProfilePoints = snapshot
+      ? profilePoints.map((point) => stateVectorToDisplay(snapshot, point, projection))
+      : profilePoints
+    const metrics = computeLimitCycleMetrics(displayProfilePoints, period)
     const stability =
       selectedBranchPoint.stability && selectedBranchPoint.stability !== 'None'
         ? selectedBranchPoint.stability
@@ -2165,6 +2232,7 @@ export function InspectorDetailsPanel({
     limitCycleMesh.ncol,
     limitCycleMesh.ntst,
     selectedBranchPoint,
+    system.config,
     systemDraft.varNames.length,
   ])
 
@@ -3419,6 +3487,22 @@ export function InspectorDetailsPanel({
   ])
   const selectedBranchPointState = useMemo(() => {
     if (!branch || !selectedBranchPoint) return []
+    if (branch.branchType === 'limit_cycle' || branch.branchType === 'isochrone_curve') {
+      const { profilePoints } = extractLimitCycleProfile(
+        selectedBranchPoint.state,
+        branchStateDimension,
+        limitCycleMesh.ntst,
+        limitCycleMesh.ncol,
+        { layout: branch.branchType === 'isochrone_curve' ? 'stage-first' : 'mesh-first' }
+      )
+      const representativeState = profilePoints[0] ?? selectedBranchPoint.state
+      if (!branchSnapshot) return representativeState
+      return stateVectorToDisplay(
+        branchSnapshot,
+        representativeState,
+        selectedBranchPointDisplayProjection
+      )
+    }
     const equilibriumState = resolveContinuationPointEquilibriumState(
       selectedBranchPoint,
       branch.data.branch_type,
@@ -3432,6 +3516,8 @@ export function InspectorDetailsPanel({
     return stateVectorToDisplay(branchSnapshot, state, selectedBranchPointDisplayProjection)
   }, [
     branch,
+    limitCycleMesh.ncol,
+    limitCycleMesh.ntst,
     branchSnapshot,
     branchStateDimension,
     selectedBranchPoint,

@@ -2569,9 +2569,17 @@ describe('InspectorDetailsPanel', () => {
     const detailsScope = within(details)
 
     const readStateValues = () => {
-      const xRow = detailsScope.getByText('x*').closest('.inspector-metrics__row')
-      const yRow = detailsScope.getByText('y').closest('.inspector-metrics__row')
-      const zRow = detailsScope.getByText('z*').closest('.inspector-metrics__row')
+      const findStateRow = (label: string) =>
+        detailsScope
+          .getAllByText(label)
+          .map((entry) => entry.closest('.inspector-metrics__row'))
+          .find((row) => {
+            const valueText = row?.querySelector('.inspector-metrics__value')?.textContent ?? ''
+            return !valueText.includes('to') && !valueText.includes('mean')
+          })
+      const xRow = findStateRow('x*')
+      const yRow = findStateRow('y')
+      const zRow = findStateRow('z*')
       return {
         x: xRow?.querySelector('.inspector-metrics__value')?.textContent,
         y: yRow?.querySelector('.inspector-metrics__value')?.textContent,
@@ -2592,6 +2600,112 @@ describe('InspectorDetailsPanel', () => {
       expect(values.x).toBe('0.550000')
       expect(values.y).toBe('0.300000')
       expect(values.z).toBe('-1.50000')
+    })
+  })
+
+  it('embeds reduced limit-cycle branch points with frozen-variable overrides in state details', async () => {
+    const user = userEvent.setup()
+    const config: SystemConfig = {
+      name: 'Frozen_LC_Inspector',
+      equations: ['y', '-y', '0'],
+      params: [0.2],
+      paramNames: ['mu'],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: config.name, config })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_Seed',
+      systemName: config.name,
+      solution: {
+        state: [0, 0, 2.2],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [],
+        eigenpairs: [],
+      },
+      frozenVariables: { frozenValuesByVarName: { x: 0, z: 2.2 } },
+      subsystemSnapshot: buildSubsystemSnapshot(config, {
+        frozenValuesByVarName: { x: 0, z: 2.2 },
+      }),
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_frozen_branch',
+      systemName: config.name,
+      parameterName: 'var:x',
+      parameterRef: { kind: 'frozen_var', variableName: 'x' },
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          { state: [1.5, 1.8, 9], param_value: 0.3, stability: 'None', eigenvalues: [] },
+          { state: [2.5, 2.9, 9], param_value: 0.5, stability: 'None', eigenvalues: [] },
+        ],
+        bifurcations: [0, 1],
+        indices: [0, 1],
+        branch_type: { type: 'LimitCycle', ntst: 1, ncol: 1 },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...config.params],
+      subsystemSnapshot: equilibrium.subsystemSnapshot,
+    }
+    const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
+    render(
+      <InspectorDetailsPanel
+        system={branchResult.system}
+        selectedNodeId={branchResult.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    await user.click(screen.getByTestId('branch-point-details-toggle'))
+    await user.click(screen.getByTestId('branch-bifurcation-0'))
+
+    const details = screen.getByTestId('branch-point-details-toggle').closest('details')
+    if (!details) throw new Error('Missing point details disclosure.')
+    const detailsScope = within(details)
+
+    await waitFor(() => {
+      expect(detailsScope.getByText('0.300000 to 0.300000 (0.00000)')).toBeVisible()
+      expect(detailsScope.getByText('1.50000 to 1.80000 (0.300000)')).toBeVisible()
+      expect(detailsScope.getByText('2.20000 to 2.20000 (0.00000)')).toBeVisible()
+    })
+
+    await user.click(screen.getByTestId('branch-bifurcation-1'))
+    await waitFor(() => {
+      expect(detailsScope.getByText('0.500000 to 0.500000 (0.00000)')).toBeVisible()
+      expect(detailsScope.getByText('2.50000 to 2.90000 (0.400000)')).toBeVisible()
+      expect(detailsScope.getByText('2.20000 to 2.20000 (0.00000)')).toBeVisible()
     })
   })
 

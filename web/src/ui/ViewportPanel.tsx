@@ -1160,10 +1160,17 @@ function resolveLimitCycleEnvelope(
   if (axis.kind !== 'state') return null
   const index = system.config.varNames.indexOf(axis.name)
   if (index < 0) return null
-  const dim = system.config.varNames.length
-  if (dim <= 0) return null
+  const branchSnapshot = resolveBranchSnapshot(system, branch)
+  const packedStateDimension =
+    branchSnapshot?.freeVariableNames.length ?? system.config.varNames.length
+  if (packedStateDimension <= 0) return null
+  const projection = resolveBranchPointDisplayProjection(
+    branch,
+    point,
+    packedStateDimension
+  )
   const { ntst, ncol } = resolveLimitCycleMesh(branch)
-  const { profilePoints } = extractLimitCycleProfile(point.state, dim, ntst, ncol, {
+  const { profilePoints } = extractLimitCycleProfile(point.state, packedStateDimension, ntst, ncol, {
     allowPackedTail: allowsPackedTailLimitCycleProfile(branch.branchType),
   })
   let min = Number.POSITIVE_INFINITY
@@ -1171,13 +1178,19 @@ function resolveLimitCycleEnvelope(
 
   if (profilePoints.length > 0) {
     for (const profilePoint of profilePoints) {
-      const value = profilePoint[index]
+      const displayPoint = branchSnapshot
+        ? stateVectorToDisplay(branchSnapshot, profilePoint, projection)
+        : profilePoint
+      const value = displayPoint[index]
       if (!Number.isFinite(value)) continue
       min = Math.min(min, value)
       max = Math.max(max, value)
     }
   } else {
-    const value = point.state[index]
+    const displayState = branchSnapshot
+      ? stateVectorToDisplay(branchSnapshot, point.state, projection)
+      : point.state
+    const value = displayState[index]
     if (Number.isFinite(value)) {
       min = value
       max = value
@@ -1222,6 +1235,8 @@ type LimitCycleTraceConfig = {
   axisIndices?: number[] | null
   plotDim?: 1 | 2 | 3
   allowPackedTail?: boolean
+  subsystemSnapshot?: SubsystemSnapshot | null
+  projection?: ReturnType<typeof resolveBranchPointDisplayProjection>
 }
 
 function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
@@ -1240,12 +1255,19 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
     axisIndices,
     plotDim: requestedPlotDim,
     allowPackedTail,
+    subsystemSnapshot,
+    projection,
   } = config
   const traces: Data[] = []
   if (!state || state.length === 0 || dim <= 0) return traces
+  const displayDimension = subsystemSnapshot?.baseVarNames.length ?? dim
   const plotDim = Math.max(
     1,
-    Math.min(dim, Math.max(1, Math.trunc(requestedPlotDim ?? Math.min(dim, 3))), 3)
+    Math.min(
+      displayDimension,
+      Math.max(1, Math.trunc(requestedPlotDim ?? Math.min(displayDimension, 3))),
+      3
+    )
   )
   const { profilePoints, period, closurePoint } = extractLimitCycleProfile(
     state,
@@ -1257,16 +1279,22 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
       allowPackedTail,
     }
   )
-  const axisOrder = resolveAxisOrder(dim, plotDim, axisIndices)
+  const toDisplayPoint = (point: number[]): number[] => {
+    if (!subsystemSnapshot) return point
+    return stateVectorToDisplay(subsystemSnapshot, point, projection)
+  }
+  const displayProfilePoints = profilePoints.map(toDisplayPoint)
+  const displayClosurePoint = closurePoint ? toDisplayPoint(closurePoint) : undefined
+  const axisOrder = resolveAxisOrder(displayDimension, plotDim, axisIndices)
   const closureCoords =
-    closurePoint && closurePoint.length >= dim
-      ? axisOrder.map((axis) => closurePoint[axis])
+    displayClosurePoint && displayClosurePoint.length >= displayDimension
+      ? axisOrder.map((axis) => displayClosurePoint[axis])
       : null
   const hasFiniteClosureCoords =
     closureCoords !== null &&
     closureCoords.length === plotDim &&
     closureCoords.every(Number.isFinite)
-  const usablePoints = profilePoints
+  const usablePoints = displayProfilePoints
     .map((point, index) => ({
       index,
       coords: axisOrder.map((axis) => point[axis]),
@@ -1455,14 +1483,21 @@ function buildLimitCyclePreviewTraces(
   if (isCurrentTarget) return EMPTY_TRACES
   const { ntst, ncol } = resolveLimitCycleMesh(branch)
   const allowPackedTail = allowsPackedTailLimitCycleProfile(branch.branchType)
-  const dim = system.config.varNames.length
+  const branchSnapshot = resolveBranchSnapshot(system, branch)
+  const packedStateDimension =
+    branchSnapshot?.freeVariableNames.length ?? system.config.varNames.length
+  const projection = resolveBranchPointDisplayProjection(
+    branch,
+    point,
+    packedStateDimension
+  )
   const indices = ensureBranchIndices(branch.data)
   const logicalIndex = indices[selection.pointIndex]
   const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : selection.pointIndex
   const traceName = `LC Preview: ${branch.name} @ ${displayIndex}`
   return buildLimitCycleTraces({
     state: point.state,
-    dim,
+    dim: packedStateDimension,
     ntst,
     ncol,
     name: traceName,
@@ -1475,6 +1510,8 @@ function buildLimitCyclePreviewTraces(
     showLegend: false,
     axisIndices,
     plotDim,
+    subsystemSnapshot: branchSnapshot,
+    projection,
   })
 }
 
@@ -2135,11 +2172,40 @@ function buildSceneTraces(
       let ncol = object.ncol
       let layout: LimitCycleProfileLayout = 'mesh-first'
       let allowPackedTail = false
+      let subsystemSnapshot =
+        object.subsystemSnapshot &&
+        isSubsystemSnapshotCompatible(system.config, object.subsystemSnapshot)
+          ? object.subsystemSnapshot
+          : null
+      let packedStateDimension =
+        subsystemSnapshot?.freeVariableNames.length ?? system.config.varNames.length
+      let projection:
+        | {
+            parameterRef?: ContinuationObject['parameterRef']
+            paramValue?: number
+            parameter2Ref?: ContinuationObject['parameter2Ref']
+            param2Value?: number
+          }
+        | undefined =
+        object.parameterRef?.kind === 'frozen_var' && Number.isFinite(object.paramValue)
+          ? {
+              parameterRef: object.parameterRef,
+              paramValue: object.paramValue,
+            }
+          : undefined
       if (renderTarget?.type === 'branch') {
         const branch = system.branches[renderTarget.branchId]
         const point = branch?.data.points[renderTarget.pointIndex]
         if (branch && point) {
           const mesh = resolveLimitCycleMesh(branch)
+          subsystemSnapshot = resolveBranchSnapshot(system, branch)
+          packedStateDimension =
+            subsystemSnapshot?.freeVariableNames.length ?? system.config.varNames.length
+          projection = resolveBranchPointDisplayProjection(
+            branch,
+            point,
+            packedStateDimension
+          )
           state = point.state
           ntst = mesh.ntst
           ncol = mesh.ncol
@@ -2151,7 +2217,7 @@ function buildSceneTraces(
       traces.push(
         ...buildLimitCycleTraces({
           state,
-          dim: system.config.varNames.length,
+          dim: packedStateDimension,
           ntst,
           ncol,
           name: object.name,
@@ -2163,6 +2229,8 @@ function buildSceneTraces(
           allowPackedTail,
           axisIndices: projectionAxisIndices,
           plotDim: projectionPlotDim,
+          subsystemSnapshot,
+          projection,
         })
       )
       continue
@@ -2622,12 +2690,17 @@ function buildSceneTraces(
         if (!shouldRenderPoint(orderIndex, idx)) continue
         const point = branch.data.points[idx]
         if (!point) continue
+        const projection = resolveBranchPointDisplayProjection(
+          branch,
+          point,
+          packedStateDimension
+        )
         const selectedPoint = selectedBranchPointIndex === idx
         const pointLineWidth = selectedPoint ? lineWidth + 1 : lineWidth
         const pointMarkerSize = selectedPoint ? markerSize + 1 : markerSize
         const pointTraces = buildLimitCycleTraces({
           state: point.state,
-          dim: system.config.varNames.length,
+          dim: packedStateDimension,
           ntst,
           ncol,
           name: branch.name,
@@ -2640,6 +2713,8 @@ function buildSceneTraces(
           axisIndices: projectionAxisIndices,
           plotDim: projectionPlotDim,
           showLegend: false,
+          subsystemSnapshot: branchSnapshot,
+          projection,
         })
         for (const trace of pointTraces) {
           if (
@@ -3143,6 +3218,9 @@ function buildDiagramTraces(
     const indices = ensureBranchIndices(branch.data)
     const order = buildSortedArrayOrder(indices)
     const branchParams = getBranchParams(system, branch)
+    const branchSnapshot = resolveBranchSnapshot(system, branch)
+    const packedStateDimension =
+      branchSnapshot?.freeVariableNames.length ?? system.config.varNames.length
     const x: number[] = []
     const y: number[] = []
     const pointIndices: number[] = []
@@ -3181,7 +3259,6 @@ function buildDiagramTraces(
     ) {
       const axisX = stateAxisIndices[0]
       const axisY = stateAxisIndices[1]
-      const dim = system.config.varNames.length
       const { ntst, ncol } = resolveLimitCycleMesh(branch)
       const layout = resolveLimitCycleLayout(branch.branchType)
       const stateSpaceStride = resolveStateSpaceStride(node.render.stateSpaceStride)
@@ -3210,9 +3287,14 @@ function buildDiagramTraces(
         }
         const point = branch.data.points[idx]
         if (!point) continue
+        const projection = resolveBranchPointDisplayProjection(
+          branch,
+          point,
+          packedStateDimension
+        )
         const { profilePoints } = extractLimitCycleProfile(
           point.state,
-          dim,
+          packedStateDimension,
           ntst,
           ncol,
           {
@@ -3224,10 +3306,13 @@ function buildDiagramTraces(
 
         let repPoint: number[] | null = null
         for (const profilePoint of profilePoints) {
-          const xValue = profilePoint[axisX]
-          const yValue = profilePoint[axisY]
+          const displayPoint = branchSnapshot
+            ? stateVectorToDisplay(branchSnapshot, profilePoint, projection)
+            : profilePoint
+          const xValue = displayPoint[axisX]
+          const yValue = displayPoint[axisY]
           if (Number.isFinite(xValue) && Number.isFinite(yValue)) {
-            repPoint = profilePoint
+            repPoint = displayPoint
             break
           }
         }
@@ -3249,8 +3334,11 @@ function buildDiagramTraces(
         const segmentCustomdata: Array<number | null> = []
         let hasFinite = false
         for (const profilePoint of profilePoints) {
-          const xValue = profilePoint[axisX]
-          const yValue = profilePoint[axisY]
+          const displayPoint = branchSnapshot
+            ? stateVectorToDisplay(branchSnapshot, profilePoint, projection)
+            : profilePoint
+          const xValue = displayPoint[axisX]
+          const yValue = displayPoint[axisY]
           if (Number.isFinite(xValue) && Number.isFinite(yValue)) {
             segmentX.push(xValue)
             segmentY.push(yValue)
