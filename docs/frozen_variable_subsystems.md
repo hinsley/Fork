@@ -72,6 +72,11 @@ Correct rendering requires:
 
 If full-system dimension is used to decode reduced-packed cycle states, branch shapes and frozen-variable readouts will be incorrect.
 
+When a cycle-like continuation branch has exactly one free variable (`freeVariableNames.length === 1`),
+Fork renders branch envelopes (min/max curves) in both state-space scenes and bifurcation diagrams.
+This envelope policy applies to continuation branches (limit cycle, isochrone, homoclinic-related branches),
+not standalone limit-cycle objects.
+
 ## Branch/Object Snapshot Semantics
 
 - Branches and derived objects carry immutable `subsystemSnapshot` copies.

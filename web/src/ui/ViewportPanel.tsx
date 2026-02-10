@@ -1150,6 +1150,80 @@ function resolveLimitCycleMesh(
 }
 
 type LimitCycleEnvelope = { min: number; max: number }
+type LimitCycleEnvelopeStates = { minState: number[]; maxState: number[] }
+
+function resolveOneFreeLimitCycleEnvelopeStates(
+  system: System,
+  branch: ContinuationObject,
+  point: ContinuationPoint,
+  options?: {
+    branchSnapshot?: SubsystemSnapshot | null
+    packedStateDimension?: number
+  }
+): LimitCycleEnvelopeStates | null {
+  const branchSnapshot = options?.branchSnapshot ?? resolveBranchSnapshot(system, branch)
+  const packedStateDimension =
+    options?.packedStateDimension ??
+    (branchSnapshot?.freeVariableNames.length ?? system.config.varNames.length)
+  if (packedStateDimension !== 1) return null
+  const freeVariableIndex = branchSnapshot?.freeVariableIndices[0] ?? 0
+  if (!Number.isInteger(freeVariableIndex) || freeVariableIndex < 0) return null
+
+  const projection = resolveBranchPointDisplayProjection(
+    branch,
+    point,
+    packedStateDimension
+  )
+  const { ntst, ncol } = resolveLimitCycleMesh(branch)
+  const layout = resolveLimitCycleLayout(branch.branchType)
+  const allowPackedTail = allowsPackedTailLimitCycleProfile(branch.branchType)
+  const { profilePoints } = extractLimitCycleProfile(
+    point.state,
+    packedStateDimension,
+    ntst,
+    ncol,
+    { layout, allowPackedTail }
+  )
+
+  let minValue = Number.POSITIVE_INFINITY
+  let maxValue = Number.NEGATIVE_INFINITY
+  let minState: number[] | null = null
+  let maxState: number[] | null = null
+
+  const ingestPoint = (rawPoint: number[]) => {
+    const displayPoint = branchSnapshot
+      ? stateVectorToDisplay(branchSnapshot, rawPoint, projection)
+      : rawPoint
+    const value = displayPoint[freeVariableIndex]
+    if (!Number.isFinite(value)) return
+    if (value <= minValue) {
+      minValue = value
+      minState = [...displayPoint]
+    }
+    if (value >= maxValue) {
+      maxValue = value
+      maxState = [...displayPoint]
+    }
+  }
+
+  for (const profilePoint of profilePoints) {
+    ingestPoint(profilePoint)
+  }
+
+  if (!minState || !maxState) {
+    const equilibriumState = resolveContinuationPointEquilibriumState(
+      point,
+      branch.data.branch_type,
+      packedStateDimension
+    )
+    if (equilibriumState && equilibriumState.length === packedStateDimension) {
+      ingestPoint(equilibriumState)
+    }
+  }
+
+  if (!minState || !maxState) return null
+  return { minState, maxState }
+}
 
 function resolveLimitCycleEnvelope(
   system: System,
@@ -1164,15 +1238,29 @@ function resolveLimitCycleEnvelope(
   const packedStateDimension =
     branchSnapshot?.freeVariableNames.length ?? system.config.varNames.length
   if (packedStateDimension <= 0) return null
-  const projection = resolveBranchPointDisplayProjection(
-    branch,
-    point,
-    packedStateDimension
-  )
-  const { ntst, ncol } = resolveLimitCycleMesh(branch)
-  const { profilePoints } = extractLimitCycleProfile(point.state, packedStateDimension, ntst, ncol, {
-    allowPackedTail: allowsPackedTailLimitCycleProfile(branch.branchType),
+  const oneFreeEnvelope = resolveOneFreeLimitCycleEnvelopeStates(system, branch, point, {
+    branchSnapshot,
+    packedStateDimension,
   })
+  if (oneFreeEnvelope) {
+    const min = oneFreeEnvelope.minState[index]
+    const max = oneFreeEnvelope.maxState[index]
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return null
+    return { min, max }
+  }
+  const projection = resolveBranchPointDisplayProjection(branch, point, packedStateDimension)
+  const { ntst, ncol } = resolveLimitCycleMesh(branch)
+  const layout = resolveLimitCycleLayout(branch.branchType)
+  const { profilePoints } = extractLimitCycleProfile(
+    point.state,
+    packedStateDimension,
+    ntst,
+    ncol,
+    {
+      layout,
+      allowPackedTail: allowsPackedTailLimitCycleProfile(branch.branchType),
+    }
+  )
   let min = Number.POSITIVE_INFINITY
   let max = Number.NEGATIVE_INFINITY
 
@@ -2540,6 +2628,106 @@ function buildSceneTraces(
       continue
     }
 
+    if (isCycleLikeBranch && packedStateDimension === 1 && projectionPlotDim >= 2) {
+      const xMax: number[] = []
+      const yMax: number[] = []
+      const zMax: number[] = []
+      const xMin: number[] = []
+      const yMin: number[] = []
+      const zMin: number[] = []
+      const pointIndices: number[] = []
+
+      for (let orderIndex = 0; orderIndex < order.length; orderIndex += 1) {
+        const idx = order[orderIndex]
+        if (!shouldRenderPoint(orderIndex, idx)) continue
+        const point = branch.data.points[idx]
+        if (!point) continue
+        const envelopeStates = resolveOneFreeLimitCycleEnvelopeStates(system, branch, point, {
+          branchSnapshot,
+          packedStateDimension,
+        })
+        if (!envelopeStates) continue
+
+        const minX = envelopeStates.minState[axisX]
+        const minY = envelopeStates.minState[axisY]
+        const maxX = envelopeStates.maxState[axisX]
+        const maxY = envelopeStates.maxState[axisY]
+        if (!Number.isFinite(minX) || !Number.isFinite(minY)) continue
+        if (!Number.isFinite(maxX) || !Number.isFinite(maxY)) continue
+
+        if (projectionPlotDim >= 3) {
+          const minZ = envelopeStates.minState[axisZ]
+          const maxZ = envelopeStates.maxState[axisZ]
+          if (!Number.isFinite(minZ) || !Number.isFinite(maxZ)) continue
+          xMin.push(minX)
+          yMin.push(minY)
+          zMin.push(minZ)
+          xMax.push(maxX)
+          yMax.push(maxY)
+          zMax.push(maxZ)
+        } else {
+          xMin.push(minX)
+          yMin.push(minY)
+          xMax.push(maxX)
+          yMax.push(maxY)
+        }
+        pointIndices.push(idx)
+      }
+
+      if (pointIndices.length === 0) {
+        continue
+      }
+
+      if (projectionPlotDim >= 3) {
+        traces.push({
+          type: 'scatter3d',
+          mode: 'lines',
+          name: branch.name,
+          uid: nodeId,
+          x: xMax,
+          y: yMax,
+          z: zMax,
+          customdata: pointIndices,
+          line: { color: node.render.color, width: lineWidth, dash: lineDash },
+        })
+        traces.push({
+          type: 'scatter3d',
+          mode: 'lines',
+          name: `${branch.name} min`,
+          uid: nodeId,
+          x: xMin,
+          y: yMin,
+          z: zMin,
+          customdata: pointIndices,
+          line: { color: node.render.color, width: lineWidth, dash: lineDash },
+          showlegend: false,
+        })
+      } else {
+        traces.push({
+          type: 'scatter',
+          mode: 'lines',
+          name: branch.name,
+          uid: nodeId,
+          x: xMax,
+          y: yMax,
+          customdata: pointIndices,
+          line: { color: node.render.color, width: lineWidth, dash: lineDash },
+        })
+        traces.push({
+          type: 'scatter',
+          mode: 'lines',
+          name: `${branch.name} min`,
+          uid: nodeId,
+          x: xMin,
+          y: yMin,
+          customdata: pointIndices,
+          line: { color: node.render.color, width: lineWidth, dash: lineDash },
+          showlegend: false,
+        })
+      }
+      continue
+    }
+
     if (isCycleLikeBranch && projectionPlotDim === 2 && system.config.varNames.length >= 3) {
       const parameterAxisVariables = new Set<string>()
       if (branch.parameterRef?.kind === 'frozen_var') {
@@ -3259,9 +3447,156 @@ function buildDiagramTraces(
     ) {
       const axisX = stateAxisIndices[0]
       const axisY = stateAxisIndices[1]
+      const stateSpaceStride = resolveStateSpaceStride(node.render.stateSpaceStride)
+      const bifSet = new Set(branch.data.bifurcations ?? [])
+
+      if (packedStateDimension === 1) {
+        const xMin: number[] = []
+        const yMin: number[] = []
+        const xMax: number[] = []
+        const yMax: number[] = []
+        const envelopePointIndices: number[] = []
+        const bifX: number[] = []
+        const bifY: number[] = []
+        const bifLabels: string[] = []
+        const bifIndices: number[] = []
+
+        for (let orderIndex = 0; orderIndex < order.length; orderIndex += 1) {
+          const idx = order[orderIndex]
+          const isBifurcation = bifSet.has(idx)
+          const isSelected =
+            selectionBranchId === branchId && selectionPointIndex === idx
+          const isEndpoint = orderIndex === 0 || orderIndex === order.length - 1
+          const isStrideHit =
+            stateSpaceStride <= 1 || orderIndex % stateSpaceStride === 0
+          if (!isStrideHit && !isBifurcation && !isSelected && !isEndpoint) {
+            continue
+          }
+          const point = branch.data.points[idx]
+          if (!point) continue
+          const envelopeStates = resolveOneFreeLimitCycleEnvelopeStates(system, branch, point, {
+            branchSnapshot,
+            packedStateDimension,
+          })
+          if (!envelopeStates) continue
+
+          const minX = envelopeStates.minState[axisX]
+          const minY = envelopeStates.minState[axisY]
+          const maxX = envelopeStates.maxState[axisX]
+          const maxY = envelopeStates.maxState[axisY]
+          if (
+            !Number.isFinite(minX) ||
+            !Number.isFinite(minY) ||
+            !Number.isFinite(maxX) ||
+            !Number.isFinite(maxY)
+          ) {
+            continue
+          }
+
+          xMin.push(minX)
+          yMin.push(minY)
+          xMax.push(maxX)
+          yMax.push(maxY)
+          envelopePointIndices.push(idx)
+
+          if (isBifurcation) {
+            const logicalIndex = indices[idx]
+            const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : idx
+            const bifLabel = formatBifurcationLabel(displayIndex, point.stability)
+            bifX.push(maxX, minX)
+            bifY.push(maxY, minY)
+            bifLabels.push(bifLabel, bifLabel)
+            bifIndices.push(idx, idx)
+          }
+        }
+
+        if (xMax.length === 0 || yMax.length === 0) continue
+        hasData = true
+
+        const highlight = branchId === selectedNodeId
+        const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
+        const markerSize = highlight ? node.render.pointSize + 2 : node.render.pointSize
+        const lineDash = resolveLineDash(node.render.lineStyle)
+
+        traces.push({
+          type: 'scatter',
+          mode: 'lines',
+          name: branch.name,
+          uid: branchId,
+          x: xMax,
+          y: yMax,
+          customdata: envelopePointIndices,
+          line: {
+            color: node.render.color,
+            width: lineWidth,
+            dash: lineDash,
+          },
+        })
+        traces.push({
+          type: 'scatter',
+          mode: 'lines',
+          name: `${branch.name} min`,
+          uid: branchId,
+          x: xMin,
+          y: yMin,
+          customdata: envelopePointIndices,
+          line: {
+            color: node.render.color,
+            width: lineWidth,
+            dash: lineDash,
+          },
+          showlegend: false,
+        })
+
+        if (bifX.length > 0) {
+          traces.push({
+            type: 'scatter',
+            mode: 'markers',
+            name: `${branch.name} bifurcations`,
+            uid: branchId,
+            x: bifX,
+            y: bifY,
+            customdata: bifIndices,
+            marker: {
+              color: node.render.color,
+              size: markerSize + 2,
+              symbol: 'diamond',
+            },
+            text: bifLabels,
+            showlegend: false,
+            hovertemplate: '%{text}<extra></extra>',
+          })
+        }
+
+        appendMultiLineMarkers(
+          branchId,
+          branch,
+          indices,
+          envelopePointIndices,
+          [
+            { x: xMax, y: yMax },
+            { x: xMin, y: yMin },
+          ],
+          markerSize,
+          node.render.color
+        )
+        appendSelectedPointMarker(
+          branchId,
+          branch,
+          indices,
+          envelopePointIndices,
+          [
+            { x: xMax, y: yMax },
+            { x: xMin, y: yMin },
+          ],
+          markerSize,
+          node.render.color
+        )
+        continue
+      }
+
       const { ntst, ncol } = resolveLimitCycleMesh(branch)
       const layout = resolveLimitCycleLayout(branch.branchType)
-      const stateSpaceStride = resolveStateSpaceStride(node.render.stateSpaceStride)
       const cycleX: Array<number | null> = []
       const cycleY: Array<number | null> = []
       const cycleCustomdata: Array<number | null> = []
@@ -3272,7 +3607,6 @@ function buildDiagramTraces(
       const bifY: number[] = []
       const bifLabels: string[] = []
       const bifIndices: number[] = []
-      const bifSet = new Set(branch.data.bifurcations ?? [])
 
       for (let orderIndex = 0; orderIndex < order.length; orderIndex += 1) {
         const idx = order[orderIndex]
