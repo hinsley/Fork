@@ -2548,6 +2548,67 @@ function buildSceneTraces(
       branchSnapshot?.freeVariableNames.length ?? system.config.varNames.length
     const selectedBranchPointIndex =
       branchPointSelection?.branchId === nodeId ? branchPointSelection.pointIndex : null
+    const selectedPointLabel =
+      selectedBranchPointIndex === null ||
+      selectedBranchPointIndex < 0 ||
+      selectedBranchPointIndex >= branch.data.points.length
+        ? null
+        : (() => {
+            const logicalIndex = indices[selectedBranchPointIndex]
+            const displayIndex = Number.isFinite(logicalIndex)
+              ? logicalIndex
+              : selectedBranchPointIndex
+            return `Selected point: ${displayIndex}`
+          })()
+
+    const appendSceneSelectedPointMarker2D = (points: Array<{ x: number; y: number }>) => {
+      if (selectedBranchPointIndex === null || !selectedPointLabel) return
+      if (points.length === 0) return
+      traces.push({
+        type: 'scatter',
+        mode: 'markers',
+        name: `${branch.name} selected point`,
+        uid: nodeId,
+        x: points.map((point) => point.x),
+        y: points.map((point) => point.y),
+        customdata: points.map(() => selectedBranchPointIndex),
+        marker: {
+          color: node.render.color,
+          size: markerSize + 4,
+          symbol: 'circle-open',
+          line: { color: node.render.color, width: 2 },
+        },
+        text: points.map(() => selectedPointLabel),
+        showlegend: false,
+        hovertemplate: '%{text}<extra></extra>',
+      })
+    }
+
+    const appendSceneSelectedPointMarker3D = (
+      points: Array<{ x: number; y: number; z: number }>
+    ) => {
+      if (selectedBranchPointIndex === null || !selectedPointLabel) return
+      if (points.length === 0) return
+      traces.push({
+        type: 'scatter3d',
+        mode: 'markers',
+        name: `${branch.name} selected point`,
+        uid: nodeId,
+        x: points.map((point) => point.x),
+        y: points.map((point) => point.y),
+        z: points.map((point) => point.z),
+        customdata: points.map(() => selectedBranchPointIndex),
+        marker: {
+          color: node.render.color,
+          size: markerSize + 4,
+          symbol: 'circle-open',
+          line: { color: node.render.color, width: 2 },
+        },
+        text: points.map(() => selectedPointLabel),
+        showlegend: false,
+        hovertemplate: '%{text}<extra></extra>',
+      })
+    }
 
     const shouldRenderPoint = (orderIndex: number, pointIndex: number): boolean => {
       if (stride <= 1) return true
@@ -2642,8 +2703,8 @@ function buildSceneTraces(
           point,
           envelopeAxisIndex,
           {
-          branchSnapshot,
-          packedStateDimension,
+            branchSnapshot,
+            packedStateDimension,
           }
         )
         if (!envelopeStates) continue
@@ -2725,6 +2786,40 @@ function buildSceneTraces(
           showlegend: false,
         })
       }
+      if (selectedBranchPointIndex !== null && selectedPointLabel) {
+        const selectedPosition = pointIndices.indexOf(selectedBranchPointIndex)
+        if (selectedPosition >= 0) {
+          if (projectionPlotDim >= 3) {
+            const selectedCoords: Array<{ x: number; y: number; z: number }> = []
+            const maxX = xMax[selectedPosition]
+            const maxY = yMax[selectedPosition]
+            const maxZ = zMax[selectedPosition]
+            const minX = xMin[selectedPosition]
+            const minY = yMin[selectedPosition]
+            const minZ = zMin[selectedPosition]
+            if (Number.isFinite(maxX) && Number.isFinite(maxY) && Number.isFinite(maxZ)) {
+              selectedCoords.push({ x: maxX, y: maxY, z: maxZ })
+            }
+            if (Number.isFinite(minX) && Number.isFinite(minY) && Number.isFinite(minZ)) {
+              selectedCoords.push({ x: minX, y: minY, z: minZ })
+            }
+            appendSceneSelectedPointMarker3D(selectedCoords)
+          } else {
+            const selectedCoords: Array<{ x: number; y: number }> = []
+            const maxX = xMax[selectedPosition]
+            const maxY = yMax[selectedPosition]
+            const minX = xMin[selectedPosition]
+            const minY = yMin[selectedPosition]
+            if (Number.isFinite(maxX) && Number.isFinite(maxY)) {
+              selectedCoords.push({ x: maxX, y: maxY })
+            }
+            if (Number.isFinite(minX) && Number.isFinite(minY)) {
+              selectedCoords.push({ x: minX, y: minY })
+            }
+            appendSceneSelectedPointMarker2D(selectedCoords)
+          }
+        }
+      }
       continue
     }
 
@@ -2773,6 +2868,16 @@ function buildSceneTraces(
             line: { color: node.render.color, width: lineWidth, dash: lineDash },
             marker: { color: node.render.color, size: markerSize },
           })
+          if (selectedBranchPointIndex !== null && selectedPointLabel) {
+            const selectedPosition = pointIndices.indexOf(selectedBranchPointIndex)
+            if (selectedPosition >= 0) {
+              const selectedX = x[selectedPosition]
+              const selectedY = y[selectedPosition]
+              if (Number.isFinite(selectedX) && Number.isFinite(selectedY)) {
+                appendSceneSelectedPointMarker2D([{ x: selectedX, y: selectedY }])
+              }
+            }
+          }
         }
         continue
       }
@@ -2864,6 +2969,23 @@ function buildSceneTraces(
             line: { color: node.render.color, width: lineWidth, dash: lineDash },
             showlegend: false,
           })
+          if (selectedBranchPointIndex !== null && selectedPointLabel) {
+            const selectedPosition = pointIndices.indexOf(selectedBranchPointIndex)
+            if (selectedPosition >= 0) {
+              const selectedCoords: Array<{ x: number; y: number }> = []
+              const maxX = xMax[selectedPosition]
+              const maxY = yMax[selectedPosition]
+              const minX = xMin[selectedPosition]
+              const minY = yMin[selectedPosition]
+              if (Number.isFinite(maxX) && Number.isFinite(maxY)) {
+                selectedCoords.push({ x: maxX, y: maxY })
+              }
+              if (Number.isFinite(minX) && Number.isFinite(minY)) {
+                selectedCoords.push({ x: minX, y: minY })
+              }
+              appendSceneSelectedPointMarker2D(selectedCoords)
+            }
+          }
         }
         continue
       }
@@ -2914,6 +3036,52 @@ function buildSceneTraces(
             )
           }
           traces.push(trace)
+        }
+        if (selectedPoint && selectedPointLabel) {
+          if (projectionPlotDim >= 3) {
+            let selectedCoord: { x: number; y: number; z: number } | null = null
+            for (const trace of pointTraces) {
+              if (trace.type !== 'scatter3d') continue
+              if (!Array.isArray(trace.x) || !Array.isArray(trace.y) || !Array.isArray(trace.z)) {
+                continue
+              }
+              for (let coordIndex = 0; coordIndex < trace.x.length; coordIndex += 1) {
+                const xValue = trace.x[coordIndex]
+                const yValue = trace.y[coordIndex]
+                const zValue = trace.z[coordIndex]
+                if (!Number.isFinite(xValue) || !Number.isFinite(yValue) || !Number.isFinite(zValue)) {
+                  continue
+                }
+                selectedCoord = {
+                  x: xValue as number,
+                  y: yValue as number,
+                  z: zValue as number,
+                }
+                break
+              }
+              if (selectedCoord) break
+            }
+            if (selectedCoord) {
+              appendSceneSelectedPointMarker3D([selectedCoord])
+            }
+          } else if (projectionPlotDim === 2) {
+            let selectedCoord: { x: number; y: number } | null = null
+            for (const trace of pointTraces) {
+              if (trace.type !== 'scatter') continue
+              if (!Array.isArray(trace.x) || !Array.isArray(trace.y)) continue
+              for (let coordIndex = 0; coordIndex < trace.x.length; coordIndex += 1) {
+                const xValue = trace.x[coordIndex]
+                const yValue = trace.y[coordIndex]
+                if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) continue
+                selectedCoord = { x: xValue as number, y: yValue as number }
+                break
+              }
+              if (selectedCoord) break
+            }
+            if (selectedCoord) {
+              appendSceneSelectedPointMarker2D([selectedCoord])
+            }
+          }
         }
       }
       continue
@@ -3082,6 +3250,28 @@ function buildSceneTraces(
             showlegend: false,
             hovertemplate: '%{text}<extra></extra>',
           })
+        }
+      }
+    }
+
+    if (selectedBranchPointIndex !== null && selectedPointLabel && projectionPlotDim >= 2) {
+      const selectedPosition = pointIndices.indexOf(selectedBranchPointIndex)
+      if (selectedPosition >= 0) {
+        if (projectionPlotDim >= 3) {
+          const selectedX = x[selectedPosition]
+          const selectedY = y[selectedPosition]
+          const selectedZ = z[selectedPosition]
+          if (Number.isFinite(selectedX) && Number.isFinite(selectedY) && Number.isFinite(selectedZ)) {
+            appendSceneSelectedPointMarker3D([
+              { x: selectedX, y: selectedY, z: selectedZ },
+            ])
+          }
+        } else {
+          const selectedX = x[selectedPosition]
+          const selectedY = y[selectedPosition]
+          if (Number.isFinite(selectedX) && Number.isFinite(selectedY)) {
+            appendSceneSelectedPointMarker2D([{ x: selectedX, y: selectedY }])
+          }
         }
       }
     }

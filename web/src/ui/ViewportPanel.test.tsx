@@ -1044,7 +1044,9 @@ describe('ViewportPanel view state wiring', () => {
     const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
     system = branchResult.system
 
-    renderPanel(system)
+    renderPanel(system, {
+      branchPointSelection: { branchId: branchResult.nodeId, pointIndex: 1 },
+    })
 
     const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
     expect(props).toBeTruthy()
@@ -1082,6 +1084,27 @@ describe('ViewportPanel view state wiring', () => {
     expect(bifTrace?.y).toEqual([0])
     expect(bifTrace?.customdata).toEqual([1])
     expect(bifTrace?.marker?.symbol).toBe('diamond')
+
+    const selectedTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === `${branch.name} selected point` &&
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'markers'
+    ) as
+      | {
+          x?: number[]
+          y?: number[]
+          customdata?: number[]
+          marker?: { symbol?: string }
+        }
+      | undefined
+    expect(selectedTrace?.x).toEqual([0.4])
+    expect(selectedTrace?.y).toEqual([0])
+    expect(selectedTrace?.customdata).toEqual([1])
+    expect(selectedTrace?.marker?.symbol).toBe('circle-open')
   })
 
   it('renders frozen limit-cycle scene axes from embedded full-state values', () => {
@@ -1152,7 +1175,9 @@ describe('ViewportPanel view state wiring', () => {
     const branchResult = addBranch(system, branch, orbitResult.nodeId)
     system = branchResult.system
 
-    renderPanel(system)
+    renderPanel(system, {
+      branchPointSelection: { branchId: branchResult.nodeId, pointIndex: 1 },
+    })
 
     const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
     expect(props).toBeTruthy()
@@ -1243,7 +1268,9 @@ describe('ViewportPanel view state wiring', () => {
     const branchResult = addBranch(system, branch, orbitResult.nodeId)
     system = branchResult.system
 
-    renderPanel(system)
+    renderPanel(system, {
+      branchPointSelection: { branchId: branchResult.nodeId, pointIndex: 1 },
+    })
 
     const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
     expect(props).toBeTruthy()
@@ -1276,6 +1303,31 @@ describe('ViewportPanel view state wiring', () => {
     expect(minTrace?.y).toEqual([0.2, 0.6])
     expect(maxTrace?.z).toEqual([4, 5])
     expect(minTrace?.z).toEqual([2, 3])
+
+    const selectedTrace = props?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        'type' in trace &&
+        trace.type === 'scatter3d' &&
+        'name' in trace &&
+        trace.name === `${branch.name} selected point` &&
+        'mode' in trace &&
+        trace.mode === 'markers'
+    ) as
+      | {
+          x?: number[]
+          y?: number[]
+          z?: number[]
+          customdata?: number[]
+          marker?: { symbol?: string }
+        }
+      | undefined
+    expect(selectedTrace?.x).toEqual([1.5, 1.5])
+    expect(selectedTrace?.y).toEqual([0.6, 0.6])
+    expect(selectedTrace?.z).toEqual([5, 3])
+    expect(selectedTrace?.customdata).toEqual([1, 1])
+    expect(selectedTrace?.marker?.symbol).toBe('circle-open')
   })
 
   it('renders one-free-variable limit-cycle diagram branches as envelopes with axis flips', () => {
