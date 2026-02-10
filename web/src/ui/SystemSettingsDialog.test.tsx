@@ -34,6 +34,7 @@ describe('SystemSettingsDialog', () => {
         onToggleVisibility={vi.fn()}
         onUpdateRender={vi.fn()}
         onUpdateObjectParams={vi.fn()}
+        onUpdateObjectFrozenVariables={vi.fn()}
         onUpdateScene={vi.fn()}
         onUpdateBifurcationDiagram={vi.fn()}
         onUpdateSystem={vi.fn(() => Promise.resolve())}
@@ -100,6 +101,7 @@ describe('SystemSettingsDialog', () => {
         onToggleVisibility={onToggleVisibility}
         onUpdateRender={onUpdateRender}
         onUpdateObjectParams={onUpdateObjectParams}
+        onUpdateObjectFrozenVariables={vi.fn()}
         onUpdateScene={onUpdateScene}
         onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
         onUpdateSystem={onUpdateSystem}
@@ -164,6 +166,7 @@ describe('SystemSettingsDialog', () => {
         onToggleVisibility={vi.fn()}
         onUpdateRender={vi.fn()}
         onUpdateObjectParams={vi.fn()}
+        onUpdateObjectFrozenVariables={vi.fn()}
         onUpdateScene={vi.fn()}
         onUpdateBifurcationDiagram={vi.fn()}
         onUpdateSystem={vi.fn(() => Promise.resolve())}
@@ -201,6 +204,7 @@ describe('SystemSettingsDialog', () => {
         onToggleVisibility={vi.fn()}
         onUpdateRender={vi.fn()}
         onUpdateObjectParams={vi.fn()}
+        onUpdateObjectFrozenVariables={vi.fn()}
         onUpdateScene={vi.fn()}
         onUpdateBifurcationDiagram={vi.fn()}
         onUpdateSystem={vi.fn(() => Promise.resolve())}

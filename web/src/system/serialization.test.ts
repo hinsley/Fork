@@ -11,6 +11,8 @@ import {
   deserializeSystem,
   deserializeSystemData,
   mergeSystem,
+  SYSTEM_DATA_SCHEMA_VERSION,
+  SYSTEM_PROJECT_SCHEMA_VERSION,
   serializeSystem,
   serializeSystemData,
   serializeSystemUi,
@@ -67,11 +69,21 @@ describe('system serialization', () => {
 
   it('extracts UI from legacy bundles', () => {
     const system = createSystem({ name: 'Legacy' })
-    const legacy = { schemaVersion: 1, system }
+    const legacy = { schemaVersion: SYSTEM_DATA_SCHEMA_VERSION, system }
     const { data, ui } = deserializeSystemData(legacy)
 
     expect(data.id).toBe(system.id)
     expect(ui?.rootIds.length).toBe(0)
     expect(ui?.ui.layout.leftWidth).toBe(system.ui.layout.leftWidth)
+  })
+
+  it('rejects old schema bundles with recompute guidance', () => {
+    const system = createSystem({ name: 'OldSchema' })
+    expect(() =>
+      deserializeSystem({
+        schemaVersion: SYSTEM_PROJECT_SCHEMA_VERSION - 1,
+        system,
+      })
+    ).toThrow(/Recompute analyses with the current app version/i)
   })
 })

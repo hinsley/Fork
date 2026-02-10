@@ -20,6 +20,7 @@ import type {
   LineStyle,
   OrbitObject,
   SceneAxisVariables,
+  SubsystemSnapshot,
   SystemConfig,
   System,
   Scene,
@@ -50,6 +51,11 @@ import {
 } from '../system/equilibriumEigenvectors'
 import { resolveSceneAxisIndices, resolveSceneAxisSelection } from '../system/sceneAxes'
 import { resolveSceneProjection } from '../system/sceneProjection'
+import {
+  mapStateRowsToDisplay,
+  stateVectorToDisplay,
+  isSubsystemSnapshotCompatible,
+} from '../system/subsystemGateway'
 import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/PlotlyViewport'
 import type { PlotlyRelayoutEvent } from '../viewports/plotly/usePlotViewport'
 import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
@@ -905,6 +911,35 @@ function collectVisibleBranchIds(system: System): string[] {
   return ids
 }
 
+function collectVisibleSceneNodeIds(system: System): string[] {
+  const ids: string[] = []
+  const stack = [...system.rootIds]
+  while (stack.length > 0) {
+    const nodeId = stack.pop()
+    if (!nodeId) continue
+    const node = system.nodes[nodeId]
+    if (!node) continue
+    if (node.children.length > 0) {
+      stack.push(...node.children)
+    }
+    if (!node.visibility) continue
+    if (node.kind === 'object' && system.objects[nodeId]) {
+      ids.push(nodeId)
+      continue
+    }
+    if (node.kind === 'branch' && system.branches[nodeId]) {
+      ids.push(nodeId)
+    }
+  }
+  return ids
+}
+
+function resolveBranchSnapshot(system: System, branch: ContinuationObject): SubsystemSnapshot | null {
+  if (!branch.subsystemSnapshot) return null
+  if (!isSubsystemSnapshotCompatible(system.config, branch.subsystemSnapshot)) return null
+  return branch.subsystemSnapshot
+}
+
 function collectMap1DRange(system: System, axisIndex: number): [number, number] | null {
   const safeAxisIndex = Number.isInteger(axisIndex) ? Math.max(0, axisIndex) : 0
   let min = Number.POSITIVE_INFINITY
@@ -1663,6 +1698,7 @@ function buildSceneTraces(
   timeSeriesMeta?: TimeSeriesViewportMeta | null,
   mapRange?: [number, number] | null,
   mapFunctionSamples?: MapFunctionSamples | null,
+  branchPointSelection?: BranchPointSelection | null,
   plotSize?: PlotSize | null
 ): Data[] {
   const traces: Data[] = []
@@ -1685,7 +1721,7 @@ function buildSceneTraces(
       ? manualSelection
       : scene.display === 'selection' && selectedNodeId
         ? [selectedNodeId]
-        : collectVisibleObjectIds(system)
+        : collectVisibleSceneNodeIds(system)
   const canPlotEigenvectors = !isMap1D && !isTimeSeries && projectionPlotDim >= 2
   let timeRange: [number, number] | null = null
   const pendingEquilibria: Array<{
@@ -1767,7 +1803,14 @@ function buildSceneTraces(
 
     if (object.type === 'equilibrium') {
       if (!object.solution || object.solution.state.length === 0) continue
-      const state = object.solution.state
+      const snapshot =
+        object.subsystemSnapshot &&
+        isSubsystemSnapshotCompatible(system.config, object.subsystemSnapshot)
+          ? object.subsystemSnapshot
+          : null
+      const state = snapshot
+        ? stateVectorToDisplay(snapshot, object.solution.state)
+        : object.solution.state
       const dimension = state.length
       const highlight = nodeId === selectedNodeId
       const size = highlight ? node.render.pointSize + 2 : node.render.pointSize
@@ -1780,10 +1823,13 @@ function buildSceneTraces(
       const axisX = axisOrder[0] ?? 0
       const axisY = axisOrder[1] ?? Math.min(1, Math.max(0, dimension - 1))
       const axisZ = axisOrder[2] ?? Math.min(2, Math.max(0, dimension - 1))
-      const cycleStates =
+      const cycleStatesRaw =
         isMap && object.solution?.cycle_points?.length
           ? object.solution.cycle_points
-          : [state]
+          : [object.solution.state]
+      const cycleStates = snapshot
+        ? cycleStatesRaw.map((cycleState) => stateVectorToDisplay(snapshot, cycleState))
+        : cycleStatesRaw
       const hasCyclePoints = isMap && cycleStates.length > 1
       const representativeState = cycleStates[0] ?? state
       const cycleTailStates = hasCyclePoints ? cycleStates.slice(1) : []
@@ -2080,7 +2126,12 @@ function buildSceneTraces(
 
     if (object.type !== 'orbit') continue
 
-    const rows = object.data
+    const snapshot =
+      object.subsystemSnapshot &&
+      isSubsystemSnapshotCompatible(system.config, object.subsystemSnapshot)
+        ? object.subsystemSnapshot
+        : null
+    const rows = snapshot ? mapStateRowsToDisplay(snapshot, object.data) : object.data
     if (rows.length === 0) continue
     const dimension = rows[0].length - 1
     const highlight = nodeId === selectedNodeId
@@ -2286,6 +2337,342 @@ function buildSceneTraces(
           )
         )
       }
+    }
+  }
+
+  for (const nodeId of candidateIds) {
+    const node = system.nodes[nodeId]
+    if (!node || node.kind !== 'branch' || !node.visibility) continue
+    const branch = system.branches[nodeId]
+    if (!branch || branch.data.points.length === 0) continue
+
+    const indices = ensureBranchIndices(branch.data)
+    const order = buildSortedArrayOrder(indices)
+    if (order.length === 0) continue
+    const stride = resolveStateSpaceStride(node.render.stateSpaceStride)
+    const highlight = nodeId === selectedNodeId
+    const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
+    const markerSize = highlight ? node.render.pointSize + 2 : node.render.pointSize
+    const lineDash = resolveLineDash(node.render.lineStyle)
+    const axisX = projectionAxisIndices[0] ?? 0
+    const axisY = projectionAxisIndices[1] ?? Math.min(1, Math.max(0, system.config.varNames.length - 1))
+    const axisZ = projectionAxisIndices[2] ?? Math.min(2, Math.max(0, system.config.varNames.length - 1))
+    const axisVarX = system.config.varNames[axisX] ?? ''
+    const axisVarY = system.config.varNames[axisY] ?? ''
+    const branchSnapshot = resolveBranchSnapshot(system, branch)
+    const packedStateDimension =
+      branchSnapshot?.freeVariableNames.length ?? system.config.varNames.length
+    const selectedBranchPointIndex =
+      branchPointSelection?.branchId === nodeId ? branchPointSelection.pointIndex : null
+
+    const shouldRenderPoint = (orderIndex: number, pointIndex: number): boolean => {
+      if (stride <= 1) return true
+      if (orderIndex === 0 || orderIndex === order.length - 1) return true
+      if (selectedBranchPointIndex === pointIndex) return true
+      return orderIndex % stride === 0
+    }
+
+    const resolveDisplayState = (point: ContinuationPoint): number[] => {
+      const equilibriumState = resolveContinuationPointEquilibriumState(
+        point,
+        branch.data.branch_type,
+        packedStateDimension
+      )
+      const source =
+        equilibriumState && equilibriumState.length > 0 ? equilibriumState : point.state
+      if (!branchSnapshot) return source
+      return stateVectorToDisplay(branchSnapshot, source)
+    }
+
+    const resolveParamValueForVariable = (
+      point: ContinuationPoint,
+      variableName: string
+    ): number | null => {
+      if (!variableName) return null
+      if (
+        branch.parameterRef?.kind === 'frozen_var' &&
+        branch.parameterRef.variableName === variableName &&
+        Number.isFinite(point.param_value)
+      ) {
+        return point.param_value
+      }
+      const branchType = branch.data.branch_type
+      if (!branchType || typeof branchType !== 'object' || !('param2_ref' in branchType)) {
+        return null
+      }
+      const param2Ref = branchType.param2_ref
+      if (
+        param2Ref?.kind !== 'frozen_var' ||
+        param2Ref.variableName !== variableName
+      ) {
+        return null
+      }
+      if (Number.isFinite(point.param2_value)) {
+        return point.param2_value ?? null
+      }
+      const inferred = resolveContinuationPointParam2Value(
+        point,
+        branchType,
+        packedStateDimension
+      )
+      return Number.isFinite(inferred) ? (inferred as number) : null
+    }
+
+    const isCycleLikeBranch = LIMIT_CYCLE_BRANCH_TYPES.has(branch.branchType)
+    if (isCycleLikeBranch && projectionPlotDim === 1) {
+      continue
+    }
+
+    if (isCycleLikeBranch && projectionPlotDim === 2 && system.config.varNames.length >= 3) {
+      const parameterAxisVariables = new Set<string>()
+      if (branch.parameterRef?.kind === 'frozen_var') {
+        parameterAxisVariables.add(branch.parameterRef.variableName)
+      }
+      const branchType = branch.data.branch_type
+      if (
+        branchType &&
+        typeof branchType === 'object' &&
+        'param2_ref' in branchType &&
+        branchType.param2_ref?.kind === 'frozen_var'
+      ) {
+        parameterAxisVariables.add(branchType.param2_ref.variableName)
+      }
+      const matchedAxes = [axisVarX, axisVarY].filter((name) =>
+        parameterAxisVariables.has(name)
+      )
+      if (matchedAxes.length === 2) {
+        const x: number[] = []
+        const y: number[] = []
+        const pointIndices: number[] = []
+        for (let orderIndex = 0; orderIndex < order.length; orderIndex += 1) {
+          const idx = order[orderIndex]
+          if (!shouldRenderPoint(orderIndex, idx)) continue
+          const point = branch.data.points[idx]
+          if (!point) continue
+          const xValue = resolveParamValueForVariable(point, axisVarX)
+          const yValue = resolveParamValueForVariable(point, axisVarY)
+          if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) continue
+          x.push(xValue as number)
+          y.push(yValue as number)
+          pointIndices.push(idx)
+        }
+        if (x.length > 0) {
+          traces.push({
+            type: 'scatter',
+            mode: 'lines+markers',
+            name: branch.name,
+            uid: nodeId,
+            x,
+            y,
+            customdata: pointIndices,
+            line: { color: node.render.color, width: lineWidth, dash: lineDash },
+            marker: { color: node.render.color, size: markerSize },
+          })
+        }
+        continue
+      }
+      if (matchedAxes.length === 1) {
+        const paramAxis = matchedAxes[0]
+        const stateAxis = paramAxis === axisVarX ? axisVarY : axisVarX
+        const stateAxisIndex = system.config.varNames.indexOf(stateAxis)
+        const mesh = resolveLimitCycleMesh(branch)
+        const layout = resolveLimitCycleLayout(branch.branchType)
+        const allowPackedTail = allowsPackedTailLimitCycleProfile(branch.branchType)
+        const xMax: number[] = []
+        const yMax: number[] = []
+        const xMin: number[] = []
+        const yMin: number[] = []
+        const pointIndices: number[] = []
+        if (stateAxisIndex < 0) {
+          continue
+        }
+        for (let orderIndex = 0; orderIndex < order.length; orderIndex += 1) {
+          const idx = order[orderIndex]
+          if (!shouldRenderPoint(orderIndex, idx)) continue
+          const point = branch.data.points[idx]
+          if (!point) continue
+          const paramValue = resolveParamValueForVariable(point, paramAxis)
+          const { profilePoints } = extractLimitCycleProfile(
+            point.state,
+            packedStateDimension,
+            mesh.ntst,
+            mesh.ncol,
+            { layout, allowPackedTail }
+          )
+          let min = Number.POSITIVE_INFINITY
+          let max = Number.NEGATIVE_INFINITY
+          if (profilePoints.length > 0) {
+            for (const profilePoint of profilePoints) {
+              const displayPoint = branchSnapshot
+                ? stateVectorToDisplay(branchSnapshot, profilePoint)
+                : profilePoint
+              const value = displayPoint[stateAxisIndex]
+              if (!Number.isFinite(value)) continue
+              min = Math.min(min, value)
+              max = Math.max(max, value)
+            }
+          }
+          if (!Number.isFinite(min) || !Number.isFinite(max)) {
+            const fallbackState = resolveDisplayState(point)
+            const value = fallbackState[stateAxisIndex]
+            if (!Number.isFinite(value)) continue
+            min = value
+            max = value
+          }
+          if (!Number.isFinite(paramValue)) continue
+          if (paramAxis === axisVarX) {
+            xMin.push(paramValue as number)
+            yMin.push(min)
+            xMax.push(paramValue as number)
+            yMax.push(max)
+          } else {
+            xMin.push(min)
+            yMin.push(paramValue as number)
+            xMax.push(max)
+            yMax.push(paramValue as number)
+          }
+          pointIndices.push(idx)
+        }
+        if (xMax.length > 0) {
+          traces.push({
+            type: 'scatter',
+            mode: 'lines',
+            name: branch.name,
+            uid: nodeId,
+            x: xMax,
+            y: yMax,
+            customdata: pointIndices,
+            line: { color: node.render.color, width: lineWidth, dash: lineDash },
+          })
+          traces.push({
+            type: 'scatter',
+            mode: 'lines',
+            name: `${branch.name} min`,
+            uid: nodeId,
+            x: xMin,
+            y: yMin,
+            customdata: pointIndices,
+            line: { color: node.render.color, width: lineWidth, dash: lineDash },
+            showlegend: false,
+          })
+        }
+        continue
+      }
+    }
+
+    if (isCycleLikeBranch) {
+      const { ntst, ncol } = resolveLimitCycleMesh(branch)
+      const layout = resolveLimitCycleLayout(branch.branchType)
+      const allowPackedTail = allowsPackedTailLimitCycleProfile(branch.branchType)
+      for (let orderIndex = 0; orderIndex < order.length; orderIndex += 1) {
+        const idx = order[orderIndex]
+        if (!shouldRenderPoint(orderIndex, idx)) continue
+        const point = branch.data.points[idx]
+        if (!point) continue
+        const selectedPoint = selectedBranchPointIndex === idx
+        const pointLineWidth = selectedPoint ? lineWidth + 1 : lineWidth
+        const pointMarkerSize = selectedPoint ? markerSize + 1 : markerSize
+        const pointTraces = buildLimitCycleTraces({
+          state: point.state,
+          dim: system.config.varNames.length,
+          ntst,
+          ncol,
+          name: branch.name,
+          uid: nodeId,
+          color: node.render.color,
+          lineWidth: pointLineWidth,
+          pointSize: pointMarkerSize,
+          layout,
+          allowPackedTail,
+          axisIndices: projectionAxisIndices,
+          plotDim: projectionPlotDim,
+          showLegend: false,
+        })
+        for (const trace of pointTraces) {
+          if (
+            (trace.type === 'scatter' || trace.type === 'scatter3d') &&
+            Array.isArray(trace.x)
+          ) {
+            ;(trace as Data & { customdata?: Array<number | null> }).customdata = trace.x.map(
+              () => idx
+            )
+          }
+          traces.push(trace)
+        }
+      }
+      continue
+    }
+
+    const x: number[] = []
+    const y: number[] = []
+    const z: number[] = []
+    const pointIndices: number[] = []
+    for (let orderIndex = 0; orderIndex < order.length; orderIndex += 1) {
+      const idx = order[orderIndex]
+      if (!shouldRenderPoint(orderIndex, idx)) continue
+      const point = branch.data.points[idx]
+      if (!point) continue
+      const state = resolveDisplayState(point)
+      const xValue = state[axisX]
+      const yValue = state[axisY]
+      const zValue = state[axisZ]
+      if (projectionPlotDim >= 3) {
+        if (!Number.isFinite(xValue) || !Number.isFinite(yValue) || !Number.isFinite(zValue)) {
+          continue
+        }
+        x.push(xValue)
+        y.push(yValue)
+        z.push(zValue)
+        pointIndices.push(idx)
+        if (canPlotEigenvectors) updateSceneBounds(sceneBounds, xValue, yValue, zValue)
+        continue
+      }
+      if (projectionPlotDim === 2) {
+        if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) continue
+        x.push(xValue)
+        y.push(yValue)
+        pointIndices.push(idx)
+        if (canPlotEigenvectors) updateSceneBounds(sceneBounds, xValue, yValue, 0)
+        continue
+      }
+      const scalar = state[axisX]
+      if (!Number.isFinite(scalar)) continue
+      if (isMap1D) {
+        x.push(scalar)
+        y.push(scalar)
+      } else {
+        x.push(indices[idx] ?? idx)
+        y.push(scalar)
+      }
+      pointIndices.push(idx)
+    }
+
+    if (pointIndices.length === 0) continue
+    if (projectionPlotDim >= 3) {
+      traces.push({
+        type: 'scatter3d',
+        mode: 'lines+markers',
+        name: branch.name,
+        uid: nodeId,
+        x,
+        y,
+        z,
+        customdata: pointIndices,
+        line: { color: node.render.color, width: lineWidth, dash: lineDash },
+        marker: { color: node.render.color, size: markerSize },
+      })
+    } else if (projectionPlotDim === 2 || isMap1D || isTimeSeries) {
+      traces.push({
+        type: 'scatter',
+        mode: 'lines+markers',
+        name: branch.name,
+        uid: nodeId,
+        x,
+        y,
+        customdata: pointIndices,
+        line: { color: node.render.color, width: lineWidth, dash: lineDash },
+        marker: { color: node.render.color, size: markerSize },
+      })
     }
   }
 
@@ -3645,7 +4032,6 @@ function ViewportTile({
       if (!node) return
 
       if (node.kind === 'branch') {
-        if (!diagram) return
         onSelectBranchPoint?.({ branchId: uid, pointIndex })
         return
       }
@@ -3665,7 +4051,6 @@ function ViewportTile({
       }
     },
     [
-      diagram,
       onSelectBranchPoint,
       onSelectLimitCyclePoint,
       onSelectObject,
@@ -3765,9 +4150,11 @@ function ViewportTile({
       timeSeriesMeta,
       sceneMapRange ?? mapRange,
       mapFunctionSamples,
+      branchPointSelection ?? null,
       plotAreaSize
     )
   }, [
+    branchPointSelection,
     mapFunctionSamples,
     mapRange,
     sceneMapRange,

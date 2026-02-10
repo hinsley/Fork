@@ -50,6 +50,10 @@ type SystemSettingsDialogProps = {
   onToggleVisibility: (id: string) => void
   onUpdateRender: (id: string, render: Partial<TreeNode['render']>) => void
   onUpdateObjectParams: (id: string, params: number[] | null) => void
+  onUpdateObjectFrozenVariables: (
+    id: string,
+    frozenValuesByVarName: Record<string, number>
+  ) => void
   onUpdateScene: (id: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
   onUpdateBifurcationDiagram: (
     id: string,
@@ -112,6 +116,7 @@ export function SystemSettingsDialog({
   onToggleVisibility,
   onUpdateRender,
   onUpdateObjectParams,
+  onUpdateObjectFrozenVariables,
   onUpdateScene,
   onUpdateBifurcationDiagram,
   onSetLimitCycleRenderTarget,
@@ -174,6 +179,7 @@ export function SystemSettingsDialog({
             onToggleVisibility={onToggleVisibility}
             onUpdateRender={onUpdateRender}
             onUpdateObjectParams={onUpdateObjectParams}
+            onUpdateObjectFrozenVariables={onUpdateObjectFrozenVariables}
             onUpdateScene={onUpdateScene}
             onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
             onSetLimitCycleRenderTarget={onSetLimitCycleRenderTarget}

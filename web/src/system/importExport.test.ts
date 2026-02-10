@@ -731,7 +731,7 @@ describe('system import/export', () => {
     const file = makeBundleFile(bundle)
 
     await expect(readSystemFile(file)).rejects.toThrow(
-      `Unsupported system schema version: ${SYSTEM_PROJECT_SCHEMA_VERSION + 1}`
+      /Recompute analyses with the current app version/
     )
   })
 

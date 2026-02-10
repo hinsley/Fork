@@ -8,6 +8,24 @@ export interface SystemConfig {
   type: 'flow' | 'map'
 }
 
+export interface FrozenVariablesConfig {
+  frozenValuesByVarName: Record<string, number>
+}
+
+export type ParameterRef =
+  | { kind: 'native_param'; name: string }
+  | { kind: 'frozen_var'; variableName: string }
+
+export interface SubsystemSnapshot {
+  baseVarNames: string[]
+  baseParamNames: string[]
+  freeVariableNames: string[]
+  freeVariableIndices: number[]
+  frozenValuesByVarName: Record<string, number>
+  frozenParameterNamesByVarName: Record<string, string>
+  hash: string
+}
+
 export interface OrbitObject {
   type: 'orbit'
   name: string
@@ -20,6 +38,8 @@ export interface OrbitObject {
   covariantVectors?: CovariantLyapunovData
   parameters?: number[]
   customParameters?: number[]
+  frozenVariables?: FrozenVariablesConfig
+  subsystemSnapshot?: SubsystemSnapshot
 }
 
 export interface ComplexValue {
@@ -64,6 +84,8 @@ export interface EquilibriumObject {
   lastRun?: EquilibriumRunSummary
   parameters?: number[]
   customParameters?: number[]
+  frozenVariables?: FrozenVariablesConfig
+  subsystemSnapshot?: SubsystemSnapshot
 }
 
 export interface ContinuationEigenvalue {
@@ -138,6 +160,8 @@ export type BranchType =
       ncol: number
       param1_name: string
       param2_name: string
+      param1_ref?: ParameterRef
+      param2_ref?: ParameterRef
       free_time: boolean
       free_eps0: boolean
       free_eps1: boolean
@@ -148,14 +172,60 @@ export type BranchType =
       ncol: number
       param1_name: string
       param2_name: string
+      param1_ref?: ParameterRef
+      param2_ref?: ParameterRef
       stage: 'StageA' | 'StageB' | 'StageC' | 'StageD'
     }
-  | { type: 'FoldCurve'; param1_name: string; param2_name: string }
-  | { type: 'HopfCurve'; param1_name: string; param2_name: string }
-  | { type: 'LPCCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
-  | { type: 'IsochroneCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
-  | { type: 'PDCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
-  | { type: 'NSCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
+  | {
+      type: 'FoldCurve'
+      param1_name: string
+      param2_name: string
+      param1_ref?: ParameterRef
+      param2_ref?: ParameterRef
+    }
+  | {
+      type: 'HopfCurve'
+      param1_name: string
+      param2_name: string
+      param1_ref?: ParameterRef
+      param2_ref?: ParameterRef
+    }
+  | {
+      type: 'LPCCurve'
+      param1_name: string
+      param2_name: string
+      param1_ref?: ParameterRef
+      param2_ref?: ParameterRef
+      ntst: number
+      ncol: number
+    }
+  | {
+      type: 'IsochroneCurve'
+      param1_name: string
+      param2_name: string
+      param1_ref?: ParameterRef
+      param2_ref?: ParameterRef
+      ntst: number
+      ncol: number
+    }
+  | {
+      type: 'PDCurve'
+      param1_name: string
+      param2_name: string
+      param1_ref?: ParameterRef
+      param2_ref?: ParameterRef
+      ntst: number
+      ncol: number
+    }
+  | {
+      type: 'NSCurve'
+      param1_name: string
+      param2_name: string
+      param1_ref?: ParameterRef
+      param2_ref?: ParameterRef
+      ntst: number
+      ncol: number
+    }
 
 export interface ContinuationBranchData {
   points: ContinuationPoint[]
@@ -172,6 +242,8 @@ export interface ContinuationObject {
   name: string
   systemName: string
   parameterName: string
+  parameterRef?: ParameterRef
+  parameter2Ref?: ParameterRef
   parentObject: string
   startObject: string
   branchType:
@@ -190,6 +262,7 @@ export interface ContinuationObject {
   timestamp: string
   params?: number[]
   mapIterations?: number
+  subsystemSnapshot?: SubsystemSnapshot
 }
 
 export type LimitCycleOrigin =
@@ -209,9 +282,12 @@ export interface LimitCycleObject {
   parameters?: number[]
   customParameters?: number[]
   parameterName?: string
+  parameterRef?: ParameterRef
   paramValue?: number
   floquetMultipliers?: ContinuationEigenvalue[]
   createdAt: string
+  frozenVariables?: FrozenVariablesConfig
+  subsystemSnapshot?: SubsystemSnapshot
 }
 
 export type IsoclineSource =
@@ -243,6 +319,7 @@ export interface IsoclineComputedSnapshot {
   frozenState: number[]
   parameters: number[]
   computedAt: string
+  subsystemSnapshot?: SubsystemSnapshot
 }
 
 export interface IsoclineObject {
@@ -256,6 +333,8 @@ export interface IsoclineObject {
   parameters?: number[]
   customParameters?: number[]
   lastComputed?: IsoclineComputedSnapshot
+  frozenVariables?: FrozenVariablesConfig
+  subsystemSnapshot?: SubsystemSnapshot
 }
 
 export type LimitCycleRenderTarget =

@@ -72,6 +72,16 @@ export const validateSystemConfig = (system: SystemConfig): SystemValidation => 
     }
   }
 
+  if (!errors.varNames && !errors.paramNames) {
+    const varSet = new Set(varNames)
+    const collisions = system.paramNames.filter((name) => varSet.has(name))
+    if (collisions.length > 0) {
+      errors.paramNames = `Variable/parameter name collisions: ${[
+        ...new Set(collisions),
+      ].join(', ')}.`
+    }
+  }
+
   const equationErrors: string[] = []
   for (let i = 0; i < system.varNames.length; i += 1) {
     const eq = system.equations[i]

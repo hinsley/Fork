@@ -77,6 +77,15 @@ import {
   resolveContinuationPointParam2Value,
 } from '../system/continuation'
 import { isCliSafeName, toCliSafeName } from '../utils/naming'
+import {
+  buildSubsystemSnapshot,
+  continuationParameterOptions,
+  formatParameterRefLabel,
+  isSubsystemSnapshotCompatible,
+  isVariableFrozen,
+  mapStateRowsToDisplay,
+  stateVectorToDisplay,
+} from '../system/subsystemGateway'
 
 type InspectorDetailsPanelProps = {
   system: System
@@ -93,6 +102,10 @@ type InspectorDetailsPanelProps = {
   onToggleVisibility: (id: string) => void
   onUpdateRender: (id: string, render: Partial<TreeNode['render']>) => void
   onUpdateObjectParams?: (id: string, params: number[] | null) => void
+  onUpdateObjectFrozenVariables?: (
+    id: string,
+    frozenValuesByVarName: Record<string, number>
+  ) => void
   onUpdateIsoclineObject?: (
     id: string,
     update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>
@@ -147,6 +160,16 @@ type InspectorDetailsPanelProps = {
   ) => Promise<void>
 }
 
+const STATE_SPACE_STRIDE_BRANCH_TYPES: ReadonlySet<ContinuationObject['branchType']> = new Set([
+  'limit_cycle',
+  'isochrone_curve',
+  'homoclinic_curve',
+  'homotopy_saddle_curve',
+  'pd_curve',
+  'lpc_curve',
+  'ns_curve',
+])
+
 type SystemDraft = {
   name: string
   type: 'flow' | 'map'
@@ -161,6 +184,13 @@ type OrbitRunDraft = {
   initialState: string[]
   duration: string
   dt: string
+}
+
+type SceneSelectableEntry = {
+  id: string
+  name: string
+  type: string
+  visible: boolean
 }
 
 type LyapunovDraft = {
@@ -1439,6 +1469,46 @@ function isIsoclineSnapshotStale(systemConfig: SystemConfig, object: IsoclineObj
   )
 }
 
+type FreezableObject = OrbitObject | EquilibriumObject | LimitCycleObject | IsoclineObject
+
+function resolveObjectFrozenValues(
+  systemConfig: SystemConfig,
+  object: FreezableObject
+): Record<string, number> {
+  if (object.type === 'isocline') {
+    const freeNames = new Set(object.axes.map((axis) => axis.variableName))
+    const frozenValuesByVarName: Record<string, number> = {}
+    systemConfig.varNames.forEach((name, index) => {
+      if (freeNames.has(name)) return
+      frozenValuesByVarName[name] = object.frozenState[index] ?? 0
+    })
+    return frozenValuesByVarName
+  }
+  return object.frozenVariables?.frozenValuesByVarName ?? {}
+}
+
+function resolveObjectCurrentSubsystemSnapshot(
+  systemConfig: SystemConfig,
+  object: FreezableObject
+) {
+  const maxFreeVariables = object.type === 'isocline' ? 3 : undefined
+  return buildSubsystemSnapshot(
+    systemConfig,
+    { frozenValuesByVarName: resolveObjectFrozenValues(systemConfig, object) },
+    { maxFreeVariables }
+  )
+}
+
+function hasSubsystemSnapshotMismatch(
+  systemConfig: SystemConfig,
+  object: FreezableObject
+): boolean {
+  if (!object.subsystemSnapshot) return false
+  if (!isSubsystemSnapshotCompatible(systemConfig, object.subsystemSnapshot)) return true
+  const current = resolveObjectCurrentSubsystemSnapshot(systemConfig, object)
+  return current.hash !== object.subsystemSnapshot.hash
+}
+
 export function InspectorDetailsPanel({
   system,
   selectedNodeId,
@@ -1454,6 +1524,7 @@ export function InspectorDetailsPanel({
   onToggleVisibility,
   onUpdateRender,
   onUpdateObjectParams = () => {},
+  onUpdateObjectFrozenVariables = () => {},
   onUpdateIsoclineObject = () => {},
   onComputeIsocline = async () => null,
   onUpdateScene,
@@ -1559,6 +1630,9 @@ export function InspectorDetailsPanel({
   const hasBranch = Boolean(branch)
   const isLimitCycleBranch =
     branch?.branchType === 'limit_cycle' || branch?.branchType === 'isochrone_curve'
+  const supportsStateSpaceStride = branch
+    ? STATE_SPACE_STRIDE_BRANCH_TYPES.has(branch.branchType)
+    : false
   const nodeRender = selectionNode
     ? { ...DEFAULT_RENDER, ...(selectionNode.render ?? {}) }
     : DEFAULT_RENDER
@@ -1852,6 +1926,7 @@ export function InspectorDetailsPanel({
     makeParamOverrideDraft(system.config, paramOverrideTarget)
   )
   const [paramOverrideError, setParamOverrideError] = useState<string | null>(null)
+  const [frozenVariableDrafts, setFrozenVariableDrafts] = useState<Record<string, string>>({})
 
   const [continuationDraft, setContinuationDraft] = useState<ContinuationDraft>(() =>
     makeContinuationDraft(system.config)
@@ -1974,28 +2049,50 @@ export function InspectorDetailsPanel({
       ? isocline.source.variableName
       : systemDraft.varNames[0] ?? ''
   }, [isocline, systemDraft.varNames])
-  const orbitPreviewPageCount = useMemo(() => {
-    if (!orbit || orbit.data.length === 0) return 0
-    return Math.ceil(orbit.data.length / ORBIT_PREVIEW_PAGE_SIZE)
-  }, [orbit])
-  const orbitPreviewVarNames = useMemo(() => {
+  const orbitSnapshot = useMemo(() => {
+    if (!orbit) return null
+    if (
+      orbit.subsystemSnapshot &&
+      isSubsystemSnapshotCompatible(system.config, orbit.subsystemSnapshot)
+    ) {
+      return orbit.subsystemSnapshot
+    }
+    return buildSubsystemSnapshot(system.config, orbit.frozenVariables)
+  }, [orbit, system.config])
+  const orbitDisplayRows = useMemo(() => {
     if (!orbit || orbit.data.length === 0) return []
-    const varCount = Math.max(orbit.data[0].length - 1, 0)
-    return Array.from({ length: varCount }, (_, index) => {
-      return systemDraft.varNames[index] || `x${index + 1}`
+    if (!orbitSnapshot) return orbit.data
+    return mapStateRowsToDisplay(orbitSnapshot, orbit.data)
+  }, [orbit, orbitSnapshot])
+  const orbitPreviewPageCount = useMemo(() => {
+    if (orbitDisplayRows.length === 0) return 0
+    return Math.ceil(orbitDisplayRows.length / ORBIT_PREVIEW_PAGE_SIZE)
+  }, [orbitDisplayRows])
+  const orbitPreviewVarNames = useMemo(() => {
+    if (!orbit || orbitDisplayRows.length === 0) return []
+    const baseNames =
+      orbitSnapshot?.baseVarNames.length === systemDraft.varNames.length
+        ? orbitSnapshot.baseVarNames
+        : systemDraft.varNames
+    return baseNames.map((name, index) => {
+      const fallback = name || `x${index + 1}`
+      return orbitSnapshot && isVariableFrozen(orbitSnapshot, name)
+        ? `${fallback}*`
+        : fallback
     })
-  }, [orbit, systemDraft.varNames])
+  }, [orbit, orbitDisplayRows.length, orbitSnapshot, systemDraft.varNames])
   const orbitPreviewStart = orbitPreviewPage * ORBIT_PREVIEW_PAGE_SIZE
-  const orbitPreviewEnd = orbit
-    ? Math.min(orbitPreviewStart + ORBIT_PREVIEW_PAGE_SIZE, orbit.data.length)
-    : 0
-  const orbitPreviewRows = orbit ? orbit.data.slice(orbitPreviewStart, orbitPreviewEnd) : []
+  const orbitPreviewEnd = Math.min(
+    orbitPreviewStart + ORBIT_PREVIEW_PAGE_SIZE,
+    orbitDisplayRows.length
+  )
+  const orbitPreviewRows = orbitDisplayRows.slice(orbitPreviewStart, orbitPreviewEnd)
   const selectedOrbitPoint =
-    orbit &&
+    orbitDisplayRows.length > 0 &&
     selectedOrbitPointIndex !== null &&
     selectedOrbitPointIndex >= 0 &&
-    selectedOrbitPointIndex < orbit.data.length
-      ? orbit.data[selectedOrbitPointIndex]
+    selectedOrbitPointIndex < orbitDisplayRows.length
+      ? orbitDisplayRows[selectedOrbitPointIndex]
       : null
   const selectedOrbitState = selectedOrbitPoint ? selectedOrbitPoint.slice(1) : null
   const limitCycleProfilePoints = useMemo(() => {
@@ -2089,6 +2186,65 @@ export function InspectorDetailsPanel({
     limitCycleFromPDNameSuggestion,
   ])
 
+  const selectedSubsystemSnapshot = useMemo(() => {
+    if (paramOverrideTarget) {
+      return resolveObjectCurrentSubsystemSnapshot(system.config, paramOverrideTarget)
+    }
+    if (branch?.subsystemSnapshot && isSubsystemSnapshotCompatible(system.config, branch.subsystemSnapshot)) {
+      return branch.subsystemSnapshot
+    }
+    return buildSubsystemSnapshot(system.config)
+  }, [branch?.subsystemSnapshot, paramOverrideTarget, system.config])
+
+  const continuationParameterLabels = useMemo(
+    () =>
+      continuationParameterOptions(system.config, selectedSubsystemSnapshot).map((option) =>
+        formatParameterRefLabel(option.ref)
+      ),
+    [selectedSubsystemSnapshot, system.config]
+  )
+  const continuationParameterSet = useMemo(
+    () => new Set(continuationParameterLabels),
+    [continuationParameterLabels]
+  )
+  const continuationParameterCount = continuationParameterLabels.length
+  const firstContinuationParameter = continuationParameterLabels[0] ?? ''
+  const currentObjectFrozenValues = useMemo(() => {
+    if (!paramOverrideTarget) return {}
+    return resolveObjectFrozenValues(system.config, paramOverrideTarget)
+  }, [paramOverrideTarget, system.config])
+  const subsystemSnapshotMismatch = useMemo(() => {
+    if (!paramOverrideTarget) return false
+    return hasSubsystemSnapshotMismatch(system.config, paramOverrideTarget)
+  }, [paramOverrideTarget, system.config])
+  const frozenVariableHeaderNames = useMemo(
+    () =>
+      systemDraft.varNames.map((name, index) => {
+        const fallback = name || `x${index + 1}`
+        return isVariableFrozen(selectedSubsystemSnapshot, name)
+          ? `${fallback}*`
+          : fallback
+      }),
+    [selectedSubsystemSnapshot, systemDraft.varNames]
+  )
+
+  useEffect(() => {
+    if (!paramOverrideTarget || paramOverrideTarget.type === 'isocline') {
+      setFrozenVariableDrafts({})
+      return
+    }
+    const next: Record<string, string> = {}
+    for (let index = 0; index < systemDraft.varNames.length; index += 1) {
+      const name = systemDraft.varNames[index]
+      if (!name) continue
+      const value =
+        currentObjectFrozenValues[name] ??
+        (paramOverrideTarget.subsystemSnapshot?.frozenValuesByVarName?.[name] ?? 0)
+      next[name] = value.toString()
+    }
+    setFrozenVariableDrafts(next)
+  }, [currentObjectFrozenValues, paramOverrideTarget, systemDraft.varNames])
+
   useEffect(() => {
     setSystemDraft(makeSystemDraft(system.config))
     setSystemTouched(false)
@@ -2100,7 +2256,7 @@ export function InspectorDetailsPanel({
     setOrbitPreviewPage(0)
     setOrbitPreviewInput('1')
     setOrbitPreviewError(null)
-  }, [selectedNodeId, orbit?.data.length])
+  }, [selectedNodeId, orbitDisplayRows.length])
 
   useEffect(() => {
     objectRef.current = object
@@ -2133,137 +2289,137 @@ export function InspectorDetailsPanel({
   }, [systemDraft.type, systemDraft.solver])
 
   useEffect(() => {
-    const firstParam = systemDraft.paramNames[0] ?? ''
+    const firstParam = continuationParameterLabels[0] ?? ''
     const resolveDistinctParam = (paramName: string) =>
-      systemDraft.paramNames.find((name) => name !== paramName) ?? firstParam
+      continuationParameterLabels.find((name) => name !== paramName) ?? firstParam
 
     setContinuationDraft((prev) => {
-      if (systemDraft.paramNames.length === 0) {
+      if (continuationParameterLabels.length === 0) {
         if (!prev.parameterName) return prev
         return { ...prev, parameterName: '' }
       }
-      if (systemDraft.paramNames.includes(prev.parameterName)) {
+      if (continuationParameterSet.has(prev.parameterName)) {
         return prev
       }
-      return { ...prev, parameterName: systemDraft.paramNames[0] ?? '' }
+      return { ...prev, parameterName: firstParam }
     })
     setLimitCycleFromOrbitDraft((prev) => {
-      if (systemDraft.paramNames.length === 0) {
+      if (continuationParameterLabels.length === 0) {
         if (!prev.parameterName) return prev
         return { ...prev, parameterName: '' }
       }
-      if (systemDraft.paramNames.includes(prev.parameterName)) {
+      if (continuationParameterSet.has(prev.parameterName)) {
         return prev
       }
-      return { ...prev, parameterName: systemDraft.paramNames[0] ?? '' }
+      return { ...prev, parameterName: firstParam }
     })
     setLimitCycleFromHopfDraft((prev) => {
-      if (systemDraft.paramNames.length === 0) {
+      if (continuationParameterLabels.length === 0) {
         if (!prev.parameterName) return prev
         return { ...prev, parameterName: '' }
       }
-      if (systemDraft.paramNames.includes(prev.parameterName)) {
+      if (continuationParameterSet.has(prev.parameterName)) {
         return prev
       }
-      return { ...prev, parameterName: systemDraft.paramNames[0] ?? '' }
+      return { ...prev, parameterName: firstParam }
     })
     setHomoclinicFromLargeCycleDraft((prev) => {
-      if (systemDraft.paramNames.length === 0) {
+      if (continuationParameterLabels.length === 0) {
         if (!prev.parameterName && !prev.param2Name) return prev
         return { ...prev, parameterName: '', param2Name: '' }
       }
-      const parameterName = systemDraft.paramNames.includes(prev.parameterName)
+      const parameterName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
         : firstParam
       const param2Name =
-        systemDraft.paramNames.includes(prev.param2Name) && prev.param2Name !== parameterName
+        continuationParameterSet.has(prev.param2Name) && prev.param2Name !== parameterName
           ? prev.param2Name
           : resolveDistinctParam(parameterName)
       return { ...prev, parameterName, param2Name }
     })
     setHomoclinicFromHomoclinicDraft((prev) => {
-      if (systemDraft.paramNames.length === 0) {
+      if (continuationParameterLabels.length === 0) {
         if (!prev.parameterName && !prev.param2Name) return prev
         return { ...prev, parameterName: '', param2Name: '' }
       }
-      const parameterName = systemDraft.paramNames.includes(prev.parameterName)
+      const parameterName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
         : firstParam
       const param2Name =
-        systemDraft.paramNames.includes(prev.param2Name) && prev.param2Name !== parameterName
+        continuationParameterSet.has(prev.param2Name) && prev.param2Name !== parameterName
           ? prev.param2Name
           : resolveDistinctParam(parameterName)
       return { ...prev, parameterName, param2Name }
     })
     setHomotopySaddleFromEquilibriumDraft((prev) => {
-      if (systemDraft.paramNames.length === 0) {
+      if (continuationParameterLabels.length === 0) {
         if (!prev.parameterName && !prev.param2Name) return prev
         return { ...prev, parameterName: '', param2Name: '' }
       }
-      const parameterName = systemDraft.paramNames.includes(prev.parameterName)
+      const parameterName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
         : firstParam
       const param2Name =
-        systemDraft.paramNames.includes(prev.param2Name) && prev.param2Name !== parameterName
+        continuationParameterSet.has(prev.param2Name) && prev.param2Name !== parameterName
           ? prev.param2Name
           : resolveDistinctParam(parameterName)
       return { ...prev, parameterName, param2Name }
     })
     setBranchContinuationDraft((prev) => {
-      if (systemDraft.paramNames.length === 0) {
+      if (continuationParameterLabels.length === 0) {
         if (!prev.parameterName) return prev
         return { ...prev, parameterName: '' }
       }
-      if (systemDraft.paramNames.includes(prev.parameterName)) {
+      if (continuationParameterSet.has(prev.parameterName)) {
         return prev
       }
-      return { ...prev, parameterName: systemDraft.paramNames[0] ?? '' }
+      return { ...prev, parameterName: firstParam }
     })
     setFoldCurveDraft((prev) => {
-      if (systemDraft.paramNames.length === 0) {
+      if (continuationParameterLabels.length === 0) {
         if (!prev.param2Name) return prev
         return { ...prev, param2Name: '' }
       }
-      if (systemDraft.paramNames.includes(prev.param2Name)) {
+      if (continuationParameterSet.has(prev.param2Name)) {
         return prev
       }
-      return { ...prev, param2Name: systemDraft.paramNames[0] ?? '' }
+      return { ...prev, param2Name: firstParam }
     })
     setHopfCurveDraft((prev) => {
-      if (systemDraft.paramNames.length === 0) {
+      if (continuationParameterLabels.length === 0) {
         if (!prev.param2Name) return prev
         return { ...prev, param2Name: '' }
       }
-      if (systemDraft.paramNames.includes(prev.param2Name)) {
+      if (continuationParameterSet.has(prev.param2Name)) {
         return prev
       }
-      return { ...prev, param2Name: systemDraft.paramNames[0] ?? '' }
+      return { ...prev, param2Name: firstParam }
     })
     setIsochroneCurveDraft((prev) => {
-      if (systemDraft.paramNames.length === 0) {
+      if (continuationParameterLabels.length === 0) {
         if (!prev.parameterName && !prev.param2Name) return prev
         return { ...prev, parameterName: '', param2Name: '' }
       }
-      const parameterName = systemDraft.paramNames.includes(prev.parameterName)
+      const parameterName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
         : firstParam
       const param2Name =
-        systemDraft.paramNames.includes(prev.param2Name) && prev.param2Name !== parameterName
+        continuationParameterSet.has(prev.param2Name) && prev.param2Name !== parameterName
           ? prev.param2Name
           : resolveDistinctParam(parameterName)
       return { ...prev, parameterName, param2Name }
     })
     setNSCurveDraft((prev) => {
-      if (systemDraft.paramNames.length === 0) {
+      if (continuationParameterLabels.length === 0) {
         if (!prev.param2Name) return prev
         return { ...prev, param2Name: '' }
       }
-      if (systemDraft.paramNames.includes(prev.param2Name)) {
+      if (continuationParameterSet.has(prev.param2Name)) {
         return prev
       }
-      return { ...prev, param2Name: systemDraft.paramNames[0] ?? '' }
+      return { ...prev, param2Name: firstParam }
     })
-  }, [systemDraft.paramNames])
+  }, [continuationParameterLabels, continuationParameterSet])
 
   useEffect(() => {
     const current = objectRef.current
@@ -2376,9 +2532,9 @@ export function InspectorDetailsPanel({
   useEffect(() => {
     if (!equilibriumName) return
     setContinuationDraft((prev) => {
-      const paramName = systemDraft.paramNames.includes(prev.parameterName)
+      const paramName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
-        : systemDraft.paramNames[0] ?? ''
+        : firstContinuationParameter
       const suggestedName = buildSuggestedBranchName(
         equilibriumContinuationBaseName,
         paramName
@@ -2386,7 +2542,12 @@ export function InspectorDetailsPanel({
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, parameterName: paramName, name: nextName }
     })
-  }, [equilibriumContinuationBaseName, equilibriumName, systemDraft.paramNames])
+  }, [
+    equilibriumContinuationBaseName,
+    equilibriumName,
+    firstContinuationParameter,
+    continuationParameterSet,
+  ])
 
   useEffect(() => {
     if (!orbit) return
@@ -2394,9 +2555,9 @@ export function InspectorDetailsPanel({
       const suggestedLimitCycleName = `lc_${toCliSafeName(orbit.name)}`
       const limitCycleName =
         prev.limitCycleName.trim().length > 0 ? prev.limitCycleName : suggestedLimitCycleName
-      const paramName = systemDraft.paramNames.includes(prev.parameterName)
+      const paramName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
-        : systemDraft.paramNames[0] ?? ''
+        : firstContinuationParameter
       const safeLimitCycleName = toCliSafeName(limitCycleName)
       const safeParamName = paramName ? toCliSafeName(paramName) : ''
       const suggestedBranchName = safeParamName
@@ -2406,30 +2567,30 @@ export function InspectorDetailsPanel({
         prev.branchName.trim().length > 0 ? prev.branchName : suggestedBranchName
       return { ...prev, limitCycleName, branchName, parameterName: paramName }
     })
-  }, [orbit, systemDraft.paramNames])
+  }, [orbit, firstContinuationParameter, continuationParameterSet])
 
   useEffect(() => {
     if (!branchName) return
     const fallbackParam =
-      systemDraft.paramNames.find((name) => name !== branchParameterName) ??
-      systemDraft.paramNames[0] ??
+      continuationParameterLabels.find((name) => name !== branchParameterName) ??
+      continuationParameterLabels[0] ??
       ''
     const hopfCodim1Params = resolveCodim1ParamNames(branch)
-    const hopfDefaultParam =
-      branch?.branchType === 'equilibrium' &&
-      systemDraft.paramNames.includes(branch.parameterName)
+      const hopfDefaultParam =
+        branch?.branchType === 'equilibrium' &&
+        continuationParameterSet.has(branch.parameterName)
         ? branch.parameterName
         : branch?.branchType === 'hopf_curve' &&
             hopfCodim1Params &&
-            systemDraft.paramNames.includes(hopfCodim1Params.param1)
+            continuationParameterSet.has(hopfCodim1Params.param1)
           ? hopfCodim1Params.param1
           : branch?.branchType === 'hopf_curve' &&
               hopfCodim1Params &&
-              systemDraft.paramNames.includes(hopfCodim1Params.param2)
+              continuationParameterSet.has(hopfCodim1Params.param2)
             ? hopfCodim1Params.param2
-            : systemDraft.paramNames[0] ?? ''
+            : firstContinuationParameter
     setBranchContinuationDraft((prev) => {
-      const paramName = systemDraft.paramNames.includes(prev.parameterName)
+      const paramName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
         : fallbackParam
       const safeBranchName = toCliSafeName(branchName)
@@ -2442,7 +2603,7 @@ export function InspectorDetailsPanel({
     })
     setFoldCurveDraft((prev) => {
       const param2Name =
-        systemDraft.paramNames.includes(prev.param2Name) &&
+        continuationParameterSet.has(prev.param2Name) &&
         prev.param2Name !== branchParameterName
           ? prev.param2Name
           : fallbackParam
@@ -2453,7 +2614,7 @@ export function InspectorDetailsPanel({
     })
     setHopfCurveDraft((prev) => {
       const param2Name =
-        systemDraft.paramNames.includes(prev.param2Name) &&
+        continuationParameterSet.has(prev.param2Name) &&
         prev.param2Name !== branchParameterName
           ? prev.param2Name
           : fallbackParam
@@ -2466,21 +2627,21 @@ export function InspectorDetailsPanel({
       const sourceParam1Name =
         branch?.branchType === 'isochrone_curve' &&
         hopfCodim1Params &&
-        systemDraft.paramNames.includes(hopfCodim1Params.param1)
+        continuationParameterSet.has(hopfCodim1Params.param1)
           ? hopfCodim1Params.param1
-          : systemDraft.paramNames.includes(branchParameterName)
+          : continuationParameterSet.has(branchParameterName)
             ? branchParameterName
-            : systemDraft.paramNames[0] ?? ''
+            : firstContinuationParameter
       const parameterName =
-        systemDraft.paramNames.includes(prev.parameterName)
+        continuationParameterSet.has(prev.parameterName)
           ? prev.parameterName
           : sourceParam1Name
       const fallbackParam2 =
-        systemDraft.paramNames.find((name) => name !== parameterName) ??
-        systemDraft.paramNames[0] ??
+        continuationParameterLabels.find((name) => name !== parameterName) ??
+        continuationParameterLabels[0] ??
         ''
       const param2Name =
-        systemDraft.paramNames.includes(prev.param2Name) &&
+        continuationParameterSet.has(prev.param2Name) &&
         prev.param2Name !== parameterName
           ? prev.param2Name
           : fallbackParam2
@@ -2491,7 +2652,7 @@ export function InspectorDetailsPanel({
     })
     setNSCurveDraft((prev) => {
       const param2Name =
-        systemDraft.paramNames.includes(prev.param2Name) &&
+        continuationParameterSet.has(prev.param2Name) &&
         prev.param2Name !== branchParameterName
           ? prev.param2Name
           : fallbackParam
@@ -2505,7 +2666,7 @@ export function InspectorDetailsPanel({
       const suggestedLimitCycleName = `lc_hopf_${safeBranchName}`
       const limitCycleName =
         prev.limitCycleName.trim().length > 0 ? prev.limitCycleName : suggestedLimitCycleName
-      const paramName = systemDraft.paramNames.includes(prev.parameterName)
+      const paramName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
         : hopfDefaultParam
       const safeLimitCycleName = toCliSafeName(limitCycleName)
@@ -2525,17 +2686,17 @@ export function InspectorDetailsPanel({
     setHomoclinicFromLargeCycleDraft((prev) => {
       const safeBranchName = toCliSafeName(branchName)
       const suggestedName = `homoc_${safeBranchName}`
-      const parameterName = systemDraft.paramNames.includes(prev.parameterName)
+      const parameterName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
-        : systemDraft.paramNames.includes(branchParameterName)
+        : continuationParameterSet.has(branchParameterName)
           ? branchParameterName
-          : systemDraft.paramNames[0] ?? ''
+          : firstContinuationParameter
       const fallbackParam2 =
-        systemDraft.paramNames.find((name) => name !== parameterName) ??
-        systemDraft.paramNames[0] ??
+        continuationParameterLabels.find((name) => name !== parameterName) ??
+        continuationParameterLabels[0] ??
         ''
       const param2Name =
-        systemDraft.paramNames.includes(prev.param2Name) && prev.param2Name !== parameterName
+        continuationParameterSet.has(prev.param2Name) && prev.param2Name !== parameterName
           ? prev.param2Name
           : fallbackParam2
       const name = prev.name.trim().length > 0 ? prev.name : suggestedName
@@ -2551,27 +2712,27 @@ export function InspectorDetailsPanel({
         typeof sourceType === 'object' &&
         'type' in sourceType &&
         sourceType.type === 'HomoclinicCurve' &&
-        systemDraft.paramNames.includes(sourceType.param1_name)
+        continuationParameterSet.has(sourceType.param1_name)
           ? sourceType.param1_name
-          : systemDraft.paramNames[0] ?? ''
-      const parameterName = systemDraft.paramNames.includes(prev.parameterName)
+          : firstContinuationParameter
+      const parameterName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
         : sourceParam1
       const fallbackParam2 =
-        systemDraft.paramNames.find((value) => value !== parameterName) ??
-        systemDraft.paramNames[0] ??
+        continuationParameterLabels.find((value) => value !== parameterName) ??
+        continuationParameterLabels[0] ??
         ''
       const sourceParam2 =
         sourceType &&
         typeof sourceType === 'object' &&
         'type' in sourceType &&
         sourceType.type === 'HomoclinicCurve' &&
-        systemDraft.paramNames.includes(sourceType.param2_name) &&
+        continuationParameterSet.has(sourceType.param2_name) &&
         sourceType.param2_name !== parameterName
           ? sourceType.param2_name
           : fallbackParam2
       const param2Name =
-        systemDraft.paramNames.includes(prev.param2Name) && prev.param2Name !== parameterName
+        continuationParameterSet.has(prev.param2Name) && prev.param2Name !== parameterName
           ? prev.param2Name
           : sourceParam2
       const freeTime =
@@ -2600,17 +2761,17 @@ export function InspectorDetailsPanel({
     setHomotopySaddleFromEquilibriumDraft((prev) => {
       const safeBranchName = toCliSafeName(branchName)
       const suggestedName = `homotopy_saddle_${safeBranchName}`
-      const parameterName = systemDraft.paramNames.includes(prev.parameterName)
+      const parameterName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
-        : systemDraft.paramNames.includes(branchParameterName)
+        : continuationParameterSet.has(branchParameterName)
           ? branchParameterName
-          : systemDraft.paramNames[0] ?? ''
+          : firstContinuationParameter
       const fallbackParam2 =
-        systemDraft.paramNames.find((name) => name !== parameterName) ??
-        systemDraft.paramNames[0] ??
+        continuationParameterLabels.find((name) => name !== parameterName) ??
+        continuationParameterLabels[0] ??
         ''
       const param2Name =
-        systemDraft.paramNames.includes(prev.param2Name) && prev.param2Name !== parameterName
+        continuationParameterSet.has(prev.param2Name) && prev.param2Name !== parameterName
           ? prev.param2Name
           : fallbackParam2
       const name = prev.name.trim().length > 0 ? prev.name : suggestedName
@@ -2635,7 +2796,14 @@ export function InspectorDetailsPanel({
     setHomoclinicFromHomoclinicError(null)
     setHomotopySaddleFromEquilibriumError(null)
     setHomoclinicFromHomotopySaddleError(null)
-  }, [branch, branchName, branchParameterName, systemDraft.paramNames])
+  }, [
+    branch,
+    branchName,
+    branchParameterName,
+    continuationParameterLabels,
+    continuationParameterSet,
+    firstContinuationParameter,
+  ])
 
   useEffect(() => {
     const branchId = hasBranch ? selectedNodeId : null
@@ -2794,17 +2962,49 @@ export function InspectorDetailsPanel({
   const hasWasmErrors = wasmEquationErrors.some((entry) => entry)
   const runDisabled = systemDirty || !systemValidation.valid || hasWasmErrors
   const isDiscreteMap = systemDraft.type === 'map'
+  const equilibriumSnapshot = useMemo(() => {
+    if (!equilibrium) return null
+    if (
+      equilibrium.subsystemSnapshot &&
+      isSubsystemSnapshotCompatible(system.config, equilibrium.subsystemSnapshot)
+    ) {
+      return equilibrium.subsystemSnapshot
+    }
+    return buildSubsystemSnapshot(
+      system.config,
+      { frozenValuesByVarName: resolveObjectFrozenValues(system.config, equilibrium) }
+    )
+  }, [equilibrium, system.config])
+  const branchSnapshot = useMemo(() => {
+    if (!branch?.subsystemSnapshot) return null
+    if (!isSubsystemSnapshotCompatible(system.config, branch.subsystemSnapshot)) return null
+    return branch.subsystemSnapshot
+  }, [branch?.subsystemSnapshot, system.config])
+  const branchStateDimension = branchSnapshot?.freeVariableNames.length ?? systemDraft.varNames.length
+  const equilibriumDisplayState = useMemo(() => {
+    if (!equilibrium?.solution?.state) return null
+    if (!equilibriumSnapshot) return equilibrium.solution.state
+    return stateVectorToDisplay(equilibriumSnapshot, equilibrium.solution.state)
+  }, [equilibrium?.solution?.state, equilibriumSnapshot])
   const equilibriumCyclePoints =
     isDiscreteMap && equilibrium?.solution?.state
       ? equilibrium.solution.cycle_points && equilibrium.solution.cycle_points.length > 0
-        ? equilibrium.solution.cycle_points
-        : [equilibrium.solution.state]
+        ? equilibrium.solution.cycle_points.map((point) =>
+            equilibriumSnapshot ? stateVectorToDisplay(equilibriumSnapshot, point) : point
+          )
+        : [
+            equilibriumSnapshot
+              ? stateVectorToDisplay(equilibriumSnapshot, equilibrium.solution.state)
+              : equilibrium.solution.state,
+          ]
       : null
   const branchCyclePoints =
     isDiscreteMap && branch?.branchType === 'equilibrium' && selectedBranchPoint?.state
       ? selectedBranchPoint.cycle_points && selectedBranchPoint.cycle_points.length > 0
-        ? selectedBranchPoint.cycle_points
-        : [selectedBranchPoint.state]
+        ? selectedBranchPoint.cycle_points.map((point) =>
+            branchSnapshot ? stateVectorToDisplay(branchSnapshot, point) : point
+          )
+        : [branchSnapshot ? stateVectorToDisplay(branchSnapshot, selectedBranchPoint.state) : selectedBranchPoint.state]
       : null
   const plotlyTheme = useMemo(() => resolvePlotlyThemeTokens(theme), [theme])
   const equilibriumEigenPlot = useMemo(() => {
@@ -2893,7 +3093,10 @@ export function InspectorDetailsPanel({
     if (scene) {
       return {
         label: 'Scene',
-        detail: scene.display === 'selection' ? 'Selection focus' : 'All visible orbits',
+        detail:
+          scene.display === 'selection'
+            ? 'Selection focus'
+            : 'All visible objects and branches',
       }
     }
 
@@ -2965,22 +3168,37 @@ export function InspectorDetailsPanel({
     [scene?.selectedNodeIds]
   )
   const sceneSelectedSet = useMemo(() => new Set(sceneSelectedIds), [sceneSelectedIds])
-  const sceneFilteredObjects = useMemo(() => {
+  const sceneSelectableEntries = useMemo<SceneSelectableEntry[]>(() => {
+    const objects = objectEntries.map((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      type: entry.type.replace('_', ' '),
+      visible: entry.visible,
+    }))
+    const branches = branchEntries.map((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      type: entry.type,
+      visible: entry.visible,
+    }))
+    return [...objects, ...branches].sort((a, b) => a.name.localeCompare(b.name))
+  }, [branchEntries, objectEntries])
+  const sceneFilteredEntries = useMemo(() => {
     const query = sceneSearch.trim().toLowerCase()
-    if (!query) return objectEntries
-    return objectEntries.filter((entry) => {
+    if (!query) return sceneSelectableEntries
+    return sceneSelectableEntries.filter((entry) => {
       const name = entry.name.toLowerCase()
-      const type = entry.type.replace('_', ' ').toLowerCase()
+      const type = entry.type.toLowerCase()
       return name.includes(query) || type.includes(query)
     })
-  }, [objectEntries, sceneSearch])
+  }, [sceneSearch, sceneSelectableEntries])
   const sceneSelectedEntries = useMemo(() => {
     if (!scene) return []
-    const byId = new Map(objectEntries.map((entry) => [entry.id, entry]))
+    const byId = new Map(sceneSelectableEntries.map((entry) => [entry.id, entry]))
     return sceneSelectedIds
       .map((id) => byId.get(id))
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
-  }, [objectEntries, scene, sceneSelectedIds])
+  }, [sceneSelectableEntries, scene, sceneSelectedIds])
   const diagramSelectedIds = useMemo(
     () => diagram?.selectedBranchIds ?? [],
     [diagram?.selectedBranchIds]
@@ -3028,13 +3246,18 @@ export function InspectorDetailsPanel({
       branch?.branchType === 'isochrone_curve'
         ? isochroneSourceParam1Name
         : branchParameterName
-    return systemDraft.paramNames.filter((name) => name !== sourceParam1Name)
-  }, [systemDraft.paramNames, branch?.branchType, branchParameterName, isochroneSourceParam1Name])
-  const isochroneParam1Options = systemDraft.paramNames
+    return continuationParameterLabels.filter((name) => name !== sourceParam1Name)
+  }, [
+    branch?.branchType,
+    branchParameterName,
+    continuationParameterLabels,
+    isochroneSourceParam1Name,
+  ])
+  const isochroneParam1Options = continuationParameterLabels
   const isochroneParam2Options = useMemo(
     () =>
-      systemDraft.paramNames.filter((name) => name !== isochroneCurveDraft.parameterName),
-    [systemDraft.paramNames, isochroneCurveDraft.parameterName]
+      continuationParameterLabels.filter((name) => name !== isochroneCurveDraft.parameterName),
+    [continuationParameterLabels, isochroneCurveDraft.parameterName]
   )
   const branchStartIndex = branchSortedOrder[0]
   const branchEndIndex = branchSortedOrder[branchSortedOrder.length - 1]
@@ -3127,26 +3350,29 @@ export function InspectorDetailsPanel({
       branchParams,
       branch,
       selectedBranchPoint,
-      systemDraft.varNames.length
+      branchStateDimension
     )
   }, [
     branch,
+    branchStateDimension,
     branchParams,
     selectedBranchPoint,
     systemDraft.paramNames,
-    systemDraft.varNames.length,
   ])
   const selectedBranchPointState = useMemo(() => {
     if (!branch || !selectedBranchPoint) return []
     const equilibriumState = resolveContinuationPointEquilibriumState(
       selectedBranchPoint,
       branch.data.branch_type,
-      systemDraft.varNames.length
+      branchStateDimension
     )
-    return equilibriumState && equilibriumState.length > 0
+    const state =
+      equilibriumState && equilibriumState.length > 0
       ? equilibriumState
       : selectedBranchPoint.state
-  }, [branch, selectedBranchPoint, systemDraft.varNames.length])
+    if (!branchSnapshot) return state
+    return stateVectorToDisplay(branchSnapshot, state)
+  }, [branch, branchSnapshot, branchStateDimension, selectedBranchPoint])
   const limitCycleRenderData = useMemo(() => {
     if (!limitCycleRenderPoint || !limitCycleRenderBranch) return null
     const baseParams = getBranchParams(system, limitCycleRenderBranch)
@@ -3353,24 +3579,29 @@ export function InspectorDetailsPanel({
 
   const setOrbitPreviewPageIndex = useCallback(
     (page: number) => {
-      if (!orbit || orbit.data.length === 0) return
+      if (orbitDisplayRows.length === 0) return
       const maxPage = Math.max(orbitPreviewPageCount - 1, 0)
       const nextPage = Math.min(Math.max(page, 0), maxPage)
       setOrbitPreviewPage(nextPage)
       setOrbitPreviewInput((nextPage + 1).toString())
       setOrbitPreviewError(null)
     },
-    [orbit, orbitPreviewPageCount]
+    [orbitDisplayRows.length, orbitPreviewPageCount]
   )
 
   useEffect(() => {
-    if (!orbit || selectedOrbitPointIndex === null) return
-    if (selectedOrbitPointIndex < 0 || selectedOrbitPointIndex >= orbit.data.length) return
+    if (orbitDisplayRows.length === 0 || selectedOrbitPointIndex === null) return
+    if (selectedOrbitPointIndex < 0 || selectedOrbitPointIndex >= orbitDisplayRows.length) return
     const targetPage = Math.floor(selectedOrbitPointIndex / ORBIT_PREVIEW_PAGE_SIZE)
     if (targetPage !== orbitPreviewPage) {
       setOrbitPreviewPageIndex(targetPage)
     }
-  }, [orbit, orbitPreviewPage, selectedOrbitPointIndex, setOrbitPreviewPageIndex])
+  }, [
+    orbitDisplayRows.length,
+    orbitPreviewPage,
+    selectedOrbitPointIndex,
+    setOrbitPreviewPageIndex,
+  ])
 
   const handleOrbitPreviewJump = () => {
     if (!orbit || orbitPreviewPageCount === 0) return
@@ -3471,6 +3702,60 @@ export function InspectorDetailsPanel({
       )
     )
   }
+
+  const handleToggleFrozenVariable = useCallback(
+    (variableName: string, frozen: boolean) => {
+      if (!paramOverrideTarget || paramOverrideTarget.type === 'isocline' || !selectedNodeId) {
+        return
+      }
+      const nextFrozen = { ...currentObjectFrozenValues }
+      if (!frozen) {
+        delete nextFrozen[variableName]
+        onUpdateObjectFrozenVariables(selectedNodeId, nextFrozen)
+        return
+      }
+      if (Object.keys(nextFrozen).length >= systemDraft.varNames.length) {
+        return
+      }
+      const raw = frozenVariableDrafts[variableName]
+      const parsed = parseDraftNumber(raw ?? '')
+      nextFrozen[variableName] = parsed ?? 0
+      onUpdateObjectFrozenVariables(selectedNodeId, nextFrozen)
+    },
+    [
+      currentObjectFrozenValues,
+      frozenVariableDrafts,
+      onUpdateObjectFrozenVariables,
+      paramOverrideTarget,
+      selectedNodeId,
+      systemDraft.varNames.length,
+    ]
+  )
+
+  const handleFrozenVariableValueChange = useCallback(
+    (variableName: string, rawValue: string) => {
+      if (!paramOverrideTarget || paramOverrideTarget.type === 'isocline' || !selectedNodeId) {
+        return
+      }
+      setFrozenVariableDrafts((prev) => ({ ...prev, [variableName]: rawValue }))
+      if (!Object.prototype.hasOwnProperty.call(currentObjectFrozenValues, variableName)) {
+        return
+      }
+      const parsed = parseDraftNumber(rawValue)
+      if (parsed === null) return
+      const nextFrozen = {
+        ...currentObjectFrozenValues,
+        [variableName]: parsed,
+      }
+      onUpdateObjectFrozenVariables(selectedNodeId, nextFrozen)
+    },
+    [
+      currentObjectFrozenValues,
+      onUpdateObjectFrozenVariables,
+      paramOverrideTarget,
+      selectedNodeId,
+    ]
+  )
 
   const handleUpdateIsocline = useCallback(
     (update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>) => {
@@ -3722,7 +4007,7 @@ export function InspectorDetailsPanel({
       setContinuationError(`Solve the ${equilibriumLabelLower} before continuing.`)
       return
     }
-    if (systemDraft.paramNames.length === 0) {
+    if (continuationParameterCount === 0) {
       setContinuationError('Add a parameter before continuing.')
       return
     }
@@ -3837,7 +4122,7 @@ export function InspectorDetailsPanel({
       setBranchContinuationError('Select a branch point to continue from.')
       return
     }
-    if (systemDraft.paramNames.length === 0) {
+    if (continuationParameterCount === 0) {
       setBranchContinuationError('Add a parameter before continuing.')
       return
     }
@@ -3931,7 +4216,7 @@ export function InspectorDetailsPanel({
       setFoldCurveError('Select a Fold bifurcation point to continue.')
       return
     }
-    if (systemDraft.paramNames.length < 2) {
+    if (continuationParameterCount < 2) {
       setFoldCurveError('Add another parameter before continuing.')
       return
     }
@@ -4000,7 +4285,7 @@ export function InspectorDetailsPanel({
       setHopfCurveError(`Select a ${hopfCurveLabel} bifurcation point to continue.`)
       return
     }
-    if (systemDraft.paramNames.length < 2) {
+    if (continuationParameterCount < 2) {
       setHopfCurveError('Add another parameter before continuing.')
       return
     }
@@ -4070,7 +4355,7 @@ export function InspectorDetailsPanel({
       setIsochroneCurveError('Selected point has no valid period.')
       return
     }
-    if (systemDraft.paramNames.length < 2) {
+    if (continuationParameterCount < 2) {
       setIsochroneCurveError('Add another parameter before continuing.')
       return
     }
@@ -4078,7 +4363,7 @@ export function InspectorDetailsPanel({
       setIsochroneCurveError('Select a first continuation parameter.')
       return
     }
-    if (!systemDraft.paramNames.includes(isochroneCurveDraft.parameterName)) {
+    if (!continuationParameterSet.has(isochroneCurveDraft.parameterName)) {
       setIsochroneCurveError('Select a valid first continuation parameter.')
       return
     }
@@ -4086,7 +4371,7 @@ export function InspectorDetailsPanel({
       setIsochroneCurveError('Select a second continuation parameter.')
       return
     }
-    if (!systemDraft.paramNames.includes(isochroneCurveDraft.param2Name)) {
+    if (!continuationParameterSet.has(isochroneCurveDraft.param2Name)) {
       setIsochroneCurveError('Select a valid second continuation parameter.')
       return
     }
@@ -4152,7 +4437,7 @@ export function InspectorDetailsPanel({
       setNSCurveError(`Select a ${nsCurveLabel} bifurcation point to continue.`)
       return
     }
-    if (systemDraft.paramNames.length < 2) {
+    if (continuationParameterCount < 2) {
       setNSCurveError('Add another parameter before continuing.')
       return
     }
@@ -4221,7 +4506,7 @@ export function InspectorDetailsPanel({
       setLimitCycleFromHopfError('Select a Hopf bifurcation point to continue.')
       return
     }
-    if (!systemDraft.paramNames.includes(limitCycleFromHopfDraft.parameterName)) {
+    if (!continuationParameterSet.has(limitCycleFromHopfDraft.parameterName)) {
       setLimitCycleFromHopfError('Continuation parameter is not defined in this system.')
       return
     }
@@ -4325,7 +4610,7 @@ export function InspectorDetailsPanel({
       setLimitCycleFromPDError('Select a Period Doubling point to branch.')
       return
     }
-    if (!branchParameterName || !systemDraft.paramNames.includes(branchParameterName)) {
+    if (!branchParameterName || !continuationParameterSet.has(branchParameterName)) {
       setLimitCycleFromPDError('Continuation parameter is not defined in this system.')
       return
     }
@@ -4429,7 +4714,7 @@ export function InspectorDetailsPanel({
       setLimitCycleFromPDError('Select a Period Doubling point to branch.')
       return
     }
-    if (!branchParameterName || !systemDraft.paramNames.includes(branchParameterName)) {
+    if (!branchParameterName || !continuationParameterSet.has(branchParameterName)) {
       setLimitCycleFromPDError('Continuation parameter is not defined in this system.')
       return
     }
@@ -4521,15 +4806,15 @@ export function InspectorDetailsPanel({
       setHomoclinicFromLargeCycleError('Select a branch point to continue from.')
       return
     }
-    if (systemDraft.paramNames.length < 2) {
+    if (continuationParameterCount < 2) {
       setHomoclinicFromLargeCycleError('Add another parameter before continuing.')
       return
     }
-    if (!systemDraft.paramNames.includes(homoclinicFromLargeCycleDraft.parameterName)) {
+    if (!continuationParameterSet.has(homoclinicFromLargeCycleDraft.parameterName)) {
       setHomoclinicFromLargeCycleError('Select a valid first continuation parameter.')
       return
     }
-    if (!systemDraft.paramNames.includes(homoclinicFromLargeCycleDraft.param2Name)) {
+    if (!continuationParameterSet.has(homoclinicFromLargeCycleDraft.param2Name)) {
       setHomoclinicFromLargeCycleError('Select a valid second continuation parameter.')
       return
     }
@@ -4638,15 +4923,15 @@ export function InspectorDetailsPanel({
       setHomoclinicFromHomoclinicError('Source homoclinic branch is missing metadata.')
       return
     }
-    if (systemDraft.paramNames.length < 2) {
+    if (continuationParameterCount < 2) {
       setHomoclinicFromHomoclinicError('Add another parameter before continuing.')
       return
     }
-    if (!systemDraft.paramNames.includes(homoclinicFromHomoclinicDraft.parameterName)) {
+    if (!continuationParameterSet.has(homoclinicFromHomoclinicDraft.parameterName)) {
       setHomoclinicFromHomoclinicError('Select a valid first continuation parameter.')
       return
     }
-    if (!systemDraft.paramNames.includes(homoclinicFromHomoclinicDraft.param2Name)) {
+    if (!continuationParameterSet.has(homoclinicFromHomoclinicDraft.param2Name)) {
       setHomoclinicFromHomoclinicError('Select a valid second continuation parameter.')
       return
     }
@@ -4749,15 +5034,15 @@ export function InspectorDetailsPanel({
       setHomotopySaddleFromEquilibriumError('Select a branch point to continue from.')
       return
     }
-    if (systemDraft.paramNames.length < 2) {
+    if (continuationParameterCount < 2) {
       setHomotopySaddleFromEquilibriumError('Add another parameter before continuing.')
       return
     }
-    if (!systemDraft.paramNames.includes(homotopySaddleFromEquilibriumDraft.parameterName)) {
+    if (!continuationParameterSet.has(homotopySaddleFromEquilibriumDraft.parameterName)) {
       setHomotopySaddleFromEquilibriumError('Select a valid first continuation parameter.')
       return
     }
-    if (!systemDraft.paramNames.includes(homotopySaddleFromEquilibriumDraft.param2Name)) {
+    if (!continuationParameterSet.has(homotopySaddleFromEquilibriumDraft.param2Name)) {
       setHomotopySaddleFromEquilibriumError('Select a valid second continuation parameter.')
       return
     }
@@ -4974,11 +5259,11 @@ export function InspectorDetailsPanel({
       setLimitCycleFromOrbitError('Run an orbit before continuing.')
       return
     }
-    if (systemDraft.paramNames.length === 0) {
+    if (continuationParameterCount === 0) {
       setLimitCycleFromOrbitError('Add a parameter before continuing.')
       return
     }
-    if (!systemDraft.paramNames.includes(limitCycleFromOrbitDraft.parameterName)) {
+    if (!continuationParameterSet.has(limitCycleFromOrbitDraft.parameterName)) {
       setLimitCycleFromOrbitError('Select a continuation parameter.')
       return
     }
@@ -5507,7 +5792,7 @@ export function InspectorDetailsPanel({
                 />
               </label>
               {selectionNode.kind === 'branch' &&
-              isLimitCycleBranch &&
+              supportsStateSpaceStride &&
               systemDraft.type === 'flow' ? (
                 <label>
                   State space stride
@@ -5529,6 +5814,82 @@ export function InspectorDetailsPanel({
                 </label>
               ) : null}
             </div>
+          ) : null}
+
+          {paramOverrideTarget && !isocline ? (
+            <InspectorDisclosure
+              key={`${selectionKey}-frozen-variables`}
+              title={
+                subsystemSnapshotMismatch ? (
+                  <>
+                    <span>Frozen Variables</span>
+                    <span className="tree-node__tag" data-testid="subsystem-mismatch-badge">
+                      mismatch
+                    </span>
+                  </>
+                ) : (
+                  'Frozen Variables'
+                )
+              }
+              testId="frozen-variables-toggle"
+            >
+              <div className="inspector-section" data-testid="frozen-variables-section">
+                <div className="state-table__wrap" role="region" aria-label="Frozen variables">
+                  <table className="state-table__grid">
+                    <thead>
+                      <tr>
+                        <th>Variable</th>
+                        <th>Frozen</th>
+                        <th>Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {systemDraft.varNames.map((name, index) => {
+                        const isFrozen = Object.prototype.hasOwnProperty.call(
+                          currentObjectFrozenValues,
+                          name
+                        )
+                        const value = currentObjectFrozenValues[name] ?? 0
+                        return (
+                          <tr key={`frozen-variable-row-${name || index}`}>
+                            <td>{name || `x${index + 1}`}</td>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={isFrozen}
+                                onChange={(event) =>
+                                  handleToggleFrozenVariable(name, event.target.checked)
+                                }
+                                data-testid={`frozen-variable-toggle-${name}`}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                className="state-table__input"
+                                value={
+                                  frozenVariableDrafts[name] ??
+                                  value.toString()
+                                }
+                                disabled={!isFrozen}
+                                onChange={(event) =>
+                                  handleFrozenVariableValueChange(name, event.target.value)
+                                }
+                                data-testid={`frozen-variable-value-${name}`}
+                              />
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="empty-state">
+                  Frozen variables are embedded as constants across this object's computations.
+                </p>
+              </div>
+            </InspectorDisclosure>
           ) : null}
 
           {paramOverrideTarget && !isocline ? (
@@ -6087,7 +6448,7 @@ export function InspectorDetailsPanel({
                   ) : null}
                   <StateTable
                     title="Initial state"
-                    varNames={systemDraft.varNames}
+                    varNames={frozenVariableHeaderNames}
                     values={orbitDraft.initialState}
                     onChange={(next) =>
                       setOrbitDraft((prev) => ({ ...prev, initialState: next }))
@@ -6142,7 +6503,7 @@ export function InspectorDetailsPanel({
                 >
                   <div className="inspector-section">
                     <h4 className="inspector-subheading">Continue from Orbit</h4>
-                    {systemDraft.paramNames.length === 0 ? (
+                    {continuationParameterCount === 0 ? (
                       <p className="empty-state">Add a parameter before continuing.</p>
                     ) : null}
                     {runDisabled ? (
@@ -6153,7 +6514,7 @@ export function InspectorDetailsPanel({
                     {orbit && orbit.data.length === 0 ? (
                       <p className="empty-state">Run an orbit before continuing.</p>
                     ) : null}
-                    {systemDraft.paramNames.length === 0 ||
+                    {continuationParameterCount === 0 ||
                     !orbit ||
                     orbit.data.length === 0 ? null : (
                     <>
@@ -6214,7 +6575,7 @@ export function InspectorDetailsPanel({
                           }}
                           data-testid="limit-cycle-from-orbit-parameter"
                         >
-                          {systemDraft.paramNames.map((name) => (
+                          {continuationParameterLabels.map((name) => (
                             <option key={name} value={name}>
                               {name}
                             </option>
@@ -6386,7 +6747,7 @@ export function InspectorDetailsPanel({
                         onClick={handleCreateLimitCycleFromOrbit}
                         disabled={
                           runDisabled ||
-                          systemDraft.paramNames.length === 0 ||
+                          continuationParameterCount === 0 ||
                           orbit.data.length === 0
                         }
                         data-testid="limit-cycle-from-orbit-submit"
@@ -6425,7 +6786,7 @@ export function InspectorDetailsPanel({
                         className="inspector-inline-button"
                         onClick={() =>
                           void writeClipboardText(
-                            formatPointValues(equilibrium.solution?.state ?? [])
+                            formatPointValues(equilibriumDisplayState ?? [])
                           )
                         }
                       >
@@ -6433,11 +6794,11 @@ export function InspectorDetailsPanel({
                       </button>
                     ) : null}
                   </div>
-                  {equilibrium.solution ? (
+                  {equilibrium.solution && equilibriumDisplayState ? (
                     <InspectorMetrics
-                      rows={systemDraft.varNames.map((name, index) => ({
-                        label: name || `x${index + 1}`,
-                        value: formatNumber(equilibrium.solution?.state[index] ?? Number.NaN, 6),
+                      rows={frozenVariableHeaderNames.map((name, index) => ({
+                        label: name,
+                        value: formatNumber(equilibriumDisplayState[index] ?? Number.NaN, 6),
                       }))}
                     />
                   ) : (
@@ -6474,9 +6835,9 @@ export function InspectorDetailsPanel({
                           <thead>
                             <tr>
                               <th>#</th>
-                              {systemDraft.varNames.map((name, index) => (
+                              {frozenVariableHeaderNames.map((name, index) => (
                                 <th key={`equilibrium-cycle-col-${index}`}>
-                                  {name || `x${index + 1}`}
+                                  {name}
                                 </th>
                               ))}
                             </tr>
@@ -6485,7 +6846,7 @@ export function InspectorDetailsPanel({
                             {equilibriumCyclePoints.map((point, rowIndex) => (
                               <tr key={`equilibrium-cycle-row-${rowIndex}`}>
                                 <td>{rowIndex}</td>
-                                {systemDraft.varNames.map((_, varIndex) => (
+                                {frozenVariableHeaderNames.map((_, varIndex) => (
                                   <td
                                     key={`equilibrium-cycle-cell-${rowIndex}-${varIndex}`}
                                   >
@@ -6807,8 +7168,8 @@ export function InspectorDetailsPanel({
                         ]}
                       />
                       <InspectorMetrics
-                        rows={systemDraft.varNames.map((name, index) => ({
-                          label: name || `x${index + 1}`,
+                        rows={frozenVariableHeaderNames.map((name, index) => ({
+                          label: name,
                           value: formatNumber(
                             equilibrium.lastSolverParams?.initialGuess[index] ?? Number.NaN,
                             6
@@ -6836,7 +7197,7 @@ export function InspectorDetailsPanel({
                   ) : null}
                   <StateTable
                     title="Initial state"
-                    varNames={systemDraft.varNames}
+                    varNames={frozenVariableHeaderNames}
                     values={equilibriumDraft.initialGuess}
                     onChange={(next) =>
                       setEquilibriumDraft((prev) => ({ ...prev, initialGuess: next }))
@@ -6913,7 +7274,7 @@ export function InspectorDetailsPanel({
                       Apply valid system changes before continuing.
                     </div>
                   ) : null}
-                  {systemDraft.paramNames.length === 0 ? (
+                  {continuationParameterCount === 0 ? (
                     <p className="empty-state">Add parameters to enable continuation.</p>
                   ) : null}
                   {!equilibrium.solution ? (
@@ -6962,7 +7323,7 @@ export function InspectorDetailsPanel({
                           }}
                           data-testid="equilibrium-branch-parameter"
                         >
-                          {systemDraft.paramNames.map((name) => (
+                          {continuationParameterLabels.map((name) => (
                             <option key={name} value={name}>
                               {name}
                             </option>
@@ -7628,7 +7989,7 @@ export function InspectorDetailsPanel({
                 </div>
               ) : null}
               <div className="inspector-subsection">
-                <h4 className="inspector-subheading">Displayed objects</h4>
+                <h4 className="inspector-subheading">Displayed items</h4>
                 <label>
                   Fallback display
                   <select
@@ -7640,13 +8001,13 @@ export function InspectorDetailsPanel({
                     }
                     data-testid="scene-display"
                   >
-                    <option value="all">All visible objects</option>
-                    <option value="selection">Selected object</option>
+                    <option value="all">All visible objects and branches</option>
+                    <option value="selection">Selected object or branch</option>
                   </select>
                 </label>
-                <p className="empty-state">Used when no objects are selected below.</p>
+                <p className="empty-state">Used when no items are selected below.</p>
                 <label>
-                  Search objects
+                  Search objects and branches
                   <input
                     value={sceneSearch}
                     onChange={(event) => setSceneSearch(event.target.value)}
@@ -7682,14 +8043,14 @@ export function InspectorDetailsPanel({
                 ) : (
                   <p className="empty-state">
                     {scene.display === 'selection'
-                      ? 'No objects selected yet. Showing the current selection by default.'
-                      : 'No objects selected yet. Showing all visible objects by default.'}{' '}
-                    Use the list below to add objects to this scene.
+                      ? 'No items selected yet. Showing the current selection by default.'
+                      : 'No items selected yet. Showing all visible items by default.'}{' '}
+                    Use the list below to add objects or branches to this scene.
                   </p>
                 )}
-                {sceneFilteredObjects.length > 0 ? (
+                {sceneFilteredEntries.length > 0 ? (
                   <div className="scene-object-list">
-                    {sceneFilteredObjects.map((entry) => {
+                    {sceneFilteredEntries.map((entry) => {
                       const checked = sceneSelectedSet.has(entry.id)
                       return (
                         <label
@@ -7716,7 +8077,7 @@ export function InspectorDetailsPanel({
                     })}
                   </div>
                 ) : (
-                  <p className="empty-state">No objects match this search.</p>
+                  <p className="empty-state">No scene items match this search.</p>
                 )}
               </div>
             </div>
@@ -8212,7 +8573,7 @@ export function InspectorDetailsPanel({
                                       resolveContinuationPointParam2Value(
                                         selectedBranchPoint,
                                         branch.data.branch_type,
-                                        systemDraft.varNames.length
+                                        branchStateDimension
                                       ) ?? branchParams[index]
                                   }
                                 } else if (index === continuationParamIndex) {
@@ -8231,7 +8592,9 @@ export function InspectorDetailsPanel({
                               <InspectorMetrics
                                 rows={limitCyclePointMetrics.metrics.ranges.map(
                                   (range, index) => ({
-                                    label: systemDraft.varNames[index] || `x${index + 1}`,
+                                    label:
+                                      frozenVariableHeaderNames[index] ||
+                                      `x${index + 1}`,
                                     value: `${formatNumber(
                                       range.min,
                                       6
@@ -8252,7 +8615,9 @@ export function InspectorDetailsPanel({
                               <InspectorMetrics
                                 rows={limitCyclePointMetrics.metrics.means.map(
                                   (mean, index) => ({
-                                    label: systemDraft.varNames[index] || `x${index + 1}`,
+                                    label:
+                                      frozenVariableHeaderNames[index] ||
+                                      `x${index + 1}`,
                                     value: `mean ${formatNumber(
                                       mean,
                                       6
@@ -8635,7 +9000,7 @@ export function InspectorDetailsPanel({
                                       resolveContinuationPointParam2Value(
                                         selectedBranchPoint,
                                         branch.data.branch_type,
-                                        systemDraft.varNames.length
+                                        branchStateDimension
                                       ) ?? branchParams[index]
                                   }
                                 } else if (index === continuationParamIndex) {
@@ -8664,8 +9029,8 @@ export function InspectorDetailsPanel({
                               ) : null}
                             </div>
                             <InspectorMetrics
-                              rows={systemDraft.varNames.map((name, index) => ({
-                                label: name || `x${index + 1}`,
+                              rows={frozenVariableHeaderNames.map((name, index) => ({
+                                label: name,
                                 value: formatNumber(
                                   selectedBranchPointState[index] ?? Number.NaN,
                                   6
@@ -8702,9 +9067,9 @@ export function InspectorDetailsPanel({
                                       <thead>
                                         <tr>
                                           <th>#</th>
-                                          {systemDraft.varNames.map((name, index) => (
+                                          {frozenVariableHeaderNames.map((name, index) => (
                                             <th key={`branch-cycle-col-${index}`}>
-                                              {name || `x${index + 1}`}
+                                              {name}
                                             </th>
                                           ))}
                                         </tr>
@@ -8713,7 +9078,7 @@ export function InspectorDetailsPanel({
                                         {branchCyclePoints.map((point, rowIndex) => (
                                           <tr key={`branch-cycle-row-${rowIndex}`}>
                                             <td>{rowIndex}</td>
-                                            {systemDraft.varNames.map((_, varIndex) => (
+                                            {frozenVariableHeaderNames.map((_, varIndex) => (
                                               <td
                                                 key={`branch-cycle-cell-${rowIndex}-${varIndex}`}
                                               >
@@ -8933,7 +9298,7 @@ export function InspectorDetailsPanel({
                           Apply valid system changes before continuing.
                         </div>
                       ) : null}
-                      {systemDraft.paramNames.length === 0 ? (
+                      {continuationParameterCount === 0 ? (
                         <p className="empty-state">Add parameters to enable continuation.</p>
                       ) : null}
                       <label>
@@ -8980,7 +9345,7 @@ export function InspectorDetailsPanel({
                           }}
                           data-testid="branch-from-point-parameter"
                         >
-                          {systemDraft.paramNames.map((name) => (
+                          {continuationParameterLabels.map((name) => (
                             <option key={name} value={name}>
                               {name}
                               {name === branch.parameterName ? ' (current)' : ''}
@@ -9135,7 +9500,7 @@ export function InspectorDetailsPanel({
                           Apply valid system changes before continuing.
                         </div>
                       ) : null}
-                      {systemDraft.paramNames.length < 2 ? (
+                      {continuationParameterCount < 2 ? (
                         <p className="empty-state">
                           Add a second parameter to enable codim-1 continuation.
                         </p>
@@ -9711,7 +10076,7 @@ export function InspectorDetailsPanel({
                           Apply valid system changes before continuing.
                         </div>
                       ) : null}
-                      {systemDraft.paramNames.length < 2 ? (
+                      {continuationParameterCount < 2 ? (
                         <p className="empty-state">
                           Add a second parameter to enable isochrone continuation.
                         </p>
@@ -9738,10 +10103,10 @@ export function InspectorDetailsPanel({
                             setIsochroneCurveDraft((prev) => {
                               const parameterName = event.target.value
                               const fallbackParam2 =
-                                systemDraft.paramNames.find((name) => name !== parameterName) ?? ''
+                                continuationParameterLabels.find((name) => name !== parameterName) ?? ''
                               const param2Name =
                                 prev.param2Name !== parameterName &&
-                                systemDraft.paramNames.includes(prev.param2Name)
+                                continuationParameterSet.has(prev.param2Name)
                                   ? prev.param2Name
                                   : fallbackParam2
                               return { ...prev, parameterName, param2Name }
@@ -9952,7 +10317,7 @@ export function InspectorDetailsPanel({
                           branches.
                         </p>
                       ) : null}
-                      {systemDraft.paramNames.length === 0 ? (
+                      {continuationParameterCount === 0 ? (
                         <p className="empty-state">Add a parameter before continuing.</p>
                       ) : null}
                       {runDisabled ? (
@@ -9961,7 +10326,7 @@ export function InspectorDetailsPanel({
                         </div>
                       ) : null}
                       {!isHopfSourceBranch ||
-                      systemDraft.paramNames.length === 0 ? null : !selectedBranchPoint ? (
+                      continuationParameterCount === 0 ? null : !selectedBranchPoint ? (
                         <p className="empty-state">Select a branch point to continue.</p>
                       ) : !isHopfPointSelected ? (
                         <p className="empty-state">
@@ -10028,7 +10393,7 @@ export function InspectorDetailsPanel({
                                 }}
                                 data-testid="limit-cycle-from-hopf-parameter"
                               >
-                              {systemDraft.paramNames.map((name) => (
+                              {continuationParameterLabels.map((name) => (
                                 <option key={name} value={name}>
                                   {name}
                                 </option>
@@ -10205,7 +10570,7 @@ export function InspectorDetailsPanel({
                               !selectedBranchPoint ||
                               !isHopfSourceBranch ||
                               !isHopfPointSelected ||
-                              systemDraft.paramNames.length === 0
+                              continuationParameterCount === 0
                             }
                             data-testid="limit-cycle-from-hopf-submit"
                           >
@@ -10506,7 +10871,7 @@ export function InspectorDetailsPanel({
                           Homoclinic continuation is only available for flow systems.
                         </p>
                       ) : null}
-                      {systemDraft.paramNames.length < 2 ? (
+                      {continuationParameterCount < 2 ? (
                         <p className="empty-state">Add a second parameter to continue.</p>
                       ) : null}
                       {runDisabled ? (
@@ -10514,7 +10879,7 @@ export function InspectorDetailsPanel({
                           Apply valid system changes before continuing.
                         </div>
                       ) : null}
-                      {systemDraft.paramNames.length < 2 ? (
+                      {continuationParameterCount < 2 ? (
                         <p className="empty-state">Add a second parameter to continue.</p>
                       ) : null}
                       {!selectedBranchPoint ? (
@@ -10547,7 +10912,7 @@ export function InspectorDetailsPanel({
                               }
                               data-testid="homoclinic-from-large-cycle-param1"
                             >
-                              {systemDraft.paramNames.map((name) => (
+                              {continuationParameterLabels.map((name) => (
                                 <option key={name} value={name}>
                                   {name}
                                 </option>
@@ -10566,7 +10931,7 @@ export function InspectorDetailsPanel({
                               }
                               data-testid="homoclinic-from-large-cycle-param2"
                             >
-                              {systemDraft.paramNames
+                              {continuationParameterLabels
                                 .filter(
                                   (name) =>
                                     name !== homoclinicFromLargeCycleDraft.parameterName
@@ -10829,14 +11194,14 @@ export function InspectorDetailsPanel({
                                 setHomoclinicFromHomoclinicDraft((prev) => {
                                   const parameterName = event.target.value
                                   const fallbackParam2 =
-                                    systemDraft.paramNames.find(
+                                    continuationParameterLabels.find(
                                       (name) => name !== parameterName
                                     ) ??
-                                    systemDraft.paramNames[0] ??
+                                    continuationParameterLabels[0] ??
                                     ''
                                   const param2Name =
                                     prev.param2Name !== parameterName &&
-                                    systemDraft.paramNames.includes(prev.param2Name)
+                                    continuationParameterSet.has(prev.param2Name)
                                       ? prev.param2Name
                                       : fallbackParam2
                                   return { ...prev, parameterName, param2Name }
@@ -10844,7 +11209,7 @@ export function InspectorDetailsPanel({
                               }
                               data-testid="homoclinic-from-homoclinic-parameter"
                             >
-                              {systemDraft.paramNames.map((name) => (
+                              {continuationParameterLabels.map((name) => (
                                 <option key={`homoc-homoc-param1-${name}`} value={name}>
                                   {name}
                                 </option>
@@ -10863,7 +11228,7 @@ export function InspectorDetailsPanel({
                               }
                               data-testid="homoclinic-from-homoclinic-param2"
                             >
-                              {systemDraft.paramNames
+                              {continuationParameterLabels
                                 .filter((name) => name !== homoclinicFromHomoclinicDraft.parameterName)
                                 .map((name) => (
                                   <option key={`homoc-homoc-param2-${name}`} value={name}>
@@ -11096,7 +11461,7 @@ export function InspectorDetailsPanel({
                           Homotopy-saddle continuation is only available for flow systems.
                         </p>
                       ) : null}
-                      {systemDraft.paramNames.length < 2 ? (
+                      {continuationParameterCount < 2 ? (
                         <p className="empty-state">Add a second parameter to continue.</p>
                       ) : null}
                       {runDisabled ? (
@@ -11134,7 +11499,7 @@ export function InspectorDetailsPanel({
                               }
                               data-testid="homotopy-saddle-from-equilibrium-param1"
                             >
-                              {systemDraft.paramNames.map((name) => (
+                              {continuationParameterLabels.map((name) => (
                                 <option key={name} value={name}>
                                   {name}
                                 </option>
@@ -11153,7 +11518,7 @@ export function InspectorDetailsPanel({
                               }
                               data-testid="homotopy-saddle-from-equilibrium-param2"
                             >
-                              {systemDraft.paramNames
+                              {continuationParameterLabels
                                 .filter(
                                   (name) =>
                                     name !== homotopySaddleFromEquilibriumDraft.parameterName

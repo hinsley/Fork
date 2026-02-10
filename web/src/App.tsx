@@ -277,6 +277,7 @@ function App() {
         onToggleVisibility={actions.toggleVisibility}
         onUpdateRender={actions.updateRender}
         onUpdateObjectParams={actions.updateObjectParams}
+        onUpdateObjectFrozenVariables={actions.updateObjectFrozenVariables}
         onUpdateScene={actions.updateScene}
         onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
         onSetLimitCycleRenderTarget={actions.setLimitCycleRenderTarget}
@@ -430,6 +431,7 @@ function App() {
                 onToggleVisibility={actions.toggleVisibility}
                 onUpdateRender={actions.updateRender}
                 onUpdateObjectParams={actions.updateObjectParams}
+                onUpdateObjectFrozenVariables={actions.updateObjectFrozenVariables}
                 onUpdateIsoclineObject={actions.updateIsoclineObject}
                 onComputeIsocline={actions.computeIsocline}
                 onUpdateScene={actions.updateScene}

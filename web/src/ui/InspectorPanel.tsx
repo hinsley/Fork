@@ -50,6 +50,10 @@ type InspectorPanelProps = {
   onToggleVisibility: (id: string) => void
   onUpdateRender: (id: string, render: Partial<TreeNode['render']>) => void
   onUpdateObjectParams: (id: string, params: number[] | null) => void
+  onUpdateObjectFrozenVariables: (
+    id: string,
+    frozenValuesByVarName: Record<string, number>
+  ) => void
   onUpdateIsoclineObject?: (
     id: string,
     update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>
@@ -118,6 +122,7 @@ export function InspectorPanel({
   onToggleVisibility,
   onUpdateRender,
   onUpdateObjectParams,
+  onUpdateObjectFrozenVariables,
   onUpdateIsoclineObject,
   onComputeIsocline,
   onUpdateScene,
@@ -163,6 +168,7 @@ export function InspectorPanel({
           onToggleVisibility={onToggleVisibility}
           onUpdateRender={onUpdateRender}
           onUpdateObjectParams={onUpdateObjectParams}
+          onUpdateObjectFrozenVariables={onUpdateObjectFrozenVariables}
           onUpdateIsoclineObject={onUpdateIsoclineObject}
           onComputeIsocline={onComputeIsocline}
           onUpdateScene={onUpdateScene}

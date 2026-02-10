@@ -118,6 +118,20 @@ describe('validateSystemConfig', () => {
     expect(nonNumeric.errors.params).toEqual(['', 'Parameter must be numeric.'])
   })
 
+  it('rejects variable and parameter name collisions', () => {
+    const result = validateSystemConfig(
+      buildConfig({
+        varNames: ['x', 'y'],
+        equations: ['x', 'y'],
+        paramNames: ['a', 'x'],
+        params: [1, 2],
+      })
+    )
+
+    expect(result.valid).toBe(false)
+    expect(result.errors.paramNames).toBe('Variable/parameter name collisions: x.')
+  })
+
   it('requires parameter counts to match names when multiple params exist', () => {
     const result = validateSystemConfig(
       buildConfig({ params: [1], paramNames: ['a', 'b'] })

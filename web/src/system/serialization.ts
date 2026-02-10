@@ -1,9 +1,9 @@
 import type { System, SystemData, SystemUiSnapshot } from './types'
 import { normalizeSystem } from './model'
 
-export const SYSTEM_DATA_SCHEMA_VERSION = 1
-export const SYSTEM_UI_SCHEMA_VERSION = 1
-export const SYSTEM_PROJECT_SCHEMA_VERSION = 1
+export const SYSTEM_DATA_SCHEMA_VERSION = 2
+export const SYSTEM_UI_SCHEMA_VERSION = 2
+export const SYSTEM_PROJECT_SCHEMA_VERSION = 2
 
 export type LegacySystemBundle = {
   schemaVersion: number
@@ -33,6 +33,12 @@ function latestIso(primary: string, secondary?: string) {
 
 function isLegacySystem(system: System | SystemData): system is System {
   return 'nodes' in system || 'ui' in system
+}
+
+function unsupportedSchemaError(version: number): Error {
+  return new Error(
+    `Unsupported system schema version: ${version}. Recompute analyses with the current app version and export again.`
+  )
 }
 
 export function splitSystem(system: System): { data: SystemData; ui: SystemUiSnapshot } {
@@ -95,7 +101,7 @@ export function deserializeSystemData(
   bundle: SystemDataBundle | LegacySystemBundle
 ): { data: SystemData; ui?: SystemUiSnapshot } {
   if (bundle.schemaVersion !== SYSTEM_DATA_SCHEMA_VERSION) {
-    throw new Error(`Unsupported system schema version: ${bundle.schemaVersion}`)
+    throw unsupportedSchemaError(bundle.schemaVersion)
   }
   if (isLegacySystem(bundle.system)) {
     const normalized = normalizeSystem(structuredClone(bundle.system))
@@ -106,7 +112,7 @@ export function deserializeSystemData(
 
 export function deserializeSystemUi(bundle: SystemUiBundle): SystemUiSnapshot {
   if (bundle.schemaVersion !== SYSTEM_UI_SCHEMA_VERSION) {
-    throw new Error(`Unsupported system UI schema version: ${bundle.schemaVersion}`)
+    throw unsupportedSchemaError(bundle.schemaVersion)
   }
   return structuredClone(bundle.ui)
 }
@@ -115,7 +121,7 @@ export function deserializeSystem(
   bundle: SystemProjectBundle | LegacySystemBundle
 ): System {
   if (bundle.schemaVersion !== SYSTEM_PROJECT_SCHEMA_VERSION) {
-    throw new Error(`Unsupported system schema version: ${bundle.schemaVersion}`)
+    throw unsupportedSchemaError(bundle.schemaVersion)
   }
   if ('ui' in bundle) {
     return mergeSystem(structuredClone(bundle.system), structuredClone(bundle.ui))

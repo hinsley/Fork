@@ -14,6 +14,7 @@ import type {
 import type { JobTiming } from '../compute/jobQueue'
 import { createSystem } from '../system/model'
 import type {
+  AnalysisObject,
   BifurcationDiagram,
   ContinuationObject,
   ContinuationPoint,
@@ -21,15 +22,18 @@ import type {
   CovariantLyapunovData,
   EquilibriumObject,
   EquilibriumSolverParams,
+  FrozenVariablesConfig,
   IsoclineAxis,
   IsoclineObject,
   IsoclineSource,
   LimitCycleRenderTarget,
   LimitCycleObject,
   OrbitObject,
+  ParameterRef,
   System,
   SystemSummary,
   Scene,
+  SubsystemSnapshot,
   SystemConfig,
   TreeNode,
 } from '../system/types'
@@ -68,6 +72,18 @@ import {
   serializeBranchDataForWasm,
 } from '../system/continuation'
 import { resolveObjectParams } from '../system/parameters'
+import {
+  buildReducedRunConfig,
+  buildSubsystemSnapshot,
+  continuationParameterOptions,
+  formatParameterRefLabel,
+  isSubsystemSnapshotCompatible,
+  mapStateRowsToReduced,
+  parseParameterRefLabel,
+  projectStateToReduced,
+  resolveRuntimeParameterName,
+  resolveSubsystemSnapshot,
+} from '../system/subsystemGateway'
 import { downloadSystem, readSystemFile } from '../system/importExport'
 import { formatEquilibriumLabel } from '../system/labels'
 import { AppContext } from './appContext'
@@ -209,16 +225,23 @@ function reshapeCovariantVectors(
   }
 }
 
-function requireOrbitRunConfig(system: SystemConfig, orbit: OrbitObject): SystemConfig {
+function requireOrbitRunConfig(
+  system: SystemConfig,
+  orbit: OrbitObject
+): { snapshot: SubsystemSnapshot; runConfig: SystemConfig } {
   if (!orbit.parameters || orbit.parameters.length !== system.params.length) {
     throw new Error(
       'Orbit parameters are unavailable. Run the orbit again to compute Lyapunov data.'
     )
   }
-  // Use parameters recorded with the trajectory to avoid analyzing a different system.
+  const snapshot = resolveSubsystemSnapshot(
+    system,
+    orbit.subsystemSnapshot,
+    orbit.frozenVariables
+  )
   return {
-    ...system,
-    params: [...orbit.parameters],
+    snapshot,
+    runConfig: buildReducedRunConfig(system, snapshot, [...orbit.parameters]),
   }
 }
 
@@ -321,6 +344,7 @@ function buildCurrentIsoclineComputeRequest(
   const source = normalizeIsoclineSource(system, object.source)
   const axes = normalizeIsoclineAxes(system, object.axes)
   const frozenState = normalizeIsoclineFrozenState(system, object.frozenState)
+  const subsystemSnapshot = buildObjectSubsystemSnapshot(system, object)
   const expression = resolveIsoclineExpression(system, source).trim()
   if (!expression) {
     throw new Error('Isocline expression is required before computing.')
@@ -344,6 +368,7 @@ function buildCurrentIsoclineComputeRequest(
     frozenState,
     parameters: [...runConfig.params],
     computedAt: new Date().toISOString(),
+    subsystemSnapshot,
   }
   return { request, snapshot }
 }
@@ -374,7 +399,18 @@ function buildLastIsoclineComputeRequest(
     axes: snapshot.axes,
     frozenState: snapshot.frozenState,
   }
-  return { request, snapshot }
+  return {
+    request,
+    snapshot: {
+      ...snapshot,
+      subsystemSnapshot: resolveSubsystemSnapshot(
+        system,
+        snapshot.subsystemSnapshot,
+        normalizeObjectFrozenVariables(system, object),
+        { maxFreeVariables: 3 }
+      ),
+    },
+  }
 }
 
 function buildIsoclineSnapshotSignature(
@@ -388,6 +424,166 @@ function buildIsoclineSnapshotSignature(
     frozenState: snapshot.frozenState,
     parameters: snapshot.parameters,
   })
+}
+
+type FreezableAnalysisObject = OrbitObject | EquilibriumObject | LimitCycleObject | IsoclineObject
+
+function isFreezableObject(object: AnalysisObject | undefined): object is FreezableAnalysisObject {
+  if (!object) return false
+  return (
+    object.type === 'orbit' ||
+    object.type === 'equilibrium' ||
+    object.type === 'limit_cycle' ||
+    object.type === 'isocline'
+  )
+}
+
+function normalizeObjectFrozenVariables(
+  system: SystemConfig,
+  object: FreezableAnalysisObject
+): FrozenVariablesConfig {
+  if (object.type === 'isocline') {
+    const frozenValuesByVarName: Record<string, number> = {}
+    const freeSet = new Set(object.axes.map((axis) => axis.variableName))
+    system.varNames.forEach((name, index) => {
+      if (freeSet.has(name)) return
+      frozenValuesByVarName[name] = object.frozenState[index] ?? 0
+    })
+    return { frozenValuesByVarName }
+  }
+  return object.frozenVariables ?? { frozenValuesByVarName: {} }
+}
+
+function buildObjectSubsystemSnapshot(
+  system: SystemConfig,
+  object: FreezableAnalysisObject,
+  options?: { useStoredSnapshot?: boolean }
+): SubsystemSnapshot {
+  const maxFree = object.type === 'isocline' ? 3 : undefined
+  if (
+    options?.useStoredSnapshot &&
+    object.subsystemSnapshot &&
+    isSubsystemSnapshotCompatible(system, object.subsystemSnapshot)
+  ) {
+    return object.subsystemSnapshot
+  }
+  return buildSubsystemSnapshot(system, normalizeObjectFrozenVariables(system, object), {
+    maxFreeVariables: maxFree,
+  })
+}
+
+function buildBranchSubsystemSnapshot(
+  system: SystemConfig,
+  branch: ContinuationObject,
+  sourceObject?: FreezableAnalysisObject | null
+): SubsystemSnapshot {
+  if (branch.subsystemSnapshot && isSubsystemSnapshotCompatible(system, branch.subsystemSnapshot)) {
+    return branch.subsystemSnapshot
+  }
+  if (sourceObject) {
+    return buildObjectSubsystemSnapshot(system, sourceObject, { useStoredSnapshot: true })
+  }
+  return buildSubsystemSnapshot(system)
+}
+
+function resolveDisplayParameterName(ref: ParameterRef): string {
+  return formatParameterRefLabel(ref)
+}
+
+function parseContinuationParameter(
+  system: SystemConfig,
+  snapshot: SubsystemSnapshot,
+  label: string
+): ParameterRef {
+  return parseParameterRefLabel(system, snapshot, label)
+}
+
+function resolveBranchPointReducedParamOverrides(
+  branch: ContinuationObject,
+  point: ContinuationPoint
+): Partial<Record<string, number>> {
+  const valuesByGeneratedName: Partial<Record<string, number>> = {}
+  const snapshot = branch.subsystemSnapshot
+  if (!snapshot) return valuesByGeneratedName
+  if (branch.parameterRef?.kind === 'frozen_var' && Number.isFinite(point.param_value)) {
+    const generated = snapshot.frozenParameterNamesByVarName[branch.parameterRef.variableName]
+    if (generated) {
+      valuesByGeneratedName[generated] = point.param_value
+    }
+  }
+  const branchType = branch.data.branch_type
+  if (
+    branchType &&
+    typeof branchType === 'object' &&
+    'param2_ref' in branchType &&
+    branchType.param2_ref?.kind === 'frozen_var'
+  ) {
+    const value = Number.isFinite(point.param2_value)
+      ? point.param2_value
+      : resolveContinuationPointParam2Value(point, branchType, snapshot.freeVariableNames.length)
+    if (Number.isFinite(value)) {
+      const generated = snapshot.frozenParameterNamesByVarName[branchType.param2_ref.variableName]
+      if (generated) {
+        valuesByGeneratedName[generated] = value
+      }
+    }
+  }
+  return valuesByGeneratedName
+}
+
+function applyReducedParamOverrides(
+  runConfig: SystemConfig,
+  overrides: Partial<Record<string, number>>
+): SystemConfig {
+  if (!overrides || Object.keys(overrides).length === 0) return runConfig
+  const next = {
+    ...runConfig,
+    params: [...runConfig.params],
+  }
+  for (let index = 0; index < runConfig.paramNames.length; index += 1) {
+    const name = runConfig.paramNames[index]
+    if (!Object.prototype.hasOwnProperty.call(overrides, name)) continue
+    const value = overrides[name]
+    if (!Number.isFinite(value)) continue
+    next.params[index] = value as number
+  }
+  return next
+}
+
+function projectStateForSnapshot(
+  snapshot: SubsystemSnapshot,
+  state: number[],
+  label: string
+): number[] {
+  const freeDimension = snapshot.freeVariableNames.length
+  const baseDimension = snapshot.baseVarNames.length
+  if (state.length === freeDimension) {
+    return [...state]
+  }
+  if (freeDimension === baseDimension) {
+    return [...state]
+  }
+  if (state.length === baseDimension) {
+    return projectStateToReduced(snapshot, state)
+  }
+  throw new Error(`${label} dimension mismatch for the selected frozen-variable subsystem.`)
+}
+
+type ObjectSubsystemRun = {
+  snapshot: SubsystemSnapshot
+  runConfig: SystemConfig
+}
+
+function buildObjectSubsystemRunConfig(
+  system: SystemConfig,
+  object: FreezableAnalysisObject,
+  baseParams: number[]
+): ObjectSubsystemRun {
+  const snapshot = buildObjectSubsystemSnapshot(system, object)
+  return {
+    snapshot,
+    runConfig: buildReducedRunConfig(system, snapshot, baseParams),
+  }
 }
 
 export type ContinuationProgressState = {
@@ -711,6 +907,10 @@ type AppActions = {
   updateViewportHeight: (nodeId: string, height: number) => void
   updateRender: (nodeId: string, render: Partial<TreeNode['render']>) => void
   updateObjectParams: (nodeId: string, params: number[] | null) => void
+  updateObjectFrozenVariables: (
+    nodeId: string,
+    frozenValuesByVarName: Record<string, number>
+  ) => void
   updateIsoclineObject: (
     nodeId: string,
     update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>
@@ -1106,6 +1306,74 @@ export function AppProvider({
     [scheduleSystemSave, state.system]
   )
 
+  const updateObjectFrozenVariablesAction = useCallback(
+    (nodeId: string, frozenValuesByVarName: Record<string, number>) => {
+      if (!state.system) return
+      const object = state.system.objects[nodeId]
+      if (!isFreezableObject(object)) return
+
+      const normalizedFrozenValuesByVarName: Record<string, number> = {}
+      for (const name of state.system.config.varNames) {
+        if (!Object.prototype.hasOwnProperty.call(frozenValuesByVarName, name)) continue
+        const value = frozenValuesByVarName[name]
+        if (!Number.isFinite(value)) {
+          dispatch({ type: 'SET_ERROR', error: `Frozen value for "${name}" must be numeric.` })
+          return
+        }
+        normalizedFrozenValuesByVarName[name] = value
+      }
+
+      if (object.type === 'isocline') {
+        const freeNames = state.system.config.varNames.filter(
+          (name) => !Object.prototype.hasOwnProperty.call(normalizedFrozenValuesByVarName, name)
+        )
+        if (freeNames.length === 0) {
+          dispatch({ type: 'SET_ERROR', error: 'At least one free variable is required.' })
+          return
+        }
+        if (freeNames.length > 3) {
+          dispatch({
+            type: 'SET_ERROR',
+            error: 'Isocline computations support at most 3 free variables.',
+          })
+          return
+        }
+
+        const nextAxes = freeNames.map((name) => {
+          const existing = object.axes.find((axis) => axis.variableName === name)
+          if (existing) return existing
+          return {
+            variableName: name,
+            min: -2,
+            max: 2,
+            samples: defaultIsoclineSamples(freeNames.length),
+          }
+        })
+        const nextFrozenState = state.system.config.varNames.map((name, index) => {
+          if (Object.prototype.hasOwnProperty.call(normalizedFrozenValuesByVarName, name)) {
+            return normalizedFrozenValuesByVarName[name]
+          }
+          return object.frozenState[index] ?? 0
+        })
+        const updated = updateObject(state.system, nodeId, {
+          axes: nextAxes,
+          frozenState: nextFrozenState,
+          frozenVariables: { frozenValuesByVarName: normalizedFrozenValuesByVarName },
+        })
+        dispatch({ type: 'SET_SYSTEM', system: updated })
+        scheduleSystemSave(updated)
+        return
+      }
+
+      const updated = updateObject(state.system, nodeId, {
+        frozenVariables: { frozenValuesByVarName: normalizedFrozenValuesByVarName },
+      })
+      dispatch({ type: 'SET_SYSTEM', system: updated })
+      scheduleSystemSave(updated)
+    },
+    [scheduleSystemSave, state.system]
+  )
+
   const updateIsoclineObjectAction = useCallback(
     (
       nodeId: string,
@@ -1125,12 +1393,19 @@ export function AppProvider({
         : object.frozenState
       const level =
         typeof update.level === 'number' && Number.isFinite(update.level) ? update.level : object.level
+      const freeSet = new Set(axes.map((axis) => axis.variableName))
+      const frozenValuesByVarName: Record<string, number> = {}
+      state.system.config.varNames.forEach((name, index) => {
+        if (freeSet.has(name)) return
+        frozenValuesByVarName[name] = frozenState[index] ?? 0
+      })
       const merged = {
         ...update,
         source,
         axes,
         frozenState,
         level,
+        frozenVariables: { frozenValuesByVarName },
       } as Partial<IsoclineObject>
       const system = updateObject(state.system, nodeId, merged)
       dispatch({ type: 'SET_SYSTEM', system })
@@ -1219,6 +1494,7 @@ export function AppProvider({
           t_end: 0,
           dt,
           parameters: [...system.params],
+          frozenVariables: { frozenValuesByVarName: {} },
         }
 
         const result = addObject(state.system, obj)
@@ -1270,13 +1546,12 @@ export function AppProvider({
             ? Math.max(1, Math.ceil(request.duration))
             : Math.max(1, Math.ceil(request.duration / dt))
 
-        const runConfig: SystemConfig = {
-          ...system,
-          params: resolveObjectParams(system, orbit.customParameters),
-        }
+        const baseParams = resolveObjectParams(system, orbit.customParameters)
+        const { snapshot, runConfig } = buildObjectSubsystemRunConfig(system, orbit, baseParams)
+        const reducedInitialState = projectStateToReduced(snapshot, request.initialState)
         const result = await client.simulateOrbit({
           system: runConfig,
-          initialState: request.initialState,
+          initialState: reducedInitialState,
           steps,
           dt,
         })
@@ -1286,7 +1561,9 @@ export function AppProvider({
           t_start: result.t_start,
           t_end: result.t_end,
           dt: result.dt,
-          parameters: [...runConfig.params],
+          parameters: [...baseParams],
+          subsystemSnapshot: snapshot,
+          frozenVariables: normalizeObjectFrozenVariables(system, orbit),
         })
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.save(updated)
@@ -1355,6 +1632,8 @@ export function AppProvider({
             axes: payload.snapshot.axes,
             frozenState: payload.snapshot.frozenState,
             parameters: payload.snapshot.parameters,
+            subsystemSnapshot: payload.snapshot.subsystemSnapshot,
+            frozenVariables: normalizeObjectFrozenVariables(system, object),
             lastComputed: payload.snapshot,
           } as Partial<IsoclineObject>)
           dispatch({ type: 'SET_SYSTEM', system: updated })
@@ -1433,7 +1712,7 @@ export function AppProvider({
         if (!orbit.data || orbit.data.length < 2) {
           throw new Error('Run an orbit before computing Lyapunov exponents.')
         }
-        const runConfig = requireOrbitRunConfig(system, orbit)
+        const { snapshot, runConfig } = requireOrbitRunConfig(system, orbit)
 
         const duration = orbit.t_end - orbit.t_start
         if (!Number.isFinite(duration) || duration <= 0) {
@@ -1469,7 +1748,11 @@ export function AppProvider({
 
         const steps = orbit.data.length - startIndex - 1
         const qrStride = Math.max(Math.trunc(request.qrStride), 1)
-        const startState = orbit.data[startIndex].slice(1)
+        const startRowState = orbit.data[startIndex].slice(1)
+        const startState =
+          startRowState.length === snapshot.freeVariableNames.length
+            ? startRowState
+            : projectStateForSnapshot(snapshot, startRowState, 'Orbit sample')
         const startTime = orbit.data[startIndex][0]
 
         const payload: CoreLyapunovExponentsRequest = {
@@ -1513,7 +1796,7 @@ export function AppProvider({
         if (!orbit.data || orbit.data.length < 2) {
           throw new Error('Run an orbit before computing covariant vectors.')
         }
-        const runConfig = requireOrbitRunConfig(system, orbit)
+        const { snapshot, runConfig } = requireOrbitRunConfig(system, orbit)
 
         const duration = orbit.t_end - orbit.t_start
         if (!Number.isFinite(duration) || duration <= 0) {
@@ -1583,7 +1866,11 @@ export function AppProvider({
         }
 
         const backwardSteps = Math.max(Math.floor(backwardTime / dt), 0)
-        const startState = orbit.data[startIndex].slice(1)
+        const startRowState = orbit.data[startIndex].slice(1)
+        const startState =
+          startRowState.length === snapshot.freeVariableNames.length
+            ? startRowState
+            : projectStateForSnapshot(snapshot, startRowState, 'Orbit sample')
         const startTime = orbit.data[startIndex][0]
 
         const payload: CoreCovariantLyapunovRequest = {
@@ -1651,6 +1938,7 @@ export function AppProvider({
           systemName: system.name,
           parameters: [...system.params],
           lastSolverParams: solverParams,
+          frozenVariables: { frozenValuesByVarName: {} },
         }
         const result = addObject(state.system, obj)
         const selected = selectNode(result.system, result.nodeId)
@@ -1702,6 +1990,7 @@ export function AppProvider({
           axes,
           frozenState: system.varNames.map(() => 0),
           parameters: [...system.params],
+          frozenVariables: { frozenValuesByVarName: {} },
         }
         const result = addObject(state.system, obj)
         const selected = selectNode(result.system, result.nodeId)
@@ -1776,13 +2065,16 @@ export function AppProvider({
           mapIterations,
         }
 
-        const runConfig: SystemConfig = {
-          ...system,
-          params: resolveObjectParams(system, equilibrium.customParameters),
-        }
+        const baseParams = resolveObjectParams(system, equilibrium.customParameters)
+        const { snapshot, runConfig } = buildObjectSubsystemRunConfig(
+          system,
+          equilibrium,
+          baseParams
+        )
+        const reducedInitialGuess = projectStateToReduced(snapshot, solverParams.initialGuess)
         const result = await client.solveEquilibrium({
           system: runConfig,
-          initialGuess: solverParams.initialGuess,
+          initialGuess: reducedInitialGuess,
           maxSteps: solverParams.maxSteps,
           dampingFactor: solverParams.dampingFactor,
           mapIterations: solverParams.mapIterations,
@@ -1794,9 +2086,11 @@ export function AppProvider({
 
         const updated = updateObject(state.system, request.equilibriumId, {
           solution: result,
-          parameters: [...runConfig.params],
+          parameters: [...baseParams],
           lastSolverParams: solverParams,
           lastRun: runSummary,
+          subsystemSnapshot: snapshot,
+          frozenVariables: normalizeObjectFrozenVariables(system, equilibrium),
         })
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.save(updated)
@@ -1834,9 +2128,6 @@ export function AppProvider({
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
         }
-        if (system.paramNames.length === 0) {
-          throw new Error('System has no parameters to continue.')
-        }
         const equilibrium = state.system.objects[request.equilibriumId]
         if (!equilibrium || equilibrium.type !== 'equilibrium') {
           throw new Error(`Select a valid ${equilibriumLabelLower} to continue.`)
@@ -1853,9 +2144,6 @@ export function AppProvider({
         if (branchNameExists(state.system, equilibrium.name, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
-        if (!system.paramNames.includes(request.parameterName)) {
-          throw new Error('Select a valid continuation parameter.')
-        }
 
         let mapIterations: number | undefined
         if (system.type === 'map') {
@@ -1871,16 +2159,29 @@ export function AppProvider({
           mapIterations = iterations
         }
 
-        const runConfig: SystemConfig = {
-          ...system,
-          params: resolveObjectParams(system, equilibrium.customParameters),
+        const baseParams = resolveObjectParams(system, equilibrium.customParameters)
+        const { snapshot, runConfig } = buildObjectSubsystemRunConfig(
+          system,
+          equilibrium,
+          baseParams
+        )
+        const availableParams = continuationParameterOptions(system, snapshot)
+        if (availableParams.length === 0) {
+          throw new Error('Subsystem has no continuation parameters available.')
         }
+        const parameterRef = parseContinuationParameter(system, snapshot, request.parameterName)
+        const runtimeParameterName = resolveRuntimeParameterName(snapshot, parameterRef)
+        const reducedEquilibriumState = projectStateForSnapshot(
+          snapshot,
+          equilibrium.solution.state,
+          equilibriumLabel
+        )
 
         const branchData = await client.runEquilibriumContinuation(
           {
             system: runConfig,
-            equilibriumState: equilibrium.solution.state,
-            parameterName: request.parameterName,
+            equilibriumState: reducedEquilibriumState,
+            parameterName: runtimeParameterName,
             mapIterations,
             settings: request.settings,
             forward: request.forward,
@@ -1899,15 +2200,17 @@ export function AppProvider({
           type: 'continuation',
           name,
           systemName: system.name,
-          parameterName: request.parameterName,
+          parameterName: resolveDisplayParameterName(parameterRef),
+          parameterRef,
           parentObject: equilibrium.name,
           startObject: equilibrium.name,
           branchType: 'equilibrium',
           data: normalized,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...runConfig.params],
+          params: [...baseParams],
           mapIterations,
+          subsystemSnapshot: snapshot,
         }
 
         const parentNodeId = findObjectIdByName(state.system, equilibrium.name)
@@ -1943,9 +2246,6 @@ export function AppProvider({
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
         }
-        if (system.paramNames.length === 0) {
-          throw new Error('System has no parameters to continue.')
-        }
 
         const sourceBranch = state.system.branches[request.branchId]
         if (!sourceBranch) {
@@ -1978,13 +2278,16 @@ export function AppProvider({
         if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
-        if (!system.paramNames.includes(request.parameterName)) {
-          throw new Error('Select a valid continuation parameter.')
+        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const availableParams = continuationParameterOptions(system, snapshot)
+        if (availableParams.length === 0) {
+          throw new Error('Subsystem has no continuation parameters available.')
         }
-        const continuationParamIdx = system.paramNames.indexOf(request.parameterName)
-        if (continuationParamIdx < 0) {
-          throw new Error('Select a valid continuation parameter.')
-        }
+        const targetParameterRef = parseContinuationParameter(system, snapshot, request.parameterName)
+        const targetRuntimeParameterName = resolveRuntimeParameterName(snapshot, targetParameterRef)
 
         let mapIterations: number | undefined
         if (canContinueEquilibrium && system.type === 'map') {
@@ -1999,13 +2302,28 @@ export function AppProvider({
           mapIterations = iterations
         }
 
-        const runConfig: SystemConfig = { ...system }
-        runConfig.params = getBranchParams(state.system, sourceBranch)
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
 
-        const sourceParamIdx = system.paramNames.indexOf(sourceBranch.parameterName)
-        if (sourceParamIdx >= 0) {
-          runConfig.params[sourceParamIdx] = point.param_value
+        const sourceParamRef = sourceBranch.parameterRef
+          ? sourceBranch.parameterRef
+          : (() => {
+              try {
+                return parseContinuationParameter(system, snapshot, sourceBranch.parameterName)
+              } catch {
+                return null
+              }
+            })()
+        if (sourceParamRef && Number.isFinite(point.param_value)) {
+          const sourceRuntimeName = resolveRuntimeParameterName(snapshot, sourceParamRef)
+          runConfig = applyReducedParamOverrides(runConfig, {
+            [sourceRuntimeName]: point.param_value,
+          })
         }
+        runConfig = applyReducedParamOverrides(
+          runConfig,
+          resolveBranchPointReducedParamOverrides(sourceBranch, point)
+        )
 
         const branchType: ContinuationObject['branchType'] = canContinueEquilibrium
           ? 'equilibrium'
@@ -2015,8 +2333,12 @@ export function AppProvider({
               await client.runEquilibriumContinuation(
                 {
                   system: runConfig,
-                  equilibriumState: point.state,
-                  parameterName: request.parameterName,
+                  equilibriumState: projectStateForSnapshot(
+                    snapshot,
+                    point.state,
+                    equilibriumLabel
+                  ),
+                  parameterName: targetRuntimeParameterName,
                   mapIterations,
                   settings: request.settings,
                   forward: request.forward,
@@ -2043,7 +2365,10 @@ export function AppProvider({
                           ...point,
                           // Remap seed point param_value to the selected continuation parameter.
                           // The source branch may have been continued in a different parameter.
-                          param_value: runConfig.params[continuationParamIdx],
+                          param_value:
+                            runConfig.params[
+                              runConfig.paramNames.indexOf(targetRuntimeParameterName)
+                            ] ?? point.param_value,
                         },
                       ],
                       bifurcations: [],
@@ -2052,7 +2377,7 @@ export function AppProvider({
                       resume_state: undefined,
                     },
                   }),
-                  parameterName: request.parameterName,
+                  parameterName: targetRuntimeParameterName,
                   settings: request.settings,
                   forward: request.forward,
                 },
@@ -2064,22 +2389,24 @@ export function AppProvider({
                     }),
                 }
               ),
-              { stateDimension: system.varNames.length }
+              { stateDimension: snapshot.freeVariableNames.length }
             )
 
         const branch: ContinuationObject = {
           type: 'continuation',
           name,
           systemName: system.name,
-          parameterName: request.parameterName,
+          parameterName: resolveDisplayParameterName(targetParameterRef),
+          parameterRef: targetParameterRef,
           parentObject: sourceBranch.parentObject,
           startObject: sourceBranch.name,
           branchType,
           data: normalized,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...runConfig.params],
+          params: [...baseParams],
           mapIterations,
+          subsystemSnapshot: snapshot,
         }
 
         const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
@@ -2148,8 +2475,12 @@ export function AppProvider({
           throw new Error('Branch has no points to extend.')
         }
 
-        const runConfig: SystemConfig = { ...system }
-        runConfig.params = getBranchParams(state.system, sourceBranch)
+        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
 
         const mapIterations =
           system.type === 'map' &&
@@ -2158,16 +2489,22 @@ export function AppProvider({
             : undefined
 
         const branchTypeMeta = sourceBranch.data.branch_type
-        const extensionParameterName =
+        const extensionLabel =
           branchTypeMeta &&
           typeof branchTypeMeta === 'object' &&
           'param1_name' in branchTypeMeta &&
           typeof branchTypeMeta.param1_name === 'string'
             ? branchTypeMeta.param1_name
             : sourceBranch.parameterName
-        if (!system.paramNames.includes(extensionParameterName)) {
-          throw new Error('Branch continuation parameter is not defined in this system.')
-        }
+        const extensionParameterRef =
+          sourceBranch.parameterRef ??
+          (branchTypeMeta &&
+          typeof branchTypeMeta === 'object' &&
+          'param1_ref' in branchTypeMeta &&
+          branchTypeMeta.param1_ref
+            ? branchTypeMeta.param1_ref
+            : parseContinuationParameter(system, snapshot, extensionLabel))
+        const extensionRuntimeName = resolveRuntimeParameterName(snapshot, extensionParameterRef)
 
         let updatedData: ContinuationObject['data'] | null = null
         const homocSourceData =
@@ -2186,21 +2523,35 @@ export function AppProvider({
           if (!endpointPoint) {
             throw new Error('Unable to resolve a valid homoclinic endpoint for extension.')
           }
-          const param1Idx = system.paramNames.indexOf(sourceType.param1_name)
-          if (param1Idx >= 0) {
-            runConfig.params[param1Idx] = endpointPoint.param_value
-          }
-          const param2Idx = system.paramNames.indexOf(sourceType.param2_name)
+          const sourceParam1Ref = sourceType.param1_ref ?? extensionParameterRef
+          const sourceParam1Runtime = resolveRuntimeParameterName(snapshot, sourceParam1Ref)
+          runConfig = applyReducedParamOverrides(runConfig, {
+            [sourceParam1Runtime]: endpointPoint.param_value,
+          })
+          const sourceParam2Ref =
+            sourceType.param2_ref ??
+            (() => {
+              try {
+                return parseContinuationParameter(system, snapshot, sourceType.param2_name)
+              } catch {
+                return null
+              }
+            })()
+          const sourceParam2Runtime = sourceParam2Ref
+            ? resolveRuntimeParameterName(snapshot, sourceParam2Ref)
+            : null
           const endpointParam2 =
             Number.isFinite(endpointPoint.param2_value)
               ? endpointPoint.param2_value
               : resolveContinuationPointParam2Value(
                   endpointPoint,
                   sourceBranch.data.branch_type,
-                  system.varNames.length
+                  snapshot.freeVariableNames.length
                 )
-          if (param2Idx >= 0 && Number.isFinite(endpointParam2)) {
-            runConfig.params[param2Idx] = endpointParam2 as number
+          if (sourceParam2Runtime && Number.isFinite(endpointParam2)) {
+            runConfig = applyReducedParamOverrides(runConfig, {
+              [sourceParam2Runtime]: endpointParam2 as number,
+            })
           }
 
           const branchData = serializeBranchDataForWasm({
@@ -2211,7 +2562,7 @@ export function AppProvider({
             {
               system: runConfig,
               branchData,
-              parameterName: sourceType.param1_name,
+              parameterName: sourceParam1Runtime,
               mapIterations,
               settings: request.settings,
               forward: request.forward,
@@ -2237,7 +2588,7 @@ export function AppProvider({
             {
               system: runConfig,
               branchData,
-              parameterName: extensionParameterName,
+              parameterName: extensionRuntimeName,
               mapIterations,
               settings: request.settings,
               forward: request.forward,
@@ -2256,7 +2607,7 @@ export function AppProvider({
         }
 
         const normalizedRaw = normalizeBranchEigenvalues(updatedData, {
-          stateDimension: system.varNames.length,
+          stateDimension: snapshot.freeVariableNames.length,
         })
         const normalized =
           sourceBranch.branchType === 'homoclinic_curve'
@@ -2266,6 +2617,7 @@ export function AppProvider({
           ...sourceBranch,
           data: normalized,
           settings: request.settings,
+          subsystemSnapshot: snapshot,
         }
 
         let updated = updateBranch(state.system, request.branchId, updatedBranch)
@@ -2306,9 +2658,6 @@ export function AppProvider({
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
         }
-        if (system.paramNames.length < 2) {
-          throw new Error('Two-parameter continuation requires at least 2 parameters.')
-        }
 
         const sourceBranch = state.system.branches[request.branchId]
         if (!sourceBranch) {
@@ -2338,32 +2687,36 @@ export function AppProvider({
           throw new Error(`Branch "${name}" already exists.`)
         }
 
-        const param1Name = sourceBranch.parameterName
-        if (!system.paramNames.includes(param1Name)) {
-          throw new Error('Source continuation parameter is not defined in this system.')
-        }
-
-        const param2Name = request.param2Name
-        if (!system.paramNames.includes(param2Name)) {
-          throw new Error('Select a valid second continuation parameter.')
-        }
-        if (param2Name === param1Name) {
+        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const param1Ref = sourceBranch.parameterRef
+          ? sourceBranch.parameterRef
+          : parseContinuationParameter(system, snapshot, sourceBranch.parameterName)
+        const param2Ref = parseContinuationParameter(system, snapshot, request.param2Name)
+        if (formatParameterRefLabel(param2Ref) === formatParameterRefLabel(param1Ref)) {
           throw new Error('Second parameter must be different from the continuation parameter.')
         }
+        const param1Name = resolveRuntimeParameterName(snapshot, param1Ref)
+        const param2Name = resolveRuntimeParameterName(snapshot, param2Ref)
+        const param1DisplayName = resolveDisplayParameterName(param1Ref)
+        const param2DisplayName = resolveDisplayParameterName(param2Ref)
 
-        const runConfig: SystemConfig = { ...system }
-        runConfig.params = getBranchParams(state.system, sourceBranch)
-
-        const param1Idx = system.paramNames.indexOf(param1Name)
-        if (param1Idx >= 0) {
-          runConfig.params[param1Idx] = point.param_value
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        runConfig = applyReducedParamOverrides(runConfig, {
+          [param1Name]: point.param_value,
+        })
+        runConfig = applyReducedParamOverrides(
+          runConfig,
+          resolveBranchPointReducedParamOverrides(sourceBranch, point)
+        )
+        const param2Idx = runConfig.paramNames.indexOf(param2Name)
+        const param2Value = runConfig.params[param2Idx] ?? Number.NaN
+        if (!Number.isFinite(param2Value)) {
+          throw new Error('Unable to resolve second continuation parameter value.')
         }
-
-        const param2Idx = system.paramNames.indexOf(param2Name)
-        if (param2Idx < 0) {
-          throw new Error('Select a valid second continuation parameter.')
-        }
-        const param2Value = runConfig.params[param2Idx]
 
         const mapIterations =
           system.type === 'map' ? sourceBranch.mapIterations ?? 1 : undefined
@@ -2371,7 +2724,7 @@ export function AppProvider({
         const curveData = await client.runFoldCurveContinuation(
           {
             system: runConfig,
-            foldState: point.state,
+            foldState: projectStateForSnapshot(snapshot, point.state, 'Fold point'),
             param1Name,
             param1Value: point.param_value,
             param2Name,
@@ -2406,24 +2759,29 @@ export function AppProvider({
           indices: curveData.points.map((_, i) => i),
           branch_type: {
             type: 'FoldCurve' as const,
-            param1_name: param1Name,
-            param2_name: param2Name,
+            param1_name: param1DisplayName,
+            param2_name: param2DisplayName,
+            param1_ref: param1Ref,
+            param2_ref: param2Ref,
           },
-        })
+        }, { stateDimension: snapshot.freeVariableNames.length })
 
         const branch: ContinuationObject = {
           type: 'continuation',
           name,
           systemName: system.name,
-          parameterName: `${param1Name}, ${param2Name}`,
+          parameterName: `${param1DisplayName}, ${param2DisplayName}`,
+          parameterRef: param1Ref,
+          parameter2Ref: param2Ref,
           parentObject: sourceBranch.parentObject,
           startObject: sourceBranch.name,
           branchType: 'fold_curve',
           data: branchData,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...runConfig.params],
+          params: [...baseParams],
           mapIterations,
+          subsystemSnapshot: snapshot,
         }
 
         const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
@@ -2462,9 +2820,6 @@ export function AppProvider({
         if (system.type === 'map') {
           throw new Error('Hopf curve continuation is only available for flow systems.')
         }
-        if (system.paramNames.length < 2) {
-          throw new Error('Two-parameter continuation requires at least 2 parameters.')
-        }
 
         const sourceBranch = state.system.branches[request.branchId]
         if (!sourceBranch) {
@@ -2494,39 +2849,43 @@ export function AppProvider({
           throw new Error(`Branch "${name}" already exists.`)
         }
 
-        const param1Name = sourceBranch.parameterName
-        if (!system.paramNames.includes(param1Name)) {
-          throw new Error('Source continuation parameter is not defined in this system.')
-        }
-
-        const param2Name = request.param2Name
-        if (!system.paramNames.includes(param2Name)) {
-          throw new Error('Select a valid second continuation parameter.')
-        }
-        if (param2Name === param1Name) {
+        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const param1Ref = sourceBranch.parameterRef
+          ? sourceBranch.parameterRef
+          : parseContinuationParameter(system, snapshot, sourceBranch.parameterName)
+        const param2Ref = parseContinuationParameter(system, snapshot, request.param2Name)
+        if (formatParameterRefLabel(param2Ref) === formatParameterRefLabel(param1Ref)) {
           throw new Error('Second parameter must be different from the continuation parameter.')
         }
+        const param1Name = resolveRuntimeParameterName(snapshot, param1Ref)
+        const param2Name = resolveRuntimeParameterName(snapshot, param2Ref)
+        const param1DisplayName = resolveDisplayParameterName(param1Ref)
+        const param2DisplayName = resolveDisplayParameterName(param2Ref)
 
-        const runConfig: SystemConfig = { ...system }
-        runConfig.params = getBranchParams(state.system, sourceBranch)
-
-        const param1Idx = system.paramNames.indexOf(param1Name)
-        if (param1Idx >= 0) {
-          runConfig.params[param1Idx] = point.param_value
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        runConfig = applyReducedParamOverrides(runConfig, {
+          [param1Name]: point.param_value,
+        })
+        runConfig = applyReducedParamOverrides(
+          runConfig,
+          resolveBranchPointReducedParamOverrides(sourceBranch, point)
+        )
+        const param2Idx = runConfig.paramNames.indexOf(param2Name)
+        const param2Value = runConfig.params[param2Idx] ?? Number.NaN
+        if (!Number.isFinite(param2Value)) {
+          throw new Error('Unable to resolve second continuation parameter value.')
         }
-
-        const param2Idx = system.paramNames.indexOf(param2Name)
-        if (param2Idx < 0) {
-          throw new Error('Select a valid second continuation parameter.')
-        }
-        const param2Value = runConfig.params[param2Idx]
         const hopfOmega = extractHopfOmega(point)
         const mapIterations = undefined
 
         const curveData = await client.runHopfCurveContinuation(
           {
             system: runConfig,
-            hopfState: point.state,
+            hopfState: projectStateForSnapshot(snapshot, point.state, 'Hopf point'),
             hopfOmega,
             param1Name,
             param1Value: point.param_value,
@@ -2563,24 +2922,29 @@ export function AppProvider({
           indices: curveData.points.map((_, i) => i),
           branch_type: {
             type: 'HopfCurve' as const,
-            param1_name: param1Name,
-            param2_name: param2Name,
+            param1_name: param1DisplayName,
+            param2_name: param2DisplayName,
+            param1_ref: param1Ref,
+            param2_ref: param2Ref,
           },
-        })
+        }, { stateDimension: snapshot.freeVariableNames.length })
 
         const branch: ContinuationObject = {
           type: 'continuation',
           name,
           systemName: system.name,
-          parameterName: `${param1Name}, ${param2Name}`,
+          parameterName: `${param1DisplayName}, ${param2DisplayName}`,
+          parameterRef: param1Ref,
+          parameter2Ref: param2Ref,
           parentObject: sourceBranch.parentObject,
           startObject: sourceBranch.name,
           branchType: 'hopf_curve',
           data: branchData,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...runConfig.params],
+          params: [...baseParams],
           mapIterations,
+          subsystemSnapshot: snapshot,
         }
 
         const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
@@ -2616,9 +2980,6 @@ export function AppProvider({
         }
         if (system.type !== 'flow') {
           throw new Error('Isochrone continuation is only available for flow systems.')
-        }
-        if (system.paramNames.length < 2) {
-          throw new Error('Two-parameter continuation requires at least 2 parameters.')
         }
 
         const sourceBranch = state.system.branches[request.branchId]
@@ -2663,57 +3024,66 @@ export function AppProvider({
           throw new Error(`Branch "${name}" already exists.`)
         }
 
-        const param1Name = request.parameterName
-        if (!system.paramNames.includes(param1Name)) {
-          throw new Error('Select a valid first continuation parameter.')
-        }
-        const param2Name = request.param2Name
-        if (!system.paramNames.includes(param2Name)) {
-          throw new Error('Select a valid second continuation parameter.')
-        }
-        if (param2Name === param1Name) {
+        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const param1Ref = parseContinuationParameter(system, snapshot, request.parameterName)
+        const param2Ref = parseContinuationParameter(system, snapshot, request.param2Name)
+        if (formatParameterRefLabel(param2Ref) === formatParameterRefLabel(param1Ref)) {
           throw new Error('Second parameter must be different from the first continuation parameter.')
         }
+        const param1Name = resolveRuntimeParameterName(snapshot, param1Ref)
+        const param2Name = resolveRuntimeParameterName(snapshot, param2Ref)
+        const param1DisplayName = resolveDisplayParameterName(param1Ref)
+        const param2DisplayName = resolveDisplayParameterName(param2Ref)
 
-        const runConfig: SystemConfig = { ...system }
-        runConfig.params = getBranchParams(state.system, sourceBranch)
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
 
         if (sourceBranch.branchType === 'isochrone_curve' && branchType.type === 'IsochroneCurve') {
-          const sourceParam1Idx = system.paramNames.indexOf(branchType.param1_name)
-          if (sourceParam1Idx >= 0) {
-            runConfig.params[sourceParam1Idx] = point.param_value
-          }
-          const sourceParam2Idx = system.paramNames.indexOf(branchType.param2_name)
+          const sourceParam1Ref =
+            branchType.param1_ref ??
+            sourceBranch.parameterRef ??
+            parseContinuationParameter(system, snapshot, branchType.param1_name)
+          const sourceParam1Name = resolveRuntimeParameterName(snapshot, sourceParam1Ref)
+          runConfig = applyReducedParamOverrides(runConfig, {
+            [sourceParam1Name]: point.param_value,
+          })
+          const sourceParam2Ref =
+            branchType.param2_ref ??
+            sourceBranch.parameter2Ref ??
+            parseContinuationParameter(system, snapshot, branchType.param2_name)
+          const sourceParam2Name = resolveRuntimeParameterName(snapshot, sourceParam2Ref)
           const sourceParam2Value = resolveContinuationPointParam2Value(
             point,
             sourceBranch.data.branch_type,
-            system.varNames.length
+            snapshot.freeVariableNames.length
           )
-          if (sourceParam2Idx >= 0 && Number.isFinite(sourceParam2Value)) {
-            runConfig.params[sourceParam2Idx] = sourceParam2Value as number
+          if (Number.isFinite(sourceParam2Value)) {
+            runConfig = applyReducedParamOverrides(runConfig, {
+              [sourceParam2Name]: sourceParam2Value as number,
+            })
           }
         }
 
         if (sourceBranch.branchType === 'limit_cycle') {
-          const sourceParam1Idx = system.paramNames.indexOf(sourceBranch.parameterName)
-          if (sourceParam1Idx >= 0) {
-            runConfig.params[sourceParam1Idx] = point.param_value
-          }
+          const sourceParam1Ref = sourceBranch.parameterRef
+            ? sourceBranch.parameterRef
+            : parseContinuationParameter(system, snapshot, sourceBranch.parameterName)
+          const sourceParam1Name = resolveRuntimeParameterName(snapshot, sourceParam1Ref)
+          runConfig = applyReducedParamOverrides(runConfig, {
+            [sourceParam1Name]: point.param_value,
+          })
         }
 
-        const param1Idx = system.paramNames.indexOf(param1Name)
-        if (param1Idx < 0) {
-          throw new Error('Select a valid first continuation parameter.')
-        }
+        const param1Idx = runConfig.paramNames.indexOf(param1Name)
         const param1Value = runConfig.params[param1Idx]
         if (!Number.isFinite(param1Value)) {
           throw new Error('Selected first continuation parameter has no valid value.')
         }
 
-        const param2Idx = system.paramNames.indexOf(param2Name)
-        if (param2Idx < 0) {
-          throw new Error('Select a valid second continuation parameter.')
-        }
+        const param2Idx = runConfig.paramNames.indexOf(param2Name)
         const param2Value = runConfig.params[param2Idx]
         if (!Number.isFinite(param2Value)) {
           throw new Error('Selected second continuation parameter has no valid value.')
@@ -2763,25 +3133,30 @@ export function AppProvider({
               : curveData.points.map((_, i) => (request.forward || i === 0 ? i : -i)),
           branch_type: {
             type: 'IsochroneCurve' as const,
-            param1_name: param1Name,
-            param2_name: param2Name,
+            param1_name: param1DisplayName,
+            param2_name: param2DisplayName,
+            param1_ref: param1Ref,
+            param2_ref: param2Ref,
             ntst,
             ncol,
           },
-        })
+        }, { stateDimension: snapshot.freeVariableNames.length })
 
         const branch: ContinuationObject = {
           type: 'continuation',
           name,
           systemName: system.name,
-          parameterName: `${param1Name}, ${param2Name}`,
+          parameterName: `${param1DisplayName}, ${param2DisplayName}`,
+          parameterRef: param1Ref,
+          parameter2Ref: param2Ref,
           parentObject: sourceBranch.parentObject,
           startObject: sourceBranch.name,
           branchType: 'isochrone_curve',
           data: branchData,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...runConfig.params],
+          params: [...baseParams],
+          subsystemSnapshot: snapshot,
         }
 
         const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
@@ -2820,9 +3195,6 @@ export function AppProvider({
         if (system.type !== 'map') {
           throw new Error('Neimark-Sacker curve continuation is only available for map systems.')
         }
-        if (system.paramNames.length < 2) {
-          throw new Error('Two-parameter continuation requires at least 2 parameters.')
-        }
 
         const sourceBranch = state.system.branches[request.branchId]
         if (!sourceBranch) {
@@ -2852,39 +3224,43 @@ export function AppProvider({
           throw new Error(`Branch "${name}" already exists.`)
         }
 
-        const param1Name = sourceBranch.parameterName
-        if (!system.paramNames.includes(param1Name)) {
-          throw new Error('Source continuation parameter is not defined in this system.')
-        }
-
-        const param2Name = request.param2Name
-        if (!system.paramNames.includes(param2Name)) {
-          throw new Error('Select a valid second continuation parameter.')
-        }
-        if (param2Name === param1Name) {
+        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const param1Ref = sourceBranch.parameterRef
+          ? sourceBranch.parameterRef
+          : parseContinuationParameter(system, snapshot, sourceBranch.parameterName)
+        const param2Ref = parseContinuationParameter(system, snapshot, request.param2Name)
+        if (formatParameterRefLabel(param2Ref) === formatParameterRefLabel(param1Ref)) {
           throw new Error('Second parameter must be different from the continuation parameter.')
         }
+        const param1Name = resolveRuntimeParameterName(snapshot, param1Ref)
+        const param2Name = resolveRuntimeParameterName(snapshot, param2Ref)
+        const param1DisplayName = resolveDisplayParameterName(param1Ref)
+        const param2DisplayName = resolveDisplayParameterName(param2Ref)
 
-        const runConfig: SystemConfig = { ...system }
-        runConfig.params = getBranchParams(state.system, sourceBranch)
-
-        const param1Idx = system.paramNames.indexOf(param1Name)
-        if (param1Idx >= 0) {
-          runConfig.params[param1Idx] = point.param_value
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        runConfig = applyReducedParamOverrides(runConfig, {
+          [param1Name]: point.param_value,
+        })
+        runConfig = applyReducedParamOverrides(
+          runConfig,
+          resolveBranchPointReducedParamOverrides(sourceBranch, point)
+        )
+        const param2Idx = runConfig.paramNames.indexOf(param2Name)
+        const param2Value = runConfig.params[param2Idx] ?? Number.NaN
+        if (!Number.isFinite(param2Value)) {
+          throw new Error('Unable to resolve second continuation parameter value.')
         }
-
-        const param2Idx = system.paramNames.indexOf(param2Name)
-        if (param2Idx < 0) {
-          throw new Error('Select a valid second continuation parameter.')
-        }
-        const param2Value = runConfig.params[param2Idx]
         const hopfOmega = extractHopfOmega(point)
         const mapIterations = sourceBranch.mapIterations ?? 1
 
         const curveData = await client.runHopfCurveContinuation(
           {
             system: runConfig,
-            hopfState: point.state,
+            hopfState: projectStateForSnapshot(snapshot, point.state, `${nsCurveLabel} point`),
             hopfOmega,
             param1Name,
             param1Value: point.param_value,
@@ -2921,24 +3297,29 @@ export function AppProvider({
           indices: curveData.points.map((_, i) => i),
           branch_type: {
             type: 'HopfCurve' as const,
-            param1_name: param1Name,
-            param2_name: param2Name,
+            param1_name: param1DisplayName,
+            param2_name: param2DisplayName,
+            param1_ref: param1Ref,
+            param2_ref: param2Ref,
           },
-        })
+        }, { stateDimension: snapshot.freeVariableNames.length })
 
         const branch: ContinuationObject = {
           type: 'continuation',
           name,
           systemName: system.name,
-          parameterName: `${param1Name}, ${param2Name}`,
+          parameterName: `${param1DisplayName}, ${param2DisplayName}`,
+          parameterRef: param1Ref,
+          parameter2Ref: param2Ref,
           parentObject: sourceBranch.parentObject,
           startObject: sourceBranch.name,
           branchType: 'hopf_curve',
           data: branchData,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...runConfig.params],
+          params: [...baseParams],
           mapIterations,
+          subsystemSnapshot: snapshot,
         }
 
         const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
@@ -3028,19 +3409,25 @@ export function AppProvider({
           throw new Error('NCOL must be a positive integer.')
         }
 
-        const parameterName = request.parameterName
-        if (!system.paramNames.includes(parameterName)) {
-          throw new Error('Continuation parameter is not defined in this system.')
-        }
+        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const parameterRef = parseContinuationParameter(system, snapshot, request.parameterName)
+        const parameterName = resolveRuntimeParameterName(snapshot, parameterRef)
+        const parameterDisplayName = resolveDisplayParameterName(parameterRef)
 
-        const runConfig: SystemConfig = { ...system }
-        runConfig.params = getBranchParams(state.system, sourceBranch)
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
 
         if (sourceBranch.branchType === 'equilibrium') {
-          const sourceParamIndex = system.paramNames.indexOf(sourceBranch.parameterName)
-          if (sourceParamIndex >= 0) {
-            runConfig.params[sourceParamIndex] = point.param_value
-          }
+          const sourceParamRef = sourceBranch.parameterRef
+            ? sourceBranch.parameterRef
+            : parseContinuationParameter(system, snapshot, sourceBranch.parameterName)
+          const sourceParamName = resolveRuntimeParameterName(snapshot, sourceParamRef)
+          runConfig = applyReducedParamOverrides(runConfig, {
+            [sourceParamName]: point.param_value,
+          })
         } else if (sourceBranch.branchType === 'hopf_curve') {
           const branchType = sourceBranch.data.branch_type
           const codim1Params =
@@ -3049,36 +3436,51 @@ export function AppProvider({
             'param1_name' in branchType &&
             'param2_name' in branchType
               ? {
-                  param1: branchType.param1_name,
-                  param2: branchType.param2_name,
+                  param1:
+                    branchType.param1_ref ??
+                    parseContinuationParameter(system, snapshot, branchType.param1_name),
+                  param2:
+                    branchType.param2_ref ??
+                    parseContinuationParameter(system, snapshot, branchType.param2_name),
                 }
               : null
           if (!codim1Params) {
             throw new Error('Hopf curve parameters are not defined in this branch.')
           }
-          const param1Index = system.paramNames.indexOf(codim1Params.param1)
-          if (param1Index >= 0) {
-            runConfig.params[param1Index] = point.param_value
+          const param1Name = resolveRuntimeParameterName(snapshot, codim1Params.param1)
+          runConfig = applyReducedParamOverrides(runConfig, {
+            [param1Name]: point.param_value,
+          })
+          const param2Value =
+            Number.isFinite(point.param2_value) || point.param2_value === 0
+              ? point.param2_value
+              : resolveContinuationPointParam2Value(
+                  point,
+                  sourceBranch.data.branch_type,
+                  snapshot.freeVariableNames.length
+                )
+          if (!Number.isFinite(param2Value)) {
+            throw new Error('Hopf curve point is missing the secondary parameter value.')
           }
-          const param2Index = system.paramNames.indexOf(codim1Params.param2)
-          if (param2Index >= 0) {
-            if (point.param2_value === undefined) {
-              throw new Error('Hopf curve point is missing the secondary parameter value.')
-            }
-            runConfig.params[param2Index] = point.param2_value
-          }
+          const param2Name = resolveRuntimeParameterName(snapshot, codim1Params.param2)
+          runConfig = applyReducedParamOverrides(runConfig, {
+            [param2Name]: param2Value as number,
+          })
         }
 
-        const paramIndex = system.paramNames.indexOf(parameterName)
+        const paramIndex = runConfig.paramNames.indexOf(parameterName)
         if (paramIndex < 0) {
           throw new Error('Continuation parameter is not defined in this system.')
         }
         const paramValue = runConfig.params[paramIndex]
+        if (!Number.isFinite(paramValue)) {
+          throw new Error('Continuation parameter value is not finite.')
+        }
 
         const branchData = await client.runLimitCycleContinuationFromHopf(
           {
             system: runConfig,
-            hopfState: point.state,
+            hopfState: projectStateForSnapshot(snapshot, point.state, 'Hopf point'),
             parameterName,
             paramValue,
             amplitude: request.amplitude,
@@ -3116,7 +3518,7 @@ export function AppProvider({
               ntst: Math.round(request.ntst),
               ncol: Math.round(request.ncol),
             },
-        })
+        }, { stateDimension: snapshot.freeVariableNames.length })
 
         const firstPoint = normalizedBranchData.points[0]
         if (!firstPoint || firstPoint.state.length === 0) {
@@ -3145,10 +3547,13 @@ export function AppProvider({
           ncol: Math.round(request.ncol),
           period,
           state: firstPoint.state,
-          parameters: [...runConfig.params],
-          parameterName,
+          parameters: [...baseParams],
+          parameterName: parameterDisplayName,
+          parameterRef,
           paramValue: firstPoint.param_value,
           createdAt: new Date().toISOString(),
+          frozenVariables: { frozenValuesByVarName: { ...snapshot.frozenValuesByVarName } },
+          subsystemSnapshot: snapshot,
         }
 
         const added = addObject(state.system, lcObj)
@@ -3156,14 +3561,16 @@ export function AppProvider({
           type: 'continuation',
           name: branchName,
           systemName: system.name,
-          parameterName,
+          parameterName: parameterDisplayName,
+          parameterRef,
           parentObject: limitCycleName,
           startObject: limitCycleName,
           branchType: 'limit_cycle',
           data: normalizedBranchData,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...runConfig.params],
+          params: [...baseParams],
+          subsystemSnapshot: snapshot,
         }
 
         const createdBranch = addBranch(added.system, branch, added.nodeId)
@@ -3210,10 +3617,6 @@ export function AppProvider({
           throw new Error('Orbit has no data to continue.')
         }
 
-        if (system.paramNames.length === 0) {
-          throw new Error('Add a parameter before continuing.')
-        }
-
         const limitCycleName = request.limitCycleName.trim()
         const limitCycleNameError = validateObjectName(limitCycleName, 'Limit cycle')
         if (limitCycleNameError) {
@@ -3243,24 +3646,25 @@ export function AppProvider({
           throw new Error('NCOL must be a positive integer.')
         }
 
-        const parameterName = request.parameterName
-        if (!system.paramNames.includes(parameterName)) {
-          throw new Error('Continuation parameter is not defined in this system.')
-        }
+        const snapshot = buildObjectSubsystemSnapshot(system, orbit)
+        const parameterRef = parseContinuationParameter(system, snapshot, request.parameterName)
+        const parameterName = resolveRuntimeParameterName(snapshot, parameterRef)
+        const parameterDisplayName = resolveDisplayParameterName(parameterRef)
+        const baseParams = resolveObjectParams(system, orbit.customParameters)
+        const runConfig = buildReducedRunConfig(system, snapshot, baseParams)
 
-        const runConfig: SystemConfig = {
-          ...system,
-          params: resolveObjectParams(system, orbit.customParameters),
-        }
-
-        const paramIndex = system.paramNames.indexOf(parameterName)
+        const paramIndex = runConfig.paramNames.indexOf(parameterName)
         if (paramIndex < 0) {
           throw new Error('Continuation parameter is not defined in this system.')
         }
         const paramValue = runConfig.params[paramIndex]
+        if (!Number.isFinite(paramValue)) {
+          throw new Error('Continuation parameter value is not finite.')
+        }
 
-        const orbitTimes = orbit.data.map((entry) => entry[0])
-        const orbitStates = orbit.data.map((entry) => entry.slice(1))
+        const reducedRows = mapStateRowsToReduced(snapshot, orbit.data)
+        const orbitTimes = reducedRows.map((entry) => entry[0])
+        const orbitStates = reducedRows.map((entry) => entry.slice(1))
 
         const branchData = await client.runLimitCycleContinuationFromOrbit(
           {
@@ -3304,7 +3708,7 @@ export function AppProvider({
               ntst: Math.round(request.ntst),
               ncol: Math.round(request.ncol),
             },
-        })
+        }, { stateDimension: snapshot.freeVariableNames.length })
 
         const firstPoint = normalizedBranchData.points[0]
         if (!firstPoint || firstPoint.state.length === 0) {
@@ -3325,11 +3729,14 @@ export function AppProvider({
           ncol: Math.round(request.ncol),
           period,
           state: firstPoint.state,
-          parameters: [...runConfig.params],
-          parameterName,
+          parameters: [...baseParams],
+          parameterName: parameterDisplayName,
+          parameterRef,
           paramValue: firstPoint.param_value,
           floquetMultipliers: firstPoint.eigenvalues,
           createdAt: new Date().toISOString(),
+          frozenVariables: normalizeObjectFrozenVariables(system, orbit),
+          subsystemSnapshot: snapshot,
         }
 
         const added = addObject(state.system, lcObj)
@@ -3337,14 +3744,16 @@ export function AppProvider({
           type: 'continuation',
           name: branchName,
           systemName: system.name,
-          parameterName,
+          parameterName: parameterDisplayName,
+          parameterRef,
           parentObject: limitCycleName,
           startObject: orbit.name,
           branchType: 'limit_cycle',
           data: normalizedBranchData,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...runConfig.params],
+          params: [...baseParams],
+          subsystemSnapshot: snapshot,
         }
 
         const createdBranch = addBranch(added.system, branch, added.nodeId)
@@ -3427,18 +3836,24 @@ export function AppProvider({
           throw new Error('Amplitude must be a positive number.')
         }
 
-        const parameterName = sourceBranch.parameterName
-        if (!system.paramNames.includes(parameterName)) {
-          throw new Error('Continuation parameter is not defined in this system.')
-        }
-
-        const runConfig: SystemConfig = { ...system }
-        runConfig.params = getBranchParams(state.system, sourceBranch)
-
-        const paramIndex = system.paramNames.indexOf(parameterName)
-        if (paramIndex >= 0) {
-          runConfig.params[paramIndex] = point.param_value
-        }
+        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const parameterRef = sourceBranch.parameterRef
+          ? sourceBranch.parameterRef
+          : parseContinuationParameter(system, snapshot, sourceBranch.parameterName)
+        const parameterName = resolveRuntimeParameterName(snapshot, parameterRef)
+        const parameterDisplayName = resolveDisplayParameterName(parameterRef)
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        runConfig = applyReducedParamOverrides(runConfig, {
+          [parameterName]: point.param_value,
+        })
+        runConfig = applyReducedParamOverrides(
+          runConfig,
+          resolveBranchPointReducedParamOverrides(sourceBranch, point)
+        )
 
         const sourceIterations = Math.max(
           sourceBranch.mapIterations ?? point.cycle_points?.length ?? 1,
@@ -3465,7 +3880,7 @@ export function AppProvider({
         const branchData = await client.runMapCycleContinuationFromPD(
           {
             system: runConfig,
-            pdState: point.state,
+            pdState: projectStateForSnapshot(snapshot, point.state, 'PD point'),
             parameterName,
             paramValue: point.param_value,
             mapIterations: sourceIterations,
@@ -3501,7 +3916,7 @@ export function AppProvider({
         const normalizedBranchData = normalizeBranchEigenvalues({
           ...branchData,
           indices,
-        })
+        }, { stateDimension: snapshot.freeVariableNames.length })
 
         const firstPoint = normalizedBranchData.points[0]
         if (!firstPoint || firstPoint.state.length === 0) {
@@ -3525,13 +3940,15 @@ export function AppProvider({
           name: cycleName,
           systemName: system.name,
           solution,
-          parameters: [...runConfig.params],
+          parameters: [...baseParams],
           lastSolverParams: {
             initialGuess: firstPoint.state,
             maxSteps: solverMaxSteps,
             dampingFactor: solverDamping,
             mapIterations: solverMapIterations,
           },
+          frozenVariables: { frozenValuesByVarName: { ...snapshot.frozenValuesByVarName } },
+          subsystemSnapshot: snapshot,
         }
 
         const added = addObject(state.system, eqObj)
@@ -3539,15 +3956,17 @@ export function AppProvider({
           type: 'continuation',
           name: branchName,
           systemName: system.name,
-          parameterName,
+          parameterName: parameterDisplayName,
+          parameterRef,
           parentObject: cycleName,
           startObject: sourceBranch.name,
           branchType: 'equilibrium',
           data: normalizedBranchData,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...runConfig.params],
+          params: [...baseParams],
           mapIterations: solverMapIterations,
+          subsystemSnapshot: snapshot,
         }
 
         const createdBranch = addBranch(added.system, branch, added.nodeId)
@@ -3624,10 +4043,15 @@ export function AppProvider({
           throw new Error('NCOL must be a positive integer.')
         }
 
-        const parameterName = sourceBranch.parameterName
-        if (!system.paramNames.includes(parameterName)) {
-          throw new Error('Continuation parameter is not defined in this system.')
-        }
+        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const parameterRef = sourceBranch.parameterRef
+          ? sourceBranch.parameterRef
+          : parseContinuationParameter(system, snapshot, sourceBranch.parameterName)
+        const parameterName = resolveRuntimeParameterName(snapshot, parameterRef)
+        const parameterDisplayName = resolveDisplayParameterName(parameterRef)
 
         let sourceNtst = 20
         const branchType = sourceBranch.data.branch_type
@@ -3635,18 +4059,20 @@ export function AppProvider({
           sourceNtst = branchType.ntst
         }
 
-        const runConfig: SystemConfig = { ...system }
-        runConfig.params = getBranchParams(state.system, sourceBranch)
-
-        const paramIndex = system.paramNames.indexOf(parameterName)
-        if (paramIndex >= 0) {
-          runConfig.params[paramIndex] = point.param_value
-        }
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        runConfig = applyReducedParamOverrides(runConfig, {
+          [parameterName]: point.param_value,
+        })
+        runConfig = applyReducedParamOverrides(
+          runConfig,
+          resolveBranchPointReducedParamOverrides(sourceBranch, point)
+        )
 
         const branchData = await client.runLimitCycleContinuationFromPD(
           {
             system: runConfig,
-            lcState: point.state,
+            lcState: projectStateForSnapshot(snapshot, point.state, 'PD point'),
             parameterName,
             paramValue: point.param_value,
             ntst: Math.round(sourceNtst),
@@ -3684,7 +4110,7 @@ export function AppProvider({
               ntst: Math.round(sourceNtst * 2),
               ncol: Math.round(request.ncol),
             },
-        })
+        }, { stateDimension: snapshot.freeVariableNames.length })
 
         const firstPoint = normalizedBranchData.points[0]
         if (!firstPoint || firstPoint.state.length === 0) {
@@ -3718,11 +4144,14 @@ export function AppProvider({
           ncol: objNcol,
           period,
           state: firstPoint.state,
-          parameters: [...runConfig.params],
-          parameterName,
+          parameters: [...baseParams],
+          parameterName: parameterDisplayName,
+          parameterRef,
           paramValue: firstPoint.param_value,
           floquetMultipliers: firstPoint.eigenvalues,
           createdAt: new Date().toISOString(),
+          frozenVariables: { frozenValuesByVarName: { ...snapshot.frozenValuesByVarName } },
+          subsystemSnapshot: snapshot,
         }
 
         const added = addObject(state.system, lcObj)
@@ -3730,14 +4159,16 @@ export function AppProvider({
           type: 'continuation',
           name: branchName,
           systemName: system.name,
-          parameterName,
+          parameterName: parameterDisplayName,
+          parameterRef,
           parentObject: limitCycleName,
           startObject: sourceBranch.name,
           branchType: 'limit_cycle',
           data: normalizedBranchData,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...runConfig.params],
+          params: [...baseParams],
+          subsystemSnapshot: snapshot,
         }
 
         const createdBranch = addBranch(added.system, branch, added.nodeId)
@@ -3779,9 +4210,6 @@ export function AppProvider({
         if (system.type === 'map') {
           throw new Error('Homoclinic continuation is only available for flow systems.')
         }
-        if (system.paramNames.length < 2) {
-          throw new Error('Homoclinic continuation requires at least 2 parameters.')
-        }
 
         const sourceBranch = state.system.branches[request.branchId]
         if (!sourceBranch) {
@@ -3816,15 +4244,19 @@ export function AppProvider({
           throw new Error(`Branch "${name}" already exists.`)
         }
 
-        if (!system.paramNames.includes(request.parameterName)) {
-          throw new Error('Select a valid first continuation parameter.')
-        }
-        if (!system.paramNames.includes(request.param2Name)) {
-          throw new Error('Select a valid second continuation parameter.')
-        }
-        if (request.param2Name === request.parameterName) {
+        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const param1Ref = parseContinuationParameter(system, snapshot, request.parameterName)
+        const param2Ref = parseContinuationParameter(system, snapshot, request.param2Name)
+        if (formatParameterRefLabel(param2Ref) === formatParameterRefLabel(param1Ref)) {
           throw new Error('Second parameter must be different from the continuation parameter.')
         }
+        const param1Name = resolveRuntimeParameterName(snapshot, param1Ref)
+        const param2Name = resolveRuntimeParameterName(snapshot, param2Ref)
+        const param1DisplayName = resolveDisplayParameterName(param1Ref)
+        const param2DisplayName = resolveDisplayParameterName(param2Ref)
 
         if (
           !Number.isFinite(request.targetNtst) ||
@@ -3852,21 +4284,24 @@ export function AppProvider({
           sourceNcol = sourceType.ncol
         }
 
-        const runConfig: SystemConfig = { ...system }
-        runConfig.params = getBranchParams(state.system, sourceBranch)
-        const param1Idx = system.paramNames.indexOf(request.parameterName)
-        if (param1Idx >= 0) {
-          runConfig.params[param1Idx] = point.param_value
-        }
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        runConfig = applyReducedParamOverrides(runConfig, {
+          [param1Name]: point.param_value,
+        })
+        runConfig = applyReducedParamOverrides(
+          runConfig,
+          resolveBranchPointReducedParamOverrides(sourceBranch, point)
+        )
 
         const branchData = await client.runHomoclinicFromLargeCycle(
           {
             system: runConfig,
-            lcState: point.state,
+            lcState: projectStateForSnapshot(snapshot, point.state, 'Large-cycle point'),
             sourceNtst,
             sourceNcol,
-            parameterName: request.parameterName,
-            param2Name: request.param2Name,
+            parameterName: param1Name,
+            param2Name,
             targetNtst: Math.round(request.targetNtst),
             targetNcol: Math.round(request.targetNcol),
             freeTime: request.freeTime,
@@ -3904,14 +4339,16 @@ export function AppProvider({
                 type: 'HomoclinicCurve' as const,
                 ntst: Math.round(request.targetNtst),
                 ncol: Math.round(request.targetNcol),
-                param1_name: request.parameterName,
-                param2_name: request.param2Name,
+                param1_name: param1DisplayName,
+                param2_name: param2DisplayName,
+                param1_ref: param1Ref,
+                param2_ref: param2Ref,
                 free_time: request.freeTime,
                 free_eps0: request.freeEps0,
                 free_eps1: request.freeEps1,
               },
           },
-          { stateDimension: system.varNames.length }
+          { stateDimension: snapshot.freeVariableNames.length }
         )
         const normalized = ensureHomoclinicEndpointResumeSeeds(
           trimHomoclinicLargeCycleSeedPoint(normalizedRaw)
@@ -3921,14 +4358,17 @@ export function AppProvider({
           type: 'continuation',
           name,
           systemName: system.name,
-          parameterName: `${request.parameterName}, ${request.param2Name}`,
+          parameterName: `${param1DisplayName}, ${param2DisplayName}`,
+          parameterRef: param1Ref,
+          parameter2Ref: param2Ref,
           parentObject: sourceBranch.parentObject,
           startObject: sourceBranch.name,
           branchType: 'homoclinic_curve',
           data: normalized,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...runConfig.params],
+          params: [...baseParams],
+          subsystemSnapshot: snapshot,
         }
 
         const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
@@ -3965,9 +4405,6 @@ export function AppProvider({
         if (system.type === 'map') {
           throw new Error('Homoclinic continuation is only available for flow systems.')
         }
-        if (system.paramNames.length < 2) {
-          throw new Error('Method 2 requires at least two system parameters.')
-        }
 
         const sourceBranch = state.system.branches[request.branchId]
         if (!sourceBranch) {
@@ -4001,15 +4438,19 @@ export function AppProvider({
         if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
-        if (!system.paramNames.includes(request.parameterName)) {
-          throw new Error('Select a valid first continuation parameter.')
-        }
-        if (!system.paramNames.includes(request.param2Name)) {
-          throw new Error('Select a valid second continuation parameter.')
-        }
-        if (request.param2Name === request.parameterName) {
+        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const param1Ref = parseContinuationParameter(system, snapshot, request.parameterName)
+        const param2Ref = parseContinuationParameter(system, snapshot, request.param2Name)
+        if (formatParameterRefLabel(param2Ref) === formatParameterRefLabel(param1Ref)) {
           throw new Error('Second parameter must be different from the continuation parameter.')
         }
+        const param1Name = resolveRuntimeParameterName(snapshot, param1Ref)
+        const param2Name = resolveRuntimeParameterName(snapshot, param2Ref)
+        const param1DisplayName = resolveDisplayParameterName(param1Ref)
+        const param2DisplayName = resolveDisplayParameterName(param2Ref)
 
         if (
           !Number.isFinite(request.targetNtst) ||
@@ -4029,28 +4470,39 @@ export function AppProvider({
           throw new Error('At least one of T, eps0, or eps1 must be free.')
         }
 
-        const runConfig: SystemConfig = { ...system }
-        runConfig.params = getBranchParams(state.system, sourceBranch)
-        const sourceParam1Idx = system.paramNames.indexOf(sourceType.param1_name)
-        if (sourceParam1Idx >= 0) {
-          runConfig.params[sourceParam1Idx] = point.param_value
-        }
-        const sourceParam2Idx = system.paramNames.indexOf(sourceType.param2_name)
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        const sourceParam1Ref =
+          sourceType.param1_ref ??
+          parseContinuationParameter(system, snapshot, sourceType.param1_name)
+        const sourceParam1Name = resolveRuntimeParameterName(snapshot, sourceParam1Ref)
+        runConfig = applyReducedParamOverrides(runConfig, {
+          [sourceParam1Name]: point.param_value,
+        })
+        const sourceParam2Ref =
+          sourceType.param2_ref ??
+          parseContinuationParameter(system, snapshot, sourceType.param2_name)
+        const sourceParam2Name = resolveRuntimeParameterName(snapshot, sourceParam2Ref)
         const sourceParam2Value = resolveContinuationPointParam2Value(
           point,
           sourceType,
-          system.varNames.length
+          snapshot.freeVariableNames.length
         )
-        if (sourceParam2Idx >= 0 && Number.isFinite(sourceParam2Value)) {
-          runConfig.params[sourceParam2Idx] = sourceParam2Value as number
+        if (Number.isFinite(sourceParam2Value)) {
+          runConfig = applyReducedParamOverrides(runConfig, {
+            [sourceParam2Name]: sourceParam2Value as number,
+          })
         }
 
-        const seedState = resolveHomoclinicSeedState(point, system.varNames.length)
+        const seedState = resolveHomoclinicSeedState(
+          { ...point, state: projectStateForSnapshot(snapshot, point.state, 'Homoclinic point') },
+          snapshot.freeVariableNames.length
+        )
         const inferredFixed = inferHomoclinicFixedEpsFromPoint(
           seedState,
           sourceType.ntst,
           sourceType.ncol,
-          system.varNames.length
+          snapshot.freeVariableNames.length
         )
         const sourceFixedTime = sourceContext?.fixed_time ?? Number.NaN
         const sourceFixedEps0 = sourceContext?.fixed_eps0 ?? inferredFixed.eps0
@@ -4093,8 +4545,8 @@ export function AppProvider({
             sourceFixedTime: Number.isFinite(sourceFixedTime) ? sourceFixedTime : 1.0,
             sourceFixedEps0,
             sourceFixedEps1,
-            parameterName: request.parameterName,
-            param2Name: request.param2Name,
+            parameterName: param1Name,
+            param2Name,
             targetNtst: Math.round(request.targetNtst),
             targetNcol: Math.round(request.targetNcol),
             freeTime: request.freeTime,
@@ -4133,28 +4585,33 @@ export function AppProvider({
                 type: 'HomoclinicCurve' as const,
                 ntst: Math.round(request.targetNtst),
                 ncol: Math.round(request.targetNcol),
-                param1_name: request.parameterName,
-                param2_name: request.param2Name,
+                param1_name: param1DisplayName,
+                param2_name: param2DisplayName,
+                param1_ref: param1Ref,
+                param2_ref: param2Ref,
                 free_time: request.freeTime,
                 free_eps0: request.freeEps0,
                 free_eps1: request.freeEps1,
               },
           },
-          { stateDimension: system.varNames.length }
+          { stateDimension: snapshot.freeVariableNames.length }
         ))
 
         const branch: ContinuationObject = {
           type: 'continuation',
           name,
           systemName: system.name,
-          parameterName: `${request.parameterName}, ${request.param2Name}`,
+          parameterName: `${param1DisplayName}, ${param2DisplayName}`,
+          parameterRef: param1Ref,
+          parameter2Ref: param2Ref,
           parentObject: sourceBranch.parentObject,
           startObject: sourceBranch.name,
           branchType: 'homoclinic_curve',
           data: normalized,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...runConfig.params],
+          params: [...baseParams],
+          subsystemSnapshot: snapshot,
         }
 
         const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
@@ -4192,9 +4649,6 @@ export function AppProvider({
         if (system.type === 'map') {
           throw new Error('Homotopy-saddle continuation is only available for flow systems.')
         }
-        if (system.paramNames.length < 2) {
-          throw new Error('Homotopy-saddle continuation requires at least 2 parameters.')
-        }
 
         const sourceBranch = state.system.branches[request.branchId]
         if (!sourceBranch) {
@@ -4220,15 +4674,19 @@ export function AppProvider({
           throw new Error(`Branch "${name}" already exists.`)
         }
 
-        if (!system.paramNames.includes(request.parameterName)) {
-          throw new Error('Select a valid first continuation parameter.')
-        }
-        if (!system.paramNames.includes(request.param2Name)) {
-          throw new Error('Select a valid second continuation parameter.')
-        }
-        if (request.param2Name === request.parameterName) {
+        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const param1Ref = parseContinuationParameter(system, snapshot, request.parameterName)
+        const param2Ref = parseContinuationParameter(system, snapshot, request.param2Name)
+        if (formatParameterRefLabel(param2Ref) === formatParameterRefLabel(param1Ref)) {
           throw new Error('Second parameter must be different from the continuation parameter.')
         }
+        const param1Name = resolveRuntimeParameterName(snapshot, param1Ref)
+        const param2Name = resolveRuntimeParameterName(snapshot, param2Ref)
+        const param1DisplayName = resolveDisplayParameterName(param1Ref)
+        const param2DisplayName = resolveDisplayParameterName(param2Ref)
 
         if (!Number.isFinite(request.ntst) || request.ntst < 2 || !Number.isInteger(request.ntst)) {
           throw new Error('NTST must be an integer greater than or equal to 2.')
@@ -4249,19 +4707,22 @@ export function AppProvider({
           throw new Error('eps1 tolerance must be a positive number.')
         }
 
-        const runConfig: SystemConfig = { ...system }
-        runConfig.params = getBranchParams(state.system, sourceBranch)
-        const param1Idx = system.paramNames.indexOf(request.parameterName)
-        if (param1Idx >= 0) {
-          runConfig.params[param1Idx] = point.param_value
-        }
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        runConfig = applyReducedParamOverrides(runConfig, {
+          [param1Name]: point.param_value,
+        })
+        runConfig = applyReducedParamOverrides(
+          runConfig,
+          resolveBranchPointReducedParamOverrides(sourceBranch, point)
+        )
 
         const branchData = await client.runHomotopySaddleFromEquilibrium(
           {
             system: runConfig,
-            equilibriumState: point.state,
-            parameterName: request.parameterName,
-            param2Name: request.param2Name,
+            equilibriumState: projectStateForSnapshot(snapshot, point.state, 'Equilibrium point'),
+            parameterName: param1Name,
+            param2Name,
             ntst: Math.round(request.ntst),
             ncol: Math.round(request.ncol),
             eps0: request.eps0,
@@ -4301,27 +4762,32 @@ export function AppProvider({
                 type: 'HomotopySaddleCurve' as const,
                 ntst: Math.round(request.ntst),
                 ncol: Math.round(request.ncol),
-                param1_name: request.parameterName,
-                param2_name: request.param2Name,
+                param1_name: param1DisplayName,
+                param2_name: param2DisplayName,
+                param1_ref: param1Ref,
+                param2_ref: param2Ref,
                 stage: 'StageD' as const,
               },
           },
-          { stateDimension: system.varNames.length }
+          { stateDimension: snapshot.freeVariableNames.length }
         ))
 
         const branch: ContinuationObject = {
           type: 'continuation',
           name,
           systemName: system.name,
-          parameterName: `${request.parameterName}, ${request.param2Name}`,
+          parameterName: `${param1DisplayName}, ${param2DisplayName}`,
+          parameterRef: param1Ref,
+          parameter2Ref: param2Ref,
           parentObject: sourceBranch.parentObject,
           startObject: sourceBranch.name,
           branchType: 'homotopy_saddle_curve',
           data: normalized,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...runConfig.params],
+          params: [...baseParams],
           mapIterations: sourceBranch.mapIterations,
+          subsystemSnapshot: snapshot,
         }
 
         const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
@@ -4409,21 +4875,38 @@ export function AppProvider({
           throw new Error('At least one of T, eps0, or eps1 must be free.')
         }
 
-        const runConfig: SystemConfig = { ...system }
-        runConfig.params = getBranchParams(state.system, sourceBranch)
-        const param1Idx = system.paramNames.indexOf(sourceType.param1_name)
-        if (param1Idx >= 0) {
-          runConfig.params[param1Idx] = point.param_value
-        }
+        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const param1Ref =
+          sourceType.param1_ref ??
+          parseContinuationParameter(system, snapshot, sourceType.param1_name)
+        const param2Ref =
+          sourceType.param2_ref ??
+          parseContinuationParameter(system, snapshot, sourceType.param2_name)
+        const param1Name = resolveRuntimeParameterName(snapshot, param1Ref)
+        const param2Name = resolveRuntimeParameterName(snapshot, param2Ref)
+        const param1DisplayName = resolveDisplayParameterName(param1Ref)
+        const param2DisplayName = resolveDisplayParameterName(param2Ref)
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        runConfig = applyReducedParamOverrides(runConfig, {
+          [param1Name]: point.param_value,
+        })
+        runConfig = applyReducedParamOverrides(
+          runConfig,
+          resolveBranchPointReducedParamOverrides(sourceBranch, point)
+        )
 
         const branchData = await client.runHomoclinicFromHomotopySaddle(
           {
             system: runConfig,
-            stageDState: point.state,
+            stageDState: projectStateForSnapshot(snapshot, point.state, 'StageD point'),
             sourceNtst: sourceType.ntst,
             sourceNcol: sourceType.ncol,
-            parameterName: sourceType.param1_name,
-            param2Name: sourceType.param2_name,
+            parameterName: param1Name,
+            param2Name,
             targetNtst: Math.round(request.targetNtst),
             targetNcol: Math.round(request.targetNcol),
             freeTime: request.freeTime,
@@ -4461,28 +4944,33 @@ export function AppProvider({
                 type: 'HomoclinicCurve' as const,
                 ntst: Math.round(request.targetNtst),
                 ncol: Math.round(request.targetNcol),
-                param1_name: sourceType.param1_name,
-                param2_name: sourceType.param2_name,
+                param1_name: param1DisplayName,
+                param2_name: param2DisplayName,
+                param1_ref: param1Ref,
+                param2_ref: param2Ref,
                 free_time: request.freeTime,
                 free_eps0: request.freeEps0,
                 free_eps1: request.freeEps1,
               },
           },
-          { stateDimension: system.varNames.length }
+          { stateDimension: snapshot.freeVariableNames.length }
         )
 
         const branch: ContinuationObject = {
           type: 'continuation',
           name,
           systemName: system.name,
-          parameterName: `${sourceType.param1_name}, ${sourceType.param2_name}`,
+          parameterName: `${param1DisplayName}, ${param2DisplayName}`,
+          parameterRef: param1Ref,
+          parameter2Ref: param2Ref,
           parentObject: sourceBranch.parentObject,
           startObject: sourceBranch.name,
           branchType: 'homoclinic_curve',
           data: normalized,
           settings: request.settings,
           timestamp: new Date().toISOString(),
-          params: [...runConfig.params],
+          params: [...baseParams],
+          subsystemSnapshot: snapshot,
         }
 
         const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
@@ -4595,6 +5083,7 @@ export function AppProvider({
       updateViewportHeight: updateViewportHeightAction,
       updateRender: updateRenderAction,
       updateObjectParams: updateObjectParamsAction,
+      updateObjectFrozenVariables: updateObjectFrozenVariablesAction,
       updateIsoclineObject: updateIsoclineObjectAction,
       updateScene: updateSceneAction,
       updateBifurcationDiagram: updateBifurcationDiagramAction,
@@ -4672,6 +5161,7 @@ export function AppProvider({
       updateViewportHeightAction,
       updateRenderAction,
       updateObjectParamsAction,
+      updateObjectFrozenVariablesAction,
       updateIsoclineObjectAction,
       updateSceneAction,
       updateBifurcationDiagramAction,
