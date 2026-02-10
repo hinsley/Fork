@@ -7544,22 +7544,6 @@ export function InspectorDetailsPanel({
           {scene ? (
             <div className="inspector-section">
               <h3>Scene</h3>
-              <label>
-                Fallback display
-                <select
-                  value={scene.display}
-                  onChange={(event) =>
-                    onUpdateScene(scene.id, {
-                      display: event.target.value as Scene['display'],
-                    })
-                  }
-                  data-testid="scene-display"
-                >
-                  <option value="all">All visible objects</option>
-                  <option value="selection">Selected object</option>
-                </select>
-              </label>
-              <p className="empty-state">Used when no objects are selected below.</p>
               {showSceneAxisPicker && sceneAxisSelection ? (
                 <div className="inspector-subsection">
                   <h4 className="inspector-subheading">State space axes</h4>
@@ -7645,6 +7629,22 @@ export function InspectorDetailsPanel({
               ) : null}
               <div className="inspector-subsection">
                 <h4 className="inspector-subheading">Displayed objects</h4>
+                <label>
+                  Fallback display
+                  <select
+                    value={scene.display}
+                    onChange={(event) =>
+                      onUpdateScene(scene.id, {
+                        display: event.target.value as Scene['display'],
+                      })
+                    }
+                    data-testid="scene-display"
+                  >
+                    <option value="all">All visible objects</option>
+                    <option value="selection">Selected object</option>
+                  </select>
+                </label>
+                <p className="empty-state">Used when no objects are selected below.</p>
                 <label>
                   Search objects
                   <input
