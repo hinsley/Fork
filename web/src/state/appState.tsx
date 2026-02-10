@@ -498,6 +498,68 @@ function parseContinuationParameter(
   return parseParameterRefLabel(system, snapshot, label)
 }
 
+function parseContinuationParameterAllowRuntimeName(
+  system: SystemConfig,
+  snapshot: SubsystemSnapshot,
+  label: string
+): ParameterRef {
+  try {
+    return parseContinuationParameter(system, snapshot, label)
+  } catch (error) {
+    for (const [variableName, generatedName] of Object.entries(
+      snapshot.frozenParameterNamesByVarName
+    )) {
+      if (generatedName === label) {
+        return { kind: 'frozen_var', variableName }
+      }
+    }
+    throw error
+  }
+}
+
+function serializeBranchDataForExtension(
+  system: SystemConfig,
+  snapshot: SubsystemSnapshot,
+  branch: ContinuationObject,
+  dataOverride?: ContinuationObject['data']
+) {
+  const data = dataOverride ?? branch.data
+  const branchType = data.branch_type
+  if (
+    branchType &&
+    typeof branchType === 'object' &&
+    'param1_name' in branchType &&
+    'param2_name' in branchType
+  ) {
+    const param1Ref =
+      ('param1_ref' in branchType && branchType.param1_ref) ||
+      branch.parameterRef ||
+      parseContinuationParameterAllowRuntimeName(system, snapshot, branchType.param1_name)
+    const param2Ref =
+      ('param2_ref' in branchType && branchType.param2_ref) ||
+      branch.parameter2Ref ||
+      parseContinuationParameterAllowRuntimeName(system, snapshot, branchType.param2_name)
+    const runtimeBranchType = {
+      ...branchType,
+      param1_name: resolveRuntimeParameterName(snapshot, param1Ref),
+      param2_name: resolveRuntimeParameterName(snapshot, param2Ref),
+      param1_ref: param1Ref,
+      param2_ref: param2Ref,
+    }
+    return serializeBranchDataForWasm({
+      ...branch,
+      data: {
+        ...data,
+        branch_type: runtimeBranchType,
+      },
+    })
+  }
+  return serializeBranchDataForWasm({
+    ...branch,
+    data,
+  })
+}
+
 function resolveBranchPointReducedParamOverrides(
   branch: ContinuationObject,
   point: ContinuationPoint
@@ -2554,10 +2616,12 @@ export function AppProvider({
             })
           }
 
-          const branchData = serializeBranchDataForWasm({
-            ...sourceBranch,
-            data: homocSourceData,
-          })
+          const branchData = serializeBranchDataForExtension(
+            system,
+            snapshot,
+            sourceBranch,
+            homocSourceData
+          )
           updatedData = await client.runContinuationExtension(
             {
               system: runConfig,
@@ -2582,7 +2646,11 @@ export function AppProvider({
             )
           }
         } else {
-          const branchData = serializeBranchDataForWasm(sourceBranch)
+          const branchData = serializeBranchDataForExtension(
+            system,
+            snapshot,
+            sourceBranch
+          )
 
           updatedData = await client.runContinuationExtension(
             {

@@ -8,6 +8,7 @@ import { MemorySystemStore } from '../system/store'
 import { addBranch, addObject, createSystem } from '../system/model'
 import { createPeriodDoublingSystem } from '../system/fixtures'
 import { normalizeBranchEigenvalues } from '../system/continuation'
+import { buildSubsystemSnapshot } from '../system/subsystemGateway'
 import type {
   ContinuationObject,
   ContinuationPoint,
@@ -404,6 +405,127 @@ describe('appState limit cycle render targets', () => {
         branchId,
         pointIndex: lastIndex,
       })
+    })
+  })
+
+  it('uses runtime frozen-parameter names when extending codim1 curves', async () => {
+    const base = createSystem({
+      name: 'Codim1_Extend_Frozen',
+      config: {
+        name: 'Codim1_Extend_Frozen',
+        equations: ['v', '0', '0'],
+        params: [0.1],
+        paramNames: ['mu'],
+        varNames: ['v', 'h1', 'h2'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const snapshot = buildSubsystemSnapshot(base.config, {
+      frozenValuesByVarName: { h1: 0.2, h2: 0.4 },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_F',
+      systemName: base.config.name,
+      parameters: [...base.config.params],
+      frozenVariables: { frozenValuesByVarName: { h1: 0.2, h2: 0.4 } },
+      subsystemSnapshot: snapshot,
+    }
+    const withObject = addObject(base, equilibrium)
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'hopf_curve_frozen',
+      systemName: base.config.name,
+      parameterName: 'var:h1, var:h2',
+      parameterRef: { kind: 'frozen_var', variableName: 'h1' },
+      parameter2Ref: { kind: 'frozen_var', variableName: 'h2' },
+      parentObject: equilibrium.name,
+      startObject: 'eq_branch_seed',
+      branchType: 'hopf_curve',
+      data: {
+        points: [
+          {
+            state: [0.1],
+            param_value: 0.2,
+            param2_value: 0.4,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [0.15],
+            param_value: 0.25,
+            param2_value: 0.45,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: {
+          type: 'HopfCurve',
+          param1_name: 'var:h1',
+          param2_name: 'var:h2',
+          param1_ref: { kind: 'frozen_var', variableName: 'h1' },
+          param2_ref: { kind: 'frozen_var', variableName: 'h2' },
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...base.config.params],
+      subsystemSnapshot: snapshot,
+    }
+    const withBranch = addBranch(withObject.system, sourceBranch, withObject.nodeId)
+    const client = new MockForkCoreClient(0)
+    let capturedParamName = ''
+    let capturedParam1Name = ''
+    let capturedParam2Name = ''
+    client.runContinuationExtension = async (request) => {
+      capturedParamName = request.parameterName
+      const branchType = request.branchData.branch_type
+      if (
+        branchType &&
+        typeof branchType === 'object' &&
+        'param1_name' in branchType &&
+        'param2_name' in branchType
+      ) {
+        capturedParam1Name = branchType.param1_name
+        capturedParam2Name = branchType.param2_name
+      }
+      const seed = request.branchData.points[request.branchData.points.length - 1]
+      return normalizeBranchEigenvalues(
+        {
+          ...request.branchData,
+          points: [
+            ...request.branchData.points,
+            {
+              ...seed,
+              param_value: seed.param_value + request.settings.step_size,
+              param2_value: seed.param2_value,
+            },
+          ],
+          indices: [0, 1, 2],
+        },
+        { stateDimension: request.system.varNames.length }
+      )
+    }
+    const { getContext } = setupApp(withBranch.system, client)
+
+    await act(async () => {
+      await getContext().actions.extendBranch({
+        branchId: withBranch.nodeId,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      expect(getContext().state.error).toBeNull()
+      expect(capturedParamName).toBe('fv__h1')
+      expect(capturedParam1Name).toBe('fv__h1')
+      expect(capturedParam2Name).toBe('fv__h2')
+      const updated = getContext().state.system!.branches[withBranch.nodeId]
+      expect(updated.data.points.length).toBe(3)
     })
   })
 
