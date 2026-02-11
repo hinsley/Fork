@@ -1107,6 +1107,140 @@ describe('ViewportPanel view state wiring', () => {
     expect(selectedTrace?.marker?.symbol).toBe('circle-open')
   })
 
+  it('renders scene fold curves as lines and only shows codim-2 markers', () => {
+    const config: SystemConfig = {
+      name: 'Scene_Fold_Curve',
+      equations: ['y', '-x + mu'],
+      params: [0.3, 0.2],
+      paramNames: ['mu', 'nu'],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['x', 'y'],
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_Seed',
+      systemName: config.name,
+      solution: {
+        state: [0.1, 0],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [0, 1, -1, 0],
+        eigenpairs: [],
+      },
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+    const continuationSettings: ContinuationSettings = {
+      step_size: 0.01,
+      min_step_size: 1e-6,
+      max_step_size: 0.1,
+      max_steps: 10,
+      corrector_steps: 4,
+      corrector_tolerance: 1e-6,
+      step_tolerance: 1e-6,
+    }
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'fold_scene_curve',
+      systemName: config.name,
+      parameterName: 'mu,nu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'fold_curve',
+      data: {
+        points: [
+          {
+            state: [0.1, 0],
+            param_value: 0.3,
+            param2_value: 0.2,
+            stability: 'Fold',
+            eigenvalues: [],
+          },
+          {
+            state: [0.4, 0.2],
+            param_value: 0.5,
+            param2_value: 0.3,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [0.8, 0.4],
+            param_value: 0.7,
+            param2_value: 0.4,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [1],
+        indices: [0, 1, 2],
+        branch_type: {
+          type: 'FoldCurve',
+          param1_name: 'mu',
+          param2_name: 'nu',
+        },
+      },
+      settings: continuationSettings,
+      timestamp: nowIso(),
+      params: [...config.params],
+    }
+    const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
+    system = branchResult.system
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const lineTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === branch.name &&
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    ) as { x?: number[]; y?: number[] } | undefined
+    expect(lineTrace?.x).toEqual([0.1, 0.4, 0.8])
+    expect(lineTrace?.y).toEqual([0, 0.2, 0.4])
+
+    const pointTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === branch.name &&
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'lines+markers'
+    )
+    expect(pointTrace).toBeUndefined()
+
+    const bifTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === `${branch.name} bifurcations` &&
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'markers'
+    ) as
+      | {
+          x?: number[]
+          y?: number[]
+          customdata?: number[]
+          marker?: { symbol?: string }
+        }
+      | undefined
+    expect(bifTrace?.x).toEqual([0.4])
+    expect(bifTrace?.y).toEqual([0.2])
+    expect(bifTrace?.customdata).toEqual([1])
+    expect(bifTrace?.marker?.symbol).toBe('diamond')
+  })
+
   it('renders frozen limit-cycle scene axes from embedded full-state values', () => {
     const config: SystemConfig = {
       name: 'Frozen_LC_Scene',

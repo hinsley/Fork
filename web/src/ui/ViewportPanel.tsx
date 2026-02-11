@@ -1108,6 +1108,15 @@ const LIMIT_CYCLE_BRANCH_TYPES = new Set([
   'lpc_curve',
   'ns_curve',
 ])
+const CODIM1_BIFURCATION_CURVE_BRANCH_TYPES = new Set([
+  'fold_curve',
+  'hopf_curve',
+  'lpc_curve',
+  'pd_curve',
+  'ns_curve',
+  'homoclinic_curve',
+  'homotopy_saddle_curve',
+])
 const DEFAULT_LIMIT_CYCLE_MESH = { ntst: 20, ncol: 4 }
 
 function resolveLimitCycleMesh(
@@ -2864,17 +2873,63 @@ function buildSceneTraces(
           pointIndices.push(idx)
         }
         if (x.length > 0) {
+          const isCodim1Curve = CODIM1_BIFURCATION_CURVE_BRANCH_TYPES.has(branch.branchType)
+          const positionByPointIndex = new Map<number, number>()
+          pointIndices.forEach((pointIndex, position) => {
+            if (!positionByPointIndex.has(pointIndex)) {
+              positionByPointIndex.set(pointIndex, position)
+            }
+          })
           traces.push({
             type: 'scatter',
-            mode: 'lines+markers',
+            mode: isCodim1Curve ? 'lines' : 'lines+markers',
             name: branch.name,
             uid: nodeId,
             x,
             y,
             customdata: pointIndices,
             line: { color: node.render.color, width: lineWidth, dash: lineDash },
-            marker: { color: node.render.color, size: markerSize },
+            ...(isCodim1Curve ? {} : { marker: { color: node.render.color, size: markerSize } }),
           })
+          if (isCodim1Curve && branch.data.bifurcations.length > 0) {
+            const bx: number[] = []
+            const by: number[] = []
+            const labels: string[] = []
+            const bifIndices: number[] = []
+            for (const bifIndex of branch.data.bifurcations) {
+              const point = branch.data.points[bifIndex]
+              const position = positionByPointIndex.get(bifIndex)
+              if (!point || position === undefined) continue
+              const xValue = x[position]
+              const yValue = y[position]
+              if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) continue
+              bx.push(xValue)
+              by.push(yValue)
+              bifIndices.push(bifIndex)
+              const logicalIndex = indices[bifIndex]
+              const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : bifIndex
+              labels.push(formatBifurcationLabel(displayIndex, point.stability))
+            }
+            if (bx.length > 0) {
+              traces.push({
+                type: 'scatter',
+                mode: 'markers',
+                name: `${branch.name} bifurcations`,
+                uid: nodeId,
+                x: bx,
+                y: by,
+                customdata: bifIndices,
+                marker: {
+                  color: node.render.color,
+                  size: markerSize + 2,
+                  symbol: 'diamond',
+                },
+                text: labels,
+                showlegend: false,
+                hovertemplate: '%{text}<extra></extra>',
+              })
+            }
+          }
           if (selectedBranchPointIndex !== null && selectedPointLabel) {
             const selectedPosition = pointIndices.indexOf(selectedBranchPointIndex)
             if (selectedPosition >= 0) {
@@ -3140,6 +3195,10 @@ function buildSceneTraces(
 
     if (pointIndices.length === 0) continue
     const isEquilibriumBranch = branch.branchType === 'equilibrium'
+    const isCodim1BifurcationCurve = CODIM1_BIFURCATION_CURVE_BRANCH_TYPES.has(branch.branchType)
+    const renderPointMarkers = !isEquilibriumBranch && !isCodim1BifurcationCurve
+    const renderBifurcationMarkers =
+      (isEquilibriumBranch || isCodim1BifurcationCurve) && branch.data.bifurcations.length > 0
     const positionByPointIndex = new Map<number, number>()
     pointIndices.forEach((pointIndex, position) => {
       if (!positionByPointIndex.has(pointIndex)) {
@@ -3149,7 +3208,7 @@ function buildSceneTraces(
     if (projectionPlotDim >= 3) {
       traces.push({
         type: 'scatter3d',
-        mode: isEquilibriumBranch ? 'lines' : 'lines+markers',
+        mode: renderPointMarkers ? 'lines+markers' : 'lines',
         name: branch.name,
         uid: nodeId,
         x,
@@ -3157,11 +3216,9 @@ function buildSceneTraces(
         z,
         customdata: pointIndices,
         line: { color: node.render.color, width: lineWidth, dash: lineDash },
-        ...(isEquilibriumBranch
-          ? {}
-          : { marker: { color: node.render.color, size: markerSize } }),
+        ...(renderPointMarkers ? { marker: { color: node.render.color, size: markerSize } } : {}),
       })
-      if (isEquilibriumBranch && branch.data.bifurcations.length > 0) {
+      if (renderBifurcationMarkers) {
         const bx: number[] = []
         const by: number[] = []
         const bz: number[] = []
@@ -3209,18 +3266,16 @@ function buildSceneTraces(
     } else if (projectionPlotDim === 2 || isMap1D || isTimeSeries) {
       traces.push({
         type: 'scatter',
-        mode: isEquilibriumBranch ? 'lines' : 'lines+markers',
+        mode: renderPointMarkers ? 'lines+markers' : 'lines',
         name: branch.name,
         uid: nodeId,
         x,
         y,
         customdata: pointIndices,
         line: { color: node.render.color, width: lineWidth, dash: lineDash },
-        ...(isEquilibriumBranch
-          ? {}
-          : { marker: { color: node.render.color, size: markerSize } }),
+        ...(renderPointMarkers ? { marker: { color: node.render.color, size: markerSize } } : {}),
       })
-      if (isEquilibriumBranch && branch.data.bifurcations.length > 0) {
+      if (renderBifurcationMarkers) {
         const bx: number[] = []
         const by: number[] = []
         const labels: string[] = []
