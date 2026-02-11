@@ -134,6 +134,15 @@ Important behavior:
 - There is no automatic retry and no automatic method switch during extension.
 - For runs with any fixed homoclinic extras (`Free T`/`Free eps0`/`Free eps1` off), extension requires saved branch metadata.
 
+### Frozen-variable subsystem invariants (extension)
+
+When extending homoclinic branches in frozen-variable subsystems:
+
+- Endpoint state must be a valid packed homoclinic point for the branch's source mesh (`ntst/ncol`) in the subsystem's reduced dimension.
+- Extension decode uses the saved homoclinic basis dimensions (`nneg`, `npos`) from branch context/setup, rather than inferring them from trailing packed-state length.
+- Extension resumes from saved endpoint metadata (`resume_state`) and, for fixed-extra runs, compatible `homoc_context` (`fixed_time`, `fixed_eps0`, `fixed_eps1`, basis snapshot).
+- If any of those decode/resume contracts are missing or incompatible, extension fails fast with an explicit error instead of silently switching continuation methods.
+
 ## Why Extension Can Jump (and How Fork Prevents It)
 
 A large first-step jump at extension startup usually means the solver did not resume from a true continuation endpoint state and tangent. In that case, the predictor can launch from a less-local direction than the branch geometry near the endpoint.
@@ -167,6 +176,9 @@ Interpretation:
 | Extension fails but branch itself is valid | Current branch settings/mesh not good for farther region | Create explicit restart (Method 2 or Method 4 path) with remeshed `NTST/NCOL` and then continue |
 | First extension point jumps far in parameter space | Local endpoint tangent/step was not appropriate | 1) Reduce initial step size 2) Ensure extension uses a branch with valid endpoint history 3) Re-seed via explicit Method 2 if needed |
 | `eps0/eps1` become much larger right after extension | First extension predictor left local manifold neighborhood | 1) Lower initial and max step sizes 2) Increase `NTST` 3) Reinitialize with explicit homoclinic restart |
+| `Large-cycle point dimension mismatch for the selected frozen-variable subsystem.` | Large-cycle packed state was interpreted in full dimension instead of reduced subsystem dimension | 1) Confirm source limit-cycle branch/object snapshot and free-variable count 2) Recompute source branch after frozen-config changes 3) Retry with the same frozen snapshot context |
+| `Continuation init failed: Decoded Riccati dimensions do not match setup basis` | Packed homoc point decode used/inferred Riccati dimensions that do not match saved setup basis | 1) Recompute from source branch point with current build 2) Keep parameter plane fixed and retry 3) If persistent, restart via Method 2 with fresh seed |
+| `Failed to decode the homoclinic endpoint state for extension. Use explicit Homoclinic from Homoclinic with a valid packed point.` | Endpoint packed state or resume metadata is incompatible with extension decode contracts for the selected subsystem | 1) Verify endpoint belongs to current branch and has packed state 2) Recompute/restart the branch with current build to regenerate resume metadata 3) Use explicit Method 2 restart from a valid point, then extend |
 
 ## Recommended Operating Pattern
 

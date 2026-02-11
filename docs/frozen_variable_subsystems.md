@@ -126,6 +126,7 @@ Extension invariants:
 - Branch extension must preserve two-parameter metadata (`param1_ref`, `param2_ref`) for stored branches.
 - Existing points and newly extended points must both retain correct `param2_value` semantics.
 - Scene/diagram projection paths must fall back to top-level branch refs if branch-type refs are absent.
+- Homoclinic extension endpoint hydration must decode packed state with saved basis dimensions (`nneg`, `npos`) from setup/context, not inferred Riccati trailing-length heuristics.
 
 ## Branch/Object Snapshot Semantics
 
