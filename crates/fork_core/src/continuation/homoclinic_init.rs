@@ -136,6 +136,54 @@ pub fn decode_homoclinic_state(
     fixed_eps0: f64,
     fixed_eps1: f64,
 ) -> Result<DecodedHomoclinicState> {
+    decode_homoclinic_state_impl(
+        flat_state,
+        dim,
+        ntst,
+        ncol,
+        extras,
+        fixed_time,
+        fixed_eps0,
+        fixed_eps1,
+        None,
+    )
+}
+
+pub fn decode_homoclinic_state_with_basis(
+    flat_state: &[f64],
+    dim: usize,
+    ntst: usize,
+    ncol: usize,
+    extras: HomoclinicExtraFlags,
+    fixed_time: f64,
+    fixed_eps0: f64,
+    fixed_eps1: f64,
+    basis_dims: (usize, usize),
+) -> Result<DecodedHomoclinicState> {
+    decode_homoclinic_state_impl(
+        flat_state,
+        dim,
+        ntst,
+        ncol,
+        extras,
+        fixed_time,
+        fixed_eps0,
+        fixed_eps1,
+        Some(basis_dims),
+    )
+}
+
+fn decode_homoclinic_state_impl(
+    flat_state: &[f64],
+    dim: usize,
+    ntst: usize,
+    ncol: usize,
+    extras: HomoclinicExtraFlags,
+    fixed_time: f64,
+    fixed_eps0: f64,
+    fixed_eps1: f64,
+    basis_dims: Option<(usize, usize)>,
+) -> Result<DecodedHomoclinicState> {
     if dim == 0 {
         bail!("State dimension must be positive");
     }
@@ -180,7 +228,14 @@ pub fn decode_homoclinic_state(
     }
 
     let remaining = flat_state.len().saturating_sub(index);
-    let (nneg, npos) = deduce_subspace_dims(remaining, dim)?;
+    let (nneg, npos) = if let Some((expected_nneg, expected_npos)) = basis_dims {
+        if expected_nneg + expected_npos != dim {
+            bail!("Configured Riccati basis dimensions do not match state dimension");
+        }
+        (expected_nneg, expected_npos)
+    } else {
+        deduce_subspace_dims(remaining, dim)?
+    };
     let y_size = nneg * npos;
     if remaining != 2 * y_size {
         bail!("Unable to decode Riccati state from homoclinic point");

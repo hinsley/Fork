@@ -1,4 +1,6 @@
-use super::homoclinic_init::{decode_homoclinic_state, pack_homoclinic_state, HomoclinicSetup};
+use super::homoclinic_init::{
+    decode_homoclinic_state_with_basis, pack_homoclinic_state, HomoclinicSetup,
+};
 use super::periodic::CollocationCoefficients;
 use super::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
 use super::{
@@ -130,7 +132,7 @@ impl<'a> HomoclinicProblem<'a> {
     }
 
     fn decode_state(&self, aug_state: &DVector<f64>) -> Result<DecodedState> {
-        let decoded = decode_homoclinic_state(
+        let decoded = decode_homoclinic_state_with_basis(
             &aug_state.as_slice()[1..],
             self.dim(),
             self.setup.ntst,
@@ -139,6 +141,7 @@ impl<'a> HomoclinicProblem<'a> {
             self.setup.guess.time,
             self.setup.guess.eps0,
             self.setup.guess.eps1,
+            (self.setup.basis.nneg, self.setup.basis.npos),
         )?;
         Ok(DecodedState {
             mesh_states: decoded.mesh_states,
@@ -548,7 +551,8 @@ fn l2_norm(v: &[f64]) -> f64 {
 mod tests {
     use super::*;
     use crate::continuation::homoclinic_init::{
-        homoclinic_setup_from_large_cycle, HomoclinicExtraFlags,
+        homoclinic_setup_from_large_cycle, HomoclinicBasis, HomoclinicExtraFlags,
+        HomoclinicGuess, HomoclinicSetup,
     };
     use crate::equation_engine::{Bytecode, OpCode};
 
@@ -571,6 +575,35 @@ mod tests {
         system.var_map.insert("x".to_string(), 0);
         system.var_map.insert("y".to_string(), 1);
         system
+    }
+
+    fn linear_system_3d() -> EquationSystem {
+        let eq1 = Bytecode {
+            ops: vec![OpCode::LoadConst(-1.0), OpCode::LoadVar(0), OpCode::Mul],
+        };
+        let eq2 = Bytecode {
+            ops: vec![OpCode::LoadConst(-2.0), OpCode::LoadVar(1), OpCode::Mul],
+        };
+        let eq3 = Bytecode {
+            ops: vec![OpCode::LoadVar(2)],
+        };
+        let mut system = EquationSystem::new(vec![eq1, eq2, eq3], vec![0.2, 0.1]);
+        system.param_map.insert("mu".to_string(), 0);
+        system.param_map.insert("nu".to_string(), 1);
+        system.var_map.insert("x".to_string(), 0);
+        system.var_map.insert("y".to_string(), 1);
+        system.var_map.insert("z".to_string(), 2);
+        system
+    }
+
+    fn identity_column_major(dim: usize) -> Vec<f64> {
+        let mut flat = Vec::with_capacity(dim * dim);
+        for col in 0..dim {
+            for row in 0..dim {
+                flat.push(if row == col { 1.0 } else { 0.0 });
+            }
+        }
+        flat
     }
 
     fn synthetic_lc_state(dim: usize, ntst: usize, ncol: usize) -> Vec<f64> {
@@ -720,5 +753,59 @@ mod tests {
         assert_eq!(jac.nrows(), dim);
         assert_eq!(jac.ncols(), dim + 1);
         assert!(jac.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn residual_uses_setup_riccati_dims_for_ambiguous_tail_shapes() {
+        let mut system = linear_system_3d();
+        let setup = HomoclinicSetup {
+            guess: HomoclinicGuess {
+                mesh_states: vec![
+                    vec![0.5, 0.2, 0.1],
+                    vec![0.3, 0.1, 0.2],
+                    vec![0.1, 0.0, 0.3],
+                ],
+                stage_states: vec![vec![vec![0.4, 0.15, 0.15]], vec![vec![0.2, 0.05, 0.25]]],
+                x0: vec![0.0, 0.0, 0.0],
+                param1_value: 0.2,
+                param2_value: 0.1,
+                time: 2.0,
+                eps0: 0.05,
+                eps1: 0.08,
+                yu: vec![0.0, 0.0],
+                ys: vec![0.0, 0.0],
+            },
+            ntst: 2,
+            ncol: 1,
+            param1_index: 0,
+            param2_index: 1,
+            param1_name: "mu".to_string(),
+            param2_name: "nu".to_string(),
+            base_params: vec![0.2, 0.1],
+            extras: HomoclinicExtraFlags {
+                free_time: false,
+                free_eps0: true,
+                free_eps1: true,
+            },
+            basis: HomoclinicBasis {
+                stable_q: identity_column_major(3),
+                unstable_q: identity_column_major(3),
+                dim: 3,
+                nneg: 2,
+                npos: 1,
+            },
+        };
+
+        let packed = pack_homoclinic_state(&setup);
+        let mut problem = HomoclinicProblem::new(&mut system, setup.clone()).expect("problem");
+        let dim = problem.dimension();
+        let mut aug = DVector::zeros(dim + 1);
+        aug[0] = setup.guess.param1_value;
+        for (i, value) in packed.iter().copied().enumerate() {
+            aug[i + 1] = value;
+        }
+        let mut residual = DVector::zeros(dim);
+        problem.residual(&aug, &mut residual).expect("residual");
+        assert!(residual.iter().all(|value| value.is_finite()));
     }
 }
