@@ -1654,6 +1654,129 @@ describe('appState homoclinic and homotopy actions', () => {
     })
   })
 
+  it('creates a homoclinic branch from a frozen large-cycle point with reduced packed state', async () => {
+    const base = createSystem({
+      name: 'Homoc_App_M1_Frozen_Reduced',
+      config: {
+        name: 'Homoc_App_M1_Frozen_Reduced',
+        equations: ['v', '0', '0'],
+        params: [0.2],
+        paramNames: ['mu'],
+        varNames: ['v', 'h1', 'h2'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const snapshot = buildSubsystemSnapshot(base.config, {
+      frozenValuesByVarName: { h1: 0.3, h2: 0.4 },
+    })
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Frozen',
+      systemName: base.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_A' },
+      ntst: 3,
+      ncol: 2,
+      period: 12,
+      state: [0.2],
+      createdAt: new Date().toISOString(),
+      frozenVariables: { frozenValuesByVarName: { h1: 0.3, h2: 0.4 } },
+      subsystemSnapshot: snapshot,
+    }
+    const added = addObject(base, limitCycle)
+    const pointCount = 3 * (2 + 1)
+    const reducedPackedState = Array.from({ length: pointCount }, (_, index) => index + 0.25)
+    reducedPackedState.push(12)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_branch_frozen',
+      systemName: base.config.name,
+      parameterName: 'var:h1',
+      parameterRef: { kind: 'frozen_var', variableName: 'h1' },
+      parentObject: limitCycle.name,
+      startObject: limitCycle.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          {
+            state: reducedPackedState,
+            param_value: 0.31,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+        branch_type: { type: 'LimitCycle', ntst: 3, ncol: 2 },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2],
+      subsystemSnapshot: snapshot,
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+    const client = new MockForkCoreClient(0)
+    let capturedLcState: number[] = []
+    client.runHomoclinicFromLargeCycle = async (request) => {
+      capturedLcState = [...request.lcState]
+      return normalizeBranchEigenvalues({
+        points: [
+          {
+            state: [0, 0, 0.5, 0.5],
+            param_value: 0.1,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [1, 1, 0.6, 0.6],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: {
+          type: 'HomoclinicCurve',
+          ntst: 6,
+          ncol: 2,
+          param1_name: 'var:h1',
+          param2_name: 'var:h2',
+          param1_ref: { kind: 'frozen_var', variableName: 'h1' },
+          param2_ref: { kind: 'frozen_var', variableName: 'h2' },
+          free_time: true,
+          free_eps0: true,
+          free_eps1: false,
+        },
+      })
+    }
+    const { getContext } = setupApp(branchResult.system, client)
+
+    await act(async () => {
+      await getContext().actions.createHomoclinicFromLargeCycle({
+        branchId: branchResult.nodeId,
+        pointIndex: 0,
+        name: 'homoc_frozen_reduced',
+        parameterName: 'var:h1',
+        param2Name: 'var:h2',
+        targetNtst: 6,
+        targetNcol: 2,
+        freeTime: true,
+        freeEps0: true,
+        freeEps1: false,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      expect(getContext().state.error).toBeNull()
+      expect(capturedLcState).toEqual(reducedPackedState)
+      const createdId = findBranchIdByName(getContext().state.system!, 'homoc_frozen_reduced')
+      expect(createdId).toBeTruthy()
+    })
+  })
+
   it('creates a homotopy-saddle branch from an equilibrium branch point', async () => {
     const base = makeTwoParamSystem('Homoc_App_M5')
     const equilibrium: EquilibriumObject = {

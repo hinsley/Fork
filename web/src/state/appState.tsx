@@ -715,6 +715,42 @@ function projectStateForSnapshot(
   throw new Error(`${label} dimension mismatch for the selected frozen-variable subsystem.`)
 }
 
+function projectLimitCyclePackedStateForSnapshot(
+  snapshot: SubsystemSnapshot,
+  state: number[],
+  ntst: number,
+  ncol: number,
+  label: string
+): number[] {
+  const freeDimension = snapshot.freeVariableNames.length
+  const baseDimension = snapshot.baseVarNames.length
+  if (freeDimension === baseDimension) {
+    return [...state]
+  }
+
+  const safeNtst = Number.isFinite(ntst) ? Math.max(1, Math.round(ntst)) : 1
+  const safeNcol = Number.isFinite(ncol) ? Math.max(1, Math.round(ncol)) : 1
+  const pointCount = safeNtst * (safeNcol + 1)
+  const expectedReducedLength = pointCount * freeDimension + 1
+  const expectedBaseLength = pointCount * baseDimension + 1
+
+  if (state.length === expectedReducedLength) {
+    return [...state]
+  }
+  if (state.length === expectedBaseLength) {
+    const reduced: number[] = []
+    for (let pointIndex = 0; pointIndex < pointCount; pointIndex += 1) {
+      const offset = pointIndex * baseDimension
+      const fullPoint = state.slice(offset, offset + baseDimension)
+      reduced.push(...projectStateToReduced(snapshot, fullPoint))
+    }
+    reduced.push(state[state.length - 1] ?? Number.NaN)
+    return reduced
+  }
+
+  return projectStateForSnapshot(snapshot, state, label)
+}
+
 type ObjectSubsystemRun = {
   snapshot: SubsystemSnapshot
   runConfig: SystemConfig
@@ -4212,9 +4248,11 @@ export function AppProvider({
         const parameterDisplayName = resolveDisplayParameterName(parameterRef)
 
         let sourceNtst = 20
+        let sourceNcol = 4
         const branchType = sourceBranch.data.branch_type
         if (branchType?.type === 'LimitCycle') {
           sourceNtst = branchType.ntst
+          sourceNcol = branchType.ncol
         }
 
         const baseParams = getBranchParams(state.system, sourceBranch)
@@ -4230,7 +4268,13 @@ export function AppProvider({
         const branchData = await client.runLimitCycleContinuationFromPD(
           {
             system: runConfig,
-            lcState: projectStateForSnapshot(snapshot, point.state, 'PD point'),
+            lcState: projectLimitCyclePackedStateForSnapshot(
+              snapshot,
+              point.state,
+              sourceNtst,
+              sourceNcol,
+              'PD point'
+            ),
             parameterName,
             paramValue: point.param_value,
             ntst: Math.round(sourceNtst),
@@ -4455,7 +4499,13 @@ export function AppProvider({
         const branchData = await client.runHomoclinicFromLargeCycle(
           {
             system: runConfig,
-            lcState: projectStateForSnapshot(snapshot, point.state, 'Large-cycle point'),
+            lcState: projectLimitCyclePackedStateForSnapshot(
+              snapshot,
+              point.state,
+              sourceNtst,
+              sourceNcol,
+              'Large-cycle point'
+            ),
             sourceNtst,
             sourceNcol,
             parameterName: param1Name,
