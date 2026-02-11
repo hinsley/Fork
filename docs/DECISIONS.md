@@ -21,6 +21,62 @@ References:
 
 ---
 
+### 2026-02-11: Object-scoped frozen-variable subsystems as compute context
+Context:
+Fast-slow workflows require running solves/continuations in reduced subsystems where selected state
+variables are frozen, while preserving consistent full-system display behavior.
+Decision:
+Make frozen-variable subsystem configuration object-scoped and snapshot-based. All compute calls go
+through the subsystem gateway, which builds reduced run configs and maps states between reduced and
+full coordinates. Persist reduced-canonical computed states and immutable subsystem snapshots on
+branches/derived objects.
+Why:
+Keeps the model modular and reproducible while avoiding ad hoc per-solver reduction logic.
+Impact:
+Objects define their own frozen context; branches inherit immutable snapshots; UI renders by embedding
+reduced states into full-system coordinates with per-point projection overrides for frozen continuation
+parameters.
+References:
+`web/src/system/subsystemGateway.ts`, `web/src/system/types.ts`,
+`web/src/state/appState.tsx`, `docs/frozen_variable_subsystems.md`
+
+### 2026-02-11: Frozen continuation parameter identity split between runtime and persisted metadata
+Context:
+Codim-1 branch extension and projection regressions occurred when frozen-variable continuation
+parameters were encoded only as display labels or only as runtime names.
+Decision:
+Use explicit persisted refs (`ParameterRef`) as source-of-truth metadata; convert to runtime parameter
+names (including generated `fv__...`) only at compute/extension request boundaries. On extension
+results, restore/preserve two-parameter metadata and display labels for stored branch data.
+Why:
+Prevents unknown-parameter errors at runtime and avoids post-extension projection collapse along
+secondary frozen continuation parameters.
+Impact:
+Extension requests reliably use runtime names; stored branches remain display-stable; scene and
+inspector projection can recover frozen param2 semantics even if response payloads omit branch-type
+refs.
+References:
+`web/src/system/subsystemGateway.ts`, `web/src/state/appState.tsx`,
+`web/src/ui/ViewportPanel.tsx`, `web/src/ui/InspectorDetailsPanel.tsx`
+
+### 2026-02-11: Scene rendering policy parity for continuation branches
+Context:
+State-space scenes and bifurcation diagrams needed aligned branch rendering semantics and selected-point
+feedback for continuation objects.
+Decision:
+Standardize scene rendering so equilibrium and codim-1 bifurcation curves render as line traces with
+dedicated codim-2 marker overlays only. Keep selected branch-point markers unified with diagram style,
+and render envelopes (not full profile point clouds) for cycle-like continuation branches when one free
+state axis is plotted.
+Why:
+Reduces visual noise and keeps scene behavior consistent with diagram interpretation.
+Impact:
+Codim-1 curves no longer render per-point markers in scenes, codim-2 points remain explicit, and
+cycle-like one-free-axis projections use min/max envelopes for continuation branches.
+References:
+`web/src/ui/ViewportPanel.tsx`, `web/src/ui/ViewportPanel.test.tsx`,
+`docs/frozen_variable_subsystems.md`
+
 ### 2026-01-22: Decouple map vs flow continuations only when taxonomy diverges
 Context:
 Some bifurcation continuation handlers share map/flow logic with label switches (e.g., PD

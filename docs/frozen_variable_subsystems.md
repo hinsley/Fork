@@ -6,6 +6,38 @@ This document describes how Fork models frozen-variable computations and how con
 
 Frozen variables let an analysis object define a reduced subsystem where selected state variables are treated as constants. This supports fast-slow workflows where slow variables are used as continuation parameters for a fast subsystem.
 
+## User Workflow and UI Behavior
+
+Frozen-variable configuration is object-scoped and edited from the Inspector.
+
+- The `Frozen Variables` section appears directly above `Parameters`.
+- Each variable row has a freeze toggle and numeric value input.
+- Frozen value inputs accept real-valued decimals (not integer-only).
+- New objects default to no frozen variables (all free).
+
+Object-level status indicators:
+
+- Objects with custom parameters keep the existing `custom` badge behavior.
+- Objects with one or more frozen variables show a snowflake badge in the object list.
+- If frozen settings are edited after a result was computed, existing results are kept and a non-blocking mismatch badge is shown (snapshot-hash mismatch).
+
+Isocline-specific constraint:
+
+- Isoclines use the same frozen menu pattern, but enforce at most 3 free variables.
+
+## Continuation Parameter Selection
+
+Continuation parameter pickers include both native parameters and frozen variables.
+
+- Native parameter labels are unchanged.
+- Frozen-variable labels are prefixed as `var:<variableName>`.
+- Continuation identity is stored as explicit refs (`parameterRef`, `parameter2Ref`), not just strings.
+
+When continuing along a frozen variable:
+
+- The selected frozen variable is treated as the varied continuation parameter per branch point.
+- Other frozen variables remain fixed at their snapshot assignments.
+
 ## Data Model
 
 Frozen-variable behavior is object-scoped.
@@ -34,6 +66,11 @@ All frozen-aware runs pass through the subsystem gateway in `web/src/system/subs
    - parameter vector extended with frozen parameter values.
 4. Resolve continuation parameter refs to runtime parameter names.
 5. Project full seeds to reduced states before calling Fork Core.
+
+Runtime naming note:
+
+- Generated frozen parameter names (`fv__...`) are internal runtime identifiers used only at the compute boundary.
+- Stored branch metadata remains display-oriented (`var:...`) with explicit refs for stable UI/projection behavior.
 
 ## Canonical State Representation
 
@@ -77,6 +114,18 @@ axes (with remaining plotted axes frozen/continuation variables), Fork renders b
 (min/max curves) in both state-space scenes and bifurcation diagrams.
 This envelope policy applies to continuation branches (limit cycle, isochrone, homoclinic-related branches),
 not standalone limit-cycle objects.
+
+## Extension Semantics for Frozen Continuations
+
+Codim-1/cycle extension requests serialize continuation parameters using runtime names (including
+generated `fv__...` names for frozen variables), but persisted branch metadata must retain display
+labels and refs.
+
+Extension invariants:
+
+- Branch extension must preserve two-parameter metadata (`param1_ref`, `param2_ref`) for stored branches.
+- Existing points and newly extended points must both retain correct `param2_value` semantics.
+- Scene/diagram projection paths must fall back to top-level branch refs if branch-type refs are absent.
 
 ## Branch/Object Snapshot Semantics
 

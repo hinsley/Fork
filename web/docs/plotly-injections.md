@@ -74,6 +74,17 @@ behavior.
 - `web/src/ui/ViewportPanel.tsx`: `buildDiagramBaseLayout()` disables legend
   item click/double-click toggles (`legend.itemclick`/`legend.itemdoubleclick`)
   so bifurcation visibility is managed only via the object tree.
+- `web/src/ui/ViewportPanel.tsx`: Scene branch rendering policy for continuation
+  objects:
+  - equilibrium and codim-1 bifurcation curves render as `lines` (no per-point
+    markers);
+  - codim-2 points from `branch.data.bifurcations` render as dedicated diamond
+    marker traces;
+  - selected branch-point markers in scenes use the same dedicated selected
+    marker style as bifurcation diagrams (`circle-open` overlay);
+  - cycle-like continuation branches (limit cycle, isochrone, homoclinic
+    related) use envelope rendering (min/max traces) for one-free-variable
+    projections, rather than plotting every cycle profile point.
 - `web/src/App.css`: `.viewport-tile--diagram` overrides Plotly legend cursor
   styles to avoid implying an independent visibility toggle in bifurcation
   diagrams.
