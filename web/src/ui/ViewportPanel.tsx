@@ -963,17 +963,19 @@ function resolveBranchPointDisplayProjection(
     projection.paramValue = point.param_value
   }
   const branchType = branch.data.branch_type
-  if (
+  const branchParam2Ref =
     branchType &&
     typeof branchType === 'object' &&
     'param2_ref' in branchType &&
-    branchType.param2_ref?.kind === 'frozen_var'
-  ) {
+    branchType.param2_ref
+      ? branchType.param2_ref
+      : branch.parameter2Ref
+  if (branchParam2Ref?.kind === 'frozen_var') {
     const param2Value = Number.isFinite(point.param2_value)
       ? point.param2_value
       : resolveContinuationPointParam2Value(point, branchType, packedStateDimension)
     if (Number.isFinite(param2Value)) {
-      projection.parameter2Ref = branchType.param2_ref
+      projection.parameter2Ref = branchParam2Ref
       projection.param2Value = param2Value as number
     }
   }
@@ -2647,10 +2649,13 @@ function buildSceneTraces(
         return point.param_value
       }
       const branchType = branch.data.branch_type
-      if (!branchType || typeof branchType !== 'object' || !('param2_ref' in branchType)) {
-        return null
-      }
-      const param2Ref = branchType.param2_ref
+      const param2Ref =
+        branchType &&
+        typeof branchType === 'object' &&
+        'param2_ref' in branchType &&
+        branchType.param2_ref
+          ? branchType.param2_ref
+          : branch.parameter2Ref
       if (
         param2Ref?.kind !== 'frozen_var' ||
         param2Ref.variableName !== variableName
@@ -2829,13 +2834,15 @@ function buildSceneTraces(
         parameterAxisVariables.add(branch.parameterRef.variableName)
       }
       const branchType = branch.data.branch_type
-      if (
+      const param2Ref =
         branchType &&
         typeof branchType === 'object' &&
         'param2_ref' in branchType &&
-        branchType.param2_ref?.kind === 'frozen_var'
-      ) {
-        parameterAxisVariables.add(branchType.param2_ref.variableName)
+        branchType.param2_ref
+          ? branchType.param2_ref
+          : branch.parameter2Ref
+      if (param2Ref?.kind === 'frozen_var') {
+        parameterAxisVariables.add(param2Ref.variableName)
       }
       const matchedAxes = [axisVarX, axisVarY].filter((name) =>
         parameterAxisVariables.has(name)

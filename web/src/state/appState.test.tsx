@@ -493,9 +493,22 @@ describe('appState limit cycle render targets', () => {
         capturedParam2Name = branchType.param2_name
       }
       const seed = request.branchData.points[request.branchData.points.length - 1]
+      const responseBranchType =
+        branchType &&
+        typeof branchType === 'object' &&
+        'param1_name' in branchType &&
+        'param2_name' in branchType
+          ? (() => {
+              const stripped = { ...branchType }
+              delete stripped.param1_ref
+              delete stripped.param2_ref
+              return stripped
+            })()
+          : branchType
       return normalizeBranchEigenvalues(
         {
           ...request.branchData,
+          branch_type: responseBranchType,
           points: [
             ...request.branchData.points,
             {
@@ -526,6 +539,14 @@ describe('appState limit cycle render targets', () => {
       expect(capturedParam2Name).toBe('fv__h2')
       const updated = getContext().state.system!.branches[withBranch.nodeId]
       expect(updated.data.points.length).toBe(3)
+      expect(updated.data.points.map((point) => point.param2_value)).toEqual([0.4, 0.45, 0.45])
+      expect(updated.data.branch_type).toMatchObject({
+        type: 'HopfCurve',
+        param1_name: 'var:h1',
+        param2_name: 'var:h2',
+        param1_ref: { kind: 'frozen_var', variableName: 'h1' },
+        param2_ref: { kind: 'frozen_var', variableName: 'h2' },
+      })
     })
   })
 

@@ -517,6 +517,95 @@ function parseContinuationParameterAllowRuntimeName(
   }
 }
 
+function isTwoParameterBranchType(
+  branchType: ContinuationObject['data']['branch_type'] | undefined | null
+): branchType is Extract<
+  NonNullable<ContinuationObject['data']['branch_type']>,
+  { param1_name: string; param2_name: string }
+> {
+  return Boolean(
+    branchType &&
+      typeof branchType === 'object' &&
+      'param1_name' in branchType &&
+      'param2_name' in branchType
+  )
+}
+
+function resolveBranchParam2Ref(
+  branch: ContinuationObject
+): ContinuationObject['parameter2Ref'] | undefined {
+  const branchType = branch.data.branch_type
+  if (
+    branchType &&
+    typeof branchType === 'object' &&
+    'param2_ref' in branchType &&
+    branchType.param2_ref
+  ) {
+    return branchType.param2_ref
+  }
+  return branch.parameter2Ref
+}
+
+function restoreExtendedBranchMetadata(
+  system: SystemConfig,
+  snapshot: SubsystemSnapshot,
+  sourceBranch: ContinuationObject,
+  data: ContinuationObject['data']
+): ContinuationObject['data'] {
+  const sourceType = sourceBranch.data.branch_type
+  if (!data.branch_type && sourceType) {
+    return {
+      ...data,
+      branch_type: sourceType,
+    }
+  }
+  if (!isTwoParameterBranchType(data.branch_type)) {
+    return data
+  }
+
+  const incomingType = data.branch_type
+  const sourceTwoParamType = isTwoParameterBranchType(sourceType) ? sourceType : null
+  const tryParseRef = (label: string | undefined): ParameterRef | null => {
+    if (!label) return null
+    try {
+      return parseContinuationParameterAllowRuntimeName(system, snapshot, label)
+    } catch {
+      return null
+    }
+  }
+
+  const param1Ref =
+    incomingType.param1_ref ??
+    sourceTwoParamType?.param1_ref ??
+    sourceBranch.parameterRef ??
+    tryParseRef(sourceTwoParamType?.param1_name) ??
+    tryParseRef(incomingType.param1_name)
+  const param2Ref =
+    incomingType.param2_ref ??
+    sourceTwoParamType?.param2_ref ??
+    sourceBranch.parameter2Ref ??
+    tryParseRef(sourceTwoParamType?.param2_name) ??
+    tryParseRef(incomingType.param2_name)
+
+  const param1Name = param1Ref
+    ? resolveDisplayParameterName(param1Ref)
+    : (sourceTwoParamType?.param1_name ?? incomingType.param1_name)
+  const param2Name = param2Ref
+    ? resolveDisplayParameterName(param2Ref)
+    : (sourceTwoParamType?.param2_name ?? incomingType.param2_name)
+
+  return {
+    ...data,
+    branch_type: {
+      ...incomingType,
+      param1_name: param1Name,
+      param2_name: param2Name,
+      param1_ref: param1Ref ?? undefined,
+      param2_ref: param2Ref ?? undefined,
+    },
+  }
+}
+
 function serializeBranchDataForExtension(
   system: SystemConfig,
   snapshot: SubsystemSnapshot,
@@ -525,19 +614,14 @@ function serializeBranchDataForExtension(
 ) {
   const data = dataOverride ?? branch.data
   const branchType = data.branch_type
-  if (
-    branchType &&
-    typeof branchType === 'object' &&
-    'param1_name' in branchType &&
-    'param2_name' in branchType
-  ) {
+  if (isTwoParameterBranchType(branchType)) {
     const param1Ref =
-      ('param1_ref' in branchType && branchType.param1_ref) ||
-      branch.parameterRef ||
+      branchType.param1_ref ??
+      branch.parameterRef ??
       parseContinuationParameterAllowRuntimeName(system, snapshot, branchType.param1_name)
     const param2Ref =
-      ('param2_ref' in branchType && branchType.param2_ref) ||
-      branch.parameter2Ref ||
+      branchType.param2_ref ??
+      resolveBranchParam2Ref(branch) ??
       parseContinuationParameterAllowRuntimeName(system, snapshot, branchType.param2_name)
     const runtimeBranchType = {
       ...branchType,
@@ -574,17 +658,17 @@ function resolveBranchPointReducedParamOverrides(
     }
   }
   const branchType = branch.data.branch_type
-  if (
-    branchType &&
-    typeof branchType === 'object' &&
-    'param2_ref' in branchType &&
-    branchType.param2_ref?.kind === 'frozen_var'
-  ) {
+  const param2Ref = resolveBranchParam2Ref(branch)
+  if (param2Ref?.kind === 'frozen_var') {
     const value = Number.isFinite(point.param2_value)
       ? point.param2_value
-      : resolveContinuationPointParam2Value(point, branchType, snapshot.freeVariableNames.length)
+      : resolveContinuationPointParam2Value(
+          point,
+          branchType,
+          snapshot.freeVariableNames.length
+        )
     if (Number.isFinite(value)) {
-      const generated = snapshot.frozenParameterNamesByVarName[branchType.param2_ref.variableName]
+      const generated = snapshot.frozenParameterNamesByVarName[param2Ref.variableName]
       if (generated) {
         valuesByGeneratedName[generated] = value
       }
@@ -2677,10 +2761,16 @@ export function AppProvider({
         const normalizedRaw = normalizeBranchEigenvalues(updatedData, {
           stateDimension: snapshot.freeVariableNames.length,
         })
+        const normalizedWithMetadata = restoreExtendedBranchMetadata(
+          system,
+          snapshot,
+          sourceBranch,
+          normalizedRaw
+        )
         const normalized =
           sourceBranch.branchType === 'homoclinic_curve'
-            ? ensureHomoclinicEndpointResumeSeeds(normalizedRaw)
-            : normalizedRaw
+            ? ensureHomoclinicEndpointResumeSeeds(normalizedWithMetadata)
+            : normalizedWithMetadata
         const updatedBranch: ContinuationObject = {
           ...sourceBranch,
           data: normalized,

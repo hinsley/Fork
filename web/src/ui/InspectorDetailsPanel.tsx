@@ -2192,12 +2192,14 @@ export function InspectorDetailsPanel({
       projection.paramValue = selectedBranchPoint.param_value
     }
     const pointBranchType = branch.data.branch_type
-    if (
+    const pointParam2Ref =
       pointBranchType &&
       typeof pointBranchType === 'object' &&
       'param2_ref' in pointBranchType &&
-      pointBranchType.param2_ref?.kind === 'frozen_var'
-    ) {
+      pointBranchType.param2_ref
+        ? pointBranchType.param2_ref
+        : branch.parameter2Ref
+    if (pointParam2Ref?.kind === 'frozen_var') {
       const param2Value = Number.isFinite(selectedBranchPoint.param2_value)
         ? selectedBranchPoint.param2_value
         : resolveContinuationPointParam2Value(
@@ -2206,7 +2208,7 @@ export function InspectorDetailsPanel({
             stateDimension
           )
       if (Number.isFinite(param2Value)) {
-        projection.parameter2Ref = pointBranchType.param2_ref
+        projection.parameter2Ref = pointParam2Ref
         projection.param2Value = param2Value as number
       }
     }
@@ -3077,12 +3079,14 @@ export function InspectorDetailsPanel({
       projection.paramValue = selectedBranchPoint.param_value
     }
     const branchType = branch.data.branch_type
-    if (
+    const branchParam2Ref =
       branchType &&
       typeof branchType === 'object' &&
       'param2_ref' in branchType &&
-      branchType.param2_ref?.kind === 'frozen_var'
-    ) {
+      branchType.param2_ref
+        ? branchType.param2_ref
+        : branch.parameter2Ref
+    if (branchParam2Ref?.kind === 'frozen_var') {
       const param2Value = Number.isFinite(selectedBranchPoint.param2_value)
         ? selectedBranchPoint.param2_value
         : resolveContinuationPointParam2Value(
@@ -3091,7 +3095,7 @@ export function InspectorDetailsPanel({
             branchStateDimension
           )
       if (Number.isFinite(param2Value)) {
-        projection.parameter2Ref = branchType.param2_ref
+        projection.parameter2Ref = branchParam2Ref
         projection.param2Value = param2Value as number
       }
     }
