@@ -4,7 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "wasm:web": "cd ../crates/fork_wasm && wasm-pack build --target web --out-dir pkg-web",
+    "predev": "npm run wasm:web",
     "dev": "vite",
+    "prebuild": "npm run wasm:web",
     "build": "tsc -b && vite build",
     "vercel:install": "sh ./scripts/vercel-install.sh",
     "vercel:build": "sh ./scripts/vercel-build.sh",
