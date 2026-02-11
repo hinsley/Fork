@@ -3,13 +3,13 @@
 use super::shared::{compute_tangent_from_problem, OwnedEquilibriumContinuationProblem};
 use crate::system::build_system;
 use fork_core::continuation::homoclinic::HomoclinicProblem;
+use fork_core::continuation::homoclinic_init::decode_homoclinic_state_with_basis;
 use fork_core::continuation::periodic::PeriodicOrbitCollocationProblem;
 use fork_core::continuation::{
-    decode_homoclinic_state, homoclinic_setup_from_homoclinic_point, pack_homoclinic_state,
-    BranchType, ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint,
-    ContinuationProblem, ContinuationResumeState, ContinuationRunner, ContinuationSettings,
-    HomoclinicBasis, HomoclinicBasisSnapshot, HomoclinicExtraFlags, HomoclinicResumeContext,
-    HomoclinicSetup,
+    homoclinic_setup_from_homoclinic_point, pack_homoclinic_state, BranchType,
+    ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint, ContinuationProblem,
+    ContinuationResumeState, ContinuationRunner, ContinuationSettings, HomoclinicBasis,
+    HomoclinicBasisSnapshot, HomoclinicExtraFlags, HomoclinicResumeContext, HomoclinicSetup,
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::SystemKind;
@@ -306,7 +306,7 @@ fn hydrate_homoclinic_setup_from_endpoint(
     endpoint_state: &[f64],
     dim: usize,
 ) -> bool {
-    let Ok(decoded) = decode_homoclinic_state(
+    let Ok(decoded) = decode_homoclinic_state_with_basis(
         endpoint_state,
         dim,
         setup.ntst,
@@ -315,13 +315,10 @@ fn hydrate_homoclinic_setup_from_endpoint(
         setup.guess.time,
         setup.guess.eps0,
         setup.guess.eps1,
+        (setup.basis.nneg, setup.basis.npos),
     ) else {
         return false;
     };
-
-    if decoded.nneg != setup.basis.nneg || decoded.npos != setup.basis.npos {
-        return false;
-    }
 
     setup.guess.mesh_states = decoded.mesh_states;
     setup.guess.stage_states = decoded.stage_states;
@@ -1820,6 +1817,95 @@ mod orientation_tests {
         assert_eq!(setup.guess.eps0, endpoint_setup.guess.eps0);
         // free_eps1 is disabled in this setup, so eps1 remains at the configured fixed value.
         assert_eq!(setup.guess.eps1, 9.0);
+        assert_eq!(setup.guess.yu, endpoint_setup.guess.yu);
+        assert_eq!(setup.guess.ys, endpoint_setup.guess.ys);
+    }
+
+    #[test]
+    fn hydrate_setup_from_endpoint_uses_basis_dims_for_ambiguous_3d_riccati_size() {
+        let mut setup = HomoclinicSetup {
+            guess: HomoclinicGuess {
+                mesh_states: vec![
+                    vec![9.0, 9.0, 9.0],
+                    vec![9.0, 9.0, 9.0],
+                    vec![9.0, 9.0, 9.0],
+                ],
+                stage_states: vec![vec![vec![9.0, 9.0, 9.0]], vec![vec![9.0, 9.0, 9.0]]],
+                x0: vec![9.0, 9.0, 9.0],
+                param1_value: 0.2,
+                param2_value: 0.9,
+                time: 9.0,
+                eps0: 9.0,
+                eps1: 9.0,
+                yu: vec![0.0, 0.0],
+                ys: vec![0.0, 0.0],
+            },
+            ntst: 2,
+            ncol: 1,
+            param1_index: 0,
+            param2_index: 1,
+            param1_name: "mu".to_string(),
+            param2_name: "nu".to_string(),
+            base_params: vec![0.2, 0.1],
+            extras: HomoclinicExtraFlags {
+                free_time: true,
+                free_eps0: true,
+                free_eps1: false,
+            },
+            basis: HomoclinicBasis {
+                stable_q: vec![
+                    1.0, 0.0, 0.0, //
+                    0.0, 1.0, 0.0, //
+                    0.0, 0.0, 1.0,
+                ],
+                unstable_q: vec![
+                    1.0, 0.0, 0.0, //
+                    0.0, 1.0, 0.0, //
+                    0.0, 0.0, 1.0,
+                ],
+                dim: 3,
+                nneg: 2,
+                npos: 1,
+            },
+        };
+
+        let endpoint_setup = HomoclinicSetup {
+            guess: HomoclinicGuess {
+                mesh_states: vec![
+                    vec![0.0, 0.0, 0.0],
+                    vec![0.5, 0.0, 0.0],
+                    vec![1.0, 0.0, 0.0],
+                ],
+                stage_states: vec![vec![vec![0.25, 0.0, 0.0]], vec![vec![0.75, 0.0, 0.0]]],
+                x0: vec![0.0, 0.0, 0.0],
+                param1_value: 0.2,
+                param2_value: 0.1,
+                time: 2.0,
+                eps0: 0.1,
+                eps1: 0.2,
+                yu: vec![0.3, 0.31],
+                ys: vec![0.4, 0.41],
+            },
+            ntst: setup.ntst,
+            ncol: setup.ncol,
+            param1_index: setup.param1_index,
+            param2_index: setup.param2_index,
+            param1_name: setup.param1_name.clone(),
+            param2_name: setup.param2_name.clone(),
+            base_params: setup.base_params.clone(),
+            extras: setup.extras,
+            basis: setup.basis.clone(),
+        };
+        let endpoint_state = pack_homoclinic_state(&endpoint_setup);
+
+        let hydrated = hydrate_homoclinic_setup_from_endpoint(&mut setup, &endpoint_state, 3);
+        assert!(hydrated, "expected basis-aware endpoint decode to hydrate setup");
+        assert_eq!(setup.guess.mesh_states, endpoint_setup.guess.mesh_states);
+        assert_eq!(setup.guess.stage_states, endpoint_setup.guess.stage_states);
+        assert_eq!(setup.guess.x0, endpoint_setup.guess.x0);
+        assert_eq!(setup.guess.param2_value, endpoint_setup.guess.param2_value);
+        assert_eq!(setup.guess.time, endpoint_setup.guess.time);
+        assert_eq!(setup.guess.eps0, endpoint_setup.guess.eps0);
         assert_eq!(setup.guess.yu, endpoint_setup.guess.yu);
         assert_eq!(setup.guess.ys, endpoint_setup.guess.ys);
     }
