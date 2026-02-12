@@ -529,7 +529,10 @@ export async function initiateMapCycleFromPD(
 
   try {
     console.log(chalk.cyan(`Initializing period-doubled ${targetLabel}...`));
-    const bridge = new WasmBridge(sysConfig);
+    const bridge = new WasmBridge({
+      ...sysConfig,
+      params: [...runConfig.params],
+    });
     const seedState = bridge.initMapCycleFromPD(
       pdPoint.state,
       sourceBranch.parameterName,

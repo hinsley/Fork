@@ -40,6 +40,10 @@ export function getBranchParams(
   // Try to get params from the parent object.
   try {
     const obj = Storage.loadObject(sysName, branch.parentObject) as any;
+    const customParams = obj?.customParameters as number[] | undefined;
+    if (Array.isArray(customParams) && customParams.length === sysConfig.params.length) {
+      return [...customParams];
+    }
     const params = obj?.parameters as number[] | undefined;
     if (Array.isArray(params) && params.length === sysConfig.params.length) {
       return [...params];

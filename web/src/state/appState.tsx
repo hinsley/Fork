@@ -71,7 +71,7 @@ import {
   resolveContinuationPointParam2Value,
   serializeBranchDataForWasm,
 } from '../system/continuation'
-import { resolveObjectParams } from '../system/parameters'
+import { hasCustomObjectParams, resolveObjectParams } from '../system/parameters'
 import {
   buildReducedRunConfig,
   buildSubsystemSnapshot,
@@ -115,6 +115,10 @@ function validateObjectName(name: string, label: string): string | null {
     return `${label} names must be alphanumeric with underscores only.`
   }
   return null
+}
+
+function inheritedCustomParameters(system: SystemConfig, params: number[]): number[] | undefined {
+  return hasCustomObjectParams(system, params) ? [...params] : undefined
 }
 
 function resolveExtensionEndpointArrayIndex(
@@ -3742,6 +3746,7 @@ export function AppProvider({
           period,
           state: firstPoint.state,
           parameters: [...baseParams],
+          customParameters: inheritedCustomParameters(system, baseParams),
           parameterName: parameterDisplayName,
           parameterRef,
           paramValue: firstPoint.param_value,
@@ -4135,6 +4140,7 @@ export function AppProvider({
           systemName: system.name,
           solution,
           parameters: [...baseParams],
+          customParameters: inheritedCustomParameters(system, baseParams),
           lastSolverParams: {
             initialGuess: firstPoint.state,
             maxSteps: solverMaxSteps,
@@ -4347,6 +4353,7 @@ export function AppProvider({
           period,
           state: firstPoint.state,
           parameters: [...baseParams],
+          customParameters: inheritedCustomParameters(system, baseParams),
           parameterName: parameterDisplayName,
           parameterRef,
           paramValue: firstPoint.param_value,

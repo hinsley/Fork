@@ -712,7 +712,6 @@ export async function initiateLCFromPD(
   pdPointIdx: number
 ): Promise<ContinuationObject | null> {
   const sysConfig = Storage.loadSystem(sysName);
-  const bridge = new WasmBridge(sysConfig);
 
   // Extract source ntst/ncol from branch metadata
   let sourceNtst = 20, sourceNcol = 4;
@@ -915,6 +914,10 @@ export async function initiateLCFromPD(
 
   try {
     console.log(chalk.cyan("Initializing period-doubled limit cycle..."));
+    const bridge = new WasmBridge({
+      ...sysConfig,
+      params: [...runConfig.params],
+    });
 
     // Call WASM to build the doubled-period setup
     const setup = bridge.initLCFromPD(

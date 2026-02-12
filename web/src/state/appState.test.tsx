@@ -1514,6 +1514,281 @@ describe('appState Lyapunov analysis parameters', () => {
   })
 })
 
+describe('appState branch-point object parameter inheritance', () => {
+  it('stores inherited custom parameters when creating a limit cycle from a Hopf point', async () => {
+    const base = createSystem({
+      name: 'Hopf_Custom_Inheritance',
+      config: {
+        name: 'Hopf_Custom_Inheritance',
+        equations: ['y', '-x + mu'],
+        params: [0.2, 0.1],
+        paramNames: ['mu', 'nu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const inheritedParams = [2.4, 3.1]
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_Source',
+      systemName: base.config.name,
+      parameters: [...inheritedParams],
+      customParameters: [...inheritedParams],
+    }
+    const withObject = addObject(base, equilibrium)
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_hopf_custom',
+      systemName: base.config.name,
+      parameterName: 'mu',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          {
+            state: [0, 0],
+            param_value: inheritedParams[0],
+            stability: 'Hopf',
+            eigenvalues: [
+              { re: 0, im: 1 },
+              { re: 0, im: -1 },
+            ],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...inheritedParams],
+    }
+    const withBranch = addBranch(withObject.system, sourceBranch, withObject.nodeId)
+    const client = new MockForkCoreClient(0)
+    client.runLimitCycleContinuationFromHopf = async (request) =>
+      normalizeBranchEigenvalues({
+        points: [
+          {
+            state: [0, 0, 6],
+            param_value: request.paramValue,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [0.1, 0.1, 6.1],
+            param_value: request.paramValue + request.settings.step_size,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: { type: 'LimitCycle', ntst: request.ntst, ncol: request.ncol },
+      })
+    const { getContext } = setupApp(withBranch.system, client)
+
+    await act(async () => {
+      await getContext().actions.createLimitCycleFromHopf({
+        branchId: withBranch.nodeId,
+        pointIndex: 0,
+        parameterName: 'mu',
+        limitCycleName: 'LC_Hopf_Custom',
+        branchName: 'lc_hopf_custom_mu',
+        amplitude: 0.2,
+        ntst: 10,
+        ncol: 4,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      const next = getContext().state.system
+      expect(next).not.toBeNull()
+      const lcId = findObjectIdByName(next!, 'LC_Hopf_Custom')
+      const lc = next!.objects[lcId] as LimitCycleObject
+      expect(lc.parameters).toEqual(inheritedParams)
+      expect(lc.customParameters).toEqual(inheritedParams)
+    })
+  })
+
+  it('stores inherited custom parameters when creating a map cycle from a PD point', async () => {
+    const base = createSystem({
+      name: 'Map_PD_Custom_Inheritance',
+      config: {
+        name: 'Map_PD_Custom_Inheritance',
+        equations: ['x + mu', 'y + nu'],
+        params: [0.2, 0.1],
+        paramNames: ['mu', 'nu'],
+        varNames: ['x', 'y'],
+        solver: 'discrete',
+        type: 'map',
+      },
+    })
+    const inheritedParams = [2.4, 3.1]
+    const cycleSeed: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Cycle_Seed',
+      systemName: base.config.name,
+      parameters: [...inheritedParams],
+      customParameters: [...inheritedParams],
+    }
+    const withObject = addObject(base, cycleSeed)
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'cycle_pd_seed',
+      systemName: base.config.name,
+      parameterName: 'mu',
+      parentObject: cycleSeed.name,
+      startObject: cycleSeed.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          {
+            state: [0.1, 0.2],
+            param_value: inheritedParams[0],
+            stability: 'PeriodDoubling',
+            eigenvalues: [{ re: -1, im: 0 }],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...inheritedParams],
+      mapIterations: 2,
+    }
+    const withBranch = addBranch(withObject.system, sourceBranch, withObject.nodeId)
+    const client = new MockForkCoreClient(0)
+    client.runMapCycleContinuationFromPD = async (request) =>
+      normalizeBranchEigenvalues({
+        points: [
+          {
+            state: [0.2, 0.3],
+            param_value: request.paramValue,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [0.25, 0.35],
+            param_value: request.paramValue + request.settings.step_size,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+      })
+    const { getContext } = setupApp(withBranch.system, client)
+
+    await act(async () => {
+      await getContext().actions.createCycleFromPD({
+        branchId: withBranch.nodeId,
+        pointIndex: 0,
+        cycleName: 'Cycle_PD_Custom',
+        branchName: 'cycle_pd_custom_mu',
+        amplitude: 0.01,
+        settings: continuationSettings,
+        forward: true,
+        solverParams: {
+          maxSteps: 25,
+          dampingFactor: 1,
+          mapIterations: 4,
+        },
+      })
+    })
+
+    await waitFor(() => {
+      const next = getContext().state.system
+      expect(next).not.toBeNull()
+      const cycleId = findObjectIdByName(next!, 'Cycle_PD_Custom')
+      const cycle = next!.objects[cycleId] as EquilibriumObject
+      expect(cycle.parameters).toEqual(inheritedParams)
+      expect(cycle.customParameters).toEqual(inheritedParams)
+    })
+  })
+
+  it('stores inherited custom parameters when creating a limit cycle from a PD point', async () => {
+    const { system } = createPeriodDoublingSystem()
+    const sourceBranchId = findBranchIdByName(system, 'lc_pd_mu')
+    const sourceBranch = system.branches[sourceBranchId]
+    const sourceObjectId = findObjectIdByName(system, sourceBranch.parentObject)
+    const inheritedParams = [2.4]
+
+    const seededSystem: System = {
+      ...system,
+      objects: {
+        ...system.objects,
+        [sourceObjectId]: {
+          ...(system.objects[sourceObjectId] as LimitCycleObject),
+          parameters: [...inheritedParams],
+          customParameters: [...inheritedParams],
+        },
+      },
+      branches: {
+        ...system.branches,
+        [sourceBranchId]: {
+          ...sourceBranch,
+          params: [...inheritedParams],
+        },
+      },
+    }
+    const { getContext } = setupApp(seededSystem)
+
+    await act(async () => {
+      await getContext().actions.createLimitCycleFromPD({
+        branchId: sourceBranchId,
+        pointIndex: 1,
+        limitCycleName: 'LC_PD_Custom',
+        branchName: 'lc_pd_custom_mu',
+        amplitude: 0.1,
+        ncol: 4,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      const next = getContext().state.system
+      expect(next).not.toBeNull()
+      const lcId = findObjectIdByName(next!, 'LC_PD_Custom')
+      const lc = next!.objects[lcId] as LimitCycleObject
+      expect(lc.parameters).toEqual(inheritedParams)
+      expect(lc.customParameters).toEqual(inheritedParams)
+    })
+  })
+
+  it('does not store custom parameters when inherited params match system defaults', async () => {
+    const { system } = createPeriodDoublingSystem()
+    const sourceBranchId = findBranchIdByName(system, 'lc_pd_mu')
+    const { getContext } = setupApp(system)
+
+    await act(async () => {
+      await getContext().actions.createLimitCycleFromPD({
+        branchId: sourceBranchId,
+        pointIndex: 1,
+        limitCycleName: 'LC_PD_Defaults',
+        branchName: 'lc_pd_defaults_mu',
+        amplitude: 0.1,
+        ncol: 4,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      const next = getContext().state.system
+      expect(next).not.toBeNull()
+      const lcId = findObjectIdByName(next!, 'LC_PD_Defaults')
+      const lc = next!.objects[lcId] as LimitCycleObject
+      expect(lc.parameters).toEqual(next!.config.params)
+      expect(lc.customParameters).toBeUndefined()
+    })
+  })
+})
+
 describe('appState homoclinic and homotopy actions', () => {
   function makeTwoParamSystem(name: string): System {
     return createSystem({

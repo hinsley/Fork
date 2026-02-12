@@ -19,6 +19,7 @@ export interface OrbitObject {
   lyapunovExponents?: number[];
   covariantVectors?: CovariantLyapunovData;
   parameters?: number[]; // Snapshot of parameters when created
+  customParameters?: number[]; // Optional custom parameter override snapshot
 }
 
 export interface ComplexValue {
@@ -62,6 +63,7 @@ export interface EquilibriumObject {
   lastSolverParams?: EquilibriumSolverParams;
   lastRun?: EquilibriumRunSummary;
   parameters?: number[]; // Snapshot of parameters when created (or last successfully solved)
+  customParameters?: number[]; // Optional custom parameter override snapshot
 }
 
 export interface ContinuationEigenvalue {
@@ -197,6 +199,7 @@ export interface LimitCycleObject {
   period: number;
   state: number[]; // Flattened collocation state: [mesh, stages, period].
   parameters?: number[]; // Full parameter snapshot at creation.
+  customParameters?: number[]; // Optional custom parameter override snapshot
   parameterName?: string;
   paramValue?: number;
   floquetMultipliers?: ContinuationEigenvalue[];
