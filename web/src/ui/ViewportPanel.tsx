@@ -1608,6 +1608,14 @@ function buildIsoclineSnapshotSignature(snapshot: IsoclineComputedSnapshot): str
   })
 }
 
+function resolveIsoclineFreeVariables(snapshot: IsoclineComputedSnapshot): string[] {
+  const snapshotFreeVariables = snapshot.subsystemSnapshot?.freeVariableNames ?? []
+  if (snapshotFreeVariables.length > 0) {
+    return snapshotFreeVariables
+  }
+  return snapshot.axes.map((axis) => axis.variableName)
+}
+
 function buildIsoclineTraces(config: {
   nodeId: string
   name: string
@@ -1621,6 +1629,7 @@ function buildIsoclineTraces(config: {
   isMap1D: boolean
   isTimeSeries: boolean
   timeRange: [number, number] | null
+  renderAsTimeSeriesHorizontalLine: boolean
 }): Data[] {
   const {
     nodeId,
@@ -1635,6 +1644,7 @@ function buildIsoclineTraces(config: {
     isMap1D,
     isTimeSeries,
     timeRange,
+    renderAsTimeSeriesHorizontalLine,
   } = config
   const traces: Data[] = []
   const dim = geometry.dim
@@ -1723,6 +1733,34 @@ function buildIsoclineTraces(config: {
     const x: number[] = []
     const y: number[] = []
     const fallbackTime = timeRange ? timeRange[0] : 0
+    if (
+      isTimeSeries &&
+      renderAsTimeSeriesHorizontalLine &&
+      timeRange &&
+      timeRange[0] !== timeRange[1]
+    ) {
+      const lineX: Array<number | null> = []
+      const lineY: Array<number | null> = []
+      const [start, end] = timeRange
+      for (let index = 0; index < pointCount; index += 1) {
+        const projected = projectPoint(readPoint(index) ?? [])
+        if (!projected || projected.length !== 1) continue
+        lineX.push(start, end, null)
+        lineY.push(projected[0], projected[0], null)
+      }
+      if (lineX.length > 0) {
+        traces.push({
+          type: 'scatter',
+          mode: 'lines',
+          name,
+          uid: nodeId,
+          x: lineX,
+          y: lineY,
+          line: { color, dash: 'dot', width },
+        })
+      }
+      return traces
+    }
     for (let index = 0; index < pointCount; index += 1) {
       const projected = projectPoint(readPoint(index) ?? [])
       if (!projected || projected.length !== 1) continue
@@ -1945,6 +1983,14 @@ function buildSceneTraces(
       const cached = isoclineCache[nodeId]
       if (!cached || cached.signature !== signature) continue
       const highlight = nodeId === selectedNodeId
+      const sceneAxisVariable = projection?.axisVariables[0] ?? null
+      const isoclineFreeVariables = resolveIsoclineFreeVariables(object.lastComputed)
+      const renderAsTimeSeriesHorizontalLine = Boolean(
+        isTimeSeries &&
+          sceneAxisVariable &&
+          isoclineFreeVariables.length === 1 &&
+          isoclineFreeVariables[0] === sceneAxisVariable
+      )
       traces.push(
         ...buildIsoclineTraces({
           nodeId,
@@ -1959,6 +2005,7 @@ function buildSceneTraces(
           isMap1D,
           isTimeSeries,
           timeRange,
+          renderAsTimeSeriesHorizontalLine,
         })
       )
       continue

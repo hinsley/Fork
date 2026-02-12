@@ -726,6 +726,192 @@ describe('ViewportPanel view state wiring', () => {
     expect(trace?.y).toEqual([0.25, 0.75])
   })
 
+  it('renders cached 1D isocline points as dotted horizontal lines in matching flow timeseries scenes', () => {
+    const config: SystemConfig = {
+      name: 'IsoFlow1D',
+      equations: ['x + y', 'x - y'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene Iso Flow 1D')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['y'],
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Y',
+      systemName: config.name,
+      data: [
+        [0, 0, -0.2],
+        [0.5, 0.1, 0.1],
+        [1, 0.2, 0.3],
+      ],
+      t_start: 0,
+      t_end: 1,
+      dt: 0.5,
+    }
+    system = addObject(system, orbit).system
+    const subsystemSnapshot = buildSubsystemSnapshot(
+      config,
+      { frozenValuesByVarName: { x: 0 } },
+      { maxFreeVariables: 3 }
+    )
+    const isocline: IsoclineObject = {
+      type: 'isocline',
+      name: 'Iso_Y',
+      systemName: config.name,
+      source: { kind: 'custom', expression: 'y' },
+      level: 0,
+      axes: [{ variableName: 'y', min: -1, max: 1, samples: 48 }],
+      frozenState: [0, 0],
+      parameters: [],
+      lastComputed: {
+        source: { kind: 'custom', expression: 'y' },
+        expression: 'y',
+        level: 0,
+        axes: [{ variableName: 'y', min: -1, max: 1, samples: 48 }],
+        frozenState: [0, 0],
+        parameters: [],
+        computedAt: nowIso(),
+        subsystemSnapshot,
+      },
+      subsystemSnapshot,
+    }
+    const added = addObject(system, isocline)
+    const signature = buildIsoclineSignature(isocline)
+
+    renderPanel(added.system, {
+      isoclineGeometryCache: {
+        [added.nodeId]: {
+          signature,
+          geometry: {
+            geometry: 'points',
+            dim: 1,
+            points: [0.25],
+          },
+        },
+      },
+    })
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const lineTrace = props?.data.find(
+      (entry) =>
+        'uid' in entry &&
+        entry.uid === added.nodeId &&
+        'mode' in entry &&
+        entry.mode === 'lines'
+    ) as { x?: Array<number | null>; y?: Array<number | null>; line?: { dash?: string } } | undefined
+    expect(lineTrace).toBeTruthy()
+    expect(lineTrace?.x).toEqual([0, 1, null])
+    expect(lineTrace?.y).toEqual([0.25, 0.25, null])
+    expect(lineTrace?.line?.dash).toBe('dot')
+    const markerTrace = props?.data.find(
+      (entry) =>
+        'uid' in entry &&
+        entry.uid === added.nodeId &&
+        'mode' in entry &&
+        entry.mode === 'markers'
+    )
+    expect(markerTrace).toBeUndefined()
+  })
+
+  it('keeps cached 1D flow isocline points as markers when scene axis does not match free variable', () => {
+    const config: SystemConfig = {
+      name: 'IsoFlow1DMismatch',
+      equations: ['x + y', 'x - y'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene Iso Flow 1D Mismatch')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['x'],
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_X',
+      systemName: config.name,
+      data: [
+        [0, -0.2, 0],
+        [1, 0.3, 0.1],
+      ],
+      t_start: 0,
+      t_end: 1,
+      dt: 1,
+    }
+    system = addObject(system, orbit).system
+    const subsystemSnapshot = buildSubsystemSnapshot(
+      config,
+      { frozenValuesByVarName: { x: 0 } },
+      { maxFreeVariables: 3 }
+    )
+    const isocline: IsoclineObject = {
+      type: 'isocline',
+      name: 'Iso_Y_Mismatch',
+      systemName: config.name,
+      source: { kind: 'custom', expression: 'y' },
+      level: 0,
+      axes: [{ variableName: 'y', min: -1, max: 1, samples: 48 }],
+      frozenState: [0, 0],
+      parameters: [],
+      lastComputed: {
+        source: { kind: 'custom', expression: 'y' },
+        expression: 'y',
+        level: 0,
+        axes: [{ variableName: 'y', min: -1, max: 1, samples: 48 }],
+        frozenState: [0, 0],
+        parameters: [],
+        computedAt: nowIso(),
+        subsystemSnapshot,
+      },
+      subsystemSnapshot,
+    }
+    const added = addObject(system, isocline)
+    const signature = buildIsoclineSignature(isocline)
+
+    renderPanel(added.system, {
+      isoclineGeometryCache: {
+        [added.nodeId]: {
+          signature,
+          geometry: {
+            geometry: 'points',
+            dim: 1,
+            points: [0.25],
+          },
+        },
+      },
+    })
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const markerTrace = props?.data.find(
+      (entry) =>
+        'uid' in entry &&
+        entry.uid === added.nodeId &&
+        'mode' in entry &&
+        entry.mode === 'markers'
+    ) as { x?: number[]; y?: number[] } | undefined
+    expect(markerTrace).toBeTruthy()
+    expect(markerTrace?.x).toEqual([0])
+    expect(markerTrace?.y).toEqual([0.25])
+    const lineTrace = props?.data.find(
+      (entry) =>
+        'uid' in entry &&
+        entry.uid === added.nodeId &&
+        'mode' in entry &&
+        entry.mode === 'lines'
+    )
+    expect(lineTrace).toBeUndefined()
+  })
+
   it('renders cached 3D isocline triangles as meshes', () => {
     const config: SystemConfig = {
       name: 'Iso3D',
