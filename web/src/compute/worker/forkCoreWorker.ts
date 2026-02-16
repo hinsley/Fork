@@ -7,6 +7,10 @@ import type {
   ContinuationProgress,
   ContinuationExtensionRequest,
   ContinuationExtensionResult,
+  EquilibriumManifold1DRequest,
+  EquilibriumManifold1DResult,
+  EquilibriumManifold2DRequest,
+  EquilibriumManifold2DResult,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
   HomoclinicContinuationResult,
@@ -20,6 +24,8 @@ import type {
   LimitCycleContinuationFromOrbitRequest,
   LimitCycleContinuationFromPDRequest,
   LimitCycleContinuationResult,
+  LimitCycleManifold2DRequest,
+  LimitCycleManifold2DResult,
   MapCycleContinuationFromPDRequest,
   CovariantLyapunovRequest,
   CovariantLyapunovResponse,
@@ -46,6 +52,9 @@ type WorkerRequest =
   | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
   | { id: string; kind: 'runEquilibriumContinuation'; payload: EquilibriumContinuationRequest }
   | { id: string; kind: 'runContinuationExtension'; payload: ContinuationExtensionRequest }
+  | { id: string; kind: 'runEquilibriumManifold1D'; payload: EquilibriumManifold1DRequest }
+  | { id: string; kind: 'runEquilibriumManifold2D'; payload: EquilibriumManifold2DRequest }
+  | { id: string; kind: 'runLimitCycleManifold2D'; payload: LimitCycleManifold2DRequest }
   | { id: string; kind: 'runFoldCurveContinuation'; payload: FoldCurveContinuationRequest }
   | { id: string; kind: 'runHopfCurveContinuation'; payload: HopfCurveContinuationRequest }
   | {
@@ -112,6 +121,9 @@ type WorkerResponse =
         | ValidateSystemResult
         | EquilibriumContinuationResult
         | ContinuationExtensionResult
+        | EquilibriumManifold1DResult
+        | EquilibriumManifold2DResult
+        | LimitCycleManifold2DResult
         | Codim1CurveBranch
         | LimitCycleContinuationResult
         | HomoclinicContinuationResult
@@ -162,6 +174,19 @@ type WasmModule = {
       dampingFactor: number,
       mapIterations: number
     ) => SolveEquilibriumResult
+    compute_eq_manifold_2d_with_progress?: (
+      equilibriumState: Float64Array,
+      settings: Record<string, unknown>,
+      onProgress: (progress: ContinuationProgress) => void
+    ) => EquilibriumManifold2DResult
+    compute_cycle_manifold_2d_with_progress?: (
+      cycleState: Float64Array,
+      ntst: number,
+      ncol: number,
+      floquetMultipliers: Array<{ re: number; im: number }>,
+      settings: Record<string, unknown>,
+      onProgress: (progress: ContinuationProgress) => void
+    ) => LimitCycleManifold2DResult
     compute_lyapunov_exponents: (
       startState: Float64Array,
       startTime: number,
@@ -278,6 +303,48 @@ type WasmModule = {
     run_steps: (batchSize: number) => ContinuationProgress
     get_progress: () => ContinuationProgress
     get_result: () => EquilibriumContinuationResult
+  }
+  WasmEqManifold1DRunner: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    systemType: string,
+    equilibriumState: Float64Array,
+    settings: Record<string, unknown>
+  ) => {
+    run_steps: (batchSize: number) => ContinuationProgress
+    get_progress: () => ContinuationProgress
+    get_result: () => EquilibriumManifold1DResult
+  }
+  WasmEqManifold2DRunner: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    systemType: string,
+    equilibriumState: Float64Array,
+    settings: Record<string, unknown>
+  ) => {
+    run_steps: (batchSize: number) => ContinuationProgress
+    get_progress: () => ContinuationProgress
+    get_result: () => EquilibriumManifold2DResult
+  }
+  WasmCycleManifold2DRunner: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    systemType: string,
+    cycleState: Float64Array,
+    ntst: number,
+    ncol: number,
+    floquetMultipliers: Array<{ re: number; im: number }>,
+    settings: Record<string, unknown>
+  ) => {
+    run_steps: (batchSize: number) => ContinuationProgress
+    get_progress: () => ContinuationProgress
+    get_result: () => LimitCycleManifold2DResult
   }
   WasmFoldCurveRunner: new (
     equations: string[],
@@ -738,6 +805,135 @@ async function runContinuationExtension(
     onProgress(progress)
   }
 
+  return runner.get_result()
+}
+
+async function runEquilibriumManifold1D(
+  request: EquilibriumManifold1DRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<EquilibriumManifold1DResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const runner = new wasm.WasmEqManifold1DRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.type,
+    new Float64Array(request.equilibriumState),
+    { ...request.settings }
+  )
+  let progress = runner.get_progress()
+  onProgress(progress)
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+  return runner.get_result()
+}
+
+async function runEquilibriumManifold2D(
+  request: EquilibriumManifold2DRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<EquilibriumManifold2DResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+
+  const computeWithProgress = system.compute_eq_manifold_2d_with_progress
+  if (typeof computeWithProgress === 'function') {
+    return computeWithProgress.call(
+      system,
+      new Float64Array(request.equilibriumState),
+      { ...request.settings },
+      (progress: ContinuationProgress) => {
+        onProgress(progress)
+      }
+    )
+  }
+
+  const runner = new wasm.WasmEqManifold2DRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.type,
+    new Float64Array(request.equilibriumState),
+    { ...request.settings }
+  )
+  let progress = runner.get_progress()
+  onProgress(progress)
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+  return runner.get_result()
+}
+
+async function runLimitCycleManifold2D(
+  request: LimitCycleManifold2DRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<LimitCycleManifold2DResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+
+  const computeWithProgress = system.compute_cycle_manifold_2d_with_progress
+  if (typeof computeWithProgress === 'function') {
+    return computeWithProgress.call(
+      system,
+      new Float64Array(request.cycleState),
+      request.ntst,
+      request.ncol,
+      request.floquetMultipliers,
+      { ...request.settings },
+      (progress: ContinuationProgress) => {
+        onProgress(progress)
+      }
+    )
+  }
+
+  const runner = new wasm.WasmCycleManifold2DRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.type,
+    new Float64Array(request.cycleState),
+    request.ntst,
+    request.ncol,
+    request.floquetMultipliers,
+    { ...request.settings }
+  )
+  let progress = runner.get_progress()
+  onProgress(progress)
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
   return runner.get_result()
 }
 
@@ -1545,6 +1741,60 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     if (message.kind === 'runContinuationExtension') {
       const result = await runContinuationExtension(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runEquilibriumManifold1D') {
+      const result = await runEquilibriumManifold1D(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runEquilibriumManifold2D') {
+      const result = await runEquilibriumManifold2D(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runLimitCycleManifold2D') {
+      const result = await runLimitCycleManifold2D(
         message.payload,
         controller.signal,
         (progress) => {

@@ -233,6 +233,9 @@ function App() {
                 maxSteps: continuationProgress.progress.max_steps,
                 points: continuationProgress.progress.points_computed,
                 bifurcations: continuationProgress.progress.bifurcations_found,
+                ringsComputed: continuationProgress.progress.rings_computed,
+                showArclength: continuationProgress.label.startsWith('Invariant Manifold'),
+                arclength: continuationProgress.progress.current_param,
               }
             : null
         }
@@ -288,6 +291,8 @@ function App() {
         onComputeCovariantLyapunovVectors={actions.computeCovariantLyapunovVectors}
         onSolveEquilibrium={actions.solveEquilibrium}
         onCreateEquilibriumBranch={actions.createEquilibriumBranch}
+        onCreateEquilibriumManifold1D={actions.createEquilibriumManifold1D}
+        onCreateEquilibriumManifold2D={actions.createEquilibriumManifold2D}
         onCreateBranchFromPoint={actions.createBranchFromPoint}
         onExtendBranch={actions.extendBranch}
         onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
@@ -296,6 +301,7 @@ function App() {
         onCreateNSCurveFromPoint={actions.createNSCurveFromPoint}
         onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
         onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
+        onCreateLimitCycleManifold2D={actions.createLimitCycleManifold2D}
         onCreateCycleFromPD={actions.createCycleFromPD}
         onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
         onCreateHomoclinicFromLargeCycle={actions.createHomoclinicFromLargeCycle}
@@ -444,6 +450,8 @@ function App() {
                 onComputeCovariantLyapunovVectors={actions.computeCovariantLyapunovVectors}
                 onSolveEquilibrium={actions.solveEquilibrium}
                 onCreateEquilibriumBranch={actions.createEquilibriumBranch}
+                onCreateEquilibriumManifold1D={actions.createEquilibriumManifold1D}
+                onCreateEquilibriumManifold2D={actions.createEquilibriumManifold2D}
                 onCreateBranchFromPoint={actions.createBranchFromPoint}
                 onExtendBranch={actions.extendBranch}
                 onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
@@ -452,6 +460,7 @@ function App() {
                 onCreateNSCurveFromPoint={actions.createNSCurveFromPoint}
                 onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
                 onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
+                onCreateLimitCycleManifold2D={actions.createLimitCycleManifold2D}
                 onCreateCycleFromPD={actions.createCycleFromPD}
                 onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
                 onCreateHomoclinicFromLargeCycle={actions.createHomoclinicFromLargeCycle}

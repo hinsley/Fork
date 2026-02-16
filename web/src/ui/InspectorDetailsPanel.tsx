@@ -14,6 +14,9 @@ import type {
   LimitCycleObject,
   LimitCycleOrigin,
   LimitCycleRenderTarget,
+  ManifoldDirection,
+  ManifoldStability,
+  ManifoldTerminationCaps,
   OrbitObject,
   Scene,
   System,
@@ -37,6 +40,8 @@ import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/p
 import type {
   BranchContinuationRequest,
   BranchExtensionRequest,
+  EquilibriumManifold1DRequest,
+  EquilibriumManifold2DRequest,
   EquilibriumContinuationRequest,
   EquilibriumSolveRequest,
   FoldCurveContinuationRequest,
@@ -48,6 +53,7 @@ import type {
   IsochroneCurveContinuationRequest,
   IsoclineComputeRequest,
   MapNSCurveContinuationRequest,
+  LimitCycleManifold2DRequest,
   LimitCycleHopfContinuationRequest,
   OrbitCovariantLyapunovRequest,
   OrbitLyapunovRequest,
@@ -134,6 +140,12 @@ type InspectorDetailsPanelProps = {
   onComputeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
   onSolveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
+  onCreateEquilibriumManifold1D?: (
+    request: EquilibriumManifold1DRequest
+  ) => Promise<void>
+  onCreateEquilibriumManifold2D?: (
+    request: EquilibriumManifold2DRequest
+  ) => Promise<void>
   onCreateBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
   onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
@@ -144,6 +156,9 @@ type InspectorDetailsPanelProps = {
   onCreateNSCurveFromPoint: (request: MapNSCurveContinuationRequest) => Promise<void>
   onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
   onCreateLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
+  onCreateLimitCycleManifold2D?: (
+    request: LimitCycleManifold2DRequest
+  ) => Promise<void>
   onCreateCycleFromPD: (request: MapCyclePDContinuationRequest) => Promise<void>
   onCreateLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
   onCreateHomoclinicFromLargeCycle?: (
@@ -317,6 +332,65 @@ type HomotopySaddleFromEquilibriumDraft = {
   correctorTolerance: string
   stepTolerance: string
   forward: boolean
+}
+
+type ManifoldCapsDraft = {
+  maxSteps: string
+  maxPoints: string
+  maxRings: string
+  maxVertices: string
+  maxTime: string
+}
+
+type EquilibriumManifoldMode = 'curve_1d' | 'surface_2d'
+type EquilibriumManifoldProfileDraft = 'local_preview' | 'lorenz_global'
+
+type EquilibriumManifoldDraft = {
+  name: string
+  mode: EquilibriumManifoldMode
+  profile: EquilibriumManifoldProfileDraft
+  stability: ManifoldStability
+  direction: ManifoldDirection
+  eigIndex: string
+  eigIndexA: string
+  eigIndexB: string
+  eps: string
+  initialRadius: string
+  targetRadius: string
+  leafDelta: string
+  deltaMin: string
+  ringPoints: string
+  minSpacing: string
+  maxSpacing: string
+  alphaMin: string
+  alphaMax: string
+  deltaAlphaMin: string
+  deltaAlphaMax: string
+  integrationDt: string
+  targetArclength: string
+  caps: ManifoldCapsDraft
+}
+
+type LimitCycleManifoldDraft = {
+  name: string
+  stability: ManifoldStability
+  profile: EquilibriumManifoldProfileDraft
+  floquetIndex: string
+  initialRadius: string
+  leafDelta: string
+  deltaMin: string
+  ringPoints: string
+  minSpacing: string
+  maxSpacing: string
+  alphaMin: string
+  alphaMax: string
+  deltaAlphaMin: string
+  deltaAlphaMax: string
+  integrationDt: string
+  targetArclength: string
+  ntst: string
+  ncol: string
+  caps: ManifoldCapsDraft
 }
 
 type ContinuationDraft = {
@@ -642,7 +716,35 @@ function formatBranchType(
   if (branch.branchType === 'equilibrium') {
     return formatEquilibriumLabel(systemType)
   }
-  return branch.branchType.replace('_', ' ')
+  if (branch.branchType === 'eq_manifold_1d') return 'equilibrium manifold (1D)'
+  if (branch.branchType === 'eq_manifold_2d') return 'equilibrium manifold (2D)'
+  if (branch.branchType === 'cycle_manifold_2d') return 'cycle manifold (2D)'
+  return branch.branchType.replaceAll('_', ' ')
+}
+
+function resolveManifoldSurfaceGeometryForInspector(
+  geometry: ContinuationObject['data']['manifold_geometry'] | undefined
+) {
+  if (!geometry || geometry.type !== 'Surface') return null
+  if ('Surface' in geometry && geometry.Surface) return geometry.Surface
+  if ('vertices_flat' in geometry && Array.isArray(geometry.vertices_flat)) {
+    return {
+      dim: geometry.dim,
+      vertices_flat: geometry.vertices_flat,
+      triangles: geometry.triangles,
+      ring_offsets: geometry.ring_offsets,
+      ring_diagnostics: geometry.ring_diagnostics,
+      solver_diagnostics: geometry.solver_diagnostics,
+    }
+  }
+  return null
+}
+
+function formatTerminationReasonLabel(reason: string | undefined): string {
+  if (!reason || reason.trim().length === 0) return 'unknown'
+  return reason
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (match) => match.toUpperCase())
 }
 
 function summarizeEigenvalues(point: ContinuationPoint, branchType?: string): string {
@@ -1054,6 +1156,191 @@ function makeHomotopySaddleFromEquilibriumDraft(
     correctorTolerance: '1e-7',
     stepTolerance: '1e-7',
     forward: true,
+  }
+}
+
+type ManifoldCapsPreset = 'curve_1d' | 'surface_2d' | 'cycle_2d'
+
+function makeSurfaceProfileDefaults(
+  profile: EquilibriumManifoldProfileDraft
+): {
+  initialRadius: string
+  targetRadius: string
+  leafDelta: string
+  deltaMin: string
+  ringPoints: string
+  minSpacing: string
+  maxSpacing: string
+  alphaMin: string
+  alphaMax: string
+  deltaAlphaMin: string
+  deltaAlphaMax: string
+  integrationDt: string
+  targetArclength: string
+  caps: ManifoldCapsDraft
+} {
+  if (profile === 'lorenz_global') {
+    return {
+      initialRadius: '1.0',
+      targetRadius: '40',
+      leafDelta: '1.0',
+      deltaMin: '0.01',
+      ringPoints: '20',
+      minSpacing: '0.25',
+      maxSpacing: '2.0',
+      alphaMin: '0.3',
+      alphaMax: '0.4',
+      deltaAlphaMin: '0.1',
+      deltaAlphaMax: '1.0',
+      integrationDt: '0.001',
+      targetArclength: '100',
+      caps: {
+        maxSteps: '2000',
+        maxPoints: '8000',
+        maxRings: '200',
+        maxVertices: '200000',
+        maxTime: '200',
+      },
+    }
+  }
+  return {
+    initialRadius: '1e-3',
+    targetRadius: '5',
+    leafDelta: '0.002',
+    deltaMin: '0.001',
+    ringPoints: '48',
+    minSpacing: '0.00134',
+    maxSpacing: '0.004',
+    alphaMin: '0.3',
+    alphaMax: '0.4',
+    deltaAlphaMin: '0.1',
+    deltaAlphaMax: '1.0',
+    integrationDt: '0.01',
+    targetArclength: '10',
+    caps: makeDefaultManifoldCapsDraft('surface_2d'),
+  }
+}
+
+function makeDefaultManifoldCapsDraft(preset: ManifoldCapsPreset = 'curve_1d'): ManifoldCapsDraft {
+  if (preset === 'surface_2d') {
+    return {
+      maxSteps: '300',
+      maxPoints: '8000',
+      maxRings: '240',
+      maxVertices: '50000',
+      maxTime: '200',
+    }
+  }
+  if (preset === 'cycle_2d') {
+    return {
+      maxSteps: '2000',
+      maxPoints: '8000',
+      maxRings: '48',
+      maxVertices: '8000',
+      maxTime: '2',
+    }
+  }
+  return {
+    maxSteps: '2000',
+    maxPoints: '20000',
+    maxRings: '500',
+    maxVertices: '200000',
+    maxTime: '1000',
+  }
+}
+
+function makeEquilibriumManifoldDraft(
+  system: SystemConfig,
+  equilibrium?: EquilibriumObject | null
+): EquilibriumManifoldDraft {
+  const mode: EquilibriumManifoldMode = system.varNames.length >= 3 ? 'surface_2d' : 'curve_1d'
+  const surfaceDefaults = mode === 'surface_2d'
+  const profile: EquilibriumManifoldProfileDraft = surfaceDefaults ? 'lorenz_global' : 'local_preview'
+  const profileDefaults = makeSurfaceProfileDefaults(profile)
+  const baseName = equilibrium ? toCliSafeName(equilibrium.name) : 'equilibrium'
+  return {
+    name: mode === 'surface_2d' ? `manifold_${baseName}_2d` : `manifold_${baseName}_1d`,
+    mode,
+    profile,
+    stability: surfaceDefaults ? 'Stable' : 'Unstable',
+    direction: 'Both',
+    eigIndex: '0',
+    eigIndexA: '0',
+    eigIndexB: '1',
+    eps: '1e-3',
+    initialRadius: surfaceDefaults ? profileDefaults.initialRadius : '1e-3',
+    targetRadius: surfaceDefaults ? profileDefaults.targetRadius : '5',
+    leafDelta: surfaceDefaults ? profileDefaults.leafDelta : '0.002',
+    deltaMin: surfaceDefaults ? profileDefaults.deltaMin : '0.001',
+    ringPoints: surfaceDefaults ? profileDefaults.ringPoints : '48',
+    minSpacing: surfaceDefaults ? profileDefaults.minSpacing : '0.00134',
+    maxSpacing: surfaceDefaults ? profileDefaults.maxSpacing : '0.004',
+    alphaMin: surfaceDefaults ? profileDefaults.alphaMin : '0.3',
+    alphaMax: surfaceDefaults ? profileDefaults.alphaMax : '0.4',
+    deltaAlphaMin: surfaceDefaults ? profileDefaults.deltaAlphaMin : '0.1',
+    deltaAlphaMax: surfaceDefaults ? profileDefaults.deltaAlphaMax : '1.0',
+    integrationDt: surfaceDefaults ? profileDefaults.integrationDt : '0.01',
+    targetArclength: surfaceDefaults ? profileDefaults.targetArclength : '10',
+    caps: surfaceDefaults ? profileDefaults.caps : makeDefaultManifoldCapsDraft('curve_1d'),
+  }
+}
+
+function makeLimitCycleManifoldDraft(
+  limitCycle?: LimitCycleObject | null
+): LimitCycleManifoldDraft {
+  const baseName = limitCycle ? toCliSafeName(limitCycle.name) : 'limit_cycle'
+  return {
+    name: `manifold_${baseName}_2d`,
+    stability: 'Unstable',
+    profile: 'local_preview',
+    floquetIndex: '0',
+    initialRadius: '1e-3',
+    leafDelta: '0.002',
+    deltaMin: '0.001',
+    ringPoints: '24',
+    minSpacing: '0.00134',
+    maxSpacing: '0.004',
+    alphaMin: '0.3',
+    alphaMax: '0.4',
+    deltaAlphaMin: '0.1',
+    deltaAlphaMax: '1.0',
+    integrationDt: '0.01',
+    targetArclength: '0.25',
+    ntst: Math.max(1, Math.trunc(limitCycle?.ntst ?? 20)).toString(),
+    ncol: Math.max(1, Math.trunc(limitCycle?.ncol ?? 4)).toString(),
+    caps: makeDefaultManifoldCapsDraft('cycle_2d'),
+  }
+}
+
+function parseManifoldCapsDraft(
+  draft: ManifoldCapsDraft
+): { caps: ManifoldTerminationCaps | null; error: string | null } {
+  const max_steps = parseDraftInteger(draft.maxSteps)
+  const max_points = parseDraftInteger(draft.maxPoints)
+  const max_rings = parseDraftInteger(draft.maxRings)
+  const max_vertices = parseDraftInteger(draft.maxVertices)
+  const max_time = parseDraftNumber(draft.maxTime)
+  if (
+    max_steps === null ||
+    max_points === null ||
+    max_rings === null ||
+    max_vertices === null ||
+    max_time === null
+  ) {
+    return { caps: null, error: 'Manifold caps must be numeric.' }
+  }
+  if (max_steps <= 0 || max_points <= 0 || max_rings <= 0 || max_vertices <= 0 || max_time <= 0) {
+    return { caps: null, error: 'Manifold caps must be positive.' }
+  }
+  return {
+    caps: {
+      max_steps,
+      max_points,
+      max_rings,
+      max_vertices,
+      max_time,
+    },
+    error: null,
   }
 }
 
@@ -1537,6 +1824,8 @@ export function InspectorDetailsPanel({
   onComputeCovariantLyapunovVectors,
   onSolveEquilibrium,
   onCreateEquilibriumBranch,
+  onCreateEquilibriumManifold1D = async () => {},
+  onCreateEquilibriumManifold2D = async () => {},
   onCreateBranchFromPoint,
   onExtendBranch,
   onCreateFoldCurveFromPoint,
@@ -1545,6 +1834,7 @@ export function InspectorDetailsPanel({
   onCreateNSCurveFromPoint,
   onCreateLimitCycleFromHopf,
   onCreateLimitCycleFromOrbit,
+  onCreateLimitCycleManifold2D = async () => {},
   onCreateCycleFromPD,
   onCreateLimitCycleFromPD,
   onCreateHomoclinicFromLargeCycle = async () => {},
@@ -1630,6 +1920,16 @@ export function InspectorDetailsPanel({
   const hasBranch = Boolean(branch)
   const isLimitCycleBranch =
     branch?.branchType === 'limit_cycle' || branch?.branchType === 'isochrone_curve'
+  const manifoldSurfaceGeometry = useMemo(
+    () => resolveManifoldSurfaceGeometryForInspector(branch?.data.manifold_geometry),
+    [branch?.data.manifold_geometry]
+  )
+  const manifoldSolverDiagnostics = manifoldSurfaceGeometry?.solver_diagnostics
+  const manifoldSurfaceRingCount = manifoldSurfaceGeometry?.ring_offsets?.length ?? 0
+  const manifoldSurfaceVertexCount =
+    manifoldSurfaceGeometry && manifoldSurfaceGeometry.dim > 0
+      ? Math.floor(manifoldSurfaceGeometry.vertices_flat.length / manifoldSurfaceGeometry.dim)
+      : 0
   const supportsStateSpaceStride = branch
     ? STATE_SPACE_STRIDE_BRANCH_TYPES.has(branch.branchType)
     : false
@@ -1641,7 +1941,10 @@ export function InspectorDetailsPanel({
     clvDim ??
     (orbit?.data?.[0] ? orbit.data[0].length - 1 : system.config.varNames.length)
   const clvRender = resolveClvRender(selectionNode?.render?.clv, clvDim)
-  const equilibriumEigenpairs = equilibrium?.solution?.eigenpairs ?? []
+  const equilibriumEigenpairs = useMemo(
+    () => equilibrium?.solution?.eigenpairs ?? [],
+    [equilibrium?.solution?.eigenpairs]
+  )
   const equilibriumEigenspaceIndices = resolveEquilibriumEigenspaceIndices(
     equilibriumEigenpairs
   )
@@ -1933,10 +2236,52 @@ export function InspectorDetailsPanel({
     makeContinuationDraft(system.config)
   )
   const [continuationError, setContinuationError] = useState<string | null>(null)
+  const [equilibriumManifoldDraft, setEquilibriumManifoldDraft] = useState<EquilibriumManifoldDraft>(
+    () => makeEquilibriumManifoldDraft(system.config, equilibrium)
+  )
+  const [equilibriumManifoldError, setEquilibriumManifoldError] = useState<string | null>(null)
   const [limitCycleFromOrbitDraft, setLimitCycleFromOrbitDraft] =
     useState<LimitCycleFromOrbitDraft>(() => makeLimitCycleFromOrbitDraft(system.config))
   const [limitCycleFromOrbitError, setLimitCycleFromOrbitError] = useState<string | null>(
     null
+  )
+  const [limitCycleManifoldDraft, setLimitCycleManifoldDraft] = useState<LimitCycleManifoldDraft>(
+    () => makeLimitCycleManifoldDraft(limitCycle)
+  )
+  const [limitCycleManifoldError, setLimitCycleManifoldError] = useState<string | null>(null)
+  const equilibriumManifoldEligibleIndexOptions = useMemo(() => {
+    const wantsUnstable = equilibriumManifoldDraft.stability === 'Unstable'
+    return equilibriumEigenpairs
+      .map((pair, index) => ({ pair, index }))
+      .filter(({ pair }) =>
+        wantsUnstable ? pair.value.re > 1e-9 : pair.value.re < -1e-9
+      )
+      .map(({ index }) => ({
+        value: index.toString(),
+        label: (index + 1).toString(),
+      }))
+  }, [equilibriumEigenpairs, equilibriumManifoldDraft.stability])
+  const equilibriumManifoldEligibleRealIndexOptions = useMemo(() => {
+    const wantsUnstable = equilibriumManifoldDraft.stability === 'Unstable'
+    return equilibriumEigenpairs
+      .map((pair, index) => ({ pair, index }))
+      .filter(
+        ({ pair }) =>
+          Math.abs(pair.value.im) <= 1e-8 &&
+          (wantsUnstable ? pair.value.re > 1e-9 : pair.value.re < -1e-9)
+      )
+      .map(({ index }) => ({
+        value: index.toString(),
+        label: (index + 1).toString(),
+      }))
+  }, [equilibriumEigenpairs, equilibriumManifoldDraft.stability])
+  const equilibriumManifoldEligibleIndexSet = useMemo(
+    () => new Set(equilibriumManifoldEligibleIndexOptions.map((option) => option.value)),
+    [equilibriumManifoldEligibleIndexOptions]
+  )
+  const equilibriumManifoldEligibleRealIndexSet = useMemo(
+    () => new Set(equilibriumManifoldEligibleRealIndexOptions.map((option) => option.value)),
+    [equilibriumManifoldEligibleRealIndexOptions]
   )
   const [limitCycleFromHopfDraft, setLimitCycleFromHopfDraft] =
     useState<LimitCycleFromHopfDraft>(() => makeLimitCycleFromHopfDraft(system.config))
@@ -2544,6 +2889,21 @@ export function InspectorDetailsPanel({
         name: prev.name,
       }))
       setContinuationError(null)
+      setEquilibriumManifoldDraft((prev) => ({
+        ...makeEquilibriumManifoldDraft(stableSystemConfig, current),
+        mode:
+          stableSystemConfig.varNames.length >= 3
+            ? prev.mode
+            : 'curve_1d',
+      }))
+      setEquilibriumManifoldError(null)
+    }
+    if (current.type === 'limit_cycle') {
+      setLimitCycleManifoldDraft((prev) => ({
+        ...makeLimitCycleManifoldDraft(current),
+        name: prev.name.trim().length > 0 ? prev.name : makeLimitCycleManifoldDraft(current).name,
+      }))
+      setLimitCycleManifoldError(null)
     }
     if (current.type === 'isocline') {
       setIsoclineError(null)
@@ -2633,6 +2993,84 @@ export function InspectorDetailsPanel({
     firstContinuationParameter,
     continuationParameterSet,
   ])
+
+  useEffect(() => {
+    if (!equilibrium) return
+    setEquilibriumManifoldDraft((prev) => {
+      const defaults = makeEquilibriumManifoldDraft(system.config, equilibrium)
+      const supportsSurface = systemDraft.varNames.length >= 3
+      const mode = supportsSurface ? prev.mode : 'curve_1d'
+      const defaultName = mode === 'surface_2d' ? defaults.name : `manifold_${toCliSafeName(equilibrium.name)}_1d`
+      const name = prev.name.trim().length > 0 ? prev.name : defaultName
+      return { ...prev, mode, name }
+    })
+  }, [equilibrium, system.config, systemDraft.varNames.length])
+
+  useEffect(() => {
+    setEquilibriumManifoldDraft((prev) => {
+      let changed = false
+      let next = prev
+
+      if (equilibriumManifoldEligibleRealIndexOptions.length > 0) {
+        const hasCurrent = equilibriumManifoldEligibleRealIndexSet.has(prev.eigIndex)
+        if (!hasCurrent) {
+          next = {
+            ...next,
+            eigIndex: equilibriumManifoldEligibleRealIndexOptions[0].value,
+          }
+          changed = true
+        }
+      } else if (prev.eigIndex !== '') {
+        next = { ...next, eigIndex: '' }
+        changed = true
+      }
+
+      let nextEigIndexA = next.eigIndexA
+      let nextEigIndexB = next.eigIndexB
+      if (equilibriumManifoldEligibleIndexOptions.length > 0) {
+        if (!equilibriumManifoldEligibleIndexSet.has(nextEigIndexA)) {
+          nextEigIndexA = equilibriumManifoldEligibleIndexOptions[0].value
+        }
+        if (!equilibriumManifoldEligibleIndexSet.has(nextEigIndexB)) {
+          const fallback =
+            equilibriumManifoldEligibleIndexOptions[
+              Math.min(1, equilibriumManifoldEligibleIndexOptions.length - 1)
+            ]
+          nextEigIndexB = fallback?.value ?? nextEigIndexA
+        }
+      } else {
+        nextEigIndexA = ''
+        nextEigIndexB = ''
+      }
+      if (nextEigIndexA !== next.eigIndexA || nextEigIndexB !== next.eigIndexB) {
+        next = {
+          ...next,
+          eigIndexA: nextEigIndexA,
+          eigIndexB: nextEigIndexB,
+        }
+        changed = true
+      }
+
+      return changed ? next : prev
+    })
+  }, [
+    equilibriumManifoldEligibleIndexOptions,
+    equilibriumManifoldEligibleIndexSet,
+    equilibriumManifoldEligibleRealIndexOptions,
+    equilibriumManifoldEligibleRealIndexSet,
+  ])
+
+  useEffect(() => {
+    if (!limitCycle) return
+    setLimitCycleManifoldDraft((prev) => {
+      const defaults = makeLimitCycleManifoldDraft(limitCycle)
+      return {
+        ...defaults,
+        ...prev,
+        name: prev.name.trim().length > 0 ? prev.name : defaults.name,
+      }
+    })
+  }, [limitCycle])
 
   useEffect(() => {
     if (!orbit) return
@@ -3414,8 +3852,7 @@ export function InspectorDetailsPanel({
   const showLimitCycleFromHopf =
     !isDiscreteMap &&
     hasSelectedBranchPoint &&
-    isHopfSourceBranch &&
-    isHopfPointSelected
+    isHopfSourceBranch
   const showLimitCycleFromPD = isPeriodDoublingPointSelected
   const branchSupportsContinueFromPoint =
     branch?.branchType === 'equilibrium' ||
@@ -3564,6 +4001,14 @@ export function InspectorDetailsPanel({
     }
     return limitCycle?.floquetMultipliers ?? []
   }, [limitCycle?.floquetMultipliers, limitCycleRenderData])
+  const limitCycleFloquetIndexOptions = useMemo(
+    () =>
+      limitCycleDisplayMultipliers.map((_, index) => ({
+        value: index.toString(),
+        label: (index + 1).toString(),
+      })),
+    [limitCycleDisplayMultipliers]
+  )
   const limitCycleMultiplierPlot = useMemo(() => {
     if (limitCycleDisplayMultipliers.length === 0) return null
     return buildEigenvaluePlot(limitCycleDisplayMultipliers, plotlyTheme, {
@@ -4197,6 +4642,347 @@ export function InspectorDetailsPanel({
       parameterName: continuationDraft.parameterName,
       settings,
       forward: continuationDraft.forward,
+    })
+  }
+
+  const handleCreateEquilibriumManifold = async () => {
+    if (runDisabled) {
+      setEquilibriumManifoldError('Apply valid system settings before computing manifolds.')
+      return
+    }
+    if (systemDraft.type === 'map') {
+      setEquilibriumManifoldError('Invariant manifolds are currently available for flow systems only.')
+      return
+    }
+    if (!equilibrium || !selectedNodeId) {
+      setEquilibriumManifoldError(`Select the ${equilibriumLabelLower} to continue.`)
+      return
+    }
+    if (!equilibrium.solution) {
+      setEquilibriumManifoldError(`Solve the ${equilibriumLabelLower} before computing manifolds.`)
+      return
+    }
+
+    const name = equilibriumManifoldDraft.name.trim()
+    if (!name) {
+      setEquilibriumManifoldError('Branch name is required.')
+      return
+    }
+    if (!isCliSafeName(name)) {
+      setEquilibriumManifoldError('Branch names must be alphanumeric with underscores only.')
+      return
+    }
+
+    const parsedCaps = parseManifoldCapsDraft(equilibriumManifoldDraft.caps)
+    if (!parsedCaps.caps) {
+      setEquilibriumManifoldError(parsedCaps.error ?? 'Invalid manifold caps.')
+      return
+    }
+
+    if (equilibriumManifoldDraft.mode === 'curve_1d') {
+      const eps = parseDraftNumber(equilibriumManifoldDraft.eps)
+      const targetArclength = parseDraftNumber(equilibriumManifoldDraft.targetArclength)
+      const integrationDt = parseDraftNumber(equilibriumManifoldDraft.integrationDt)
+      if (
+        eps === null ||
+        targetArclength === null ||
+        integrationDt === null
+      ) {
+        setEquilibriumManifoldError('1D manifold settings must be numeric.')
+        return
+      }
+      if (
+        eps <= 0 ||
+        targetArclength <= 0 ||
+        integrationDt === 0
+      ) {
+        setEquilibriumManifoldError(
+          '1D manifold settings must be positive (integration dt must be non-zero).'
+        )
+        return
+      }
+      let eigIndex: number | undefined
+      if (equilibriumManifoldEligibleRealIndexOptions.length === 0) {
+        setEquilibriumManifoldError(
+          `No real ${equilibriumManifoldDraft.stability.toLowerCase()} eigenmodes are available for 1D manifolds.`
+        )
+        return
+      }
+      if (equilibriumManifoldDraft.eigIndex.trim().length > 0) {
+        const parsed = parseDraftInteger(equilibriumManifoldDraft.eigIndex)
+        if (parsed === null || parsed < 0) {
+          setEquilibriumManifoldError('Eigen index must be a non-negative integer.')
+          return
+        }
+        if (!equilibriumManifoldEligibleRealIndexSet.has(parsed.toString())) {
+          setEquilibriumManifoldError(
+            `Select an eligible ${equilibriumManifoldDraft.stability.toLowerCase()} real eigen index.`
+          )
+          return
+        }
+        eigIndex = parsed
+      }
+      setEquilibriumManifoldError(null)
+      await onCreateEquilibriumManifold1D({
+        equilibriumId: selectedNodeId,
+        name,
+        settings: {
+          stability: equilibriumManifoldDraft.stability,
+          direction: equilibriumManifoldDraft.direction,
+          eig_index: eigIndex,
+          eps,
+          target_arclength: targetArclength,
+          integration_dt: integrationDt,
+          caps: parsedCaps.caps,
+        },
+      })
+      return
+    }
+
+    if (systemDraft.varNames.length < 3) {
+      setEquilibriumManifoldError('2D equilibrium manifolds require at least three state variables.')
+      return
+    }
+    const initialRadius = parseDraftNumber(equilibriumManifoldDraft.initialRadius)
+    const leafDelta = parseDraftNumber(equilibriumManifoldDraft.leafDelta)
+    const deltaMin = parseDraftNumber(equilibriumManifoldDraft.deltaMin)
+    const ringPoints = parseDraftInteger(equilibriumManifoldDraft.ringPoints)
+    const minSpacing = parseDraftNumber(equilibriumManifoldDraft.minSpacing)
+    const maxSpacing = parseDraftNumber(equilibriumManifoldDraft.maxSpacing)
+    const alphaMin = parseDraftNumber(equilibriumManifoldDraft.alphaMin)
+    const alphaMax = parseDraftNumber(equilibriumManifoldDraft.alphaMax)
+    const deltaAlphaMin = parseDraftNumber(equilibriumManifoldDraft.deltaAlphaMin)
+    const deltaAlphaMax = parseDraftNumber(equilibriumManifoldDraft.deltaAlphaMax)
+    const integrationDt = parseDraftNumber(equilibriumManifoldDraft.integrationDt)
+    const targetRadius = parseDraftNumber(equilibriumManifoldDraft.targetRadius)
+    const targetArclength = parseDraftNumber(equilibriumManifoldDraft.targetArclength)
+    if (
+      initialRadius === null ||
+      leafDelta === null ||
+      deltaMin === null ||
+      ringPoints === null ||
+      minSpacing === null ||
+      maxSpacing === null ||
+      alphaMin === null ||
+      alphaMax === null ||
+      deltaAlphaMin === null ||
+      deltaAlphaMax === null ||
+      integrationDt === null ||
+      targetRadius === null ||
+      targetArclength === null
+    ) {
+      setEquilibriumManifoldError('2D manifold settings must be numeric.')
+      return
+    }
+    if (
+      initialRadius <= 0 ||
+      leafDelta <= 0 ||
+      deltaMin <= 0 ||
+      deltaMin > leafDelta ||
+      ringPoints < 4 ||
+      minSpacing <= 0 ||
+      maxSpacing <= 0 ||
+      maxSpacing <= minSpacing ||
+      alphaMin <= 0 ||
+      alphaMax <= 0 ||
+      alphaMax <= alphaMin ||
+      deltaAlphaMin <= 0 ||
+      deltaAlphaMax <= 0 ||
+      deltaAlphaMax <= deltaAlphaMin ||
+      integrationDt === 0 ||
+      targetRadius <= 0 ||
+      targetArclength < 0
+    ) {
+      setEquilibriumManifoldError(
+        '2D manifold settings are invalid. Check radius/delta positivity, spacing bounds, and alpha thresholds.'
+      )
+      return
+    }
+    let eigIndices: [number, number] | undefined
+    if (equilibriumManifoldEligibleIndexOptions.length === 0) {
+      setEquilibriumManifoldError(
+        `No ${equilibriumManifoldDraft.stability.toLowerCase()} eigenmodes are available for 2D manifolds.`
+      )
+      return
+    }
+    const eigA = equilibriumManifoldDraft.eigIndexA.trim()
+    const eigB = equilibriumManifoldDraft.eigIndexB.trim()
+    if (eigA.length > 0 || eigB.length > 0) {
+      const parsedA = parseDraftInteger(eigA)
+      const parsedB = parseDraftInteger(eigB)
+      if (parsedA === null || parsedB === null || parsedA < 0 || parsedB < 0) {
+          setEquilibriumManifoldError('Eigenspace indices must be non-negative integers.')
+          return
+        }
+      if (
+        !equilibriumManifoldEligibleIndexSet.has(parsedA.toString()) ||
+        !equilibriumManifoldEligibleIndexSet.has(parsedB.toString())
+      ) {
+        setEquilibriumManifoldError(
+          `Select ${equilibriumManifoldDraft.stability.toLowerCase()} eigen indices for the 2D manifold.`
+        )
+        return
+      }
+      eigIndices = [parsedA, parsedB]
+    }
+    setEquilibriumManifoldError(null)
+    await onCreateEquilibriumManifold2D({
+      equilibriumId: selectedNodeId,
+      name,
+      settings: {
+        stability: equilibriumManifoldDraft.stability,
+        profile:
+          equilibriumManifoldDraft.profile === 'lorenz_global'
+            ? 'LorenzGlobalKo'
+            : 'LocalPreview',
+        eig_indices: eigIndices,
+        initial_radius: initialRadius,
+        leaf_delta: leafDelta,
+        delta_min: deltaMin,
+        ring_points: ringPoints,
+        min_spacing: minSpacing,
+        max_spacing: maxSpacing,
+        alpha_min: alphaMin,
+        alpha_max: alphaMax,
+        delta_alpha_min: deltaAlphaMin,
+        delta_alpha_max: deltaAlphaMax,
+        integration_dt: integrationDt,
+        target_radius: targetRadius,
+        target_arclength: targetArclength,
+        caps: parsedCaps.caps,
+      },
+    })
+  }
+
+  const handleCreateLimitCycleManifold = async () => {
+    if (runDisabled) {
+      setLimitCycleManifoldError('Apply valid system settings before computing manifolds.')
+      return
+    }
+    if (systemDraft.type === 'map') {
+      setLimitCycleManifoldError('Invariant manifolds are currently available for flow systems only.')
+      return
+    }
+    if (!limitCycle || !selectedNodeId) {
+      setLimitCycleManifoldError('Select a limit cycle to continue.')
+      return
+    }
+    if (systemDraft.varNames.length < 3) {
+      setLimitCycleManifoldError('2D cycle manifolds require at least three state variables.')
+      return
+    }
+
+    const name = limitCycleManifoldDraft.name.trim()
+    if (!name) {
+      setLimitCycleManifoldError('Branch name is required.')
+      return
+    }
+    if (!isCliSafeName(name)) {
+      setLimitCycleManifoldError('Branch names must be alphanumeric with underscores only.')
+      return
+    }
+
+    const parsedCaps = parseManifoldCapsDraft(limitCycleManifoldDraft.caps)
+    if (!parsedCaps.caps) {
+      setLimitCycleManifoldError(parsedCaps.error ?? 'Invalid manifold caps.')
+      return
+    }
+    const initialRadius = parseDraftNumber(limitCycleManifoldDraft.initialRadius)
+    const leafDelta = parseDraftNumber(limitCycleManifoldDraft.leafDelta)
+    const deltaMin = parseDraftNumber(limitCycleManifoldDraft.deltaMin)
+    const ringPoints = parseDraftInteger(limitCycleManifoldDraft.ringPoints)
+    const minSpacing = parseDraftNumber(limitCycleManifoldDraft.minSpacing)
+    const maxSpacing = parseDraftNumber(limitCycleManifoldDraft.maxSpacing)
+    const alphaMin = parseDraftNumber(limitCycleManifoldDraft.alphaMin)
+    const alphaMax = parseDraftNumber(limitCycleManifoldDraft.alphaMax)
+    const deltaAlphaMin = parseDraftNumber(limitCycleManifoldDraft.deltaAlphaMin)
+    const deltaAlphaMax = parseDraftNumber(limitCycleManifoldDraft.deltaAlphaMax)
+    const integrationDt = parseDraftNumber(limitCycleManifoldDraft.integrationDt)
+    const targetArclength = parseDraftNumber(limitCycleManifoldDraft.targetArclength)
+    const ntst = parseDraftInteger(limitCycleManifoldDraft.ntst)
+    const ncol = parseDraftInteger(limitCycleManifoldDraft.ncol)
+    if (
+      initialRadius === null ||
+      leafDelta === null ||
+      deltaMin === null ||
+      ringPoints === null ||
+      minSpacing === null ||
+      maxSpacing === null ||
+      alphaMin === null ||
+      alphaMax === null ||
+      deltaAlphaMin === null ||
+      deltaAlphaMax === null ||
+      integrationDt === null ||
+      targetArclength === null ||
+      ntst === null ||
+      ncol === null
+    ) {
+      setLimitCycleManifoldError('Cycle manifold settings must be numeric.')
+      return
+    }
+    if (
+      initialRadius <= 0 ||
+      leafDelta <= 0 ||
+      deltaMin <= 0 ||
+      deltaMin > leafDelta ||
+      ringPoints < 4 ||
+      minSpacing <= 0 ||
+      maxSpacing <= 0 ||
+      maxSpacing <= minSpacing ||
+      alphaMin <= 0 ||
+      alphaMax <= 0 ||
+      alphaMax <= alphaMin ||
+      deltaAlphaMin <= 0 ||
+      deltaAlphaMax <= 0 ||
+      deltaAlphaMax <= deltaAlphaMin ||
+      integrationDt === 0 ||
+      targetArclength < 0 ||
+      ntst <= 0 ||
+      ncol <= 0
+    ) {
+      setLimitCycleManifoldError(
+        'Cycle manifold settings are invalid (ring points >= 4, ntst/ncol > 0, arclength >= 0).'
+      )
+      return
+    }
+
+    let floquetIndex: number | undefined
+    if (limitCycleManifoldDraft.floquetIndex.trim().length > 0) {
+      const parsed = parseDraftInteger(limitCycleManifoldDraft.floquetIndex)
+      if (parsed === null || parsed < 0) {
+        setLimitCycleManifoldError('Floquet index must be a non-negative integer.')
+        return
+      }
+      floquetIndex = parsed
+    }
+
+    setLimitCycleManifoldError(null)
+    await onCreateLimitCycleManifold2D({
+      limitCycleId: selectedNodeId,
+      name,
+      settings: {
+        stability: limitCycleManifoldDraft.stability,
+        floquet_index: floquetIndex,
+        profile:
+          limitCycleManifoldDraft.profile === 'lorenz_global'
+            ? 'LorenzGlobalKo'
+            : 'LocalPreview',
+        initial_radius: initialRadius,
+        leaf_delta: leafDelta,
+        delta_min: deltaMin,
+        ring_points: ringPoints,
+        min_spacing: minSpacing,
+        max_spacing: maxSpacing,
+        alpha_min: alphaMin,
+        alpha_max: alphaMax,
+        delta_alpha_min: deltaAlphaMin,
+        delta_alpha_max: deltaAlphaMax,
+        integration_dt: integrationDt,
+        target_arclength: targetArclength,
+        ntst,
+        ncol,
+        caps: parsedCaps.caps,
+      },
     })
   }
 
@@ -6052,6 +6838,7 @@ export function InspectorDetailsPanel({
                 </p>
               </div>
             </InspectorDisclosure>
+
           ) : null}
 
           {paramOverrideTarget && !isocline ? (
@@ -7620,6 +8407,486 @@ export function InspectorDetailsPanel({
                   )}
                 </div>
               </InspectorDisclosure>
+
+              <InspectorDisclosure
+                key={`${selectionKey}-equilibrium-manifold`}
+                title="Invariant Manifolds"
+                testId="equilibrium-manifold-toggle"
+                defaultOpen={false}
+              >
+                <div className="inspector-section">
+                  {runDisabled ? (
+                    <div className="field-warning">
+                      Apply valid system changes before computing manifolds.
+                    </div>
+                  ) : null}
+                  {systemDraft.type === 'map' ? (
+                    <p className="empty-state">
+                      Invariant manifolds are available for flow systems only.
+                    </p>
+                  ) : null}
+                  {!equilibrium.solution ? (
+                    <p className="empty-state">{`Solve the ${equilibriumLabelLower} before computing manifolds.`}</p>
+                  ) : (
+                    <>
+                      <label>
+                        Branch name
+                        <input
+                          value={equilibriumManifoldDraft.name}
+                          onChange={(event) =>
+                            setEquilibriumManifoldDraft((prev) => ({
+                              ...prev,
+                              name: event.target.value,
+                            }))
+                          }
+                          data-testid="equilibrium-manifold-name"
+                        />
+                      </label>
+                      <label>
+                        Kind
+                        <select
+                          value={equilibriumManifoldDraft.stability}
+                          onChange={(event) =>
+                            setEquilibriumManifoldDraft((prev) => ({
+                              ...prev,
+                              stability: event.target.value as ManifoldStability,
+                            }))
+                          }
+                          data-testid="equilibrium-manifold-stability"
+                        >
+                          <option value="Unstable">Unstable</option>
+                          <option value="Stable">Stable</option>
+                        </select>
+                      </label>
+                      <label>
+                        Mode
+                        <select
+                          value={equilibriumManifoldDraft.mode}
+                          onChange={(event) =>
+                            setEquilibriumManifoldDraft((prev) => {
+                              const nextMode = event.target.value as EquilibriumManifoldMode
+                              if (nextMode !== 'surface_2d') {
+                                return { ...prev, mode: nextMode }
+                              }
+                              const defaults = makeSurfaceProfileDefaults(prev.profile)
+                              return {
+                                ...prev,
+                                mode: nextMode,
+                                ...defaults,
+                              }
+                            })
+                          }
+                          disabled={systemDraft.varNames.length < 3}
+                          data-testid="equilibrium-manifold-mode"
+                        >
+                          <option value="curve_1d">1D curve</option>
+                          <option value="surface_2d">2D surface</option>
+                        </select>
+                      </label>
+
+                      {equilibriumManifoldDraft.mode === 'curve_1d' ? (
+                        <>
+                          <label>
+                            Direction
+                            <select
+                              value={equilibriumManifoldDraft.direction}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  direction: event.target.value as ManifoldDirection,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold-direction"
+                            >
+                              <option value="Both">both</option>
+                              <option value="Plus">plus</option>
+                              <option value="Minus">minus</option>
+                            </select>
+                          </label>
+                          <label>
+                            Eigen index
+                            <select
+                              value={equilibriumManifoldDraft.eigIndex}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  eigIndex: event.target.value,
+                                }))
+                              }
+                              disabled={equilibriumManifoldEligibleRealIndexOptions.length === 0}
+                              data-testid="equilibrium-manifold-eig-index"
+                            >
+                              {equilibriumManifoldEligibleRealIndexOptions.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          {equilibriumManifoldEligibleRealIndexOptions.length === 0 ? (
+                            <div className="field-warning">
+                              No eligible real {equilibriumManifoldDraft.stability.toLowerCase()} eigenmodes.
+                            </div>
+                          ) : null}
+                          <label>
+                            Epsilon
+                            <input
+                              value={equilibriumManifoldDraft.eps}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  eps: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold-eps"
+                            />
+                          </label>
+                          <label>
+                            Integration dt
+                            <input
+                              value={equilibriumManifoldDraft.integrationDt}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  integrationDt: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold-integration-dt"
+                            />
+                          </label>
+                          <label>
+                            Target arclength
+                            <input
+                              value={equilibriumManifoldDraft.targetArclength}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  targetArclength: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold-target-arclength"
+                            />
+                          </label>
+                        </>
+                      ) : (
+                        <>
+                          <label>
+                            Profile
+                            <select
+                              value={equilibriumManifoldDraft.profile}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => {
+                                  const profile = event.target.value as EquilibriumManifoldProfileDraft
+                                  const defaults = makeSurfaceProfileDefaults(profile)
+                                  return {
+                                    ...prev,
+                                    profile,
+                                    ...defaults,
+                                  }
+                                })
+                              }
+                              data-testid="equilibrium-manifold2d-profile"
+                            >
+                              <option value="local_preview">local preview</option>
+                              <option value="lorenz_global">Default</option>
+                            </select>
+                          </label>
+                          <label>
+                            Eigenspace indices (A,B)
+                            <div className="inspector-row">
+                              <select
+                                value={equilibriumManifoldDraft.eigIndexA}
+                                onChange={(event) =>
+                                  setEquilibriumManifoldDraft((prev) => ({
+                                    ...prev,
+                                    eigIndexA: event.target.value,
+                                  }))
+                                }
+                                disabled={equilibriumManifoldEligibleIndexOptions.length === 0}
+                                data-testid="equilibrium-manifold-eig-index-a"
+                              >
+                                {equilibriumManifoldEligibleIndexOptions.map((option) => (
+                                  <option key={`a-${option.value}`} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <select
+                                value={equilibriumManifoldDraft.eigIndexB}
+                                onChange={(event) =>
+                                  setEquilibriumManifoldDraft((prev) => ({
+                                    ...prev,
+                                    eigIndexB: event.target.value,
+                                  }))
+                                }
+                                disabled={equilibriumManifoldEligibleIndexOptions.length === 0}
+                                data-testid="equilibrium-manifold-eig-index-b"
+                              >
+                                {equilibriumManifoldEligibleIndexOptions.map((option) => (
+                                  <option key={`b-${option.value}`} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </label>
+                          {equilibriumManifoldEligibleIndexOptions.length === 0 ? (
+                            <div className="field-warning">
+                              No eligible {equilibriumManifoldDraft.stability.toLowerCase()} eigenmodes.
+                            </div>
+                          ) : null}
+                          <label>
+                            Initial radius
+                            <input
+                              value={equilibriumManifoldDraft.initialRadius}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  initialRadius: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold2d-initial-radius"
+                            />
+                          </label>
+                          <label>
+                            Leaf delta
+                            <input
+                              value={equilibriumManifoldDraft.leafDelta}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  leafDelta: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold2d-leaf-delta"
+                            />
+                          </label>
+                          <label>
+                            Delta min
+                            <input
+                              value={equilibriumManifoldDraft.deltaMin}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  deltaMin: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold2d-delta-min"
+                            />
+                          </label>
+                          <label>
+                            Ring points
+                            <input
+                              value={equilibriumManifoldDraft.ringPoints}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  ringPoints: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold2d-ring-points"
+                            />
+                          </label>
+                          <label>
+                            Min spacing
+                            <input
+                              value={equilibriumManifoldDraft.minSpacing}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  minSpacing: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold2d-min-spacing"
+                            />
+                          </label>
+                          <label>
+                            Max spacing
+                            <input
+                              value={equilibriumManifoldDraft.maxSpacing}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  maxSpacing: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold2d-max-spacing"
+                            />
+                          </label>
+                          <label>
+                            Alpha min
+                            <input
+                              value={equilibriumManifoldDraft.alphaMin}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  alphaMin: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold2d-alpha-min"
+                            />
+                          </label>
+                          <label>
+                            Alpha max
+                            <input
+                              value={equilibriumManifoldDraft.alphaMax}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  alphaMax: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold2d-alpha-max"
+                            />
+                          </label>
+                          <label>
+                            Delta-alpha min
+                            <input
+                              value={equilibriumManifoldDraft.deltaAlphaMin}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  deltaAlphaMin: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold2d-delta-alpha-min"
+                            />
+                          </label>
+                          <label>
+                            Delta-alpha max
+                            <input
+                              value={equilibriumManifoldDraft.deltaAlphaMax}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  deltaAlphaMax: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold2d-delta-alpha-max"
+                            />
+                          </label>
+                          <label>
+                            Integration dt
+                            <input
+                              value={equilibriumManifoldDraft.integrationDt}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  integrationDt: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold2d-integration-dt"
+                            />
+                          </label>
+                          <label>
+                            Target radius
+                            <input
+                              value={equilibriumManifoldDraft.targetRadius}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  targetRadius: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold2d-target-radius"
+                            />
+                          </label>
+                          <label>
+                            Target arclength
+                            <input
+                              value={equilibriumManifoldDraft.targetArclength}
+                              onChange={(event) =>
+                                setEquilibriumManifoldDraft((prev) => ({
+                                  ...prev,
+                                  targetArclength: event.target.value,
+                                }))
+                              }
+                              data-testid="equilibrium-manifold2d-target-arclength"
+                            />
+                          </label>
+                        </>
+                      )}
+
+                      <div className="inspector-divider">Termination caps</div>
+                      <label>
+                        Max steps
+                        <input
+                          value={equilibriumManifoldDraft.caps.maxSteps}
+                          onChange={(event) =>
+                            setEquilibriumManifoldDraft((prev) => ({
+                              ...prev,
+                              caps: { ...prev.caps, maxSteps: event.target.value },
+                            }))
+                          }
+                          data-testid="equilibrium-manifold-caps-max-steps"
+                        />
+                      </label>
+                      <label>
+                        Max points
+                        <input
+                          value={equilibriumManifoldDraft.caps.maxPoints}
+                          onChange={(event) =>
+                            setEquilibriumManifoldDraft((prev) => ({
+                              ...prev,
+                              caps: { ...prev.caps, maxPoints: event.target.value },
+                            }))
+                          }
+                          data-testid="equilibrium-manifold-caps-max-points"
+                        />
+                      </label>
+                      <label>
+                        Max rings
+                        <input
+                          value={equilibriumManifoldDraft.caps.maxRings}
+                          onChange={(event) =>
+                            setEquilibriumManifoldDraft((prev) => ({
+                              ...prev,
+                              caps: { ...prev.caps, maxRings: event.target.value },
+                            }))
+                          }
+                          data-testid="equilibrium-manifold-caps-max-rings"
+                        />
+                      </label>
+                      <label>
+                        Max vertices
+                        <input
+                          value={equilibriumManifoldDraft.caps.maxVertices}
+                          onChange={(event) =>
+                            setEquilibriumManifoldDraft((prev) => ({
+                              ...prev,
+                              caps: { ...prev.caps, maxVertices: event.target.value },
+                            }))
+                          }
+                          data-testid="equilibrium-manifold-caps-max-vertices"
+                        />
+                      </label>
+                      <label>
+                        Max time
+                        <input
+                          value={equilibriumManifoldDraft.caps.maxTime}
+                          onChange={(event) =>
+                            setEquilibriumManifoldDraft((prev) => ({
+                              ...prev,
+                              caps: { ...prev.caps, maxTime: event.target.value },
+                            }))
+                          }
+                          data-testid="equilibrium-manifold-caps-max-time"
+                        />
+                      </label>
+                      {equilibriumManifoldError ? (
+                        <div className="field-error">{equilibriumManifoldError}</div>
+                      ) : null}
+                      <button
+                        onClick={handleCreateEquilibriumManifold}
+                        disabled={runDisabled || systemDraft.type === 'map'}
+                        data-testid="equilibrium-manifold-submit"
+                      >
+                        Compute
+                      </button>
+                    </>
+                  )}
+                </div>
+              </InspectorDisclosure>
             </>
           ) : null}
 
@@ -7752,6 +9019,251 @@ export function InspectorDetailsPanel({
                   </div>
                 ) : (
                   <p className="empty-state">Floquet multipliers not computed yet.</p>
+                )}
+              </div>
+            </InspectorDisclosure>
+          ) : null}
+
+          {limitCycle ? (
+            <InspectorDisclosure
+              key={`${selectionKey}-limit-cycle-manifold`}
+              title="Invariant Manifolds"
+              testId="limit-cycle-manifold-toggle"
+              defaultOpen={false}
+            >
+              <div className="inspector-section">
+                {runDisabled ? (
+                  <div className="field-warning">
+                    Apply valid system changes before computing manifolds.
+                  </div>
+                ) : null}
+                {systemDraft.type === 'map' ? (
+                  <p className="empty-state">
+                    Invariant manifolds are available for flow systems only.
+                  </p>
+                ) : null}
+                {limitCycleDisplayMultipliers.length === 0 ? (
+                  <p className="empty-state">
+                    Floquet multipliers are required. Continue the cycle first to populate them.
+                  </p>
+                ) : (
+                  <>
+                    <label>
+                      Branch name
+                      <input
+                        value={limitCycleManifoldDraft.name}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            name: event.target.value,
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-name"
+                      />
+                    </label>
+                    <label>
+                      Kind
+                      <select
+                        value={limitCycleManifoldDraft.stability}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            stability: event.target.value as ManifoldStability,
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-stability"
+                      >
+                        <option value="Unstable">Unstable</option>
+                        <option value="Stable">Stable</option>
+                      </select>
+                    </label>
+                    <label>
+                      Floquet index
+                      <select
+                        value={limitCycleManifoldDraft.floquetIndex}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            floquetIndex: event.target.value,
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-floquet-index"
+                      >
+                        {limitCycleFloquetIndexOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Initial radius
+                      <input
+                        value={limitCycleManifoldDraft.initialRadius}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            initialRadius: event.target.value,
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-initial-radius"
+                      />
+                    </label>
+                    <label>
+                      Leaf delta
+                      <input
+                        value={limitCycleManifoldDraft.leafDelta}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            leafDelta: event.target.value,
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-leaf-delta"
+                      />
+                    </label>
+                    <label>
+                      Ring points
+                      <input
+                        value={limitCycleManifoldDraft.ringPoints}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            ringPoints: event.target.value,
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-ring-points"
+                      />
+                    </label>
+                    <label>
+                      Integration dt
+                      <input
+                        value={limitCycleManifoldDraft.integrationDt}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            integrationDt: event.target.value,
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-integration-dt"
+                      />
+                    </label>
+                    <label>
+                      Target arclength
+                      <input
+                        value={limitCycleManifoldDraft.targetArclength}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            targetArclength: event.target.value,
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-target-arclength"
+                      />
+                    </label>
+                    <label>
+                      NTST
+                      <input
+                        value={limitCycleManifoldDraft.ntst}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            ntst: event.target.value,
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-ntst"
+                      />
+                    </label>
+                    <label>
+                      NCOL
+                      <input
+                        value={limitCycleManifoldDraft.ncol}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            ncol: event.target.value,
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-ncol"
+                      />
+                    </label>
+                    <div className="inspector-divider">Termination caps</div>
+                    <label>
+                      Max steps
+                      <input
+                        value={limitCycleManifoldDraft.caps.maxSteps}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            caps: { ...prev.caps, maxSteps: event.target.value },
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-caps-max-steps"
+                      />
+                    </label>
+                    <label>
+                      Max points
+                      <input
+                        value={limitCycleManifoldDraft.caps.maxPoints}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            caps: { ...prev.caps, maxPoints: event.target.value },
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-caps-max-points"
+                      />
+                    </label>
+                    <label>
+                      Max rings
+                      <input
+                        value={limitCycleManifoldDraft.caps.maxRings}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            caps: { ...prev.caps, maxRings: event.target.value },
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-caps-max-rings"
+                      />
+                    </label>
+                    <label>
+                      Max vertices
+                      <input
+                        value={limitCycleManifoldDraft.caps.maxVertices}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            caps: { ...prev.caps, maxVertices: event.target.value },
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-caps-max-vertices"
+                      />
+                    </label>
+                    <label>
+                      Max time
+                      <input
+                        value={limitCycleManifoldDraft.caps.maxTime}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            caps: { ...prev.caps, maxTime: event.target.value },
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-caps-max-time"
+                      />
+                    </label>
+                    {limitCycleManifoldError ? (
+                      <div className="field-error">{limitCycleManifoldError}</div>
+                    ) : null}
+                    <button
+                      onClick={handleCreateLimitCycleManifold}
+                      disabled={runDisabled || systemDraft.type === 'map'}
+                      data-testid="limit-cycle-manifold-submit"
+                    >
+                      Compute
+                    </button>
+                  </>
                 )}
               </div>
             </InspectorDisclosure>
@@ -8868,6 +10380,29 @@ export function InspectorDetailsPanel({
                             { label: 'Continuation param', value: branch.parameterName },
                             { label: 'Points', value: branch.data.points.length },
                             { label: 'Bifurcations', value: branchBifurcations.length },
+                            ...(manifoldSurfaceGeometry
+                              ? [
+                                  { label: 'Surface rings', value: manifoldSurfaceRingCount },
+                                  { label: 'Surface vertices', value: manifoldSurfaceVertexCount },
+                                ]
+                              : []),
+                            ...(manifoldSolverDiagnostics
+                              ? [
+                                  {
+                                    label: 'Termination',
+                                    value: formatTerminationReasonLabel(
+                                      manifoldSolverDiagnostics.termination_reason
+                                    ),
+                                  },
+                                  {
+                                    label: 'Final leaf delta',
+                                    value: formatScientific(
+                                      manifoldSolverDiagnostics.final_leaf_delta ?? Number.NaN,
+                                      3
+                                    ),
+                                  },
+                                ]
+                              : []),
                             ...(branchStartPoint
                               ? [
                                   {
@@ -8946,6 +10481,178 @@ export function InspectorDetailsPanel({
                               },
                             ]}
                           />
+                        </div>
+                      ) : null}
+                      {manifoldSolverDiagnostics ? (
+                        <div className="inspector-section">
+                          <h4 className="inspector-subheading">Manifold solver diagnostics</h4>
+                          <InspectorMetrics
+                            rows={[
+                              {
+                                label: 'Ring attempts',
+                                value: manifoldSolverDiagnostics.ring_attempts ?? 0,
+                              },
+                              {
+                                label: 'Leaf build failures',
+                                value: manifoldSolverDiagnostics.build_failures ?? 0,
+                              },
+                              {
+                                label: 'Leaf fail: plane no-convergence',
+                                value: manifoldSolverDiagnostics.leaf_fail_plane_no_convergence ?? 0,
+                              },
+                              {
+                                label: 'Leaf fail: root not bracketed',
+                                value:
+                                  manifoldSolverDiagnostics.leaf_fail_plane_root_not_bracketed ?? 0,
+                              },
+                              {
+                                label: 'Leaf fail: segment switch limit',
+                                value: manifoldSolverDiagnostics.leaf_fail_segment_switch_limit ?? 0,
+                              },
+                              {
+                                label: 'Leaf fail: integrator non-finite',
+                                value: manifoldSolverDiagnostics.leaf_fail_integrator_non_finite ?? 0,
+                              },
+                              {
+                                label: 'Leaf fail: no first hit before max time',
+                                value:
+                                  manifoldSolverDiagnostics.leaf_fail_no_first_hit_within_max_time ??
+                                  0,
+                              },
+                              {
+                                label: 'Spacing failures',
+                                value: manifoldSolverDiagnostics.spacing_failures ?? 0,
+                              },
+                              {
+                                label: 'Ring-quality rejects',
+                                value: manifoldSolverDiagnostics.reject_ring_quality ?? 0,
+                              },
+                              {
+                                label: 'Geodesic rejects',
+                                value: manifoldSolverDiagnostics.reject_geodesic_quality ?? 0,
+                              },
+                              {
+                                label: 'Too-small candidates',
+                                value: manifoldSolverDiagnostics.reject_too_small ?? 0,
+                              },
+                              {
+                                label: 'Leaf delta floor',
+                                value: formatScientific(
+                                  manifoldSolverDiagnostics.leaf_delta_floor ?? Number.NaN,
+                                  3
+                                ),
+                              },
+                              {
+                                label: 'Min leaf delta reached',
+                                value: manifoldSolverDiagnostics.min_leaf_delta_reached ? 'yes' : 'no',
+                              },
+                              ...(typeof manifoldSolverDiagnostics.failed_ring === 'number'
+                                ? [
+                                    {
+                                      label: 'Failed ring',
+                                      value: manifoldSolverDiagnostics.failed_ring,
+                                    },
+                                  ]
+                                : []),
+                              ...(typeof manifoldSolverDiagnostics.failed_attempt === 'number'
+                                ? [
+                                    {
+                                      label: 'Failed attempt',
+                                      value: manifoldSolverDiagnostics.failed_attempt,
+                                    },
+                                  ]
+                                : []),
+                              ...(typeof manifoldSolverDiagnostics.failed_leaf_points === 'number'
+                                ? [
+                                    {
+                                      label: 'Solved leaf points before fail',
+                                      value: manifoldSolverDiagnostics.failed_leaf_points,
+                                    },
+                                  ]
+                                : []),
+                              ...(manifoldSolverDiagnostics.last_leaf_failure_reason
+                                ? [
+                                    {
+                                      label: 'Last leaf failure reason',
+                                      value: manifoldSolverDiagnostics.last_leaf_failure_reason,
+                                    },
+                                  ]
+                                : []),
+                              ...(typeof manifoldSolverDiagnostics.last_leaf_failure_point === 'number'
+                                ? [
+                                    {
+                                      label: 'Last leaf failure point',
+                                      value: manifoldSolverDiagnostics.last_leaf_failure_point,
+                                    },
+                                  ]
+                                : []),
+                              ...(typeof manifoldSolverDiagnostics.last_leaf_failure_segment === 'number'
+                                ? [
+                                    {
+                                      label: 'Last leaf failure segment',
+                                      value: manifoldSolverDiagnostics.last_leaf_failure_segment,
+                                    },
+                                  ]
+                                : []),
+                              ...(typeof manifoldSolverDiagnostics.last_leaf_failure_time === 'number'
+                                ? [
+                                    {
+                                      label: 'Last leaf failure time',
+                                      value: formatScientific(
+                                        manifoldSolverDiagnostics.last_leaf_failure_time,
+                                        3
+                                      ),
+                                    },
+                                  ]
+                                : []),
+                              ...(typeof manifoldSolverDiagnostics.last_leaf_failure_tau === 'number'
+                                ? [
+                                    {
+                                      label: 'Last leaf failure tau',
+                                      value: formatScientific(
+                                        manifoldSolverDiagnostics.last_leaf_failure_tau,
+                                        3
+                                      ),
+                                    },
+                                  ]
+                                : []),
+                              {
+                                label: 'Last ring max turn angle',
+                                value: formatScientific(
+                                  manifoldSolverDiagnostics.last_ring_max_turn_angle ?? Number.NaN,
+                                  3
+                                ),
+                              },
+                              {
+                                label: 'Last ring max distance-angle',
+                                value: formatScientific(
+                                  manifoldSolverDiagnostics.last_ring_max_distance_angle ??
+                                    Number.NaN,
+                                  3
+                                ),
+                              },
+                              {
+                                label: 'Last geodesic max angle',
+                                value: formatScientific(
+                                  manifoldSolverDiagnostics.last_geodesic_max_angle ?? Number.NaN,
+                                  3
+                                ),
+                              },
+                              {
+                                label: 'Last geodesic max distance-angle',
+                                value: formatScientific(
+                                  manifoldSolverDiagnostics.last_geodesic_max_distance_angle ??
+                                    Number.NaN,
+                                  3
+                                ),
+                              },
+                            ]}
+                          />
+                          {manifoldSolverDiagnostics.termination_detail ? (
+                            <div className="inspector-data">
+                              <div>{manifoldSolverDiagnostics.termination_detail}</div>
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                     </InspectorDisclosure>

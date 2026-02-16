@@ -9,6 +9,9 @@ type ToolbarProps = {
     maxSteps: number
     points: number
     bifurcations: number
+    ringsComputed?: number
+    showArclength?: boolean
+    arclength?: number
   } | null
   onOpenSystems: () => void
   theme: 'light' | 'dark'
@@ -25,6 +28,14 @@ export function Toolbar({
   onThemeChange,
   onResetFork,
 }: ToolbarProps) {
+  const formatArclength = (value: number) => {
+    if (!Number.isFinite(value)) return 'n/a'
+    if (Math.abs(value) >= 1000 || (Math.abs(value) > 0 && Math.abs(value) < 1e-3)) {
+      return value.toExponential(3)
+    }
+    return value.toFixed(3)
+  }
+
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsRef = useRef<HTMLDivElement | null>(null)
   const resetMessage =
@@ -139,8 +150,15 @@ export function Toolbar({
               />
             </div>
             <div className="toolbar__progress-meta">
+              {typeof progress.ringsComputed === 'number' ? (
+                <span>{progress.ringsComputed} rings</span>
+              ) : null}
               <span>{progress.points} pts</span>
-              <span>{progress.bifurcations} bifurcations</span>
+              {progress.showArclength ? (
+                <span>arclength {formatArclength(progress.arclength ?? 0)}</span>
+              ) : (
+                <span>{progress.bifurcations} bifurcations</span>
+              )}
             </div>
           </div>
         ) : (

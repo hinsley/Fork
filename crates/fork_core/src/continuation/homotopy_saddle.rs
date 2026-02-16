@@ -35,6 +35,7 @@ pub fn continue_homotopy_saddle_curve(
         upoldp: None,
         homoc_context: None,
         resume_state: None,
+        manifold_geometry: None,
     };
 
     let sign = if forward { 1.0 } else { -1.0 };

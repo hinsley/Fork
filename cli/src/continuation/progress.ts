@@ -1,5 +1,14 @@
 import { printProgress, printProgressComplete } from '../format';
-import { ContinuationBranchData, ContinuationProgress } from '../types';
+import {
+  ContinuationBranchData,
+  ContinuationProgress,
+  EquilibriumManifold1DSettings,
+  EquilibriumManifold1DResult,
+  EquilibriumManifold2DSettings,
+  EquilibriumManifold2DResult,
+  LimitCycleManifold2DSettings,
+  LimitCycleManifold2DResult
+} from '../types';
 import { WasmBridge } from '../wasm';
 
 const DEFAULT_PROGRESS_UPDATES = 50;
@@ -368,6 +377,63 @@ export function runNSCurveWithProgress(
     ncol,
     settings,
     forward
+  );
+
+  return runContinuationRunnerWithProgress(runner, label);
+}
+
+/**
+ * Compute 1D equilibrium manifold branches with stepped progress updates.
+ */
+export function runEquilibriumManifold1DWithProgress(
+  bridge: WasmBridge,
+  equilibriumState: number[],
+  settings: EquilibriumManifold1DSettings,
+  label: string
+): EquilibriumManifold1DResult {
+  const runner = bridge.createEquilibriumManifold1DRunner(
+    equilibriumState,
+    settings
+  );
+
+  return runContinuationRunnerWithProgress(runner, label);
+}
+
+/**
+ * Compute a 2D equilibrium manifold branch with stepped progress updates.
+ */
+export function runEquilibriumManifold2DWithProgress(
+  bridge: WasmBridge,
+  equilibriumState: number[],
+  settings: EquilibriumManifold2DSettings,
+  label: string
+): EquilibriumManifold2DResult {
+  const runner = bridge.createEquilibriumManifold2DRunner(
+    equilibriumState,
+    settings
+  );
+
+  return runContinuationRunnerWithProgress(runner, label);
+}
+
+/**
+ * Compute a 2D limit-cycle manifold branch with stepped progress updates.
+ */
+export function runLimitCycleManifold2DWithProgress(
+  bridge: WasmBridge,
+  cycleState: number[],
+  ntst: number,
+  ncol: number,
+  floquetMultipliers: Array<{ re: number; im: number }>,
+  settings: LimitCycleManifold2DSettings,
+  label: string
+): LimitCycleManifold2DResult {
+  const runner = bridge.createLimitCycleManifold2DRunner(
+    cycleState,
+    ntst,
+    ncol,
+    floquetMultipliers,
+    settings
   );
 
   return runContinuationRunnerWithProgress(runner, label);

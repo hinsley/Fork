@@ -12,6 +12,8 @@ import type {
   BranchContinuationRequest,
   BranchExtensionRequest,
   EquilibriumContinuationRequest,
+  EquilibriumManifold1DRequest,
+  EquilibriumManifold2DRequest,
   EquilibriumSolveRequest,
   FoldCurveContinuationRequest,
   HomoclinicFromHomoclinicRequest,
@@ -21,6 +23,7 @@ import type {
   HomotopySaddleFromEquilibriumRequest,
   IsochroneCurveContinuationRequest,
   IsoclineComputeRequest,
+  LimitCycleManifold2DRequest,
   MapNSCurveContinuationRequest,
   LimitCycleHopfContinuationRequest,
   LimitCycleOrbitContinuationRequest,
@@ -82,6 +85,12 @@ type InspectorPanelProps = {
   onComputeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
   onSolveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
+  onCreateEquilibriumManifold1D?: (
+    request: EquilibriumManifold1DRequest
+  ) => Promise<void>
+  onCreateEquilibriumManifold2D?: (
+    request: EquilibriumManifold2DRequest
+  ) => Promise<void>
   onCreateBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
   onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
@@ -92,6 +101,9 @@ type InspectorPanelProps = {
   onCreateNSCurveFromPoint: (request: MapNSCurveContinuationRequest) => Promise<void>
   onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
   onCreateLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
+  onCreateLimitCycleManifold2D?: (
+    request: LimitCycleManifold2DRequest
+  ) => Promise<void>
   onCreateCycleFromPD: (request: MapCyclePDContinuationRequest) => Promise<void>
   onCreateLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
   onCreateHomoclinicFromLargeCycle?: (
@@ -135,6 +147,8 @@ export function InspectorPanel({
   onComputeCovariantLyapunovVectors,
   onSolveEquilibrium,
   onCreateEquilibriumBranch,
+  onCreateEquilibriumManifold1D,
+  onCreateEquilibriumManifold2D,
   onCreateBranchFromPoint,
   onExtendBranch,
   onCreateFoldCurveFromPoint,
@@ -143,6 +157,7 @@ export function InspectorPanel({
   onCreateNSCurveFromPoint,
   onCreateLimitCycleFromHopf,
   onCreateLimitCycleFromOrbit,
+  onCreateLimitCycleManifold2D,
   onCreateCycleFromPD,
   onCreateLimitCycleFromPD,
   onCreateHomoclinicFromLargeCycle,
@@ -181,6 +196,8 @@ export function InspectorPanel({
           onComputeCovariantLyapunovVectors={onComputeCovariantLyapunovVectors}
           onSolveEquilibrium={onSolveEquilibrium}
           onCreateEquilibriumBranch={onCreateEquilibriumBranch}
+          onCreateEquilibriumManifold1D={onCreateEquilibriumManifold1D}
+          onCreateEquilibriumManifold2D={onCreateEquilibriumManifold2D}
           onCreateBranchFromPoint={onCreateBranchFromPoint}
           onExtendBranch={onExtendBranch}
           onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
@@ -189,6 +206,7 @@ export function InspectorPanel({
           onCreateNSCurveFromPoint={onCreateNSCurveFromPoint}
           onCreateLimitCycleFromHopf={onCreateLimitCycleFromHopf}
           onCreateLimitCycleFromOrbit={onCreateLimitCycleFromOrbit}
+          onCreateLimitCycleManifold2D={onCreateLimitCycleManifold2D}
           onCreateCycleFromPD={onCreateCycleFromPD}
           onCreateLimitCycleFromPD={onCreateLimitCycleFromPD}
           onCreateHomoclinicFromLargeCycle={onCreateHomoclinicFromLargeCycle}

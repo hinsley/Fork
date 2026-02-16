@@ -28,6 +28,10 @@ import type {
   IsoclineSource,
   LimitCycleRenderTarget,
   LimitCycleObject,
+  Manifold2DProfile,
+  ManifoldDirection,
+  ManifoldStability,
+  ManifoldTerminationCaps,
   OrbitObject,
   ParameterRef,
   System,
@@ -115,6 +119,68 @@ function validateObjectName(name: string, label: string): string | null {
     return `${label} names must be alphanumeric with underscores only.`
   }
   return null
+}
+
+function validateManifoldCaps(caps: ManifoldTerminationCaps): string | null {
+  if (!Number.isFinite(caps.max_steps) || caps.max_steps <= 0 || !Number.isInteger(caps.max_steps)) {
+    return 'Manifold max steps must be a positive integer.'
+  }
+  if (!Number.isFinite(caps.max_points) || caps.max_points <= 0 || !Number.isInteger(caps.max_points)) {
+    return 'Manifold max points must be a positive integer.'
+  }
+  if (!Number.isFinite(caps.max_rings) || caps.max_rings <= 0 || !Number.isInteger(caps.max_rings)) {
+    return 'Manifold max rings must be a positive integer.'
+  }
+  if (
+    !Number.isFinite(caps.max_vertices) ||
+    caps.max_vertices <= 0 ||
+    !Number.isInteger(caps.max_vertices)
+  ) {
+    return 'Manifold max vertices must be a positive integer.'
+  }
+  if (!Number.isFinite(caps.max_time) || caps.max_time <= 0) {
+    return 'Manifold max time must be a positive number.'
+  }
+  return null
+}
+
+function buildManifoldBranchSettings(options: {
+  caps: ManifoldTerminationCaps
+  integrationDt?: number
+  correctorSteps?: number
+  correctorTolerance?: number
+}): ContinuationSettings {
+  const stepSize =
+    typeof options.integrationDt === 'number' && Number.isFinite(options.integrationDt)
+      ? Math.max(Math.abs(options.integrationDt), 1e-9)
+      : 1e-2
+  const maxSteps =
+    Number.isFinite(options.caps.max_steps) && options.caps.max_steps > 0
+      ? Math.max(1, Math.trunc(options.caps.max_steps))
+      : 300
+  const correctorSteps =
+    Number.isFinite(options.correctorSteps) && (options.correctorSteps ?? 0) > 0
+      ? Math.max(1, Math.trunc(options.correctorSteps as number))
+      : 4
+  const correctorTolerance =
+    Number.isFinite(options.correctorTolerance) && (options.correctorTolerance ?? 0) > 0
+      ? Math.max(Number.EPSILON, options.correctorTolerance as number)
+      : 1e-6
+  return {
+    step_size: stepSize,
+    min_step_size: Math.max(stepSize * 0.1, 1e-12),
+    max_step_size: Math.max(stepSize * 10, 1e-9),
+    max_steps: maxSteps,
+    corrector_steps: correctorSteps,
+    corrector_tolerance: correctorTolerance,
+    step_tolerance: correctorTolerance,
+  }
+}
+
+function resolveManifoldDirectionSuffix(direction: ManifoldDirection | null): string {
+  if (direction === 'Plus') return 'plus'
+  if (direction === 'Minus') return 'minus'
+  return 'branch'
 }
 
 function inheritedCustomParameters(system: SystemConfig, params: number[]): number[] | undefined {
@@ -982,6 +1048,69 @@ export type LimitCycleHopfContinuationRequest = {
   forward: boolean
 }
 
+export type EquilibriumManifold1DRequest = {
+  equilibriumId: string
+  name: string
+  settings: {
+    stability: ManifoldStability
+    direction: ManifoldDirection
+    eig_index?: number
+    eps: number
+    target_arclength: number
+    integration_dt: number
+    caps: ManifoldTerminationCaps
+  }
+}
+
+export type EquilibriumManifold2DRequest = {
+  equilibriumId: string
+  name: string
+  settings: {
+    stability: ManifoldStability
+    eig_indices?: [number, number]
+    profile?: Manifold2DProfile
+    initial_radius: number
+    leaf_delta: number
+    delta_min: number
+    ring_points: number
+    min_spacing: number
+    max_spacing: number
+    alpha_min: number
+    alpha_max: number
+    delta_alpha_min: number
+    delta_alpha_max: number
+    integration_dt: number
+    target_radius: number
+    target_arclength: number
+    caps: ManifoldTerminationCaps
+  }
+}
+
+export type LimitCycleManifold2DRequest = {
+  limitCycleId: string
+  name: string
+  settings: {
+    stability: ManifoldStability
+    floquet_index?: number
+    profile?: Manifold2DProfile
+    initial_radius: number
+    leaf_delta: number
+    delta_min: number
+    ring_points: number
+    min_spacing: number
+    max_spacing: number
+    alpha_min: number
+    alpha_max: number
+    delta_alpha_min: number
+    delta_alpha_max: number
+    integration_dt: number
+    target_arclength: number
+    ntst?: number
+    ncol?: number
+    caps: ManifoldTerminationCaps
+  }
+}
+
 
 type AppState = {
   system: System | null
@@ -1127,6 +1256,9 @@ type AppActions = {
   computeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
   solveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   createEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
+  createEquilibriumManifold1D: (request: EquilibriumManifold1DRequest) => Promise<void>
+  createEquilibriumManifold2D: (request: EquilibriumManifold2DRequest) => Promise<void>
+  createLimitCycleManifold2D: (request: LimitCycleManifold2DRequest) => Promise<void>
   createBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
   extendBranch: (request: BranchExtensionRequest) => Promise<void>
   createFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
@@ -2402,6 +2534,577 @@ export function AppProvider({
         const parentNodeId = findObjectIdByName(state.system, equilibrium.name)
         if (!parentNodeId) {
           throw new Error(`Unable to locate the parent ${equilibriumLabelLower} in the tree.`)
+        }
+
+        const created = addBranch(state.system, branch, parentNodeId)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const createEquilibriumManifold1D = useCallback(
+    async (request: EquilibriumManifold1DRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const equilibriumLabelLower = formatEquilibriumLabel(system.type, { lowercase: true })
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (system.type === 'map') {
+          throw new Error('Invariant manifolds are currently available for flow systems only.')
+        }
+
+        const equilibrium = state.system.objects[request.equilibriumId]
+        if (!equilibrium || equilibrium.type !== 'equilibrium') {
+          throw new Error(`Select a valid ${equilibriumLabelLower}.`)
+        }
+        if (!equilibrium.solution) {
+          throw new Error(`Solve the ${equilibriumLabelLower} before computing manifolds.`)
+        }
+
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) {
+          throw new Error(nameError)
+        }
+
+        const settings = request.settings
+        const capsError = validateManifoldCaps(settings.caps)
+        if (capsError) {
+          throw new Error(capsError)
+        }
+        if (!Number.isFinite(settings.eps) || settings.eps <= 0) {
+          throw new Error('Manifold epsilon must be a positive number.')
+        }
+        if (!Number.isFinite(settings.target_arclength) || settings.target_arclength <= 0) {
+          throw new Error('Target arclength must be a positive number.')
+        }
+        if (!Number.isFinite(settings.integration_dt) || settings.integration_dt === 0) {
+          throw new Error('Integration dt must be non-zero.')
+        }
+        if (
+          settings.eig_index !== undefined &&
+          (!Number.isFinite(settings.eig_index) ||
+            settings.eig_index < 0 ||
+            !Number.isInteger(settings.eig_index))
+        ) {
+          throw new Error('Eigenvalue index must be a non-negative integer.')
+        }
+
+        const baseParams = resolveObjectParams(system, equilibrium.customParameters)
+        const { snapshot, runConfig } = buildObjectSubsystemRunConfig(
+          system,
+          equilibrium,
+          baseParams
+        )
+        const reducedEquilibriumState = projectStateForSnapshot(
+          snapshot,
+          equilibrium.solution.state,
+          formatEquilibriumLabel(system.type)
+        )
+        const branchDataList = await client.runEquilibriumManifold1D(
+          {
+            system: runConfig,
+            equilibriumState: reducedEquilibriumState,
+            settings: {
+              ...settings,
+              caps: { ...settings.caps },
+            },
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Invariant Manifold (Equilibrium 1D)', progress },
+              }),
+          }
+        )
+
+        if (!Array.isArray(branchDataList) || branchDataList.length === 0) {
+          throw new Error('Invariant manifold computation did not return any branches.')
+        }
+
+        const parentNodeId = findObjectIdByName(state.system, equilibrium.name)
+        if (!parentNodeId) {
+          throw new Error(`Unable to locate the parent ${equilibriumLabelLower} in the tree.`)
+        }
+
+        let nextSystem = state.system
+        const reservedNames = new Set<string>()
+        const createdNodeIds: string[] = []
+        for (let index = 0; index < branchDataList.length; index += 1) {
+          const branchData = branchDataList[index]
+          const normalized = normalizeBranchEigenvalues(branchData, {
+            stateDimension: snapshot.freeVariableNames.length,
+          })
+          const branchType = normalized.branch_type
+          const direction =
+            branchType &&
+            typeof branchType === 'object' &&
+            'type' in branchType &&
+            branchType.type === 'ManifoldEq1D'
+              ? branchType.direction
+              : null
+          const branchName =
+            branchDataList.length === 1
+              ? name
+              : `${name}_${resolveManifoldDirectionSuffix(direction)}`
+          if (reservedNames.has(branchName) || branchNameExists(nextSystem, equilibrium.name, branchName)) {
+            throw new Error(`Branch "${branchName}" already exists.`)
+          }
+          reservedNames.add(branchName)
+
+          const branch: ContinuationObject = {
+            type: 'continuation',
+            name: branchName,
+            systemName: system.name,
+            parameterName: 'manifold',
+            parentObject: equilibrium.name,
+            startObject: equilibrium.name,
+            branchType: 'eq_manifold_1d',
+            data: normalized,
+            settings: buildManifoldBranchSettings({
+              caps: settings.caps,
+              integrationDt: settings.integration_dt,
+            }),
+            timestamp: new Date().toISOString(),
+            params: [...baseParams],
+            subsystemSnapshot: snapshot,
+          }
+
+          const created = addBranch(nextSystem, branch, parentNodeId)
+          nextSystem = created.system
+          createdNodeIds.push(created.nodeId)
+        }
+
+        const selectedId = createdNodeIds[0] ?? null
+        const selected = selectedId ? selectNode(nextSystem, selectedId) : nextSystem
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const createEquilibriumManifold2D = useCallback(
+    async (request: EquilibriumManifold2DRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const equilibriumLabelLower = formatEquilibriumLabel(system.type, { lowercase: true })
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (system.type === 'map') {
+          throw new Error('Invariant manifolds are currently available for flow systems only.')
+        }
+
+        const equilibrium = state.system.objects[request.equilibriumId]
+        if (!equilibrium || equilibrium.type !== 'equilibrium') {
+          throw new Error(`Select a valid ${equilibriumLabelLower}.`)
+        }
+        if (!equilibrium.solution) {
+          throw new Error(`Solve the ${equilibriumLabelLower} before computing manifolds.`)
+        }
+
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        if (branchNameExists(state.system, equilibrium.name, name)) {
+          throw new Error(`Branch "${name}" already exists.`)
+        }
+
+        const settings = request.settings
+        const capsError = validateManifoldCaps(settings.caps)
+        if (capsError) {
+          throw new Error(capsError)
+        }
+        if (!Number.isFinite(settings.initial_radius) || settings.initial_radius <= 0) {
+          throw new Error('Initial radius must be a positive number.')
+        }
+        if (!Number.isFinite(settings.leaf_delta) || settings.leaf_delta <= 0) {
+          throw new Error('Leaf delta must be a positive number.')
+        }
+        if (!Number.isFinite(settings.delta_min) || settings.delta_min <= 0) {
+          throw new Error('Delta min must be a positive number.')
+        }
+        if (settings.delta_min > settings.leaf_delta) {
+          throw new Error('Delta min cannot exceed leaf delta.')
+        }
+        if (
+          !Number.isFinite(settings.ring_points) ||
+          settings.ring_points < 4 ||
+          !Number.isInteger(settings.ring_points)
+        ) {
+          throw new Error('Ring points must be an integer greater than or equal to 4.')
+        }
+        if (!Number.isFinite(settings.integration_dt) || settings.integration_dt === 0) {
+          throw new Error('Integration dt must be non-zero.')
+        }
+        if (!Number.isFinite(settings.target_radius) || settings.target_radius <= 0) {
+          throw new Error('Target radius must be a positive number.')
+        }
+        if (!Number.isFinite(settings.target_arclength) || settings.target_arclength < 0) {
+          throw new Error('Target arclength must be zero or greater.')
+        }
+        if (!Number.isFinite(settings.min_spacing) || settings.min_spacing <= 0) {
+          throw new Error('Min spacing must be a positive number.')
+        }
+        if (!Number.isFinite(settings.max_spacing) || settings.max_spacing <= 0) {
+          throw new Error('Max spacing must be a positive number.')
+        }
+        if (settings.max_spacing <= settings.min_spacing) {
+          throw new Error('Max spacing must be greater than min spacing.')
+        }
+        if (!Number.isFinite(settings.alpha_min) || settings.alpha_min <= 0) {
+          throw new Error('Alpha min must be a positive number.')
+        }
+        if (!Number.isFinite(settings.alpha_max) || settings.alpha_max <= 0) {
+          throw new Error('Alpha max must be a positive number.')
+        }
+        if (settings.alpha_max <= settings.alpha_min) {
+          throw new Error('Alpha max must be greater than alpha min.')
+        }
+        if (!Number.isFinite(settings.delta_alpha_min) || settings.delta_alpha_min <= 0) {
+          throw new Error('Delta alpha min must be a positive number.')
+        }
+        if (!Number.isFinite(settings.delta_alpha_max) || settings.delta_alpha_max <= 0) {
+          throw new Error('Delta alpha max must be a positive number.')
+        }
+        if (settings.delta_alpha_max <= settings.delta_alpha_min) {
+          throw new Error('Delta alpha max must be greater than delta alpha min.')
+        }
+        if (settings.eig_indices) {
+          const [a, b] = settings.eig_indices
+          if (
+            !Number.isFinite(a) ||
+            !Number.isFinite(b) ||
+            a < 0 ||
+            b < 0 ||
+            !Number.isInteger(a) ||
+            !Number.isInteger(b)
+          ) {
+            throw new Error('Eigenspace indices must be non-negative integers.')
+          }
+        }
+
+        const baseParams = resolveObjectParams(system, equilibrium.customParameters)
+        const { snapshot, runConfig } = buildObjectSubsystemRunConfig(
+          system,
+          equilibrium,
+          baseParams
+        )
+        const reducedEquilibriumState = projectStateForSnapshot(
+          snapshot,
+          equilibrium.solution.state,
+          formatEquilibriumLabel(system.type)
+        )
+        const branchData = await client.runEquilibriumManifold2D(
+          {
+            system: runConfig,
+            equilibriumState: reducedEquilibriumState,
+            settings: {
+              ...settings,
+              caps: { ...settings.caps },
+            },
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Invariant Manifold (Equilibrium 2D)', progress },
+              }),
+          }
+        )
+
+        const normalized = normalizeBranchEigenvalues(branchData, {
+          stateDimension: snapshot.freeVariableNames.length,
+        })
+        if (!normalized.points.length) {
+          throw new Error('Invariant manifold computation did not return any points.')
+        }
+
+        const parentNodeId = findObjectIdByName(state.system, equilibrium.name)
+        if (!parentNodeId) {
+          throw new Error(`Unable to locate the parent ${equilibriumLabelLower} in the tree.`)
+        }
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name,
+          systemName: system.name,
+          parameterName: 'manifold',
+          parentObject: equilibrium.name,
+          startObject: equilibrium.name,
+          branchType: 'eq_manifold_2d',
+          data: normalized,
+          settings: buildManifoldBranchSettings({
+            caps: settings.caps,
+            integrationDt: settings.integration_dt,
+          }),
+          timestamp: new Date().toISOString(),
+          params: [...baseParams],
+          subsystemSnapshot: snapshot,
+        }
+        const created = addBranch(state.system, branch, parentNodeId)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const createLimitCycleManifold2D = useCallback(
+    async (request: LimitCycleManifold2DRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (system.type === 'map') {
+          throw new Error('Invariant manifolds are currently available for flow systems only.')
+        }
+
+        const limitCycle = state.system.objects[request.limitCycleId]
+        if (!limitCycle || limitCycle.type !== 'limit_cycle') {
+          throw new Error('Select a valid limit cycle.')
+        }
+
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        if (branchNameExists(state.system, limitCycle.name, name)) {
+          throw new Error(`Branch "${name}" already exists.`)
+        }
+
+        const settings = request.settings
+        const capsError = validateManifoldCaps(settings.caps)
+        if (capsError) {
+          throw new Error(capsError)
+        }
+        if (!Number.isFinite(settings.initial_radius) || settings.initial_radius <= 0) {
+          throw new Error('Initial radius must be a positive number.')
+        }
+        if (!Number.isFinite(settings.leaf_delta) || settings.leaf_delta <= 0) {
+          throw new Error('Leaf delta must be a positive number.')
+        }
+        if (!Number.isFinite(settings.delta_min) || settings.delta_min <= 0) {
+          throw new Error('Delta min must be a positive number.')
+        }
+        if (settings.delta_min > settings.leaf_delta) {
+          throw new Error('Delta min cannot exceed leaf delta.')
+        }
+        if (
+          !Number.isFinite(settings.ring_points) ||
+          settings.ring_points < 4 ||
+          !Number.isInteger(settings.ring_points)
+        ) {
+          throw new Error('Ring points must be an integer greater than or equal to 4.')
+        }
+        if (!Number.isFinite(settings.integration_dt) || settings.integration_dt === 0) {
+          throw new Error('Integration dt must be non-zero.')
+        }
+        if (!Number.isFinite(settings.target_arclength) || settings.target_arclength < 0) {
+          throw new Error('Target arclength must be zero or greater.')
+        }
+        if (!Number.isFinite(settings.min_spacing) || settings.min_spacing <= 0) {
+          throw new Error('Min spacing must be a positive number.')
+        }
+        if (!Number.isFinite(settings.max_spacing) || settings.max_spacing <= 0) {
+          throw new Error('Max spacing must be a positive number.')
+        }
+        if (settings.max_spacing <= settings.min_spacing) {
+          throw new Error('Max spacing must be greater than min spacing.')
+        }
+        if (!Number.isFinite(settings.alpha_min) || settings.alpha_min <= 0) {
+          throw new Error('Alpha min must be a positive number.')
+        }
+        if (!Number.isFinite(settings.alpha_max) || settings.alpha_max <= 0) {
+          throw new Error('Alpha max must be a positive number.')
+        }
+        if (settings.alpha_max <= settings.alpha_min) {
+          throw new Error('Alpha max must be greater than alpha min.')
+        }
+        if (!Number.isFinite(settings.delta_alpha_min) || settings.delta_alpha_min <= 0) {
+          throw new Error('Delta alpha min must be a positive number.')
+        }
+        if (!Number.isFinite(settings.delta_alpha_max) || settings.delta_alpha_max <= 0) {
+          throw new Error('Delta alpha max must be a positive number.')
+        }
+        if (settings.delta_alpha_max <= settings.delta_alpha_min) {
+          throw new Error('Delta alpha max must be greater than delta alpha min.')
+        }
+        if (
+          settings.floquet_index !== undefined &&
+          (!Number.isFinite(settings.floquet_index) ||
+            settings.floquet_index < 0 ||
+            !Number.isInteger(settings.floquet_index))
+        ) {
+          throw new Error('Floquet index must be a non-negative integer.')
+        }
+        if (
+          settings.ntst !== undefined &&
+          (!Number.isFinite(settings.ntst) || settings.ntst <= 0 || !Number.isInteger(settings.ntst))
+        ) {
+          throw new Error('NTST must be a positive integer.')
+        }
+        if (
+          settings.ncol !== undefined &&
+          (!Number.isFinite(settings.ncol) || settings.ncol <= 0 || !Number.isInteger(settings.ncol))
+        ) {
+          throw new Error('NCOL must be a positive integer.')
+        }
+
+        const baseParams = resolveObjectParams(system, limitCycle.customParameters)
+        const { snapshot, runConfig } = buildObjectSubsystemRunConfig(
+          system,
+          limitCycle,
+          baseParams
+        )
+        let seedState = limitCycle.state
+        let seedNtst = limitCycle.ntst
+        let seedNcol = limitCycle.ncol
+        let floquet = normalizeEigenvalueArray(limitCycle.floquetMultipliers)
+
+        const renderTarget = state.system.ui.limitCycleRenderTargets?.[request.limitCycleId]
+        if (renderTarget?.type === 'branch') {
+          const seedBranch = state.system.branches[renderTarget.branchId]
+          const seedPoint = seedBranch?.data.points[renderTarget.pointIndex]
+          if (seedPoint?.state.length) {
+            seedState = seedPoint.state
+          }
+          if (seedPoint?.eigenvalues && normalizeEigenvalueArray(seedPoint.eigenvalues).length > 0) {
+            floquet = normalizeEigenvalueArray(seedPoint.eigenvalues)
+          }
+          const branchType = seedBranch?.data.branch_type
+          if (
+            branchType &&
+            typeof branchType === 'object' &&
+            'ntst' in branchType &&
+            'ncol' in branchType &&
+            Number.isFinite(branchType.ntst) &&
+            Number.isFinite(branchType.ncol)
+          ) {
+            seedNtst = Math.max(1, Math.trunc(branchType.ntst as number))
+            seedNcol = Math.max(1, Math.trunc(branchType.ncol as number))
+          }
+        }
+
+        if (floquet.length === 0) {
+          const fallbackBranch = Object.values(state.system.branches)
+            .filter(
+              (branch) =>
+                branch.parentObject === limitCycle.name &&
+                branch.data.points.length > 0 &&
+                (branch.branchType === 'limit_cycle' || branch.branchType === 'isochrone_curve')
+            )
+            .sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0]
+          if (fallbackBranch) {
+            const fallbackPoint = fallbackBranch.data.points[fallbackBranch.data.points.length - 1]
+            floquet = normalizeEigenvalueArray(fallbackPoint?.eigenvalues)
+          }
+        }
+
+        if (floquet.length === 0) {
+          throw new Error(
+            'Floquet multipliers are unavailable for this limit cycle. Continue a limit-cycle branch first.'
+          )
+        }
+
+        const cycleState = projectLimitCyclePackedStateForSnapshot(
+          snapshot,
+          seedState,
+          seedNtst,
+          seedNcol,
+          'Limit cycle'
+        )
+        const branchData = await client.runLimitCycleManifold2D(
+          {
+            system: runConfig,
+            cycleState,
+            ntst: seedNtst,
+            ncol: seedNcol,
+            floquetMultipliers: floquet,
+            settings: {
+              ...settings,
+              ntst: settings.ntst ?? seedNtst,
+              ncol: settings.ncol ?? seedNcol,
+              caps: { ...settings.caps },
+            },
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Invariant Manifold (Limit Cycle 2D)', progress },
+              }),
+          }
+        )
+
+        const normalized = normalizeBranchEigenvalues(branchData, {
+          stateDimension: snapshot.freeVariableNames.length,
+        })
+        if (!normalized.points.length) {
+          throw new Error('Invariant manifold computation did not return any points.')
+        }
+
+        const parentNodeId = findObjectIdByName(state.system, limitCycle.name)
+        if (!parentNodeId) {
+          throw new Error('Unable to locate the parent limit cycle in the tree.')
+        }
+
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name,
+          systemName: system.name,
+          parameterName: 'manifold',
+          parentObject: limitCycle.name,
+          startObject: limitCycle.name,
+          branchType: 'cycle_manifold_2d',
+          data: normalized,
+          settings: buildManifoldBranchSettings({
+            caps: settings.caps,
+            integrationDt: settings.integration_dt,
+          }),
+          timestamp: new Date().toISOString(),
+          params: [...baseParams],
+          subsystemSnapshot: snapshot,
         }
 
         const created = addBranch(state.system, branch, parentNodeId)
@@ -5314,6 +6017,9 @@ export function AppProvider({
       computeCovariantLyapunovVectors,
       solveEquilibrium,
       createEquilibriumBranch,
+      createEquilibriumManifold1D,
+      createEquilibriumManifold2D,
+      createLimitCycleManifold2D,
       createBranchFromPoint,
       extendBranch,
       createFoldCurveFromPoint,
@@ -5342,6 +6048,9 @@ export function AppProvider({
       computeCovariantLyapunovVectors,
       solveEquilibrium,
       createEquilibriumBranch,
+      createEquilibriumManifold1D,
+      createEquilibriumManifold2D,
+      createLimitCycleManifold2D,
       createBranchFromPoint,
       extendBranch,
       createFoldCurveFromPoint,

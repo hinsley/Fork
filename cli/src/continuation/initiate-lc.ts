@@ -9,7 +9,13 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
-import { ContinuationObject, ContinuationPoint, LimitCycleObject } from '../types';
+import {
+  ContinuationObject,
+  ContinuationPoint,
+  LimitCycleManifold2DSettings,
+  LimitCycleObject,
+  ManifoldTerminationCaps
+} from '../types';
 import {
   ConfigEntry,
   MENU_PAGE_SIZE,
@@ -21,8 +27,29 @@ import {
 import { printSuccess, printError, printInfo } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
 import { isValidName, getBranchParams } from './utils';
-import { runLimitCycleContinuationWithProgress } from './progress';
+import {
+  runLimitCycleContinuationWithProgress,
+  runLimitCycleManifold2DWithProgress
+} from './progress';
 import { formatEquilibriumLabel } from '../labels';
+
+const DEFAULT_MANIFOLD_CAPS: ManifoldTerminationCaps = {
+  max_steps: 2000,
+  max_points: 2000,
+  max_rings: 256,
+  max_vertices: 20000,
+  max_time: 100
+};
+
+function parseOptionalIndex(input: string): number | undefined {
+  const trimmed = input.trim();
+  if (trimmed.length === 0) return undefined;
+  const parsed = parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return undefined;
+  }
+  return parsed;
+}
 
 /**
  * Initiates limit cycle continuation from a Hopf bifurcation point.
@@ -1001,5 +1028,363 @@ export async function initiateLCFromPD(
   } catch (e) {
     printError(`PD Branching Failed: ${e}`);
     return null;
+  }
+}
+
+export async function initiateLimitCycleManifold2DFromPoint(
+  sysName: string,
+  sourceBranch: ContinuationObject,
+  point: ContinuationPoint,
+  pointIdx: number
+): Promise<ContinuationObject | null> {
+  const sysConfig = Storage.loadSystem(sysName);
+  const parentObject = sourceBranch.parentObject;
+
+  if (sysConfig.type !== 'flow') {
+    printError('Limit-cycle manifolds are only available for flow systems.');
+    return null;
+  }
+  if (sysConfig.equations.length < 3) {
+    printError('2D limit-cycle manifolds require at least 3 state dimensions.');
+    return null;
+  }
+  if (!Array.isArray(point.eigenvalues) || point.eigenvalues.length === 0) {
+    printError('Selected limit-cycle point has no Floquet multipliers.');
+    return null;
+  }
+
+  let sourceNtst = 20;
+  let sourceNcol = 4;
+  const branchTypeData = sourceBranch.data.branch_type as any;
+  if (branchTypeData?.type === 'LimitCycle') {
+    sourceNtst = Math.max(2, Number(branchTypeData.ntst) || sourceNtst);
+    sourceNcol = Math.max(1, Number(branchTypeData.ncol) || sourceNcol);
+  }
+
+  let branchName = `lcm2d_${sourceBranch.name}_idx${pointIdx}`;
+  let stability: 'Stable' | 'Unstable' = 'Unstable';
+  let floquetIndexInput = '';
+  let initialRadiusInput = '1e-4';
+  let leafDeltaInput = '2e-2';
+  let ringPointsInput = '24';
+  let integrationDtInput = '1e-2';
+  let targetArclengthInput = '0.25';
+  let maxStepsInput = DEFAULT_MANIFOLD_CAPS.max_steps.toString();
+  let maxPointsInput = DEFAULT_MANIFOLD_CAPS.max_points.toString();
+  let maxRingsInput = '48';
+  let maxVerticesInput = '8000';
+  let maxTimeInput = '2';
+
+  const entries: ConfigEntry[] = [
+    {
+      id: 'branchName',
+      label: 'Branch name',
+      section: 'Branch Settings',
+      getDisplay: () => formatUnset(branchName),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Name for this 2D cycle manifold branch:',
+          default: branchName
+        });
+        branchName = value;
+      }
+    },
+    {
+      id: 'stability',
+      label: 'Manifold stability',
+      section: 'Manifold Selection',
+      getDisplay: () => stability,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          type: 'rawlist',
+          name: 'value',
+          message: 'Select manifold stability:',
+          choices: [
+            { name: 'Unstable', value: 'Unstable' },
+            { name: 'Stable', value: 'Stable' }
+          ],
+          default: stability
+        });
+        stability = value;
+      }
+    },
+    {
+      id: 'floquetIndex',
+      label: 'Floquet index (optional)',
+      section: 'Manifold Selection',
+      getDisplay: () => formatUnset(floquetIndexInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Floquet index (blank for auto):',
+          default: floquetIndexInput
+        });
+        floquetIndexInput = value;
+      }
+    },
+    {
+      id: 'discretization',
+      label: 'Discretization (inherited)',
+      section: 'Source Data',
+      getDisplay: () => `${sourceNtst}×${sourceNcol}`,
+      edit: async () => {
+        printInfo('NTST/NCOL are inherited from the source limit-cycle branch.');
+      }
+    },
+    {
+      id: 'initialRadius',
+      label: 'Initial radius',
+      section: 'Numerics',
+      getDisplay: () => initialRadiusInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Initial radius:',
+          default: initialRadiusInput
+        });
+        initialRadiusInput = value;
+      }
+    },
+    {
+      id: 'leafDelta',
+      label: 'Leaf delta',
+      section: 'Numerics',
+      getDisplay: () => leafDeltaInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Leaf delta:',
+          default: leafDeltaInput
+        });
+        leafDeltaInput = value;
+      }
+    },
+    {
+      id: 'ringPoints',
+      label: 'Ring points',
+      section: 'Numerics',
+      getDisplay: () => ringPointsInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Ring points (minimum 8):',
+          default: ringPointsInput
+        });
+        ringPointsInput = value;
+      }
+    },
+    {
+      id: 'integrationDt',
+      label: 'Integration dt',
+      section: 'Numerics',
+      getDisplay: () => integrationDtInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Integration dt:',
+          default: integrationDtInput
+        });
+        integrationDtInput = value;
+      }
+    },
+    {
+      id: 'targetArclength',
+      label: 'Target arclength',
+      section: 'Numerics',
+      getDisplay: () => targetArclengthInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Target arclength:',
+          default: targetArclengthInput
+        });
+        targetArclengthInput = value;
+      }
+    },
+    {
+      id: 'maxSteps',
+      label: 'Caps: max steps',
+      section: 'Termination Caps',
+      getDisplay: () => maxStepsInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Maximum solver steps:',
+          default: maxStepsInput
+        });
+        maxStepsInput = value;
+      }
+    },
+    {
+      id: 'maxPoints',
+      label: 'Caps: max points',
+      section: 'Termination Caps',
+      getDisplay: () => maxPointsInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Maximum points:',
+          default: maxPointsInput
+        });
+        maxPointsInput = value;
+      }
+    },
+    {
+      id: 'maxRings',
+      label: 'Caps: max rings',
+      section: 'Termination Caps',
+      getDisplay: () => maxRingsInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Maximum rings:',
+          default: maxRingsInput
+        });
+        maxRingsInput = value;
+      }
+    },
+    {
+      id: 'maxVertices',
+      label: 'Caps: max vertices',
+      section: 'Termination Caps',
+      getDisplay: () => maxVerticesInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Maximum vertices:',
+          default: maxVerticesInput
+        });
+        maxVerticesInput = value;
+      }
+    },
+    {
+      id: 'maxTime',
+      label: 'Caps: max time',
+      section: 'Termination Caps',
+      getDisplay: () => maxTimeInput,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Maximum integration time:',
+          default: maxTimeInput
+        });
+        maxTimeInput = value;
+      }
+    }
+  ];
+
+  while (true) {
+    const result = await runConfigMenu('Compute 2D Limit-Cycle Manifold', entries);
+    if (result === 'back') {
+      return null;
+    }
+
+    if (!branchName) {
+      printError('Please provide a branch name.');
+      continue;
+    }
+    const validName = isValidName(branchName);
+    if (validName !== true) {
+      printError(typeof validName === 'string' ? validName : 'Invalid branch name.');
+      continue;
+    }
+    if (Storage.listBranches(sysName, parentObject).includes(branchName)) {
+      printError(`Branch "${branchName}" already exists.`);
+      continue;
+    }
+
+    const floquetIndex = parseOptionalIndex(floquetIndexInput);
+    if (floquetIndexInput.trim().length > 0 && floquetIndex === undefined) {
+      printError('Floquet index must be a non-negative integer.');
+      continue;
+    }
+
+    const ringPoints = parseIntOrDefault(ringPointsInput, 24);
+    if (!Number.isFinite(ringPoints) || ringPoints < 8) {
+      printError('Ring points must be an integer greater than or equal to 8.');
+      continue;
+    }
+
+    const settings: LimitCycleManifold2DSettings = {
+      stability,
+      floquet_index: floquetIndex,
+      profile: 'LocalPreview',
+      initial_radius: Math.max(parseFloatOrDefault(initialRadiusInput, 1e-4), Number.EPSILON),
+      leaf_delta: Math.max(parseFloatOrDefault(leafDeltaInput, 2e-3), Number.EPSILON),
+      delta_min: Math.max(parseFloatOrDefault(leafDeltaInput, 2e-3) * 0.5, Number.EPSILON),
+      ring_points: Math.max(ringPoints, 8),
+      min_spacing: Math.max(parseFloatOrDefault(leafDeltaInput, 2e-3) * 0.67, Number.EPSILON),
+      max_spacing: Math.max(parseFloatOrDefault(leafDeltaInput, 2e-3) * 2.0, Number.EPSILON),
+      alpha_min: 0.3,
+      alpha_max: 0.4,
+      delta_alpha_min: 0.1,
+      delta_alpha_max: 1.0,
+      integration_dt: Math.max(parseFloatOrDefault(integrationDtInput, 1e-2), Number.EPSILON),
+      target_arclength: Math.max(parseFloatOrDefault(targetArclengthInput, 0.25), Number.EPSILON),
+      ntst: sourceNtst,
+      ncol: sourceNcol,
+      caps: {
+        max_steps: Math.max(parseIntOrDefault(maxStepsInput, DEFAULT_MANIFOLD_CAPS.max_steps), 1),
+        max_points: Math.max(parseIntOrDefault(maxPointsInput, DEFAULT_MANIFOLD_CAPS.max_points), 2),
+        max_rings: Math.max(parseIntOrDefault(maxRingsInput, DEFAULT_MANIFOLD_CAPS.max_rings), 1),
+        max_vertices: Math.max(parseIntOrDefault(maxVerticesInput, DEFAULT_MANIFOLD_CAPS.max_vertices), 3),
+        max_time: Math.max(parseFloatOrDefault(maxTimeInput, DEFAULT_MANIFOLD_CAPS.max_time), Number.EPSILON)
+      }
+    };
+
+    try {
+      const runConfig = { ...sysConfig };
+      runConfig.params = getBranchParams(sysName, sourceBranch, sysConfig);
+      const sourceParamIdx = sysConfig.paramNames.indexOf(sourceBranch.parameterName);
+      if (sourceParamIdx >= 0) {
+        runConfig.params[sourceParamIdx] = point.param_value;
+      }
+
+      printInfo('Computing 2D limit-cycle manifold...');
+      const bridge = new WasmBridge(runConfig);
+      const branchData = normalizeBranchEigenvalues(
+        runLimitCycleManifold2DWithProgress(
+          bridge,
+          point.state,
+          sourceNtst,
+          sourceNcol,
+          point.eigenvalues ?? [],
+          settings,
+          'Cycle Manifold 2D'
+        )
+      );
+
+      branchData.branch_type = branchData.branch_type ?? {
+        type: 'ManifoldCycle2D',
+        stability: settings.stability,
+        floquet_index: settings.floquet_index ?? 0,
+        ntst: sourceNtst,
+        ncol: sourceNcol,
+        method: 'leaf_shooting_bvp',
+        caps: settings.caps
+      };
+
+      const continuation: ContinuationObject = {
+        type: 'continuation',
+        name: branchName,
+        systemName: sysName,
+        parameterName: sourceBranch.parameterName,
+        parentObject,
+        startObject: sourceBranch.name,
+        branchType: 'cycle_manifold_2d',
+        data: branchData,
+        settings,
+        timestamp: new Date().toISOString(),
+        params: [...runConfig.params]
+      };
+
+      Storage.saveBranch(sysName, parentObject, continuation);
+      printSuccess(`2D limit-cycle manifold saved as "${continuation.name}".`);
+      return continuation;
+    } catch (e) {
+      printError(`2D limit-cycle manifold failed: ${e}`);
+      return null;
+    }
   }
 }

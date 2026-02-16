@@ -7,6 +7,10 @@ import type {
   ContinuationExtensionResult,
   CovariantLyapunovRequest,
   CovariantLyapunovResponse,
+  EquilibriumManifold1DRequest,
+  EquilibriumManifold1DResult,
+  EquilibriumManifold2DRequest,
+  EquilibriumManifold2DResult,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
   FoldCurveContinuationRequest,
@@ -23,6 +27,8 @@ import type {
   LimitCycleContinuationFromOrbitRequest,
   LimitCycleContinuationFromPDRequest,
   LimitCycleContinuationResult,
+  LimitCycleManifold2DRequest,
+  LimitCycleManifold2DResult,
   MapCycleContinuationFromPDRequest,
   LyapunovExponentsRequest,
   SampleMap1DFunctionRequest,
@@ -415,6 +421,250 @@ export class MockForkCoreClient implements ForkCoreClient {
         opts?.onProgress?.({ ...progress })
 
         return normalizeBranchEigenvalues(request.branchData)
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runEquilibriumManifold1D(
+    request: EquilibriumManifold1DRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<EquilibriumManifold1DResult> {
+    const job = this.queue.enqueue(
+      'runEquilibriumManifold1D',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const progress: ContinuationProgress = {
+          done: true,
+          current_step: 1,
+          max_steps: 1,
+          points_computed: 24,
+          bifurcations_found: 0,
+          current_param: request.settings.target_arclength,
+        }
+        opts?.onProgress?.(progress)
+
+        const branches: EquilibriumManifold1DResult = []
+        const directions =
+          request.settings.direction === 'Both'
+            ? (['Plus', 'Minus'] as const)
+            : ([request.settings.direction] as const)
+        for (const direction of directions) {
+          const sign = direction === 'Minus' ? -1 : 1
+          const points: Array<{ state: number[]; param_value: number; stability: 'None'; eigenvalues: [] }> = []
+          const pointsFlat: number[] = []
+          const arclength: number[] = []
+          const count = 24
+          for (let i = 0; i < count; i += 1) {
+            const t = i / (count - 1)
+            const arc = t * request.settings.target_arclength
+            const state = request.equilibriumState.map((value, index) =>
+              index === 0 ? value + sign * arc : value
+            )
+            points.push({ state, param_value: arc, stability: 'None', eigenvalues: [] })
+            pointsFlat.push(...state)
+            arclength.push(arc)
+          }
+          branches.push({
+            points,
+            bifurcations: [],
+            indices: points.map((_, index) => index),
+            branch_type: {
+              type: 'ManifoldEq1D',
+              stability: request.settings.stability,
+              direction,
+              eig_index: request.settings.eig_index ?? 0,
+              method: 'mock',
+              caps: request.settings.caps,
+            },
+            manifold_geometry: {
+              type: 'Curve',
+              dim: request.system.varNames.length,
+              points_flat: pointsFlat,
+              arclength,
+              direction,
+            },
+          })
+        }
+        return branches
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runEquilibriumManifold2D(
+    request: EquilibriumManifold2DRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<EquilibriumManifold2DResult> {
+    const job = this.queue.enqueue(
+      'runEquilibriumManifold2D',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+        opts?.onProgress?.({
+          done: true,
+          current_step: 1,
+          max_steps: 1,
+          points_computed: 64,
+          bifurcations_found: 0,
+          current_param: request.settings.target_radius,
+        })
+        const dim = request.system.varNames.length
+        const ringPoints = Math.max(8, request.settings.ring_points)
+        const rings = 4
+        const vertices: number[][] = []
+        const ringOffsets: number[] = []
+        for (let r = 0; r < rings; r += 1) {
+          ringOffsets.push(vertices.length)
+          const radius = request.settings.initial_radius + r * request.settings.leaf_delta
+          for (let i = 0; i < ringPoints; i += 1) {
+            const theta = (2 * Math.PI * i) / ringPoints
+            const state = request.equilibriumState.slice()
+            state[0] = (state[0] ?? 0) + radius * Math.cos(theta)
+            state[1] = (state[1] ?? 0) + radius * Math.sin(theta)
+            if (dim > 2) state[2] = state[2] ?? 0
+            vertices.push(state)
+          }
+        }
+        const triangles: number[] = []
+        for (let r = 0; r < rings - 1; r += 1) {
+          const a0 = ringOffsets[r]
+          const b0 = ringOffsets[r + 1]
+          for (let i = 0; i < ringPoints; i += 1) {
+            const ni = (i + 1) % ringPoints
+            triangles.push(a0 + i, b0 + i, b0 + ni, a0 + i, b0 + ni, a0 + ni)
+          }
+        }
+        const branch: EquilibriumManifold2DResult = {
+          points: vertices.map((state, index) => ({
+            state,
+            param_value: index / ringPoints,
+            stability: 'None',
+            eigenvalues: [],
+          })),
+          bifurcations: [],
+          indices: vertices.map((_, index) => index),
+          branch_type: {
+            type: 'ManifoldEq2D',
+            stability: request.settings.stability,
+            eig_kind: 'RealPair',
+            eig_indices: request.settings.eig_indices ?? [0, 1],
+            method: 'mock',
+            caps: request.settings.caps,
+          },
+          manifold_geometry: {
+            type: 'Surface',
+            dim,
+            vertices_flat: vertices.flat(),
+            triangles,
+            ring_offsets: ringOffsets,
+            ring_diagnostics: ringOffsets.map((_, ring) => ({
+              ring_index: ring,
+              radius_estimate:
+                request.settings.initial_radius + ring * request.settings.leaf_delta,
+              point_count: ringPoints,
+            })),
+          },
+        }
+        return branch
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runLimitCycleManifold2D(
+    request: LimitCycleManifold2DRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<LimitCycleManifold2DResult> {
+    const job = this.queue.enqueue(
+      'runLimitCycleManifold2D',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+        opts?.onProgress?.({
+          done: true,
+          current_step: 1,
+          max_steps: 1,
+          points_computed: 64,
+          bifurcations_found: 0,
+          current_param: request.settings.target_arclength,
+        })
+
+        const dim = request.system.varNames.length
+        const ringPoints = Math.max(8, request.settings.ring_points)
+        const rings = 4
+        const vertices: number[][] = []
+        const ringOffsets: number[] = []
+        for (let r = 0; r < rings; r += 1) {
+          ringOffsets.push(vertices.length)
+          const z = r * request.settings.leaf_delta
+          for (let i = 0; i < ringPoints; i += 1) {
+            const theta = (2 * Math.PI * i) / ringPoints
+            const state = Array.from({ length: dim }, () => 0)
+            state[0] = Math.cos(theta)
+            state[1] = Math.sin(theta)
+            if (dim > 2) state[2] = z
+            vertices.push(state)
+          }
+        }
+        const triangles: number[] = []
+        for (let r = 0; r < rings - 1; r += 1) {
+          const a0 = ringOffsets[r]
+          const b0 = ringOffsets[r + 1]
+          for (let i = 0; i < ringPoints; i += 1) {
+            const ni = (i + 1) % ringPoints
+            triangles.push(a0 + i, b0 + i, b0 + ni, a0 + i, b0 + ni, a0 + ni)
+          }
+        }
+        const branch: LimitCycleManifold2DResult = {
+          points: vertices.map((state, index) => ({
+            state,
+            param_value: index / ringPoints,
+            stability: 'None',
+            eigenvalues: [],
+          })),
+          bifurcations: [],
+          indices: vertices.map((_, index) => index),
+          branch_type: {
+            type: 'ManifoldCycle2D',
+            stability: request.settings.stability,
+            floquet_index: 0,
+            ntst: request.ntst,
+            ncol: request.ncol,
+            method: 'mock',
+            caps: request.settings.caps,
+          },
+          manifold_geometry: {
+            type: 'Surface',
+            dim,
+            vertices_flat: vertices.flat(),
+            triangles,
+            ring_offsets: ringOffsets,
+            ring_diagnostics: ringOffsets.map((_, ring) => ({
+              ring_index: ring,
+              radius_estimate: ring * request.settings.leaf_delta,
+              point_count: ringPoints,
+            })),
+          },
+        }
+        return branch
       },
       opts
     )

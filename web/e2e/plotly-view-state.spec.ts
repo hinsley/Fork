@@ -26,7 +26,12 @@ const readCameraKey = (page: Page) =>
         ? { x: camera.eye[0], y: camera.eye[1], z: camera.eye[2] }
         : camera.eye
     if (eye?.x == null || eye?.y == null || eye?.z == null) return null
-    return `${eye.x.toFixed(4)}|${eye.y.toFixed(4)}|${eye.z.toFixed(4)}`
+    const formatCoord = (value: number) => {
+      const rounded = Number(value.toFixed(4))
+      const normalized = Object.is(rounded, -0) ? 0 : rounded
+      return normalized.toFixed(4)
+    }
+    return `${formatCoord(eye.x)}|${formatCoord(eye.y)}|${formatCoord(eye.z)}`
   })
 
 const readSceneUirevision = (page: Page) =>
@@ -190,10 +195,15 @@ test('plotly 3d camera persists across style-only updates', async ({ page }) => 
           ? { x: camera.eye[0], y: camera.eye[1], z: camera.eye[2] }
           : camera?.eye
       if (!eye) return false
-      const key = `${eye.x.toFixed(4)}|${eye.y.toFixed(4)}|${eye.z.toFixed(4)}`
+      const formatCoord = (value: number) => {
+        const rounded = Number(value.toFixed(4))
+        const normalized = Object.is(rounded, -0) ? 0 : rounded
+        return normalized.toFixed(4)
+      }
+      const key = `${formatCoord(eye.x)}|${formatCoord(eye.y)}|${formatCoord(eye.z)}`
       return key === expected
     },
-    `${cameraOverride.eye.x.toFixed(4)}|${cameraOverride.eye.y.toFixed(4)}|${cameraOverride.eye.z.toFixed(4)}`
+    `${Number(cameraOverride.eye.x.toFixed(4)).toFixed(4)}|${Number(cameraOverride.eye.y.toFixed(4)).toFixed(4)}|${Number(cameraOverride.eye.z.toFixed(4)).toFixed(4)}`
   )
 
   const releasedCameraKey = await readCameraKey(page)

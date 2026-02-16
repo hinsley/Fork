@@ -18,6 +18,8 @@ import type {
   EquilibriumEigenPair,
   IsoclineComputedSnapshot,
   LineStyle,
+  ManifoldCurveGeometry,
+  ManifoldSurfaceGeometry,
   OrbitObject,
   SceneAxisVariables,
   SubsystemSnapshot,
@@ -1117,6 +1119,11 @@ const CODIM1_BIFURCATION_CURVE_BRANCH_TYPES = new Set([
   'homoclinic_curve',
   'homotopy_saddle_curve',
 ])
+const MANIFOLD_CURVE_BRANCH_TYPES = new Set<ContinuationObject['branchType']>(['eq_manifold_1d'])
+const MANIFOLD_SURFACE_BRANCH_TYPES = new Set<ContinuationObject['branchType']>([
+  'eq_manifold_2d',
+  'cycle_manifold_2d',
+])
 const DEFAULT_LIMIT_CYCLE_MESH = { ntst: 20, ncol: 4 }
 
 function resolveLimitCycleMesh(
@@ -1885,6 +1892,452 @@ function buildIsoclineTraces(config: {
   return traces
 }
 
+function resolveManifoldCurveGeometry(
+  geometry: ContinuationObject['data']['manifold_geometry'] | undefined
+): ManifoldCurveGeometry | null {
+  if (!geometry || geometry.type !== 'Curve') return null
+  if ('Curve' in geometry && geometry.Curve) {
+    return geometry.Curve
+  }
+  if ('points_flat' in geometry && Array.isArray(geometry.points_flat)) {
+    return {
+      dim: geometry.dim,
+      points_flat: geometry.points_flat,
+      arclength: geometry.arclength,
+      direction: geometry.direction,
+    }
+  }
+  return null
+}
+
+function resolveManifoldSurfaceGeometry(
+  geometry: ContinuationObject['data']['manifold_geometry'] | undefined
+): ManifoldSurfaceGeometry | null {
+  if (!geometry || geometry.type !== 'Surface') return null
+  if ('Surface' in geometry && geometry.Surface) {
+    return geometry.Surface
+  }
+  if ('vertices_flat' in geometry && Array.isArray(geometry.vertices_flat)) {
+    return {
+      dim: geometry.dim,
+      vertices_flat: geometry.vertices_flat,
+      triangles: geometry.triangles,
+      ring_offsets: geometry.ring_offsets,
+      ring_diagnostics: geometry.ring_diagnostics,
+      solver_diagnostics: geometry.solver_diagnostics,
+    }
+  }
+  return null
+}
+
+function buildManifoldCurveTraces(config: {
+  nodeId: string
+  name: string
+  color: string
+  lineDash: 'solid' | 'dash' | 'dot'
+  lineWidth: number
+  pointSize: number
+  highlight: boolean
+  geometry: ManifoldCurveGeometry
+  axisIndices: number[] | null
+  plotDim: 1 | 2 | 3
+  selectedPointIndex: number | null
+}): Data[] {
+  const {
+    nodeId,
+    name,
+    color,
+    lineDash,
+    lineWidth,
+    pointSize,
+    highlight,
+    geometry,
+    axisIndices,
+    plotDim: requestedPlotDim,
+    selectedPointIndex,
+  } = config
+  const traces: Data[] = []
+  if (!Number.isFinite(geometry.dim) || geometry.dim <= 0) return traces
+  const dim = Math.trunc(geometry.dim)
+  const pointCount = Math.floor(geometry.points_flat.length / dim)
+  if (pointCount <= 0) return traces
+  const plotDim = Math.max(1, Math.min(requestedPlotDim, dim, 3)) as 1 | 2 | 3
+  const axes = resolveAxisOrder(dim, plotDim, axisIndices)
+  const width = highlight ? lineWidth + 1 : lineWidth
+  const markerSize = highlight ? pointSize + 4 : pointSize + 2
+  const readPoint = (index: number): number[] | null => {
+    if (index < 0 || index >= pointCount) return null
+    const start = index * dim
+    const point = geometry.points_flat.slice(start, start + dim)
+    return point.length === dim ? point : null
+  }
+
+  if (plotDim >= 3) {
+    const x: number[] = []
+    const y: number[] = []
+    const z: number[] = []
+    const customdata: number[] = []
+    for (let index = 0; index < pointCount; index += 1) {
+      const point = readPoint(index)
+      if (!point) continue
+      const px = point[axes[0] ?? 0]
+      const py = point[axes[1] ?? 1]
+      const pz = point[axes[2] ?? 2]
+      if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue
+      x.push(px)
+      y.push(py)
+      z.push(pz)
+      customdata.push(index)
+    }
+    if (x.length > 0) {
+      traces.push({
+        type: 'scatter3d',
+        mode: 'lines',
+        name,
+        uid: nodeId,
+        x,
+        y,
+        z,
+        customdata,
+        line: { color, width, dash: lineDash },
+      })
+    }
+    if (
+      selectedPointIndex !== null &&
+      selectedPointIndex >= 0 &&
+      selectedPointIndex < pointCount
+    ) {
+      const selected = readPoint(selectedPointIndex)
+      if (selected) {
+        const px = selected[axes[0] ?? 0]
+        const py = selected[axes[1] ?? 1]
+        const pz = selected[axes[2] ?? 2]
+        if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+          traces.push({
+            type: 'scatter3d',
+            mode: 'markers',
+            name: `${name} selected point`,
+            uid: nodeId,
+            x: [px],
+            y: [py],
+            z: [pz],
+            customdata: [selectedPointIndex],
+            marker: {
+              color,
+              size: markerSize,
+              symbol: 'circle-open',
+              line: { color, width: 2 },
+            },
+            showlegend: false,
+            hovertemplate: 'Selected point<extra></extra>',
+          })
+        }
+      }
+    }
+    return traces
+  }
+
+  if (plotDim === 2) {
+    const x: number[] = []
+    const y: number[] = []
+    const customdata: number[] = []
+    for (let index = 0; index < pointCount; index += 1) {
+      const point = readPoint(index)
+      if (!point) continue
+      const px = point[axes[0] ?? 0]
+      const py = point[axes[1] ?? 1]
+      if (!Number.isFinite(px) || !Number.isFinite(py)) continue
+      x.push(px)
+      y.push(py)
+      customdata.push(index)
+    }
+    if (x.length > 0) {
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        name,
+        uid: nodeId,
+        x,
+        y,
+        customdata,
+        line: { color, width, dash: lineDash },
+      })
+    }
+    if (
+      selectedPointIndex !== null &&
+      selectedPointIndex >= 0 &&
+      selectedPointIndex < pointCount
+    ) {
+      const selected = readPoint(selectedPointIndex)
+      if (selected) {
+        const px = selected[axes[0] ?? 0]
+        const py = selected[axes[1] ?? 1]
+        if (Number.isFinite(px) && Number.isFinite(py)) {
+          traces.push({
+            type: 'scatter',
+            mode: 'markers',
+            name: `${name} selected point`,
+            uid: nodeId,
+            x: [px],
+            y: [py],
+            customdata: [selectedPointIndex],
+            marker: {
+              color,
+              size: markerSize,
+              symbol: 'circle-open',
+              line: { color, width: 2 },
+            },
+            showlegend: false,
+            hovertemplate: 'Selected point<extra></extra>',
+          })
+        }
+      }
+    }
+    return traces
+  }
+
+  const arclength =
+    Array.isArray(geometry.arclength) && geometry.arclength.length === pointCount
+      ? geometry.arclength
+      : Array.from({ length: pointCount }, (_, index) => index)
+  const y: number[] = []
+  for (let index = 0; index < pointCount; index += 1) {
+    const point = readPoint(index)
+    if (!point) continue
+    const value = point[axes[0] ?? 0]
+    if (!Number.isFinite(value)) continue
+    y.push(value)
+  }
+  if (y.length > 0) {
+    traces.push({
+      type: 'scatter',
+      mode: 'lines',
+      name,
+      uid: nodeId,
+      x: arclength.slice(0, y.length),
+      y,
+      line: { color, width, dash: lineDash },
+    })
+  }
+  return traces
+}
+
+function buildManifoldSurfaceTraces(config: {
+  nodeId: string
+  name: string
+  color: string
+  lineDash: 'solid' | 'dash' | 'dot'
+  lineWidth: number
+  pointSize: number
+  highlight: boolean
+  geometry: ManifoldSurfaceGeometry
+  axisIndices: number[] | null
+  plotDim: 1 | 2 | 3
+  selectedPointIndex: number | null
+}): Data[] {
+  const {
+    nodeId,
+    name,
+    color,
+    lineDash,
+    lineWidth,
+    pointSize,
+    highlight,
+    geometry,
+    axisIndices,
+    plotDim: requestedPlotDim,
+    selectedPointIndex,
+  } = config
+  const traces: Data[] = []
+  if (!Number.isFinite(geometry.dim) || geometry.dim <= 0) return traces
+  const dim = Math.trunc(geometry.dim)
+  const vertexCount = Math.floor(geometry.vertices_flat.length / dim)
+  if (vertexCount <= 0) return traces
+  const plotDim = Math.max(1, Math.min(requestedPlotDim, dim, 3)) as 1 | 2 | 3
+  if (plotDim === 1) return traces
+  const axes = resolveAxisOrder(dim, plotDim, axisIndices)
+  const width = highlight ? lineWidth + 1 : lineWidth
+  const markerSize = highlight ? pointSize + 4 : pointSize + 2
+  const readVertex = (index: number): number[] | null => {
+    if (index < 0 || index >= vertexCount) return null
+    const start = index * dim
+    const point = geometry.vertices_flat.slice(start, start + dim)
+    return point.length === dim ? point : null
+  }
+
+  const ringStarts =
+    Array.isArray(geometry.ring_offsets) && geometry.ring_offsets.length > 0
+      ? geometry.ring_offsets.filter(
+          (value) => Number.isInteger(value) && value >= 0 && value < vertexCount
+        )
+      : [0]
+  const ringBounds: Array<{ start: number; end: number }> = []
+  for (let idx = 0; idx < ringStarts.length; idx += 1) {
+    const start = ringStarts[idx] ?? 0
+    const next = ringStarts[idx + 1]
+    const end = typeof next === 'number' ? next : vertexCount
+    if (end - start >= 2) {
+      ringBounds.push({ start, end: Math.min(end, vertexCount) })
+    }
+  }
+  if (ringBounds.length === 0) {
+    ringBounds.push({ start: 0, end: vertexCount })
+  }
+
+  if (plotDim >= 3) {
+    const x: Array<number | null> = []
+    const y: Array<number | null> = []
+    const z: Array<number | null> = []
+    for (const ring of ringBounds) {
+      const ringIndices: number[] = []
+      for (let index = ring.start; index < ring.end; index += 1) {
+        const point = readVertex(index)
+        if (!point) continue
+        const px = point[axes[0] ?? 0]
+        const py = point[axes[1] ?? 1]
+        const pz = point[axes[2] ?? 2]
+        if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue
+        x.push(px)
+        y.push(py)
+        z.push(pz)
+        ringIndices.push(index)
+      }
+      if (ringIndices.length > 1) {
+        const first = readVertex(ringIndices[0] ?? -1)
+        if (first) {
+          const fx = first[axes[0] ?? 0]
+          const fy = first[axes[1] ?? 1]
+          const fz = first[axes[2] ?? 2]
+          if (Number.isFinite(fx) && Number.isFinite(fy) && Number.isFinite(fz)) {
+            x.push(fx)
+            y.push(fy)
+            z.push(fz)
+          }
+        }
+      }
+      x.push(null)
+      y.push(null)
+      z.push(null)
+    }
+    if (x.length > 0) {
+      traces.push({
+        type: 'scatter3d',
+        mode: 'lines',
+        name,
+        uid: nodeId,
+        x,
+        y,
+        z,
+        line: { color, width, dash: lineDash },
+      })
+    }
+    if (
+      selectedPointIndex !== null &&
+      selectedPointIndex >= 0 &&
+      selectedPointIndex < vertexCount
+    ) {
+      const selected = readVertex(selectedPointIndex)
+      if (selected) {
+        const px = selected[axes[0] ?? 0]
+        const py = selected[axes[1] ?? 1]
+        const pz = selected[axes[2] ?? 2]
+        if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+          traces.push({
+            type: 'scatter3d',
+            mode: 'markers',
+            name: `${name} selected point`,
+            uid: nodeId,
+            x: [px],
+            y: [py],
+            z: [pz],
+            customdata: [selectedPointIndex],
+            marker: {
+              color,
+              size: markerSize,
+              symbol: 'circle-open',
+              line: { color, width: 2 },
+            },
+            showlegend: false,
+            hovertemplate: 'Selected point<extra></extra>',
+          })
+        }
+      }
+    }
+    return traces
+  }
+
+  const x: Array<number | null> = []
+  const y: Array<number | null> = []
+  for (const ring of ringBounds) {
+    const ringIndices: number[] = []
+    for (let index = ring.start; index < ring.end; index += 1) {
+      const point = readVertex(index)
+      if (!point) continue
+      const px = point[axes[0] ?? 0]
+      const py = point[axes[1] ?? 1]
+      if (!Number.isFinite(px) || !Number.isFinite(py)) continue
+      x.push(px)
+      y.push(py)
+      ringIndices.push(index)
+    }
+    if (ringIndices.length > 1) {
+      const first = readVertex(ringIndices[0] ?? -1)
+      if (first) {
+        const fx = first[axes[0] ?? 0]
+        const fy = first[axes[1] ?? 1]
+        if (Number.isFinite(fx) && Number.isFinite(fy)) {
+          x.push(fx)
+          y.push(fy)
+        }
+      }
+    }
+    x.push(null)
+    y.push(null)
+  }
+  if (x.length > 0) {
+    traces.push({
+      type: 'scatter',
+      mode: 'lines',
+      name,
+      uid: nodeId,
+      x,
+      y,
+      line: { color, width, dash: lineDash },
+    })
+  }
+  if (
+    selectedPointIndex !== null &&
+    selectedPointIndex >= 0 &&
+    selectedPointIndex < vertexCount
+  ) {
+    const selected = readVertex(selectedPointIndex)
+    if (selected) {
+      const px = selected[axes[0] ?? 0]
+      const py = selected[axes[1] ?? 1]
+      if (Number.isFinite(px) && Number.isFinite(py)) {
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: `${name} selected point`,
+          uid: nodeId,
+          x: [px],
+          y: [py],
+          customdata: [selectedPointIndex],
+          marker: {
+            color,
+            size: markerSize,
+            symbol: 'circle-open',
+            line: { color, width: 2 },
+          },
+          showlegend: false,
+          hovertemplate: 'Selected point<extra></extra>',
+        })
+      }
+    }
+  }
+  return traces
+}
+
 function buildSceneTraces(
   system: System,
   scene: Scene,
@@ -2618,6 +3071,61 @@ function buildSceneTraces(
               : selectedBranchPointIndex
             return `Selected point: ${displayIndex}`
           })()
+
+    if (MANIFOLD_CURVE_BRANCH_TYPES.has(branch.branchType)) {
+      const fallbackDim = branch.data.points[0]?.state.length ?? 0
+      const fallbackGeometry: ManifoldCurveGeometry | null =
+        fallbackDim > 0
+          ? {
+              dim: fallbackDim,
+              points_flat: branch.data.points.flatMap((point) => point.state),
+              arclength: branch.data.points.map((point) => point.param_value),
+              direction: 'Both',
+            }
+          : null
+      const manifoldCurve =
+        resolveManifoldCurveGeometry(branch.data.manifold_geometry) ?? fallbackGeometry
+      if (manifoldCurve) {
+        traces.push(
+          ...buildManifoldCurveTraces({
+            nodeId,
+            name: branch.name,
+            color: node.render.color,
+            lineDash,
+            lineWidth,
+            pointSize: node.render.pointSize,
+            highlight,
+            geometry: manifoldCurve,
+            axisIndices: projectionAxisIndices,
+            plotDim: projectionPlotDim,
+            selectedPointIndex: selectedBranchPointIndex,
+          })
+        )
+      }
+      continue
+    }
+
+    if (MANIFOLD_SURFACE_BRANCH_TYPES.has(branch.branchType)) {
+      const manifoldSurface = resolveManifoldSurfaceGeometry(branch.data.manifold_geometry)
+      if (manifoldSurface) {
+        traces.push(
+          ...buildManifoldSurfaceTraces({
+            nodeId,
+            name: branch.name,
+            color: node.render.color,
+            lineDash,
+            lineWidth,
+            pointSize: node.render.pointSize,
+            highlight,
+            geometry: manifoldSurface,
+            axisIndices: projectionAxisIndices,
+            plotDim: projectionPlotDim,
+            selectedPointIndex: selectedBranchPointIndex,
+          })
+        )
+      }
+      continue
+    }
 
     const appendSceneSelectedPointMarker2D = (points: Array<{ x: number; y: number }>) => {
       if (selectedBranchPointIndex === null || !selectedPointLabel) return

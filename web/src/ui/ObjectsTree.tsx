@@ -35,6 +35,7 @@ type ObjectsTreeProps = {
 }
 
 function getBranchTypeLabel(branch: ContinuationObject, system: System): string {
+  const manifoldStopSuffix = getManifoldStopLabel(branch)
   if (branch.branchType === 'equilibrium') {
     return formatEquilibriumLabel(system.config.type, {
       lowercase: true,
@@ -50,13 +51,31 @@ function getBranchTypeLabel(branch: ContinuationObject, system: System): string 
   if (branch.branchType === 'isochrone_curve') return 'isochrone curve'
   if (branch.branchType === 'pd_curve') return 'pd curve'
   if (branch.branchType === 'ns_curve') return 'ns curve'
+  if (branch.branchType === 'eq_manifold_1d') return 'equilibrium manifold (1d)'
+  if (branch.branchType === 'eq_manifold_2d') {
+    return `equilibrium manifold (2d${manifoldStopSuffix})`
+  }
+  if (branch.branchType === 'cycle_manifold_2d') {
+    return `cycle manifold (2d${manifoldStopSuffix})`
+  }
   return 'branch'
+}
+
+function getManifoldStopLabel(branch: ContinuationObject): string {
+  if (branch.branchType !== 'eq_manifold_2d' && branch.branchType !== 'cycle_manifold_2d') {
+    return ''
+  }
+  const geometry = branch.data.manifold_geometry
+  if (!geometry || !('vertices_flat' in geometry)) return ''
+  const reason = geometry.solver_diagnostics?.termination_reason?.trim()
+  if (!reason) return ''
+  return `, ${reason.replaceAll('_', ' ')}`
 }
 
 function getNodeLabel(node: TreeNode, system: System) {
   if (node.kind === 'branch') {
     const branch = system.branches[node.id]
-    return `${node.name} (${branch ? getBranchTypeLabel(branch, system) : 'branch'})`
+    return `Branch: ${node.name} (${branch ? getBranchTypeLabel(branch, system) : 'branch'})`
   }
   if (node.objectType === 'equilibrium') {
     const object = system.objects[node.id]

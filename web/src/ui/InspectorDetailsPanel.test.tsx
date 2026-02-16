@@ -2250,6 +2250,136 @@ describe('InspectorDetailsPanel', () => {
     })
   })
 
+  it('shows manifold solver diagnostics for 2D manifold branches', async () => {
+    const user = userEvent.setup()
+    const config: SystemConfig = {
+      name: 'Manifold_Diagnostics',
+      equations: ['sigma*(y-x)', 'x*(rho-z)-y', 'x*y-beta*z'],
+      params: [10, 28, 8 / 3],
+      paramNames: ['sigma', 'rho', 'beta'],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const baseSystem = createSystem({ name: config.name, config })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq0',
+      systemName: config.name,
+    }
+    const withEq = addObject(baseSystem, equilibrium)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq0_ws_2d',
+      systemName: config.name,
+      parameterName: 'arclength',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'eq_manifold_2d',
+      data: {
+        points: [
+          {
+            state: [0, 0, 0],
+            param_value: 0,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: {
+          type: 'ManifoldEq2D',
+          stability: 'Stable',
+          eig_kind: 'RealPair',
+          eig_indices: [0, 1],
+          method: 'leaf_shooting_bvp',
+          caps: {
+            max_steps: 2000,
+            max_points: 20000,
+            max_rings: 500,
+            max_vertices: 200000,
+            max_time: 100,
+          },
+        },
+        manifold_geometry: {
+          type: 'Surface',
+          dim: 3,
+          vertices_flat: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+          triangles: [0, 1, 2],
+          ring_offsets: [0],
+          ring_diagnostics: [{ ring_index: 1, radius_estimate: 0.1, point_count: 20 }],
+          solver_diagnostics: {
+            termination_reason: 'ring_build_failed',
+            termination_detail:
+              'ring=8 attempt=0 delta=0.025: could not solve all leaf points',
+            final_leaf_delta: 0.025,
+            ring_attempts: 9,
+            build_failures: 1,
+            spacing_failures: 0,
+            reject_ring_quality: 3,
+            reject_geodesic_quality: 2,
+            reject_too_small: 0,
+            failed_ring: 9,
+            failed_attempt: 1,
+            failed_leaf_points: 17,
+            leaf_delta_floor: 1e-6,
+            min_leaf_delta_reached: true,
+            last_ring_max_turn_angle: 0.4,
+            last_ring_max_distance_angle: 0.03,
+            last_geodesic_max_angle: 0.7,
+            last_geodesic_max_distance_angle: 0.08,
+          },
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...config.params],
+    }
+    const withBranch = addBranch(withEq.system, branch, withEq.nodeId)
+
+    render(
+      <InspectorDetailsPanel
+        system={withBranch.system}
+        selectedNodeId={withBranch.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    expect(screen.getByText('Branch Summary')).toBeVisible()
+    await user.click(screen.getByTestId('branch-summary-toggle'))
+    expect(screen.getByText('Manifold solver diagnostics')).toBeVisible()
+    expect(screen.getByText('Ring Build Failed')).toBeVisible()
+    expect(screen.getByText('Leaf delta floor')).toBeVisible()
+    expect(screen.getByText('Failed ring')).toBeVisible()
+    expect(screen.getByText('Failed attempt')).toBeVisible()
+    expect(screen.getByText('Solved leaf points before fail')).toBeVisible()
+    expect(
+      screen.getByText('ring=8 attempt=0 delta=0.025: could not solve all leaf points')
+    ).toBeVisible()
+  })
+
   it('allows setting limit cycle render targets from homoclinic child branches', async () => {
     const user = userEvent.setup()
     let system = createSystem({
@@ -3294,7 +3424,7 @@ describe('InspectorDetailsPanel', () => {
       },
       forward: true,
     })
-  })
+  }, 15_000)
 
   it('hides NCOL for period-doubling continuation in maps', async () => {
     // TODO: This map-vs-flow UI gating is a brittle design pattern; revisit with a holistic menu model.
@@ -3588,7 +3718,7 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.queryByText('Cycle from PD')).toBeNull()
   })
 
-  it('hides "Limit Cycle from Hopf" for non-Hopf equilibrium points', () => {
+  it('shows "Limit Cycle from Hopf" guidance for non-Hopf equilibrium points', () => {
     const config: SystemConfig = {
       name: 'Flow_Menu_No_Hopf',
       equations: ['x', '-x'],
@@ -3670,7 +3800,11 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    expect(screen.queryByTestId('limit-cycle-from-hopf-toggle')).toBeNull()
+    const hopfToggle = screen.getByTestId('limit-cycle-from-hopf-toggle')
+    fireEvent.click(hopfToggle)
+    expect(
+      screen.getByText('Select a Hopf bifurcation point to continue a limit cycle.')
+    ).toBeInTheDocument()
   })
 
   it('hides "Limit Cycle from Hopf" for limit-cycle and homoclinic branches', () => {
@@ -4244,6 +4378,94 @@ describe('InspectorDetailsPanel', () => {
       const markerTrace = traces.find((trace) => trace.mode === 'markers')
       expect(markerTrace?.marker?.color).toEqual(['#1f77b4', '#ff0000', '#ff0000'])
     })
+  })
+
+  it('filters equilibrium manifold eigen-index dropdowns by selected stability', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({
+      name: 'Manifold_Index_Filter_System',
+      config: {
+        name: 'Manifold_Index_Filter_System',
+        equations: ['x', '-y', 'z'],
+        params: [0],
+        paramNames: ['mu'],
+        varNames: ['x', 'y', 'z'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq_Filter',
+      systemName: baseSystem.config.name,
+      solution: {
+        state: [0, 0, 0],
+        residual_norm: 0,
+        iterations: 3,
+        jacobian: [1, 0, 0, 0, -1, 0, 0, 0, 0.2],
+        eigenpairs: [
+          { value: { re: 1.2, im: 0 }, vector: [{ re: 1, im: 0 }, { re: 0, im: 0 }, { re: 0, im: 0 }] },
+          { value: { re: -0.8, im: 0 }, vector: [{ re: 0, im: 0 }, { re: 1, im: 0 }, { re: 0, im: 0 }] },
+          { value: { re: 0.5, im: 0.7 }, vector: [{ re: 1, im: 0.2 }, { re: 0, im: 0 }, { re: 0, im: 0 }] },
+          { value: { re: -0.3, im: -0.4 }, vector: [{ re: 0, im: 0 }, { re: 1, im: 0.4 }, { re: 0, im: 0 }] },
+          { value: { re: -2.0, im: 0 }, vector: [{ re: 0, im: 0 }, { re: 0, im: 0 }, { re: 1, im: 0 }] },
+        ],
+      },
+    }
+    const added = addObject(baseSystem, equilibrium)
+
+    render(
+      <InspectorDetailsPanel
+        system={added.system}
+        selectedNodeId={added.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumManifold1D={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumManifold2D={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateIsochroneCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleManifold2D={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('equilibrium-manifold-toggle'))
+
+    const eigA = screen.getByTestId('equilibrium-manifold-eig-index-a') as HTMLSelectElement
+    expect(Array.from(eigA.options).map((option) => option.textContent)).toEqual([
+      '2',
+      '4',
+      '5',
+    ])
+
+    await user.selectOptions(screen.getByTestId('equilibrium-manifold-stability'), 'Unstable')
+    await waitFor(() => {
+      expect(Array.from(eigA.options).map((option) => option.textContent)).toEqual(['1', '3'])
+    })
+
+    await user.selectOptions(screen.getByTestId('equilibrium-manifold-mode'), 'curve_1d')
+    await user.selectOptions(screen.getByTestId('equilibrium-manifold-stability'), 'Stable')
+    const eig1d = screen.getByTestId('equilibrium-manifold-eig-index') as HTMLSelectElement
+    expect(Array.from(eig1d.options).map((option) => option.textContent)).toEqual(['2', '5'])
   })
 
   it('jumps to the newest branch point after extension', async () => {

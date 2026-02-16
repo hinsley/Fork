@@ -3,6 +3,12 @@ import {
     SystemConfig,
     ContinuationBranchData,
     ContinuationEigenvalue,
+    EquilibriumManifold1DSettings,
+    EquilibriumManifold1DResult,
+    EquilibriumManifold2DSettings,
+    EquilibriumManifold2DResult,
+    LimitCycleManifold2DSettings,
+    LimitCycleManifold2DResult,
     LimitCycleBranchResponse,
     LimitCycleMeta,
     ContinuationProgress,
@@ -36,6 +42,13 @@ export type Codim1CurveRunner = {
     get_progress(): ContinuationProgress;
     is_done(): boolean;
     get_result(): any;
+};
+
+export type ManifoldRunner<T> = {
+    run_steps(batchSize: number): ContinuationProgress;
+    get_progress(): ContinuationProgress;
+    is_done(): boolean;
+    get_result(): T;
 };
 
 export type AnalysisRunner<T> = {
@@ -134,6 +147,122 @@ export class WasmBridge {
             settings,
             forward
         ) as ContinuationRunner;
+    }
+
+    createEquilibriumManifold1DRunner(
+        equilibriumState: number[],
+        settings: EquilibriumManifold1DSettings
+    ): ManifoldRunner<EquilibriumManifold1DResult> {
+        if (!wasmModule) throw new Error("WASM module not loaded");
+        if (typeof (wasmModule as any).WasmEqManifold1DRunner !== 'function') {
+            throw new Error(
+                "Equilibrium 1D manifold runner is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
+
+        return new wasmModule.WasmEqManifold1DRunner(
+            this.config.equations,
+            new Float64Array(this.config.params),
+            this.config.paramNames,
+            this.config.varNames,
+            this.config.type || "flow",
+            new Float64Array(equilibriumState),
+            settings
+        ) as ManifoldRunner<EquilibriumManifold1DResult>;
+    }
+
+    createEquilibriumManifold2DRunner(
+        equilibriumState: number[],
+        settings: EquilibriumManifold2DSettings
+    ): ManifoldRunner<EquilibriumManifold2DResult> {
+        if (!wasmModule) throw new Error("WASM module not loaded");
+        if (typeof (wasmModule as any).WasmEqManifold2DRunner !== 'function') {
+            throw new Error(
+                "Equilibrium 2D manifold runner is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
+
+        return new wasmModule.WasmEqManifold2DRunner(
+            this.config.equations,
+            new Float64Array(this.config.params),
+            this.config.paramNames,
+            this.config.varNames,
+            this.config.type || "flow",
+            new Float64Array(equilibriumState),
+            settings
+        ) as ManifoldRunner<EquilibriumManifold2DResult>;
+    }
+
+    createLimitCycleManifold2DRunner(
+        cycleState: number[],
+        ntst: number,
+        ncol: number,
+        floquetMultipliers: ContinuationEigenvalue[],
+        settings: LimitCycleManifold2DSettings
+    ): ManifoldRunner<LimitCycleManifold2DResult> {
+        if (!wasmModule) throw new Error("WASM module not loaded");
+        if (typeof (wasmModule as any).WasmCycleManifold2DRunner !== 'function') {
+            throw new Error(
+                "Limit-cycle 2D manifold runner is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
+
+        return new wasmModule.WasmCycleManifold2DRunner(
+            this.config.equations,
+            new Float64Array(this.config.params),
+            this.config.paramNames,
+            this.config.varNames,
+            this.config.type || "flow",
+            new Float64Array(cycleState),
+            Math.max(1, Math.trunc(ntst)),
+            Math.max(1, Math.trunc(ncol)),
+            floquetMultipliers,
+            settings
+        ) as ManifoldRunner<LimitCycleManifold2DResult>;
+    }
+
+    runEquilibriumManifold1D(
+        equilibriumState: number[],
+        settings: EquilibriumManifold1DSettings
+    ): EquilibriumManifold1DResult {
+        const runner = this.createEquilibriumManifold1DRunner(equilibriumState, settings);
+        return this.runManifoldRunnerToCompletion(runner);
+    }
+
+    runEquilibriumManifold2D(
+        equilibriumState: number[],
+        settings: EquilibriumManifold2DSettings
+    ): EquilibriumManifold2DResult {
+        const runner = this.createEquilibriumManifold2DRunner(equilibriumState, settings);
+        return this.runManifoldRunnerToCompletion(runner);
+    }
+
+    runLimitCycleManifold2D(
+        cycleState: number[],
+        ntst: number,
+        ncol: number,
+        floquetMultipliers: ContinuationEigenvalue[],
+        settings: LimitCycleManifold2DSettings
+    ): LimitCycleManifold2DResult {
+        const runner = this.createLimitCycleManifold2DRunner(
+            cycleState,
+            ntst,
+            ncol,
+            floquetMultipliers,
+            settings
+        );
+        return this.runManifoldRunnerToCompletion(runner);
+    }
+
+    private runManifoldRunnerToCompletion<T>(runner: ManifoldRunner<T>): T {
+        let progress = runner.get_progress();
+        const batchSize = computeBatchSizeForRunner(progress.max_steps);
+
+        while (!progress.done) {
+            progress = runner.run_steps(batchSize);
+        }
+
+        return runner.get_result();
     }
 
     createHomoclinicContinuationRunner(
@@ -1109,6 +1238,13 @@ function isCodim1BranchType(branchType: any): boolean {
         type === 'PDCurve' ||
         type === 'NSCurve'
     );
+}
+
+function computeBatchSizeForRunner(maxSteps: number): number {
+    if (!Number.isFinite(maxSteps) || maxSteps <= 0) {
+        return 1;
+    }
+    return Math.max(1, Math.ceil(maxSteps / 50));
 }
 
 function normalizeEigenvalues(raw: unknown): ContinuationEigenvalue[] {

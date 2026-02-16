@@ -137,15 +137,7 @@ pub fn decode_homoclinic_state(
     fixed_eps1: f64,
 ) -> Result<DecodedHomoclinicState> {
     decode_homoclinic_state_impl(
-        flat_state,
-        dim,
-        ntst,
-        ncol,
-        extras,
-        fixed_time,
-        fixed_eps0,
-        fixed_eps1,
-        None,
+        flat_state, dim, ntst, ncol, extras, fixed_time, fixed_eps0, fixed_eps1, None,
     )
 }
 

@@ -316,6 +316,52 @@ describe('ObjectsTree', () => {
     )
   })
 
+  it('appends 2D manifold stop reason to branch labels when diagnostics are present', () => {
+    const demo = createDemoSystem()
+    const branch = demo.system.branches[demo.branchNodeId]
+    if (!branch) {
+      throw new Error('Missing demo branch fixture data.')
+    }
+    branch.branchType = 'eq_manifold_2d'
+    branch.data.manifold_geometry = {
+      type: 'Surface',
+      dim: 3,
+      vertices_flat: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+      triangles: [0, 1, 2],
+      ring_offsets: [0, 3],
+      ring_diagnostics: [],
+      solver_diagnostics: {
+        termination_reason: 'ring_build_failed',
+        final_leaf_delta: 0.01,
+        ring_attempts: 10,
+        build_failures: 1,
+        spacing_failures: 0,
+        reject_ring_quality: 2,
+        reject_geodesic_quality: 3,
+        reject_too_small: 0,
+      },
+    }
+
+    render(
+      <ObjectsTree
+        system={demo.system}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={vi.fn()}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    expect(screen.getByTestId(`object-tree-node-${demo.branchNodeId}`)).toHaveTextContent(
+      'eq_branch (equilibrium manifold (2d, ring build failed))'
+    )
+  })
+
   it('highlights only the selected node row', () => {
     const { system } = createPeriodDoublingSystem()
     const branchId = Object.keys(system.branches)[0]

@@ -7,6 +7,10 @@ import type {
   ContinuationExtensionResult,
   CovariantLyapunovRequest,
   CovariantLyapunovResponse,
+  EquilibriumManifold1DRequest,
+  EquilibriumManifold1DResult,
+  EquilibriumManifold2DRequest,
+  EquilibriumManifold2DResult,
   EquilibriumContinuationRequest,
   EquilibriumContinuationResult,
   FoldCurveContinuationRequest,
@@ -23,6 +27,8 @@ import type {
   LimitCycleContinuationFromOrbitRequest,
   LimitCycleContinuationFromPDRequest,
   LimitCycleContinuationResult,
+  LimitCycleManifold2DRequest,
+  LimitCycleManifold2DResult,
   MapCycleContinuationFromPDRequest,
   LyapunovExponentsRequest,
   SampleMap1DFunctionRequest,
@@ -46,6 +52,9 @@ type WorkerRequest =
   | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
   | { id: string; kind: 'runEquilibriumContinuation'; payload: EquilibriumContinuationRequest }
   | { id: string; kind: 'runContinuationExtension'; payload: ContinuationExtensionRequest }
+  | { id: string; kind: 'runEquilibriumManifold1D'; payload: EquilibriumManifold1DRequest }
+  | { id: string; kind: 'runEquilibriumManifold2D'; payload: EquilibriumManifold2DRequest }
+  | { id: string; kind: 'runLimitCycleManifold2D'; payload: LimitCycleManifold2DRequest }
   | { id: string; kind: 'runFoldCurveContinuation'; payload: FoldCurveContinuationRequest }
   | { id: string; kind: 'runHopfCurveContinuation'; payload: HopfCurveContinuationRequest }
   | {
@@ -112,6 +121,9 @@ type WorkerResponse =
         | ValidateSystemResult
         | EquilibriumContinuationResult
         | ContinuationExtensionResult
+        | EquilibriumManifold1DResult
+        | EquilibriumManifold2DResult
+        | LimitCycleManifold2DResult
         | Codim1CurveBranch
         | LimitCycleContinuationResult
         | HomoclinicContinuationResult
@@ -137,6 +149,9 @@ export class WasmForkCoreClient implements ForkCoreClient {
           | ValidateSystemResult
           | EquilibriumContinuationResult
           | ContinuationExtensionResult
+          | EquilibriumManifold1DResult
+          | EquilibriumManifold2DResult
+          | LimitCycleManifold2DResult
           | Codim1CurveBranch
           | LimitCycleContinuationResult
           | HomoclinicContinuationResult
@@ -264,6 +279,45 @@ export class WasmForkCoreClient implements ForkCoreClient {
     const job = this.queue.enqueue(
       'runContinuationExtension',
       (signal) => this.runWorker('runContinuationExtension', request, signal, opts?.onProgress),
+      opts
+    )
+    return await job.promise
+  }
+
+  async runEquilibriumManifold1D(
+    request: EquilibriumManifold1DRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<EquilibriumManifold1DResult> {
+    const job = this.queue.enqueue(
+      'runEquilibriumManifold1D',
+      (signal) =>
+        this.runWorker('runEquilibriumManifold1D', request, signal, opts?.onProgress),
+      opts
+    )
+    return await job.promise
+  }
+
+  async runEquilibriumManifold2D(
+    request: EquilibriumManifold2DRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<EquilibriumManifold2DResult> {
+    const job = this.queue.enqueue(
+      'runEquilibriumManifold2D',
+      (signal) =>
+        this.runWorker('runEquilibriumManifold2D', request, signal, opts?.onProgress),
+      opts
+    )
+    return await job.promise
+  }
+
+  async runLimitCycleManifold2D(
+    request: LimitCycleManifold2DRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<LimitCycleManifold2DResult> {
+    const job = this.queue.enqueue(
+      'runLimitCycleManifold2D',
+      (signal) =>
+        this.runWorker('runLimitCycleManifold2D', request, signal, opts?.onProgress),
       opts
     )
     return await job.promise
@@ -506,6 +560,24 @@ export class WasmForkCoreClient implements ForkCoreClient {
     onProgress?: (progress: ContinuationProgress) => void
   ): Promise<ContinuationExtensionResult>
   private runWorker(
+    kind: 'runEquilibriumManifold1D',
+    payload: EquilibriumManifold1DRequest,
+    signal: AbortSignal,
+    onProgress?: (progress: ContinuationProgress) => void
+  ): Promise<EquilibriumManifold1DResult>
+  private runWorker(
+    kind: 'runEquilibriumManifold2D',
+    payload: EquilibriumManifold2DRequest,
+    signal: AbortSignal,
+    onProgress?: (progress: ContinuationProgress) => void
+  ): Promise<EquilibriumManifold2DResult>
+  private runWorker(
+    kind: 'runLimitCycleManifold2D',
+    payload: LimitCycleManifold2DRequest,
+    signal: AbortSignal,
+    onProgress?: (progress: ContinuationProgress) => void
+  ): Promise<LimitCycleManifold2DResult>
+  private runWorker(
     kind: 'runFoldCurveContinuation',
     payload: FoldCurveContinuationRequest,
     signal: AbortSignal,
@@ -586,6 +658,9 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | 'solveEquilibrium'
       | 'runEquilibriumContinuation'
       | 'runContinuationExtension'
+      | 'runEquilibriumManifold1D'
+      | 'runEquilibriumManifold2D'
+      | 'runLimitCycleManifold2D'
       | 'runFoldCurveContinuation'
       | 'runHopfCurveContinuation'
       | 'runIsochroneCurveContinuation'
@@ -607,6 +682,9 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | SolveEquilibriumRequest
       | EquilibriumContinuationRequest
       | ContinuationExtensionRequest
+      | EquilibriumManifold1DRequest
+      | EquilibriumManifold2DRequest
+      | LimitCycleManifold2DRequest
       | FoldCurveContinuationRequest
       | HopfCurveContinuationRequest
       | IsochroneCurveContinuationRequest
@@ -631,6 +709,9 @@ export class WasmForkCoreClient implements ForkCoreClient {
     | ValidateSystemResult
     | EquilibriumContinuationResult
     | ContinuationExtensionResult
+    | EquilibriumManifold1DResult
+    | EquilibriumManifold2DResult
+    | LimitCycleManifold2DResult
     | Codim1CurveBranch
     | LimitCycleContinuationResult
     | HomoclinicContinuationResult
@@ -654,6 +735,12 @@ export class WasmForkCoreClient implements ForkCoreClient {
             ? { id, kind, payload: payload as EquilibriumContinuationRequest }
             : kind === 'runContinuationExtension'
               ? { id, kind, payload: payload as ContinuationExtensionRequest }
+              : kind === 'runEquilibriumManifold1D'
+                ? { id, kind, payload: payload as EquilibriumManifold1DRequest }
+                : kind === 'runEquilibriumManifold2D'
+                  ? { id, kind, payload: payload as EquilibriumManifold2DRequest }
+                  : kind === 'runLimitCycleManifold2D'
+                    ? { id, kind, payload: payload as LimitCycleManifold2DRequest }
               : kind === 'runFoldCurveContinuation'
                 ? { id, kind, payload: payload as FoldCurveContinuationRequest }
         : kind === 'runHopfCurveContinuation'
@@ -696,6 +783,9 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | ValidateSystemResult
       | EquilibriumContinuationResult
       | ContinuationExtensionResult
+      | EquilibriumManifold1DResult
+      | EquilibriumManifold2DResult
+      | LimitCycleManifold2DResult
       | Codim1CurveBranch
       | LimitCycleContinuationResult
       | HomoclinicContinuationResult

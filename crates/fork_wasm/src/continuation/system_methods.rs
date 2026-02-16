@@ -8,6 +8,8 @@ use fork_core::continuation::equilibrium::{
 };
 use fork_core::continuation::{
     continue_homoclinic_curve, continue_homotopy_saddle_curve, continue_limit_cycle_collocation,
+    continue_limit_cycle_manifold_2d, continue_limit_cycle_manifold_2d_with_progress,
+    continue_manifold_eq_1d, continue_manifold_eq_2d, continue_manifold_eq_2d_with_progress,
     continue_with_problem, extend_limit_cycle_collocation,
     homoclinic_setup_from_homoclinic_point_with_source_extras,
     homoclinic_setup_from_homotopy_saddle_point, homoclinic_setup_from_large_cycle,
@@ -16,15 +18,46 @@ use fork_core::continuation::{
     Codim1CurvePoint, Codim1CurveType, Codim2BifurcationType, CollocationConfig,
     ContinuationBranch, ContinuationSettings, FoldCurveProblem, HomoclinicExtraFlags,
     HomoclinicFixedScalars, HomoclinicSetup, HomotopySaddleSetup, HopfCurveProblem,
-    IsochroneCurveProblem, LPCCurveProblem, LimitCycleSetup, NSCurveProblem, OrbitTimeMode,
+    IsochroneCurveProblem, LPCCurveProblem, LimitCycleSetup, Manifold1DSettings,
+    Manifold2DSettings, ManifoldCycle2DSettings, ManifoldGeometry, NSCurveProblem, OrbitTimeMode,
     PDCurveProblem, StepResult,
 };
 use fork_core::equilibrium::{compute_jacobian, SystemKind};
 use fork_core::traits::DynamicalSystem;
+use js_sys::Function;
 use nalgebra::DMatrix;
-use serde::Serialize;
+use num_complex::Complex;
+use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
+
+#[derive(Debug, Clone, Deserialize)]
+struct ComplexWire {
+    re: f64,
+    im: f64,
+}
+
+fn manifold_ring_count(branch: &ContinuationBranch) -> usize {
+    match branch.manifold_geometry.as_ref() {
+        Some(ManifoldGeometry::Surface(surface)) => surface.ring_offsets.len(),
+        _ => 0,
+    }
+}
+
+fn emit_progress(callback: &Function, progress: StepResult) -> Result<(), JsValue> {
+    let payload = to_value(&progress)
+        .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
+    callback
+        .call1(&JsValue::NULL, &payload)
+        .map(|_| ())
+        .map_err(|err| {
+            if err.is_string() {
+                err
+            } else {
+                JsValue::from_str("Progress callback threw an error.")
+            }
+        })
+}
 
 #[wasm_bindgen]
 impl WasmSystem {
@@ -189,6 +222,13 @@ impl WasmSystem {
                     "Branch extension for homoclinic and homotopy-saddle curves is not available yet.",
                 ))
             }
+            BranchType::ManifoldEq1D { .. }
+            | BranchType::ManifoldEq2D { .. }
+            | BranchType::ManifoldCycle2D { .. } => {
+                return Err(JsValue::from_str(
+                    "Branch extension for invariant manifold branches is not available yet.",
+                ))
+            }
         };
 
         to_value(&updated_branch)
@@ -226,6 +266,189 @@ impl WasmSystem {
 
         to_value(&eigenvalues)
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn compute_eq_manifold_1d(
+        &mut self,
+        equilibrium_state: Vec<f64>,
+        settings_val: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        if !matches!(self.system_type, SystemType::Flow) {
+            return Err(JsValue::from_str(
+                "Invariant manifolds are currently available for flow systems only.",
+            ));
+        }
+        let settings: Manifold1DSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid manifold settings: {}", e)))?;
+        let branches = continue_manifold_eq_1d(&mut self.system, &equilibrium_state, settings)
+            .map_err(|e| JsValue::from_str(&format!("1D manifold computation failed: {}", e)))?;
+        to_value(&branches).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn compute_eq_manifold_2d(
+        &mut self,
+        equilibrium_state: Vec<f64>,
+        settings_val: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        if !matches!(self.system_type, SystemType::Flow) {
+            return Err(JsValue::from_str(
+                "Invariant manifolds are currently available for flow systems only.",
+            ));
+        }
+        let settings: Manifold2DSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid manifold settings: {}", e)))?;
+        let branch = continue_manifold_eq_2d(&mut self.system, &equilibrium_state, settings)
+            .map_err(|e| JsValue::from_str(&format!("2D manifold computation failed: {}", e)))?;
+        to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn compute_eq_manifold_2d_with_progress(
+        &mut self,
+        equilibrium_state: Vec<f64>,
+        settings_val: JsValue,
+        progress_callback: Function,
+    ) -> Result<JsValue, JsValue> {
+        if !matches!(self.system_type, SystemType::Flow) {
+            return Err(JsValue::from_str(
+                "Invariant manifolds are currently available for flow systems only.",
+            ));
+        }
+        let settings: Manifold2DSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid manifold settings: {}", e)))?;
+        let max_rings = settings.caps.max_rings.max(1);
+        let mut callback_error: Option<JsValue> = None;
+        let mut latest_arclength = 0.0f64;
+        let mut on_ring_progress = |rings: usize, points: usize, arclength: f64| {
+            if callback_error.is_some() {
+                return;
+            }
+            latest_arclength = arclength;
+            let progress =
+                StepResult::new(false, rings.min(max_rings), max_rings, points, 0, arclength)
+                    .with_rings_computed(rings);
+            if let Err(err) = emit_progress(&progress_callback, progress) {
+                callback_error = Some(err);
+            }
+        };
+        let branch = continue_manifold_eq_2d_with_progress(
+            &mut self.system,
+            &equilibrium_state,
+            settings,
+            Some(&mut on_ring_progress),
+        )
+        .map_err(|e| JsValue::from_str(&format!("2D manifold computation failed: {}", e)))?;
+        if let Some(err) = callback_error {
+            return Err(err);
+        }
+        let rings = manifold_ring_count(&branch);
+        let final_progress = StepResult::new(
+            true,
+            rings.min(max_rings),
+            max_rings,
+            branch.points.len(),
+            0,
+            latest_arclength,
+        )
+        .with_rings_computed(rings);
+        emit_progress(&progress_callback, final_progress)?;
+        to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn compute_cycle_manifold_2d(
+        &mut self,
+        cycle_state: Vec<f64>,
+        ntst: u32,
+        ncol: u32,
+        floquet_multipliers_val: JsValue,
+        settings_val: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        if !matches!(self.system_type, SystemType::Flow) {
+            return Err(JsValue::from_str(
+                "Invariant manifolds are currently available for flow systems only.",
+            ));
+        }
+        let settings: ManifoldCycle2DSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid manifold settings: {}", e)))?;
+        let floquet_wire: Vec<ComplexWire> = from_value(floquet_multipliers_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid Floquet multipliers: {}", e)))?;
+        let floquet_multipliers = floquet_wire
+            .into_iter()
+            .map(|value| Complex::new(value.re, value.im))
+            .collect::<Vec<_>>();
+        let branch = continue_limit_cycle_manifold_2d(
+            &mut self.system,
+            &cycle_state,
+            ntst as usize,
+            ncol as usize,
+            &floquet_multipliers,
+            settings,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Cycle manifold computation failed: {}", e)))?;
+        to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn compute_cycle_manifold_2d_with_progress(
+        &mut self,
+        cycle_state: Vec<f64>,
+        ntst: u32,
+        ncol: u32,
+        floquet_multipliers_val: JsValue,
+        settings_val: JsValue,
+        progress_callback: Function,
+    ) -> Result<JsValue, JsValue> {
+        if !matches!(self.system_type, SystemType::Flow) {
+            return Err(JsValue::from_str(
+                "Invariant manifolds are currently available for flow systems only.",
+            ));
+        }
+        let settings: ManifoldCycle2DSettings = from_value(settings_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid manifold settings: {}", e)))?;
+        let max_rings = settings.caps.max_rings.max(1);
+        let floquet_wire: Vec<ComplexWire> = from_value(floquet_multipliers_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid Floquet multipliers: {}", e)))?;
+        let floquet_multipliers = floquet_wire
+            .into_iter()
+            .map(|value| Complex::new(value.re, value.im))
+            .collect::<Vec<_>>();
+        let mut callback_error: Option<JsValue> = None;
+        let mut latest_arclength = 0.0f64;
+        let mut on_ring_progress = |rings: usize, points: usize, arclength: f64| {
+            if callback_error.is_some() {
+                return;
+            }
+            latest_arclength = arclength;
+            let progress =
+                StepResult::new(false, rings.min(max_rings), max_rings, points, 0, arclength)
+                    .with_rings_computed(rings);
+            if let Err(err) = emit_progress(&progress_callback, progress) {
+                callback_error = Some(err);
+            }
+        };
+        let branch = continue_limit_cycle_manifold_2d_with_progress(
+            &mut self.system,
+            &cycle_state,
+            ntst as usize,
+            ncol as usize,
+            &floquet_multipliers,
+            settings,
+            Some(&mut on_ring_progress),
+        )
+        .map_err(|e| JsValue::from_str(&format!("Cycle manifold computation failed: {}", e)))?;
+        if let Some(err) = callback_error {
+            return Err(err);
+        }
+        let rings = manifold_ring_count(&branch);
+        let final_progress = StepResult::new(
+            true,
+            rings.min(max_rings),
+            max_rings,
+            branch.points.len(),
+            0,
+            latest_arclength,
+        )
+        .with_rings_computed(rings);
+        emit_progress(&progress_callback, final_progress)?;
+        to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
     /// Initializes a limit cycle guess from a Hopf bifurcation point.

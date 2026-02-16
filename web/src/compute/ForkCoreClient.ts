@@ -2,6 +2,8 @@ import type {
   ContinuationBranchData,
   ContinuationSettings,
   ContinuationPoint,
+  Manifold2DProfile,
+  ManifoldStability,
   EquilibriumSolution,
   SystemConfig,
 } from '../system/types'
@@ -13,6 +15,7 @@ export type ContinuationProgress = {
   points_computed: number
   bifurcations_found: number
   current_param: number
+  rings_computed?: number
 }
 
 export type SimulateOrbitRequest = {
@@ -132,6 +135,100 @@ export type EquilibriumContinuationRequest = {
 }
 
 export type EquilibriumContinuationResult = ContinuationBranchData
+
+export type ManifoldTerminationCapsRequest = {
+  max_steps: number
+  max_points: number
+  max_rings: number
+  max_vertices: number
+  max_time: number
+}
+
+export type ManifoldBoundsRequest = {
+  min: number[]
+  max: number[]
+}
+
+export type EquilibriumManifold1DSettingsRequest = {
+  stability: ManifoldStability
+  direction: 'Plus' | 'Minus' | 'Both'
+  eig_index?: number
+  eps: number
+  target_arclength: number
+  integration_dt: number
+  caps: ManifoldTerminationCapsRequest
+  bounds?: ManifoldBoundsRequest
+}
+
+export type EquilibriumManifold2DSettingsRequest = {
+  stability: ManifoldStability
+  eig_indices?: [number, number]
+  profile?: Manifold2DProfile
+  initial_radius: number
+  leaf_delta: number
+  delta_min: number
+  ring_points: number
+  min_spacing: number
+  max_spacing: number
+  alpha_min: number
+  alpha_max: number
+  delta_alpha_min: number
+  delta_alpha_max: number
+  integration_dt: number
+  target_radius: number
+  target_arclength: number
+  caps: ManifoldTerminationCapsRequest
+  bounds?: ManifoldBoundsRequest
+}
+
+export type LimitCycleManifold2DSettingsRequest = {
+  stability: ManifoldStability
+  floquet_index?: number
+  profile?: Manifold2DProfile
+  initial_radius: number
+  leaf_delta: number
+  delta_min: number
+  ring_points: number
+  min_spacing: number
+  max_spacing: number
+  alpha_min: number
+  alpha_max: number
+  delta_alpha_min: number
+  delta_alpha_max: number
+  integration_dt: number
+  target_arclength: number
+  ntst?: number
+  ncol?: number
+  caps: ManifoldTerminationCapsRequest
+  bounds?: ManifoldBoundsRequest
+}
+
+export type EquilibriumManifold1DRequest = {
+  system: SystemConfig
+  equilibriumState: number[]
+  settings: EquilibriumManifold1DSettingsRequest
+}
+
+export type EquilibriumManifold1DResult = ContinuationBranchData[]
+
+export type EquilibriumManifold2DRequest = {
+  system: SystemConfig
+  equilibriumState: number[]
+  settings: EquilibriumManifold2DSettingsRequest
+}
+
+export type EquilibriumManifold2DResult = ContinuationBranchData
+
+export type LimitCycleManifold2DRequest = {
+  system: SystemConfig
+  cycleState: number[]
+  ntst: number
+  ncol: number
+  floquetMultipliers: Array<{ re: number; im: number }>
+  settings: LimitCycleManifold2DSettingsRequest
+}
+
+export type LimitCycleManifold2DResult = ContinuationBranchData
 
 export type ContinuationBranchDataWire = Omit<ContinuationBranchData, 'points'> & {
   points: Array<
@@ -371,6 +468,18 @@ export interface ForkCoreClient {
     request: ContinuationExtensionRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<ContinuationExtensionResult>
+  runEquilibriumManifold1D(
+    request: EquilibriumManifold1DRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<EquilibriumManifold1DResult>
+  runEquilibriumManifold2D(
+    request: EquilibriumManifold2DRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<EquilibriumManifold2DResult>
+  runLimitCycleManifold2D(
+    request: LimitCycleManifold2DRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<LimitCycleManifold2DResult>
   runFoldCurveContinuation(
     request: FoldCurveContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }

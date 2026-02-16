@@ -551,8 +551,8 @@ fn l2_norm(v: &[f64]) -> f64 {
 mod tests {
     use super::*;
     use crate::continuation::homoclinic_init::{
-        homoclinic_setup_from_large_cycle, HomoclinicBasis, HomoclinicExtraFlags,
-        HomoclinicGuess, HomoclinicSetup,
+        homoclinic_setup_from_large_cycle, HomoclinicBasis, HomoclinicExtraFlags, HomoclinicGuess,
+        HomoclinicSetup,
     };
     use crate::equation_engine::{Bytecode, OpCode};
 

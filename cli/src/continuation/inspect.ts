@@ -9,7 +9,7 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
-import { ContinuationObject, ContinuationPoint } from '../types';
+import { ContinuationObject, ContinuationPoint, ManifoldSurfaceGeometry } from '../types';
 import { NavigationRequest } from '../navigation';
 import { MENU_PAGE_SIZE } from '../menu';
 import {
@@ -28,8 +28,17 @@ import {
   summarizeEigenvalues
 } from './utils';
 import { formatEquilibriumLabel } from '../labels';
-import { initiateLCBranchFromPoint, initiateLCFromPD } from './initiate-lc';
-import { initiateEquilibriumBranchFromPoint, initiateMapCycleFromPD } from './initiate-eq';
+import {
+  initiateLCBranchFromPoint,
+  initiateLCFromPD,
+  initiateLimitCycleManifold2DFromPoint
+} from './initiate-lc';
+import {
+  initiateEquilibriumBranchFromPoint,
+  initiateEquilibriumManifold1DFromPoint,
+  initiateEquilibriumManifold2DFromPoint,
+  initiateMapCycleFromPD
+} from './initiate-eq';
 import { initiateFoldCurve, initiateHopfCurve, initiateIsochroneCurve, initiateLPCCurve, initiatePDCurve, initiateNSCurve } from './initiate-codim1';
 import {
   initiateHomoclinicFromHomoclinic,
@@ -41,6 +50,67 @@ import { printProgress, printProgressComplete } from '../format';
 
 type BranchDetailResult = 'SUMMARY' | 'EXIT' | NavigationRequest;
 const DETAIL_PAGE_SIZE = 10;
+
+function formatTerminationReason(reason: string | undefined): string {
+  if (!reason || reason.trim().length === 0) return 'Unknown';
+  return reason
+    .split('_')
+    .filter((part) => part.length > 0)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function summarizeManifoldSolverDiagnostics(branch: ContinuationObject): string | null {
+  if (branch.branchType !== 'eq_manifold_2d' && branch.branchType !== 'cycle_manifold_2d') {
+    return null;
+  }
+  const geometry = branch.data.manifold_geometry;
+  if (!geometry || geometry.type !== 'Surface') return null;
+  const candidate = ('Surface' in geometry && geometry.Surface
+    ? geometry.Surface
+    : geometry) as Partial<ManifoldSurfaceGeometry>;
+  if (
+    !Array.isArray(candidate.vertices_flat) ||
+    !Array.isArray(candidate.triangles) ||
+    !Array.isArray(candidate.ring_offsets)
+  ) {
+    return null;
+  }
+  const surface = candidate as ManifoldSurfaceGeometry;
+  const diagnostics = surface.solver_diagnostics;
+  if (!diagnostics) return null;
+  const reason = formatTerminationReason(diagnostics.termination_reason);
+  const delta = Number.isFinite(diagnostics.final_leaf_delta)
+    ? formatNumber(diagnostics.final_leaf_delta)
+    : 'n/a';
+  const floor = typeof diagnostics.leaf_delta_floor === 'number' && Number.isFinite(diagnostics.leaf_delta_floor)
+    ? formatNumber(diagnostics.leaf_delta_floor)
+    : 'n/a';
+  const detail = diagnostics.termination_detail ? ` (${diagnostics.termination_detail})` : '';
+  const failedRing =
+    typeof diagnostics.failed_ring === 'number' ? diagnostics.failed_ring.toString() : 'n/a';
+  const failedAttempt =
+    typeof diagnostics.failed_attempt === 'number' ? diagnostics.failed_attempt.toString() : 'n/a';
+  const failedLeafPoints =
+    typeof diagnostics.failed_leaf_points === 'number'
+      ? diagnostics.failed_leaf_points.toString()
+      : 'n/a';
+  const floorFlag = diagnostics.min_leaf_delta_reached ? 'yes' : 'no';
+  const leafReason = diagnostics.last_leaf_failure_reason ?? 'n/a';
+  const leafPoint = typeof diagnostics.last_leaf_failure_point === 'number'
+    ? diagnostics.last_leaf_failure_point.toString()
+    : 'n/a';
+  const leafTime = Number.isFinite(diagnostics.last_leaf_failure_time)
+    ? formatNumber(diagnostics.last_leaf_failure_time as number)
+    : 'n/a';
+  const leafSeg = typeof diagnostics.last_leaf_failure_segment === 'number'
+    ? diagnostics.last_leaf_failure_segment.toString()
+    : 'n/a';
+  const leafTau = Number.isFinite(diagnostics.last_leaf_failure_tau)
+    ? formatNumber(diagnostics.last_leaf_failure_tau as number)
+    : 'n/a';
+  return `Termination: ${reason} • Final leaf delta=${delta} • floor=${floor} (reached=${floorFlag}) • failed ring/attempt/solved=${failedRing}/${failedAttempt}/${failedLeafPoints} • leaf reason=${leafReason} @ point/seg=${leafPoint}/${leafSeg} time=${leafTime} tau=${leafTau}${detail}`;
+}
 
 /**
  * Displays a paginated list of branch points for detailed inspection.
@@ -205,11 +275,15 @@ export async function browseBranchSummary(
     const choices: any[] = [...summaryChoices];
     choices.push(new inquirer.Separator());
     choices.push({ name: chalk.red('Exit Branch Viewer'), value: 'EXIT' });
+    const manifoldSummary = summarizeManifoldSolverDiagnostics(branch);
+    const summaryMessage = manifoldSummary
+      ? `Branch Summary\n${chalk.gray(manifoldSummary)}`
+      : 'Branch Summary';
 
     const { selection } = await inquirer.prompt({
       type: 'rawlist',
       name: 'selection',
-      message: 'Branch Summary',
+      message: summaryMessage,
       choices,
       pageSize: MENU_PAGE_SIZE
     });
@@ -342,7 +416,16 @@ export function formatPointRow(
   } else {
     // Single-parameter branch
     const paramVal = formatNumber(pt.param_value);
-    paramDisplay = `${branch.parameterName}=${paramVal}`;
+    if (branch.branchType === 'eq_manifold_1d') {
+      paramDisplay = `s=${paramVal}`;
+    } else if (
+      branch.branchType === 'eq_manifold_2d' ||
+      branch.branchType === 'cycle_manifold_2d'
+    ) {
+      paramDisplay = `ring=${paramVal}`;
+    } else {
+      paramDisplay = `${branch.parameterName}=${paramVal}`;
+    }
   }
 
   const prefix = bifurcationSet.has(arrayIdx) ? '*' : ' ';
@@ -497,7 +580,10 @@ export async function hydrateEigenvalues(sysName: string, branch: ContinuationOb
     branch.branchType === 'pd_curve' ||
     branch.branchType === 'ns_curve' ||
     branch.branchType === 'homoclinic_curve' ||
-    branch.branchType === 'homotopy_saddle_curve'
+    branch.branchType === 'homotopy_saddle_curve' ||
+    branch.branchType === 'eq_manifold_1d' ||
+    branch.branchType === 'eq_manifold_2d' ||
+    branch.branchType === 'cycle_manifold_2d'
   ) {
     return;
   }
@@ -646,15 +732,19 @@ export async function showPointDetails(
     }
   } else {
     // Standard single-parameter branch handling
-    // Override the continuation parameter with the point's value
-    const contParamIdx = paramNames.indexOf(branch.parameterName);
+    // Manifold branches use param_value as arc/ring progress, not a system parameter value.
+    const isManifoldBranch =
+      branchType === 'eq_manifold_1d' ||
+      branchType === 'eq_manifold_2d' ||
+      branchType === 'cycle_manifold_2d';
+    const contParamIdx = isManifoldBranch ? -1 : paramNames.indexOf(branch.parameterName);
     if (contParamIdx >= 0) {
       currentParams[contParamIdx] = pt.param_value;
     }
 
     console.log(chalk.white('Parameters:'));
     for (let i = 0; i < paramNames.length; i++) {
-      const isContParam = paramNames[i] === branch.parameterName;
+      const isContParam = contParamIdx >= 0 && paramNames[i] === branch.parameterName;
       const marker = isContParam ? ' ← continuation' : '';
       const color = isContParam ? chalk.cyan : (x: string) => x;
       console.log(color(`  ${paramNames[i]}: ${formatNumberFullPrecision(currentParams[i])}${marker}`));
@@ -777,6 +867,16 @@ export async function showPointDetails(
     choices.push({ name: `Create New ${equilibriumLabel} Branch`, value: 'NEW_EQ_BRANCH' });
     if (sysConfig.type === 'flow') {
       choices.push({
+        name: 'Compute 1D Equilibrium Manifold',
+        value: 'RUN_EQ_MANIFOLD_1D'
+      });
+      if (sysConfig.equations.length >= 3) {
+        choices.push({
+          name: 'Compute 2D Equilibrium Manifold',
+          value: 'RUN_EQ_MANIFOLD_2D'
+        });
+      }
+      choices.push({
         name: 'Continue Homotopy-Saddle (Method 4)',
         value: 'CONTINUE_HOMOTOPY_SADDLE'
       });
@@ -799,6 +899,9 @@ export async function showPointDetails(
     // For limit cycle branches, offer to create a new limit cycle branch
     choices.push({ name: 'Create New Limit Cycle Branch', value: 'NEW_LC_BRANCH' });
     choices.push({ name: 'Continue Isochrone', value: 'CONTINUE_ISOCHRONE_CURVE' });
+    if (sysConfig.type === 'flow' && sysConfig.equations.length >= 3) {
+      choices.push({ name: 'Compute 2D Limit-Cycle Manifold', value: 'RUN_LC_MANIFOLD_2D' });
+    }
     choices.push({
       name: 'Continue Homoclinic Curve (Method 1)',
       value: 'CONTINUE_HOMOCLINIC_FROM_LC'
@@ -860,6 +963,28 @@ export async function showPointDetails(
     };
   }
 
+  if (action === 'RUN_EQ_MANIFOLD_1D') {
+    const newBranch = await initiateEquilibriumManifold1DFromPoint(sysName, branch, pt, arrayIdx);
+    if (!newBranch) return 'BACK';
+    return {
+      kind: 'OPEN_BRANCH',
+      objectName: newBranch.parentObject,
+      branchName: newBranch.name,
+      autoInspect: true,
+    };
+  }
+
+  if (action === 'RUN_EQ_MANIFOLD_2D') {
+    const newBranch = await initiateEquilibriumManifold2DFromPoint(sysName, branch, pt, arrayIdx);
+    if (!newBranch) return 'BACK';
+    return {
+      kind: 'OPEN_BRANCH',
+      objectName: newBranch.parentObject,
+      branchName: newBranch.name,
+      autoInspect: true,
+    };
+  }
+
   if (action === 'BRANCH_PD_CYCLE') {
     const newBranch = await initiateMapCycleFromPD(sysName, branch, pt, arrayIdx);
     if (!newBranch) return 'BACK';
@@ -873,6 +998,17 @@ export async function showPointDetails(
 
   if (action === 'NEW_LC_BRANCH') {
     const newBranch = await initiateLCBranchFromPoint(sysName, branch, pt, arrayIdx);
+    if (!newBranch) return 'BACK';
+    return {
+      kind: 'OPEN_BRANCH',
+      objectName: newBranch.parentObject,
+      branchName: newBranch.name,
+      autoInspect: true,
+    };
+  }
+
+  if (action === 'RUN_LC_MANIFOLD_2D') {
+    const newBranch = await initiateLimitCycleManifold2DFromPoint(sysName, branch, pt, arrayIdx);
     if (!newBranch) return 'BACK';
     return {
       kind: 'OPEN_BRANCH',

@@ -6,10 +6,10 @@ use fork_core::continuation::homoclinic::HomoclinicProblem;
 use fork_core::continuation::homoclinic_init::decode_homoclinic_state_with_basis;
 use fork_core::continuation::periodic::PeriodicOrbitCollocationProblem;
 use fork_core::continuation::{
-    homoclinic_setup_from_homoclinic_point, pack_homoclinic_state, BranchType,
-    ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint, ContinuationProblem,
-    ContinuationResumeState, ContinuationRunner, ContinuationSettings, HomoclinicBasis,
-    HomoclinicBasisSnapshot, HomoclinicExtraFlags, HomoclinicResumeContext, HomoclinicSetup,
+    homoclinic_setup_from_homoclinic_point, pack_homoclinic_state, BranchType, ContinuationBranch,
+    ContinuationEndpointSeed, ContinuationPoint, ContinuationProblem, ContinuationResumeState,
+    ContinuationRunner, ContinuationSettings, HomoclinicBasis, HomoclinicBasisSnapshot,
+    HomoclinicExtraFlags, HomoclinicResumeContext, HomoclinicSetup,
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::SystemKind;
@@ -1130,6 +1130,13 @@ impl WasmContinuationExtensionRunner {
                     "Branch extension for homotopy-saddle curves is not available yet.",
                 ))
             }
+            BranchType::ManifoldEq1D { .. }
+            | BranchType::ManifoldEq2D { .. }
+            | BranchType::ManifoldCycle2D { .. } => {
+                return Err(JsValue::from_str(
+                    "Branch extension for invariant manifold branches is not available yet.",
+                ))
+            }
         };
 
         Ok(WasmContinuationExtensionRunner {
@@ -1899,7 +1906,10 @@ mod orientation_tests {
         let endpoint_state = pack_homoclinic_state(&endpoint_setup);
 
         let hydrated = hydrate_homoclinic_setup_from_endpoint(&mut setup, &endpoint_state, 3);
-        assert!(hydrated, "expected basis-aware endpoint decode to hydrate setup");
+        assert!(
+            hydrated,
+            "expected basis-aware endpoint decode to hydrate setup"
+        );
         assert_eq!(setup.guess.mesh_states, endpoint_setup.guess.mesh_states);
         assert_eq!(setup.guess.stage_states, endpoint_setup.guess.stage_states);
         assert_eq!(setup.guess.x0, endpoint_setup.guess.x0);
@@ -2129,6 +2139,7 @@ mod orientation_tests {
                     step_size: 0.02,
                 }),
             }),
+            manifold_geometry: None,
         };
 
         let seed = super::select_resume_seed(&branch, true, 3, 2).expect("seed");

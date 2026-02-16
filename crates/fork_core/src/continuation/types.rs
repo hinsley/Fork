@@ -14,6 +14,403 @@ fn default_homoclinic_eps() -> f64 {
     1e-2
 }
 
+fn default_manifold_max_steps() -> usize {
+    2_000
+}
+
+fn default_manifold_max_points() -> usize {
+    20_000
+}
+
+fn default_manifold_max_rings() -> usize {
+    500
+}
+
+fn default_manifold_max_vertices() -> usize {
+    200_000
+}
+
+fn default_manifold_max_time() -> f64 {
+    1_000.0
+}
+
+fn default_manifold_radius() -> f64 {
+    5.0
+}
+
+fn default_manifold_eps() -> f64 {
+    1e-3
+}
+
+fn default_manifold_dt() -> f64 {
+    1e-2
+}
+
+fn default_manifold_ring_points() -> usize {
+    48
+}
+
+fn default_manifold_leaf_delta() -> f64 {
+    2e-3
+}
+
+fn default_manifold_target_arclength() -> f64 {
+    10.0
+}
+
+fn default_manifold_delta_min() -> f64 {
+    1e-3
+}
+
+fn default_manifold_alpha_min() -> f64 {
+    0.3
+}
+
+fn default_manifold_alpha_max() -> f64 {
+    0.4
+}
+
+fn default_manifold_delta_alpha_min() -> f64 {
+    0.1
+}
+
+fn default_manifold_delta_alpha_max() -> f64 {
+    1.0
+}
+
+/// Stable/unstable selector for invariant manifold computations.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ManifoldStability {
+    Stable,
+    Unstable,
+}
+
+/// Direction selector for one-dimensional manifolds.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ManifoldDirection {
+    Plus,
+    Minus,
+    Both,
+}
+
+/// Eigenspace kind selected for two-dimensional equilibrium manifolds.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ManifoldEigenKind {
+    RealPair,
+    ComplexPair,
+}
+
+/// Parameter profile selector for 2D manifold workflows.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Manifold2DProfile {
+    LocalPreview,
+    LorenzGlobalKo,
+}
+
+/// Global stop criteria shared by manifold workflows.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct ManifoldTerminationCaps {
+    #[serde(default = "default_manifold_max_steps")]
+    pub max_steps: usize,
+    #[serde(default = "default_manifold_max_points")]
+    pub max_points: usize,
+    #[serde(default = "default_manifold_max_rings")]
+    pub max_rings: usize,
+    #[serde(default = "default_manifold_max_vertices")]
+    pub max_vertices: usize,
+    #[serde(default = "default_manifold_max_time")]
+    pub max_time: f64,
+}
+
+impl Default for ManifoldTerminationCaps {
+    fn default() -> Self {
+        Self {
+            max_steps: default_manifold_max_steps(),
+            max_points: default_manifold_max_points(),
+            max_rings: default_manifold_max_rings(),
+            max_vertices: default_manifold_max_vertices(),
+            max_time: default_manifold_max_time(),
+        }
+    }
+}
+
+/// Optional box bounds used to stop manifold growth outside a domain.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ManifoldBounds {
+    pub min: Vec<f64>,
+    pub max: Vec<f64>,
+}
+
+/// Settings for 1D equilibrium manifold computation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Manifold1DSettings {
+    pub stability: ManifoldStability,
+    pub direction: ManifoldDirection,
+    #[serde(default)]
+    pub eig_index: Option<usize>,
+    #[serde(default = "default_manifold_eps")]
+    pub eps: f64,
+    #[serde(default = "default_manifold_target_arclength")]
+    pub target_arclength: f64,
+    #[serde(default = "default_manifold_dt")]
+    pub integration_dt: f64,
+    #[serde(default)]
+    pub caps: ManifoldTerminationCaps,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<ManifoldBounds>,
+}
+
+impl Default for Manifold1DSettings {
+    fn default() -> Self {
+        Self {
+            stability: ManifoldStability::Unstable,
+            direction: ManifoldDirection::Both,
+            eig_index: None,
+            eps: default_manifold_eps(),
+            target_arclength: default_manifold_target_arclength(),
+            integration_dt: default_manifold_dt(),
+            caps: ManifoldTerminationCaps::default(),
+            bounds: None,
+        }
+    }
+}
+
+/// Settings for 2D equilibrium manifolds.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Manifold2DSettings {
+    pub stability: ManifoldStability,
+    #[serde(default)]
+    pub eig_indices: Option<[usize; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<Manifold2DProfile>,
+    #[serde(default = "default_manifold_eps")]
+    pub initial_radius: f64,
+    #[serde(default = "default_manifold_leaf_delta")]
+    pub leaf_delta: f64,
+    #[serde(default = "default_manifold_delta_min")]
+    pub delta_min: f64,
+    #[serde(default = "default_manifold_ring_points")]
+    pub ring_points: usize,
+    /// Minimum accepted spacing between adjacent ring vertices.
+    /// Non-positive values enable adaptive defaults based on `leaf_delta`.
+    #[serde(default)]
+    pub min_spacing: f64,
+    /// Maximum accepted spacing between adjacent ring vertices.
+    /// Non-positive values enable adaptive defaults based on `leaf_delta`.
+    #[serde(default)]
+    pub max_spacing: f64,
+    #[serde(default = "default_manifold_alpha_min")]
+    pub alpha_min: f64,
+    #[serde(default = "default_manifold_alpha_max")]
+    pub alpha_max: f64,
+    #[serde(default = "default_manifold_delta_alpha_min")]
+    pub delta_alpha_min: f64,
+    #[serde(default = "default_manifold_delta_alpha_max")]
+    pub delta_alpha_max: f64,
+    #[serde(default = "default_manifold_dt")]
+    pub integration_dt: f64,
+    #[serde(default = "default_manifold_radius")]
+    pub target_radius: f64,
+    #[serde(default = "default_manifold_target_arclength")]
+    pub target_arclength: f64,
+    #[serde(default)]
+    pub caps: ManifoldTerminationCaps,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<ManifoldBounds>,
+}
+
+impl Default for Manifold2DSettings {
+    fn default() -> Self {
+        Self {
+            stability: ManifoldStability::Unstable,
+            eig_indices: None,
+            profile: None,
+            initial_radius: default_manifold_eps(),
+            leaf_delta: default_manifold_leaf_delta(),
+            delta_min: default_manifold_delta_min(),
+            ring_points: default_manifold_ring_points(),
+            min_spacing: 0.0,
+            max_spacing: 0.0,
+            alpha_min: default_manifold_alpha_min(),
+            alpha_max: default_manifold_alpha_max(),
+            delta_alpha_min: default_manifold_delta_alpha_min(),
+            delta_alpha_max: default_manifold_delta_alpha_max(),
+            integration_dt: default_manifold_dt(),
+            target_radius: default_manifold_radius(),
+            target_arclength: default_manifold_target_arclength(),
+            caps: ManifoldTerminationCaps::default(),
+            bounds: None,
+        }
+    }
+}
+
+/// Settings for 2D limit-cycle manifold computations.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ManifoldCycle2DSettings {
+    pub stability: ManifoldStability,
+    #[serde(default)]
+    pub floquet_index: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<Manifold2DProfile>,
+    #[serde(default = "default_manifold_eps")]
+    pub initial_radius: f64,
+    #[serde(default = "default_manifold_leaf_delta")]
+    pub leaf_delta: f64,
+    #[serde(default = "default_manifold_delta_min")]
+    pub delta_min: f64,
+    #[serde(default = "default_manifold_ring_points")]
+    pub ring_points: usize,
+    #[serde(default)]
+    pub min_spacing: f64,
+    #[serde(default)]
+    pub max_spacing: f64,
+    #[serde(default = "default_manifold_alpha_min")]
+    pub alpha_min: f64,
+    #[serde(default = "default_manifold_alpha_max")]
+    pub alpha_max: f64,
+    #[serde(default = "default_manifold_delta_alpha_min")]
+    pub delta_alpha_min: f64,
+    #[serde(default = "default_manifold_delta_alpha_max")]
+    pub delta_alpha_max: f64,
+    #[serde(default = "default_manifold_dt")]
+    pub integration_dt: f64,
+    #[serde(default = "default_manifold_target_arclength")]
+    pub target_arclength: f64,
+    #[serde(default)]
+    pub ntst: usize,
+    #[serde(default)]
+    pub ncol: usize,
+    #[serde(default)]
+    pub caps: ManifoldTerminationCaps,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<ManifoldBounds>,
+}
+
+impl Default for ManifoldCycle2DSettings {
+    fn default() -> Self {
+        Self {
+            stability: ManifoldStability::Unstable,
+            floquet_index: None,
+            profile: None,
+            initial_radius: default_manifold_eps(),
+            leaf_delta: default_manifold_leaf_delta(),
+            delta_min: default_manifold_delta_min(),
+            ring_points: default_manifold_ring_points(),
+            min_spacing: 0.0,
+            max_spacing: 0.0,
+            alpha_min: default_manifold_alpha_min(),
+            alpha_max: default_manifold_alpha_max(),
+            delta_alpha_min: default_manifold_delta_alpha_min(),
+            delta_alpha_max: default_manifold_delta_alpha_max(),
+            integration_dt: default_manifold_dt(),
+            target_arclength: default_manifold_target_arclength(),
+            ntst: 0,
+            ncol: 0,
+            caps: ManifoldTerminationCaps::default(),
+            bounds: None,
+        }
+    }
+}
+
+/// Geometry payload for a 1D manifold.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ManifoldCurveGeometry {
+    pub dim: usize,
+    pub points_flat: Vec<f64>,
+    pub arclength: Vec<f64>,
+    pub direction: ManifoldDirection,
+}
+
+/// Per-ring diagnostics for 2D manifold growth.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ManifoldRingDiagnostic {
+    pub ring_index: usize,
+    pub radius_estimate: f64,
+    pub point_count: usize,
+}
+
+/// Solver-level diagnostics for 2D manifold growth.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ManifoldSurfaceSolverDiagnostics {
+    #[serde(default)]
+    pub termination_reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub termination_detail: Option<String>,
+    #[serde(default)]
+    pub final_leaf_delta: f64,
+    #[serde(default)]
+    pub ring_attempts: usize,
+    #[serde(default)]
+    pub build_failures: usize,
+    #[serde(default)]
+    pub spacing_failures: usize,
+    #[serde(default)]
+    pub reject_ring_quality: usize,
+    #[serde(default)]
+    pub reject_geodesic_quality: usize,
+    #[serde(default)]
+    pub reject_too_small: usize,
+    #[serde(default)]
+    pub leaf_fail_plane_no_convergence: usize,
+    #[serde(default)]
+    pub leaf_fail_plane_root_not_bracketed: usize,
+    #[serde(default)]
+    pub leaf_fail_segment_switch_limit: usize,
+    #[serde(default)]
+    pub leaf_fail_integrator_non_finite: usize,
+    #[serde(default)]
+    pub leaf_fail_no_first_hit_within_max_time: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_ring: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_attempt: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_leaf_points: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_leaf_failure_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_leaf_failure_point: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_leaf_failure_time: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_leaf_failure_segment: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_leaf_failure_tau: Option<f64>,
+    #[serde(default)]
+    pub leaf_delta_floor: f64,
+    #[serde(default)]
+    pub min_leaf_delta_reached: bool,
+    #[serde(default)]
+    pub last_ring_max_turn_angle: f64,
+    #[serde(default)]
+    pub last_ring_max_distance_angle: f64,
+    #[serde(default)]
+    pub last_geodesic_max_angle: f64,
+    #[serde(default)]
+    pub last_geodesic_max_distance_angle: f64,
+}
+
+/// Geometry payload for 2D manifold surfaces.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ManifoldSurfaceGeometry {
+    pub dim: usize,
+    pub vertices_flat: Vec<f64>,
+    pub triangles: Vec<usize>,
+    pub ring_offsets: Vec<usize>,
+    #[serde(default)]
+    pub ring_diagnostics: Vec<ManifoldRingDiagnostic>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub solver_diagnostics: Option<ManifoldSurfaceSolverDiagnostics>,
+}
+
+/// Persisted manifold geometry attached to a continuation branch.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
+pub enum ManifoldGeometry {
+    Curve(ManifoldCurveGeometry),
+    Surface(ManifoldSurfaceGeometry),
+}
+
 /// Settings controlling the pseudo-arclength continuation algorithm.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ContinuationSettings {
@@ -75,6 +472,28 @@ pub enum BranchType {
         param2_name: String,
         stage: HomotopyStage,
     },
+    ManifoldEq1D {
+        stability: ManifoldStability,
+        direction: ManifoldDirection,
+        eig_index: usize,
+        method: String,
+        caps: ManifoldTerminationCaps,
+    },
+    ManifoldEq2D {
+        stability: ManifoldStability,
+        eig_kind: ManifoldEigenKind,
+        eig_indices: [usize; 2],
+        method: String,
+        caps: ManifoldTerminationCaps,
+    },
+    ManifoldCycle2D {
+        stability: ManifoldStability,
+        floquet_index: usize,
+        ntst: usize,
+        ncol: usize,
+        method: String,
+        caps: ManifoldTerminationCaps,
+    },
 }
 
 impl Default for BranchType {
@@ -117,6 +536,9 @@ pub struct ContinuationBranch {
     /// Optional extension resume metadata for min/max signed-index endpoints.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_state: Option<ContinuationResumeState>,
+    /// Optional persisted geometry for invariant-manifold branches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifold_geometry: Option<ManifoldGeometry>,
 }
 
 /// Basis snapshot for homoclinic continuation restart/extension.
@@ -286,6 +708,9 @@ pub struct StepResult {
     pub bifurcations_found: usize,
     /// Current parameter value (for live display)
     pub current_param: f64,
+    /// Number of manifold rings accepted so far (when applicable).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rings_computed: Option<usize>,
 }
 
 impl StepResult {
@@ -304,6 +729,12 @@ impl StepResult {
             points_computed,
             bifurcations_found,
             current_param,
+            rings_computed: None,
         }
+    }
+
+    pub fn with_rings_computed(mut self, rings_computed: usize) -> Self {
+        self.rings_computed = Some(rings_computed);
+        self
     }
 }

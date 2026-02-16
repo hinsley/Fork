@@ -31,6 +31,9 @@ pub mod homoclinic_init;
 #[path = "continuation/homotopy_saddle.rs"]
 pub mod homotopy_saddle;
 
+#[path = "continuation/manifold.rs"]
+pub mod manifold;
+
 // Re-export types needed for external use
 pub use codim1_curves::{Codim2TestFunctions, FoldCurveProblem, HopfCurveProblem};
 pub use homoclinic::continue_homoclinic_curve;
@@ -43,7 +46,13 @@ pub use homoclinic_init::{
     HomoclinicSetup, HomotopySaddleSetup,
 };
 pub use homotopy_saddle::{continue_homotopy_saddle_curve, homotopy_stage_d_to_homoclinic};
-pub use lc_codim1_curves::{IsochroneCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem};
+pub use lc_codim1_curves::{
+    IsochroneCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
+};
+pub use manifold::{
+    continue_limit_cycle_manifold_2d, continue_limit_cycle_manifold_2d_with_progress,
+    continue_manifold_eq_1d, continue_manifold_eq_2d, continue_manifold_eq_2d_with_progress,
+};
 pub use periodic::{
     continue_limit_cycle_collocation, extend_limit_cycle_collocation, limit_cycle_setup_from_hopf,
     limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd, CollocationConfig, LimitCycleGuess,
@@ -54,7 +63,10 @@ pub use types::{
     BifurcationType, BranchType, Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType,
     Codim2BifurcationType, ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint,
     ContinuationResumeState, ContinuationSettings, HomoclinicBasisSnapshot,
-    HomoclinicResumeContext, HomotopyStage, StepResult,
+    HomoclinicResumeContext, HomotopyStage, Manifold1DSettings, Manifold2DSettings, ManifoldBounds,
+    ManifoldCurveGeometry, ManifoldCycle2DSettings, ManifoldDirection, ManifoldEigenKind,
+    ManifoldGeometry, ManifoldRingDiagnostic, ManifoldStability, ManifoldSurfaceGeometry,
+    ManifoldTerminationCaps, StepResult,
 };
 pub use util::{
     compute_eigenvalues, compute_nullspace_tangent, continuation_point_to_aug, hopf_pair_count,
@@ -107,6 +119,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
         upoldp: None,
         homoc_context: None,
         resume_state: None,
+        manifold_geometry: None,
     };
 
     // Compute initial tangent and orient it based on requested parameter direction.
@@ -424,6 +437,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             upoldp: None,
             homoc_context: None,
             resume_state: None,
+            manifold_geometry: None,
         };
         Ok((initial_diag, branch))
     }
@@ -1292,6 +1306,7 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
         upoldp: None,
         homoc_context: None,
         resume_state: None,
+        manifold_geometry: None,
     };
 
     // Use provided tangent (already oriented correctly)
@@ -1981,6 +1996,7 @@ pub fn continue_parameter(
         upoldp: None,
         homoc_context: None,
         resume_state: None,
+        manifold_geometry: None,
     };
 
     extend_branch(system, kind, branch, param_index, settings, forward)
@@ -2832,6 +2848,7 @@ mod tests {
             upoldp: None,
             homoc_context: None,
             resume_state: None,
+            manifold_geometry: None,
         };
 
         let extended = extend_branch_with_problem(&mut problem, branch, settings, true)
@@ -3057,6 +3074,7 @@ mod tests {
                     step_size: 0.05,
                 }),
             }),
+            manifold_geometry: None,
         };
 
         let extended = extend_branch_with_problem(&mut problem, branch, settings, true)
@@ -3132,6 +3150,7 @@ mod tests {
                     step_size: 0.2,
                 }),
             }),
+            manifold_geometry: None,
         };
 
         let extended =
@@ -3182,6 +3201,7 @@ mod tests {
             upoldp: None,
             homoc_context: None,
             resume_state: None,
+            manifold_geometry: None,
         };
 
         let extended =

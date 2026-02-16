@@ -78,6 +78,10 @@ behavior.
   objects:
   - equilibrium and codim-1 bifurcation curves render as `lines` (no per-point
     markers);
+  - invariant manifold branches render from persisted `manifold_geometry`:
+    `eq_manifold_1d` as line traces, and `eq_manifold_2d` /
+    `cycle_manifold_2d` as per-ring closed line traces (no mesh fill) in both
+    3-axis and 2-axis scene projections;
   - codim-2 points from `branch.data.bifurcations` render as dedicated diamond
     marker traces;
   - selected branch-point markers in scenes use the same dedicated selected
