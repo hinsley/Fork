@@ -77,6 +77,28 @@ describe('system serialization', () => {
     expect(ui?.ui.layout.leftWidth).toBe(system.ui.layout.leftWidth)
   })
 
+  it('serializes UI without touching data-heavy objects or branches', () => {
+    const base = createSystem({ name: 'Ui_Only_Serialize' })
+    const withScene = addScene(base, 'Scene 1')
+    const guarded = Object.create(withScene.system) as typeof withScene.system
+    Object.defineProperty(guarded, 'objects', {
+      get() {
+        throw new Error('objects should not be accessed for UI serialization')
+      },
+      enumerable: true,
+      configurable: true,
+    })
+    Object.defineProperty(guarded, 'branches', {
+      get() {
+        throw new Error('branches should not be accessed for UI serialization')
+      },
+      enumerable: true,
+      configurable: true,
+    })
+
+    expect(() => serializeSystemUi(guarded)).not.toThrow()
+  })
+
   it('rejects old schema bundles with recompute guidance', () => {
     const system = createSystem({ name: 'OldSchema' })
     expect(() =>

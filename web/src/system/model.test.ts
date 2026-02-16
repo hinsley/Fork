@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  addBranch,
   addObject,
   addBifurcationDiagram,
   addScene,
@@ -15,7 +16,7 @@ import {
   updateScene,
   updateSystem,
 } from './model'
-import type { OrbitObject } from './types'
+import type { ContinuationObject, LimitCycleObject, OrbitObject } from './types'
 
 describe('system model', () => {
   it('adds objects, renames, and toggles visibility', () => {
@@ -214,5 +215,116 @@ describe('system model', () => {
     const normalized = normalizeSystem(legacy)
 
     expect(normalized.scenes[0]?.axisVariables).toEqual(['w', 'x', 'y'])
+  })
+
+  it('renames scene nodes without cloning object or branch payload maps', () => {
+    const base = createSystem({ name: 'Scene_Rename_Ref' })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit A',
+      systemName: base.config.name,
+      data: [[0, 0, 1]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+    }
+    const withObject = addObject(base, orbit)
+    const withScene = addScene(withObject.system, 'Scene A')
+
+    const renamed = renameNode(withScene.system, withScene.nodeId, 'Scene B')
+
+    expect(renamed.nodes[withScene.nodeId].name).toBe('Scene B')
+    expect(renamed.scenes.find((scene) => scene.id === withScene.nodeId)?.name).toBe('Scene B')
+    expect(renamed.objects).toBe(withScene.system.objects)
+    expect(renamed.branches).toBe(withScene.system.branches)
+    expect(renamed.rootIds).toBe(withScene.system.rootIds)
+  })
+
+  it('renames objects with dependency rewrites using copy-on-write updates', () => {
+    const base = createSystem({
+      name: 'Object_Rename_Ref',
+      config: {
+        name: 'Object_Rename_Ref',
+        equations: ['y', '-x'],
+        params: [0],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit A',
+      systemName: base.config.name,
+      data: [[0, 0, 1]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+      parameters: [0],
+    }
+    const withOrbit = addObject(base, orbit)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'orbit_branch',
+      systemName: base.config.name,
+      parameterName: 'mu',
+      parentObject: orbit.name,
+      startObject: orbit.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [{ state: [0, 0], param_value: 0, stability: 'None', eigenvalues: [] }],
+        bifurcations: [],
+        indices: [0],
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-5,
+        max_step_size: 0.1,
+        max_steps: 10,
+        corrector_steps: 3,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: new Date().toISOString(),
+      params: [0],
+    }
+    const withBranch = addBranch(withOrbit.system, branch, withOrbit.nodeId)
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC A',
+      systemName: base.config.name,
+      origin: { type: 'orbit', orbitName: orbit.name },
+      ntst: 12,
+      ncol: 4,
+      period: 1,
+      state: [0, 0],
+      createdAt: new Date().toISOString(),
+      parameters: [0],
+    }
+    const withLimitCycle = addObject(withBranch.system, limitCycle)
+
+    const renamed = renameNode(withLimitCycle.system, withOrbit.nodeId, 'Orbit B')
+
+    expect(renamed.nodes[withOrbit.nodeId].name).toBe('Orbit B')
+    expect(renamed.objects[withOrbit.nodeId].name).toBe('Orbit B')
+    expect(renamed.branches[withBranch.nodeId].parentObject).toBe('Orbit B')
+    expect(renamed.branches[withBranch.nodeId].startObject).toBe('Orbit B')
+    const lc = renamed.objects[withLimitCycle.nodeId]
+    expect(lc.type).toBe('limit_cycle')
+    if (lc.type === 'limit_cycle') {
+      expect(lc.origin.type).toBe('orbit')
+      if (lc.origin.type === 'orbit') {
+        expect(lc.origin.orbitName).toBe('Orbit B')
+      }
+    }
+    expect(renamed.objects).not.toBe(withLimitCycle.system.objects)
+    expect(renamed.branches).not.toBe(withLimitCycle.system.branches)
+    const renamedOrbit = renamed.objects[withOrbit.nodeId]
+    const originalOrbit = withLimitCycle.system.objects[withOrbit.nodeId]
+    expect(renamedOrbit.type).toBe('orbit')
+    if (renamedOrbit.type === 'orbit' && originalOrbit.type === 'orbit') {
+      expect(renamedOrbit.data).toBe(originalOrbit.data)
+    }
   })
 })

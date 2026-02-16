@@ -81,7 +81,15 @@ export function serializeSystemData(system: System): SystemDataBundle {
 }
 
 export function serializeSystemUi(system: System): SystemUiBundle {
-  const { ui } = splitSystem(system)
+  const ui: SystemUiSnapshot = {
+    systemId: system.id,
+    updatedAt: system.updatedAt,
+    nodes: structuredClone(system.nodes),
+    rootIds: structuredClone(system.rootIds),
+    scenes: structuredClone(system.scenes),
+    bifurcationDiagrams: structuredClone(system.bifurcationDiagrams),
+    ui: structuredClone(system.ui),
+  }
   return {
     schemaVersion: SYSTEM_UI_SCHEMA_VERSION,
     ui,

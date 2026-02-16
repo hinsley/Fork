@@ -228,74 +228,154 @@ export function addBifurcationDiagram(
 }
 
 export function renameNode(system: System, nodeId: string, newName: string): System {
-  const next = structuredClone(system)
-  const node = next.nodes[nodeId]
+  const node = system.nodes[nodeId]
   if (!node) return system
-  const renamedObject = next.objects[nodeId]
+  const nextNodes = {
+    ...system.nodes,
+    [nodeId]: {
+      ...node,
+      name: newName,
+    },
+  }
+
+  let nextObjects = system.objects
+  let nextBranches = system.branches
+
+  const getObject = (id: string) =>
+    nextObjects === system.objects ? system.objects[id] : nextObjects[id]
+  const getBranch = (id: string) =>
+    nextBranches === system.branches ? system.branches[id] : nextBranches[id]
+
+  const setObject = (id: string, value: System['objects'][string]) => {
+    if (nextObjects === system.objects) {
+      nextObjects = { ...system.objects }
+    }
+    nextObjects[id] = value
+  }
+
+  const setBranch = (id: string, value: System['branches'][string]) => {
+    if (nextBranches === system.branches) {
+      nextBranches = { ...system.branches }
+    }
+    nextBranches[id] = value
+  }
+
+  const renamedObject = getObject(nodeId)
   const oldObjectName = renamedObject?.name
 
-  node.name = newName
   if (renamedObject) {
-    renamedObject.name = newName
+    setObject(nodeId, { ...renamedObject, name: newName })
   }
-  const branch = next.branches[nodeId]
-  if (branch) branch.name = newName
+  const branch = getBranch(nodeId)
+  if (branch) {
+    setBranch(nodeId, { ...branch, name: newName })
+  }
 
   if (oldObjectName && oldObjectName !== newName) {
-    for (const candidate of Object.values(next.branches)) {
-      if (candidate.parentObject === oldObjectName) {
-        candidate.parentObject = newName
+    for (const branchId of Object.keys(system.branches)) {
+      const candidate = getBranch(branchId)
+      let updatedBranch = candidate
+      if (updatedBranch.parentObject === oldObjectName) {
+        updatedBranch = { ...updatedBranch, parentObject: newName }
       }
       if (
-        candidate.startObject === oldObjectName &&
-        (candidate.branchType === 'equilibrium' || candidate.branchType === 'limit_cycle')
+        updatedBranch.startObject === oldObjectName &&
+        (updatedBranch.branchType === 'equilibrium' ||
+          updatedBranch.branchType === 'limit_cycle')
       ) {
-        candidate.startObject = newName
+        updatedBranch = { ...updatedBranch, startObject: newName }
+      }
+      if (updatedBranch !== candidate) {
+        setBranch(branchId, updatedBranch)
       }
     }
 
-    for (const obj of Object.values(next.objects)) {
+    for (const objectId of Object.keys(system.objects)) {
+      const obj = getObject(objectId)
       if (obj.type !== 'limit_cycle') continue
       if (obj.origin.type === 'orbit' && obj.origin.orbitName === oldObjectName) {
-        obj.origin = { ...obj.origin, orbitName: newName }
+        setObject(objectId, {
+          ...obj,
+          origin: { ...obj.origin, orbitName: newName },
+        })
       } else if (
         obj.origin.type === 'hopf' &&
         obj.origin.equilibriumObjectName === oldObjectName
       ) {
-        obj.origin = { ...obj.origin, equilibriumObjectName: newName }
+        setObject(objectId, {
+          ...obj,
+          origin: { ...obj.origin, equilibriumObjectName: newName },
+        })
       } else if (
         obj.origin.type === 'pd' &&
         obj.origin.sourceLimitCycleObjectName === oldObjectName
       ) {
-        obj.origin = { ...obj.origin, sourceLimitCycleObjectName: newName }
+        setObject(objectId, {
+          ...obj,
+          origin: { ...obj.origin, sourceLimitCycleObjectName: newName },
+        })
       }
     }
   }
 
-  const scene = next.scenes.find((entry) => entry.id === nodeId)
-  if (scene) scene.name = newName
-  const diagram = next.bifurcationDiagrams.find((entry) => entry.id === nodeId)
-  if (diagram) diagram.name = newName
-  next.updatedAt = nowIso()
-  return next
+  const sceneIndex = system.scenes.findIndex((entry) => entry.id === nodeId)
+  let nextScenes = system.scenes
+  if (sceneIndex !== -1) {
+    nextScenes = [...system.scenes]
+    nextScenes[sceneIndex] = { ...nextScenes[sceneIndex], name: newName }
+  }
+
+  const diagramIndex = system.bifurcationDiagrams.findIndex((entry) => entry.id === nodeId)
+  let nextBifurcationDiagrams = system.bifurcationDiagrams
+  if (diagramIndex !== -1) {
+    nextBifurcationDiagrams = [...system.bifurcationDiagrams]
+    nextBifurcationDiagrams[diagramIndex] = {
+      ...nextBifurcationDiagrams[diagramIndex],
+      name: newName,
+    }
+  }
+
+  return {
+    ...system,
+    nodes: nextNodes,
+    objects: nextObjects,
+    branches: nextBranches,
+    scenes: nextScenes,
+    bifurcationDiagrams: nextBifurcationDiagrams,
+    updatedAt: nowIso(),
+  }
 }
 
 export function toggleNodeVisibility(system: System, nodeId: string): System {
-  const next = structuredClone(system)
-  const node = next.nodes[nodeId]
+  const node = system.nodes[nodeId]
   if (!node) return system
-  node.visibility = !node.visibility
-  next.updatedAt = nowIso()
-  return next
+  return {
+    ...system,
+    nodes: {
+      ...system.nodes,
+      [nodeId]: {
+        ...node,
+        visibility: !node.visibility,
+      },
+    },
+    updatedAt: nowIso(),
+  }
 }
 
 export function toggleNodeExpanded(system: System, nodeId: string): System {
-  const next = structuredClone(system)
-  const node = next.nodes[nodeId]
+  const node = system.nodes[nodeId]
   if (!node) return system
-  node.expanded = !node.expanded
-  next.updatedAt = nowIso()
-  return next
+  return {
+    ...system,
+    nodes: {
+      ...system.nodes,
+      [nodeId]: {
+        ...node,
+        expanded: !node.expanded,
+      },
+    },
+    updatedAt: nowIso(),
+  }
 }
 
 export function moveNode(
@@ -420,27 +500,45 @@ export function removeNode(system: System, nodeId: string): System {
 }
 
 export function selectNode(system: System, nodeId: string | null): System {
-  const next = structuredClone(system)
-  next.ui.selectedNodeId = nodeId
-  next.updatedAt = nowIso()
-  return next
+  return {
+    ...system,
+    ui: {
+      ...system.ui,
+      selectedNodeId: nodeId,
+    },
+    updatedAt: nowIso(),
+  }
 }
 
 export function updateLayout(system: System, layout: Partial<SystemLayout>): System {
-  const next = structuredClone(system)
-  next.ui.layout = { ...next.ui.layout, ...layout }
-  next.updatedAt = nowIso()
-  return next
+  return {
+    ...system,
+    ui: {
+      ...system.ui,
+      layout: {
+        ...system.ui.layout,
+        ...layout,
+      },
+    },
+    updatedAt: nowIso(),
+  }
 }
 
 export function updateViewportHeights(
   system: System,
   updates: Record<string, number>
 ): System {
-  const next = structuredClone(system)
-  next.ui.viewportHeights = { ...next.ui.viewportHeights, ...updates }
-  next.updatedAt = nowIso()
-  return next
+  return {
+    ...system,
+    ui: {
+      ...system.ui,
+      viewportHeights: {
+        ...system.ui.viewportHeights,
+        ...updates,
+      },
+    },
+    updatedAt: nowIso(),
+  }
 }
 
 export function updateLimitCycleRenderTarget(
@@ -448,17 +546,20 @@ export function updateLimitCycleRenderTarget(
   objectId: string,
   target: LimitCycleRenderTarget | null
 ): System {
-  const next = structuredClone(system)
-  if (!next.ui.limitCycleRenderTargets) {
-    next.ui.limitCycleRenderTargets = {}
-  }
+  const nextTargets = { ...(system.ui.limitCycleRenderTargets ?? {}) }
   if (target) {
-    next.ui.limitCycleRenderTargets[objectId] = target
+    nextTargets[objectId] = target
   } else {
-    delete next.ui.limitCycleRenderTargets[objectId]
+    delete nextTargets[objectId]
   }
-  next.updatedAt = nowIso()
-  return next
+  return {
+    ...system,
+    ui: {
+      ...system.ui,
+      limitCycleRenderTargets: nextTargets,
+    },
+    updatedAt: nowIso(),
+  }
 }
 
 export function updateNodeRender(
@@ -466,12 +567,19 @@ export function updateNodeRender(
   nodeId: string,
   render: Partial<TreeNode['render']>
 ): System {
-  const next = structuredClone(system)
-  const node = next.nodes[nodeId]
+  const node = system.nodes[nodeId]
   if (!node) return system
-  node.render = { ...DEFAULT_RENDER, ...(node.render ?? {}), ...render }
-  next.updatedAt = nowIso()
-  return next
+  return {
+    ...system,
+    nodes: {
+      ...system.nodes,
+      [nodeId]: {
+        ...node,
+        render: { ...DEFAULT_RENDER, ...(node.render ?? {}), ...render },
+      },
+    },
+    updatedAt: nowIso(),
+  }
 }
 
 export function updateScene(
@@ -479,12 +587,15 @@ export function updateScene(
   sceneId: string,
   update: Partial<Omit<Scene, 'id' | 'name'>>
 ): System {
-  const next = structuredClone(system)
-  const scene = next.scenes.find((entry) => entry.id === sceneId)
-  if (!scene) return system
-  Object.assign(scene, update)
-  next.updatedAt = nowIso()
-  return next
+  const index = system.scenes.findIndex((entry) => entry.id === sceneId)
+  if (index === -1) return system
+  const nextScenes = [...system.scenes]
+  nextScenes[index] = { ...nextScenes[index], ...update }
+  return {
+    ...system,
+    scenes: nextScenes,
+    updatedAt: nowIso(),
+  }
 }
 
 export function updateBifurcationDiagram(
@@ -492,12 +603,15 @@ export function updateBifurcationDiagram(
   diagramId: string,
   update: Partial<Omit<BifurcationDiagram, 'id' | 'name'>>
 ): System {
-  const next = structuredClone(system)
-  const diagram = next.bifurcationDiagrams.find((entry) => entry.id === diagramId)
-  if (!diagram) return system
-  Object.assign(diagram, update)
-  next.updatedAt = nowIso()
-  return next
+  const index = system.bifurcationDiagrams.findIndex((entry) => entry.id === diagramId)
+  if (index === -1) return system
+  const nextDiagrams = [...system.bifurcationDiagrams]
+  nextDiagrams[index] = { ...nextDiagrams[index], ...update }
+  return {
+    ...system,
+    bifurcationDiagrams: nextDiagrams,
+    updatedAt: nowIso(),
+  }
 }
 
 export function updateSystem(system: System, config: SystemConfig): System {

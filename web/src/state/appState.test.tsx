@@ -125,6 +125,90 @@ describe('appState selection', () => {
   })
 })
 
+describe('appState rename persistence routing', () => {
+  class SpySystemStore extends MemorySystemStore {
+    saveCount = 0
+    saveUiCount = 0
+
+    override async save(system: System): Promise<void> {
+      this.saveCount += 1
+      await super.save(system)
+    }
+
+    override async saveUi(system: System): Promise<void> {
+      this.saveUiCount += 1
+      await super.saveUi(system)
+    }
+  }
+
+  it('keeps selection unsaved, routes style updates to saveUi, and routes object renames to save', async () => {
+    const base = createSystem({ name: 'Rename_Routing' })
+    const sceneId = base.scenes[0]?.id
+    if (!sceneId) {
+      throw new Error('Expected default scene.')
+    }
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_For_Rename',
+      systemName: base.config.name,
+      data: [[0, 0, 0, 0]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+      parameters: [...base.config.params],
+    }
+    const withOrbit = addObject(base, orbit)
+    const store = new SpySystemStore()
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <AppProvider store={store} client={new MockForkCoreClient(0)} initialSystem={withOrbit.system}>
+        {children}
+      </AppProvider>
+    )
+    const { result } = renderHook(() => useAppContext(), { wrapper })
+    const getContext = () => {
+      if (!result.current) {
+        throw new Error('Missing app context.')
+      }
+      return result.current
+    }
+
+    await act(async () => {
+      getContext().actions.renameNode(sceneId, 'Scene_Renamed')
+    })
+
+    await waitFor(() => {
+      expect(store.saveUiCount).toBe(1)
+      expect(store.saveCount).toBe(0)
+    })
+
+    await act(async () => {
+      getContext().actions.selectNode(withOrbit.nodeId)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    })
+
+    expect(store.saveUiCount).toBe(1)
+    expect(store.saveCount).toBe(0)
+
+    await act(async () => {
+      getContext().actions.updateRender(withOrbit.nodeId, { lineWidth: 4, color: '#ff0000' })
+    })
+
+    await waitFor(() => {
+      expect(store.saveUiCount).toBe(2)
+      expect(store.saveCount).toBe(0)
+    })
+
+    await act(async () => {
+      getContext().actions.renameNode(withOrbit.nodeId, 'Orbit_Renamed')
+    })
+
+    await waitFor(() => {
+      expect(store.saveCount).toBe(1)
+      expect(store.saveUiCount).toBe(1)
+    })
+  })
+})
+
 describe('appState limit cycle render targets', () => {
   it('uses the last computed point after continuing from an orbit', async () => {
     const base = createSystem({ name: 'Orbit_LC' })

@@ -1528,9 +1528,13 @@ export function AppProvider({
       }
       const system = renameNode(state.system, nodeId, trimmedName)
       dispatch({ type: 'SET_SYSTEM', system })
-      scheduleSystemSave(system)
+      if (node.kind === 'scene' || node.kind === 'diagram') {
+        scheduleUiSave(system)
+      } else {
+        scheduleSystemSave(system)
+      }
     },
-    [scheduleSystemSave, state.system]
+    [scheduleSystemSave, scheduleUiSave, state.system]
   )
 
   const toggleVisibilityAction = useCallback(
