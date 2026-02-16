@@ -1939,6 +1939,7 @@ function buildManifoldCurveTraces(config: {
   pointSize: number
   highlight: boolean
   geometry: ManifoldCurveGeometry
+  subsystemSnapshot?: SubsystemSnapshot | null
   axisIndices: number[] | null
   plotDim: 1 | 2 | 3
   selectedPointIndex: number | null
@@ -1952,6 +1953,7 @@ function buildManifoldCurveTraces(config: {
     pointSize,
     highlight,
     geometry,
+    subsystemSnapshot,
     axisIndices,
     plotDim: requestedPlotDim,
     selectedPointIndex,
@@ -1961,16 +1963,29 @@ function buildManifoldCurveTraces(config: {
   const dim = Math.trunc(geometry.dim)
   const pointCount = Math.floor(geometry.points_flat.length / dim)
   if (pointCount <= 0) return traces
-  const plotDim = Math.max(1, Math.min(requestedPlotDim, dim, 3)) as 1 | 2 | 3
-  const axes = resolveAxisOrder(dim, plotDim, axisIndices)
-  const width = highlight ? lineWidth + 1 : lineWidth
-  const markerSize = highlight ? pointSize + 4 : pointSize + 2
-  const readPoint = (index: number): number[] | null => {
+  const displayPoints: Array<number[] | null> = Array.from({ length: pointCount }, () => null)
+  let displayDim = 0
+  const readRawPoint = (index: number): number[] | null => {
     if (index < 0 || index >= pointCount) return null
     const start = index * dim
     const point = geometry.points_flat.slice(start, start + dim)
     return point.length === dim ? point : null
   }
+  for (let index = 0; index < pointCount; index += 1) {
+    const rawPoint = readRawPoint(index)
+    if (!rawPoint) continue
+    const mappedPoint = subsystemSnapshot
+      ? stateVectorToDisplay(subsystemSnapshot, rawPoint)
+      : rawPoint
+    if (!Array.isArray(mappedPoint) || mappedPoint.length === 0) continue
+    displayPoints[index] = mappedPoint
+    displayDim = Math.max(displayDim, mappedPoint.length)
+  }
+  if (displayDim <= 0) return traces
+  const plotDim = Math.max(1, Math.min(requestedPlotDim, displayDim, 3)) as 1 | 2 | 3
+  const axes = resolveAxisOrder(displayDim, plotDim, axisIndices)
+  const width = highlight ? lineWidth + 1 : lineWidth
+  const markerSize = highlight ? pointSize + 4 : pointSize + 2
 
   if (plotDim >= 3) {
     const x: number[] = []
@@ -1978,7 +1993,7 @@ function buildManifoldCurveTraces(config: {
     const z: number[] = []
     const customdata: number[] = []
     for (let index = 0; index < pointCount; index += 1) {
-      const point = readPoint(index)
+      const point = displayPoints[index]
       if (!point) continue
       const px = point[axes[0] ?? 0]
       const py = point[axes[1] ?? 1]
@@ -2007,7 +2022,7 @@ function buildManifoldCurveTraces(config: {
       selectedPointIndex >= 0 &&
       selectedPointIndex < pointCount
     ) {
-      const selected = readPoint(selectedPointIndex)
+      const selected = displayPoints[selectedPointIndex]
       if (selected) {
         const px = selected[axes[0] ?? 0]
         const py = selected[axes[1] ?? 1]
@@ -2042,7 +2057,7 @@ function buildManifoldCurveTraces(config: {
     const y: number[] = []
     const customdata: number[] = []
     for (let index = 0; index < pointCount; index += 1) {
-      const point = readPoint(index)
+      const point = displayPoints[index]
       if (!point) continue
       const px = point[axes[0] ?? 0]
       const py = point[axes[1] ?? 1]
@@ -2068,7 +2083,7 @@ function buildManifoldCurveTraces(config: {
       selectedPointIndex >= 0 &&
       selectedPointIndex < pointCount
     ) {
-      const selected = readPoint(selectedPointIndex)
+      const selected = displayPoints[selectedPointIndex]
       if (selected) {
         const px = selected[axes[0] ?? 0]
         const py = selected[axes[1] ?? 1]
@@ -2102,7 +2117,7 @@ function buildManifoldCurveTraces(config: {
       : Array.from({ length: pointCount }, (_, index) => index)
   const y: number[] = []
   for (let index = 0; index < pointCount; index += 1) {
-    const point = readPoint(index)
+    const point = displayPoints[index]
     if (!point) continue
     const value = point[axes[0] ?? 0]
     if (!Number.isFinite(value)) continue
@@ -2131,6 +2146,7 @@ function buildManifoldSurfaceTraces(config: {
   pointSize: number
   highlight: boolean
   geometry: ManifoldSurfaceGeometry
+  subsystemSnapshot?: SubsystemSnapshot | null
   axisIndices: number[] | null
   plotDim: 1 | 2 | 3
   selectedPointIndex: number | null
@@ -2144,6 +2160,7 @@ function buildManifoldSurfaceTraces(config: {
     pointSize,
     highlight,
     geometry,
+    subsystemSnapshot,
     axisIndices,
     plotDim: requestedPlotDim,
     selectedPointIndex,
@@ -2153,17 +2170,30 @@ function buildManifoldSurfaceTraces(config: {
   const dim = Math.trunc(geometry.dim)
   const vertexCount = Math.floor(geometry.vertices_flat.length / dim)
   if (vertexCount <= 0) return traces
-  const plotDim = Math.max(1, Math.min(requestedPlotDim, dim, 3)) as 1 | 2 | 3
-  if (plotDim === 1) return traces
-  const axes = resolveAxisOrder(dim, plotDim, axisIndices)
-  const width = highlight ? lineWidth + 1 : lineWidth
-  const markerSize = highlight ? pointSize + 4 : pointSize + 2
-  const readVertex = (index: number): number[] | null => {
+  const displayVertices: Array<number[] | null> = Array.from({ length: vertexCount }, () => null)
+  let displayDim = 0
+  const readRawVertex = (index: number): number[] | null => {
     if (index < 0 || index >= vertexCount) return null
     const start = index * dim
     const point = geometry.vertices_flat.slice(start, start + dim)
     return point.length === dim ? point : null
   }
+  for (let index = 0; index < vertexCount; index += 1) {
+    const rawVertex = readRawVertex(index)
+    if (!rawVertex) continue
+    const mappedVertex = subsystemSnapshot
+      ? stateVectorToDisplay(subsystemSnapshot, rawVertex)
+      : rawVertex
+    if (!Array.isArray(mappedVertex) || mappedVertex.length === 0) continue
+    displayVertices[index] = mappedVertex
+    displayDim = Math.max(displayDim, mappedVertex.length)
+  }
+  if (displayDim <= 0) return traces
+  const plotDim = Math.max(1, Math.min(requestedPlotDim, displayDim, 3)) as 1 | 2 | 3
+  if (plotDim === 1) return traces
+  const axes = resolveAxisOrder(displayDim, plotDim, axisIndices)
+  const width = highlight ? lineWidth + 1 : lineWidth
+  const markerSize = highlight ? pointSize + 4 : pointSize + 2
 
   const ringStarts =
     Array.isArray(geometry.ring_offsets) && geometry.ring_offsets.length > 0
@@ -2191,7 +2221,7 @@ function buildManifoldSurfaceTraces(config: {
     for (const ring of ringBounds) {
       const ringIndices: number[] = []
       for (let index = ring.start; index < ring.end; index += 1) {
-        const point = readVertex(index)
+        const point = displayVertices[index]
         if (!point) continue
         const px = point[axes[0] ?? 0]
         const py = point[axes[1] ?? 1]
@@ -2203,7 +2233,7 @@ function buildManifoldSurfaceTraces(config: {
         ringIndices.push(index)
       }
       if (ringIndices.length > 1) {
-        const first = readVertex(ringIndices[0] ?? -1)
+        const first = displayVertices[ringIndices[0] ?? -1]
         if (first) {
           const fx = first[axes[0] ?? 0]
           const fy = first[axes[1] ?? 1]
@@ -2236,7 +2266,7 @@ function buildManifoldSurfaceTraces(config: {
       selectedPointIndex >= 0 &&
       selectedPointIndex < vertexCount
     ) {
-      const selected = readVertex(selectedPointIndex)
+      const selected = displayVertices[selectedPointIndex]
       if (selected) {
         const px = selected[axes[0] ?? 0]
         const py = selected[axes[1] ?? 1]
@@ -2271,7 +2301,7 @@ function buildManifoldSurfaceTraces(config: {
   for (const ring of ringBounds) {
     const ringIndices: number[] = []
     for (let index = ring.start; index < ring.end; index += 1) {
-      const point = readVertex(index)
+      const point = displayVertices[index]
       if (!point) continue
       const px = point[axes[0] ?? 0]
       const py = point[axes[1] ?? 1]
@@ -2281,7 +2311,7 @@ function buildManifoldSurfaceTraces(config: {
       ringIndices.push(index)
     }
     if (ringIndices.length > 1) {
-      const first = readVertex(ringIndices[0] ?? -1)
+      const first = displayVertices[ringIndices[0] ?? -1]
       if (first) {
         const fx = first[axes[0] ?? 0]
         const fy = first[axes[1] ?? 1]
@@ -2310,7 +2340,7 @@ function buildManifoldSurfaceTraces(config: {
     selectedPointIndex >= 0 &&
     selectedPointIndex < vertexCount
   ) {
-    const selected = readVertex(selectedPointIndex)
+    const selected = displayVertices[selectedPointIndex]
     if (selected) {
       const px = selected[axes[0] ?? 0]
       const py = selected[axes[1] ?? 1]
@@ -3096,6 +3126,7 @@ function buildSceneTraces(
             pointSize: node.render.pointSize,
             highlight,
             geometry: manifoldCurve,
+            subsystemSnapshot: branchSnapshot,
             axisIndices: projectionAxisIndices,
             plotDim: projectionPlotDim,
             selectedPointIndex: selectedBranchPointIndex,
@@ -3118,6 +3149,7 @@ function buildSceneTraces(
             pointSize: node.render.pointSize,
             highlight,
             geometry: manifoldSurface,
+            subsystemSnapshot: branchSnapshot,
             axisIndices: projectionAxisIndices,
             plotDim: projectionPlotDim,
             selectedPointIndex: selectedBranchPointIndex,

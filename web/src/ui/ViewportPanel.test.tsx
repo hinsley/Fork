@@ -1638,6 +1638,350 @@ describe('ViewportPanel view state wiring', () => {
     expect(meshTrace).toBeUndefined()
   })
 
+  it('renders frozen 1D manifold curves as 3D traces in 3D scenes', () => {
+    const config: SystemConfig = {
+      name: 'Frozen_Manifold_1D_3D',
+      equations: ['y', '-x + mu', '-z'],
+      params: [0.3],
+      paramNames: ['mu'],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const frozenZ = 2.5
+    const subsystemSnapshot = buildSubsystemSnapshot(config, {
+      frozenValuesByVarName: { z: frozenZ },
+    })
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['x', 'y', 'z'],
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_Frozen_Seed_1D',
+      systemName: config.name,
+      solution: {
+        state: [0, 0, frozenZ],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [0, 1, 0, -1, 0, 0, 0, 0, -1],
+        eigenpairs: [],
+      },
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+    const continuationSettings: ContinuationSettings = {
+      step_size: 0.01,
+      min_step_size: 1e-6,
+      max_step_size: 0.1,
+      max_steps: 10,
+      corrector_steps: 4,
+      corrector_tolerance: 1e-6,
+      step_tolerance: 1e-6,
+    }
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_manifold_frozen_curve',
+      systemName: config.name,
+      parameterName: 'manifold',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'eq_manifold_1d',
+      data: {
+        points: [
+          { state: [0.1, 0.4], param_value: 0, stability: 'None', eigenvalues: [] },
+          { state: [0.2, 0.5], param_value: 1, stability: 'None', eigenvalues: [] },
+          { state: [0.35, 0.7], param_value: 2, stability: 'None', eigenvalues: [] },
+        ],
+        bifurcations: [],
+        indices: [0, 1, 2],
+        branch_type: {
+          type: 'ManifoldEq1D',
+          stability: 'Stable',
+          direction: 'Plus',
+          eig_index: 0,
+          method: 'shooting_bvp',
+          caps: {
+            max_steps: 1024,
+            max_points: 2048,
+            max_rings: 64,
+            max_vertices: 4096,
+            max_time: 25,
+          },
+        },
+        manifold_geometry: {
+          type: 'Curve',
+          dim: 2,
+          points_flat: [0.1, 0.4, 0.2, 0.5, 0.35, 0.7],
+          arclength: [0, 1, 2],
+          direction: 'Plus',
+        },
+      },
+      settings: continuationSettings,
+      timestamp: nowIso(),
+      params: [...config.params],
+      subsystemSnapshot,
+    }
+    const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
+    system = branchResult.system
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const manifoldTraces = (props?.data ?? []).filter(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    )
+    expect(
+      manifoldTraces.some((trace) => trace.type === 'scatter3d')
+    ).toBe(true)
+    expect(
+      manifoldTraces.some((trace) => trace.type === 'scatter')
+    ).toBe(false)
+    const manifoldTrace = manifoldTraces.find((trace) => trace.type === 'scatter3d') as
+      | { z?: Array<number | null> }
+      | undefined
+    expect(manifoldTrace).toBeTruthy()
+    const zValues = (manifoldTrace?.z ?? []).filter(
+      (value): value is number => typeof value === 'number' && Number.isFinite(value)
+    )
+    expect(zValues.length).toBeGreaterThan(0)
+    expect(zValues.every((value) => Math.abs(value - frozenZ) <= 1e-12)).toBe(true)
+  })
+
+  it('renders frozen 2D manifold surface rings as 3D traces in 3D scenes', () => {
+    const config: SystemConfig = {
+      name: 'Frozen_Manifold_2D_3D',
+      equations: ['y', '-x + mu', '-z'],
+      params: [0.3],
+      paramNames: ['mu'],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const frozenZ = -1.75
+    const subsystemSnapshot = buildSubsystemSnapshot(config, {
+      frozenValuesByVarName: { z: frozenZ },
+    })
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['x', 'y', 'z'],
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_Frozen_Seed_2D',
+      systemName: config.name,
+      solution: {
+        state: [0, 0, frozenZ],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [0, 1, 0, -1, 0, 0, 0, 0, -1],
+        eigenpairs: [],
+      },
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+    const continuationSettings: ContinuationSettings = {
+      step_size: 0.01,
+      min_step_size: 1e-6,
+      max_step_size: 0.1,
+      max_steps: 10,
+      corrector_steps: 4,
+      corrector_tolerance: 1e-6,
+      step_tolerance: 1e-6,
+    }
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_manifold_frozen_surface',
+      systemName: config.name,
+      parameterName: 'manifold',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'eq_manifold_2d',
+      data: {
+        points: [
+          { state: [1, 0], param_value: 0, stability: 'None', eigenvalues: [] },
+          { state: [0, 1], param_value: 1, stability: 'None', eigenvalues: [] },
+          { state: [-1, 0], param_value: 2, stability: 'None', eigenvalues: [] },
+          { state: [2, 0], param_value: 3, stability: 'None', eigenvalues: [] },
+          { state: [0, 2], param_value: 4, stability: 'None', eigenvalues: [] },
+          { state: [-2, 0], param_value: 5, stability: 'None', eigenvalues: [] },
+        ],
+        bifurcations: [],
+        indices: [0, 1, 2, 3, 4, 5],
+        branch_type: {
+          type: 'ManifoldEq2D',
+          stability: 'Stable',
+          eig_kind: 'RealPair',
+          eig_indices: [0, 1],
+          method: 'leaf_shooting_bvp',
+          caps: {
+            max_steps: 1024,
+            max_points: 4096,
+            max_rings: 128,
+            max_vertices: 65536,
+            max_time: 100,
+          },
+        },
+        manifold_geometry: {
+          type: 'Surface',
+          dim: 2,
+          vertices_flat: [
+            1, 0, 0, 1, -1, 0,
+            2, 0, 0, 2, -2, 0,
+          ],
+          triangles: [0, 1, 3, 1, 4, 3],
+          ring_offsets: [0, 3, 6],
+          ring_diagnostics: [],
+        },
+      },
+      settings: continuationSettings,
+      timestamp: nowIso(),
+      params: [...config.params],
+      subsystemSnapshot,
+    }
+    const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
+    system = branchResult.system
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const manifoldTraces = (props?.data ?? []).filter(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    )
+    expect(
+      manifoldTraces.some((trace) => trace.type === 'scatter3d')
+    ).toBe(true)
+    expect(
+      manifoldTraces.some((trace) => trace.type === 'scatter')
+    ).toBe(false)
+    const manifoldTrace = manifoldTraces.find((trace) => trace.type === 'scatter3d') as
+      | { z?: Array<number | null> }
+      | undefined
+    expect(manifoldTrace).toBeTruthy()
+    const zValues = (manifoldTrace?.z ?? []).filter(
+      (value): value is number => typeof value === 'number' && Number.isFinite(value)
+    )
+    expect(zValues.length).toBeGreaterThan(0)
+    expect(zValues.every((value) => Math.abs(value - frozenZ) <= 1e-12)).toBe(true)
+  })
+
+  it('maps frozen manifold coordinates correctly when scene includes a frozen axis', () => {
+    const config: SystemConfig = {
+      name: 'Frozen_Manifold_Axis_Mapping',
+      equations: ['y', '-x + mu', '-z'],
+      params: [0.3],
+      paramNames: ['mu'],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const frozenZ = 3.4
+    const subsystemSnapshot = buildSubsystemSnapshot(config, {
+      frozenValuesByVarName: { z: frozenZ },
+    })
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['x', 'z'],
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_Frozen_Seed_Axis',
+      systemName: config.name,
+      solution: {
+        state: [0, 0, frozenZ],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [0, 1, 0, -1, 0, 0, 0, 0, -1],
+        eigenpairs: [],
+      },
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+    const continuationSettings: ContinuationSettings = {
+      step_size: 0.01,
+      min_step_size: 1e-6,
+      max_step_size: 0.1,
+      max_steps: 10,
+      corrector_steps: 4,
+      corrector_tolerance: 1e-6,
+      step_tolerance: 1e-6,
+    }
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_manifold_frozen_axis_projection',
+      systemName: config.name,
+      parameterName: 'manifold',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'eq_manifold_1d',
+      data: {
+        points: [
+          { state: [1, 10], param_value: 0, stability: 'None', eigenvalues: [] },
+          { state: [2, 20], param_value: 1, stability: 'None', eigenvalues: [] },
+          { state: [3, 30], param_value: 2, stability: 'None', eigenvalues: [] },
+        ],
+        bifurcations: [],
+        indices: [0, 1, 2],
+        branch_type: {
+          type: 'ManifoldEq1D',
+          stability: 'Stable',
+          direction: 'Plus',
+          eig_index: 0,
+          method: 'shooting_bvp',
+          caps: {
+            max_steps: 1024,
+            max_points: 2048,
+            max_rings: 64,
+            max_vertices: 4096,
+            max_time: 25,
+          },
+        },
+        manifold_geometry: {
+          type: 'Curve',
+          dim: 2,
+          points_flat: [1, 10, 2, 20, 3, 30],
+          arclength: [0, 1, 2],
+          direction: 'Plus',
+        },
+      },
+      settings: continuationSettings,
+      timestamp: nowIso(),
+      params: [...config.params],
+      subsystemSnapshot,
+    }
+    const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
+    system = branchResult.system
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const manifoldTrace = props?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        trace.type === 'scatter' &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    ) as { x?: number[]; y?: number[] } | undefined
+    expect(manifoldTrace).toBeTruthy()
+    expect(manifoldTrace?.x).toEqual([1, 2, 3])
+    expect(manifoldTrace?.y).toEqual([frozenZ, frozenZ, frozenZ])
+  })
+
   it('renders frozen limit-cycle scene axes from embedded full-state values', () => {
     const config: SystemConfig = {
       name: 'Frozen_LC_Scene',
