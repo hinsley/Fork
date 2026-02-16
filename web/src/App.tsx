@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import { useAppContext } from './state/appContext'
 import { Panel } from './ui/Panel'
@@ -215,10 +215,9 @@ function App() {
     updatePreview(side, startWidth, workspaceRect.width)
   }
 
-  const gridTemplateColumns = useMemo(() => {
-    if (!system) return '1fr'
-    return `${system.ui.layout.leftWidth}px ${SPLITTER_WIDTH}px 1fr ${SPLITTER_WIDTH}px ${system.ui.layout.rightWidth}px`
-  }, [system])
+  const gridTemplateColumns = system
+    ? `${system.ui.layout.leftWidth}px ${SPLITTER_WIDTH}px 1fr ${SPLITTER_WIDTH}px ${system.ui.layout.rightWidth}px`
+    : '1fr'
 
   return (
     <div className="app">

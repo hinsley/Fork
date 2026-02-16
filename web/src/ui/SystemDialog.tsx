@@ -101,7 +101,7 @@ export function SystemDialog({
           <h3>Import</h3>
           <input
             type="file"
-            accept="application/json"
+            accept=".zip,application/zip"
             onChange={(event) => {
               const file = event.target.files?.[0]
               if (file) onImportSystem(file)

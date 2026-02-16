@@ -28,6 +28,7 @@ export interface SubsystemSnapshot {
 
 export interface OrbitObject {
   type: 'orbit'
+  id?: string
   name: string
   systemName: string
   data: number[][]
@@ -77,6 +78,7 @@ export interface EquilibriumRunSummary {
 
 export interface EquilibriumObject {
   type: 'equilibrium'
+  id?: string
   name: string
   systemName: string
   solution?: EquilibriumSolution
@@ -345,11 +347,14 @@ export interface ContinuationBranchData {
 
 export interface ContinuationObject {
   type: 'continuation'
+  id?: string
   name: string
   systemName: string
   parameterName: string
   parameterRef?: ParameterRef
   parameter2Ref?: ParameterRef
+  parentObjectId?: string
+  startObjectId?: string
   parentObject: string
   startObject: string
   branchType:
@@ -375,12 +380,27 @@ export interface ContinuationObject {
 }
 
 export type LimitCycleOrigin =
-  | { type: 'orbit'; orbitName: string }
-  | { type: 'hopf'; equilibriumObjectName: string; equilibriumBranchName: string; pointIndex: number }
-  | { type: 'pd'; sourceLimitCycleObjectName: string; sourceBranchName: string; pointIndex: number }
+  | { type: 'orbit'; orbitId?: string; orbitName: string }
+  | {
+      type: 'hopf'
+      equilibriumObjectId?: string
+      equilibriumBranchId?: string
+      equilibriumObjectName: string
+      equilibriumBranchName: string
+      pointIndex: number
+    }
+  | {
+      type: 'pd'
+      sourceLimitCycleObjectId?: string
+      sourceBranchId?: string
+      sourceLimitCycleObjectName: string
+      sourceBranchName: string
+      pointIndex: number
+    }
 
 export interface LimitCycleObject {
   type: 'limit_cycle'
+  id?: string
   name: string
   systemName: string
   origin: LimitCycleOrigin
@@ -433,6 +453,7 @@ export interface IsoclineComputedSnapshot {
 
 export interface IsoclineObject {
   type: 'isocline'
+  id?: string
   name: string
   systemName: string
   source: IsoclineSource
@@ -568,10 +589,34 @@ export interface SystemUiState {
   limitCycleRenderTargets?: Record<string, LimitCycleRenderTarget>
 }
 
+export interface ObjectIndexEntry {
+  id: string
+  name: string
+  objectType: AnalysisObject['type']
+  shard: string
+  updatedAt: string
+}
+
+export interface BranchIndexEntry {
+  id: string
+  name: string
+  branchType: ContinuationObject['branchType']
+  parentObjectId: string | null
+  startObjectId: string | null
+  shard: string
+  updatedAt: string
+}
+
+export interface SystemIndex {
+  objects: Record<string, ObjectIndexEntry>
+  branches: Record<string, BranchIndexEntry>
+}
+
 export interface System {
   id: string
   name: string
   config: SystemConfig
+  index: SystemIndex
   nodes: Record<string, TreeNode>
   rootIds: string[]
   objects: Record<string, AnalysisObject>
@@ -586,6 +631,7 @@ export interface SystemData {
   id: string
   name: string
   config: SystemConfig
+  index: SystemIndex
   objects: Record<string, AnalysisObject>
   branches: Record<string, ContinuationObject>
   updatedAt: string

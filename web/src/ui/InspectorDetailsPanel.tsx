@@ -1893,6 +1893,16 @@ export function InspectorDetailsPanel({
     }
     return null
   }, [branch, node, object, selectedNodeId])
+  const [selectionNameDraft, setSelectionNameDraft] = useState('')
+  useEffect(() => {
+    setSelectionNameDraft(selectionNode?.name ?? '')
+  }, [selectionNode?.id, selectionNode?.name])
+  const commitSelectionName = useCallback(() => {
+    if (!selectionNode) return
+    const trimmedName = selectionNameDraft.trim()
+    if (trimmedName === selectionNode.name) return
+    onRename(selectionNode.id, trimmedName)
+  }, [onRename, selectionNameDraft, selectionNode])
   const scene = selectedNodeId
     ? system.scenes.find((entry) => entry.id === selectedNodeId)
     : undefined
@@ -6618,6 +6628,15 @@ export function InspectorDetailsPanel({
       orbit?.covariantVectors && orbit.covariantVectors.vectors.length > 0
     )
     const clvNeeds2d = clvPlotDim < 2
+    const selectionPayloadPending = Boolean(
+      selectionNode &&
+        ((selectionNode.kind === 'object' &&
+          !object &&
+          Boolean(system.index.objects[selectionNode.id])) ||
+          (selectionNode.kind === 'branch' &&
+            !branch &&
+            Boolean(system.index.branches[selectionNode.id])))
+    )
 
     return (
       <div className="inspector-panel" data-testid="inspector-panel-body">
@@ -6627,8 +6646,21 @@ export function InspectorDetailsPanel({
               <label>
                 Name
                 <input
-                  value={selectionNode.name}
-                  onChange={(event) => onRename(selectionNode.id, event.target.value)}
+                  value={selectionNameDraft}
+                  onChange={(event) => setSelectionNameDraft(event.target.value)}
+                  onBlur={commitSelectionName}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      event.currentTarget.blur()
+                      return
+                    }
+                    if (event.key === 'Escape') {
+                      event.preventDefault()
+                      setSelectionNameDraft(selectionNode.name)
+                      event.currentTarget.blur()
+                    }
+                  }}
                   data-testid="inspector-name"
                 />
               </label>
@@ -6637,6 +6669,12 @@ export function InspectorDetailsPanel({
                 {summary?.detail ? <span>{summary.detail}</span> : null}
               </div>
             </div>
+
+          {selectionPayloadPending ? (
+            <div className="inspector-section">
+              <p className="empty-state">Loading selected computation…</p>
+            </div>
+          ) : null}
 
           {showVisibilityToggle ? (
             <div className="inspector-section">

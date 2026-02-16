@@ -6,6 +6,7 @@ import type {
   LimitCycleRenderTarget,
   RenderStyle,
   System,
+  SystemIndex,
   SystemLayout,
   SystemUiState,
   Scene,
@@ -65,6 +66,52 @@ export const DEFAULT_RENDER: RenderStyle = {
   stateSpaceStride: 1,
 }
 
+function fnv1a32(value: string): number {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return hash >>> 0
+}
+
+export function shardForEntityId(id: string): string {
+  return (fnv1a32(id) & 0xff).toString(16).padStart(2, '0')
+}
+
+export function emptySystemIndex(): SystemIndex {
+  return {
+    objects: {},
+    branches: {},
+  }
+}
+
+function rebuildSystemIndex(system: System): SystemIndex {
+  const index = emptySystemIndex()
+  const updatedAt = system.updatedAt
+  Object.entries(system.objects).forEach(([id, obj]) => {
+    index.objects[id] = {
+      id,
+      name: obj.name,
+      objectType: obj.type,
+      shard: shardForEntityId(id),
+      updatedAt,
+    }
+  })
+  Object.entries(system.branches).forEach(([id, branch]) => {
+    index.branches[id] = {
+      id,
+      name: branch.name,
+      branchType: branch.branchType,
+      parentObjectId: branch.parentObjectId ?? null,
+      startObjectId: branch.startObjectId ?? null,
+      shard: shardForEntityId(id),
+      updatedAt,
+    }
+  })
+  return index
+}
+
 // IDs and timestamps are routed through deterministic helpers for tests.
 
 export function createSystem(args: { name: string; config?: SystemConfig }): System {
@@ -74,6 +121,7 @@ export function createSystem(args: { name: string; config?: SystemConfig }): Sys
     id: makeId('system'),
     name: args.name,
     config,
+    index: emptySystemIndex(),
     nodes: {},
     rootIds: [],
     objects: {},
@@ -113,10 +161,18 @@ export function addObject(system: System, obj: AnalysisObject): { system: System
     objectType: obj.type,
     parentId: null,
   })
+  const updatedAt = nowIso()
   next.nodes[node.id] = node
   next.rootIds.push(node.id)
-  next.objects[node.id] = obj
-  next.updatedAt = nowIso()
+  next.objects[node.id] = { ...obj, id: node.id }
+  next.index.objects[node.id] = {
+    id: node.id,
+    name: obj.name,
+    objectType: obj.type,
+    shard: shardForEntityId(node.id),
+    updatedAt,
+  }
+  next.updatedAt = updatedAt
   return { system: next, nodeId: node.id }
 }
 
@@ -131,9 +187,17 @@ export function updateObject(
   const next = structuredClone(system)
   const existing = next.objects[nodeId]
   if (!existing) return system
-  const updated = { ...existing, ...update, type: existing.type } as AnalysisObject
+  const updatedAt = nowIso()
+  const updated = { ...existing, ...update, type: existing.type, id: nodeId } as AnalysisObject
   next.objects[nodeId] = updated
-  next.updatedAt = nowIso()
+  next.index.objects[nodeId] = {
+    id: nodeId,
+    name: updated.name,
+    objectType: updated.type,
+    shard: shardForEntityId(nodeId),
+    updatedAt,
+  }
+  next.updatedAt = updatedAt
   return next
 }
 
@@ -144,8 +208,25 @@ export function updateBranch(
 ): System {
   const next = structuredClone(system)
   if (!next.branches[nodeId]) return system
-  next.branches[nodeId] = branch
-  next.updatedAt = nowIso()
+  const updatedAt = nowIso()
+  const normalized: ContinuationObject = {
+    ...branch,
+    id: nodeId,
+    parentObjectId: branch.parentObjectId ?? next.nodes[nodeId]?.parentId ?? undefined,
+    startObjectId:
+      branch.startObjectId ?? branch.parentObjectId ?? next.nodes[nodeId]?.parentId ?? undefined,
+  }
+  next.branches[nodeId] = normalized
+  next.index.branches[nodeId] = {
+    id: nodeId,
+    name: normalized.name,
+    branchType: normalized.branchType,
+    parentObjectId: normalized.parentObjectId ?? null,
+    startObjectId: normalized.startObjectId ?? null,
+    shard: shardForEntityId(nodeId),
+    updatedAt,
+  }
+  next.updatedAt = updatedAt
   return next
 }
 
@@ -161,14 +242,30 @@ export function addBranch(
     objectType: 'continuation',
     parentId: parentNodeId,
   })
+  const updatedAt = nowIso()
   next.nodes[node.id] = node
-  next.branches[node.id] = branch
+  const normalized: ContinuationObject = {
+    ...branch,
+    id: node.id,
+    parentObjectId: branch.parentObjectId ?? parentNodeId,
+    startObjectId: branch.startObjectId ?? branch.parentObjectId ?? parentNodeId,
+  }
+  next.branches[node.id] = normalized
+  next.index.branches[node.id] = {
+    id: node.id,
+    name: normalized.name,
+    branchType: normalized.branchType,
+    parentObjectId: normalized.parentObjectId ?? null,
+    startObjectId: normalized.startObjectId ?? null,
+    shard: shardForEntityId(node.id),
+    updatedAt,
+  }
   const parent = next.nodes[parentNodeId]
   if (parent) {
     parent.children.push(node.id)
     parent.expanded = true
   }
-  next.updatedAt = nowIso()
+  next.updatedAt = updatedAt
   return { system: next, nodeId: node.id }
 }
 
@@ -230,6 +327,7 @@ export function addBifurcationDiagram(
 export function renameNode(system: System, nodeId: string, newName: string): System {
   const node = system.nodes[nodeId]
   if (!node) return system
+  const updatedAt = nowIso()
   const nextNodes = {
     ...system.nodes,
     [nodeId]: {
@@ -237,85 +335,28 @@ export function renameNode(system: System, nodeId: string, newName: string): Sys
       name: newName,
     },
   }
-
   let nextObjects = system.objects
+  if (system.objects[nodeId]) {
+    nextObjects = {
+      ...system.objects,
+      [nodeId]: { ...system.objects[nodeId], name: newName, id: nodeId },
+    }
+  }
   let nextBranches = system.branches
-
-  const getObject = (id: string) =>
-    nextObjects === system.objects ? system.objects[id] : nextObjects[id]
-  const getBranch = (id: string) =>
-    nextBranches === system.branches ? system.branches[id] : nextBranches[id]
-
-  const setObject = (id: string, value: System['objects'][string]) => {
-    if (nextObjects === system.objects) {
-      nextObjects = { ...system.objects }
+  if (system.branches[nodeId]) {
+    nextBranches = {
+      ...system.branches,
+      [nodeId]: { ...system.branches[nodeId], name: newName, id: nodeId },
     }
-    nextObjects[id] = value
   }
-
-  const setBranch = (id: string, value: System['branches'][string]) => {
-    if (nextBranches === system.branches) {
-      nextBranches = { ...system.branches }
-    }
-    nextBranches[id] = value
+  const nextIndex = structuredClone(system.index)
+  if (nextIndex.objects[nodeId]) {
+    nextIndex.objects[nodeId].name = newName
+    nextIndex.objects[nodeId].updatedAt = updatedAt
   }
-
-  const renamedObject = getObject(nodeId)
-  const oldObjectName = renamedObject?.name
-
-  if (renamedObject) {
-    setObject(nodeId, { ...renamedObject, name: newName })
-  }
-  const branch = getBranch(nodeId)
-  if (branch) {
-    setBranch(nodeId, { ...branch, name: newName })
-  }
-
-  if (oldObjectName && oldObjectName !== newName) {
-    for (const branchId of Object.keys(system.branches)) {
-      const candidate = getBranch(branchId)
-      let updatedBranch = candidate
-      if (updatedBranch.parentObject === oldObjectName) {
-        updatedBranch = { ...updatedBranch, parentObject: newName }
-      }
-      if (
-        updatedBranch.startObject === oldObjectName &&
-        (updatedBranch.branchType === 'equilibrium' ||
-          updatedBranch.branchType === 'limit_cycle')
-      ) {
-        updatedBranch = { ...updatedBranch, startObject: newName }
-      }
-      if (updatedBranch !== candidate) {
-        setBranch(branchId, updatedBranch)
-      }
-    }
-
-    for (const objectId of Object.keys(system.objects)) {
-      const obj = getObject(objectId)
-      if (obj.type !== 'limit_cycle') continue
-      if (obj.origin.type === 'orbit' && obj.origin.orbitName === oldObjectName) {
-        setObject(objectId, {
-          ...obj,
-          origin: { ...obj.origin, orbitName: newName },
-        })
-      } else if (
-        obj.origin.type === 'hopf' &&
-        obj.origin.equilibriumObjectName === oldObjectName
-      ) {
-        setObject(objectId, {
-          ...obj,
-          origin: { ...obj.origin, equilibriumObjectName: newName },
-        })
-      } else if (
-        obj.origin.type === 'pd' &&
-        obj.origin.sourceLimitCycleObjectName === oldObjectName
-      ) {
-        setObject(objectId, {
-          ...obj,
-          origin: { ...obj.origin, sourceLimitCycleObjectName: newName },
-        })
-      }
-    }
+  if (nextIndex.branches[nodeId]) {
+    nextIndex.branches[nodeId].name = newName
+    nextIndex.branches[nodeId].updatedAt = updatedAt
   }
 
   const sceneIndex = system.scenes.findIndex((entry) => entry.id === nodeId)
@@ -337,12 +378,13 @@ export function renameNode(system: System, nodeId: string, newName: string): Sys
 
   return {
     ...system,
+    index: nextIndex,
     nodes: nextNodes,
     objects: nextObjects,
     branches: nextBranches,
     scenes: nextScenes,
     bifurcationDiagrams: nextBifurcationDiagrams,
-    updatedAt: nowIso(),
+    updatedAt,
   }
 }
 
@@ -454,6 +496,8 @@ export function removeNode(system: System, nodeId: string): System {
     delete next.nodes[id]
     delete next.objects[id]
     delete next.branches[id]
+    delete next.index.objects[id]
+    delete next.index.branches[id]
   }
 
   next.scenes = next.scenes.filter((scene) => !removalSet.has(scene.id))
@@ -641,12 +685,92 @@ export function updateSystem(system: System, config: SystemConfig): System {
   return next
 }
 
+export function mergeLoadedEntities(
+  system: System,
+  payload: {
+    objects?: Record<string, AnalysisObject>
+    branches?: Record<string, ContinuationObject>
+  }
+): System {
+  const next = structuredClone(system)
+  const updatedAt = nowIso()
+  if (payload.objects) {
+    Object.entries(payload.objects).forEach(([id, object]) => {
+      const normalizedObject = { ...object, id } as AnalysisObject
+      next.objects[id] = normalizedObject
+      next.index.objects[id] = {
+        id,
+        name: normalizedObject.name,
+        objectType: normalizedObject.type,
+        shard: shardForEntityId(id),
+        updatedAt,
+      }
+    })
+  }
+  if (payload.branches) {
+    Object.entries(payload.branches).forEach(([id, branch]) => {
+      const normalizedBranch: ContinuationObject = {
+        ...branch,
+        id,
+      }
+      next.branches[id] = normalizedBranch
+      next.index.branches[id] = {
+        id,
+        name: normalizedBranch.name,
+        branchType: normalizedBranch.branchType,
+        parentObjectId: normalizedBranch.parentObjectId ?? null,
+        startObjectId: normalizedBranch.startObjectId ?? null,
+        shard: shardForEntityId(id),
+        updatedAt,
+      }
+    })
+  }
+  next.updatedAt = updatedAt
+  return normalizeSystem(next)
+}
+
+function mergeIndexEntries(
+  nodes: Record<string, TreeNode>,
+  loaded: SystemIndex,
+  existing: SystemIndex | null
+): SystemIndex {
+  const merged: SystemIndex = {
+    objects: {
+      ...(existing?.objects ?? {}),
+    },
+    branches: {
+      ...(existing?.branches ?? {}),
+    },
+  }
+  Object.entries(loaded.objects).forEach(([id, entry]) => {
+    merged.objects[id] = entry
+  })
+  Object.entries(loaded.branches).forEach(([id, entry]) => {
+    merged.branches[id] = entry
+  })
+  Object.keys(merged.objects).forEach((id) => {
+    const node = nodes[id]
+    if (!node || node.kind !== 'object') {
+      delete merged.objects[id]
+    }
+  })
+  Object.keys(merged.branches).forEach((id) => {
+    const node = nodes[id]
+    if (!node || node.kind !== 'branch') {
+      delete merged.branches[id]
+    }
+  })
+  return merged
+}
+
 export function normalizeSystem(system: System): System {
   const next = structuredClone(system) as System & {
+    index?: SystemIndex
     scenes?: Scene[]
     bifurcationDiagrams?: BifurcationDiagram[]
     ui?: SystemUiState & { layout?: Partial<SystemLayout> }
   }
+  const existingIndex = structuredClone(next.index ?? emptySystemIndex())
 
   if (!next.scenes) {
     next.scenes = [structuredClone(DEFAULT_SCENE)]
@@ -731,39 +855,57 @@ export function normalizeSystem(system: System): System {
 
   const objectNameToNodeId = new Map<string, string>()
   Object.entries(next.objects).forEach(([id, obj]) => {
+    const normalizedObject = { ...obj, id } as AnalysisObject
+    next.objects[id] = normalizedObject
     if (!next.nodes[id]) {
       next.nodes[id] = createTreeNode({
         id,
-        name: obj.name,
+        name: normalizedObject.name,
         kind: 'object',
-        objectType: obj.type,
+        objectType: normalizedObject.type,
         parentId: null,
       })
     }
     const node = next.nodes[id]
-    node.name = obj.name
+    node.name = normalizedObject.name
     node.kind = 'object'
-    node.objectType = obj.type
+    node.objectType = normalizedObject.type
     node.parentId = node.parentId ?? null
     if (!next.rootIds.includes(id)) {
       next.rootIds.push(id)
     }
-    objectNameToNodeId.set(obj.name, id)
+    objectNameToNodeId.set(normalizedObject.name, id)
   })
 
   Object.entries(next.branches).forEach(([id, branch]) => {
-    const parentId = objectNameToNodeId.get(branch.parentObject) ?? null
+    const parentId =
+      branch.parentObjectId ??
+      objectNameToNodeId.get(branch.parentObject) ??
+      next.nodes[id]?.parentId ??
+      null
+    const startObjectId =
+      branch.startObjectId ??
+      objectNameToNodeId.get(branch.startObject) ??
+      branch.parentObjectId ??
+      null
+    const normalizedBranch: ContinuationObject = {
+      ...branch,
+      id,
+      parentObjectId: parentId ?? undefined,
+      startObjectId: startObjectId ?? undefined,
+    }
+    next.branches[id] = normalizedBranch
     if (!next.nodes[id]) {
       next.nodes[id] = createTreeNode({
         id,
-        name: branch.name,
+        name: normalizedBranch.name,
         kind: 'branch',
         objectType: 'continuation',
         parentId,
       })
     }
     const node = next.nodes[id]
-    node.name = branch.name
+    node.name = normalizedBranch.name
     node.kind = 'branch'
     node.objectType = 'continuation'
     node.parentId = node.parentId ?? parentId
@@ -814,6 +956,8 @@ export function normalizeSystem(system: System): System {
   })
   nextUi.limitCycleRenderTargets = normalizedTargets
   next.ui = nextUi
+  const loadedIndex = rebuildSystemIndex(next as System)
+  next.index = mergeIndexEntries(next.nodes, loadedIndex, existingIndex)
 
   return next as System
 }

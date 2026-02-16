@@ -646,13 +646,16 @@ export function buildSortedArrayOrder(indices: number[]): number[] {
     .map((entry) => entry.arrayIdx)
 }
 
-export function getBranchParams(system: System, branch: ContinuationObject): number[] {
+export function getBranchParams(
+  system: Pick<System, 'config' | 'objects'>,
+  branch: ContinuationObject
+): number[] {
   if (isValidParameterSet(system.config.params, branch.params)) {
     return [...branch.params]
   }
-  const parent = Object.values(system.objects).find(
-    (obj) => obj.name === branch.parentObject
-  )
+  const parent =
+    (branch.parentObjectId ? system.objects[branch.parentObjectId] : undefined) ??
+    Object.values(system.objects).find((obj) => obj.name === branch.parentObject)
   if (parent && parent.type !== 'continuation') {
     if (isValidParameterSet(system.config.params, parent.customParameters)) {
       return [...parent.customParameters]

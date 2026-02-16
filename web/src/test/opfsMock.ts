@@ -4,6 +4,7 @@ class MockFileHandle {
   kind = 'file' as const
   name: string
   contents = ''
+  writeCount = 0
 
   constructor(name: string) {
     this.name = name
@@ -29,6 +30,7 @@ class MockFileHandle {
       },
       close: async () => {
         this.contents = buffer
+        this.writeCount += 1
       },
     }
   }

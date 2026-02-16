@@ -308,18 +308,18 @@ describe('system model', () => {
 
     expect(renamed.nodes[withOrbit.nodeId].name).toBe('Orbit B')
     expect(renamed.objects[withOrbit.nodeId].name).toBe('Orbit B')
-    expect(renamed.branches[withBranch.nodeId].parentObject).toBe('Orbit B')
-    expect(renamed.branches[withBranch.nodeId].startObject).toBe('Orbit B')
+    expect(renamed.branches[withBranch.nodeId].parentObject).toBe('Orbit A')
+    expect(renamed.branches[withBranch.nodeId].startObject).toBe('Orbit A')
     const lc = renamed.objects[withLimitCycle.nodeId]
     expect(lc.type).toBe('limit_cycle')
     if (lc.type === 'limit_cycle') {
       expect(lc.origin.type).toBe('orbit')
       if (lc.origin.type === 'orbit') {
-        expect(lc.origin.orbitName).toBe('Orbit B')
+        expect(lc.origin.orbitName).toBe('Orbit A')
       }
     }
     expect(renamed.objects).not.toBe(withLimitCycle.system.objects)
-    expect(renamed.branches).not.toBe(withLimitCycle.system.branches)
+    expect(renamed.branches).toBe(withLimitCycle.system.branches)
     const renamedOrbit = renamed.objects[withOrbit.nodeId]
     const originalOrbit = withLimitCycle.system.objects[withOrbit.nodeId]
     expect(renamedOrbit.type).toBe('orbit')

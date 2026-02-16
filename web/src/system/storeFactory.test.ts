@@ -18,6 +18,15 @@ class FailingStore implements SystemStore {
   async saveUi(): Promise<void> {
     throw new Error('fail')
   }
+  async loadEntities(): Promise<{ objects: Record<string, never>; branches: Record<string, never> }> {
+    throw new Error('fail')
+  }
+  async exportSystemArchive(): Promise<{ filename: string; blob: Blob }> {
+    throw new Error('fail')
+  }
+  async importSystemArchive(): Promise<System> {
+    throw new Error('fail')
+  }
   async remove(): Promise<void> {
     throw new Error('fail')
   }
@@ -47,6 +56,22 @@ class TestStore implements SystemStore {
   async saveUi(system: System): Promise<void> {
     this.systems.set(system.id, structuredClone(system))
   }
+  async loadEntities(
+    systemId: string,
+    objectIds: string[],
+    branchIds: string[]
+  ): Promise<{ objects: Record<string, never>; branches: Record<string, never> }> {
+    void systemId
+    void objectIds
+    void branchIds
+    return { objects: {}, branches: {} }
+  }
+  async exportSystemArchive(): Promise<{ filename: string; blob: Blob }> {
+    return { filename: 'test.zip', blob: new Blob() }
+  }
+  async importSystemArchive(): Promise<System> {
+    throw new Error('Missing system')
+  }
   async remove(id: string): Promise<void> {
     this.systems.delete(id)
   }
@@ -67,6 +92,15 @@ class VolatileStore implements SystemStore {
   }
   async saveUi(): Promise<void> {
     // Intentionally drop writes to simulate non-persistent storage.
+  }
+  async loadEntities(): Promise<{ objects: Record<string, never>; branches: Record<string, never> }> {
+    return { objects: {}, branches: {} }
+  }
+  async exportSystemArchive(): Promise<{ filename: string; blob: Blob }> {
+    return { filename: 'volatile.zip', blob: new Blob() }
+  }
+  async importSystemArchive(): Promise<System> {
+    throw new Error('Missing system')
   }
   async remove(): Promise<void> {
     // No-op.

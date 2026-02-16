@@ -1,21 +1,24 @@
-import { deserializeSystem, serializeSystem } from './serialization'
+import { buildSystemArchiveBlob, parseSystemArchiveFile } from './archive'
 import type { System } from './types'
 
-export function downloadSystem(system: System) {
-  const bundle = serializeSystem(system)
-  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
+function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = `${system.name.replace(/\s+/g, '_') || 'fork_system'}.json`
+  anchor.download = filename
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()
   URL.revokeObjectURL(url)
 }
 
-export async function readSystemFile(file: File): Promise<System> {
-  const text = await file.text()
-  const bundle = JSON.parse(text) as ReturnType<typeof serializeSystem>
-  return deserializeSystem(bundle)
+export function downloadSystem(system: System) {
+  const blob = buildSystemArchiveBlob(system)
+  const filename = `${system.name.replace(/\s+/g, '_') || 'fork_system'}.zip`
+  downloadBlob(blob, filename)
 }
+
+export async function readSystemFile(file: File): Promise<System> {
+  return await parseSystemArchiveFile(file)
+}
+

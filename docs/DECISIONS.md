@@ -21,6 +21,27 @@ References:
 
 ---
 
+### 2026-02-16: Web persistence V3 hard cutover with sharded entities and ZIP-only transfer
+Context:
+The web app previously rewrote large JSON payloads on many updates and used name-coupled references
+that amplified rewrite churn after renames.
+Decision:
+Adopt persistence V3 with per-system manifests/meta/ui, object/branch indexes, sharded payload files
+(`objects/<shard>/<id>.json`, `branches/<shard>/<id>.json`), ID-based parent/start references, and
+lazy entity hydration. Use new namespaces (`fork-systems-v3` in OPFS, `fork-systems-v3` IndexedDB DB)
+and ZIP-only import/export via archive APIs.
+Why:
+This removes whole-file rewrite pressure, improves large-system load behavior, and keeps lookup costs
+bounded without directory scans.
+Impact:
+Hard cutover: legacy local namespaces and legacy JSON import format are intentionally not read.
+Users must re-seed defaults or import V3 ZIP archives. `saveUi()` is UI-only, while `save()` writes
+only changed payload records plus updated indexes/manifest.
+References:
+`web/src/system/opfs.ts`, `web/src/system/indexedDb.ts`, `web/src/system/archive.ts`,
+`web/src/system/store.ts`, `web/src/system/types.ts`, `web/src/state/appState.tsx`,
+`web/src/system/importExport.ts`
+
 ### 2026-02-11: Object-scoped frozen-variable subsystems as compute context
 Context:
 Fast-slow workflows require running solves/continuations in reduced subsystems where selected state

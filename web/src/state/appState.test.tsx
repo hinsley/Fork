@@ -5,11 +5,12 @@ import { AppProvider } from './appState'
 import { useAppContext } from './appContext'
 import { MockForkCoreClient } from '../compute/mockClient'
 import { MemorySystemStore } from '../system/store'
-import { addBranch, addObject, createSystem } from '../system/model'
+import { addBranch, addObject, addScene, createSystem } from '../system/model'
 import { createPeriodDoublingSystem } from '../system/fixtures'
 import { normalizeBranchEigenvalues } from '../system/continuation'
 import { buildSubsystemSnapshot } from '../system/subsystemGateway'
 import type {
+  AnalysisObject,
   ContinuationObject,
   ContinuationPoint,
   ContinuationSettings,
@@ -56,6 +57,34 @@ function setupApp(
     return result.current
   }
 
+  return { getContext }
+}
+
+function setupAppWithStore(
+  store: MemorySystemStore,
+  options: {
+    initialSystem?: System | null
+    clientOverride?: MockForkCoreClient
+  } = {}
+) {
+  const client = options.clientOverride ?? new MockForkCoreClient(0)
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <AppProvider
+      store={store}
+      client={client}
+      initialSystem={options.initialSystem ?? null}
+      initialSystems={[]}
+    >
+      {children}
+    </AppProvider>
+  )
+  const { result } = renderHook(() => useAppContext(), { wrapper })
+  const getContext = () => {
+    if (!result.current) {
+      throw new Error('Missing app context.')
+    }
+    return result.current
+  }
   return { getContext }
 }
 
@@ -125,6 +154,138 @@ describe('appState selection', () => {
   })
 })
 
+describe('appState lazy hydration', () => {
+  class LazyHydrationStore extends MemorySystemStore {
+    loadEntitiesCalls: Array<{ systemId: string; objectIds: string[]; branchIds: string[] }> = []
+    private readonly fullSystems: Record<string, System>
+
+    constructor(systems: System[]) {
+      super()
+      this.fullSystems = Object.fromEntries(systems.map((system) => [system.id, structuredClone(system)]))
+    }
+
+    override async load(id: string): Promise<System> {
+      const full = this.fullSystems[id]
+      if (!full) {
+        throw new Error(`System "${id}" not found`)
+      }
+      return {
+        ...structuredClone(full),
+        objects: {},
+        branches: {},
+      }
+    }
+
+    override async loadEntities(
+      systemId: string,
+      objectIds: string[],
+      branchIds: string[]
+    ): Promise<{ objects: Record<string, AnalysisObject>; branches: Record<string, ContinuationObject> }> {
+      this.loadEntitiesCalls.push({ systemId, objectIds: [...objectIds], branchIds: [...branchIds] })
+      const full = this.fullSystems[systemId]
+      if (!full) {
+        throw new Error(`System "${systemId}" not found`)
+      }
+      const objects = Object.fromEntries(
+        objectIds
+          .map((id) => (full.objects[id] ? [id, structuredClone(full.objects[id])] : null))
+          .filter((entry): entry is [string, AnalysisObject] => Boolean(entry))
+      )
+      const branches = Object.fromEntries(
+        branchIds
+          .map((id) => (full.branches[id] ? [id, structuredClone(full.branches[id])] : null))
+          .filter((entry): entry is [string, ContinuationObject] => Boolean(entry))
+      )
+      return { objects, branches }
+    }
+  }
+
+  it('hydrates selected entities when opening skeleton systems', async () => {
+    const base = createSystem({ name: 'Lazy_Select' })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Lazy',
+      systemName: base.config.name,
+      data: [[0, 0, 0]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+      parameters: [...base.config.params],
+    }
+    const withOrbit = addObject(base, orbit)
+    withOrbit.system.nodes[withOrbit.nodeId].visibility = false
+    const store = new LazyHydrationStore([withOrbit.system])
+    const { getContext } = setupAppWithStore(store)
+
+    await act(async () => {
+      await getContext().actions.openSystem(withOrbit.system.id)
+    })
+
+    expect(getContext().state.system?.objects[withOrbit.nodeId]).toBeUndefined()
+    expect(store.loadEntitiesCalls).toHaveLength(0)
+
+    await act(async () => {
+      getContext().actions.selectNode(withOrbit.nodeId)
+    })
+
+    await waitFor(() => {
+      const loaded = getContext().state.system?.objects[withOrbit.nodeId]
+      expect(loaded).toBeDefined()
+      expect(getContext().state.error).toBeNull()
+    })
+    expect(
+      store.loadEntitiesCalls.some((call) => call.objectIds.includes(withOrbit.nodeId))
+    ).toBe(true)
+  })
+
+  it('auto-hydrates equilibrium payloads before solve actions', async () => {
+    const base = createSystem({ name: 'Lazy_Solve' })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_Lazy',
+      systemName: base.config.name,
+      solution: {
+        state: [0, 0],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [1, 0, 0, 1],
+        eigenpairs: [],
+      },
+      parameters: [...base.config.params],
+    }
+    const withEquilibrium = addObject(base, equilibrium)
+    withEquilibrium.system.nodes[withEquilibrium.nodeId].visibility = false
+    const store = new LazyHydrationStore([withEquilibrium.system])
+    const { getContext } = setupAppWithStore(store, {
+      clientOverride: new MockForkCoreClient(0),
+    })
+
+    await act(async () => {
+      await getContext().actions.openSystem(withEquilibrium.system.id)
+    })
+
+    expect(getContext().state.system?.objects[withEquilibrium.nodeId]).toBeUndefined()
+
+    await act(async () => {
+      await getContext().actions.solveEquilibrium({
+        equilibriumId: withEquilibrium.nodeId,
+        initialGuess: [0.1, -0.2],
+        maxSteps: 10,
+        dampingFactor: 1,
+      })
+    })
+
+    await waitFor(() => {
+      const loaded = getContext().state.system?.objects[withEquilibrium.nodeId]
+      expect(loaded).toBeDefined()
+      expect(getContext().state.error).toBeNull()
+    })
+    expect(
+      store.loadEntitiesCalls.some((call) => call.objectIds.includes(withEquilibrium.nodeId))
+    ).toBe(true)
+  })
+})
+
 describe('appState rename persistence routing', () => {
   class SpySystemStore extends MemorySystemStore {
     saveCount = 0
@@ -143,10 +304,8 @@ describe('appState rename persistence routing', () => {
 
   it('keeps selection unsaved, routes style updates to saveUi, and routes object renames to save', async () => {
     const base = createSystem({ name: 'Rename_Routing' })
-    const sceneId = base.scenes[0]?.id
-    if (!sceneId) {
-      throw new Error('Expected default scene.')
-    }
+    const withScene = addScene(base, 'Scene_For_Rename')
+    const sceneId = withScene.nodeId
     const orbit: OrbitObject = {
       type: 'orbit',
       name: 'Orbit_For_Rename',
@@ -157,7 +316,7 @@ describe('appState rename persistence routing', () => {
       dt: 0.1,
       parameters: [...base.config.params],
     }
-    const withOrbit = addObject(base, orbit)
+    const withOrbit = addObject(withScene.system, orbit)
     const store = new SpySystemStore()
     const wrapper = ({ children }: { children: ReactNode }) => (
       <AppProvider store={store} client={new MockForkCoreClient(0)} initialSystem={withOrbit.system}>
@@ -204,7 +363,7 @@ describe('appState rename persistence routing', () => {
 
     await waitFor(() => {
       expect(store.saveCount).toBe(1)
-      expect(store.saveUiCount).toBe(1)
+      expect(store.saveUiCount).toBe(2)
     })
   })
 })

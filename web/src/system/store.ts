@@ -1,10 +1,24 @@
-import type { System, SystemSummary } from './types'
+import type {
+  AnalysisObject,
+  ContinuationObject,
+  System,
+  SystemSummary,
+} from './types'
+import { buildSystemArchiveBlob, parseSystemArchiveFile } from './archive'
+
+export type LoadedEntities = {
+  objects: Record<string, AnalysisObject>
+  branches: Record<string, ContinuationObject>
+}
 
 export interface SystemStore {
   list(): Promise<SystemSummary[]>
   load(id: string): Promise<System>
+  loadEntities(systemId: string, objectIds: string[], branchIds: string[]): Promise<LoadedEntities>
   save(system: System): Promise<void>
   saveUi(system: System): Promise<void>
+  exportSystemArchive(systemId: string): Promise<{ filename: string; blob: Blob }>
+  importSystemArchive(file: File): Promise<System>
   remove(id: string): Promise<void>
   clear(): Promise<void>
 }
@@ -29,6 +43,32 @@ export class MemorySystemStore implements SystemStore {
     return structuredClone(system)
   }
 
+  async loadEntities(
+    systemId: string,
+    objectIds: string[],
+    branchIds: string[]
+  ): Promise<LoadedEntities> {
+    const system = this.systems.get(systemId)
+    if (!system) {
+      throw new Error(`System "${systemId}" not found`)
+    }
+    const objects: Record<string, AnalysisObject> = {}
+    const branches: Record<string, ContinuationObject> = {}
+    objectIds.forEach((id) => {
+      const entry = system.objects[id]
+      if (entry) {
+        objects[id] = structuredClone(entry)
+      }
+    })
+    branchIds.forEach((id) => {
+      const entry = system.branches[id]
+      if (entry) {
+        branches[id] = structuredClone(entry)
+      }
+    })
+    return { objects, branches }
+  }
+
   async save(system: System): Promise<void> {
     this.systems.set(system.id, structuredClone(system))
   }
@@ -47,6 +87,24 @@ export class MemorySystemStore implements SystemStore {
     next.ui = structuredClone(system.ui)
     next.updatedAt = system.updatedAt
     this.systems.set(system.id, next)
+  }
+
+  async exportSystemArchive(systemId: string): Promise<{ filename: string; blob: Blob }> {
+    const system = this.systems.get(systemId)
+    if (!system) {
+      throw new Error(`System "${systemId}" not found`)
+    }
+    const blob = buildSystemArchiveBlob(structuredClone(system))
+    return {
+      filename: `${system.name || 'fork_system'}.zip`,
+      blob,
+    }
+  }
+
+  async importSystemArchive(file: File): Promise<System> {
+    const system = await parseSystemArchiveFile(file)
+    this.systems.set(system.id, structuredClone(system))
+    return structuredClone(system)
   }
 
   async remove(id: string): Promise<void> {

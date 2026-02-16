@@ -1,41 +1,40 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { strFromU8, unzipSync } from 'fflate'
 import { downloadSystem, readSystemFile } from './importExport'
-import { serializeSystem, SYSTEM_PROJECT_SCHEMA_VERSION } from './serialization'
+import { buildSystemArchiveBytes } from './archive'
 import {
   addBifurcationDiagram,
   addBranch,
   addObject,
   addScene,
   createSystem,
-  normalizeSystem,
   selectNode,
-  toggleNodeExpanded,
-  toggleNodeVisibility,
-  updateBifurcationDiagram,
   updateLayout,
-  updateLimitCycleRenderTarget,
   updateNodeRender,
-  updateScene,
   updateViewportHeights,
 } from './model'
-import { createDemoSystem } from './fixtures'
-import { IndexedDbSystemStore } from './indexedDb'
-import { OpfsSystemStore } from './opfs'
 import type {
-  BranchType,
   ContinuationObject,
   ContinuationSettings,
   EquilibriumObject,
   LimitCycleObject,
-  LimitCycleOrigin,
   OrbitObject,
   System,
-  SystemConfig,
 } from './types'
+import { IndexedDbSystemStore } from './indexedDb'
+import { OpfsSystemStore } from './opfs'
 import { installMockOpfs } from '../test/opfsMock'
 import { nowIso } from '../utils/determinism'
 
-let storeCounter = 0
+const BASE_SETTINGS: ContinuationSettings = {
+  step_size: 0.01,
+  min_step_size: 1e-6,
+  max_step_size: 0.1,
+  max_steps: 100,
+  corrector_steps: 4,
+  corrector_tolerance: 1e-6,
+  step_tolerance: 1e-6,
+}
 
 function ensureUrlHelpers() {
   if (!('createObjectURL' in URL)) {
@@ -55,24 +54,15 @@ function ensureUrlHelpers() {
 async function exportSystem(system: System) {
   ensureUrlHelpers()
   let capturedBlob: Blob | null = null
-
-  const createObjectUrlSpy = vi
-    .spyOn(URL, 'createObjectURL')
-    .mockImplementation((blob) => {
-      capturedBlob = blob as Blob
-      return 'blob:mock-url'
-    })
+  const createObjectUrlSpy = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+    capturedBlob = blob as Blob
+    return 'blob:mock-url'
+  })
   const revokeSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
-  const clickSpy = vi
-    .spyOn(HTMLAnchorElement.prototype, 'click')
-    .mockImplementation(() => {})
-  const removeSpy = vi
-    .spyOn(HTMLAnchorElement.prototype, 'remove')
-    .mockImplementation(() => {})
+  const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  const removeSpy = vi.spyOn(HTMLAnchorElement.prototype, 'remove').mockImplementation(() => {})
   const appendSpy = vi.spyOn(document.body, 'appendChild')
-
   downloadSystem(system)
-
   const anchor = appendSpy.mock.calls[0]?.[0] as HTMLAnchorElement | undefined
   if (!anchor) {
     throw new Error('Export did not append a download anchor.')
@@ -80,10 +70,9 @@ async function exportSystem(system: System) {
   if (!capturedBlob) {
     throw new Error('Export did not create a blob.')
   }
-
   return {
     anchor,
-    blob: capturedBlob,
+    blob: capturedBlob as Blob,
     spies: {
       appendSpy,
       clickSpy,
@@ -94,738 +83,310 @@ async function exportSystem(system: System) {
   }
 }
 
-function makeTextFile(text: string, name = 'system.json'): File {
-  return { text: async () => text, name } as File
-}
-
-function makeBundleFile(bundle: unknown, name = 'system.json') {
-  return makeTextFile(JSON.stringify(bundle), name)
-}
-
-async function readBlobText(blob: Blob): Promise<string> {
-  if ('text' in blob && typeof blob.text === 'function') {
-    return await blob.text()
-  }
-  if ('arrayBuffer' in blob && typeof blob.arrayBuffer === 'function') {
-    const buffer = await blob.arrayBuffer()
-    return new TextDecoder().decode(buffer)
-  }
-  if (typeof FileReader !== 'undefined') {
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onerror = () =>
-        reject(reader.error ?? new Error('Failed to read blob contents'))
-      reader.onload = () => resolve(String(reader.result ?? ''))
-      reader.readAsText(blob)
-    })
-  }
-  throw new Error('Blob text not supported in this environment.')
-}
-
 async function roundTripSystem(system: System): Promise<System> {
-  const { blob, anchor } = await exportSystem(system)
-  const file = makeTextFile(await readBlobText(blob), anchor.download)
-  return await readSystemFile(file)
+  const bytes = buildSystemArchiveBytes(system)
+  return await readSystemFile(bytesToFile(bytes, `${system.name}.zip`))
 }
 
-function makeIndexedDbStore() {
-  storeCounter += 1
-  return new IndexedDbSystemStore({ name: `fork-test-${storeCounter}` })
+async function decodeZip(bytes: Uint8Array): Promise<Record<string, Uint8Array>> {
+  return unzipSync(bytes)
 }
 
-function createLargeSystem(): System {
-  let system = createSystem({ name: 'Large_System' })
-  const points = Array.from({ length: 2000 }, (_, index) => [
-    index * 0.05,
-    Math.sin(index / 10),
-    Math.cos(index / 10),
-  ])
+function decodeJson<T>(entries: Record<string, Uint8Array>, path: string): T {
+  const normalized = path.replace(/^\/+/, '')
+  const file =
+    entries[path] ??
+    entries[normalized] ??
+    entries[`/${normalized}`] ??
+    entries[`./${normalized}`]
+  if (!file) {
+    throw new Error(`Missing archive entry: ${path}`)
+  }
+  return JSON.parse(strFromU8(file)) as T
+}
+
+function hasEntry(entries: Record<string, Uint8Array>, path: string): boolean {
+  const normalized = path.replace(/^\/+/, '')
+  return Boolean(
+    entries[path] ??
+      entries[normalized] ??
+      entries[`/${normalized}`] ??
+      entries[`./${normalized}`]
+  )
+}
+
+function bytesToFile(bytes: Uint8Array, name: string): File {
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+  return {
+    name,
+    type: 'application/zip',
+    arrayBuffer: async () => buffer,
+    text: async () => String.fromCharCode(...bytes),
+  } as File
+}
+
+function createRichSystem(): {
+  system: System
+  orbitId: string
+  equilibriumId: string
+  equilibriumBranchId: string
+  limitCycleId: string
+  limitCycleBranchId: string
+} {
+  let system = createSystem({
+    name: 'Zip_Roundtrip_System',
+    config: {
+      name: 'Zip_Roundtrip_System',
+      equations: ['y', '-x + mu'],
+      params: [0.2],
+      paramNames: ['mu'],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    },
+  })
+
   const orbit: OrbitObject = {
     type: 'orbit',
-    name: 'Large_Orbit',
+    name: 'Orbit_A',
     systemName: system.config.name,
-    data: points,
-    t_start: 0,
-    t_end: points[points.length - 1][0],
-    dt: 0.05,
-  }
-  system = addObject(system, orbit).system
-  return system
-}
-
-const BASE_PARAMS = [0.1, 0.2]
-const BASE_SETTINGS: ContinuationSettings = {
-  step_size: 0.01,
-  min_step_size: 1e-6,
-  max_step_size: 0.1,
-  max_steps: 50,
-  corrector_steps: 4,
-  corrector_tolerance: 1e-6,
-  step_tolerance: 1e-6,
-}
-const LIMIT_CYCLE_STATE = [1, 0, 0, 1, 2]
-
-function makeConfig(
-  name: string,
-  type: SystemConfig['type'] = 'flow'
-): SystemConfig {
-  return {
-    name,
-    equations:
-      type === 'map' ? ['x + mu', 'y + nu', 'z + mu'] : ['y', 'z', '-x'],
-    params: [...BASE_PARAMS],
-    paramNames: ['mu', 'nu'],
-    varNames: ['x', 'y', 'z'],
-    solver: 'rk4',
-    type,
-  }
-}
-
-function createConfiguredSystem(
-  name: string,
-  type: SystemConfig['type'] = 'flow'
-): System {
-  return createSystem({ name, config: makeConfig(name, type) })
-}
-
-function makeOrbit(systemName: string, name = 'Orbit_A'): OrbitObject {
-  return {
-    type: 'orbit',
-    name,
-    systemName,
     data: [
-      [0, 0, 1],
-      [0.1, 0.2, 0.9],
-      [0.2, 0.4, 0.8],
+      [0, 0.1, -0.1],
+      [0.1, 0.2, -0.15],
+      [0.2, 0.25, -0.2],
     ],
     t_start: 0,
     t_end: 0.2,
     dt: 0.1,
-    lyapunovExponents: [0.12, -0.04],
-    covariantVectors: {
-      dim: 2,
-      times: [0, 1],
-      vectors: [
-        [
-          [1, 0],
-          [0, 1],
-        ],
-        [
-          [0.5, 0.5],
-          [-0.5, 0.5],
-        ],
-      ],
-    },
-    parameters: [...BASE_PARAMS],
-    customParameters: [0.5],
+    parameters: [0.2],
   }
-}
+  const orbitAdded = addObject(system, orbit)
+  system = orbitAdded.system
 
-function makeEquilibrium(systemName: string, name = 'Equilibrium_A'): EquilibriumObject {
-  return {
+  const equilibrium: EquilibriumObject = {
     type: 'equilibrium',
-    name,
-    systemName,
+    name: 'EQ_A',
+    systemName: system.config.name,
     solution: {
-      state: [0.1, 0.2, 0.3],
-      residual_norm: 1e-6,
-      iterations: 3,
-      jacobian: [1, 0, 0, 0, 1, 0, 0, 0, 1],
-      eigenpairs: [
-        {
-          value: { re: -1, im: 0 },
-          vector: [
-            { re: 1, im: 0 },
-            { re: 0, im: 0 },
-            { re: 0, im: 0 },
-          ],
-        },
-        {
-          value: { re: -0.2, im: 0.5 },
-          vector: [
-            { re: 0, im: 1 },
-            { re: 1, im: 0 },
-            { re: 0, im: 0 },
-          ],
-        },
-      ],
+      state: [0, 0],
+      residual_norm: 0,
+      iterations: 2,
+      jacobian: [0, 1, -1, 0],
+      eigenpairs: [],
     },
-    lastSolverParams: {
-      initialGuess: [0, 0, 0],
-      maxSteps: 15,
-      dampingFactor: 0.8,
-    },
-    lastRun: {
-      timestamp: nowIso(),
-      success: true,
-      residual_norm: 1e-6,
-      iterations: 3,
-    },
-    parameters: [...BASE_PARAMS],
-    customParameters: [0.4],
+    parameters: [0.2],
   }
-}
+  const equilibriumAdded = addObject(system, equilibrium)
+  system = equilibriumAdded.system
 
-function makeLimitCycle(
-  systemName: string,
-  origin: LimitCycleOrigin,
-  name = 'LimitCycle_A'
-): LimitCycleObject {
-  return {
-    type: 'limit_cycle',
-    name,
-    systemName,
-    origin,
-    ntst: 4,
-    ncol: 3,
-    period: 2,
-    state: [...LIMIT_CYCLE_STATE],
-    parameters: [...BASE_PARAMS],
-    customParameters: [0.8],
-    parameterName: 'mu',
-    paramValue: 0.2,
-    floquetMultipliers: [{ re: -1, im: 0 }, { re: 0.3, im: 0.4 }],
-    createdAt: nowIso(),
-  }
-}
-
-function makeContinuationBranch(options: {
-  name: string
-  systemName: string
-  parentObject: string
-  startObject: string
-  parameterName: string
-  branchType: ContinuationObject['branchType']
-  branchTypeData?: BranchType
-  stability?: string
-  state?: number[]
-}): ContinuationObject {
-  const baseState = options.state ?? [0, 0, 1]
-  const nextState = baseState.map((value) => value + 0.1)
-  return {
+  const equilibriumBranch: ContinuationObject = {
     type: 'continuation',
-    name: options.name,
-    systemName: options.systemName,
-    parameterName: options.parameterName,
-    parentObject: options.parentObject,
-    startObject: options.startObject,
-    branchType: options.branchType,
+    name: 'eq_mu',
+    systemName: system.config.name,
+    parameterName: 'mu',
+    parentObjectId: equilibriumAdded.nodeId,
+    startObjectId: equilibriumAdded.nodeId,
+    parentObject: equilibrium.name,
+    startObject: equilibrium.name,
+    branchType: 'equilibrium',
     data: {
-      points: [
-        {
-          state: baseState,
-          param_value: 0.1,
-          stability: 'None',
-          eigenvalues: [{ re: -1, im: 0 }],
-        },
-        {
-          state: nextState,
-          param_value: 0.2,
-          stability: options.stability ?? 'None',
-          eigenvalues: [{ re: 0.1, im: 0.2 }],
-        },
-      ],
-      bifurcations: [1],
-      indices: [0, 1],
-      branch_type: options.branchTypeData,
+      points: [{ state: [0, 0], param_value: 0.2, stability: 'Hopf', eigenvalues: [] }],
+      bifurcations: [0],
+      indices: [0],
     },
     settings: BASE_SETTINGS,
     timestamp: nowIso(),
-    params: [...BASE_PARAMS],
+    params: [0.2],
   }
-}
+  const equilibriumBranchAdded = addBranch(system, equilibriumBranch, equilibriumAdded.nodeId)
+  system = equilibriumBranchAdded.system
 
-const objectCases: Array<{ name: string; build: () => System }> = [
-  {
-    name: 'orbit',
-    build: () => {
-      const system = createConfiguredSystem('Orbit_Object_System')
-      return addObject(system, makeOrbit(system.config.name)).system
+  const limitCycle: LimitCycleObject = {
+    type: 'limit_cycle',
+    name: 'LC_A',
+    systemName: system.config.name,
+    origin: {
+      type: 'hopf',
+      equilibriumObjectId: equilibriumAdded.nodeId,
+      equilibriumBranchId: equilibriumBranchAdded.nodeId,
+      equilibriumObjectName: equilibrium.name,
+      equilibriumBranchName: equilibriumBranch.name,
+      pointIndex: 0,
     },
-  },
-  {
-    name: 'equilibrium',
-    build: () => {
-      const system = createConfiguredSystem('Equilibrium_Object_System')
-      return addObject(system, makeEquilibrium(system.config.name)).system
-    },
-  },
-  {
-    name: 'limit_cycle (orbit origin)',
-    build: () => {
-      let system = createConfiguredSystem('LimitCycle_Orbit_System')
-      const orbit = makeOrbit(system.config.name, 'Orbit_Source')
-      const orbitResult = addObject(system, orbit)
-      system = orbitResult.system
-      const limitCycle = makeLimitCycle(system.config.name, {
-        type: 'orbit',
-        orbitName: orbit.name,
-      })
-      system = addObject(system, limitCycle).system
-      return system
-    },
-  },
-  {
-    name: 'limit_cycle (hopf origin)',
-    build: () => {
-      let system = createConfiguredSystem('LimitCycle_Hopf_System')
-      const equilibrium = makeEquilibrium(system.config.name, 'Eq_Source')
-      const equilibriumResult = addObject(system, equilibrium)
-      system = equilibriumResult.system
-      const hopfBranch = makeContinuationBranch({
-        name: 'eq_hopf_branch',
-        systemName: system.config.name,
-        parentObject: equilibrium.name,
-        startObject: equilibrium.name,
-        parameterName: 'mu',
-        branchType: 'equilibrium',
-        branchTypeData: { type: 'Equilibrium' },
-        stability: 'Hopf',
-      })
-      system = addBranch(system, hopfBranch, equilibriumResult.nodeId).system
-      const limitCycle = makeLimitCycle(system.config.name, {
-        type: 'hopf',
-        equilibriumObjectName: equilibrium.name,
-        equilibriumBranchName: hopfBranch.name,
-        pointIndex: 0,
-      })
-      system = addObject(system, limitCycle).system
-      return system
-    },
-  },
-  {
-    name: 'limit_cycle (pd origin)',
-    build: () => {
-      let system = createConfiguredSystem('LimitCycle_PD_System')
-      const orbit = makeOrbit(system.config.name, 'Orbit_Source')
-      const orbitResult = addObject(system, orbit)
-      system = orbitResult.system
-      const baseCycle = makeLimitCycle(system.config.name, {
-        type: 'orbit',
-        orbitName: orbit.name,
-      })
-      const baseCycleResult = addObject(system, baseCycle)
-      system = baseCycleResult.system
-      const pdBranch = makeContinuationBranch({
-        name: 'lc_pd_branch',
-        systemName: system.config.name,
-        parentObject: baseCycle.name,
-        startObject: baseCycle.name,
-        parameterName: 'mu',
-        branchType: 'limit_cycle',
-        branchTypeData: { type: 'LimitCycle', ntst: 4, ncol: 3 },
-        stability: 'PeriodDoubling',
-        state: LIMIT_CYCLE_STATE,
-      })
-      system = addBranch(system, pdBranch, baseCycleResult.nodeId).system
-      const derivedCycle = makeLimitCycle(system.config.name, {
-        type: 'pd',
-        sourceLimitCycleObjectName: baseCycle.name,
-        sourceBranchName: pdBranch.name,
-        pointIndex: 1,
-      })
-      system = addObject(system, derivedCycle).system
-      return system
-    },
-  },
-]
-
-const branchCases: Array<{
-  name: string
-  branchType: ContinuationObject['branchType']
-  branchTypeData: BranchType
-  parentKind: 'equilibrium' | 'limit_cycle'
-  stability: string
-}> = [
-  {
-    name: 'equilibrium',
-    branchType: 'equilibrium',
-    branchTypeData: { type: 'Equilibrium' },
-    parentKind: 'equilibrium',
-    stability: 'Fold',
-  },
-  {
-    name: 'limit_cycle',
-    branchType: 'limit_cycle',
-    branchTypeData: { type: 'LimitCycle', ntst: 5, ncol: 4 },
-    parentKind: 'limit_cycle',
-    stability: 'PeriodDoubling',
-  },
-  {
-    name: 'fold_curve',
-    branchType: 'fold_curve',
-    branchTypeData: { type: 'FoldCurve', param1_name: 'mu', param2_name: 'nu' },
-    parentKind: 'equilibrium',
-    stability: 'Fold',
-  },
-  {
-    name: 'hopf_curve',
-    branchType: 'hopf_curve',
-    branchTypeData: { type: 'HopfCurve', param1_name: 'mu', param2_name: 'nu' },
-    parentKind: 'equilibrium',
-    stability: 'Hopf',
-  },
-  {
-    name: 'homoclinic_curve',
-    branchType: 'homoclinic_curve',
-    branchTypeData: {
-      type: 'HomoclinicCurve',
-      ntst: 6,
-      ncol: 2,
-      param1_name: 'mu',
-      param2_name: 'nu',
-      free_time: true,
-      free_eps0: true,
-      free_eps1: false,
-    },
-    parentKind: 'equilibrium',
-    stability: 'None',
-  },
-  {
-    name: 'homotopy_saddle_curve',
-    branchType: 'homotopy_saddle_curve',
-    branchTypeData: {
-      type: 'HomotopySaddleCurve',
-      ntst: 6,
-      ncol: 2,
-      param1_name: 'mu',
-      param2_name: 'nu',
-      stage: 'StageD',
-    },
-    parentKind: 'equilibrium',
-    stability: 'None',
-  },
-  {
-    name: 'lpc_curve',
-    branchType: 'lpc_curve',
-    branchTypeData: { type: 'LPCCurve', param1_name: 'mu', param2_name: 'nu', ntst: 4, ncol: 2 },
-    parentKind: 'limit_cycle',
-    stability: 'CycleFold',
-  },
-  {
-    name: 'isochrone_curve',
-    branchType: 'isochrone_curve',
-    branchTypeData: {
-      type: 'IsochroneCurve',
-      param1_name: 'mu',
-      param2_name: 'nu',
-      ntst: 4,
-      ncol: 2,
-    },
-    parentKind: 'limit_cycle',
-    stability: 'None',
-  },
-  {
-    name: 'pd_curve',
-    branchType: 'pd_curve',
-    branchTypeData: { type: 'PDCurve', param1_name: 'mu', param2_name: 'nu', ntst: 4, ncol: 2 },
-    parentKind: 'limit_cycle',
-    stability: 'PeriodDoubling',
-  },
-  {
-    name: 'ns_curve',
-    branchType: 'ns_curve',
-    branchTypeData: { type: 'NSCurve', param1_name: 'mu', param2_name: 'nu', ntst: 4, ncol: 2 },
-    parentKind: 'limit_cycle',
-    stability: 'NeimarkSacker',
-  },
-]
-
-function buildSystemWithBranch(caseInfo: (typeof branchCases)[number]): System {
-  let system = createConfiguredSystem(`Branch_${caseInfo.name}`)
-  let parentName = ''
-  let parentNodeId = ''
-
-  if (caseInfo.parentKind === 'equilibrium') {
-    const equilibrium = makeEquilibrium(system.config.name, 'Branch_Eq')
-    const equilibriumResult = addObject(system, equilibrium)
-    system = equilibriumResult.system
-    parentName = equilibrium.name
-    parentNodeId = equilibriumResult.nodeId
-  } else {
-    const orbit = makeOrbit(system.config.name, 'Branch_Orbit')
-    const orbitResult = addObject(system, orbit)
-    system = orbitResult.system
-    const limitCycle = makeLimitCycle(system.config.name, {
-      type: 'orbit',
-      orbitName: orbit.name,
-    })
-    const limitCycleResult = addObject(system, limitCycle)
-    system = limitCycleResult.system
-    parentName = limitCycle.name
-    parentNodeId = limitCycleResult.nodeId
+    ntst: 20,
+    ncol: 4,
+    period: 6,
+    state: [0, 1, 0, -1, 6],
+    parameters: [0.2],
+    parameterName: 'mu',
+    paramValue: 0.2,
+    createdAt: nowIso(),
   }
+  const limitCycleAdded = addObject(system, limitCycle)
+  system = limitCycleAdded.system
 
-  const branch = makeContinuationBranch({
-    name: `branch_${caseInfo.name}`,
+  const limitCycleBranch: ContinuationObject = {
+    type: 'continuation',
+    name: 'lc_mu',
     systemName: system.config.name,
-    parentObject: parentName,
-    startObject: parentName,
     parameterName: 'mu',
-    branchType: caseInfo.branchType,
-    branchTypeData: caseInfo.branchTypeData,
-    stability: caseInfo.stability,
-    state: caseInfo.parentKind === 'limit_cycle' ? LIMIT_CYCLE_STATE : undefined,
-  })
-
-  return addBranch(system, branch, parentNodeId).system
-}
-
-function buildUiConfigSystem(): System {
-  let system = createConfiguredSystem('UI_Config_System')
-  const orbit = makeOrbit(system.config.name, 'UI_Orbit')
-  const orbitResult = addObject(system, orbit)
-  system = orbitResult.system
-
-  const equilibrium = makeEquilibrium(system.config.name, 'UI_Equilibrium')
-  const equilibriumResult = addObject(system, equilibrium)
-  system = equilibriumResult.system
-
-  const limitCycleBranchOrigin = makeLimitCycle(system.config.name, {
-    type: 'orbit',
-    orbitName: orbit.name,
-  }, 'UI_LC_Branch')
-  const limitCycleBranchResult = addObject(system, limitCycleBranchOrigin)
-  system = limitCycleBranchResult.system
-
-  const limitCycleObjectOrigin = makeLimitCycle(system.config.name, {
-    type: 'orbit',
-    orbitName: orbit.name,
-  }, 'UI_LC_Object')
-  const limitCycleObjectResult = addObject(system, limitCycleObjectOrigin)
-  system = limitCycleObjectResult.system
-
-  const branch = makeContinuationBranch({
-    name: 'UI_LC_Branch_Mu',
-    systemName: system.config.name,
-    parentObject: limitCycleBranchOrigin.name,
-    startObject: limitCycleBranchOrigin.name,
-    parameterName: 'mu',
+    parentObjectId: limitCycleAdded.nodeId,
+    startObjectId: equilibriumBranchAdded.nodeId,
+    parentObject: limitCycle.name,
+    startObject: equilibriumBranch.name,
     branchType: 'limit_cycle',
-    branchTypeData: { type: 'LimitCycle', ntst: 4, ncol: 3 },
-    stability: 'PeriodDoubling',
-    state: LIMIT_CYCLE_STATE,
-  })
-  const branchResult = addBranch(system, branch, limitCycleBranchResult.nodeId)
-  system = branchResult.system
-
-  const sceneResult = addScene(system, 'Scene_UI')
-  system = sceneResult.system
-  const diagramResult = addBifurcationDiagram(system, 'Diagram_UI')
-  system = diagramResult.system
-
-  system = updateScene(system, sceneResult.nodeId, {
-    camera: {
-      eye: { x: 2, y: 1, z: 0.5 },
-      center: { x: 0, y: 0, z: 0 },
-      up: { x: 0, y: 1, z: 0 },
+    data: {
+      points: [
+        {
+          state: [0, 1, 0, -1, 6],
+          param_value: 0.2,
+          stability: 'None',
+          eigenvalues: [{ re: 0.8, im: 0.1 }],
+        },
+      ],
+      bifurcations: [],
+      indices: [0],
     },
-    axisRanges: { x: [-1, 1], y: [-2, 2], z: [0, 3] },
-    axisVariables: ['x', 'y', 'z'],
-    selectedNodeIds: [orbitResult.nodeId, branchResult.nodeId],
-    display: 'selection',
-    viewRevision: 2,
-  })
-  system = updateBifurcationDiagram(system, diagramResult.nodeId, {
-    selectedBranchIds: [branchResult.nodeId],
-    xAxis: { kind: 'parameter', name: 'mu' },
-    yAxis: { kind: 'state', name: 'x' },
-    axisRanges: { x: [0, 1], y: [-1, 1] },
-    viewRevision: 1,
-  })
+    settings: BASE_SETTINGS,
+    timestamp: nowIso(),
+    params: [0.2],
+  }
+  const limitCycleBranchAdded = addBranch(system, limitCycleBranch, limitCycleAdded.nodeId)
+  system = limitCycleBranchAdded.system
 
-  system = updateLayout(system, {
-    leftWidth: 220,
-    rightWidth: 340,
-    objectsOpen: false,
-    inspectorOpen: true,
-    branchViewerOpen: false,
-  })
-  system = updateViewportHeights(system, {
-    [sceneResult.nodeId]: 240,
-    [diagramResult.nodeId]: 180,
-  })
-  system = selectNode(system, equilibriumResult.nodeId)
-
-  system = updateNodeRender(system, orbitResult.nodeId, {
-    color: '#00aa00',
+  system = addScene(system, 'Scene_A').system
+  system = addBifurcationDiagram(system, 'Diagram_A').system
+  system = updateLayout(system, { leftWidth: 310, rightWidth: 360 })
+  system = updateViewportHeights(system, { [limitCycleAdded.nodeId]: 520 })
+  system = updateNodeRender(system, limitCycleAdded.nodeId, {
     lineWidth: 3,
-    lineStyle: 'dashed',
     pointSize: 6,
-    clv: {
-      enabled: true,
-      stride: 2,
-      lengthScale: 1.2,
-      headScale: 0.8,
-      thickness: 1,
-      vectorIndices: [0, 1],
-      colors: ['#ff0000', '#00ff00'],
-      colorOverrides: { 1: '#0000ff' },
-    },
+    color: '#00aa66',
   })
-  system = updateNodeRender(system, equilibriumResult.nodeId, {
-    color: '#3300ff',
-    lineWidth: 2,
-    lineStyle: 'dotted',
-    equilibriumEigenvectors: {
-      enabled: true,
-      vectorIndices: [0],
-      colors: ['#ffaa00'],
-      lineLengthScale: 1.5,
-      lineThickness: 2,
-      discRadiusScale: 1.2,
-      discThickness: 1.1,
-      colorOverrides: { 0: '#000000' },
-    },
-  })
+  system = selectNode(system, limitCycleBranchAdded.nodeId)
 
-  system = toggleNodeVisibility(system, equilibriumResult.nodeId)
-  system = toggleNodeExpanded(system, branchResult.nodeId)
-
-  system = updateLimitCycleRenderTarget(system, limitCycleBranchResult.nodeId, {
-    type: 'branch',
-    branchId: branchResult.nodeId,
-    pointIndex: 1,
-  })
-  system = updateLimitCycleRenderTarget(system, limitCycleObjectResult.nodeId, {
-    type: 'object',
-  })
-
-  return system
+  return {
+    system,
+    orbitId: orbitAdded.nodeId,
+    equilibriumId: equilibriumAdded.nodeId,
+    equilibriumBranchId: equilibriumBranchAdded.nodeId,
+    limitCycleId: limitCycleAdded.nodeId,
+    limitCycleBranchId: limitCycleBranchAdded.nodeId,
+  }
 }
 
-describe('system import/export', () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
-  it('reads a system bundle from a file', async () => {
-    const system = createSystem({ name: 'Example' })
-    const bundle = serializeSystem(system)
-    const file = makeBundleFile(bundle)
-
-    const restored = await readSystemFile(file)
-
-    expect(restored).toEqual(normalizeSystem(system))
-  })
-
-  it('reads a legacy system bundle from a file', async () => {
-    const system = createSystem({ name: 'Legacy_System' })
-    const bundle = {
-      schemaVersion: SYSTEM_PROJECT_SCHEMA_VERSION,
-      system,
-    }
-    const file = makeBundleFile(bundle)
-
-    const restored = await readSystemFile(file)
-
-    expect(restored).toEqual(normalizeSystem(system))
-  })
-
-  it('rejects unsupported schema versions', async () => {
-    const system = createSystem({ name: 'Versioned_System' })
-    const bundle = {
-      ...serializeSystem(system),
-      schemaVersion: SYSTEM_PROJECT_SCHEMA_VERSION + 1,
-    }
-    const file = makeBundleFile(bundle)
-
-    await expect(readSystemFile(file)).rejects.toThrow(
-      /Recompute analyses with the current app version/
-    )
-  })
-
-  it('downloads a system bundle as JSON', async () => {
-    const system = createSystem({ name: 'My_System' })
+describe('system import/export (zip)', () => {
+  it('downloads zip archives with v3 layout entries', async () => {
+    const { system } = createRichSystem()
     const { anchor, blob, spies } = await exportSystem(system)
-    const payload = JSON.parse(await readBlobText(blob))
 
+    expect(anchor.download).toBe('Zip_Roundtrip_System.zip')
+    expect(blob.type).toBe('application/zip')
     expect(spies.createObjectUrlSpy).toHaveBeenCalledTimes(1)
-    expect(spies.revokeSpy).toHaveBeenCalledWith('blob:mock-url')
+    expect(spies.revokeSpy).toHaveBeenCalledTimes(1)
     expect(spies.clickSpy).toHaveBeenCalledTimes(1)
     expect(spies.removeSpy).toHaveBeenCalledTimes(1)
-    expect(spies.appendSpy).toHaveBeenCalledTimes(1)
-    expect(anchor.download).toBe('My_System.json')
-    expect(anchor.href).toBe('blob:mock-url')
-    expect(payload).toEqual(serializeSystem(system))
+
+    const entries = await decodeZip(buildSystemArchiveBytes(system))
+    expect(Object.keys(entries)).toContain('manifest.json')
+    expect(hasEntry(entries, 'system.json')).toBe(true)
+    expect(hasEntry(entries, 'ui.json')).toBe(true)
+    expect(hasEntry(entries, 'index/objects.json')).toBe(true)
+    expect(hasEntry(entries, 'index/branches.json')).toBe(true)
+
+    const objectIndex = decodeJson<Record<string, { shard: string }>>(entries, 'index/objects.json')
+    const branchIndex = decodeJson<Record<string, { shard: string }>>(entries, 'index/branches.json')
+    Object.keys(objectIndex).forEach((id) => {
+      const shard = objectIndex[id]?.shard
+      expect(hasEntry(entries, `objects/${shard}/${id}.json`)).toBe(true)
+    })
+    Object.keys(branchIndex).forEach((id) => {
+      const shard = branchIndex[id]?.shard
+      expect(hasEntry(entries, `branches/${shard}/${id}.json`)).toBe(true)
+    })
   })
 
-  it('round-trips export/import for a demo system', async () => {
-    const { system } = createDemoSystem()
-    const { blob, anchor } = await exportSystem(system)
-    const file = makeTextFile(await readBlobText(blob), anchor.download)
+  it('round-trips full system data, ui state, and id references', async () => {
+    const ids = createRichSystem()
+    const restored = await roundTripSystem(ids.system)
 
-    const restored = await readSystemFile(file)
+    expect(restored.id).toBe(ids.system.id)
+    expect(restored.name).toBe(ids.system.name)
+    expect(restored.config).toEqual(ids.system.config)
+    expect(restored.ui.layout).toEqual(ids.system.ui.layout)
+    expect(restored.ui.viewportHeights).toEqual(ids.system.ui.viewportHeights)
+    expect(restored.ui.selectedNodeId).toBe(ids.system.ui.selectedNodeId)
+    expect(restored.nodes).toEqual(ids.system.nodes)
+    expect(restored.rootIds).toEqual(ids.system.rootIds)
+    expect(restored.scenes).toEqual(ids.system.scenes)
+    expect(restored.bifurcationDiagrams).toEqual(ids.system.bifurcationDiagrams)
+    expect(Object.keys(restored.index.objects).sort()).toEqual(
+      Object.keys(ids.system.index.objects).sort()
+    )
+    expect(Object.keys(restored.index.branches).sort()).toEqual(
+      Object.keys(ids.system.index.branches).sort()
+    )
 
-    expect(restored).toEqual(normalizeSystem(system))
+    expect(restored.branches[ids.equilibriumBranchId].parentObjectId).toBe(ids.equilibriumId)
+    expect(restored.branches[ids.equilibriumBranchId].startObjectId).toBe(ids.equilibriumId)
+    expect(restored.branches[ids.limitCycleBranchId].parentObjectId).toBe(ids.limitCycleId)
+    expect(restored.branches[ids.limitCycleBranchId].startObjectId).toBe(ids.equilibriumBranchId)
+
+    const restoredCycle = restored.objects[ids.limitCycleId]
+    expect(restoredCycle.type).toBe('limit_cycle')
+    if (restoredCycle.type === 'limit_cycle') {
+      expect(restoredCycle.origin.type).toBe('hopf')
+      if (restoredCycle.origin.type === 'hopf') {
+        expect(restoredCycle.origin.equilibriumObjectId).toBe(ids.equilibriumId)
+        expect(restoredCycle.origin.equilibriumBranchId).toBe(ids.equilibriumBranchId)
+      }
+    }
   })
 
-  it('round-trips export/import for large systems', async () => {
-    const system = createLargeSystem()
-    const { blob, anchor } = await exportSystem(system)
-    const file = makeTextFile(await readBlobText(blob), anchor.download)
-
-    const restored = await readSystemFile(file)
-
-    expect(restored).toEqual(normalizeSystem(system))
-  })
-
-  it.each(objectCases)('round-trips $name objects', async ({ build }) => {
-    const system = build()
-    const restored = await roundTripSystem(system)
-    expect(restored).toEqual(normalizeSystem(system))
-  })
-
-  it.each(branchCases)('round-trips $name continuation branches', async (caseInfo) => {
-    const system = buildSystemWithBranch(caseInfo)
-    const restored = await roundTripSystem(system)
-    expect(restored).toEqual(normalizeSystem(system))
-  })
-
-  it('round-trips full UI configuration', async () => {
-    const system = buildUiConfigSystem()
-    const restored = await roundTripSystem(system)
-    const normalized = normalizeSystem(system)
-
-    expect(restored.ui).toEqual(normalized.ui)
-    expect(restored.nodes).toEqual(normalized.nodes)
-    expect(restored.rootIds).toEqual(normalized.rootIds)
-    expect(restored.scenes).toEqual(normalized.scenes)
-    expect(restored.bifurcationDiagrams).toEqual(normalized.bifurcationDiagrams)
-  })
-
-  it('moves exports between opfs and indexeddb stores', async () => {
-    const { cleanup } = installMockOpfs()
-    const opfsStore = new OpfsSystemStore()
-    const indexedDbStore = makeIndexedDbStore()
-    const { system } = createDemoSystem()
+  it('transfers archives between IndexedDB and OPFS stores', async () => {
+    const opfsInstall = installMockOpfs()
+    const idb = new IndexedDbSystemStore({
+      name: `fork-test-idb-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    })
+    const opfs = new OpfsSystemStore()
+    const ids = createRichSystem()
 
     try {
-      await opfsStore.save(system)
-      const stored = await opfsStore.load(system.id)
-      const { blob, anchor } = await exportSystem(stored)
-      const file = makeTextFile(await readBlobText(blob), anchor.download)
-      const imported = await readSystemFile(file)
+      await idb.save(ids.system)
+      const exportMeta = await idb.exportSystemArchive(ids.system.id)
+      expect(exportMeta.filename.endsWith('.zip')).toBe(true)
 
-      await indexedDbStore.save(imported)
-      const loaded = await indexedDbStore.load(imported.id)
-      expect(loaded).toEqual(normalizeSystem(system))
-
-      await indexedDbStore.save(system)
-      const indexedStored = await indexedDbStore.load(system.id)
-      const indexedExport = await exportSystem(indexedStored)
-      const indexedFile = makeTextFile(
-        await readBlobText(indexedExport.blob),
-        indexedExport.anchor.download
+      const skeleton = await idb.load(ids.system.id)
+      const entities = await idb.loadEntities(
+        ids.system.id,
+        Object.keys(skeleton.index.objects),
+        Object.keys(skeleton.index.branches)
       )
-      const opfsImported = await readSystemFile(indexedFile)
-      await opfsStore.save(opfsImported)
-      const opfsLoaded = await opfsStore.load(opfsImported.id)
-      expect(opfsLoaded).toEqual(normalizeSystem(system))
+      const bytes = buildSystemArchiveBytes({
+        ...skeleton,
+        objects: entities.objects,
+        branches: entities.branches,
+      })
+      const imported = await opfs.importSystemArchive(
+        bytesToFile(bytes, `${ids.system.name}.zip`)
+      )
+      const loaded = await opfs.load(imported.id)
+
+      expect(loaded.name).toBe(ids.system.name)
+      expect(Object.keys(loaded.index.objects).sort()).toEqual(
+        Object.keys(ids.system.index.objects).sort()
+      )
+      expect(Object.keys(loaded.index.branches).sort()).toEqual(
+        Object.keys(ids.system.index.branches).sort()
+      )
     } finally {
-      await opfsStore.clear()
-      await indexedDbStore.clear()
-      cleanup()
+      await idb.clear()
+      await opfs.clear()
+      opfsInstall.cleanup()
     }
   })
 })

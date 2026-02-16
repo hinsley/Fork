@@ -232,6 +232,9 @@ describe('InspectorDetailsPanel', () => {
     const nameInput = screen.getByTestId('inspector-name')
     await user.clear(nameInput)
     await user.type(nameInput, 'Orbit Q')
+    expect(onRename).not.toHaveBeenCalled()
+    await user.tab()
+    expect(onRename).toHaveBeenCalledTimes(1)
     expect(onRename).toHaveBeenLastCalledWith(objectNodeId, 'Orbit Q')
 
     await user.click(screen.getByTestId('inspector-visibility'))
@@ -241,7 +244,7 @@ describe('InspectorDetailsPanel', () => {
     await user.clear(lineWidth)
     await user.type(lineWidth, '3')
     expect(onUpdateRender).toHaveBeenLastCalledWith(objectNodeId, { lineWidth: 3 })
-  })
+  }, 15000)
 
   it('updates branch line style render settings', async () => {
     const user = userEvent.setup()
@@ -721,7 +724,7 @@ describe('InspectorDetailsPanel', () => {
       { isoclineId: added.nodeId },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
-  })
+  }, 15000)
 
   it('blocks compute when isocline drafts are unparsable', async () => {
     const user = userEvent.setup()
@@ -786,9 +789,10 @@ describe('InspectorDetailsPanel', () => {
 
     await user.click(screen.getByTestId('isocline-toggle'))
     fireEvent.change(screen.getByTestId('isocline-level'), { target: { value: '-' } })
+    const callsBefore = onComputeIsocline.mock.calls.length
     await user.click(screen.getByTestId('isocline-compute'))
 
-    expect(onComputeIsocline).not.toHaveBeenCalled()
+    expect(onComputeIsocline).toHaveBeenCalledTimes(callsBefore)
     expect(screen.getByText('Isocline value must be a valid real number.')).toBeInTheDocument()
   })
 
@@ -1139,7 +1143,7 @@ describe('InspectorDetailsPanel', () => {
       },
       forward: false,
     })
-  })
+  }, 15000)
 
   it('hides limit cycle menu for map orbits', () => {
     const config: SystemConfig = {

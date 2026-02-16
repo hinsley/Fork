@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { IndexedDbSystemStore } from './indexedDb'
-import { createSystem, updateLayout, updateSystem } from './model'
+import { addObject, createSystem, updateLayout, updateObject, updateSystem } from './model'
+import type { OrbitObject } from './types'
 
 async function createLegacyDb(name: string, version = 1): Promise<void> {
   await new Promise<void>((resolve, reject) => {
@@ -32,6 +33,38 @@ async function deleteDb(name: string): Promise<void> {
 function makeStore() {
   const nonce = Math.random().toString(16).slice(2)
   return new IndexedDbSystemStore({ name: `fork-test-${Date.now()}-${nonce}` })
+}
+
+async function readObjectPayloadRecord(
+  dbName: string,
+  systemId: string,
+  objectId: string
+): Promise<unknown> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(dbName, 3)
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () =>
+      reject(request.error ?? new Error('Failed to open IndexedDB for inspection'))
+  })
+  try {
+    const tx = db.transaction('object-payload', 'readonly')
+    const store = tx.objectStore('object-payload')
+    const key = `${systemId}:${objectId}`
+    const value = await new Promise<unknown>((resolve, reject) => {
+      const request = store.get(key)
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () =>
+        reject(request.error ?? new Error('Failed to read payload inspection key'))
+    })
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error ?? new Error('Inspection transaction failed'))
+      tx.onabort = () => reject(tx.error ?? new Error('Inspection transaction aborted'))
+    })
+    return structuredClone(value)
+  } finally {
+    db.close()
+  }
 }
 
 describe('IndexedDbSystemStore', () => {
@@ -82,6 +115,48 @@ describe('IndexedDbSystemStore', () => {
       const loaded = await store.load(base.id)
       expect(loaded.name).toBe('IndexedDB_System_Updated')
       expect(loaded.ui.layout.leftWidth).toBe(uiOnly.ui.layout.leftWidth)
+    } finally {
+      await store.clear()
+    }
+  })
+
+  it('preserves untouched payload records when saving a single edited entity', async () => {
+    const store = makeStore()
+    try {
+      const base = createSystem({ name: 'IndexedDB_Diff' })
+      const orbitA: OrbitObject = {
+        type: 'orbit',
+        name: 'Orbit_A',
+        systemName: base.config.name,
+        data: [[0, 0, 0]],
+        t_start: 0,
+        t_end: 0,
+        dt: 0.1,
+      }
+      const orbitB: OrbitObject = {
+        type: 'orbit',
+        name: 'Orbit_B',
+        systemName: base.config.name,
+        data: [[0, 1, 0]],
+        t_start: 0,
+        t_end: 0,
+        dt: 0.1,
+      }
+      const withA = addObject(base, orbitA)
+      const withB = addObject(withA.system, orbitB)
+      await store.save(withB.system)
+
+      const dbName = (store as unknown as { dbName: string }).dbName
+      const beforeB = await readObjectPayloadRecord(dbName, withB.system.id, withB.nodeId)
+
+      const edited = updateObject(withB.system, withA.nodeId, { name: 'Orbit_A_Updated' })
+      await store.save(edited)
+
+      const afterA = await readObjectPayloadRecord(dbName, edited.id, withA.nodeId)
+      const afterB = await readObjectPayloadRecord(dbName, edited.id, withB.nodeId)
+
+      expect(afterA).not.toEqual(null)
+      expect(afterB).toEqual(beforeB)
     } finally {
       await store.clear()
     }

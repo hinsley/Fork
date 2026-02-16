@@ -41,12 +41,13 @@ import type {
   SystemConfig,
   TreeNode,
 } from '../system/types'
-import type { SystemStore } from '../system/store'
+import type { LoadedEntities, SystemStore } from '../system/store'
 import {
   addBifurcationDiagram,
   addBranch,
   addObject,
   addScene,
+  mergeLoadedEntities,
   moveNode,
   reorderNode,
   removeNode,
@@ -88,7 +89,6 @@ import {
   resolveRuntimeParameterName,
   resolveSubsystemSnapshot,
 } from '../system/subsystemGateway'
-import { downloadSystem, readSystemFile } from '../system/importExport'
 import { formatEquilibriumLabel } from '../system/labels'
 import { AppContext } from './appContext'
 import { validateSystemConfig, validateSystemName } from './systemValidation'
@@ -99,10 +99,70 @@ function findObjectIdByName(system: System, name: string): string | null {
   return match ? match[0] : null
 }
 
-function branchNameExists(system: System, parentName: string, name: string): boolean {
+function branchNameExists(system: System, parentObjectId: string, name: string): boolean {
   return Object.values(system.branches).some(
-    (branch) => branch.parentObject === parentName && branch.name === name
+    (branch) =>
+      (branch.parentObjectId === parentObjectId || branch.parentObject === parentObjectId) &&
+      branch.name === name
   )
+}
+
+function resolveBranchParentObjectId(system: System, branch: ContinuationObject): string | null {
+  if (branch.parentObjectId && system.nodes[branch.parentObjectId]) {
+    return branch.parentObjectId
+  }
+  return findObjectIdByName(system, branch.parentObject)
+}
+
+function resolveEntityName(system: System, entityId: string | null, fallback: string): string {
+  if (!entityId) return fallback
+  return (
+    system.nodes[entityId]?.name ??
+    system.objects[entityId]?.name ??
+    system.branches[entityId]?.name ??
+    fallback
+  )
+}
+
+function resolveBranchParentObjectName(system: System, branch: ContinuationObject): string {
+  return resolveEntityName(system, resolveBranchParentObjectId(system, branch), branch.parentObject)
+}
+
+function branchNameExistsForBranch(
+  system: System,
+  branch: ContinuationObject,
+  name: string
+): boolean {
+  const parentObjectId = resolveBranchParentObjectId(system, branch)
+  if (!parentObjectId) return false
+  return branchNameExists(system, parentObjectId, name)
+}
+
+function collectVisibleEntityIds(system: System): { objectIds: string[]; branchIds: string[] } {
+  const objectIds = new Set<string>()
+  const branchIds = new Set<string>()
+  const stack = [...system.rootIds]
+  const visited = new Set<string>()
+  while (stack.length > 0) {
+    const nodeId = stack.pop()
+    if (!nodeId || visited.has(nodeId)) continue
+    visited.add(nodeId)
+    const node = system.nodes[nodeId]
+    if (!node) continue
+    if (!node.visibility) continue
+    if (node.kind === 'object' && system.index.objects[nodeId]) {
+      objectIds.add(nodeId)
+    } else if (node.kind === 'branch' && system.index.branches[nodeId]) {
+      branchIds.add(nodeId)
+    }
+    if (node.expanded) {
+      stack.push(...node.children)
+    }
+  }
+  return {
+    objectIds: [...objectIds],
+    branchIds: [...branchIds],
+  }
 }
 
 function validateBranchName(name: string): string | null {
@@ -1117,6 +1177,10 @@ type AppState = {
   systems: SystemSummary[]
   busy: boolean
   error: string | null
+  loadingEntityIds: Record<string, boolean>
+  loadErrorsByEntityId: Record<string, string>
+  loadedObjectIds: Record<string, boolean>
+  loadedBranchIds: Record<string, boolean>
   timings: JobTiming[]
   continuationProgress: ContinuationProgressState | null
   isoclineGeometryCache: Record<
@@ -1133,6 +1197,9 @@ type AppAction =
   | { type: 'SET_SYSTEMS'; systems: SystemSummary[] }
   | { type: 'SET_BUSY'; busy: boolean }
   | { type: 'SET_ERROR'; error: string | null }
+  | { type: 'START_ENTITY_LOAD'; ids: string[] }
+  | { type: 'SET_ENTITY_LOAD_ERROR'; id: string; error: string }
+  | { type: 'FINISH_ENTITY_LOAD'; objectIds: string[]; branchIds: string[]; ids: string[] }
   | { type: 'ADD_TIMING'; timing: JobTiming }
   | { type: 'SET_CONTINUATION_PROGRESS'; progress: ContinuationProgressState | null }
   | {
@@ -1148,6 +1215,10 @@ const initialState: AppState = {
   systems: [],
   busy: false,
   error: null,
+  loadingEntityIds: {},
+  loadErrorsByEntityId: {},
+  loadedObjectIds: {},
+  loadedBranchIds: {},
   timings: [],
   continuationProgress: null,
   isoclineGeometryCache: {},
@@ -1156,14 +1227,62 @@ const initialState: AppState = {
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'SET_SYSTEM':
+      {
+        const loadedObjectIds = action.system
+          ? Object.fromEntries(Object.keys(action.system.objects).map((id) => [id, true]))
+          : {}
+        const loadedBranchIds = action.system
+          ? Object.fromEntries(Object.keys(action.system.branches).map((id) => [id, true]))
+          : {}
+        return {
+          ...state,
+          system: action.system,
+          loadedObjectIds,
+          loadedBranchIds,
+          loadingEntityIds: {},
+          loadErrorsByEntityId: {},
+          isoclineGeometryCache:
+            state.system && action.system && state.system.id === action.system.id
+              ? state.isoclineGeometryCache
+              : {},
+        }
+      }
+    case 'START_ENTITY_LOAD':
       return {
         ...state,
-        system: action.system,
-        isoclineGeometryCache:
-          state.system && action.system && state.system.id === action.system.id
-            ? state.isoclineGeometryCache
-            : {},
+        loadingEntityIds: {
+          ...state.loadingEntityIds,
+          ...Object.fromEntries(action.ids.map((id) => [id, true])),
+        },
       }
+    case 'SET_ENTITY_LOAD_ERROR':
+      return {
+        ...state,
+        loadErrorsByEntityId: {
+          ...state.loadErrorsByEntityId,
+          [action.id]: action.error,
+        },
+      }
+    case 'FINISH_ENTITY_LOAD': {
+      const loadingEntityIds = { ...state.loadingEntityIds }
+      action.ids.forEach((id) => {
+        delete loadingEntityIds[id]
+      })
+      const loadedObjectIds = { ...state.loadedObjectIds }
+      action.objectIds.forEach((id) => {
+        loadedObjectIds[id] = true
+      })
+      const loadedBranchIds = { ...state.loadedBranchIds }
+      action.branchIds.forEach((id) => {
+        loadedBranchIds[id] = true
+      })
+      return {
+        ...state,
+        loadingEntityIds,
+        loadedObjectIds,
+        loadedBranchIds,
+      }
+    }
     case 'SET_SYSTEMS':
       return { ...state, systems: action.systems }
     case 'SET_BUSY':
@@ -1280,6 +1399,9 @@ type AppActions = {
   addScene: (name: string, targetId?: string | null) => Promise<void>
   addBifurcationDiagram: (name: string, targetId?: string | null) => Promise<void>
   importSystem: (file: File) => Promise<void>
+  ensureObjectLoaded: (id: string) => Promise<void>
+  ensureBranchLoaded: (id: string) => Promise<void>
+  ensureEntitiesLoaded: (request: { objectIds?: string[]; branchIds?: string[] }) => Promise<void>
   clearError: () => void
 }
 
@@ -1371,6 +1493,80 @@ export function AppProvider({
     [store]
   )
 
+  const applyLoadedEntities = useCallback(
+    (loaded: LoadedEntities): System | null => {
+      const current = latestSystemRef.current
+      if (!current) return null
+      const merged = mergeLoadedEntities(current, loaded)
+      latestSystemRef.current = merged
+      dispatch({ type: 'SET_SYSTEM', system: merged })
+      return merged
+    },
+    []
+  )
+
+  const ensureEntitiesLoaded = useCallback(
+    async (request: { objectIds?: string[]; branchIds?: string[] }): Promise<System | null> => {
+      const current = latestSystemRef.current
+      if (!current) return null
+      const objectIds = (request.objectIds ?? []).filter(
+        (id) => Boolean(current.index.objects[id]) && !current.objects[id]
+      )
+      const branchIds = (request.branchIds ?? []).filter(
+        (id) => Boolean(current.index.branches[id]) && !current.branches[id]
+      )
+      if (objectIds.length === 0 && branchIds.length === 0) {
+        return current
+      }
+      const loadIds = [...objectIds, ...branchIds]
+      dispatch({ type: 'START_ENTITY_LOAD', ids: loadIds })
+      try {
+        const loaded = await store.loadEntities(current.id, objectIds, branchIds)
+        const merged = applyLoadedEntities(loaded)
+        dispatch({ type: 'FINISH_ENTITY_LOAD', objectIds, branchIds, ids: loadIds })
+        return merged
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        loadIds.forEach((id) => {
+          dispatch({ type: 'SET_ENTITY_LOAD_ERROR', id, error: message })
+        })
+        dispatch({ type: 'SET_ERROR', error: message })
+        dispatch({ type: 'FINISH_ENTITY_LOAD', objectIds: [], branchIds: [], ids: loadIds })
+        return current
+      }
+    },
+    [applyLoadedEntities, store]
+  )
+
+  const ensureObjectLoaded = useCallback(
+    async (id: string) => {
+      await ensureEntitiesLoaded({ objectIds: [id] })
+    },
+    [ensureEntitiesLoaded]
+  )
+
+  const ensureBranchLoaded = useCallback(
+    async (id: string) => {
+      await ensureEntitiesLoaded({ branchIds: [id] })
+    },
+    [ensureEntitiesLoaded]
+  )
+
+  useEffect(() => {
+    const system = state.system
+    if (!system) return
+    const selected = system.ui.selectedNodeId
+    const visible = collectVisibleEntityIds(system)
+    const objectIds = [...visible.objectIds]
+    const branchIds = [...visible.branchIds]
+    if (selected) {
+      if (system.index.objects[selected]) objectIds.push(selected)
+      if (system.index.branches[selected]) branchIds.push(selected)
+    }
+    if (objectIds.length === 0 && branchIds.length === 0) return
+    void ensureEntitiesLoaded({ objectIds, branchIds })
+  }, [ensureEntitiesLoaded, state.system])
+
   const refreshSystems = useCallback(async () => {
     try {
       const systems = await store.list()
@@ -1407,11 +1603,22 @@ export function AppProvider({
   const openSystem = useCallback(
     async (id: string) => {
       dispatch({ type: 'SET_BUSY', busy: true })
-      const system = await store.load(id)
-      dispatch({ type: 'SET_SYSTEM', system })
-      dispatch({ type: 'SET_BUSY', busy: false })
+      try {
+        const system = await store.load(id)
+        latestSystemRef.current = system
+        dispatch({ type: 'SET_SYSTEM', system })
+        const selectedNodeId = system.ui.selectedNodeId
+        if (selectedNodeId) {
+          await ensureEntitiesLoaded({
+            objectIds: [selectedNodeId],
+            branchIds: [selectedNodeId],
+          })
+        }
+      } finally {
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
     },
-    [store]
+    [ensureEntitiesLoaded, store]
   )
 
   const saveSystem = useCallback(async () => {
@@ -1426,9 +1633,15 @@ export function AppProvider({
     async (id: string) => {
       dispatch({ type: 'SET_BUSY', busy: true })
       try {
-        const system =
-          state.system && state.system.id === id ? state.system : await store.load(id)
-        downloadSystem(system)
+        const result = await store.exportSystemArchive(id)
+        const url = URL.createObjectURL(result.blob)
+        const anchor = document.createElement('a')
+        anchor.href = url
+        anchor.download = result.filename
+        document.body.appendChild(anchor)
+        anchor.click()
+        anchor.remove()
+        URL.revokeObjectURL(url)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         dispatch({ type: 'SET_ERROR', error: message })
@@ -1436,7 +1649,7 @@ export function AppProvider({
         dispatch({ type: 'SET_BUSY', busy: false })
       }
     },
-    [state.system, store]
+    [store]
   )
 
   const deleteSystem = useCallback(
@@ -1509,8 +1722,15 @@ export function AppProvider({
       if (state.system.ui.selectedNodeId === nodeId) return
       const system = selectNode(state.system, nodeId)
       dispatch({ type: 'SET_SYSTEM', system })
+      if (nodeId) {
+        if (system.index.objects[nodeId]) {
+          void ensureObjectLoaded(nodeId)
+        } else if (system.index.branches[nodeId]) {
+          void ensureBranchLoaded(nodeId)
+        }
+      }
     },
-    [state.system]
+    [ensureBranchLoaded, ensureObjectLoaded, state.system]
   )
 
   const renameNodeAction = useCallback(
@@ -2334,23 +2554,26 @@ export function AppProvider({
     async (request: EquilibriumSolveRequest) => {
       if (!state.system) return
       dispatch({ type: 'SET_BUSY', busy: true })
-      const system = state.system.config
-      const equilibriumLabelLower = formatEquilibriumLabel(system.type, { lowercase: true })
       const runSummary = {
         timestamp: new Date().toISOString(),
         success: false,
         residual_norm: undefined as number | undefined,
         iterations: undefined as number | undefined,
       }
-
       let mapIterations: number | undefined
-
       try {
+        const hydrated = await ensureEntitiesLoaded({ objectIds: [request.equilibriumId] })
+        const current = hydrated ?? latestSystemRef.current
+        if (!current) {
+          throw new Error('No system is currently loaded.')
+        }
+        const system = current.config
+        const equilibriumLabelLower = formatEquilibriumLabel(system.type, { lowercase: true })
         const validation = validateSystemConfig(system)
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
         }
-        const equilibrium = state.system.objects[request.equilibriumId]
+        const equilibrium = current.objects[request.equilibriumId]
         if (!equilibrium || equilibrium.type !== 'equilibrium') {
           throw new Error(`Select a valid ${equilibriumLabelLower} to solve.`)
         }
@@ -2406,7 +2629,7 @@ export function AppProvider({
         runSummary.residual_norm = result.residual_norm
         runSummary.iterations = result.iterations
 
-        const updated = updateObject(state.system, request.equilibriumId, {
+        const updated = updateObject(current, request.equilibriumId, {
           solution: result,
           parameters: [...baseParams],
           lastSolverParams: solverParams,
@@ -2434,7 +2657,7 @@ export function AppProvider({
         dispatch({ type: 'SET_BUSY', busy: false })
       }
     },
-    [client, state.system, store]
+    [client, ensureEntitiesLoaded, state.system, store]
   )
 
   const createEquilibriumBranch = useCallback(
@@ -2463,7 +2686,7 @@ export function AppProvider({
         if (nameError) {
           throw new Error(nameError)
         }
-        if (branchNameExists(state.system, equilibrium.name, name)) {
+        if (branchNameExists(state.system, request.equilibriumId, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
 
@@ -2524,6 +2747,8 @@ export function AppProvider({
           systemName: system.name,
           parameterName: resolveDisplayParameterName(parameterRef),
           parameterRef,
+          parentObjectId: request.equilibriumId,
+          startObjectId: request.equilibriumId,
           parentObject: equilibrium.name,
           startObject: equilibrium.name,
           branchType: 'equilibrium',
@@ -2666,7 +2891,7 @@ export function AppProvider({
             branchDataList.length === 1
               ? name
               : `${name}_${resolveManifoldDirectionSuffix(direction)}`
-          if (reservedNames.has(branchName) || branchNameExists(nextSystem, equilibrium.name, branchName)) {
+          if (reservedNames.has(branchName) || branchNameExists(nextSystem, request.equilibriumId, branchName)) {
             throw new Error(`Branch "${branchName}" already exists.`)
           }
           reservedNames.add(branchName)
@@ -2676,8 +2901,10 @@ export function AppProvider({
             name: branchName,
             systemName: system.name,
             parameterName: 'manifold',
-            parentObject: equilibrium.name,
-            startObject: equilibrium.name,
+            parentObjectId: request.equilibriumId,
+          startObjectId: request.equilibriumId,
+          parentObject: equilibrium.name,
+          startObject: equilibrium.name,
             branchType: 'eq_manifold_1d',
             data: normalized,
             settings: buildManifoldBranchSettings({
@@ -2738,7 +2965,7 @@ export function AppProvider({
         if (nameError) {
           throw new Error(nameError)
         }
-        if (branchNameExists(state.system, equilibrium.name, name)) {
+        if (branchNameExists(state.system, request.equilibriumId, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
 
@@ -2861,6 +3088,8 @@ export function AppProvider({
           name,
           systemName: system.name,
           parameterName: 'manifold',
+          parentObjectId: request.equilibriumId,
+          startObjectId: request.equilibriumId,
           parentObject: equilibrium.name,
           startObject: equilibrium.name,
           branchType: 'eq_manifold_2d',
@@ -2913,7 +3142,7 @@ export function AppProvider({
         if (nameError) {
           throw new Error(nameError)
         }
-        if (branchNameExists(state.system, limitCycle.name, name)) {
+        if (branchNameExists(state.system, request.limitCycleId, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
 
@@ -3098,6 +3327,8 @@ export function AppProvider({
           name,
           systemName: system.name,
           parameterName: 'manifold',
+          parentObjectId: request.limitCycleId,
+          startObjectId: request.limitCycleId,
           parentObject: limitCycle.name,
           startObject: limitCycle.name,
           branchType: 'cycle_manifold_2d',
@@ -3168,10 +3399,10 @@ export function AppProvider({
         if (nameError) {
           throw new Error(nameError)
         }
-        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+        if (branchNameExistsForBranch(state.system, sourceBranch, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
-        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
         const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
         const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
         const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
@@ -3291,8 +3522,10 @@ export function AppProvider({
           systemName: system.name,
           parameterName: resolveDisplayParameterName(targetParameterRef),
           parameterRef: targetParameterRef,
-          parentObject: sourceBranch.parentObject,
-          startObject: sourceBranch.name,
+          parentObjectId: resolveBranchParentObjectId(state.system, sourceBranch) ?? undefined,
+          startObjectId: request.branchId,
+          parentObject: resolveBranchParentObjectName(state.system, sourceBranch),
+          startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
           branchType,
           data: normalized,
           settings: request.settings,
@@ -3302,7 +3535,7 @@ export function AppProvider({
           subsystemSnapshot: snapshot,
         }
 
-        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const parentNodeId = resolveBranchParentObjectId(state.system, sourceBranch)
         if (!parentNodeId) {
           throw new Error(`Unable to locate the parent ${equilibriumLabelLower} in the tree.`)
         }
@@ -3368,7 +3601,7 @@ export function AppProvider({
           throw new Error('Branch has no points to extend.')
         }
 
-        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
         const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
         const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
         const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
@@ -3527,7 +3760,7 @@ export function AppProvider({
 
         let updated = updateBranch(state.system, request.branchId, updatedBranch)
         if (sourceBranch.branchType === 'limit_cycle' && normalized.points.length > 0) {
-          const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+          const parentNodeId = resolveBranchParentObjectId(state.system, sourceBranch)
           if (parentNodeId) {
             const lastIndex = normalized.points.length - 1
             updated = updateLimitCycleRenderTarget(updated, parentNodeId, {
@@ -3588,11 +3821,11 @@ export function AppProvider({
         if (nameError) {
           throw new Error(nameError)
         }
-        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+        if (branchNameExistsForBranch(state.system, sourceBranch, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
 
-        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
         const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
         const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
         const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
@@ -3678,8 +3911,10 @@ export function AppProvider({
           parameterName: `${param1DisplayName}, ${param2DisplayName}`,
           parameterRef: param1Ref,
           parameter2Ref: param2Ref,
-          parentObject: sourceBranch.parentObject,
-          startObject: sourceBranch.name,
+          parentObjectId: resolveBranchParentObjectId(state.system, sourceBranch) ?? undefined,
+          startObjectId: request.branchId,
+          parentObject: resolveBranchParentObjectName(state.system, sourceBranch),
+          startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
           branchType: 'fold_curve',
           data: branchData,
           settings: request.settings,
@@ -3689,7 +3924,7 @@ export function AppProvider({
           subsystemSnapshot: snapshot,
         }
 
-        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const parentNodeId = resolveBranchParentObjectId(state.system, sourceBranch)
         if (!parentNodeId) {
           throw new Error(`Unable to locate the parent ${equilibriumLabelLower} in the tree.`)
         }
@@ -3750,11 +3985,11 @@ export function AppProvider({
         if (nameError) {
           throw new Error(nameError)
         }
-        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+        if (branchNameExistsForBranch(state.system, sourceBranch, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
 
-        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
         const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
         const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
         const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
@@ -3841,8 +4076,10 @@ export function AppProvider({
           parameterName: `${param1DisplayName}, ${param2DisplayName}`,
           parameterRef: param1Ref,
           parameter2Ref: param2Ref,
-          parentObject: sourceBranch.parentObject,
-          startObject: sourceBranch.name,
+          parentObjectId: resolveBranchParentObjectId(state.system, sourceBranch) ?? undefined,
+          startObjectId: request.branchId,
+          parentObject: resolveBranchParentObjectName(state.system, sourceBranch),
+          startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
           branchType: 'hopf_curve',
           data: branchData,
           settings: request.settings,
@@ -3852,7 +4089,7 @@ export function AppProvider({
           subsystemSnapshot: snapshot,
         }
 
-        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const parentNodeId = resolveBranchParentObjectId(state.system, sourceBranch)
         if (!parentNodeId) {
           throw new Error(`Unable to locate the parent ${equilibriumLabelLower} in the tree.`)
         }
@@ -3925,11 +4162,11 @@ export function AppProvider({
         if (nameError) {
           throw new Error(nameError)
         }
-        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+        if (branchNameExistsForBranch(state.system, sourceBranch, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
 
-        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
         const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
         const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
         const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
@@ -4054,8 +4291,10 @@ export function AppProvider({
           parameterName: `${param1DisplayName}, ${param2DisplayName}`,
           parameterRef: param1Ref,
           parameter2Ref: param2Ref,
-          parentObject: sourceBranch.parentObject,
-          startObject: sourceBranch.name,
+          parentObjectId: resolveBranchParentObjectId(state.system, sourceBranch) ?? undefined,
+          startObjectId: request.branchId,
+          parentObject: resolveBranchParentObjectName(state.system, sourceBranch),
+          startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
           branchType: 'isochrone_curve',
           data: branchData,
           settings: request.settings,
@@ -4064,7 +4303,7 @@ export function AppProvider({
           subsystemSnapshot: snapshot,
         }
 
-        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const parentNodeId = resolveBranchParentObjectId(state.system, sourceBranch)
         if (!parentNodeId) {
           throw new Error('Unable to locate the parent limit cycle in the tree.')
         }
@@ -4125,11 +4364,11 @@ export function AppProvider({
         if (nameError) {
           throw new Error(nameError)
         }
-        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+        if (branchNameExistsForBranch(state.system, sourceBranch, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
 
-        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
         const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
         const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
         const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
@@ -4216,8 +4455,10 @@ export function AppProvider({
           parameterName: `${param1DisplayName}, ${param2DisplayName}`,
           parameterRef: param1Ref,
           parameter2Ref: param2Ref,
-          parentObject: sourceBranch.parentObject,
-          startObject: sourceBranch.name,
+          parentObjectId: resolveBranchParentObjectId(state.system, sourceBranch) ?? undefined,
+          startObjectId: request.branchId,
+          parentObject: resolveBranchParentObjectName(state.system, sourceBranch),
+          startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
           branchType: 'hopf_curve',
           data: branchData,
           settings: request.settings,
@@ -4227,7 +4468,7 @@ export function AppProvider({
           subsystemSnapshot: snapshot,
         }
 
-        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const parentNodeId = resolveBranchParentObjectId(state.system, sourceBranch)
         if (!parentNodeId) {
           throw new Error(`Unable to locate the parent ${equilibriumLabelLower} in the tree.`)
         }
@@ -4314,7 +4555,7 @@ export function AppProvider({
           throw new Error('NCOL must be a positive integer.')
         }
 
-        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
         const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
         const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
         const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
@@ -4444,8 +4685,8 @@ export function AppProvider({
           systemName: system.name,
           origin: {
             type: 'hopf',
-            equilibriumObjectName: sourceBranch.parentObject,
-            equilibriumBranchName: sourceBranch.name,
+            equilibriumObjectName: resolveBranchParentObjectName(state.system, sourceBranch),
+            equilibriumBranchName: resolveEntityName(state.system, request.branchId, sourceBranch.name),
             pointIndex: logicalIndex,
           },
           ntst: Math.round(request.ntst),
@@ -4742,7 +4983,7 @@ export function AppProvider({
           throw new Error('Amplitude must be a positive number.')
         }
 
-        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
         const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
         const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
         const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
@@ -4866,7 +5107,7 @@ export function AppProvider({
           parameterName: parameterDisplayName,
           parameterRef,
           parentObject: cycleName,
-          startObject: sourceBranch.name,
+          startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
           branchType: 'equilibrium',
           data: normalizedBranchData,
           settings: request.settings,
@@ -4950,7 +5191,7 @@ export function AppProvider({
           throw new Error('NCOL must be a positive integer.')
         }
 
-        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
         const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
         const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
         const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
@@ -5051,8 +5292,8 @@ export function AppProvider({
           systemName: system.name,
           origin: {
             type: 'pd',
-            sourceLimitCycleObjectName: sourceBranch.parentObject,
-            sourceBranchName: sourceBranch.name,
+            sourceLimitCycleObjectName: resolveBranchParentObjectName(state.system, sourceBranch),
+            sourceBranchName: resolveEntityName(state.system, request.branchId, sourceBranch.name),
             pointIndex: request.pointIndex,
           },
           ntst: objNtst,
@@ -5078,7 +5319,7 @@ export function AppProvider({
           parameterName: parameterDisplayName,
           parameterRef,
           parentObject: limitCycleName,
-          startObject: sourceBranch.name,
+          startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
           branchType: 'limit_cycle',
           data: normalizedBranchData,
           settings: request.settings,
@@ -5156,11 +5397,11 @@ export function AppProvider({
         if (nameError) {
           throw new Error(nameError)
         }
-        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+        if (branchNameExistsForBranch(state.system, sourceBranch, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
 
-        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
         const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
         const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
         const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
@@ -5283,8 +5524,10 @@ export function AppProvider({
           parameterName: `${param1DisplayName}, ${param2DisplayName}`,
           parameterRef: param1Ref,
           parameter2Ref: param2Ref,
-          parentObject: sourceBranch.parentObject,
-          startObject: sourceBranch.name,
+          parentObjectId: resolveBranchParentObjectId(state.system, sourceBranch) ?? undefined,
+          startObjectId: request.branchId,
+          parentObject: resolveBranchParentObjectName(state.system, sourceBranch),
+          startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
           branchType: 'homoclinic_curve',
           data: normalized,
           settings: request.settings,
@@ -5293,7 +5536,7 @@ export function AppProvider({
           subsystemSnapshot: snapshot,
         }
 
-        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const parentNodeId = resolveBranchParentObjectId(state.system, sourceBranch)
         if (!parentNodeId) {
           throw new Error('Unable to locate the parent object in the tree.')
         }
@@ -5357,10 +5600,10 @@ export function AppProvider({
         if (nameError) {
           throw new Error(nameError)
         }
-        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+        if (branchNameExistsForBranch(state.system, sourceBranch, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
-        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
         const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
         const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
         const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
@@ -5526,8 +5769,10 @@ export function AppProvider({
           parameterName: `${param1DisplayName}, ${param2DisplayName}`,
           parameterRef: param1Ref,
           parameter2Ref: param2Ref,
-          parentObject: sourceBranch.parentObject,
-          startObject: sourceBranch.name,
+          parentObjectId: resolveBranchParentObjectId(state.system, sourceBranch) ?? undefined,
+          startObjectId: request.branchId,
+          parentObject: resolveBranchParentObjectName(state.system, sourceBranch),
+          startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
           branchType: 'homoclinic_curve',
           data: normalized,
           settings: request.settings,
@@ -5536,7 +5781,7 @@ export function AppProvider({
           subsystemSnapshot: snapshot,
         }
 
-        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const parentNodeId = resolveBranchParentObjectId(state.system, sourceBranch)
         if (!parentNodeId) {
           throw new Error('Unable to locate the parent object in the tree.')
         }
@@ -5592,11 +5837,11 @@ export function AppProvider({
         if (nameError) {
           throw new Error(nameError)
         }
-        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+        if (branchNameExistsForBranch(state.system, sourceBranch, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
 
-        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
         const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
         const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
         const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
@@ -5701,8 +5946,10 @@ export function AppProvider({
           parameterName: `${param1DisplayName}, ${param2DisplayName}`,
           parameterRef: param1Ref,
           parameter2Ref: param2Ref,
-          parentObject: sourceBranch.parentObject,
-          startObject: sourceBranch.name,
+          parentObjectId: resolveBranchParentObjectId(state.system, sourceBranch) ?? undefined,
+          startObjectId: request.branchId,
+          parentObject: resolveBranchParentObjectName(state.system, sourceBranch),
+          startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
           branchType: 'homotopy_saddle_curve',
           data: normalized,
           settings: request.settings,
@@ -5712,7 +5959,7 @@ export function AppProvider({
           subsystemSnapshot: snapshot,
         }
 
-        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const parentNodeId = resolveBranchParentObjectId(state.system, sourceBranch)
         if (!parentNodeId) {
           throw new Error(`Unable to locate the parent ${equilibriumLabelLower} in the tree.`)
         }
@@ -5775,7 +6022,7 @@ export function AppProvider({
         if (nameError) {
           throw new Error(nameError)
         }
-        if (branchNameExists(state.system, sourceBranch.parentObject, name)) {
+        if (branchNameExistsForBranch(state.system, sourceBranch, name)) {
           throw new Error(`Branch "${name}" already exists.`)
         }
 
@@ -5797,7 +6044,7 @@ export function AppProvider({
           throw new Error('At least one of T, eps0, or eps1 must be free.')
         }
 
-        const sourceObjectId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
         const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
         const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
         const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
@@ -5885,8 +6132,10 @@ export function AppProvider({
           parameterName: `${param1DisplayName}, ${param2DisplayName}`,
           parameterRef: param1Ref,
           parameter2Ref: param2Ref,
-          parentObject: sourceBranch.parentObject,
-          startObject: sourceBranch.name,
+          parentObjectId: resolveBranchParentObjectId(state.system, sourceBranch) ?? undefined,
+          startObjectId: request.branchId,
+          parentObject: resolveBranchParentObjectName(state.system, sourceBranch),
+          startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
           branchType: 'homoclinic_curve',
           data: normalized,
           settings: request.settings,
@@ -5895,7 +6144,7 @@ export function AppProvider({
           subsystemSnapshot: snapshot,
         }
 
-        const parentNodeId = findObjectIdByName(state.system, sourceBranch.parentObject)
+        const parentNodeId = resolveBranchParentObjectId(state.system, sourceBranch)
         if (!parentNodeId) {
           throw new Error('Unable to locate the parent object in the tree.')
         }
@@ -5973,8 +6222,7 @@ export function AppProvider({
     async (file: File) => {
       dispatch({ type: 'SET_BUSY', busy: true })
       try {
-        const system = await readSystemFile(file)
-        await store.save(system)
+        const system = await store.importSystemArchive(file)
         dispatch({ type: 'SET_SYSTEM', system })
         await refreshSystems()
       } finally {
@@ -6041,6 +6289,11 @@ export function AppProvider({
       addScene: addSceneAction,
       addBifurcationDiagram: addBifurcationDiagramAction,
       importSystem,
+      ensureObjectLoaded,
+      ensureBranchLoaded,
+      ensureEntitiesLoaded: async (request: { objectIds?: string[]; branchIds?: string[] }) => {
+        await ensureEntitiesLoaded(request)
+      },
       clearError: () => dispatch({ type: 'SET_ERROR', error: null }),
     }),
     [
@@ -6099,6 +6352,9 @@ export function AppProvider({
       computeIsocline,
       addSceneAction,
       importSystem,
+      ensureObjectLoaded,
+      ensureBranchLoaded,
+      ensureEntitiesLoaded,
     ]
   )
 

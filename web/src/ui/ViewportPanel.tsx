@@ -876,7 +876,13 @@ function buildEquilibriumEigenvectorTraces(
 }
 
 
-function collectVisibleObjectIds(system: System): string[] {
+type VisibleObjectSource = Pick<System, 'rootIds' | 'nodes' | 'objects'>
+type VisibleBranchSource = Pick<System, 'rootIds' | 'nodes' | 'branches'>
+type VisibleSceneSource = Pick<System, 'rootIds' | 'nodes' | 'objects' | 'branches'>
+type TraceSystem = System
+type DiagramTraceSystem = System
+
+function collectVisibleObjectIds(system: VisibleObjectSource): string[] {
   const ids: string[] = []
   const stack = [...system.rootIds]
   while (stack.length > 0) {
@@ -895,7 +901,7 @@ function collectVisibleObjectIds(system: System): string[] {
   return ids
 }
 
-function collectVisibleBranchIds(system: System): string[] {
+function collectVisibleBranchIds(system: VisibleBranchSource): string[] {
   const ids: string[] = []
   const stack = [...system.rootIds]
   while (stack.length > 0) {
@@ -913,7 +919,7 @@ function collectVisibleBranchIds(system: System): string[] {
   return ids
 }
 
-function collectVisibleSceneNodeIds(system: System): string[] {
+function collectVisibleSceneNodeIds(system: VisibleSceneSource): string[] {
   const ids: string[] = []
   const stack = [...system.rootIds]
   while (stack.length > 0) {
@@ -984,7 +990,7 @@ function resolveBranchPointDisplayProjection(
   return Object.keys(projection).length > 0 ? projection : undefined
 }
 
-function collectMap1DRange(system: System, axisIndex: number): [number, number] | null {
+function collectMap1DRange(system: VisibleObjectSource, axisIndex: number): [number, number] | null {
   const safeAxisIndex = Number.isInteger(axisIndex) ? Math.max(0, axisIndex) : 0
   let min = Number.POSITIVE_INFINITY
   let max = Number.NEGATIVE_INFINITY
@@ -1542,7 +1548,7 @@ function buildObjectNameIndex(system: System): Map<string, string> {
 }
 
 function buildLimitCyclePreviewTraces(
-  system: System,
+  system: TraceSystem,
   selection: BranchPointSelection | null,
   axisIndices: number[] | null,
   plotDim: 1 | 2 | 3
@@ -2369,7 +2375,7 @@ function buildManifoldSurfaceTraces(config: {
 }
 
 function buildSceneTraces(
-  system: System,
+  system: TraceSystem,
   scene: Scene,
   selectedNodeId: string | null,
   isoclineGeometryCache?: Record<
@@ -3987,7 +3993,7 @@ function buildSceneTraces(
 }
 
 function buildDiagramTraces(
-  system: System,
+  system: DiagramTraceSystem,
   diagram: BifurcationDiagram,
   selectedNodeId: string | null,
   branchPointSelection: BranchPointSelection | null
@@ -5358,7 +5364,7 @@ function isCameraSpec(camera: unknown): camera is PlotlyCameraSpec {
   return isVector3(record.eye) && isVector3(record.center) && isVector3(record.up)
 }
 
-function buildSceneInitialView(system: System, scene: Scene): PlotlyRelayoutEvent | null {
+function buildSceneInitialView(system: Pick<TraceSystem, 'config'>, scene: Scene): PlotlyRelayoutEvent | null {
   const snapshot: PlotlyRelayoutEvent = {}
   const projection = resolveSceneProjection(system.config, scene.axisVariables)
   if (projection?.kind === 'phase_3d') {
@@ -5412,7 +5418,68 @@ function ViewportTile({
   isoclineGeometryCache,
 }: ViewportTileProps) {
   const { node, scene, diagram } = entry
-  const isSelected = node.id === selectedNodeId
+  const systemId = system.id
+  const systemName = system.name
+  const systemConfig = system.config
+  const systemIndex = system.index
+  const systemRootIds = system.rootIds
+  const systemNodes = system.nodes
+  const systemObjects = system.objects
+  const systemBranches = system.branches
+  const systemScenes = system.scenes
+  const systemDiagrams = system.bifurcationDiagrams
+  const uiLayout = system.ui.layout
+  const uiViewportHeights = system.ui.viewportHeights
+  const limitCycleRenderTargets = system.ui.limitCycleRenderTargets
+  const traceSystem = useMemo<TraceSystem>(
+    () => ({
+      id: systemId,
+      name: systemName,
+      config: systemConfig,
+      index: systemIndex,
+      rootIds: systemRootIds,
+      nodes: systemNodes,
+      objects: systemObjects,
+      branches: systemBranches,
+      scenes: systemScenes,
+      bifurcationDiagrams: systemDiagrams,
+      ui: {
+        selectedNodeId: null,
+        layout: uiLayout,
+        viewportHeights: uiViewportHeights,
+        limitCycleRenderTargets,
+      },
+      updatedAt: '',
+    }),
+    [
+      limitCycleRenderTargets,
+      systemBranches,
+      systemConfig,
+      systemDiagrams,
+      systemId,
+      systemIndex,
+      systemName,
+      systemNodes,
+      systemObjects,
+      systemRootIds,
+      systemScenes,
+      uiLayout,
+      uiViewportHeights,
+    ]
+  )
+  const selectedNode = selectedNodeId ? systemNodes[selectedNodeId] : null
+  const selectedPlotNodeId =
+    selectedNode && (selectedNode.kind === 'object' || selectedNode.kind === 'branch')
+      ? selectedNode.id
+      : null
+  const selectedViewportId =
+    selectedNode && (selectedNode.kind === 'scene' || selectedNode.kind === 'diagram')
+      ? selectedNode.id
+      : null
+  const sceneTraceSelectedNodeId = scene?.display === 'selection' ? selectedPlotNodeId : null
+  const diagramTraceSelectedNodeId =
+    selectedNode?.kind === 'branch' ? selectedNode.id : null
+  const isSelected = node.id === selectedViewportId
   const isDragging = draggingId === node.id
   const isDropTarget = dragOverId === node.id && draggingId !== node.id
   const isCollapsed = !node.expanded
@@ -5429,8 +5496,8 @@ function ViewportTile({
   const activeSceneId = scene?.id ?? null
   const sceneProjection = useMemo(() => {
     if (!scene) return null
-    return resolveSceneProjection(system.config, scene.axisVariables)
-  }, [scene, system.config])
+    return resolveSceneProjection(systemConfig, scene.axisVariables)
+  }, [scene, systemConfig])
   const timeSeriesRange =
     timeSeriesState.sceneId === activeSceneId ? timeSeriesState.range : null
   const plotHeight =
@@ -5446,7 +5513,7 @@ function ViewportTile({
       const pointIndex = resolvePointIndex(event)
       if (pointIndex === null || typeof uid !== 'string') return
 
-      const node = system.nodes[uid]
+      const node = systemNodes[uid]
       if (!node) return
 
       if (node.kind === 'branch') {
@@ -5455,7 +5522,7 @@ function ViewportTile({
       }
 
       if (node.kind !== 'object') return
-      const object = system.objects[uid]
+      const object = systemObjects[uid]
       if (!object) return
 
       if (object.type === 'orbit') {
@@ -5473,8 +5540,8 @@ function ViewportTile({
       onSelectLimitCyclePoint,
       onSelectObject,
       onSelectOrbitPoint,
-      system.nodes,
-      system.objects,
+      systemNodes,
+      systemObjects,
     ]
   )
 
@@ -5511,38 +5578,38 @@ function ViewportTile({
   const sceneMapRange = useMemo(() => {
     if (!sceneProjection || sceneProjection.kind !== 'map_cobweb_1d') return null
     const axisIndex = sceneProjection.axisIndices[0] ?? 0
-    return collectMap1DRange(system, axisIndex)
-  }, [sceneProjection, system])
+    return collectMap1DRange(traceSystem, axisIndex)
+  }, [sceneProjection, traceSystem])
 
   const diagramTraceState = useMemo(() => {
     if (!diagram) return null
     return buildDiagramTraces(
-      system,
+      traceSystem,
       diagram,
-      selectedNodeId,
+      diagramTraceSelectedNodeId,
       branchPointSelection ?? null
     )
-  }, [branchPointSelection, diagram, selectedNodeId, system])
+  }, [branchPointSelection, diagram, diagramTraceSelectedNodeId, traceSystem])
 
   const viewRevision = scene?.viewRevision ?? diagram?.viewRevision ?? 0
   const initialView = useMemo(() => {
-    if (scene) return buildSceneInitialView(system, scene)
+    if (scene) return buildSceneInitialView(traceSystem, scene)
     if (diagram) return buildDiagramInitialView(diagram)
     return null
-  }, [diagram, scene, system])
+  }, [diagram, scene, traceSystem])
 
   const layout = useMemo(() => {
-    if (scene) return buildSceneBaseLayout(system.config, scene.axisVariables, plotlyTheme)
+    if (scene) return buildSceneBaseLayout(systemConfig, scene.axisVariables, plotlyTheme)
     if (diagram) return buildDiagramBaseLayout(diagramTraceState, plotlyTheme)
-    const fallbackAxisVariables = system.scenes[0]?.axisVariables ?? null
-    return buildSceneBaseLayout(system.config, fallbackAxisVariables, plotlyTheme)
+    const fallbackAxisVariables = systemScenes[0]?.axisVariables ?? null
+    return buildSceneBaseLayout(systemConfig, fallbackAxisVariables, plotlyTheme)
   }, [
     diagram,
     diagramTraceState,
     plotlyTheme,
     scene,
-    system.config,
-    system.scenes,
+    systemConfig,
+    systemScenes,
   ])
 
   const plotAreaSize = useMemo(() => {
@@ -5561,9 +5628,9 @@ function ViewportTile({
   const sceneTraces = useMemo(() => {
     if (!scene) return EMPTY_TRACES
     return buildSceneTraces(
-      system,
+      traceSystem,
       scene,
-      selectedNodeId,
+      sceneTraceSelectedNodeId,
       isoclineGeometryCache,
       timeSeriesMeta,
       sceneMapRange ?? mapRange,
@@ -5578,25 +5645,25 @@ function ViewportTile({
     sceneMapRange,
     plotAreaSize,
     scene,
-    selectedNodeId,
+    sceneTraceSelectedNodeId,
     isoclineGeometryCache,
-    system,
     timeSeriesMeta,
+    traceSystem,
   ])
 
   const limitCyclePreviewTraces = useMemo(() => {
     if (!scene) return EMPTY_TRACES
     const axisIndices =
       sceneProjection?.axisIndices ??
-      resolveSceneAxisIndices(system.config.varNames, scene.axisVariables)
+      resolveSceneAxisIndices(systemConfig.varNames, scene.axisVariables)
     const plotDim = sceneProjection?.axisCount ?? 3
     return buildLimitCyclePreviewTraces(
-      system,
+      traceSystem,
       branchPointSelection ?? null,
       axisIndices,
       plotDim
     )
-  }, [branchPointSelection, scene, sceneProjection, system])
+  }, [branchPointSelection, scene, sceneProjection, systemConfig.varNames, traceSystem])
 
   const data = useMemo(() => {
     if (scene) {
@@ -5773,42 +5840,56 @@ export function ViewportPanel({
   const mapRequestKeyRef = useRef<string | null>(null)
   const mapKeyRef = useRef<string | null>(null)
   const plotlyTheme = useMemo(() => resolvePlotlyThemeTokens(theme), [theme])
+  const systemConfig = system.config
+  const systemRootIds = system.rootIds
+  const systemNodes = system.nodes
+  const systemObjects = system.objects
+  const systemScenes = system.scenes
+  const systemDiagrams = system.bifurcationDiagrams
+  const mapRangeSource = useMemo<VisibleObjectSource>(
+    () => ({
+      rootIds: systemRootIds,
+      nodes: systemNodes,
+      objects: systemObjects,
+    }),
+    [systemRootIds, systemNodes, systemObjects]
+  )
 
   const viewports = useMemo(() => {
     const entries: ViewportEntry[] = []
-    for (const nodeId of system.rootIds) {
-      const node = system.nodes[nodeId]
+    for (const nodeId of systemRootIds) {
+      const node = systemNodes[nodeId]
       if (!node) continue
       if (node.kind === 'scene') {
-        const scene = system.scenes.find((entry) => entry.id === nodeId)
+        const scene = systemScenes.find((entry) => entry.id === nodeId)
         if (!scene) continue
         entries.push({ node, scene })
       } else if (node.kind === 'diagram') {
-        const diagram = system.bifurcationDiagrams.find((entry) => entry.id === nodeId)
+        const diagram = systemDiagrams.find((entry) => entry.id === nodeId)
         if (!diagram) continue
         entries.push({ node, diagram })
       }
     }
     return entries
-  }, [system])
+  }, [systemDiagrams, systemNodes, systemRootIds, systemScenes])
 
   const hasMapCobwebScene = useMemo(() => {
     return viewports.some((entry) => {
       if (!entry.scene) return false
-      const projection = resolveSceneProjection(system.config, entry.scene.axisVariables)
+      const projection = resolveSceneProjection(systemConfig, entry.scene.axisVariables)
       return projection?.kind === 'map_cobweb_1d'
     })
-  }, [system.config, viewports])
+  }, [systemConfig, viewports])
   const shouldSampleMapFunction =
-    system.config.type === 'map' &&
-    system.config.varNames.length === 1 &&
+    systemConfig.type === 'map' &&
+    systemConfig.varNames.length === 1 &&
     hasMapCobwebScene
   const mapRangeKey = useMemo(() => {
     if (!shouldSampleMapFunction) return null
-    const range = collectMap1DRange(system, 0)
+    const range = collectMap1DRange(mapRangeSource, 0)
     if (!range) return null
     return `${range[0]}|${range[1]}`
-  }, [shouldSampleMapFunction, system])
+  }, [mapRangeSource, shouldSampleMapFunction])
   const mapRangeValues = useMemo(() => {
     if (!mapRangeKey) return null
     const parts = mapRangeKey.split('|').map((value) => Number(value))
@@ -5819,11 +5900,11 @@ export function ViewportPanel({
   }, [mapRangeKey])
   const mapConfigJson = shouldSampleMapFunction
     ? JSON.stringify({
-        ...system.config,
-        equations: [...system.config.equations],
-        params: [...system.config.params],
-        paramNames: [...system.config.paramNames],
-        varNames: [...system.config.varNames],
+        ...systemConfig,
+        equations: [...systemConfig.equations],
+        params: [...systemConfig.params],
+        paramNames: [...systemConfig.paramNames],
+        varNames: [...systemConfig.varNames],
       })
     : null
   const mapConfig = useMemo(() => {
@@ -5902,7 +5983,10 @@ export function ViewportPanel({
     mapKey,
     mapRangeValues,
     onSampleMap1DFunction,
-    system,
+    systemConfig,
+    systemNodes,
+    systemObjects,
+    systemRootIds,
   ])
 
   useEffect(() => {

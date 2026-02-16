@@ -1,5 +1,5 @@
 import { IndexedDbSystemStore } from './indexedDb'
-import { OpfsSystemStore } from './opfs'
+import { OpfsSystemStore, supportsOpfs } from './opfs'
 import { seedDefaultSystems } from './seedDefaults'
 import { MemorySystemStore, type SystemStore } from './store'
 
@@ -21,7 +21,7 @@ function detectStoreSupport(): StoreSupport {
     return { opfs: false, indexedDb: false }
   }
   return {
-    opfs: 'storage' in navigator && 'getDirectory' in navigator.storage,
+    opfs: supportsOpfs(),
     indexedDb: 'indexedDB' in window,
   }
 }

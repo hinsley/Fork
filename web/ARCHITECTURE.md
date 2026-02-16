@@ -54,11 +54,34 @@ existing CLI surface area and the Rust/WASM core.
 
 ### System Model + Persistence
 - `src/system/`: system schema, object tree ops, branch ops, migrations.
-- `src/system/opfs.ts`: OPFS persistence helpers, import/export bundling; Chromium-only File System
-  Access API, so Safari/Firefox require a feature-detected IndexedDB fallback (memory if needed).
+- `src/system/opfs.ts`: OPFS V3 persistence (Chromium-only File System Access API) with per-system
+  `manifest.json`, `system.json`, `ui.json`, indexed metadata, and sharded entity payload files.
 - `src/system/indexedDb.ts`: IndexedDB persistence fallback for non-Chromium browsers.
+- `src/system/archive.ts`: ZIP pack/unpack for V3 archive transfer.
 - `src/system/storeFactory.ts`: runtime store selection across OPFS, IndexedDB, and memory.
 - `src/system/fixtures.ts`: deterministic fixtures for tests.
+
+### Persistence V3 (Cutover)
+- Namespace/version:
+  - OPFS root directory: `fork-systems-v3`
+  - IndexedDB database: `fork-systems-v3` (schema version 3)
+- System layout:
+  - `manifest.json` (list summary)
+  - `system.json` (system config/meta only)
+  - `ui.json` (tree/scenes/diagrams/ui state)
+  - `index/objects.json`, `index/branches.json`
+  - `objects/<shard>/<objectId>.json`, `branches/<shard>/<branchId>.json`
+- Entity addressing:
+  - Stable IDs and ID-based references (`parentObjectId`, `startObjectId`, origin ID refs)
+  - Shard key: `fnv1a32(id) & 0xff` (2 hex chars)
+- Load/write model:
+  - `load()` returns a skeleton system with indexes and UI metadata; entity payloads hydrate lazily.
+  - `save()` writes changed payload entries and updated index/meta artifacts.
+  - `saveUi()` is UI-only and does not rewrite entity payloads.
+- Transfer:
+  - Import/export is ZIP-only (`.zip`), mirroring the V3 structure.
+- Cutover policy:
+  - Hard cutover. Legacy web storage namespaces and legacy JSON import files are not read.
 
 ### WASM Bridge + Compute
 - `src/compute/`:
@@ -124,7 +147,8 @@ existing CLI surface area and the Rust/WASM core.
 - Reuse CLI type definitions as the source of truth:
   - Prefer extracting shared types to a common module (future step).
   - In v0, mirror the CLI type interfaces in web with explicit parity tests.
-- Keep persistence format compatible with CLI object + branch JSON layout.
+- Persistence format is web-specific V3 storage plus ZIP archives; compatibility is maintained at the
+  analysis/model level, not by sharing legacy CLI JSON file layout.
 - Centralize ForkCoreClient APIs to avoid divergence across UI + tests.
 
 ## Rendering Co-Design Guardrail

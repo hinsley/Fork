@@ -56,7 +56,7 @@ describe('SystemDialog', () => {
     expect(confirmDelete).toHaveBeenCalledWith({ name: 'System A', kind: 'System' })
     expect(onDeleteSystem).toHaveBeenCalledWith('sys-1')
 
-    const file = new File(['{}'], 'system.json', { type: 'application/json' })
+    const file = new File(['PK\x03\x04'], 'system.zip', { type: 'application/zip' })
     const input = screen.getByTestId('import-system')
     await user.upload(input, file)
     expect(onImportSystem).toHaveBeenCalledWith(file)
