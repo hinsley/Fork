@@ -807,7 +807,7 @@ export async function initiateEquilibriumManifold2DFromPoint(
   let maxSpacingInput = '2.0';
   let alphaMinInput = '0.3';
   let alphaMaxInput = '0.4';
-  let deltaAlphaMinInput = '0.1';
+  let deltaAlphaMinInput = '0.01';
   let deltaAlphaMaxInput = '1.0';
   let integrationDtInput = '1e-3';
   let targetRadiusInput = '40';
@@ -849,7 +849,7 @@ export async function initiateEquilibriumManifold2DFromPoint(
     maxSpacingInput = '2.0';
     alphaMinInput = '0.3';
     alphaMaxInput = '0.4';
-    deltaAlphaMinInput = '0.1';
+    deltaAlphaMinInput = '0.01';
     deltaAlphaMaxInput = '1.0';
     integrationDtInput = '1e-3';
     targetRadiusInput = '40';
@@ -1221,7 +1221,7 @@ export async function initiateEquilibriumManifold2DFromPoint(
     const maxSpacing = parseFloatOrDefault(maxSpacingInput, 2.0);
     const alphaMin = parseFloatOrDefault(alphaMinInput, 0.3);
     const alphaMax = parseFloatOrDefault(alphaMaxInput, 0.4);
-    const deltaAlphaMin = parseFloatOrDefault(deltaAlphaMinInput, 0.1);
+    const deltaAlphaMin = parseFloatOrDefault(deltaAlphaMinInput, 0.01);
     const deltaAlphaMax = parseFloatOrDefault(deltaAlphaMaxInput, 1.0);
     const targetRadius = parseFloatOrDefault(targetRadiusInput, 40.0);
     if (!Number.isFinite(initialRadius) || initialRadius <= 0) {

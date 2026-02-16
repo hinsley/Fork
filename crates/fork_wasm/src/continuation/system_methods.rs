@@ -44,6 +44,26 @@ fn manifold_ring_count(branch: &ContinuationBranch) -> usize {
     }
 }
 
+fn arclength_progress_step(arclength: f64) -> usize {
+    if !arclength.is_finite() || arclength <= 0.0 {
+        0
+    } else if arclength >= (usize::MAX as f64) {
+        usize::MAX
+    } else {
+        arclength.floor() as usize
+    }
+}
+
+fn arclength_progress_max(target_arclength: f64) -> usize {
+    if !target_arclength.is_finite() || target_arclength <= 0.0 {
+        1
+    } else if target_arclength >= (usize::MAX as f64) {
+        usize::MAX
+    } else {
+        (target_arclength.ceil() as usize).max(1)
+    }
+}
+
 fn emit_progress(callback: &Function, progress: StepResult) -> Result<(), JsValue> {
     let payload = to_value(&progress)
         .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
@@ -315,17 +335,27 @@ impl WasmSystem {
         }
         let settings: Manifold2DSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid manifold settings: {}", e)))?;
-        let max_rings = settings.caps.max_rings.max(1);
+        let max_arclength_steps = arclength_progress_max(settings.target_arclength.max(0.0));
         let mut callback_error: Option<JsValue> = None;
         let mut latest_arclength = 0.0f64;
-        let mut on_ring_progress = |rings: usize, points: usize, arclength: f64| {
+        let mut latest_radius = 0.0f64;
+        let mut on_ring_progress = |rings: usize, points: usize, arclength: f64, radius: f64| {
             if callback_error.is_some() {
                 return;
             }
             latest_arclength = arclength;
-            let progress =
-                StepResult::new(false, rings.min(max_rings), max_rings, points, 0, arclength)
-                    .with_rings_computed(rings);
+            latest_radius = radius;
+            let arclength_step = arclength_progress_step(arclength);
+            let max_step = max_arclength_steps.max(arclength_step.max(1));
+            let progress = StepResult::new(
+                false,
+                arclength_step.min(max_step),
+                max_step,
+                points,
+                0,
+                radius,
+            )
+            .with_rings_computed(rings);
             if let Err(err) = emit_progress(&progress_callback, progress) {
                 callback_error = Some(err);
             }
@@ -341,13 +371,15 @@ impl WasmSystem {
             return Err(err);
         }
         let rings = manifold_ring_count(&branch);
+        let final_arclength_step = arclength_progress_step(latest_arclength);
+        let final_max_step = max_arclength_steps.max(final_arclength_step.max(1));
         let final_progress = StepResult::new(
             true,
-            rings.min(max_rings),
-            max_rings,
+            final_arclength_step.min(final_max_step),
+            final_max_step,
             branch.points.len(),
             0,
-            latest_arclength,
+            latest_radius,
         )
         .with_rings_computed(rings);
         emit_progress(&progress_callback, final_progress)?;
@@ -403,7 +435,7 @@ impl WasmSystem {
         }
         let settings: ManifoldCycle2DSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid manifold settings: {}", e)))?;
-        let max_rings = settings.caps.max_rings.max(1);
+        let max_arclength_steps = arclength_progress_max(settings.target_arclength.max(0.0));
         let floquet_wire: Vec<ComplexWire> = from_value(floquet_multipliers_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid Floquet multipliers: {}", e)))?;
         let floquet_multipliers = floquet_wire
@@ -412,14 +444,24 @@ impl WasmSystem {
             .collect::<Vec<_>>();
         let mut callback_error: Option<JsValue> = None;
         let mut latest_arclength = 0.0f64;
-        let mut on_ring_progress = |rings: usize, points: usize, arclength: f64| {
+        let mut latest_radius = 0.0f64;
+        let mut on_ring_progress = |rings: usize, points: usize, arclength: f64, radius: f64| {
             if callback_error.is_some() {
                 return;
             }
             latest_arclength = arclength;
-            let progress =
-                StepResult::new(false, rings.min(max_rings), max_rings, points, 0, arclength)
-                    .with_rings_computed(rings);
+            latest_radius = radius;
+            let arclength_step = arclength_progress_step(arclength);
+            let max_step = max_arclength_steps.max(arclength_step.max(1));
+            let progress = StepResult::new(
+                false,
+                arclength_step.min(max_step),
+                max_step,
+                points,
+                0,
+                radius,
+            )
+            .with_rings_computed(rings);
             if let Err(err) = emit_progress(&progress_callback, progress) {
                 callback_error = Some(err);
             }
@@ -438,13 +480,15 @@ impl WasmSystem {
             return Err(err);
         }
         let rings = manifold_ring_count(&branch);
+        let final_arclength_step = arclength_progress_step(latest_arclength);
+        let final_max_step = max_arclength_steps.max(final_arclength_step.max(1));
         let final_progress = StepResult::new(
             true,
-            rings.min(max_rings),
-            max_rings,
+            final_arclength_step.min(final_max_step),
+            final_max_step,
             branch.points.len(),
             0,
-            latest_arclength,
+            latest_radius,
         )
         .with_rings_computed(rings);
         emit_progress(&progress_callback, final_progress)?;

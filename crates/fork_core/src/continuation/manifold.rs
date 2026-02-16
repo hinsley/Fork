@@ -38,6 +38,7 @@ const LEAF_TAU_MAX_ABS: f64 = 0.5;
 const LEAF_TAU_MAX_TIME_FACTOR: f64 = 0.1;
 const LEAF_SEGMENT_SWITCH_EPS: f64 = 1e-4;
 const LEAF_SEGMENT_SWITCH_MAX: usize = 64;
+const TAU_SWITCH_EPS: f64 = 1e-6;
 const LEAF_SIGN_EPS_SCALE: f64 = 1e-14;
 #[cfg(test)]
 const SOURCE_PARAM_MONO_EPS: f64 = 1e-6;
@@ -251,7 +252,7 @@ fn apply_eq_2d_profile(settings: &mut Manifold2DSettings) {
             }
             apply(&mut settings.alpha_min, 0.3);
             apply(&mut settings.alpha_max, 0.4);
-            apply(&mut settings.delta_alpha_min, 0.1);
+            apply(&mut settings.delta_alpha_min, 0.01);
             apply(&mut settings.delta_alpha_max, 1.0);
             settings.caps.max_steps = settings.caps.max_steps.max(150);
             settings.caps.max_time = settings.caps.max_time.max(50.0);
@@ -310,7 +311,7 @@ fn apply_cycle_2d_profile(settings: &mut ManifoldCycle2DSettings) {
             }
             apply(&mut settings.alpha_min, 0.3);
             apply(&mut settings.alpha_max, 0.4);
-            apply(&mut settings.delta_alpha_min, 0.1);
+            apply(&mut settings.delta_alpha_min, 0.01);
             apply(&mut settings.delta_alpha_max, 1.0);
             settings.caps.max_steps = settings.caps.max_steps.max(150);
             settings.caps.max_time = settings.caps.max_time.max(50.0);
@@ -385,7 +386,7 @@ pub fn continue_manifold_eq_2d_with_progress(
     system: &mut EquationSystem,
     equilibrium_state: &[f64],
     settings: Manifold2DSettings,
-    on_ring_progress: Option<&mut dyn FnMut(usize, usize, f64)>,
+    on_ring_progress: Option<&mut dyn FnMut(usize, usize, f64, f64)>,
 ) -> Result<ContinuationBranch> {
     let mut settings = settings;
     apply_eq_2d_profile(&mut settings);
@@ -525,7 +526,7 @@ pub fn continue_limit_cycle_manifold_2d_with_progress(
     ncol: usize,
     floquet_multipliers: &[Complex<f64>],
     settings: ManifoldCycle2DSettings,
-    on_ring_progress: Option<&mut dyn FnMut(usize, usize, f64)>,
+    on_ring_progress: Option<&mut dyn FnMut(usize, usize, f64, f64)>,
 ) -> Result<ContinuationBranch> {
     let mut settings = settings;
     apply_cycle_2d_profile(&mut settings);
@@ -1064,7 +1065,7 @@ fn grow_surface_from_ring(
     center: Option<&[f64]>,
     initial_in_anchors: Option<&[Vec<f64>]>,
     bounds: Option<&ManifoldBounds>,
-    mut on_ring_progress: Option<&mut dyn FnMut(usize, usize, f64)>,
+    mut on_ring_progress: Option<&mut dyn FnMut(usize, usize, f64, f64)>,
 ) -> SurfaceGrowthResult {
     let initial_inward = if let Some(anchors) = initial_in_anchors {
         anchors.to_vec()
@@ -1099,7 +1100,20 @@ fn grow_surface_from_ring(
 
     if let Some(progress) = on_ring_progress.as_deref_mut() {
         let initial_vertices = rings.first().map_or(0, |ring| ring.points.len());
-        progress(rings.len(), initial_vertices, 0.0);
+        let initial_radius = if let Some(center_state) = center {
+            if initial_vertices == 0 {
+                0.0
+            } else {
+                let mut sum = 0.0;
+                for point in &rings[0].points {
+                    sum += l2_distance(point, center_state);
+                }
+                sum / (initial_vertices as f64)
+            }
+        } else {
+            0.0
+        };
+        progress(rings.len(), initial_vertices, 0.0, initial_radius);
     }
 
     while ring_index + 1 < max_rings {
@@ -1364,7 +1378,12 @@ fn grow_surface_from_ring(
 
         let total_vertices: usize = rings.iter().map(|ring| ring.points.len()).sum();
         if let Some(progress) = on_ring_progress.as_deref_mut() {
-            progress(rings.len(), total_vertices, accumulated_arc);
+            progress(
+                rings.len(),
+                total_vertices,
+                accumulated_arc,
+                radius_estimate,
+            );
         }
         if total_vertices >= max_vertices {
             termination_reason = Some(SurfaceTerminationReason::MaxVertices);
@@ -1995,6 +2014,189 @@ fn eval_plane_residual_and_derivative_on_segment(
     Ok((residual, deriv, start, point))
 }
 
+fn canonicalize_segment_tau(tau: f64) -> f64 {
+    if tau <= TAU_SWITCH_EPS {
+        0.0
+    } else if tau >= 1.0 - TAU_SWITCH_EPS {
+        1.0
+    } else {
+        tau.clamp(0.0, 1.0)
+    }
+}
+
+fn try_solve_plane_root_on_segment(
+    system: &EquationSystem,
+    ring: &[Vec<f64>],
+    base_point: &[f64],
+    leaf_normal: &[f64],
+    segment_index: usize,
+    tau_time: f64,
+    sigma: f64,
+    dt: f64,
+    max_steps_per_leaf: usize,
+    max_time: f64,
+    plane_tol: f64,
+) -> Result<Option<(f64, Vec<f64>, Vec<f64>)>, LeafFailureKind> {
+    let (h0, dh0, start0, end0) = eval_plane_residual_and_derivative_on_segment(
+        system,
+        ring,
+        base_point,
+        leaf_normal,
+        segment_index,
+        tau_time,
+        0.0,
+        sigma,
+        dt,
+        max_steps_per_leaf,
+        max_time,
+    )?;
+    if h0.abs() <= plane_tol {
+        return Ok(Some((0.0, start0, end0)));
+    }
+
+    let (h1, dh1, start1, end1) = eval_plane_residual_and_derivative_on_segment(
+        system,
+        ring,
+        base_point,
+        leaf_normal,
+        segment_index,
+        tau_time,
+        1.0,
+        sigma,
+        dt,
+        max_steps_per_leaf,
+        max_time,
+    )?;
+    if h1.abs() <= plane_tol {
+        return Ok(Some((1.0, start1, end1)));
+    }
+
+    if h0 * h1 <= 0.0 {
+        let mut left_tau = 0.0;
+        let mut right_tau = 1.0;
+        let mut left_h = h0;
+        let mut right_h = h1;
+        let mut left_start = start0.clone();
+        let mut left_end = end0.clone();
+        let mut right_start = start1.clone();
+        let mut right_end = end1.clone();
+
+        for _ in 0..LEAF_PLANE_BISECT_ITERS {
+            let mid_tau = 0.5 * (left_tau + right_tau);
+            let (mid_h, _mid_dh, mid_start, mid_end) =
+                eval_plane_residual_and_derivative_on_segment(
+                    system,
+                    ring,
+                    base_point,
+                    leaf_normal,
+                    segment_index,
+                    tau_time,
+                    mid_tau,
+                    sigma,
+                    dt,
+                    max_steps_per_leaf,
+                    max_time,
+                )?;
+            if mid_h.abs() <= plane_tol {
+                return Ok(Some((mid_tau, mid_start, mid_end)));
+            }
+            if left_h * mid_h <= 0.0 {
+                right_tau = mid_tau;
+                right_h = mid_h;
+                right_start = mid_start;
+                right_end = mid_end;
+            } else {
+                left_tau = mid_tau;
+                left_h = mid_h;
+                left_start = mid_start;
+                left_end = mid_end;
+            }
+        }
+
+        if left_h.abs() <= right_h.abs() {
+            return Ok(Some((left_tau, left_start, left_end)));
+        }
+        return Ok(Some((right_tau, right_start, right_end)));
+    }
+
+    if dh0 * dh1 <= 0.0 {
+        let mut left_tau = 0.0;
+        let mut right_tau = 1.0;
+        let mut left_dh = dh0;
+
+        let mut best_abs_h = h0.abs();
+        let mut best_tau = 0.0;
+        let mut best_start = start0;
+        let mut best_end = end0;
+        if h1.abs() < best_abs_h {
+            best_abs_h = h1.abs();
+            best_tau = 1.0;
+            best_start = start1;
+            best_end = end1;
+        }
+
+        for _ in 0..LEAF_PLANE_BISECT_ITERS {
+            let mid_tau = 0.5 * (left_tau + right_tau);
+            let (mid_h, mid_dh, mid_start, mid_end) =
+                eval_plane_residual_and_derivative_on_segment(
+                    system,
+                    ring,
+                    base_point,
+                    leaf_normal,
+                    segment_index,
+                    tau_time,
+                    mid_tau,
+                    sigma,
+                    dt,
+                    max_steps_per_leaf,
+                    max_time,
+                )?;
+            if mid_h.abs() < best_abs_h {
+                best_abs_h = mid_h.abs();
+                best_tau = mid_tau;
+                best_start = mid_start.clone();
+                best_end = mid_end.clone();
+            }
+            if mid_dh.abs() <= LEAF_PLANE_DERIV_EPS {
+                if mid_h.abs() <= plane_tol {
+                    return Ok(Some((mid_tau, mid_start, mid_end)));
+                }
+                break;
+            }
+            if left_dh * mid_dh <= 0.0 {
+                right_tau = mid_tau;
+            } else {
+                left_tau = mid_tau;
+                left_dh = mid_dh;
+            }
+        }
+
+        let stationary_tau = 0.5 * (left_tau + right_tau);
+        let (stationary_h, _stationary_dh, stationary_start, stationary_end) =
+            eval_plane_residual_and_derivative_on_segment(
+                system,
+                ring,
+                base_point,
+                leaf_normal,
+                segment_index,
+                tau_time,
+                stationary_tau,
+                sigma,
+                dt,
+                max_steps_per_leaf,
+                max_time,
+            )?;
+        if stationary_h.abs() <= plane_tol {
+            return Ok(Some((stationary_tau, stationary_start, stationary_end)));
+        }
+        if best_abs_h <= plane_tol {
+            return Ok(Some((best_tau, best_start, best_end)));
+        }
+    }
+
+    Ok(None)
+}
+
 fn solve_plane_root_polygon(
     system: &EquationSystem,
     ring: &[Vec<f64>],
@@ -2013,11 +2215,12 @@ fn solve_plane_root_polygon(
         return Err(LeafFailureKind::PlaneSolveNoConvergence);
     }
     let m = ring.len();
+    let max_switch = m.saturating_add(8).max(LEAF_SEGMENT_SWITCH_MAX).min(4096);
     let mut seg = seed_seg % m;
-    let mut tau = seed_tau.clamp(0.0, 1.0);
+    let mut tau = canonicalize_segment_tau(seed_tau.clamp(0.0, 1.0));
     let mut switch_count = 0usize;
 
-    'outer: while switch_count < LEAF_SEGMENT_SWITCH_MAX {
+    'newton: loop {
         for _ in 0..LEAF_TAU_NEWTON_MAX_ITERS {
             let (h, dh, start, end) = eval_plane_residual_and_derivative_on_segment(
                 system,
@@ -2033,132 +2236,88 @@ fn solve_plane_root_polygon(
                 max_time,
             )?;
             if h.abs() <= plane_tol {
-                return Ok((seg, tau, start, end));
+                return Ok((seg, canonicalize_segment_tau(tau), start, end));
             }
             if dh.abs() <= LEAF_PLANE_DERIV_EPS {
                 break;
             }
             let step = (h / dh).clamp(-LEAF_TAU_NEWTON_MAX_STEP, LEAF_TAU_NEWTON_MAX_STEP);
             let tau_next = tau - step;
-            if tau_next < 0.0 {
+            if tau_next < -TAU_SWITCH_EPS {
                 seg = (seg + 1) % m;
-                tau = (tau_next + 1.0).clamp(0.0, 1.0);
+                tau = canonicalize_segment_tau(tau_next + 1.0);
                 switch_count += 1;
-                continue 'outer;
+                if switch_count >= max_switch {
+                    return Err(LeafFailureKind::SegmentSwitchLimitExceeded);
+                }
+                continue 'newton;
             }
-            if tau_next > 1.0 {
-                seg = (seg + m - 1) % m;
-                tau = (tau_next - 1.0).clamp(0.0, 1.0);
-                switch_count += 1;
-                continue 'outer;
-            }
-            tau = tau_next.clamp(0.0, 1.0);
-        }
-
-        let tau_samples = [0.0_f64, 0.5_f64, 1.0_f64];
-        let mut samples: Vec<(f64, f64, Vec<f64>, Vec<f64>)> =
-            Vec::with_capacity(tau_samples.len());
-        for &tau_sample in &tau_samples {
-            let sample = eval_plane_residual_and_derivative_on_segment(
-                system,
-                ring,
-                base_point,
-                leaf_normal,
-                seg,
-                tau_time,
-                tau_sample,
-                sigma,
-                dt,
-                max_steps_per_leaf,
-                max_time,
-            )?;
-            if sample.0.abs() <= plane_tol {
-                return Ok((seg, tau_sample, sample.2, sample.3));
-            }
-            samples.push((tau_sample, sample.0, sample.2, sample.3));
-        }
-
-        for pair in samples.windows(2) {
-            let (tau_l, h_l, _, _) = &pair[0];
-            let (tau_r, h_r, _, _) = &pair[1];
-            if *h_l * *h_r > 0.0 {
+            if tau_next < 0.0 {
+                tau = 0.0;
                 continue;
             }
-            let mut left_tau = *tau_l;
-            let mut right_tau = *tau_r;
-            let mut left_h = *h_l;
-            for _ in 0..LEAF_PLANE_BISECT_ITERS {
-                let mid_tau = 0.5 * (left_tau + right_tau);
-                let (mid_h, _mid_dh, mid_start, mid_end) =
-                    eval_plane_residual_and_derivative_on_segment(
-                        system,
-                        ring,
-                        base_point,
-                        leaf_normal,
-                        seg,
-                        tau_time,
-                        mid_tau,
-                        sigma,
-                        dt,
-                        max_steps_per_leaf,
-                        max_time,
-                    )?;
-                if mid_h.abs() <= plane_tol {
-                    return Ok((seg, mid_tau, mid_start, mid_end));
+            if tau_next > 1.0 + TAU_SWITCH_EPS {
+                seg = (seg + m - 1) % m;
+                tau = canonicalize_segment_tau(tau_next - 1.0);
+                switch_count += 1;
+                if switch_count >= max_switch {
+                    return Err(LeafFailureKind::SegmentSwitchLimitExceeded);
                 }
-                if left_h * mid_h <= 0.0 {
-                    right_tau = mid_tau;
-                } else {
-                    left_tau = mid_tau;
-                    left_h = mid_h;
-                }
+                continue 'newton;
             }
-            let root_tau = 0.5 * (left_tau + right_tau);
-            let (_root_h, _root_dh, root_start, root_end) =
-                eval_plane_residual_and_derivative_on_segment(
-                    system,
-                    ring,
-                    base_point,
-                    leaf_normal,
-                    seg,
-                    tau_time,
-                    root_tau,
-                    sigma,
-                    dt,
-                    max_steps_per_leaf,
-                    max_time,
-                )?;
-            return Ok((seg, root_tau, root_start, root_end));
-        }
-
-        let mut best_idx = 0usize;
-        let mut best_abs = samples[0].1.abs();
-        for (idx, sample) in samples.iter().enumerate().skip(1) {
-            let value = sample.1.abs();
-            if value < best_abs {
-                best_abs = value;
-                best_idx = idx;
+            if tau_next > 1.0 {
+                tau = 1.0;
+                continue;
             }
+            tau = canonicalize_segment_tau(tau_next);
         }
-        if best_abs <= plane_tol {
-            let (tau_best, _h_best, start_best, end_best) = samples.remove(best_idx);
-            return Ok((seg, tau_best, start_best, end_best));
-        }
-
-        let h0 = samples[0].1.abs();
-        let h1 = samples[samples.len() - 1].1.abs();
-        if h0 < h1 {
-            seg = (seg + 1) % m;
-            tau = 1.0;
-        } else {
-            seg = (seg + m - 1) % m;
-            tau = 0.0;
-        }
-        switch_count += 1;
-        continue;
+        break;
     }
 
-    Err(LeafFailureKind::SegmentSwitchLimitExceeded)
+    let seg0 = seg;
+    let scan_limit = m.min(max_switch).max(1);
+    for k in 0..scan_limit {
+        let forward = (seg0 + k) % m;
+        if let Some((tau_root, start, end)) = try_solve_plane_root_on_segment(
+            system,
+            ring,
+            base_point,
+            leaf_normal,
+            forward,
+            tau_time,
+            sigma,
+            dt,
+            max_steps_per_leaf,
+            max_time,
+            plane_tol,
+        )? {
+            return Ok((forward, canonicalize_segment_tau(tau_root), start, end));
+        }
+        if k == 0 {
+            continue;
+        }
+        let backward = (seg0 + m - (k % m)) % m;
+        if backward == forward {
+            continue;
+        }
+        if let Some((tau_root, start, end)) = try_solve_plane_root_on_segment(
+            system,
+            ring,
+            base_point,
+            leaf_normal,
+            backward,
+            tau_time,
+            sigma,
+            dt,
+            max_steps_per_leaf,
+            max_time,
+            plane_tol,
+        )? {
+            return Ok((backward, canonicalize_segment_tau(tau_root), start, end));
+        }
+    }
+
+    Err(LeafFailureKind::PlaneSolveNoConvergence)
 }
 
 fn evaluate_leaf_sample_at_time(
@@ -4233,7 +4392,7 @@ mod tests {
                 max_spacing: 2.0,
                 alpha_min: 0.3,
                 alpha_max: 0.4,
-                delta_alpha_min: 0.1,
+                delta_alpha_min: 0.01,
                 delta_alpha_max: 1.0,
                 integration_dt: 1e-3,
                 target_radius: 8.0,
@@ -4291,7 +4450,7 @@ mod tests {
                 max_spacing: 2.0,
                 alpha_min: 0.3,
                 alpha_max: 0.4,
-                delta_alpha_min: 0.1,
+                delta_alpha_min: 0.01,
                 delta_alpha_max: 1.0,
                 integration_dt: 1e-3,
                 target_radius: 8.0,
@@ -4412,7 +4571,7 @@ mod tests {
                 max_spacing: 2.0,
                 alpha_min: 0.3,
                 alpha_max: 0.4,
-                delta_alpha_min: 0.1,
+                delta_alpha_min: 0.01,
                 delta_alpha_max: 1.0,
                 integration_dt: 1e-3,
                 target_radius: 40.0,
@@ -4463,6 +4622,156 @@ mod tests {
         assert_eq!(
             diagnostics.leaf_fail_plane_root_not_bracketed, 0,
             "PlaneRootNotBracketed should be recovered via segment switching"
+        );
+    }
+
+    #[test]
+    fn manifold_eq_2d_lorenz_global_default_scale_no_segment_switch_limit_failures_even_with_small_delta_min(
+    ) {
+        let mut system = build_system(
+            &["sigma*(y-x)", "x*(rho-z)-y", "x*y-beta*z"],
+            &["x", "y", "z"],
+            &[("sigma", 10.0), ("rho", 28.0), ("beta", 8.0 / 3.0)],
+        );
+        let branch = continue_manifold_eq_2d(
+            &mut system,
+            &[0.0, 0.0, 0.0],
+            Manifold2DSettings {
+                stability: ManifoldStability::Stable,
+                initial_radius: 1.0,
+                leaf_delta: 1.0,
+                delta_min: 1e-3,
+                ring_points: 20,
+                min_spacing: 0.25,
+                max_spacing: 2.0,
+                alpha_min: 0.3,
+                alpha_max: 0.4,
+                delta_alpha_min: 0.01,
+                delta_alpha_max: 1.0,
+                integration_dt: 1e-3,
+                target_radius: 40.0,
+                target_arclength: 100.0,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 2000,
+                    max_points: 8_000,
+                    max_rings: 200,
+                    max_vertices: 200_000,
+                    max_time: 200.0,
+                },
+                ..Manifold2DSettings::default()
+            },
+        )
+        .expect("lorenz stable manifold");
+        let ManifoldGeometry::Surface(surface) = branch.manifold_geometry.expect("geometry") else {
+            panic!("expected surface geometry");
+        };
+        let diagnostics = surface
+            .solver_diagnostics
+            .expect("expected solver diagnostics on 2D manifold geometry");
+        assert_ne!(
+            diagnostics.termination_reason, "ring_build_failed",
+            "unexpected ring-build failure detail={:?}",
+            diagnostics.termination_detail
+        );
+        assert_eq!(
+            diagnostics.leaf_fail_segment_switch_limit, 0,
+            "segment-switch limit failures should be eliminated; detail={:?}",
+            diagnostics.termination_detail
+        );
+        assert!(
+            diagnostics.termination_reason == "target_radius"
+                || diagnostics.termination_reason == "target_arclength"
+                || diagnostics.termination_reason == "max_rings",
+            "unexpected termination reason={} detail={:?}",
+            diagnostics.termination_reason,
+            diagnostics.termination_detail
+        );
+        assert!(
+            surface.ring_offsets.len() >= 30 || diagnostics.termination_reason == "target_radius",
+            "expected substantial ring growth before stop, got rings={} reason={} detail={:?}",
+            surface.ring_offsets.len(),
+            diagnostics.termination_reason,
+            diagnostics.termination_detail
+        );
+    }
+
+    #[test]
+    fn manifold_eq_2d_rossler_unstable_no_segment_switch_limit_failures() {
+        let mut system = build_system(
+            &["-y-z", "x+a*y", "b+z*(x-c)"],
+            &["x", "y", "z"],
+            &[("a", 0.2), ("b", 0.2), ("c", 5.7)],
+        );
+        let guesses = [
+            vec![0.0, 0.0, 0.0],
+            vec![0.1, -0.1, 0.1],
+            vec![6.0, -28.0, 28.0],
+        ];
+        let mut equilibrium = None;
+        for guess in guesses {
+            let Ok(solution) = solve_equilibrium(
+                &system,
+                SystemKind::Flow,
+                &guess,
+                NewtonSettings {
+                    max_steps: 80,
+                    damping: 1.0,
+                    tolerance: 1e-10,
+                },
+            ) else {
+                continue;
+            };
+            let unstable_count = solution
+                .eigenpairs
+                .iter()
+                .filter(|pair| pair.value.re > 1e-9)
+                .count();
+            if unstable_count == 2 {
+                equilibrium = Some(solution.state);
+                break;
+            }
+        }
+        let equilibrium = equilibrium.expect("expected Rossler equilibrium with 2D unstable side");
+
+        let branch = continue_manifold_eq_2d(
+            &mut system,
+            &equilibrium,
+            Manifold2DSettings {
+                stability: ManifoldStability::Unstable,
+                initial_radius: 0.02,
+                leaf_delta: 0.02,
+                delta_min: 1e-3,
+                ring_points: 12,
+                min_spacing: 0.005,
+                max_spacing: 0.05,
+                alpha_min: 0.3,
+                alpha_max: 0.4,
+                delta_alpha_min: 0.1,
+                delta_alpha_max: 1.0,
+                integration_dt: 5e-3,
+                target_radius: 0.2,
+                target_arclength: 0.3,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 80,
+                    max_points: 400,
+                    max_rings: 4,
+                    max_vertices: 2_000,
+                    max_time: 1.0,
+                },
+                ..Manifold2DSettings::default()
+            },
+        )
+        .expect("Rossler unstable manifold");
+        let ManifoldGeometry::Surface(surface) = branch.manifold_geometry.expect("geometry") else {
+            panic!("expected surface geometry");
+        };
+        let diagnostics = surface
+            .solver_diagnostics
+            .expect("expected solver diagnostics on 2D manifold geometry");
+        assert_eq!(
+            diagnostics.leaf_fail_segment_switch_limit, 0,
+            "Rossler run should avoid segment-switch-limit failures; detail={:?}",
+            diagnostics.termination_detail
         );
     }
 }

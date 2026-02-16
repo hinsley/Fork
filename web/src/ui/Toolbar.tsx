@@ -12,6 +12,8 @@ type ToolbarProps = {
     ringsComputed?: number
     showArclength?: boolean
     arclength?: number
+    arclengthTarget?: number
+    radius?: number
   } | null
   onOpenSystems: () => void
   theme: 'light' | 'dark'
@@ -133,9 +135,16 @@ export function Toolbar({
           <div className="toolbar__progress">
             <div className="toolbar__progress-header">
               <span>{progress.label}</span>
-              <span>
-                {progress.currentStep} / {progress.maxSteps}
-              </span>
+              {progress.showArclength ? (
+                <span>
+                  {formatArclength(progress.arclength ?? progress.currentStep)} /{' '}
+                  {formatArclength(progress.arclengthTarget ?? progress.maxSteps)}
+                </span>
+              ) : (
+                <span>
+                  {progress.currentStep} / {progress.maxSteps}
+                </span>
+              )}
             </div>
             <div className="toolbar__progress-bar" role="progressbar">
               <div
@@ -155,7 +164,7 @@ export function Toolbar({
               ) : null}
               <span>{progress.points} pts</span>
               {progress.showArclength ? (
-                <span>arclength {formatArclength(progress.arclength ?? 0)}</span>
+                <span>radius {formatArclength(progress.radius ?? 0)}</span>
               ) : (
                 <span>{progress.bifurcations} bifurcations</span>
               )}

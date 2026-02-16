@@ -234,8 +234,12 @@ function App() {
                 points: continuationProgress.progress.points_computed,
                 bifurcations: continuationProgress.progress.bifurcations_found,
                 ringsComputed: continuationProgress.progress.rings_computed,
-                showArclength: continuationProgress.label.startsWith('Invariant Manifold'),
-                arclength: continuationProgress.progress.current_param,
+                showArclength:
+                  continuationProgress.label === 'Invariant Manifold (Equilibrium 2D)' ||
+                  continuationProgress.label === 'Invariant Manifold (Limit Cycle 2D)',
+                arclength: continuationProgress.progress.current_step,
+                arclengthTarget: continuationProgress.progress.max_steps,
+                radius: continuationProgress.progress.current_param,
               }
             : null
         }

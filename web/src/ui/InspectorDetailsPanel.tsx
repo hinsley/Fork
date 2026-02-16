@@ -1190,7 +1190,7 @@ function makeSurfaceProfileDefaults(
       maxSpacing: '2.0',
       alphaMin: '0.3',
       alphaMax: '0.4',
-      deltaAlphaMin: '0.1',
+      deltaAlphaMin: '0.01',
       deltaAlphaMax: '1.0',
       integrationDt: '0.001',
       targetArclength: '100',
