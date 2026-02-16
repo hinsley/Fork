@@ -411,7 +411,6 @@ export async function initiateEquilibriumManifold1DFromPoint(
   let integrationDtInput = '1e-2';
   let maxStepsInput = DEFAULT_MANIFOLD_CAPS.max_steps.toString();
   let maxPointsInput = DEFAULT_MANIFOLD_CAPS.max_points.toString();
-  let maxRingsInput = DEFAULT_MANIFOLD_CAPS.max_rings.toString();
   let maxVerticesInput = DEFAULT_MANIFOLD_CAPS.max_vertices.toString();
   let maxTimeInput = DEFAULT_MANIFOLD_CAPS.max_time.toString();
   const eligibleRealEigenIndices = (): number[] => {
@@ -580,20 +579,6 @@ export async function initiateEquilibriumManifold1DFromPoint(
       }
     },
     {
-      id: 'maxRings',
-      label: 'Caps: max rings',
-      section: 'Termination Caps',
-      getDisplay: () => maxRingsInput,
-      edit: async () => {
-        const { value } = await inquirer.prompt({
-          name: 'value',
-          message: 'Maximum rings:',
-          default: maxRingsInput
-        });
-        maxRingsInput = value;
-      }
-    },
-    {
       id: 'maxVertices',
       label: 'Caps: max vertices',
       section: 'Termination Caps',
@@ -680,7 +665,7 @@ export async function initiateEquilibriumManifold1DFromPoint(
       caps: {
         max_steps: Math.max(parseIntOrDefault(maxStepsInput, DEFAULT_MANIFOLD_CAPS.max_steps), 1),
         max_points: Math.max(parseIntOrDefault(maxPointsInput, DEFAULT_MANIFOLD_CAPS.max_points), 2),
-        max_rings: Math.max(parseIntOrDefault(maxRingsInput, DEFAULT_MANIFOLD_CAPS.max_rings), 1),
+        max_rings: DEFAULT_MANIFOLD_CAPS.max_rings,
         max_vertices: Math.max(parseIntOrDefault(maxVerticesInput, DEFAULT_MANIFOLD_CAPS.max_vertices), 3),
         max_time: Math.max(parseFloatOrDefault(maxTimeInput, DEFAULT_MANIFOLD_CAPS.max_time), Number.EPSILON)
       }

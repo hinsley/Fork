@@ -8834,19 +8834,21 @@ export function InspectorDetailsPanel({
                           data-testid="equilibrium-manifold-caps-max-points"
                         />
                       </label>
-                      <label>
-                        Max rings
-                        <input
-                          value={equilibriumManifoldDraft.caps.maxRings}
-                          onChange={(event) =>
-                            setEquilibriumManifoldDraft((prev) => ({
-                              ...prev,
-                              caps: { ...prev.caps, maxRings: event.target.value },
-                            }))
-                          }
-                          data-testid="equilibrium-manifold-caps-max-rings"
-                        />
-                      </label>
+                      {equilibriumManifoldDraft.mode === 'surface_2d' ? (
+                        <label>
+                          Max rings
+                          <input
+                            value={equilibriumManifoldDraft.caps.maxRings}
+                            onChange={(event) =>
+                              setEquilibriumManifoldDraft((prev) => ({
+                                ...prev,
+                                caps: { ...prev.caps, maxRings: event.target.value },
+                              }))
+                            }
+                            data-testid="equilibrium-manifold-caps-max-rings"
+                          />
+                        </label>
+                      ) : null}
                       <label>
                         Max vertices
                         <input
