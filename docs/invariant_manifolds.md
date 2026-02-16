@@ -251,7 +251,7 @@ Profile defaults in Web:
 - `max_spacing = 2.0`
 - `alpha_min = 0.3`
 - `alpha_max = 0.4`
-- `delta_alpha_min = 0.1`
+- `delta_alpha_min = 0.01`
 - `delta_alpha_max = 1.0`
 - `integration_dt = 0.001`
 - `target_arclength = 100`
@@ -296,13 +296,13 @@ Notable CLI differences:
 
 ## Progress Display
 
-During manifold runs, toolbar progress metadata includes:
+During 2D manifold runs, the toolbar progress UI now shows:
 
-- `rings` count (for 2D workflows)
-- `points`
-- current manifold `arclength`
+- header progress as `arclength / target arclength`
+- metadata rows for `rings` and `points`
+- metadata value `radius` (current radius estimate)
 
-For non-manifold continuations, the same slot shows `bifurcations`.
+For non-manifold continuations and 1D manifold runs, the generic progress display remains step-based and the same metadata slot shows `bifurcations`.
 
 ## Branch Summary and Diagnostics
 
