@@ -387,6 +387,7 @@ function App() {
                 system={system}
                 selectedNodeId={system.ui.selectedNodeId}
                 branchPointSelection={branchPointSelection}
+                orbitPointSelection={orbitPointSelection}
                 theme={theme}
                 onSelectViewport={selectNode}
                 onSelectObject={selectNode}

@@ -86,6 +86,8 @@ behavior.
     marker traces;
   - selected branch-point markers in scenes use the same dedicated selected
     marker style as bifurcation diagrams (`circle-open` overlay);
+  - selected orbit-point markers in scenes render as dedicated `circle-open`
+    overlay traces so inspector point selection is visible in state space;
   - cycle-like continuation branches (limit cycle, isochrone, homoclinic
     related) use envelope rendering (min/max traces) for one-free-variable
     projections, rather than plotting every cycle profile point.
@@ -111,6 +113,9 @@ behavior.
 
 - `web/e2e/clv-arrow-selection.spec.ts`: uses Plotly's event emitter
   (`node.emit('plotly_click', ...)`) to simulate click events in tests.
+- `web/e2e/orbit-scene-point-selection.spec.ts`: uses Plotly's event emitter
+  (`node.emit('plotly_click', ...)`) to simulate orbit-point scene clicks and
+  verify Orbit Data preview selection/page jumps.
 - `web/e2e/plotly-view-state.spec.ts`: reads `node._fullLayout` to inspect
   camera state in tests.
 - `web/src/test/setup.ts`: mocks `plotlyAdapter` to avoid loading Plotly during

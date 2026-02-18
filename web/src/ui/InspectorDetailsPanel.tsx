@@ -4202,12 +4202,10 @@ export function InspectorDetailsPanel({
     if (orbitDisplayRows.length === 0 || selectedOrbitPointIndex === null) return
     if (selectedOrbitPointIndex < 0 || selectedOrbitPointIndex >= orbitDisplayRows.length) return
     const targetPage = Math.floor(selectedOrbitPointIndex / ORBIT_PREVIEW_PAGE_SIZE)
-    if (targetPage !== orbitPreviewPage) {
-      setOrbitPreviewPageIndex(targetPage)
-    }
+    setOrbitPreviewPageIndex(targetPage)
   }, [
     orbitDisplayRows.length,
-    orbitPreviewPage,
+    orbitPointSelection,
     selectedOrbitPointIndex,
     setOrbitPreviewPageIndex,
   ])

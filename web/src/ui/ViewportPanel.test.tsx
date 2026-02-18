@@ -24,7 +24,7 @@ import type {
   Scene,
   SystemConfig,
 } from '../system/types'
-import type { BranchPointSelection } from './branchPointSelection'
+import type { BranchPointSelection, OrbitPointSelection } from './branchPointSelection'
 import { nowIso } from '../utils/determinism'
 import { buildSubsystemSnapshot } from '../system/subsystemGateway'
 
@@ -34,6 +34,14 @@ type PlotlyProps = {
   layout: Partial<Layout>
   viewRevision: number | string
   initialView: Record<string, unknown> | null
+  onPointClick?: (point: {
+    uid?: string
+    pointIndex?: number
+    customdata?: unknown
+    x?: number
+    y?: number
+    z?: number
+  }) => void
 }
 
 const plotlyCalls: PlotlyProps[] = []
@@ -47,6 +55,7 @@ vi.mock('../viewports/plotly/PlotlyViewport', () => ({
 
 type RenderPanelOverrides = {
   branchPointSelection?: BranchPointSelection
+  orbitPointSelection?: OrbitPointSelection
   selectedNodeId?: string | null
   isoclineGeometryCache?: Record<
     string,
@@ -66,6 +75,7 @@ function renderPanel(
       system={system}
       selectedNodeId={overrides.selectedNodeId ?? null}
       branchPointSelection={overrides.branchPointSelection}
+      orbitPointSelection={overrides.orbitPointSelection}
       theme="light"
       onSelectViewport={vi.fn()}
       onSelectObject={vi.fn()}
@@ -97,6 +107,123 @@ function buildIsoclineSignature(object: IsoclineObject): string {
 describe('ViewportPanel view state wiring', () => {
   beforeEach(() => {
     plotlyCalls.length = 0
+  })
+
+  it('falls back to event point index when selecting orbit points from scene traces', () => {
+    let system = createSystem({ name: 'Orbit_Click_System' })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = sceneResult.system
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Click_Target',
+      systemName: system.config.name,
+      data: [
+        [0, 0.1, 0.2],
+        [0.1, 0.3, 0.4],
+        [0.2, 0.5, 0.6],
+      ],
+      t_start: 0,
+      t_end: 0.2,
+      dt: 0.1,
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+    const onSelectObject = vi.fn()
+    const onSelectOrbitPoint = vi.fn()
+
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        theme="light"
+        onSelectViewport={vi.fn()}
+        onSelectObject={onSelectObject}
+        onSelectOrbitPoint={onSelectOrbitPoint}
+        onReorderViewport={vi.fn()}
+        onResizeViewport={vi.fn()}
+        onToggleViewport={vi.fn()}
+        onCreateScene={vi.fn()}
+        onCreateBifurcation={vi.fn()}
+        onRenameViewport={vi.fn()}
+        onDeleteViewport={vi.fn()}
+      />
+    )
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props?.onPointClick).toBeDefined()
+
+    props?.onPointClick?.({
+      uid: orbitResult.nodeId,
+      pointIndex: 2,
+    })
+
+    expect(onSelectObject).toHaveBeenCalledWith(orbitResult.nodeId)
+    expect(onSelectOrbitPoint).toHaveBeenCalledWith({
+      orbitId: orbitResult.nodeId,
+      pointIndex: 2,
+    })
+  })
+
+  it('renders a selected orbit-point marker in state-space scenes', () => {
+    const config: SystemConfig = {
+      name: 'Orbit_Selected_Point_System',
+      equations: ['x', 'y', 'z'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: 'Orbit_Selected_Point_System', config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = sceneResult.system
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Selected_Point',
+      systemName: system.config.name,
+      data: [
+        [0, 1, 2, 3],
+        [0.1, 4, 5, 6],
+        [0.2, 7, 8, 9],
+      ],
+      t_start: 0,
+      t_end: 0.2,
+      dt: 0.1,
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+
+    renderPanel(system, {
+      orbitPointSelection: { orbitId: orbitResult.nodeId, pointIndex: 1 },
+    })
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const selectedTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === `${orbit.name} selected point` &&
+        'mode' in trace &&
+        trace.mode === 'markers'
+    ) as
+      | {
+          type?: string
+          x?: number[]
+          y?: number[]
+          z?: number[]
+          customdata?: number[]
+          marker?: { symbol?: string }
+          showlegend?: boolean
+        }
+      | undefined
+
+    expect(selectedTrace?.type).toBe('scatter3d')
+    expect(selectedTrace?.x).toEqual([4])
+    expect(selectedTrace?.y).toEqual([5])
+    expect(selectedTrace?.z).toEqual([6])
+    expect(selectedTrace?.customdata).toEqual([1])
+    expect(selectedTrace?.marker?.symbol).toBe('circle-open')
+    expect(selectedTrace?.showlegend).toBe(false)
   })
 
   it('omits axis ranges from 2D layouts but seeds initialView', () => {

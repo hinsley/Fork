@@ -1043,6 +1043,73 @@ describe('InspectorDetailsPanel', () => {
     })
   })
 
+  it('keeps manual orbit preview page navigation when a point is selected', async () => {
+    const user = userEvent.setup()
+    let system = createSystem({ name: 'Orbit_Preview_Nav' })
+    const orbitRows = Array.from({ length: 25 }, (_, index) => {
+      const t = index * 0.1
+      return [t, Math.sin(t), Math.cos(t)]
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Preview_Nav',
+      systemName: system.config.name,
+      data: orbitRows,
+      t_start: 0,
+      t_end: 2.4,
+      dt: 0.1,
+      parameters: [],
+    }
+    const added = addObject(system, orbit)
+    system = added.system
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={added.nodeId}
+        view="selection"
+        theme="light"
+        orbitPointSelection={{ orbitId: added.nodeId, pointIndex: 17 }}
+        onOrbitPointSelect={vi.fn()}
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    const orbitDataToggle = screen.getByTestId('orbit-data-toggle')
+    const orbitDataDetails = orbitDataToggle.closest('details')
+    if (orbitDataDetails && !orbitDataDetails.open) {
+      await user.click(orbitDataToggle)
+    }
+
+    expect(screen.getByText('Page 2 of 3')).toBeVisible()
+    await user.click(screen.getByTestId('orbit-preview-next'))
+    expect(screen.getByText('Page 3 of 3')).toBeVisible()
+
+    const tableRegion = screen.getByRole('region', { name: 'Orbit data preview' })
+    const rows = within(tableRegion).getAllByRole('row')
+    expect(within(rows[1]).getByText('20')).toBeVisible()
+  })
+
   it('creates limit cycle continuation from orbit data', async () => {
     const user = userEvent.setup()
     const { system, objectNodeId } = createDemoSystem()

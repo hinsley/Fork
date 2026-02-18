@@ -73,6 +73,7 @@ type ViewportPanelProps = {
   system: System
   selectedNodeId: string | null
   branchPointSelection?: BranchPointSelection
+  orbitPointSelection?: OrbitPointSelection
   theme: 'light' | 'dark'
   onSelectViewport: (id: string) => void
   onSelectObject: (id: string) => void
@@ -110,6 +111,7 @@ type ViewportTileProps = {
   entry: ViewportEntry
   selectedNodeId: string | null
   branchPointSelection?: BranchPointSelection
+  orbitPointSelection?: OrbitPointSelection
   mapRange: [number, number] | null
   mapFunctionSamples: MapFunctionSamples | null
   draggingId: string | null
@@ -140,11 +142,19 @@ type ViewportTileProps = {
   >
 }
 
-function resolvePointIndex(point: PlotlyPointClick): number | null {
-  if (typeof point.customdata !== 'number' || !Number.isFinite(point.customdata)) {
+function resolveNumericPointIndex(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
     return null
   }
-  return Math.max(0, Math.round(point.customdata))
+  return Math.max(0, Math.round(value))
+}
+
+function resolveCustomDataPointIndex(point: PlotlyPointClick): number | null {
+  return resolveNumericPointIndex(point.customdata)
+}
+
+function resolveEventPointIndex(point: PlotlyPointClick): number | null {
+  return resolveNumericPointIndex(point.pointIndex)
 }
 
 const LINE_STYLE_DASH: Record<LineStyle, 'solid' | 'dash' | 'dot'> = {
@@ -2389,6 +2399,7 @@ function buildSceneTraces(
   mapRange?: [number, number] | null,
   mapFunctionSamples?: MapFunctionSamples | null,
   branchPointSelection?: BranchPointSelection | null,
+  orbitPointSelection?: OrbitPointSelection | null,
   plotSize?: PlotSize | null
 ): Data[] {
   const traces: Data[] = []
@@ -2874,6 +2885,102 @@ function buildSceneTraces(
     const axisX = axisOrder[0] ?? 0
     const axisY = axisOrder[1] ?? Math.min(1, Math.max(0, dimension - 1))
     const axisZ = axisOrder[2] ?? Math.min(2, Math.max(0, dimension - 1))
+    const selectedOrbitPointIndex =
+      orbitPointSelection?.orbitId === nodeId ? orbitPointSelection.pointIndex : null
+    const appendSelectedOrbitMarker = () => {
+      if (
+        selectedOrbitPointIndex === null ||
+        selectedOrbitPointIndex < 0 ||
+        selectedOrbitPointIndex >= rows.length
+      ) {
+        return
+      }
+      const row = rows[selectedOrbitPointIndex]
+      if (!row) return
+      const markerSize = (highlight ? node.render.pointSize + 2 : node.render.pointSize) + 4
+      const selectedLabel = `Selected point: ${selectedOrbitPointIndex}`
+      const marker = {
+        color: node.render.color,
+        size: markerSize,
+        symbol: 'circle-open' as const,
+        line: { color: node.render.color, width: 2 },
+      }
+      if (isMap1D) {
+        const value = row[axisX + 1]
+        if (!Number.isFinite(value)) return
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: `${object.name} selected point`,
+          uid: nodeId,
+          x: [value],
+          y: [value],
+          customdata: [selectedOrbitPointIndex],
+          marker,
+          text: [selectedLabel],
+          showlegend: false,
+          hovertemplate: '%{text}<extra></extra>',
+        })
+        return
+      }
+      if (objectPlotDim >= 3) {
+        const valueX = row[axisX + 1]
+        const valueY = row[axisY + 1]
+        const valueZ = row[axisZ + 1]
+        if (!Number.isFinite(valueX) || !Number.isFinite(valueY) || !Number.isFinite(valueZ)) {
+          return
+        }
+        traces.push({
+          type: 'scatter3d',
+          mode: 'markers',
+          name: `${object.name} selected point`,
+          uid: nodeId,
+          x: [valueX],
+          y: [valueY],
+          z: [valueZ],
+          customdata: [selectedOrbitPointIndex],
+          marker,
+          text: [selectedLabel],
+          showlegend: false,
+          hovertemplate: '%{text}<extra></extra>',
+        })
+        return
+      }
+      if (objectPlotDim >= 2) {
+        const valueX = row[axisX + 1]
+        const valueY = row[axisY + 1]
+        if (!Number.isFinite(valueX) || !Number.isFinite(valueY)) return
+        traces.push({
+          type: 'scatter',
+          mode: 'markers',
+          name: `${object.name} selected point`,
+          uid: nodeId,
+          x: [valueX],
+          y: [valueY],
+          customdata: [selectedOrbitPointIndex],
+          marker,
+          text: [selectedLabel],
+          showlegend: false,
+          hovertemplate: '%{text}<extra></extra>',
+        })
+        return
+      }
+      const value = row[axisX + 1]
+      if (!Number.isFinite(row[0]) || !Number.isFinite(value)) return
+      traces.push({
+        type: 'scatter',
+        mode: 'markers',
+        name: `${object.name} selected point`,
+        uid: nodeId,
+        x: [row[0]],
+        y: [value],
+        customdata: [selectedOrbitPointIndex],
+        marker,
+        text: [selectedLabel],
+        showlegend: false,
+        hovertemplate: '%{text}<extra></extra>',
+      })
+    }
     if (isMap1D) {
       const size = highlight ? node.render.pointSize + 2 : node.render.pointSize
       const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
@@ -3068,6 +3175,7 @@ function buildSceneTraces(
         )
       }
     }
+    appendSelectedOrbitMarker()
   }
 
   for (const nodeId of candidateIds) {
@@ -5394,6 +5502,7 @@ function ViewportTile({
   entry,
   selectedNodeId,
   branchPointSelection,
+  orbitPointSelection,
   mapRange,
   mapFunctionSamples,
   draggingId,
@@ -5509,15 +5618,15 @@ function ViewportTile({
       if (typeof uid === 'string') {
         onSelectObject(uid)
       }
-
-      const pointIndex = resolvePointIndex(event)
-      if (pointIndex === null || typeof uid !== 'string') return
+      if (typeof uid !== 'string') return
 
       const node = systemNodes[uid]
       if (!node) return
+      const customPointIndex = resolveCustomDataPointIndex(event)
 
       if (node.kind === 'branch') {
-        onSelectBranchPoint?.({ branchId: uid, pointIndex })
+        if (customPointIndex === null) return
+        onSelectBranchPoint?.({ branchId: uid, pointIndex: customPointIndex })
         return
       }
 
@@ -5526,12 +5635,16 @@ function ViewportTile({
       if (!object) return
 
       if (object.type === 'orbit') {
+        // Orbit traces can report clicks using pointNumber/pointIndex when customdata
+        // is not present; fall back so scene clicks can drive Orbit Data preview.
+        const pointIndex = customPointIndex ?? resolveEventPointIndex(event)
+        if (pointIndex === null) return
         if (pointIndex >= 0 && pointIndex < object.data.length) {
           onSelectOrbitPoint?.({ orbitId: uid, pointIndex })
         }
       } else if (object.type === 'limit_cycle') {
-        if (pointIndex >= 0) {
-          onSelectLimitCyclePoint?.({ limitCycleId: uid, pointIndex })
+        if (customPointIndex !== null && customPointIndex >= 0) {
+          onSelectLimitCyclePoint?.({ limitCycleId: uid, pointIndex: customPointIndex })
         }
       }
     },
@@ -5636,10 +5749,12 @@ function ViewportTile({
       sceneMapRange ?? mapRange,
       mapFunctionSamples,
       branchPointSelection ?? null,
+      orbitPointSelection ?? null,
       plotAreaSize
     )
   }, [
     branchPointSelection,
+    orbitPointSelection,
     mapFunctionSamples,
     mapRange,
     sceneMapRange,
@@ -5797,6 +5912,7 @@ export function ViewportPanel({
   system,
   selectedNodeId,
   branchPointSelection,
+  orbitPointSelection,
   theme,
   onSelectViewport,
   onSelectObject,
@@ -6173,6 +6289,7 @@ export function ViewportPanel({
                 entry={entry}
                 selectedNodeId={selectedNodeId}
                 branchPointSelection={branchPointSelection}
+                orbitPointSelection={orbitPointSelection}
                 mapRange={mapRangeValues}
                 mapFunctionSamples={activeMapFunction}
                 draggingId={draggingId}
