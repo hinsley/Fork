@@ -221,6 +221,20 @@ function extractOrbitValue(row: number[], variableIndex: number): number {
   return row[variableIndex + 1]
 }
 
+function formatOrbitFlowTimeLabel(value: number): string {
+  if (!Number.isFinite(value)) return ''
+  const rounded = Math.round(value * 1000) / 1000
+  const safeRounded = Object.is(rounded, -0) ? 0 : rounded
+  return safeRounded.toFixed(3)
+}
+
+function formatOrbitMapStepLabel(value: number, fallbackIndex: number): string {
+  if (Number.isFinite(value)) {
+    return `${Math.round(value)}`
+  }
+  return `${fallbackIndex}`
+}
+
 function buildCobwebRowsFromOrbitRows(rows: number[][], variableIndex: number): number[][] {
   const projected: number[][] = []
   for (let index = 0; index < rows.length; index += 1) {
@@ -2885,6 +2899,15 @@ function buildSceneTraces(
     const axisX = axisOrder[0] ?? 0
     const axisY = axisOrder[1] ?? Math.min(1, Math.max(0, dimension - 1))
     const axisZ = axisOrder[2] ?? Math.min(2, Math.max(0, dimension - 1))
+    const axisLabelX = system.config.varNames[axisX] ?? 'x'
+    const axisLabelY = system.config.varNames[axisY] ?? 'y'
+    const axisLabelZ = system.config.varNames[axisZ] ?? 'z'
+    const flowHoverTemplate3D = `${axisLabelX}: %{x:.6g}<br>${axisLabelY}: %{y:.6g}<br>${axisLabelZ}: %{z:.6g}<br>t: %{text}<extra></extra>`
+    const flowHoverTemplate2D = `${axisLabelX}: %{x:.6g}<br>${axisLabelY}: %{y:.6g}<br>t: %{text}<extra></extra>`
+    const flowHoverTemplate1D = `t: %{text}<br>${axisLabelX}: %{y:.6g}<extra></extra>`
+    const mapHoverTemplate3D = `${axisLabelX}: %{x:.6g}<br>${axisLabelY}: %{y:.6g}<br>${axisLabelZ}: %{z:.6g}<br>n: %{text}<extra></extra>`
+    const mapHoverTemplate2D = `${axisLabelX}: %{x:.6g}<br>${axisLabelY}: %{y:.6g}<br>n: %{text}<extra></extra>`
+    const mapHoverTemplate1D = `${axisLabelX}_n: %{x:.6g}<br>${axisLabelX}_{n+1}: %{y:.6g}<br>n: %{text}<extra></extra>`
     const selectedOrbitPointIndex =
       orbitPointSelection?.orbitId === nodeId ? orbitPointSelection.pointIndex : null
     const appendSelectedOrbitMarker = () => {
@@ -2986,12 +3009,14 @@ function buildSceneTraces(
       const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
       const diagonal: number[] = []
       const customdata: number[] = []
+      const orbitStepLabels: string[] = []
       for (let index = 0; index < rows.length; index += 1) {
         const row = rows[index]
         const value = row[axisX + 1]
         if (typeof value !== 'number' || !Number.isFinite(value)) continue
         diagonal.push(value)
         customdata.push(index)
+        orbitStepLabels.push(formatOrbitMapStepLabel(row[0], index))
       }
       if (diagonal.length > 0) {
         traces.push({
@@ -3002,10 +3027,12 @@ function buildSceneTraces(
           x: diagonal,
           y: diagonal,
           customdata,
+          text: orbitStepLabels,
           marker: {
             color: node.render.color,
             size,
           },
+          hovertemplate: mapHoverTemplate1D,
         })
       }
       const cobwebTrace = buildCobwebLineTrace(
@@ -3027,6 +3054,7 @@ function buildSceneTraces(
         const y: number[] = []
         const z: number[] = []
         const customdata: number[] = []
+        const orbitStepLabels: string[] = []
         for (let index = 0; index < rows.length; index += 1) {
           const row = rows[index]
           const valueX = row[axisX + 1]
@@ -3036,6 +3064,7 @@ function buildSceneTraces(
           y.push(valueY)
           z.push(valueZ)
           customdata.push(index)
+          orbitStepLabels.push(formatOrbitMapStepLabel(row[0], index))
           if (canPlotEigenvectors) {
             updateSceneBounds(sceneBounds, valueX, valueY, valueZ)
           }
@@ -3049,15 +3078,18 @@ function buildSceneTraces(
           y,
           z,
           customdata,
+          text: orbitStepLabels,
           marker: {
             color: node.render.color,
             size,
           },
+          hovertemplate: mapHoverTemplate3D,
         })
       } else if (objectPlotDim >= 2) {
         const x: number[] = []
         const y: number[] = []
         const customdata: number[] = []
+        const orbitStepLabels: string[] = []
         for (let index = 0; index < rows.length; index += 1) {
           const row = rows[index]
           const valueX = row[axisX + 1]
@@ -3065,6 +3097,7 @@ function buildSceneTraces(
           x.push(valueX)
           y.push(valueY)
           customdata.push(index)
+          orbitStepLabels.push(formatOrbitMapStepLabel(row[0], index))
           if (canPlotEigenvectors) {
             updateSceneBounds(sceneBounds, valueX, valueY, 0)
           }
@@ -3077,10 +3110,12 @@ function buildSceneTraces(
           x,
           y,
           customdata,
+          text: orbitStepLabels,
           marker: {
             color: node.render.color,
             size,
           },
+          hovertemplate: mapHoverTemplate2D,
         })
       }
     } else {
@@ -3088,6 +3123,7 @@ function buildSceneTraces(
       const y: number[] = []
       const z: number[] = []
       const customdata: number[] = []
+      const orbitTimeLabels: string[] = []
       if (objectPlotDim >= 3) {
         for (let index = 0; index < rows.length; index += 1) {
           const row = rows[index]
@@ -3098,6 +3134,7 @@ function buildSceneTraces(
           y.push(valueY)
           z.push(valueZ)
           customdata.push(index)
+          orbitTimeLabels.push(formatOrbitFlowTimeLabel(row[0]))
           if (canPlotEigenvectors) {
             updateSceneBounds(sceneBounds, valueX, valueY, valueZ)
           }
@@ -3110,6 +3147,7 @@ function buildSceneTraces(
           x.push(valueX)
           y.push(valueY)
           customdata.push(index)
+          orbitTimeLabels.push(formatOrbitFlowTimeLabel(row[0]))
           if (canPlotEigenvectors) {
             updateSceneBounds(sceneBounds, valueX, valueY, 0)
           }
@@ -3121,6 +3159,7 @@ function buildSceneTraces(
           x.push(row[0])
           y.push(value)
           customdata.push(index)
+          orbitTimeLabels.push(formatOrbitFlowTimeLabel(row[0]))
           if (isTimeSeries) {
             minY = Math.min(minY, value)
             maxY = Math.max(maxY, value)
@@ -3138,10 +3177,12 @@ function buildSceneTraces(
           y,
           z,
           customdata,
+          text: orbitTimeLabels,
           line: {
             color: node.render.color,
             width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
           },
+          hovertemplate: flowHoverTemplate3D,
         })
       } else {
         traces.push({
@@ -3152,10 +3193,12 @@ function buildSceneTraces(
           x,
           y,
           customdata,
+          text: orbitTimeLabels,
           line: {
             color: node.render.color,
             width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
           },
+          hovertemplate: objectPlotDim >= 2 ? flowHoverTemplate2D : flowHoverTemplate1D,
         })
       }
     }

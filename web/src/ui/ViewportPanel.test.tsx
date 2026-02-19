@@ -224,6 +224,18 @@ describe('ViewportPanel view state wiring', () => {
     expect(selectedTrace?.customdata).toEqual([1])
     expect(selectedTrace?.marker?.symbol).toBe('circle-open')
     expect(selectedTrace?.showlegend).toBe(false)
+
+    const orbitTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === orbit.name &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    ) as { hovertemplate?: string; text?: string[] } | undefined
+    expect(orbitTrace?.hovertemplate).toBe(
+      'x: %{x:.6g}<br>y: %{y:.6g}<br>z: %{z:.6g}<br>t: %{text}<extra></extra>'
+    )
+    expect(orbitTrace?.text).toEqual(['0.000', '0.100', '0.200'])
   })
 
   it('omits axis ranges from 2D layouts but seeds initialView', () => {
@@ -268,6 +280,20 @@ describe('ViewportPanel view state wiring', () => {
     let system = createSystem({ name: 'Map2D_System', config })
     const sceneResult = addScene(system, 'Scene Map 2D')
     system = sceneResult.system
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Map2DOrbit',
+      systemName: config.name,
+      data: [
+        [0, 1, 2],
+        [1, 1.5, 2.5],
+        [2, 2, 3],
+      ],
+      t_start: 0,
+      t_end: 2,
+      dt: 1,
+    }
+    system = addObject(system, orbit).system
 
     renderPanel(system)
 
@@ -276,6 +302,17 @@ describe('ViewportPanel view state wiring', () => {
     expect(props?.layout?.scene).toBeUndefined()
     expect(props?.layout?.xaxis?.title).toMatchObject({ text: 'u' })
     expect(props?.layout?.yaxis?.title).toMatchObject({ text: 'v' })
+    const orbitTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === orbit.name &&
+        'mode' in trace &&
+        trace.mode === 'markers'
+    ) as { hovertemplate?: string; text?: string[] } | undefined
+    expect(orbitTrace?.hovertemplate).toBe(
+      'u: %{x:.6g}<br>v: %{y:.6g}<br>n: %{text}<extra></extra>'
+    )
+    expect(orbitTrace?.text).toEqual(['0', '1', '2'])
   })
 
   it('renders 4D flow scenes as time series when axis count is 1', () => {
@@ -321,9 +358,11 @@ describe('ViewportPanel view state wiring', () => {
         trace.name === orbit.name &&
         'mode' in trace &&
         trace.mode === 'lines'
-    ) as { x?: number[]; y?: number[] } | undefined
+    ) as { x?: number[]; y?: number[]; hovertemplate?: string; text?: string[] } | undefined
     expect(orbitTrace?.x).toEqual([0, 0.1, 0.2])
     expect(orbitTrace?.y).toEqual([3, 3.2, 3.4])
+    expect(orbitTrace?.hovertemplate).toBe('t: %{text}<br>w: %{y:.6g}<extra></extra>')
+    expect(orbitTrace?.text).toEqual(['0.000', '0.100', '0.200'])
   })
 
   it('renders 4D flow scenes as 2D projections when axis count is 2', () => {
@@ -369,9 +408,13 @@ describe('ViewportPanel view state wiring', () => {
         trace.name === orbit.name &&
         'mode' in trace &&
         trace.mode === 'lines'
-    ) as { x?: number[]; y?: number[] } | undefined
+    ) as { x?: number[]; y?: number[]; hovertemplate?: string; text?: string[] } | undefined
     expect(orbitTrace?.x).toEqual([2, 2.1, 2.2])
     expect(orbitTrace?.y).toEqual([0, 0.2, 0.4])
+    expect(orbitTrace?.hovertemplate).toBe(
+      'z: %{x:.6g}<br>x: %{y:.6g}<br>t: %{text}<extra></extra>'
+    )
+    expect(orbitTrace?.text).toEqual(['0.000', '0.100', '0.200'])
   })
 
   it('renders 4D map scenes as 1D cobweb projections without map function curve', () => {
@@ -429,6 +472,17 @@ describe('ViewportPanel view state wiring', () => {
         trace.mode === 'lines'
     )
     expect(cobwebTrace).toBeTruthy()
+    const orbitMarkerTrace = props?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === orbitResult.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'markers'
+    ) as { hovertemplate?: string; text?: string[] } | undefined
+    expect(orbitMarkerTrace?.hovertemplate).toBe(
+      'z_n: %{x:.6g}<br>z_{n+1}: %{y:.6g}<br>n: %{text}<extra></extra>'
+    )
+    expect(orbitMarkerTrace?.text).toEqual(['0', '1', '2'])
     const hasFunctionCurve = props?.data.some(
       (trace) =>
         'line' in trace &&

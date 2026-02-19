@@ -63,6 +63,10 @@ behavior.
 - `web/src/ui/ViewportPanel.tsx`: 1-axis map scenes for systems with more than
   one variable render cobweb projection (`x_n` vs `x_{n+1}`) for the selected
   variable and intentionally do **not** render a governing map function graph.
+- `web/src/ui/ViewportPanel.tsx`: orbit scene traces set explicit
+  `hovertemplate` strings so hover labels use the active scene axis variable
+  names (not Plotly defaults) and include trajectory position metadata:
+  continuous systems show `t`, while discrete maps show integer `n`.
 - `web/src/ui/ViewportPanel.tsx`: `buildSceneInitialView()` and
   `buildDiagramInitialView()` translate stored `scene.camera` / `axisRanges`
   (if present) into a one-time `initialView` payload for `usePlotViewport`.
