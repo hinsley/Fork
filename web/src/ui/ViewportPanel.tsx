@@ -3499,6 +3499,13 @@ function buildSceneTraces(
     const axisVarX = system.config.varNames[axisX] ?? ''
     const axisVarY = system.config.varNames[axisY] ?? ''
     const axisVarZ = system.config.varNames[axisZ] ?? ''
+    const axisLabelX = axisVarX || 'x'
+    const axisLabelY = axisVarY || 'y'
+    const axisLabelZ = axisVarZ || 'z'
+    const branchHoverTemplate3D = `${axisLabelX}: %{x:.6g}<br>${axisLabelY}: %{y:.6g}<br>${axisLabelZ}: %{z:.6g}<br>%{text}<extra></extra>`
+    const branchHoverTemplate2D = `${axisLabelX}: %{x:.6g}<br>${axisLabelY}: %{y:.6g}<br>%{text}<extra></extra>`
+    const branchHoverTemplateMap1D = `${axisLabelX}_n: %{x:.6g}<br>${axisLabelX}_{n+1}: %{y:.6g}<br>%{text}<extra></extra>`
+    const branchHoverTemplateTimeSeries1D = `${axisLabelX}: %{y:.6g}<br>%{text}<extra></extra>`
     const branchSnapshot = resolveBranchSnapshot(system, branch)
     const packedStateDimension =
       branchSnapshot?.freeVariableNames.length ?? system.config.varNames.length
@@ -3848,6 +3855,7 @@ function buildSceneTraces(
           customdata: pointIndices,
           line: { color: node.render.color, width: lineWidth, dash: lineDash },
           ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+          ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate3D } : {}),
         })
         traces.push({
           type: 'scatter3d',
@@ -3861,6 +3869,7 @@ function buildSceneTraces(
           line: { color: node.render.color, width: lineWidth, dash: lineDash },
           showlegend: false,
           ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+          ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate3D } : {}),
         })
       } else {
         traces.push({
@@ -3873,6 +3882,7 @@ function buildSceneTraces(
           customdata: pointIndices,
           line: { color: node.render.color, width: lineWidth, dash: lineDash },
           ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+          ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate2D } : {}),
         })
         traces.push({
           type: 'scatter',
@@ -3885,6 +3895,7 @@ function buildSceneTraces(
           line: { color: node.render.color, width: lineWidth, dash: lineDash },
           showlegend: false,
           ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+          ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate2D } : {}),
         })
       }
       if (selectedBranchPointIndex !== null && selectedPointLabel) {
@@ -3971,6 +3982,7 @@ function buildSceneTraces(
             line: { color: node.render.color, width: lineWidth, dash: lineDash },
             ...(isCodim1Curve ? {} : { marker: { color: node.render.color, size: markerSize } }),
             ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+            ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate2D } : {}),
           })
           if (isCodim1Curve && branch.data.bifurcations.length > 0) {
             const bx: number[] = []
@@ -4107,6 +4119,7 @@ function buildSceneTraces(
             customdata: pointIndices,
             line: { color: node.render.color, width: lineWidth, dash: lineDash },
             ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+            ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate2D } : {}),
           })
           traces.push({
             type: 'scatter',
@@ -4119,6 +4132,7 @@ function buildSceneTraces(
             line: { color: node.render.color, width: lineWidth, dash: lineDash },
             showlegend: false,
             ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+            ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate2D } : {}),
           })
           if (selectedBranchPointIndex !== null && selectedPointLabel) {
             const selectedPosition = pointIndices.indexOf(selectedBranchPointIndex)
@@ -4176,6 +4190,9 @@ function buildSceneTraces(
           showLegend: false,
           subsystemSnapshot: branchSnapshot,
           projection,
+          hoverTemplate3D: branchHoverTemplate3D,
+          hoverTemplate2D: branchHoverTemplate2D,
+          hoverTemplate1D: isMap1D ? branchHoverTemplateMap1D : branchHoverTemplateTimeSeries1D,
         })
         const pointParameterHoverText = resolvePointParameterHoverText(idx)
         for (const trace of pointTraces) {
@@ -4311,6 +4328,7 @@ function buildSceneTraces(
         line: { color: node.render.color, width: lineWidth, dash: lineDash },
         ...(renderPointMarkers ? { marker: { color: node.render.color, size: markerSize } } : {}),
         ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+        ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate3D } : {}),
       })
       if (renderBifurcationMarkers) {
         const bx: number[] = []
@@ -4374,6 +4392,16 @@ function buildSceneTraces(
         line: { color: node.render.color, width: lineWidth, dash: lineDash },
         ...(renderPointMarkers ? { marker: { color: node.render.color, size: markerSize } } : {}),
         ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+        ...(branchTraceParameterText
+          ? {
+              hovertemplate:
+                projectionPlotDim === 2
+                  ? branchHoverTemplate2D
+                  : isMap1D
+                    ? branchHoverTemplateMap1D
+                    : branchHoverTemplateTimeSeries1D,
+            }
+          : {}),
       })
       if (renderBifurcationMarkers) {
         const bx: number[] = []

@@ -1984,11 +1984,12 @@ describe('ViewportPanel view state wiring', () => {
         trace.uid === branchResult.nodeId &&
         'mode' in trace &&
         trace.mode === 'lines'
-    ) as { x?: number[]; y?: number[]; text?: string[] } | undefined
+    ) as { x?: number[]; y?: number[]; text?: string[]; hovertemplate?: string } | undefined
     expect(branchLineTrace).toBeTruthy()
     expect(branchLineTrace?.x).toEqual([0.1, 0.4, 0.7])
     expect(branchLineTrace?.y).toEqual([0, 0, 0])
     expect(branchLineTrace?.text).toEqual(['mu: 0.3', 'mu: 0.6', 'mu: 0.9'])
+    expect(branchLineTrace?.hovertemplate).toContain('%{text}')
 
     const bifTrace = props?.data.find(
       (trace) =>
@@ -2133,10 +2134,11 @@ describe('ViewportPanel view state wiring', () => {
         trace.uid === branchResult.nodeId &&
         'mode' in trace &&
         trace.mode === 'lines'
-    ) as { x?: number[]; y?: number[]; text?: string[] } | undefined
+    ) as { x?: number[]; y?: number[]; text?: string[]; hovertemplate?: string } | undefined
     expect(lineTrace?.x).toEqual([0.1, 0.4, 0.8])
     expect(lineTrace?.y).toEqual([0, 0.2, 0.4])
     expect(lineTrace?.text).toEqual(['mu: 0.3<br>nu: 0.2', 'mu: 0.5<br>nu: 0.3', 'mu: 0.7<br>nu: 0.4'])
+    expect(lineTrace?.hovertemplate).toContain('%{text}')
 
     const pointTrace = props?.data.find(
       (trace) =>
@@ -2248,8 +2250,9 @@ describe('ViewportPanel view state wiring', () => {
         trace.uid === branchResult.nodeId &&
         'mode' in trace &&
         trace.mode === 'lines'
-    ) as { text?: string[] } | undefined
+    ) as { text?: string[]; hovertemplate?: string } | undefined
     expect(lineTrace?.text).toEqual(['r: 2.5', 'r: 2.8'])
+    expect(lineTrace?.hovertemplate).toContain('%{text}')
   })
 
   it('applies dash styles to 1D equilibrium manifold traces in scenes', () => {
@@ -2886,8 +2889,19 @@ describe('ViewportPanel view state wiring', () => {
         trace.uid === branchResult.nodeId &&
         'mode' in trace &&
         trace.mode === 'lines'
-    ) as Array<{ x?: Array<number | null>; y?: Array<number | null> }>
+    ) as Array<{
+      x?: Array<number | null>
+      y?: Array<number | null>
+      text?: string[]
+      hovertemplate?: string
+    }>
     expect(lcLines.length).toBeGreaterThan(0)
+    const lineWithParamText = lcLines.find(
+      (line) =>
+        Array.isArray(line.text) && line.text.some((entry) => typeof entry === 'string' && entry.includes('x:'))
+    )
+    expect(lineWithParamText).toBeTruthy()
+    expect(lineWithParamText?.hovertemplate).toContain('%{text}')
     for (const line of lcLines) {
       const numericY = (line.y ?? []).filter(
         (value): value is number => typeof value === 'number'
