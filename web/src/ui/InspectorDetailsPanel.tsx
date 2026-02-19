@@ -93,6 +93,7 @@ import {
   mapStateRowsToDisplay,
   stateVectorToDisplay,
 } from '../system/subsystemGateway'
+import { normalizeFloquetMultipliersForRendering } from '../system/floquetModes'
 
 type InspectorDetailsPanelProps = {
   system: System
@@ -4052,13 +4053,17 @@ export function InspectorDetailsPanel({
     }
     return limitCycle?.floquetMultipliers ?? []
   }, [limitCycle?.floquetMultipliers, limitCycleRenderData])
+  const limitCycleRenderableMultipliers = useMemo(
+    () => normalizeFloquetMultipliersForRendering(limitCycleDisplayMultipliers),
+    [limitCycleDisplayMultipliers]
+  )
   const limitCycleFloquetPairTemplate = useMemo(
     () =>
-      limitCycleDisplayMultipliers.map((value) => ({
+      limitCycleRenderableMultipliers.map((value) => ({
         value,
         vector: [] as ComplexValue[],
       })),
-    [limitCycleDisplayMultipliers]
+    [limitCycleRenderableMultipliers]
   )
   const limitCycleFloquetEigenspaceIndices = resolveEquilibriumEigenspaceIndices(
     limitCycleFloquetPairTemplate
@@ -4084,11 +4089,11 @@ export function InspectorDetailsPanel({
   )
   const limitCycleFloquetIndexOptions = useMemo(
     () =>
-      limitCycleDisplayMultipliers.map((_, index) => ({
+      limitCycleRenderableMultipliers.map((_, index) => ({
         value: index.toString(),
         label: (index + 1).toString(),
       })),
-    [limitCycleDisplayMultipliers]
+    [limitCycleRenderableMultipliers]
   )
   const limitCycleMultiplierPlot = useMemo(() => {
     if (limitCycleDisplayMultipliers.length === 0) return null
@@ -9469,12 +9474,12 @@ export function InspectorDetailsPanel({
                           </label>
                           {limitCycleFloquetIndices.length > 0 ? (
                             <div className="inspector-list">
-                              {limitCycleFloquetIndices.map((index, idx) => {
-                                const value = limitCycleDisplayMultipliers[index]
-                                const label =
-                                  value && !isRealEigenvalue(value)
-                                    ? `Floquet eigenspace ${index + 1}`
-                                    : `Floquet eigenline ${index + 1}`
+                                {limitCycleFloquetIndices.map((index, idx) => {
+                                  const value = limitCycleRenderableMultipliers[index]
+                                  const label =
+                                    value && !isRealEigenvalue(value)
+                                      ? `Floquet eigenspace ${index + 1}`
+                                      : `Floquet eigenline ${index + 1}`
                                 const visible = limitCycleFloquetVisibleSet.has(index)
                                 return (
                                   <div

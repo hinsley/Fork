@@ -58,6 +58,7 @@ import {
   stateVectorToDisplay,
   isSubsystemSnapshotCompatible,
 } from '../system/subsystemGateway'
+import { normalizeFloquetMultipliersForRendering } from '../system/floquetModes'
 import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/PlotlyViewport'
 import type { PlotlyRelayoutEvent } from '../viewports/plotly/usePlotViewport'
 import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
@@ -2938,6 +2939,9 @@ function buildSceneTraces(
         })
       }
       const floquetModes = object.floquetModes
+      const floquetDisplayMultipliers = floquetModes
+        ? normalizeFloquetMultipliersForRendering(floquetModes.multipliers)
+        : []
       const floquetPointCount = Math.min(
         displayProfilePoints.length,
         floquetModes?.vectors?.length ?? 0
@@ -2948,12 +2952,12 @@ function buildSceneTraces(
           floquetModes &&
           floquetModes.ntst === ntst &&
           floquetModes.ncol === ncol &&
-          floquetModes.multipliers.length > 0 &&
+          floquetDisplayMultipliers.length > 0 &&
           floquetPointCount > 0
       )
       if (canRenderFloquetModes && floquetModes) {
         const eigenspaceIndices = resolveEquilibriumEigenspaceIndices(
-          floquetModes.multipliers.map((value) => ({
+          floquetDisplayMultipliers.map((value) => ({
             value,
             vector: [],
           }))
@@ -2984,7 +2988,7 @@ function buildSceneTraces(
             const stateAtPoint = displayProfilePoints[pointIndex]
             if (!stateAtPoint || stateAtPoint.length < 2) continue
             const eigenpairs = buildFloquetEigenpairsAtPoint(
-              floquetModes.multipliers,
+              floquetDisplayMultipliers,
               floquetModes.vectors[pointIndex]
             )
             const hasVectors = eigenpairs.some(
