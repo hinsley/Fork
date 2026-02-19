@@ -2949,8 +2949,7 @@ function buildSceneTraces(
           floquetModes.ntst === ntst &&
           floquetModes.ncol === ncol &&
           floquetModes.multipliers.length > 0 &&
-          floquetPointCount > 0 &&
-          (!renderTarget || renderTarget.type === 'object')
+          floquetPointCount > 0
       )
       if (canRenderFloquetModes && floquetModes) {
         const eigenspaceIndices = resolveEquilibriumEigenspaceIndices(

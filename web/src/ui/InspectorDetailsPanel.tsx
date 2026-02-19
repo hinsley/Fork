@@ -4109,9 +4109,6 @@ export function InspectorDetailsPanel({
     limitCycleFloquetModesMatchMesh &&
     limitCycleFloquetModePointCount > 0 &&
     limitCycleFloquetModeCount > 0
-  const limitCycleFloquetModesCanRender =
-    limitCycleFloquetModesAvailable &&
-    (!limitCycleRenderTarget || limitCycleRenderTarget.type === 'object')
 
   const handleApplySystem = async () => {
     setSystemTouched(true)
@@ -9382,12 +9379,6 @@ export function InspectorDetailsPanel({
                       )}
                       {limitCycleFloquetModesAvailable ? (
                         <>
-                          {!limitCycleFloquetModesCanRender ? (
-                            <p className="empty-state">
-                              Switch the render target back to the stored limit cycle object to
-                              display Floquet eigenspaces.
-                            </p>
-                          ) : null}
                           <label>
                             Show Floquet eigenspaces
                             <input

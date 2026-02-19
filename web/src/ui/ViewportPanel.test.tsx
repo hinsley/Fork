@@ -985,6 +985,129 @@ describe('ViewportPanel view state wiring', () => {
     expect(closureMarker?.y?.[0]).toBe(0)
   })
 
+  it('renders limit-cycle Floquet eigenlines even when using a branch render target', () => {
+    let system = createSystem({
+      name: 'LC_Floquet_Render_Target',
+      config: {
+        name: 'LC_Floquet_Render_Target',
+        equations: ['y', '-x'],
+        params: [0.2],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const sceneResult = addScene(system, 'Scene LC Floquet')
+    system = sceneResult.system
+    const cycleState = [1, 0, 0, 1, -1, 0, 0, -1, 1, 0, 1]
+    const lcObject: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Floquet',
+      systemName: system.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_Floquet' },
+      ntst: 2,
+      ncol: 1,
+      period: 1,
+      state: cycleState,
+      floquetMultipliers: [
+        { re: 1, im: 0 },
+        { re: 0.8, im: 0 },
+      ],
+      floquetModes: {
+        ntst: 2,
+        ncol: 1,
+        multipliers: [
+          { re: 1, im: 0 },
+          { re: 0.8, im: 0 },
+        ],
+        vectors: Array.from({ length: 5 }, () => [
+          [
+            { re: 1, im: 0 },
+            { re: 0, im: 0 },
+          ],
+          [
+            { re: 0, im: 0 },
+            { re: 1, im: 0 },
+          ],
+        ]),
+        computedAt: nowIso(),
+      },
+      createdAt: nowIso(),
+    }
+    const addedObject = addObject(system, lcObject)
+    const lcBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_floquet_mu',
+      systemName: system.config.name,
+      parameterName: 'mu',
+      parentObject: lcObject.name,
+      startObject: lcObject.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          {
+            state: cycleState,
+            param_value: 0.2,
+            stability: 'Stable',
+            eigenvalues: [
+              { re: 1, im: 0 },
+              { re: 0.8, im: 0 },
+            ],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: { type: 'LimitCycle', ntst: 2, ncol: 1 },
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-6,
+        max_step_size: 0.1,
+        max_steps: 5,
+        corrector_steps: 4,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      } as ContinuationSettings,
+      timestamp: nowIso(),
+      params: [0.2],
+    }
+    const addedBranch = addBranch(addedObject.system, lcBranch, addedObject.nodeId)
+    system = updateLimitCycleRenderTarget(addedBranch.system, addedObject.nodeId, {
+      type: 'branch',
+      branchId: addedBranch.nodeId,
+      pointIndex: 0,
+    })
+    system.nodes[addedObject.nodeId].render.equilibriumEigenvectors = {
+      enabled: true,
+      stride: 1,
+      vectorIndices: [0, 1],
+      colors: ['#00ff00', '#ff00ff'],
+      lineLengthScale: 0.2,
+      lineThickness: 2,
+      discRadiusScale: 0,
+      discThickness: 2,
+    }
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const hasFloquetLine = props?.data.some(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === addedObject.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'lines' &&
+        'line' in trace &&
+        trace.line &&
+        typeof trace.line === 'object' &&
+        'color' in trace.line &&
+        (trace.line.color === '#00ff00' || trace.line.color === '#ff00ff')
+    )
+    expect(hasFloquetLine).toBe(true)
+  })
+
   it('renders cached 1D isocline points as diagonal markers in map scenes', () => {
     const config: SystemConfig = {
       name: 'IsoMap1D',
