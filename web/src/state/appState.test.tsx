@@ -651,6 +651,39 @@ describe('appState limit cycle render targets', () => {
     })
   })
 
+  it('updates limit-cycle object parameters when selecting a branch render target point', async () => {
+    const { system } = createPeriodDoublingSystem()
+    const { getContext } = setupApp(system)
+
+    const branchId = findBranchIdByName(system, 'lc_pd_mu')
+    const lcId = findObjectIdByName(system, 'LC_PD')
+
+    await act(async () => {
+      getContext().actions.setLimitCycleRenderTarget(lcId, {
+        type: 'branch',
+        branchId,
+        pointIndex: 1,
+      })
+    })
+
+    await waitFor(() => {
+      const next = getContext().state.system
+      expect(next).not.toBeNull()
+      const limitCycle = next!.objects[lcId]
+      if (!limitCycle || limitCycle.type !== 'limit_cycle') {
+        throw new Error('Expected limit cycle object.')
+      }
+      expect(next!.ui.limitCycleRenderTargets?.[lcId]).toEqual({
+        type: 'branch',
+        branchId,
+        pointIndex: 1,
+      })
+      expect(limitCycle.parameters?.[0]).toBeCloseTo(0.25, 12)
+      expect(limitCycle.customParameters?.[0]).toBeCloseTo(0.25, 12)
+      expect(limitCycle.paramValue).toBeCloseTo(0.25, 12)
+    })
+  })
+
   it('uses runtime frozen-parameter names when extending codim1 curves', async () => {
     const base = createSystem({
       name: 'Codim1_Extend_Frozen',

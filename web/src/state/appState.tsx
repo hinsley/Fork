@@ -1965,11 +1965,118 @@ export function AppProvider({
   const setLimitCycleRenderTargetAction = useCallback(
     (objectId: string, target: LimitCycleRenderTarget | null) => {
       if (!state.system) return
-      const system = updateLimitCycleRenderTarget(state.system, objectId, target)
+      let system = updateLimitCycleRenderTarget(state.system, objectId, target)
+      let persistSystem = false
+      if (target?.type === 'branch') {
+        const object = system.objects[objectId]
+        const branch = system.branches[target.branchId]
+        const point = branch?.data.points[target.pointIndex]
+        const parentObjectId = branch ? resolveBranchParentObjectId(system, branch) : null
+        if (
+          object &&
+          object.type === 'limit_cycle' &&
+          branch &&
+          point &&
+          parentObjectId === objectId
+        ) {
+          const snapshot = buildBranchSubsystemSnapshot(system.config, branch, object)
+          let nextParams = getBranchParams(system, branch)
+          let paramsChanged = false
+          let frozenChanged = false
+          const nextFrozenValuesByVarName = {
+            ...(object.frozenVariables?.frozenValuesByVarName ?? {}),
+          }
+          const applyParamValue = (ref: ParameterRef | null, value: number | undefined) => {
+            if (!ref || !Number.isFinite(value)) return
+            if (ref.kind === 'native_param') {
+              const paramIndex = system.config.paramNames.indexOf(ref.name)
+              if (paramIndex < 0 || paramIndex >= nextParams.length) return
+              if (nextParams[paramIndex] !== value) {
+                nextParams = [...nextParams]
+                nextParams[paramIndex] = value
+                paramsChanged = true
+              }
+              return
+            }
+            if (ref.kind === 'frozen_var') {
+              const currentValue = nextFrozenValuesByVarName[ref.variableName]
+              if (currentValue !== value) {
+                nextFrozenValuesByVarName[ref.variableName] = value
+                frozenChanged = true
+              }
+            }
+          }
+          const primaryParamRef =
+            branch.parameterRef ??
+            (() => {
+              try {
+                return parseContinuationParameterAllowRuntimeName(
+                  system.config,
+                  snapshot,
+                  branch.parameterName
+                )
+              } catch {
+                return null
+              }
+            })()
+          applyParamValue(primaryParamRef, point.param_value)
+          const branchType = branch.data.branch_type
+          const secondaryParamRef =
+            resolveBranchParam2Ref(branch) ??
+            (() => {
+              if (
+                branchType &&
+                typeof branchType === 'object' &&
+                'param2_name' in branchType &&
+                branchType.param2_name
+              ) {
+                try {
+                  return parseContinuationParameterAllowRuntimeName(
+                    system.config,
+                    snapshot,
+                    branchType.param2_name
+                  )
+                } catch {
+                  return null
+                }
+              }
+              return null
+            })()
+          const secondaryValue = Number.isFinite(point.param2_value)
+            ? point.param2_value
+            : resolveContinuationPointParam2Value(point, branchType, snapshot.freeVariableNames.length)
+          applyParamValue(secondaryParamRef, secondaryValue)
+
+          const nextObject: Partial<LimitCycleObject> = {
+            paramValue: Number.isFinite(point.param_value) ? point.param_value : object.paramValue,
+            parameters: nextParams,
+            customParameters: inheritedCustomParameters(system.config, nextParams),
+            subsystemSnapshot: snapshot,
+          }
+          if (frozenChanged) {
+            nextObject.frozenVariables = {
+              frozenValuesByVarName: nextFrozenValuesByVarName,
+            }
+          }
+          if (
+            paramsChanged ||
+            frozenChanged ||
+            nextObject.paramValue !== object.paramValue ||
+            object.subsystemSnapshot !== snapshot
+          ) {
+            system = updateObject(system, objectId, nextObject)
+            persistSystem = true
+          }
+        }
+      }
       dispatch({ type: 'SET_SYSTEM', system })
-      scheduleUiSave(system)
+      if (persistSystem) {
+        scheduleSystemSave(system)
+      } else {
+        scheduleUiSave(system)
+      }
     },
-    [scheduleUiSave, state.system]
+    [scheduleSystemSave, scheduleUiSave, state.system]
   )
 
   const updateSceneAction = useCallback(
