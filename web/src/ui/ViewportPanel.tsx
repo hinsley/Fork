@@ -2450,6 +2450,7 @@ function buildSceneTraces(
   system: TraceSystem,
   scene: Scene,
   selectedNodeId: string | null,
+  selectedOrbitNodeId: string | null,
   isoclineGeometryCache?: Record<
     string,
     {
@@ -3158,7 +3159,9 @@ function buildSceneTraces(
     const mapHoverTemplate2D = `${axisLabelX}: %{x:.6g}<br>${axisLabelY}: %{y:.6g}<br>n: %{text}<extra></extra>`
     const mapHoverTemplate1D = `${axisLabelX}_n: %{x:.6g}<br>${axisLabelX}_{n+1}: %{y:.6g}<br>n: %{text}<extra></extra>`
     const selectedOrbitPointIndex =
-      orbitPointSelection?.orbitId === nodeId ? orbitPointSelection.pointIndex : null
+      selectedOrbitNodeId === nodeId && orbitPointSelection?.orbitId === nodeId
+        ? orbitPointSelection.pointIndex
+        : null
     const appendSelectedOrbitMarker = () => {
       if (
         selectedOrbitPointIndex === null ||
@@ -5874,6 +5877,10 @@ function ViewportTile({
     selectedNode && (selectedNode.kind === 'object' || selectedNode.kind === 'branch')
       ? selectedNode.id
       : null
+  const selectedOrbitNodeId =
+    selectedNode?.kind === 'object' && systemObjects[selectedNode.id]?.type === 'orbit'
+      ? selectedNode.id
+      : null
   const selectedViewportId =
     selectedNode && (selectedNode.kind === 'scene' || selectedNode.kind === 'diagram')
       ? selectedNode.id
@@ -6037,6 +6044,7 @@ function ViewportTile({
       traceSystem,
       scene,
       sceneTraceSelectedNodeId,
+      selectedOrbitNodeId,
       isoclineGeometryCache,
       timeSeriesMeta,
       sceneMapRange ?? mapRange,
@@ -6055,6 +6063,7 @@ function ViewportTile({
     sceneMapRange,
     plotAreaSize,
     scene,
+    selectedOrbitNodeId,
     sceneTraceSelectedNodeId,
     isoclineGeometryCache,
     timeSeriesMeta,

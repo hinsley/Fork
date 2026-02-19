@@ -200,6 +200,7 @@ describe('ViewportPanel view state wiring', () => {
     system = orbitResult.system
 
     renderPanel(system, {
+      selectedNodeId: orbitResult.nodeId,
       orbitPointSelection: { orbitId: orbitResult.nodeId, pointIndex: 1 },
     })
 
@@ -242,6 +243,98 @@ describe('ViewportPanel view state wiring', () => {
       'x: %{x:.6g}<br>y: %{y:.6g}<br>z: %{z:.6g}<br>t: %{text}<extra></extra>'
     )
     expect(orbitTrace?.text).toEqual(['0.000', '0.100', '0.200'])
+  })
+
+  it('does not render selected orbit-point markers when no orbit object is selected (flow)', () => {
+    const config: SystemConfig = {
+      name: 'Orbit_Selected_Point_Flow_No_Selected_Orbit',
+      equations: ['x', 'y', 'z'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = sceneResult.system
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Selected_Point',
+      systemName: system.config.name,
+      data: [
+        [0, 1, 2, 3],
+        [0.1, 4, 5, 6],
+        [0.2, 7, 8, 9],
+      ],
+      t_start: 0,
+      t_end: 0.2,
+      dt: 0.1,
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+
+    renderPanel(system, {
+      selectedNodeId: null,
+      orbitPointSelection: { orbitId: orbitResult.nodeId, pointIndex: 1 },
+    })
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const selectedTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === `${orbit.name} selected point` &&
+        'mode' in trace &&
+        trace.mode === 'markers'
+    )
+    expect(selectedTrace).toBeFalsy()
+  })
+
+  it('does not render selected orbit-point markers when no orbit object is selected (map)', () => {
+    const config: SystemConfig = {
+      name: 'Orbit_Selected_Point_Map_No_Selected_Orbit',
+      equations: ['r * x * (1 - x)'],
+      params: [2.5],
+      paramNames: ['r'],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = sceneResult.system
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Map_Selected_Point',
+      systemName: system.config.name,
+      data: [
+        [0, 0.2],
+        [1, 0.4],
+        [2, 0.6],
+      ],
+      t_start: 0,
+      t_end: 2,
+      dt: 1,
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+
+    renderPanel(system, {
+      selectedNodeId: null,
+      orbitPointSelection: { orbitId: orbitResult.nodeId, pointIndex: 1 },
+    })
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const selectedTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === `${orbit.name} selected point` &&
+        'mode' in trace &&
+        trace.mode === 'markers'
+    )
+    expect(selectedTrace).toBeFalsy()
   })
 
   it('selects limit cycle points from scene clicks using trace customdata', () => {
