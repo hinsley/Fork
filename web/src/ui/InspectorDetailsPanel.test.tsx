@@ -3337,6 +3337,78 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.queryByText('0.1000 + 0.2000i')).toBeNull()
   })
 
+  it('uses stored Floquet mode multipliers when mode vectors are present', async () => {
+    const user = userEvent.setup()
+    const { system } = createPeriodDoublingSystem()
+    const branchId = Object.keys(system.branches)[0]
+    const branch = branchId ? system.branches[branchId] : undefined
+    const limitCycleId =
+      branch &&
+      Object.entries(system.objects).find(([, obj]) => obj.name === branch.parentObject)?.[0]
+    if (!branchId || !branch || !limitCycleId) {
+      throw new Error('Missing limit cycle branch fixture data.')
+    }
+
+    const limitCycle = system.objects[limitCycleId] as LimitCycleObject
+    system.objects[limitCycleId] = {
+      ...limitCycle,
+      floquetMultipliers: [{ re: 0.1, im: 0.2 }],
+      floquetModes: {
+        ntst: limitCycle.ntst,
+        ncol: limitCycle.ncol,
+        multipliers: [{ re: 0.3, im: 0 }],
+        vectors: [
+          [
+            [
+              { re: 1, im: 0 },
+              { re: 0, im: 0 },
+            ],
+          ],
+        ],
+        computedAt: new Date().toISOString(),
+      },
+    }
+    system.ui.limitCycleRenderTargets = {
+      [limitCycleId]: { type: 'branch', branchId, pointIndex: 1 },
+    }
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={limitCycleId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onSetLimitCycleRenderTarget={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByTestId('limit-cycle-data-toggle'))
+
+    expect(screen.getByText('0.3000 + 0.0000i')).toBeVisible()
+    expect(screen.queryByText('-1.0000 + 0.0000i')).toBeNull()
+  })
+
   it('shows and runs manual Floquet mode compute even before multipliers exist', async () => {
     const user = userEvent.setup()
     const { system } = createPeriodDoublingSystem()

@@ -4053,9 +4053,12 @@ export function InspectorDetailsPanel({
     }
     return limitCycle?.floquetMultipliers ?? []
   }, [limitCycle?.floquetMultipliers, limitCycleRenderData])
+  const limitCycleFloquetModes = limitCycle?.floquetModes ?? null
+  const limitCycleModeMultipliers =
+    limitCycleFloquetModes?.multipliers ?? limitCycleDisplayMultipliers
   const limitCycleRenderableMultipliers = useMemo(
-    () => normalizeFloquetMultipliersForRendering(limitCycleDisplayMultipliers),
-    [limitCycleDisplayMultipliers]
+    () => normalizeFloquetMultipliersForRendering(limitCycleModeMultipliers),
+    [limitCycleModeMultipliers]
   )
   const limitCycleFloquetPairTemplate = useMemo(
     () =>
@@ -4096,13 +4099,12 @@ export function InspectorDetailsPanel({
     [limitCycleRenderableMultipliers]
   )
   const limitCycleMultiplierPlot = useMemo(() => {
-    if (limitCycleDisplayMultipliers.length === 0) return null
-    return buildEigenvaluePlot(limitCycleDisplayMultipliers, plotlyTheme, {
+    if (limitCycleModeMultipliers.length === 0) return null
+    return buildEigenvaluePlot(limitCycleModeMultipliers, plotlyTheme, {
       showUnitCircle: true,
       markerColors: limitCycleFloquetMarkerColors,
     })
-  }, [limitCycleDisplayMultipliers, limitCycleFloquetMarkerColors, plotlyTheme])
-  const limitCycleFloquetModes = limitCycle?.floquetModes ?? null
+  }, [limitCycleModeMultipliers, limitCycleFloquetMarkerColors, plotlyTheme])
   const limitCycleFloquetModesMatchMesh =
     limitCycleFloquetModes !== null &&
     limitCycle !== null &&
@@ -9320,7 +9322,7 @@ export function InspectorDetailsPanel({
               <div className="inspector-section">
                 <h4 className="inspector-subheading">Floquet multipliers</h4>
                 <div className="inspector-list">
-                  {limitCycleDisplayMultipliers.length > 0 ? (
+                  {limitCycleModeMultipliers.length > 0 ? (
                     <>
                       {limitCycleMultiplierPlot ? (
                         <div className="inspector-plot">
@@ -9333,7 +9335,7 @@ export function InspectorDetailsPanel({
                         </div>
                       ) : null}
                       <InspectorMetrics
-                        rows={limitCycleDisplayMultipliers.map((value, index) => ({
+                        rows={limitCycleModeMultipliers.map((value, index) => ({
                           label: `Multiplier ${index + 1}`,
                           value: formatComplexValue(value),
                         }))}
