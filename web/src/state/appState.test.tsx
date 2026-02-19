@@ -684,6 +684,50 @@ describe('appState limit cycle render targets', () => {
     })
   })
 
+  it('uses the selected branch render target point when computing Floquet modes', async () => {
+    const { system } = createPeriodDoublingSystem()
+    const branchId = findBranchIdByName(system, 'lc_pd_mu')
+    const lcId = findObjectIdByName(system, 'LC_PD')
+    const client = new MockForkCoreClient(0)
+    let capturedRequest:
+      | {
+          cycleState: number[]
+          systemParams: number[]
+          ntst: number
+          ncol: number
+        }
+      | null = null
+    const originalCompute = client.computeLimitCycleFloquetModes.bind(client)
+    client.computeLimitCycleFloquetModes = async (request, opts) => {
+      capturedRequest = {
+        cycleState: [...request.cycleState],
+        systemParams: [...request.system.params],
+        ntst: request.ntst,
+        ncol: request.ncol,
+      }
+      return originalCompute(request, opts)
+    }
+    const { getContext } = setupApp(system, client)
+
+    await act(async () => {
+      getContext().actions.setLimitCycleRenderTarget(lcId, {
+        type: 'branch',
+        branchId,
+        pointIndex: 1,
+      })
+      await getContext().actions.computeLimitCycleFloquetModes({ limitCycleId: lcId })
+    })
+
+    await waitFor(() => {
+      expect(capturedRequest).not.toBeNull()
+      expect(capturedRequest!.cycleState).toEqual(system.branches[branchId].data.points[1].state)
+      expect(capturedRequest!.systemParams[0]).toBeCloseTo(0.25, 12)
+      expect(capturedRequest!.ntst).toBe(4)
+      expect(capturedRequest!.ncol).toBe(2)
+      expect(getContext().state.error).toBeNull()
+    })
+  })
+
   it('uses runtime frozen-parameter names when extending codim1 curves', async () => {
     const base = createSystem({
       name: 'Codim1_Extend_Frozen',

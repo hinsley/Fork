@@ -2587,12 +2587,98 @@ export function AppProvider({
           throw new Error('Limit cycle mesh metadata is invalid.')
         }
 
-        const baseParams = resolveObjectParams(system, limitCycle.customParameters)
-        const { snapshot, runConfig } = buildObjectSubsystemRunConfig(
-          system,
-          limitCycle,
-          baseParams
-        )
+        let baseParams = resolveObjectParams(system, limitCycle.customParameters)
+        let seedState = limitCycle.state
+        let seedNtst = limitCycle.ntst
+        let seedNcol = limitCycle.ncol
+        let snapshot = buildObjectSubsystemSnapshot(system, limitCycle)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        let runtimeParameterRef: ParameterRef | null = null
+        const renderTarget = current.ui.limitCycleRenderTargets?.[request.limitCycleId]
+        if (renderTarget?.type === 'branch') {
+          const seedBranch = current.branches[renderTarget.branchId]
+          const seedPoint = seedBranch?.data.points[renderTarget.pointIndex]
+          const parentObjectId = seedBranch ? resolveBranchParentObjectId(current, seedBranch) : null
+          if (seedBranch && seedPoint && parentObjectId === request.limitCycleId) {
+            snapshot = buildBranchSubsystemSnapshot(system, seedBranch, limitCycle)
+            baseParams = getBranchParams(current, seedBranch)
+            runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+            if (seedPoint.state.length > 0) {
+              seedState = seedPoint.state
+            }
+            const branchType = seedBranch.data.branch_type
+            if (
+              branchType &&
+              typeof branchType === 'object' &&
+              'ntst' in branchType &&
+              'ncol' in branchType &&
+              Number.isFinite(branchType.ntst) &&
+              Number.isFinite(branchType.ncol)
+            ) {
+              seedNtst = Math.max(1, Math.trunc(branchType.ntst as number))
+              seedNcol = Math.max(1, Math.trunc(branchType.ncol as number))
+            }
+            const applyParamValue = (ref: ParameterRef | null, value: number | undefined) => {
+              if (!ref || !Number.isFinite(value)) return
+              if (ref.kind !== 'native_param') return
+              const paramIndex = system.paramNames.indexOf(ref.name)
+              if (paramIndex < 0 || paramIndex >= baseParams.length) return
+              if (baseParams[paramIndex] !== value) {
+                baseParams = [...baseParams]
+                baseParams[paramIndex] = value
+              }
+            }
+            const primaryParamRef =
+              seedBranch.parameterRef ??
+              (() => {
+                try {
+                  return parseContinuationParameterAllowRuntimeName(
+                    system,
+                    snapshot,
+                    seedBranch.parameterName
+                  )
+                } catch {
+                  return null
+                }
+              })()
+            runtimeParameterRef = primaryParamRef
+            applyParamValue(primaryParamRef, seedPoint.param_value)
+            const secondaryParamRef =
+              resolveBranchParam2Ref(seedBranch) ??
+              (() => {
+                if (
+                  branchType &&
+                  typeof branchType === 'object' &&
+                  'param2_name' in branchType &&
+                  branchType.param2_name
+                ) {
+                  try {
+                    return parseContinuationParameterAllowRuntimeName(
+                      system,
+                      snapshot,
+                      branchType.param2_name
+                    )
+                  } catch {
+                    return null
+                  }
+                }
+                return null
+              })()
+            const secondaryValue = Number.isFinite(seedPoint.param2_value)
+              ? seedPoint.param2_value
+              : resolveContinuationPointParam2Value(
+                  seedPoint,
+                  branchType,
+                  snapshot.freeVariableNames.length
+                )
+            applyParamValue(secondaryParamRef, secondaryValue)
+            runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+            runConfig = applyReducedParamOverrides(
+              runConfig,
+              resolveBranchPointReducedParamOverrides(seedBranch, seedPoint)
+            )
+          }
+        }
         if (runConfig.paramNames.length === 0) {
           throw new Error(
             'Floquet mode computation requires at least one continuation parameter.'
@@ -2600,14 +2686,16 @@ export function AppProvider({
         }
         const reducedState = projectLimitCyclePackedStateForSnapshot(
           snapshot,
-          limitCycle.state,
-          limitCycle.ntst,
-          limitCycle.ncol,
+          seedState,
+          seedNtst,
+          seedNcol,
           'Limit cycle state'
         )
 
         let runtimeParameterName: string | null = null
-        if (limitCycle.parameterRef) {
+        if (runtimeParameterRef) {
+          runtimeParameterName = resolveRuntimeParameterName(snapshot, runtimeParameterRef)
+        } else if (limitCycle.parameterRef) {
           runtimeParameterName = resolveRuntimeParameterName(snapshot, limitCycle.parameterRef)
         } else if (typeof limitCycle.parameterName === 'string' && limitCycle.parameterName.trim()) {
           try {
@@ -2628,8 +2716,8 @@ export function AppProvider({
         const payload: CoreLimitCycleFloquetModesRequest = {
           system: runConfig,
           cycleState: reducedState,
-          ntst: limitCycle.ntst,
-          ncol: limitCycle.ncol,
+          ntst: seedNtst,
+          ncol: seedNcol,
           parameterName: runtimeParameterName,
         }
         const result = await client.computeLimitCycleFloquetModes(payload)
