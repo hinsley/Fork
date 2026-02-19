@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { resolveEquilibriumEigenvalueMarkerColors } from './equilibriumEigenvectors'
+import {
+  DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER,
+  resolveEquilibriumEigenvalueMarkerColors,
+} from './equilibriumEigenvectors'
 import type { EquilibriumEigenPair } from './types'
 
 function pair(re: number, im: number): EquilibriumEigenPair {
@@ -10,6 +13,10 @@ function pair(re: number, im: number): EquilibriumEigenPair {
 }
 
 describe('resolveEquilibriumEigenvalueMarkerColors', () => {
+  it('uses 0.1 as the default eigenspace disk radius scale', () => {
+    expect(DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER.discRadiusScale).toBe(0.1)
+  })
+
   it('maps a complex conjugate pair to the same eigenspace color', () => {
     const eigenpairs = [pair(-1, 0), pair(0.2, 0.5), pair(0.2, -0.5)]
 

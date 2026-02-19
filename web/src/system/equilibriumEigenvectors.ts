@@ -20,7 +20,7 @@ export const DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER: EquilibriumEigenvectorRende
   colors: [EIGENVECTOR_COLOR_PALETTE[0]],
   lineLengthScale: 0.2,
   lineThickness: 2,
-  discRadiusScale: 0.2,
+  discRadiusScale: 0.1,
   discThickness: 2,
 }
 

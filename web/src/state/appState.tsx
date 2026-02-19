@@ -125,6 +125,24 @@ function resolveEntityName(system: System, entityId: string | null, fallback: st
   )
 }
 
+function areEigenvalueArraysEqual(
+  left: ContinuationPoint['eigenvalues'] | undefined,
+  right: ContinuationPoint['eigenvalues'] | undefined
+): boolean {
+  const normalizedLeft = normalizeEigenvalueArray(left)
+  const normalizedRight = normalizeEigenvalueArray(right)
+  if (normalizedLeft.length !== normalizedRight.length) return false
+  for (let index = 0; index < normalizedLeft.length; index += 1) {
+    const leftValue = normalizedLeft[index]
+    const rightValue = normalizedRight[index]
+    if (!leftValue || !rightValue) return false
+    if (leftValue.re !== rightValue.re || leftValue.im !== rightValue.im) {
+      return false
+    }
+  }
+  return true
+}
+
 function resolveBranchParentObjectName(system: System, branch: ContinuationObject): string {
   return resolveEntityName(system, resolveBranchParentObjectId(system, branch), branch.parentObject)
 }
@@ -1564,7 +1582,14 @@ export function AppProvider({
     const selected = system.ui.selectedNodeId
     const visible = collectVisibleEntityIds(system)
     const objectIds = [...visible.objectIds]
-    const branchIds = [...visible.branchIds]
+    const branchIdSet = new Set(visible.branchIds)
+    const renderTargets = system.ui.limitCycleRenderTargets ?? {}
+    Object.values(renderTargets).forEach((target) => {
+      if (target?.type === 'branch' && system.index.branches[target.branchId]) {
+        branchIdSet.add(target.branchId)
+      }
+    })
+    const branchIds = [...branchIdSet]
     if (selected) {
       if (system.index.objects[selected]) objectIds.push(selected)
       if (system.index.branches[selected]) branchIds.push(selected)
@@ -2046,12 +2071,22 @@ export function AppProvider({
             ? point.param2_value
             : resolveContinuationPointParam2Value(point, branchType, snapshot.freeVariableNames.length)
           applyParamValue(secondaryParamRef, secondaryValue)
+          const nextFloquetMultipliers = normalizeEigenvalueArray(point.eigenvalues)
+          const floquetMultipliersChanged = !areEigenvalueArraysEqual(
+            object.floquetMultipliers,
+            nextFloquetMultipliers
+          )
+          const floquetModesChanged = object.floquetModes !== undefined
 
           const nextObject: Partial<LimitCycleObject> = {
             paramValue: Number.isFinite(point.param_value) ? point.param_value : object.paramValue,
             parameters: nextParams,
             customParameters: inheritedCustomParameters(system.config, nextParams),
             subsystemSnapshot: snapshot,
+          }
+          if (floquetMultipliersChanged || floquetModesChanged) {
+            nextObject.floquetMultipliers = nextFloquetMultipliers
+            nextObject.floquetModes = undefined
           }
           if (frozenChanged) {
             nextObject.frozenVariables = {
@@ -2061,6 +2096,8 @@ export function AppProvider({
           if (
             paramsChanged ||
             frozenChanged ||
+            floquetMultipliersChanged ||
+            floquetModesChanged ||
             nextObject.paramValue !== object.paramValue ||
             object.subsystemSnapshot !== snapshot
           ) {

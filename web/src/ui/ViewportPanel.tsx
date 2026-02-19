@@ -674,22 +674,36 @@ function buildEquilibriumEigenvectorTraces(
     use3d ? Math.abs(stateZ) : 0
   )
   const baseDiag = Number.isFinite(diag) && diag > 0 ? diag : fallbackScale
+  const positiveSpans = [dx, dy, use3d ? dz : Number.NaN].filter(
+    (span): span is number => Number.isFinite(span) && span > 0
+  )
+  const fallbackSpan =
+    positiveSpans.length > 0 ? Math.max(...positiveSpans) : Math.max(1, baseDiag)
+  const spanX = Number.isFinite(dx) && dx > 0 ? dx : fallbackSpan
+  const spanY = Number.isFinite(dy) && dy > 0 ? dy : fallbackSpan
+  const spanZ = use3d && Number.isFinite(dz) && dz > 0 ? dz : fallbackSpan
   const hasAspectScale =
     !use3d &&
     plotSize &&
     Number.isFinite(plotSize.width) &&
     Number.isFinite(plotSize.height) &&
     plotSize.width > 0 &&
-    plotSize.height > 0 &&
-    Number.isFinite(dx) &&
-    Number.isFinite(dy) &&
-    dx > 0 &&
-    dy > 0
-  const scaleX = hasAspectScale ? plotSize.width / dx : 1
-  const scaleY = hasAspectScale ? plotSize.height / dy : 1
+    plotSize.height > 0
+  const scaleX = hasAspectScale ? plotSize.width / spanX : 1 / spanX
+  const scaleY = hasAspectScale ? plotSize.height / spanY : 1 / spanY
+  const scaleZ = use3d ? 1 / spanZ : 0
+  const normalizedDiag = Math.sqrt(
+    (dx * scaleX) * (dx * scaleX) +
+      (dy * scaleY) * (dy * scaleY) +
+      (use3d ? (dz * scaleZ) * (dz * scaleZ) : 0)
+  )
   const diagPixels = hasAspectScale
     ? Math.sqrt(plotSize.width * plotSize.width + plotSize.height * plotSize.height)
-    : baseDiag
+    : Number.isFinite(normalizedDiag) && normalizedDiag > 0
+      ? normalizedDiag
+      : use3d
+        ? Math.sqrt(3)
+        : Math.sqrt(2)
   const lineLength = entry.lineLengthScale * diagPixels
   const discRadius = entry.discRadiusScale * diagPixels
   const lineHalfLength = lineLength * 0.5
@@ -719,9 +733,13 @@ function buildEquilibriumEigenvectorTraces(
     return `rgba(${r}, ${g}, ${b}, ${alpha})`
   }
 
+  const metricScales = use3d ? [scaleX, scaleY, scaleZ] : [scaleX, scaleY]
   const dot = (a: number[], b: number[]) =>
-    a.reduce((sum, value, index) => sum + value * (b[index] ?? 0), 0)
-  const norm = (vec: number[]) => Math.sqrt(vec.reduce((sum, value) => sum + value * value, 0))
+    a.reduce((sum, value, index) => {
+      const scale = metricScales[index] ?? 1
+      return sum + value * (b[index] ?? 0) * scale * scale
+    }, 0)
+  const norm = (vec: number[]) => Math.sqrt(dot(vec, vec))
   const normalize = (vec: number[]) => {
     const magnitude = norm(vec)
     if (!Number.isFinite(magnitude) || magnitude <= EIGENVECTOR_ORTHO_EPS) return null
@@ -850,12 +868,8 @@ function buildEquilibriumEigenvectorTraces(
 
   const resolveEigenlineDirection = (real: number[], imag: number[]) => {
     if (!Number.isFinite(lineLength) || lineLength <= 0) return null
-    const realNorm = use3d
-      ? norm(real)
-      : Math.sqrt((real[0] * scaleX) ** 2 + (real[1] * scaleY) ** 2)
-    const imagNorm = use3d
-      ? norm(imag)
-      : Math.sqrt((imag[0] * scaleX) ** 2 + (imag[1] * scaleY) ** 2)
+    const realNorm = norm(real)
+    const imagNorm = norm(imag)
     const useReal = realNorm >= imagNorm
     const components = useReal ? real : imag
     const componentNorm = useReal ? realNorm : imagNorm

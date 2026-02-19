@@ -217,6 +217,79 @@ describe('system model', () => {
     expect(normalized.scenes[0]?.axisVariables).toEqual(['w', 'x', 'y'])
   })
 
+  it('preserves limit-cycle render targets when normalizing skeleton systems', () => {
+    const base = createSystem({
+      name: 'LC_Target_Skeleton',
+      config: {
+        name: 'LC_Target_Skeleton',
+        equations: ['y', '-x'],
+        params: [0.2],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const cycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Seed',
+      systemName: base.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_Seed' },
+      ntst: 4,
+      ncol: 2,
+      period: 1,
+      state: [0, 0, 1],
+      createdAt: new Date().toISOString(),
+    }
+    const withCycle = addObject(base, cycle)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_branch',
+      systemName: base.config.name,
+      parameterName: 'mu',
+      parentObject: cycle.name,
+      startObject: cycle.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [{ state: [0, 0, 1], param_value: 0.2, stability: 'None', eigenvalues: [] }],
+        bifurcations: [],
+        indices: [0],
+      },
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-5,
+        max_step_size: 0.1,
+        max_steps: 10,
+        corrector_steps: 3,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      timestamp: new Date().toISOString(),
+      params: [0.2],
+    }
+    const withBranch = addBranch(withCycle.system, branch, withCycle.nodeId)
+    const targetSystem = structuredClone(withBranch.system)
+    targetSystem.ui.limitCycleRenderTargets = {
+      [withCycle.nodeId]: {
+        type: 'branch',
+        branchId: withBranch.nodeId,
+        pointIndex: 0,
+      },
+    }
+
+    const skeleton = normalizeSystem({
+      ...targetSystem,
+      objects: {},
+      branches: {},
+    })
+
+    expect(skeleton.ui.limitCycleRenderTargets?.[withCycle.nodeId]).toEqual({
+      type: 'branch',
+      branchId: withBranch.nodeId,
+      pointIndex: 0,
+    })
+  })
+
   it('renames scene nodes without cloning object or branch payload maps', () => {
     const base = createSystem({ name: 'Scene_Rename_Ref' })
     const orbit: OrbitObject = {

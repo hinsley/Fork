@@ -938,8 +938,22 @@ export function normalizeSystem(system: System): System {
   )
   const limitCycleRenderTargets = nextUi.limitCycleRenderTargets ?? {}
   const normalizedTargets: Record<string, LimitCycleRenderTarget> = {}
+  const isLimitCycleObject = (objectId: string): boolean => {
+    const payload = next.objects[objectId]
+    if (payload) return payload.type === 'limit_cycle'
+    const node = next.nodes[objectId]
+    if (node?.kind === 'object' && node.objectType === 'limit_cycle') return true
+    const indexEntry = existingIndex.objects[objectId]
+    return indexEntry?.objectType === 'limit_cycle'
+  }
+  const hasBranchReference = (branchId: string): boolean => {
+    if (next.branches[branchId]) return true
+    const node = next.nodes[branchId]
+    if (node?.kind === 'branch') return true
+    return Boolean(existingIndex.branches[branchId])
+  }
   Object.entries(limitCycleRenderTargets).forEach(([objectId, target]) => {
-    if (!next.objects[objectId] || next.objects[objectId]?.type !== 'limit_cycle') {
+    if (!isLimitCycleObject(objectId)) {
       return
     }
     if (!target || typeof target !== 'object') return
@@ -949,7 +963,7 @@ export function normalizeSystem(system: System): System {
     }
     const branchId = (target as { branchId?: string }).branchId
     const pointIndex = (target as { pointIndex?: number }).pointIndex
-    if (!branchId || !next.branches[branchId]) return
+    if (!branchId || !hasBranchReference(branchId)) return
     if (typeof pointIndex !== 'number' || !Number.isFinite(pointIndex)) return
     if (pointIndex < 0) return
     normalizedTargets[objectId] = { type: 'branch', branchId, pointIndex }

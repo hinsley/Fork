@@ -284,6 +284,31 @@ describe('appState lazy hydration', () => {
       store.loadEntitiesCalls.some((call) => call.objectIds.includes(withEquilibrium.nodeId))
     ).toBe(true)
   })
+
+  it('hydrates limit-cycle render-target branches even when branch nodes are hidden', async () => {
+    const { system } = createPeriodDoublingSystem()
+    const branchId = findBranchIdByName(system, 'lc_pd_mu')
+    const lcId = findObjectIdByName(system, 'LC_PD')
+    const hidden = structuredClone(system)
+    hidden.nodes[lcId].expanded = false
+    hidden.ui.limitCycleRenderTargets = {
+      [lcId]: { type: 'branch', branchId, pointIndex: 1 },
+    }
+    const store = new LazyHydrationStore([hidden])
+    const { getContext } = setupAppWithStore(store)
+
+    await act(async () => {
+      await getContext().actions.openSystem(hidden.id)
+    })
+
+    await waitFor(() => {
+      expect(getContext().state.system?.branches[branchId]).toBeDefined()
+      expect(getContext().state.error).toBeNull()
+    })
+    expect(
+      store.loadEntitiesCalls.some((call) => call.branchIds.includes(branchId))
+    ).toBe(true)
+  })
 })
 
 describe('appState rename persistence routing', () => {
@@ -653,10 +678,28 @@ describe('appState limit cycle render targets', () => {
 
   it('updates limit-cycle object parameters when selecting a branch render target point', async () => {
     const { system } = createPeriodDoublingSystem()
-    const { getContext } = setupApp(system)
-
     const branchId = findBranchIdByName(system, 'lc_pd_mu')
     const lcId = findObjectIdByName(system, 'LC_PD')
+    const seededLimitCycle = system.objects[lcId]
+    if (!seededLimitCycle || seededLimitCycle.type !== 'limit_cycle') {
+      throw new Error('Expected limit cycle object.')
+    }
+    seededLimitCycle.floquetMultipliers = [{ re: 0.9, im: 0 }]
+    seededLimitCycle.floquetModes = {
+      ntst: seededLimitCycle.ntst,
+      ncol: seededLimitCycle.ncol,
+      multipliers: [{ re: 0.9, im: 0 }],
+      vectors: [
+        [
+          [
+            { re: 1, im: 0 },
+            { re: 0, im: 0 },
+          ],
+        ],
+      ],
+      computedAt: new Date().toISOString(),
+    }
+    const { getContext } = setupApp(system)
 
     await act(async () => {
       getContext().actions.setLimitCycleRenderTarget(lcId, {
@@ -681,6 +724,8 @@ describe('appState limit cycle render targets', () => {
       expect(limitCycle.parameters?.[0]).toBeCloseTo(0.25, 12)
       expect(limitCycle.customParameters?.[0]).toBeCloseTo(0.25, 12)
       expect(limitCycle.paramValue).toBeCloseTo(0.25, 12)
+      expect(limitCycle.floquetMultipliers).toEqual([{ re: -1, im: 0 }])
+      expect(limitCycle.floquetModes).toBeUndefined()
     })
   })
 

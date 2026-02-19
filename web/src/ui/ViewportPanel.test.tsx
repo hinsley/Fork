@@ -1108,6 +1108,209 @@ describe('ViewportPanel view state wiring', () => {
     expect(hasFloquetLine).toBe(true)
   })
 
+  it('keeps 3D eigenline lengths visually isotropic across anisotropic axis spans', () => {
+    const config: SystemConfig = {
+      name: 'Eigenline_Anisotropic_3D',
+      equations: ['x', 'y', 'z'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene Eigenline 3D')
+    system = sceneResult.system
+
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Bounds',
+      systemName: config.name,
+      data: [
+        [0, 0, 0, 0],
+        [0.5, 500, 0.5, 0.5],
+        [1, 1000, 1, 1],
+      ],
+      t_start: 0,
+      t_end: 1,
+      dt: 0.5,
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq_Anisotropic',
+      systemName: config.name,
+      solution: {
+        state: [500, 0.5, 0.5],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [
+          {
+            value: { re: 0.9, im: 0 },
+            vector: [
+              { re: 1, im: 0 },
+              { re: 0, im: 0 },
+              { re: 0, im: 0 },
+            ],
+          },
+          {
+            value: { re: 0.8, im: 0 },
+            vector: [
+              { re: 0, im: 0 },
+              { re: 1, im: 0 },
+              { re: 0, im: 0 },
+            ],
+          },
+        ],
+      },
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+    system.nodes[equilibriumResult.nodeId].render.equilibriumEigenvectors = {
+      enabled: true,
+      stride: 1,
+      vectorIndices: [0, 1],
+      colors: ['#00ff00', '#ff00ff'],
+      lineLengthScale: 0.2,
+      lineThickness: 2,
+      discRadiusScale: 0,
+      discThickness: 2,
+    }
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const xLine = props?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === equilibriumResult.nodeId &&
+        'type' in trace &&
+        trace.type === 'scatter3d' &&
+        'mode' in trace &&
+        trace.mode === 'lines' &&
+        'line' in trace &&
+        trace.line &&
+        typeof trace.line === 'object' &&
+        'color' in trace.line &&
+        trace.line.color === '#00ff00'
+    ) as { x?: number[]; y?: number[] } | undefined
+    const yLine = props?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === equilibriumResult.nodeId &&
+        'type' in trace &&
+        trace.type === 'scatter3d' &&
+        'mode' in trace &&
+        trace.mode === 'lines' &&
+        'line' in trace &&
+        trace.line &&
+        typeof trace.line === 'object' &&
+        'color' in trace.line &&
+        trace.line.color === '#ff00ff'
+    ) as { x?: number[]; y?: number[] } | undefined
+    expect(xLine).toBeTruthy()
+    expect(yLine).toBeTruthy()
+
+    const xSpan = Math.abs((xLine?.x?.[1] ?? 0) - (xLine?.x?.[0] ?? 0))
+    const ySpan = Math.abs((yLine?.y?.[1] ?? 0) - (yLine?.y?.[0] ?? 0))
+    expect(xSpan / 1000).toBeCloseTo(ySpan, 3)
+  })
+
+  it('renders 3D eigendisks as axis-compensated ellipses in anisotropic scenes', () => {
+    const config: SystemConfig = {
+      name: 'Eigendisk_Anisotropic_3D',
+      equations: ['x', 'y', 'z'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene Eigendisk 3D')
+    system = sceneResult.system
+
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Bounds',
+      systemName: config.name,
+      data: [
+        [0, 0, 0, 0],
+        [1, 1000, 1, 1],
+      ],
+      t_start: 0,
+      t_end: 1,
+      dt: 1,
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq_Complex',
+      systemName: config.name,
+      solution: {
+        state: [500, 0.5, 0.5],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [
+          {
+            value: { re: 0.7, im: 0.3 },
+            vector: [
+              { re: 1, im: 0 },
+              { re: 0, im: 1 },
+              { re: 0, im: 0 },
+            ],
+          },
+        ],
+      },
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+    system.nodes[equilibriumResult.nodeId].render.equilibriumEigenvectors = {
+      enabled: true,
+      stride: 1,
+      vectorIndices: [0],
+      colors: ['#ffaa00'],
+      lineLengthScale: 0.2,
+      lineThickness: 2,
+      discRadiusScale: 0.2,
+      discThickness: 2,
+    }
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const discOutline = props?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === equilibriumResult.nodeId &&
+        'type' in trace &&
+        trace.type === 'scatter3d' &&
+        'mode' in trace &&
+        trace.mode === 'lines' &&
+        'line' in trace &&
+        trace.line &&
+        typeof trace.line === 'object' &&
+        'color' in trace.line &&
+        trace.line.color === '#ffaa00'
+    ) as { x?: number[]; y?: number[] } | undefined
+    expect(discOutline).toBeTruthy()
+    const xValues = (discOutline?.x ?? []).filter((value) => Number.isFinite(value))
+    const yValues = (discOutline?.y ?? []).filter((value) => Number.isFinite(value))
+    expect(xValues.length).toBeGreaterThan(2)
+    expect(yValues.length).toBeGreaterThan(2)
+    const xSpan = Math.max(...xValues) - Math.min(...xValues)
+    const ySpan = Math.max(...yValues) - Math.min(...yValues)
+    expect(xSpan / 1000).toBeCloseTo(ySpan, 2)
+  })
+
   it('renders cached 1D isocline points as diagonal markers in map scenes', () => {
     const config: SystemConfig = {
       name: 'IsoMap1D',
