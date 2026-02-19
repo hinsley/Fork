@@ -54,8 +54,9 @@ pub use manifold::{
     continue_manifold_eq_1d, continue_manifold_eq_2d, continue_manifold_eq_2d_with_progress,
 };
 pub use periodic::{
-    continue_limit_cycle_collocation, extend_limit_cycle_collocation, limit_cycle_setup_from_hopf,
-    limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd, CollocationConfig, LimitCycleGuess,
+    compute_limit_cycle_floquet_modes, continue_limit_cycle_collocation,
+    extend_limit_cycle_collocation, limit_cycle_setup_from_hopf, limit_cycle_setup_from_orbit,
+    limit_cycle_setup_from_pd, CollocationConfig, FloquetModeVectors, LimitCycleGuess,
     LimitCycleSetup, OrbitTimeMode,
 };
 pub use problem::{PointDiagnostics, TestFunctionValues};

@@ -901,6 +901,25 @@ function buildEquilibriumEigenvectorTraces(
   return traces
 }
 
+function buildFloquetEigenpairsAtPoint(
+  multipliers: Array<{ re: number; im: number }>,
+  vectorsAtPoint: Array<Array<{ re: number; im: number }>> | undefined
+): EquilibriumEigenPair[] {
+  if (!Array.isArray(multipliers) || multipliers.length === 0) return []
+  return multipliers.map((value, index) => ({
+    value: {
+      re: Number.isFinite(value.re) ? value.re : Number(value.re ?? 0),
+      im: Number.isFinite(value.im) ? value.im : Number(value.im ?? 0),
+    },
+    vector: Array.isArray(vectorsAtPoint?.[index])
+      ? (vectorsAtPoint?.[index] ?? []).map((component) => ({
+          re: Number.isFinite(component.re) ? component.re : Number(component.re ?? 0),
+          im: Number.isFinite(component.im) ? component.im : Number(component.im ?? 0),
+        }))
+      : [],
+  }))
+}
+
 
 type VisibleObjectSource = Pick<System, 'rootIds' | 'nodes' | 'objects'>
 type VisibleBranchSource = Pick<System, 'rootIds' | 'nodes' | 'branches'>
@@ -2895,6 +2914,101 @@ function buildSceneTraces(
       const hoverTemplate3D = `${axisLabelX}: %{x:.6g}<br>${axisLabelY}: %{y:.6g}<br>${axisLabelZ}: %{z:.6g}<extra></extra>`
       const hoverTemplate2D = `${axisLabelX}: %{x:.6g}<br>${axisLabelY}: %{y:.6g}<extra></extra>`
       const hoverTemplate1D = `${axisLabelX}: %{y:.6g}<extra></extra>`
+      const { profilePoints } = extractLimitCycleProfile(
+        state,
+        packedStateDimension,
+        ntst,
+        ncol,
+        {
+          layout,
+          allowPackedTail,
+        }
+      )
+      const displayProfilePoints = subsystemSnapshot
+        ? profilePoints.map((point) =>
+            stateVectorToDisplay(subsystemSnapshot, point, projection)
+          )
+        : profilePoints
+      if (canPlotEigenvectors && objectPlotDim >= 2) {
+        displayProfilePoints.forEach((point) => {
+          const valueX = point[axisX]
+          const valueY = point[axisY]
+          const valueZ = objectPlotDim >= 3 ? point[axisZ] : 0
+          updateSceneBounds(sceneBounds, valueX, valueY, valueZ)
+        })
+      }
+      const floquetModes = object.floquetModes
+      const floquetPointCount = Math.min(
+        displayProfilePoints.length,
+        floquetModes?.vectors?.length ?? 0
+      )
+      const canRenderFloquetModes = Boolean(
+        canPlotEigenvectors &&
+          objectPlotDim >= 2 &&
+          floquetModes &&
+          floquetModes.ntst === ntst &&
+          floquetModes.ncol === ncol &&
+          floquetModes.multipliers.length > 0 &&
+          floquetPointCount > 0 &&
+          (!renderTarget || renderTarget.type === 'object')
+      )
+      if (canRenderFloquetModes && floquetModes) {
+        const eigenspaceIndices = resolveEquilibriumEigenspaceIndices(
+          floquetModes.multipliers.map((value) => ({
+            value,
+            vector: [],
+          }))
+        )
+        const floquetRender = resolveEquilibriumEigenvectorRender(
+          node.render?.equilibriumEigenvectors,
+          eigenspaceIndices
+        )
+        const stride = Math.max(1, Math.floor(floquetRender.stride))
+        const minVectorLength =
+          objectPlotDim >= 3
+            ? Math.max(axisX, axisY, axisZ) + 1
+            : Math.max(axisX, axisY) + 1
+        if (floquetRender.enabled && floquetRender.vectorIndices.length > 0) {
+          const sampleIndices = new Set<number>()
+          for (let index = 0; index < floquetPointCount; index += stride) {
+            sampleIndices.add(index)
+          }
+          if (
+            selectedLimitCyclePointIndex !== null &&
+            selectedLimitCyclePointIndex >= 0 &&
+            selectedLimitCyclePointIndex < floquetPointCount
+          ) {
+            sampleIndices.add(selectedLimitCyclePointIndex)
+          }
+          const orderedIndices = [...sampleIndices].sort((a, b) => a - b)
+          for (const pointIndex of orderedIndices) {
+            const stateAtPoint = displayProfilePoints[pointIndex]
+            if (!stateAtPoint || stateAtPoint.length < 2) continue
+            const eigenpairs = buildFloquetEigenpairsAtPoint(
+              floquetModes.multipliers,
+              floquetModes.vectors[pointIndex]
+            )
+            const hasVectors = eigenpairs.some(
+              (pair) => pair.vector.length >= minVectorLength
+            )
+            if (!hasVectors) continue
+            pendingEigenvectors.push({
+              nodeId,
+              state: stateAtPoint,
+              eigenpairs,
+              vectorIndices: floquetRender.vectorIndices,
+              colors: floquetRender.colors,
+              lineLengthScale: floquetRender.lineLengthScale,
+              lineThickness: floquetRender.lineThickness,
+              discRadiusScale: floquetRender.discRadiusScale,
+              discThickness: floquetRender.discThickness,
+              highlight: selectedLimitCyclePointIndex === pointIndex,
+              axisIndices: axisOrder,
+              plotDim: objectPlotDim >= 3 ? 3 : 2,
+            })
+          }
+        }
+      }
       traces.push(
         ...buildLimitCycleTraces({
           state,

@@ -5,7 +5,7 @@ use super::{
 };
 #[allow(unused_imports)]
 use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
-use crate::equilibrium::{compute_jacobian, SystemKind};
+use crate::equilibrium::{compute_jacobian, ComplexNumber, SystemKind};
 use crate::traits::DynamicalSystem;
 use anyhow::{anyhow, bail, Result};
 use nalgebra::linalg::SVD;
@@ -95,6 +95,14 @@ pub struct LimitCycleSetup {
     pub phase_direction: Vec<f64>,
     pub mesh_points: usize,
     pub collocation_degree: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FloquetModeVectors {
+    pub ntst: usize,
+    pub ncol: usize,
+    pub multipliers: Vec<ComplexNumber>,
+    pub vectors: Vec<Vec<Vec<ComplexNumber>>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -1321,6 +1329,255 @@ pub fn extract_multipliers_shooting(
     Ok(eigenvalues)
 }
 
+pub fn compute_limit_cycle_floquet_modes(
+    system: &mut EquationSystem,
+    param_index: usize,
+    cycle_state: &[f64],
+    ntst: usize,
+    ncol: usize,
+) -> Result<FloquetModeVectors> {
+    let dim = system.equations.len();
+    if dim == 0 {
+        bail!("System has zero dimension.");
+    }
+    if ntst < 2 {
+        bail!("Floquet mode computation requires ntst >= 2.");
+    }
+    if ncol == 0 {
+        bail!("Floquet mode computation requires ncol >= 1.");
+    }
+    if param_index >= system.params.len() {
+        bail!("Parameter index out of bounds for Floquet mode computation.");
+    }
+
+    let mesh_len = ntst * dim;
+    let stage_len = ntst * ncol * dim;
+    let expected_len = mesh_len + stage_len + 1;
+    if cycle_state.len() != expected_len {
+        bail!(
+            "Invalid limit-cycle state length for Floquet mode computation: expected {}, got {}.",
+            expected_len,
+            cycle_state.len()
+        );
+    }
+    let period = cycle_state[expected_len - 1];
+    if !period.is_finite() || period <= 0.0 {
+        bail!("Cycle period must be a positive finite number.");
+    }
+
+    let mut mesh_states = Vec::with_capacity(ntst);
+    for interval in 0..ntst {
+        let start = interval * dim;
+        mesh_states.push(cycle_state[start..start + dim].to_vec());
+    }
+    let stage_offset = mesh_len;
+    let mut stage_states = Vec::with_capacity(ntst * ncol);
+    for stage_index in 0..(ntst * ncol) {
+        let start = stage_offset + stage_index * dim;
+        stage_states.push(cycle_state[start..start + dim].to_vec());
+    }
+
+    let phase_anchor = mesh_states[0].clone();
+    let mut phase_direction = if ntst > 1 {
+        mesh_states[1]
+            .iter()
+            .zip(mesh_states[0].iter())
+            .map(|(a, b)| a - b)
+            .collect::<Vec<_>>()
+    } else {
+        vec![0.0; dim]
+    };
+    let phase_norm = phase_direction.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if phase_norm > 1e-12 {
+        for value in phase_direction.iter_mut() {
+            *value /= phase_norm;
+        }
+    } else {
+        phase_direction = vec![0.0; dim];
+        phase_direction[0] = 1.0;
+    }
+
+    let param_value = system.params[param_index];
+    let mut problem = PeriodicOrbitCollocationProblem::new(
+        system,
+        param_index,
+        ntst,
+        ncol,
+        phase_anchor,
+        phase_direction,
+    )?;
+
+    let mut aug_state = DVector::zeros(1 + cycle_state.len());
+    aug_state[0] = param_value;
+    for (index, value) in cycle_state.iter().enumerate() {
+        aug_state[index + 1] = *value;
+    }
+    let jac = problem.extended_jacobian(&aug_state)?;
+
+    let ncol_coord = ncol * dim;
+    let mesh_col_start = 1usize;
+    let stage_col_start = mesh_col_start + ntst * dim;
+    let continuity_row_start = ntst * ncol * dim;
+
+    let mut interval_ds_dx: Vec<DMatrix<f64>> = Vec::with_capacity(ntst);
+    let mut interval_transfers: Vec<DMatrix<f64>> = Vec::with_capacity(ntst);
+    let mut monodromy = DMatrix::<f64>::identity(dim, dim);
+
+    for interval in 0..ntst {
+        let cont_row = continuity_row_start + interval * dim;
+        let coll_row_start = interval * ncol_coord;
+        let stage_col = stage_col_start + interval * ncol_coord;
+        let mesh_col = mesh_col_start + interval * dim;
+        let next_mesh_col = mesh_col_start + ((interval + 1) % ntst) * dim;
+
+        let mut g_x = DMatrix::<f64>::zeros(ncol_coord, dim);
+        for r in 0..ncol_coord {
+            for c in 0..dim {
+                g_x[(r, c)] = jac[(coll_row_start + r, mesh_col + c)];
+            }
+        }
+
+        let mut g_s = DMatrix::<f64>::zeros(ncol_coord, ncol_coord);
+        for r in 0..ncol_coord {
+            for c in 0..ncol_coord {
+                g_s[(r, c)] = jac[(coll_row_start + r, stage_col + c)];
+            }
+        }
+
+        let ds_dx = match g_s.clone().lu().solve(&-&g_x) {
+            Some(solution) => solution,
+            None => bail!(
+                "Floquet mode computation failed: singular stage block at interval {}.",
+                interval
+            ),
+        };
+
+        let mut c_x = DMatrix::<f64>::zeros(dim, dim);
+        for r in 0..dim {
+            for c in 0..dim {
+                c_x[(r, c)] = jac[(cont_row + r, mesh_col + c)];
+            }
+        }
+
+        let mut c_s = DMatrix::<f64>::zeros(dim, ncol_coord);
+        for r in 0..dim {
+            for c in 0..ncol_coord {
+                c_s[(r, c)] = jac[(cont_row + r, stage_col + c)];
+            }
+        }
+
+        let mut c_next = DMatrix::<f64>::zeros(dim, dim);
+        for r in 0..dim {
+            for c in 0..dim {
+                c_next[(r, c)] = jac[(cont_row + r, next_mesh_col + c)];
+            }
+        }
+
+        let effective_c_x = &c_x + &c_s * &ds_dx;
+        let transfer = match c_next.clone().lu().solve(&-&effective_c_x) {
+            Some(solution) => solution,
+            None => bail!(
+                "Floquet mode computation failed: singular continuity block at interval {}.",
+                interval
+            ),
+        };
+
+        monodromy = &transfer * &monodromy;
+        interval_ds_dx.push(ds_dx);
+        interval_transfers.push(transfer);
+    }
+
+    let multipliers: Vec<Complex<f64>> = monodromy
+        .complex_eigenvalues()
+        .iter()
+        .cloned()
+        .collect();
+    if multipliers.is_empty() {
+        bail!("Floquet mode computation failed: no multipliers returned.");
+    }
+
+    let mut mesh_mode_vectors: Vec<Vec<Complex<f64>>> = Vec::with_capacity(multipliers.len());
+    for multiplier in multipliers.iter().copied() {
+        let mut eigenvector = compute_complex_eigenvector(&monodromy, multiplier)?;
+        normalize_complex_vector_in_place(&mut eigenvector);
+        mesh_mode_vectors.push(eigenvector);
+    }
+
+    let mut mesh_flows = Vec::with_capacity(mesh_states.len());
+    for state in mesh_states.iter() {
+        let mut flow = vec![0.0; dim];
+        problem.context.system.apply(0.0, state, &mut flow);
+        mesh_flows.push(flow);
+    }
+    let mut stage_flows = Vec::with_capacity(stage_states.len());
+    for state in stage_states.iter() {
+        let mut flow = vec![0.0; dim];
+        problem.context.system.apply(0.0, state, &mut flow);
+        stage_flows.push(flow);
+    }
+
+    let mut vectors: Vec<Vec<Vec<ComplexNumber>>> = Vec::with_capacity(ntst * (ncol + 1) + 1);
+    vectors.push(
+        mesh_mode_vectors
+            .iter()
+            .map(|mode| {
+                project_complex_vector_orthogonal_to_flow(mode, &mesh_flows[0])
+                    .into_iter()
+                    .map(ComplexNumber::from)
+                    .collect::<Vec<_>>()
+            })
+            .collect(),
+    );
+
+    for interval in 0..ntst {
+        let ds_dx = &interval_ds_dx[interval];
+        let transfer = &interval_transfers[interval];
+
+        for stage in 0..ncol {
+            let stage_flow = &stage_flows[interval * ncol + stage];
+            let mode_vectors = mesh_mode_vectors
+                .iter()
+                .map(|mode| {
+                    let stage_vector =
+                        apply_stage_transfer_to_complex_vector(ds_dx, stage, dim, mode);
+                    project_complex_vector_orthogonal_to_flow(&stage_vector, stage_flow)
+                        .into_iter()
+                        .map(ComplexNumber::from)
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            vectors.push(mode_vectors);
+        }
+
+        let next_mesh_mode_vectors = mesh_mode_vectors
+            .iter()
+            .map(|mode| apply_real_matrix_to_complex_vector(transfer, mode))
+            .collect::<Vec<_>>();
+        mesh_mode_vectors = next_mesh_mode_vectors;
+
+        let next_mesh_index = (interval + 1) % ntst;
+        let next_mesh_flow = &mesh_flows[next_mesh_index];
+        vectors.push(
+            mesh_mode_vectors
+                .iter()
+                .map(|mode| {
+                    project_complex_vector_orthogonal_to_flow(mode, next_mesh_flow)
+                        .into_iter()
+                        .map(ComplexNumber::from)
+                        .collect::<Vec<_>>()
+                })
+                .collect(),
+        );
+    }
+
+    Ok(FloquetModeVectors {
+        ntst,
+        ncol,
+        multipliers: multipliers.into_iter().map(ComplexNumber::from).collect(),
+        vectors,
+    })
+}
+
 /// Bifurcation tests from Floquet multipliers with sanity check.
 ///
 /// Returns (cycle_fold, period_doubling, neimark_sacker, eigenvalues).
@@ -1640,6 +1897,73 @@ fn compute_complex_eigenvector(
         vector.push(v_t[(row_index, i)].conj());
     }
     Ok(vector)
+}
+
+fn normalize_complex_vector_in_place(vec: &mut [Complex<f64>]) {
+    let norm = vec.iter().map(|value| value.norm_sqr()).sum::<f64>().sqrt();
+    if !norm.is_finite() || norm <= 0.0 {
+        return;
+    }
+    for entry in vec.iter_mut() {
+        *entry /= norm;
+    }
+}
+
+fn apply_real_matrix_to_complex_vector(
+    matrix: &DMatrix<f64>,
+    vector: &[Complex<f64>],
+) -> Vec<Complex<f64>> {
+    let rows = matrix.nrows();
+    let cols = matrix.ncols();
+    let mut output = vec![Complex::new(0.0, 0.0); rows];
+    for row in 0..rows {
+        let mut sum = Complex::new(0.0, 0.0);
+        for col in 0..cols {
+            sum += matrix[(row, col)] * vector[col];
+        }
+        output[row] = sum;
+    }
+    output
+}
+
+fn apply_stage_transfer_to_complex_vector(
+    ds_dx: &DMatrix<f64>,
+    stage: usize,
+    dim: usize,
+    vector: &[Complex<f64>],
+) -> Vec<Complex<f64>> {
+    let row_start = stage * dim;
+    let mut output = vec![Complex::new(0.0, 0.0); dim];
+    for row in 0..dim {
+        let mut sum = Complex::new(0.0, 0.0);
+        for col in 0..dim {
+            sum += ds_dx[(row_start + row, col)] * vector[col];
+        }
+        output[row] = sum;
+    }
+    output
+}
+
+fn project_complex_vector_orthogonal_to_flow(
+    vector: &[Complex<f64>],
+    flow: &[f64],
+) -> Vec<Complex<f64>> {
+    let flow_norm_sq = flow.iter().map(|value| value * value).sum::<f64>();
+    if !flow_norm_sq.is_finite() || flow_norm_sq <= 1e-14 {
+        return vector.to_vec();
+    }
+    let projection = vector
+        .iter()
+        .zip(flow.iter())
+        .fold(Complex::new(0.0, 0.0), |acc, (value, flow_component)| {
+            acc + *value * *flow_component
+        })
+        / flow_norm_sq;
+    vector
+        .iter()
+        .zip(flow.iter())
+        .map(|(value, flow_component)| *value - projection * *flow_component)
+        .collect()
 }
 
 pub fn continue_limit_cycle_collocation(

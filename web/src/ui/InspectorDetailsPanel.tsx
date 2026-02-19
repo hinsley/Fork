@@ -52,6 +52,7 @@ import type {
   HomotopySaddleFromEquilibriumRequest,
   IsochroneCurveContinuationRequest,
   IsoclineComputeRequest,
+  LimitCycleFloquetModesRequest,
   MapNSCurveContinuationRequest,
   LimitCycleManifold2DRequest,
   LimitCycleHopfContinuationRequest,
@@ -158,6 +159,9 @@ type InspectorDetailsPanelProps = {
   onCreateLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
   onCreateLimitCycleManifold2D?: (
     request: LimitCycleManifold2DRequest
+  ) => Promise<void>
+  onComputeLimitCycleFloquetModes?: (
+    request: LimitCycleFloquetModesRequest
   ) => Promise<void>
   onCreateCycleFromPD: (request: MapCyclePDContinuationRequest) => Promise<void>
   onCreateLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
@@ -1835,6 +1839,7 @@ export function InspectorDetailsPanel({
   onCreateLimitCycleFromHopf,
   onCreateLimitCycleFromOrbit,
   onCreateLimitCycleManifold2D = async () => {},
+  onComputeLimitCycleFloquetModes = async () => {},
   onCreateCycleFromPD,
   onCreateLimitCycleFromPD,
   onCreateHomoclinicFromLargeCycle = async () => {},
@@ -2262,6 +2267,9 @@ export function InspectorDetailsPanel({
     () => makeLimitCycleManifoldDraft(limitCycle)
   )
   const [limitCycleManifoldError, setLimitCycleManifoldError] = useState<string | null>(null)
+  const [limitCycleFloquetModesError, setLimitCycleFloquetModesError] = useState<string | null>(
+    null
+  )
   const equilibriumManifoldEligibleIndexOptions = useMemo(() => {
     const wantsUnstable = equilibriumManifoldDraft.stability === 'Unstable'
     return equilibriumEigenpairs
@@ -3110,6 +3118,10 @@ export function InspectorDetailsPanel({
       }
     })
   }, [limitCycle])
+
+  useEffect(() => {
+    setLimitCycleFloquetModesError(null)
+  }, [selectedNodeId, limitCycle?.floquetModes?.computedAt])
 
   useEffect(() => {
     if (!orbit) return
@@ -4040,6 +4052,36 @@ export function InspectorDetailsPanel({
     }
     return limitCycle?.floquetMultipliers ?? []
   }, [limitCycle?.floquetMultipliers, limitCycleRenderData])
+  const limitCycleFloquetPairTemplate = useMemo(
+    () =>
+      limitCycleDisplayMultipliers.map((value) => ({
+        value,
+        vector: [] as ComplexValue[],
+      })),
+    [limitCycleDisplayMultipliers]
+  )
+  const limitCycleFloquetEigenspaceIndices = resolveEquilibriumEigenspaceIndices(
+    limitCycleFloquetPairTemplate
+  )
+  const limitCycleFloquetRender = resolveEquilibriumEigenvectorRender(
+    selectionNode?.render?.equilibriumEigenvectors,
+    limitCycleFloquetEigenspaceIndices
+  )
+  const limitCycleFloquetIndices = defaultEquilibriumEigenvectorIndices(
+    limitCycleFloquetEigenspaceIndices
+  )
+  const limitCycleFloquetColors = resolveEquilibriumEigenvectorColors(
+    limitCycleFloquetIndices,
+    limitCycleFloquetRender.vectorIndices,
+    limitCycleFloquetRender.colors,
+    limitCycleFloquetRender.colorOverrides
+  )
+  const limitCycleFloquetVisibleSet = new Set(limitCycleFloquetRender.vectorIndices)
+  const limitCycleFloquetMarkerColors = resolveEquilibriumEigenvalueMarkerColors(
+    limitCycleFloquetPairTemplate,
+    limitCycleFloquetIndices,
+    limitCycleFloquetColors
+  )
   const limitCycleFloquetIndexOptions = useMemo(
     () =>
       limitCycleDisplayMultipliers.map((_, index) => ({
@@ -4052,8 +4094,24 @@ export function InspectorDetailsPanel({
     if (limitCycleDisplayMultipliers.length === 0) return null
     return buildEigenvaluePlot(limitCycleDisplayMultipliers, plotlyTheme, {
       showUnitCircle: true,
+      markerColors: limitCycleFloquetMarkerColors,
     })
-  }, [limitCycleDisplayMultipliers, plotlyTheme])
+  }, [limitCycleDisplayMultipliers, limitCycleFloquetMarkerColors, plotlyTheme])
+  const limitCycleFloquetModes = limitCycle?.floquetModes ?? null
+  const limitCycleFloquetModesMatchMesh =
+    limitCycleFloquetModes !== null &&
+    limitCycle !== null &&
+    limitCycleFloquetModes.ntst === limitCycle.ntst &&
+    limitCycleFloquetModes.ncol === limitCycle.ncol
+  const limitCycleFloquetModePointCount = limitCycleFloquetModes?.vectors.length ?? 0
+  const limitCycleFloquetModeCount = limitCycleFloquetModes?.multipliers.length ?? 0
+  const limitCycleFloquetModesAvailable =
+    limitCycleFloquetModesMatchMesh &&
+    limitCycleFloquetModePointCount > 0 &&
+    limitCycleFloquetModeCount > 0
+  const limitCycleFloquetModesCanRender =
+    limitCycleFloquetModesAvailable &&
+    (!limitCycleRenderTarget || limitCycleRenderTarget.type === 'object')
 
   const handleApplySystem = async () => {
     setSystemTouched(true)
@@ -6663,6 +6721,60 @@ export function InspectorDetailsPanel({
     updateEquilibriumEigenvectorRender({ colors })
   }
 
+  const updateLimitCycleFloquetRender = useCallback(
+    (update: Partial<EquilibriumEigenvectorRenderStyle>) => {
+      if (!selectionNode) return
+      const merged = resolveEquilibriumEigenvectorRender(
+        { ...limitCycleFloquetRender, ...update },
+        limitCycleFloquetEigenspaceIndices
+      )
+      onUpdateRender(selectionNode.id, { equilibriumEigenvectors: merged })
+    },
+    [
+      limitCycleFloquetEigenspaceIndices,
+      limitCycleFloquetRender,
+      onUpdateRender,
+      selectionNode,
+    ]
+  )
+
+  const handleLimitCycleFloquetVisibilityChange = (index: number, visible: boolean) => {
+    const nextSet = new Set(limitCycleFloquetRender.vectorIndices)
+    if (visible) {
+      nextSet.add(index)
+    } else {
+      nextSet.delete(index)
+    }
+    const nextIndices = limitCycleFloquetIndices.filter((value) => nextSet.has(value))
+    const colors = resolveEquilibriumEigenvectorColors(
+      nextIndices,
+      limitCycleFloquetRender.vectorIndices,
+      limitCycleFloquetRender.colors,
+      limitCycleFloquetRender.colorOverrides
+    )
+    updateLimitCycleFloquetRender({ vectorIndices: nextIndices, colors })
+  }
+
+  const handleLimitCycleFloquetColorChange = (index: number, color: string) => {
+    const colorIndex = limitCycleFloquetRender.vectorIndices.indexOf(index)
+    if (colorIndex === -1) return
+    const colors = limitCycleFloquetRender.colors.map((value, idx) =>
+      idx === colorIndex ? color : value
+    )
+    updateLimitCycleFloquetRender({ colors })
+  }
+
+  const handleComputeLimitCycleFloquetModes = async () => {
+    if (!limitCycle || !selectedNodeId) return
+    setLimitCycleFloquetModesError(null)
+    try {
+      await onComputeLimitCycleFloquetModes({ limitCycleId: selectedNodeId })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setLimitCycleFloquetModesError(message)
+    }
+  }
+
   const handleClvVisibilityChange = (index: number, visible: boolean) => {
     const nextSet = new Set(clvRender.vectorIndices)
     if (visible) {
@@ -9205,28 +9317,219 @@ export function InspectorDetailsPanel({
               </div>
               <div className="inspector-section">
                 <h4 className="inspector-subheading">Floquet multipliers</h4>
-                {limitCycleDisplayMultipliers.length > 0 ? (
-                  <div className="inspector-list">
-                    {limitCycleMultiplierPlot ? (
-                      <div className="inspector-plot">
-                        <PlotlyViewport
-                          plotId="limit-cycle-multiplier-plot"
-                          data={limitCycleMultiplierPlot.data}
-                          layout={limitCycleMultiplierPlot.layout}
-                          testId="limit-cycle-multiplier-plot"
-                        />
+                <div className="inspector-list">
+                  {limitCycleDisplayMultipliers.length > 0 ? (
+                    <>
+                      {limitCycleMultiplierPlot ? (
+                        <div className="inspector-plot">
+                          <PlotlyViewport
+                            plotId="limit-cycle-multiplier-plot"
+                            data={limitCycleMultiplierPlot.data}
+                            layout={limitCycleMultiplierPlot.layout}
+                            testId="limit-cycle-multiplier-plot"
+                          />
+                        </div>
+                      ) : null}
+                      <InspectorMetrics
+                        rows={limitCycleDisplayMultipliers.map((value, index) => ({
+                          label: `Multiplier ${index + 1}`,
+                          value: formatComplexValue(value),
+                        }))}
+                      />
+                    </>
+                  ) : (
+                    <p className="empty-state">Floquet multipliers not computed yet.</p>
+                  )}
+                  {systemDraft.type === 'flow' ? (
+                    <>
+                      <div className="inspector-inline-actions">
+                        <button
+                          type="button"
+                          onClick={() => void handleComputeLimitCycleFloquetModes()}
+                          disabled={runDisabled}
+                          data-testid="limit-cycle-floquet-modes-compute"
+                        >
+                          Compute Floquet modes
+                        </button>
                       </div>
-                    ) : null}
-                    <InspectorMetrics
-                      rows={limitCycleDisplayMultipliers.map((value, index) => ({
-                        label: `Multiplier ${index + 1}`,
-                        value: formatComplexValue(value),
-                      }))}
-                    />
-                  </div>
-                ) : (
-                  <p className="empty-state">Floquet multipliers not computed yet.</p>
-                )}
+                      {limitCycleFloquetModesError ? (
+                        <div className="field-error">{limitCycleFloquetModesError}</div>
+                      ) : null}
+                      {limitCycleFloquetModes ? (
+                        <>
+                          {!limitCycleFloquetModesMatchMesh ? (
+                            <div className="field-warning">
+                              Stored Floquet modes use mesh {limitCycleFloquetModes.ntst}/
+                              {limitCycleFloquetModes.ncol}, but this limit cycle uses{' '}
+                              {limitCycle?.ntst ?? 0}/{limitCycle?.ncol ?? 0}. Recompute modes.
+                            </div>
+                          ) : null}
+                          <InspectorMetrics
+                            rows={[
+                              {
+                                label: 'Stored samples',
+                                value: limitCycleFloquetModePointCount.toLocaleString(),
+                              },
+                              {
+                                label: 'Computed',
+                                value: limitCycleFloquetModes.computedAt,
+                              },
+                            ]}
+                          />
+                        </>
+                      ) : (
+                        <p className="empty-state">Floquet mode vectors not computed yet.</p>
+                      )}
+                      {limitCycleFloquetModesAvailable ? (
+                        <>
+                          {!limitCycleFloquetModesCanRender ? (
+                            <p className="empty-state">
+                              Switch the render target back to the stored limit cycle object to
+                              display Floquet eigenspaces.
+                            </p>
+                          ) : null}
+                          <label>
+                            Show Floquet eigenspaces
+                            <input
+                              type="checkbox"
+                              checked={limitCycleFloquetRender.enabled}
+                              onChange={(event) =>
+                                updateLimitCycleFloquetRender({
+                                  enabled: event.target.checked,
+                                })
+                              }
+                              data-testid="limit-cycle-floquet-enabled"
+                            />
+                          </label>
+                          <label>
+                            Point stride
+                            <input
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={limitCycleFloquetRender.stride}
+                              onChange={(event) =>
+                                updateLimitCycleFloquetRender({
+                                  stride: Number(event.target.value),
+                                })
+                              }
+                              data-testid="limit-cycle-floquet-stride"
+                            />
+                          </label>
+                          <label>
+                            Eigenline length (fraction of scene)
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              value={limitCycleFloquetRender.lineLengthScale}
+                              onChange={(event) =>
+                                updateLimitCycleFloquetRender({
+                                  lineLengthScale: Number(event.target.value),
+                                })
+                              }
+                              data-testid="limit-cycle-floquet-line-length"
+                            />
+                          </label>
+                          <label>
+                            Eigenline thickness (px)
+                            <input
+                              type="number"
+                              min={0.5}
+                              step={0.5}
+                              value={limitCycleFloquetRender.lineThickness}
+                              onChange={(event) =>
+                                updateLimitCycleFloquetRender({
+                                  lineThickness: Number(event.target.value),
+                                })
+                              }
+                              data-testid="limit-cycle-floquet-line-thickness"
+                            />
+                          </label>
+                          <label>
+                            Eigenspace disc radius (fraction of scene)
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              value={limitCycleFloquetRender.discRadiusScale}
+                              onChange={(event) =>
+                                updateLimitCycleFloquetRender({
+                                  discRadiusScale: Number(event.target.value),
+                                })
+                              }
+                              data-testid="limit-cycle-floquet-disc-radius"
+                            />
+                          </label>
+                          <label>
+                            Eigenspace disc thickness (px)
+                            <input
+                              type="number"
+                              min={0.5}
+                              step={0.5}
+                              value={limitCycleFloquetRender.discThickness}
+                              onChange={(event) =>
+                                updateLimitCycleFloquetRender({
+                                  discThickness: Number(event.target.value),
+                                })
+                              }
+                              data-testid="limit-cycle-floquet-disc-thickness"
+                            />
+                          </label>
+                          {limitCycleFloquetIndices.length > 0 ? (
+                            <div className="inspector-list">
+                              {limitCycleFloquetIndices.map((index, idx) => {
+                                const value = limitCycleDisplayMultipliers[index]
+                                const label =
+                                  value && !isRealEigenvalue(value)
+                                    ? `Floquet eigenspace ${index + 1}`
+                                    : `Floquet eigenline ${index + 1}`
+                                const visible = limitCycleFloquetVisibleSet.has(index)
+                                return (
+                                  <div
+                                    className="clv-control-row"
+                                    key={`limit-cycle-floquet-color-${index}`}
+                                  >
+                                    <span className="clv-control-row__label">{label}</span>
+                                    <input
+                                      type="checkbox"
+                                      checked={visible}
+                                      onChange={(event) =>
+                                        handleLimitCycleFloquetVisibilityChange(
+                                          index,
+                                          event.target.checked
+                                        )
+                                      }
+                                      aria-label={`Show ${label.toLowerCase()}`}
+                                      data-testid={`limit-cycle-floquet-show-${index}`}
+                                    />
+                                    <input
+                                      type="color"
+                                      value={limitCycleFloquetColors[idx]}
+                                      onChange={(event) =>
+                                        handleLimitCycleFloquetColorChange(
+                                          index,
+                                          event.target.value
+                                        )
+                                      }
+                                      disabled={!visible}
+                                      aria-label={`${label} color`}
+                                      data-testid={`limit-cycle-floquet-color-${index}`}
+                                    />
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="empty-state">
+                      Floquet mode vectors are available for flow systems only.
+                    </p>
+                  )}
+                </div>
               </div>
             </InspectorDisclosure>
           ) : null}

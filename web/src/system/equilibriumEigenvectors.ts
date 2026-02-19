@@ -15,6 +15,7 @@ export const EIGENVECTOR_COLOR_PALETTE = [
 
 export const DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER: EquilibriumEigenvectorRenderStyle = {
   enabled: false,
+  stride: 10,
   vectorIndices: [0],
   colors: [EIGENVECTOR_COLOR_PALETTE[0]],
   lineLengthScale: 0.2,
@@ -99,6 +100,13 @@ function normalizeLineLengthScale(value: number | undefined): number {
     return DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER.lineLengthScale
   }
   return Math.max(0, value)
+}
+
+function normalizeStride(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER.stride
+  }
+  return Math.max(1, Math.trunc(value))
 }
 
 function normalizeLineThickness(value: number | undefined): number {
@@ -259,6 +267,7 @@ export function resolveEquilibriumEigenvectorRender(
 
   return {
     enabled: Boolean(render?.enabled ?? DEFAULT_EQUILIBRIUM_EIGENVECTOR_RENDER.enabled),
+    stride: normalizeStride(render?.stride),
     vectorIndices: indices,
     colors,
     colorOverrides,

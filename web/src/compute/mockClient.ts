@@ -27,6 +27,8 @@ import type {
   LimitCycleContinuationFromOrbitRequest,
   LimitCycleContinuationFromPDRequest,
   LimitCycleContinuationResult,
+  LimitCycleFloquetModesRequest,
+  LimitCycleFloquetModesResult,
   LimitCycleManifold2DRequest,
   LimitCycleManifold2DResult,
   MapCycleContinuationFromPDRequest,
@@ -665,6 +667,49 @@ export class MockForkCoreClient implements ForkCoreClient {
           },
         }
         return branch
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async computeLimitCycleFloquetModes(
+    request: LimitCycleFloquetModesRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<LimitCycleFloquetModesResult> {
+    const job = this.queue.enqueue(
+      'computeLimitCycleFloquetModes',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+        const dim = Math.max(1, request.system.varNames.length)
+        const modeCount = dim
+        const pointCount = Math.max(1, request.ntst * (request.ncol + 1) + 1)
+        const multipliers = Array.from({ length: modeCount }, (_, index) => ({
+          re: index === 0 ? 1 : Math.max(0.1, 0.85 - index * 0.1),
+          im: index === 1 ? 0.2 : index === 2 ? -0.2 : 0,
+        }))
+        const vectors = Array.from({ length: pointCount }, (_, pointIndex) =>
+          Array.from({ length: modeCount }, (_, modeIndex) =>
+            Array.from({ length: dim }, (_, component) => {
+              const angle = (2 * Math.PI * pointIndex) / Math.max(pointCount - 1, 1)
+              if (modeIndex === component) {
+                return { re: Math.cos(angle), im: Math.sin(angle) * 0.05 }
+              }
+              return { re: 0, im: 0 }
+            })
+          )
+        )
+        return {
+          ntst: request.ntst,
+          ncol: request.ncol,
+          multipliers,
+          vectors,
+        }
       },
       opts
     )

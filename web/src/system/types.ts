@@ -414,9 +414,18 @@ export interface LimitCycleObject {
   parameterRef?: ParameterRef
   paramValue?: number
   floquetMultipliers?: ContinuationEigenvalue[]
+  floquetModes?: LimitCycleFloquetModeData
   createdAt: string
   frozenVariables?: FrozenVariablesConfig
   subsystemSnapshot?: SubsystemSnapshot
+}
+
+export interface LimitCycleFloquetModeData {
+  ntst: number
+  ncol: number
+  multipliers: ContinuationEigenvalue[]
+  vectors: ComplexValue[][][]
+  computedAt: string
 }
 
 export type IsoclineSource =
@@ -499,6 +508,7 @@ export interface ClvRenderStyle {
 
 export interface EquilibriumEigenvectorRenderStyle {
   enabled: boolean
+  stride: number
   vectorIndices: number[]
   colors: string[]
   colorOverrides?: Record<number, string>

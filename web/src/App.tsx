@@ -305,6 +305,7 @@ function App() {
         onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
         onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
         onCreateLimitCycleManifold2D={actions.createLimitCycleManifold2D}
+        onComputeLimitCycleFloquetModes={actions.computeLimitCycleFloquetModes}
         onCreateCycleFromPD={actions.createCycleFromPD}
         onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
         onCreateHomoclinicFromLargeCycle={actions.createHomoclinicFromLargeCycle}
@@ -466,6 +467,7 @@ function App() {
                 onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
                 onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
                 onCreateLimitCycleManifold2D={actions.createLimitCycleManifold2D}
+                onComputeLimitCycleFloquetModes={actions.computeLimitCycleFloquetModes}
                 onCreateCycleFromPD={actions.createCycleFromPD}
                 onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
                 onCreateHomoclinicFromLargeCycle={actions.createHomoclinicFromLargeCycle}

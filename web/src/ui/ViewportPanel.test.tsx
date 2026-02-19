@@ -707,6 +707,7 @@ describe('ViewportPanel view state wiring', () => {
     system = equilibriumResult.system
     system.nodes[equilibriumResult.nodeId].render.equilibriumEigenvectors = {
       enabled: true,
+      stride: 1,
       vectorIndices: [0],
       colors: ['#00ff00'],
       lineLengthScale: 1,

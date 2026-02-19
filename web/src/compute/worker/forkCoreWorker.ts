@@ -24,6 +24,8 @@ import type {
   LimitCycleContinuationFromOrbitRequest,
   LimitCycleContinuationFromPDRequest,
   LimitCycleContinuationResult,
+  LimitCycleFloquetModesRequest,
+  LimitCycleFloquetModesResult,
   LimitCycleManifold2DRequest,
   LimitCycleManifold2DResult,
   MapCycleContinuationFromPDRequest,
@@ -55,6 +57,7 @@ type WorkerRequest =
   | { id: string; kind: 'runEquilibriumManifold1D'; payload: EquilibriumManifold1DRequest }
   | { id: string; kind: 'runEquilibriumManifold2D'; payload: EquilibriumManifold2DRequest }
   | { id: string; kind: 'runLimitCycleManifold2D'; payload: LimitCycleManifold2DRequest }
+  | { id: string; kind: 'computeLimitCycleFloquetModes'; payload: LimitCycleFloquetModesRequest }
   | { id: string; kind: 'runFoldCurveContinuation'; payload: FoldCurveContinuationRequest }
   | { id: string; kind: 'runHopfCurveContinuation'; payload: HopfCurveContinuationRequest }
   | {
@@ -124,6 +127,7 @@ type WorkerResponse =
         | EquilibriumManifold1DResult
         | EquilibriumManifold2DResult
         | LimitCycleManifold2DResult
+        | LimitCycleFloquetModesResult
         | Codim1CurveBranch
         | LimitCycleContinuationResult
         | HomoclinicContinuationResult
@@ -187,6 +191,12 @@ type WasmModule = {
       settings: Record<string, unknown>,
       onProgress: (progress: ContinuationProgress) => void
     ) => LimitCycleManifold2DResult
+    compute_limit_cycle_floquet_modes?: (
+      cycleState: Float64Array,
+      ntst: number,
+      ncol: number,
+      parameterName: string
+    ) => LimitCycleFloquetModesResult
     compute_lyapunov_exponents: (
       startState: Float64Array,
       startTime: number,
@@ -935,6 +945,36 @@ async function runLimitCycleManifold2D(
     onProgress(progress)
   }
   return runner.get_result()
+}
+
+async function runComputeLimitCycleFloquetModes(
+  request: LimitCycleFloquetModesRequest,
+  signal: AbortSignal
+): Promise<LimitCycleFloquetModesResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+  abortIfNeeded(signal)
+  const computeModes = system.compute_limit_cycle_floquet_modes
+  if (typeof computeModes !== 'function') {
+    throw new Error(
+      'Floquet mode computation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  return computeModes.call(
+    system,
+    new Float64Array(request.cycleState),
+    request.ntst,
+    request.ncol,
+    request.parameterName
+  )
 }
 
 async function runFoldCurveContinuation(
@@ -1805,6 +1845,16 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
           }
           ctx.postMessage(response)
         }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'computeLimitCycleFloquetModes') {
+      const result = await runComputeLimitCycleFloquetModes(
+        message.payload,
+        controller.signal
       )
       const response: WorkerResponse = { id: message.id, ok: true, result }
       ctx.postMessage(response)

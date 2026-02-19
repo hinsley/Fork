@@ -23,6 +23,7 @@ import type {
   HomotopySaddleFromEquilibriumRequest,
   IsochroneCurveContinuationRequest,
   IsoclineComputeRequest,
+  LimitCycleFloquetModesRequest,
   LimitCycleManifold2DRequest,
   MapNSCurveContinuationRequest,
   LimitCycleHopfContinuationRequest,
@@ -104,6 +105,9 @@ type InspectorPanelProps = {
   onCreateLimitCycleManifold2D?: (
     request: LimitCycleManifold2DRequest
   ) => Promise<void>
+  onComputeLimitCycleFloquetModes?: (
+    request: LimitCycleFloquetModesRequest
+  ) => Promise<void>
   onCreateCycleFromPD: (request: MapCyclePDContinuationRequest) => Promise<void>
   onCreateLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
   onCreateHomoclinicFromLargeCycle?: (
@@ -158,6 +162,7 @@ export function InspectorPanel({
   onCreateLimitCycleFromHopf,
   onCreateLimitCycleFromOrbit,
   onCreateLimitCycleManifold2D,
+  onComputeLimitCycleFloquetModes,
   onCreateCycleFromPD,
   onCreateLimitCycleFromPD,
   onCreateHomoclinicFromLargeCycle,
@@ -207,6 +212,7 @@ export function InspectorPanel({
           onCreateLimitCycleFromHopf={onCreateLimitCycleFromHopf}
           onCreateLimitCycleFromOrbit={onCreateLimitCycleFromOrbit}
           onCreateLimitCycleManifold2D={onCreateLimitCycleManifold2D}
+          onComputeLimitCycleFloquetModes={onComputeLimitCycleFloquetModes}
           onCreateCycleFromPD={onCreateCycleFromPD}
           onCreateLimitCycleFromPD={onCreateLimitCycleFromPD}
           onCreateHomoclinicFromLargeCycle={onCreateHomoclinicFromLargeCycle}

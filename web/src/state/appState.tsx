@@ -6,6 +6,7 @@ import type {
   CovariantLyapunovRequest as CoreCovariantLyapunovRequest,
   CovariantLyapunovResponse,
   ForkCoreClient,
+  LimitCycleFloquetModesRequest as CoreLimitCycleFloquetModesRequest,
   LyapunovExponentsRequest as CoreLyapunovExponentsRequest,
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
@@ -1171,6 +1172,10 @@ export type LimitCycleManifold2DRequest = {
   }
 }
 
+export type LimitCycleFloquetModesRequest = {
+  limitCycleId: string
+}
+
 
 type AppState = {
   system: System | null
@@ -1373,6 +1378,7 @@ type AppActions = {
   ) => Promise<SampleMap1DFunctionResult>
   computeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
   computeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
+  computeLimitCycleFloquetModes: (request: LimitCycleFloquetModesRequest) => Promise<void>
   solveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   createEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   createEquilibriumManifold1D: (request: EquilibriumManifold1DRequest) => Promise<void>
@@ -2441,6 +2447,138 @@ export function AppProvider({
       }
     },
     [client, state.system, store]
+  )
+
+  const computeLimitCycleFloquetModes = useCallback(
+    async (request: LimitCycleFloquetModesRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        const hydrated = await ensureEntitiesLoaded({ objectIds: [request.limitCycleId] })
+        const current = hydrated ?? latestSystemRef.current
+        if (!current) {
+          throw new Error('No system is currently loaded.')
+        }
+        const system = current.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (system.type !== 'flow') {
+          throw new Error('Floquet mode computation is available for flow systems only.')
+        }
+        const limitCycle = current.objects[request.limitCycleId]
+        if (!limitCycle || limitCycle.type !== 'limit_cycle') {
+          throw new Error('Select a valid limit cycle to analyze.')
+        }
+        if (
+          !Number.isInteger(limitCycle.ntst) ||
+          limitCycle.ntst <= 0 ||
+          !Number.isInteger(limitCycle.ncol) ||
+          limitCycle.ncol <= 0
+        ) {
+          throw new Error('Limit cycle mesh metadata is invalid.')
+        }
+
+        const baseParams = resolveObjectParams(system, limitCycle.customParameters)
+        const { snapshot, runConfig } = buildObjectSubsystemRunConfig(
+          system,
+          limitCycle,
+          baseParams
+        )
+        if (runConfig.paramNames.length === 0) {
+          throw new Error(
+            'Floquet mode computation requires at least one continuation parameter.'
+          )
+        }
+        const reducedState = projectLimitCyclePackedStateForSnapshot(
+          snapshot,
+          limitCycle.state,
+          limitCycle.ntst,
+          limitCycle.ncol,
+          'Limit cycle state'
+        )
+
+        let runtimeParameterName: string | null = null
+        if (limitCycle.parameterRef) {
+          runtimeParameterName = resolveRuntimeParameterName(snapshot, limitCycle.parameterRef)
+        } else if (typeof limitCycle.parameterName === 'string' && limitCycle.parameterName.trim()) {
+          try {
+            const ref = parseContinuationParameterAllowRuntimeName(
+              system,
+              snapshot,
+              limitCycle.parameterName
+            )
+            runtimeParameterName = resolveRuntimeParameterName(snapshot, ref)
+          } catch {
+            runtimeParameterName = null
+          }
+        }
+        if (!runtimeParameterName || !runConfig.paramNames.includes(runtimeParameterName)) {
+          runtimeParameterName = runConfig.paramNames[0]
+        }
+
+        const payload: CoreLimitCycleFloquetModesRequest = {
+          system: runConfig,
+          cycleState: reducedState,
+          ntst: limitCycle.ntst,
+          ncol: limitCycle.ncol,
+          parameterName: runtimeParameterName,
+        }
+        const result = await client.computeLimitCycleFloquetModes(payload)
+
+        const normalizeComplexValue = (
+          value: unknown
+        ): {
+          re: number
+          im: number
+        } => {
+          if (value && typeof value === 'object') {
+            const entry = value as { re?: number; im?: number }
+            return {
+              re: Number.isFinite(entry.re) ? (entry.re as number) : Number(entry.re ?? 0),
+              im: Number.isFinite(entry.im) ? (entry.im as number) : Number(entry.im ?? 0),
+            }
+          }
+          return { re: 0, im: 0 }
+        }
+
+        const multipliers = normalizeEigenvalueArray(result.multipliers)
+        const vectors = Array.isArray(result.vectors)
+          ? result.vectors.map((pointVectors) =>
+              Array.isArray(pointVectors)
+                ? pointVectors.map((modeVector) =>
+                    Array.isArray(modeVector)
+                      ? modeVector.map((component) => normalizeComplexValue(component))
+                      : []
+                  )
+                : []
+            )
+          : []
+
+        const updated = updateObject(current, request.limitCycleId, {
+          floquetMultipliers: multipliers,
+          floquetModes: {
+            ntst: Math.max(1, Math.trunc(result.ntst ?? limitCycle.ntst)),
+            ncol: Math.max(1, Math.trunc(result.ncol ?? limitCycle.ncol)),
+            multipliers,
+            vectors,
+            computedAt: new Date().toISOString(),
+          },
+          parameters: [...baseParams],
+          subsystemSnapshot: snapshot,
+          frozenVariables: normalizeObjectFrozenVariables(system, limitCycle),
+        })
+        dispatch({ type: 'SET_SYSTEM', system: updated })
+        await store.save(updated)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, ensureEntitiesLoaded, state.system, store]
   )
 
   const createEquilibriumObject = useCallback(
@@ -6267,6 +6405,7 @@ export function AppProvider({
       sampleMap1DFunction,
       computeLyapunovExponents,
       computeCovariantLyapunovVectors,
+      computeLimitCycleFloquetModes,
       solveEquilibrium,
       createEquilibriumBranch,
       createEquilibriumManifold1D,
@@ -6303,6 +6442,7 @@ export function AppProvider({
       sampleMap1DFunction,
       computeLyapunovExponents,
       computeCovariantLyapunovVectors,
+      computeLimitCycleFloquetModes,
       solveEquilibrium,
       createEquilibriumBranch,
       createEquilibriumManifold1D,

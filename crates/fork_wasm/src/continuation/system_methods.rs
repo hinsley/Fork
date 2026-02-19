@@ -7,6 +7,7 @@ use fork_core::continuation::equilibrium::{
     extend_branch as core_extend_branch, map_cycle_seed_from_pd,
 };
 use fork_core::continuation::{
+    compute_limit_cycle_floquet_modes as core_compute_limit_cycle_floquet_modes,
     continue_homoclinic_curve, continue_homotopy_saddle_curve, continue_limit_cycle_collocation,
     continue_limit_cycle_manifold_2d, continue_limit_cycle_manifold_2d_with_progress,
     continue_manifold_eq_1d, continue_manifold_eq_2d, continue_manifold_eq_2d_with_progress,
@@ -493,6 +494,33 @@ impl WasmSystem {
         .with_rings_computed(rings);
         emit_progress(&progress_callback, final_progress)?;
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn compute_limit_cycle_floquet_modes(
+        &mut self,
+        cycle_state: Vec<f64>,
+        ntst: u32,
+        ncol: u32,
+        parameter_name: &str,
+    ) -> Result<JsValue, JsValue> {
+        if !matches!(self.system_type, SystemType::Flow) {
+            return Err(JsValue::from_str(
+                "Floquet mode computation is currently available for flow systems only.",
+            ));
+        }
+        let param_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
+        let result = core_compute_limit_cycle_floquet_modes(
+            &mut self.system,
+            param_index,
+            &cycle_state,
+            ntst as usize,
+            ncol as usize,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Floquet mode computation failed: {}", e)))?;
+        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
     /// Initializes a limit cycle guess from a Hopf bifurcation point.

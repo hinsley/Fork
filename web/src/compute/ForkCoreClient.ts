@@ -230,6 +230,21 @@ export type LimitCycleManifold2DRequest = {
 
 export type LimitCycleManifold2DResult = ContinuationBranchData
 
+export type LimitCycleFloquetModesRequest = {
+  system: SystemConfig
+  cycleState: number[]
+  ntst: number
+  ncol: number
+  parameterName: string
+}
+
+export type LimitCycleFloquetModesResult = {
+  ntst: number
+  ncol: number
+  multipliers: Array<{ re: number; im: number }>
+  vectors: Array<Array<Array<{ re: number; im: number }>>>
+}
+
 export type ContinuationBranchDataWire = Omit<ContinuationBranchData, 'points'> & {
   points: Array<
     Omit<ContinuationPoint, 'eigenvalues'> & {
@@ -480,6 +495,10 @@ export interface ForkCoreClient {
     request: LimitCycleManifold2DRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<LimitCycleManifold2DResult>
+  computeLimitCycleFloquetModes(
+    request: LimitCycleFloquetModesRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<LimitCycleFloquetModesResult>
   runFoldCurveContinuation(
     request: FoldCurveContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }

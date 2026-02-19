@@ -95,6 +95,9 @@ behavior.
   - limit-cycle object traces set explicit `hovertemplate` strings so hover
     labels use active scene axis variable names and omit time/phase; selected
     limit-cycle points also render as dedicated `circle-open` overlay traces;
+  - persisted limit-cycle Floquet mode vectors (when manually computed from the
+    inspector) reuse the equilibrium eigenline/eigendisc trace pipeline and are
+    sampled along the cycle with a configurable integer stride;
   - cycle-like continuation branches (limit cycle, isochrone, homoclinic
     related) use envelope rendering (min/max traces) for one-free-variable
     projections, rather than plotting every cycle profile point.

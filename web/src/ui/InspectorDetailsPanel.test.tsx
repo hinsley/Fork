@@ -3337,6 +3337,144 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.queryByText('0.1000 + 0.2000i')).toBeNull()
   })
 
+  it('shows and runs manual Floquet mode compute even before multipliers exist', async () => {
+    const user = userEvent.setup()
+    const { system } = createPeriodDoublingSystem()
+    const branchId = Object.keys(system.branches)[0]
+    const branch = branchId ? system.branches[branchId] : undefined
+    const limitCycleId =
+      branch &&
+      Object.entries(system.objects).find(([, obj]) => obj.name === branch.parentObject)?.[0]
+    if (!branchId || !branch || !limitCycleId) {
+      throw new Error('Missing limit cycle branch fixture data.')
+    }
+    const limitCycle = system.objects[limitCycleId] as LimitCycleObject
+    system.objects[limitCycleId] = {
+      ...limitCycle,
+      floquetMultipliers: [],
+      floquetModes: undefined,
+    }
+    const onComputeLimitCycleFloquetModes = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={limitCycleId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onComputeLimitCycleFloquetModes={onComputeLimitCycleFloquetModes}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onSetLimitCycleRenderTarget={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByTestId('limit-cycle-data-toggle'))
+    expect(screen.getByText('Floquet multipliers not computed yet.')).toBeVisible()
+
+    const computeButton = screen.getByTestId('limit-cycle-floquet-modes-compute')
+    expect(computeButton).toBeEnabled()
+    await user.click(computeButton)
+
+    expect(onComputeLimitCycleFloquetModes).toHaveBeenCalledWith({ limitCycleId })
+  })
+
+  it('shows a toggle for the trivial Floquet mode (index 0)', async () => {
+    const user = userEvent.setup()
+    const { system } = createPeriodDoublingSystem()
+    const branchId = Object.keys(system.branches)[0]
+    const branch = branchId ? system.branches[branchId] : undefined
+    const limitCycleId =
+      branch &&
+      Object.entries(system.objects).find(([, obj]) => obj.name === branch.parentObject)?.[0]
+    if (!branchId || !branch || !limitCycleId) {
+      throw new Error('Missing limit cycle branch fixture data.')
+    }
+
+    const limitCycle = system.objects[limitCycleId] as LimitCycleObject
+    system.objects[limitCycleId] = {
+      ...limitCycle,
+      floquetMultipliers: [
+        { re: 1, im: 0 },
+        { re: 0.5, im: 0 },
+      ],
+      floquetModes: {
+        ntst: limitCycle.ntst,
+        ncol: limitCycle.ncol,
+        multipliers: [
+          { re: 1, im: 0 },
+          { re: 0.5, im: 0 },
+        ],
+        vectors: [
+          [
+            [
+              { re: 1, im: 0 },
+              { re: 0, im: 0 },
+            ],
+            [
+              { re: 0, im: 0 },
+              { re: 1, im: 0 },
+            ],
+          ],
+        ],
+        computedAt: new Date().toISOString(),
+      },
+    }
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={limitCycleId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onSetLimitCycleRenderTarget={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByTestId('limit-cycle-data-toggle'))
+    expect(screen.getByTestId('limit-cycle-floquet-show-0')).toBeVisible()
+  })
+
   it('allows restoring the stored limit cycle render target for orbit-sourced cycles', async () => {
     const user = userEvent.setup()
     const { system } = createPeriodDoublingSystem()
