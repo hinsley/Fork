@@ -1984,10 +1984,11 @@ describe('ViewportPanel view state wiring', () => {
         trace.uid === branchResult.nodeId &&
         'mode' in trace &&
         trace.mode === 'lines'
-    ) as { x?: number[]; y?: number[] } | undefined
+    ) as { x?: number[]; y?: number[]; text?: string[] } | undefined
     expect(branchLineTrace).toBeTruthy()
     expect(branchLineTrace?.x).toEqual([0.1, 0.4, 0.7])
     expect(branchLineTrace?.y).toEqual([0, 0, 0])
+    expect(branchLineTrace?.text).toEqual(['mu: 0.3', 'mu: 0.6', 'mu: 0.9'])
 
     const bifTrace = props?.data.find(
       (trace) =>
@@ -2002,6 +2003,7 @@ describe('ViewportPanel view state wiring', () => {
           x?: number[]
           y?: number[]
           customdata?: number[]
+          text?: string[]
           marker?: { symbol?: string }
         }
       | undefined
@@ -2009,6 +2011,7 @@ describe('ViewportPanel view state wiring', () => {
     expect(bifTrace?.x).toEqual([0.4])
     expect(bifTrace?.y).toEqual([0])
     expect(bifTrace?.customdata).toEqual([1])
+    expect(bifTrace?.text?.[0]).toContain('mu: 0.6')
     expect(bifTrace?.marker?.symbol).toBe('diamond')
 
     const selectedTrace = props?.data.find(
@@ -2130,9 +2133,10 @@ describe('ViewportPanel view state wiring', () => {
         trace.uid === branchResult.nodeId &&
         'mode' in trace &&
         trace.mode === 'lines'
-    ) as { x?: number[]; y?: number[] } | undefined
+    ) as { x?: number[]; y?: number[]; text?: string[] } | undefined
     expect(lineTrace?.x).toEqual([0.1, 0.4, 0.8])
     expect(lineTrace?.y).toEqual([0, 0.2, 0.4])
+    expect(lineTrace?.text).toEqual(['mu: 0.3<br>nu: 0.2', 'mu: 0.5<br>nu: 0.3', 'mu: 0.7<br>nu: 0.4'])
 
     const pointTrace = props?.data.find(
       (trace) =>
@@ -2158,13 +2162,94 @@ describe('ViewportPanel view state wiring', () => {
           x?: number[]
           y?: number[]
           customdata?: number[]
+          text?: string[]
           marker?: { symbol?: string }
         }
       | undefined
     expect(bifTrace?.x).toEqual([0.4])
     expect(bifTrace?.y).toEqual([0.2])
     expect(bifTrace?.customdata).toEqual([1])
+    expect(bifTrace?.text?.[0]).toContain('mu: 0.5')
+    expect(bifTrace?.text?.[0]).toContain('nu: 0.3')
     expect(bifTrace?.marker?.symbol).toBe('diamond')
+  })
+
+  it('shows bifurcation parameter values in map scene branch hover text', () => {
+    const config: SystemConfig = {
+      name: 'Scene_Map_Branch_Hover_Params',
+      equations: ['r * x * (1 - x)'],
+      params: [2.5],
+      paramNames: ['r'],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['x'],
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_Map_Seed',
+      systemName: config.name,
+      solution: {
+        state: [0.2],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [0],
+        eigenpairs: [],
+      },
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+    const continuationSettings: ContinuationSettings = {
+      step_size: 0.01,
+      min_step_size: 1e-6,
+      max_step_size: 0.1,
+      max_steps: 10,
+      corrector_steps: 4,
+      corrector_tolerance: 1e-6,
+      step_tolerance: 1e-6,
+    }
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'map_eq_branch',
+      systemName: config.name,
+      parameterName: 'r',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          { state: [0.2], param_value: 2.5, stability: 'Stable', eigenvalues: [] },
+          { state: [0.4], param_value: 2.8, stability: 'None', eigenvalues: [] },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: { type: 'Equilibrium' },
+      },
+      settings: continuationSettings,
+      timestamp: nowIso(),
+      params: [...config.params],
+    }
+    const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
+    system = branchResult.system
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    const lineTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === branch.name &&
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    ) as { text?: string[] } | undefined
+    expect(lineTrace?.text).toEqual(['r: 2.5', 'r: 2.8'])
   })
 
   it('applies dash styles to 1D equilibrium manifold traces in scenes', () => {

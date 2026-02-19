@@ -176,6 +176,12 @@ function resolveStateSpaceStride(value?: number | null): number {
   return rounded >= 1 ? rounded : 1
 }
 
+function formatContinuationHoverParameterValue(value: number): string {
+  if (!Number.isFinite(value)) return 'NaN'
+  const rounded = Number(value.toPrecision(6))
+  return Object.is(rounded, -0) ? '0' : rounded.toString()
+}
+
 type TimeSeriesViewportMeta = {
   yRange?: [number, number] | null
   height?: number | null
@@ -3510,6 +3516,94 @@ function buildSceneTraces(
               : selectedBranchPointIndex
             return `Selected point: ${displayIndex}`
           })()
+    const branchType = branch.data.branch_type
+    const param2Ref =
+      branchType &&
+      typeof branchType === 'object' &&
+      'param2_ref' in branchType &&
+      branchType.param2_ref
+        ? branchType.param2_ref
+        : branch.parameter2Ref
+    const parseParameterNameParts = (value: string): string[] =>
+      value
+        .split(',')
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0)
+    const parameterNameParts = parseParameterNameParts(branch.parameterName ?? '')
+    const resolveParameterLabelFromRef = (
+      ref: ContinuationObject['parameterRef'] | ContinuationObject['parameter2Ref'] | undefined
+    ): string | null => {
+      if (!ref) return null
+      return ref.kind === 'native_param' ? ref.name : ref.variableName
+    }
+    const primaryParameterLabel = (() => {
+      if (branchType && 'param1_name' in branchType && branchType.param1_name.trim()) {
+        return branchType.param1_name.trim()
+      }
+      const labelFromRef = resolveParameterLabelFromRef(branch.parameterRef)
+      if (labelFromRef && labelFromRef.trim()) return labelFromRef.trim()
+      if (parameterNameParts.length > 0) return parameterNameParts[0]
+      return branch.parameterName?.trim() || 'parameter'
+    })()
+    const secondaryParameterLabel = (() => {
+      if (branchType && 'param2_name' in branchType && branchType.param2_name.trim()) {
+        return branchType.param2_name.trim()
+      }
+      const labelFromRef = resolveParameterLabelFromRef(param2Ref)
+      if (labelFromRef && labelFromRef.trim()) return labelFromRef.trim()
+      if (parameterNameParts.length > 1) return parameterNameParts[1]
+      return null
+    })()
+    const resolveBranchParameterFallback = (label: string | null): number | null => {
+      if (!label) return null
+      const paramIndex = system.config.paramNames.indexOf(label)
+      if (paramIndex < 0) return null
+      const fallback = branch.params?.[paramIndex]
+      return Number.isFinite(fallback) ? (fallback as number) : null
+    }
+    const resolveSecondaryParameterValue = (point: ContinuationPoint): number | null => {
+      if (Number.isFinite(point.param2_value)) {
+        return point.param2_value ?? null
+      }
+      const inferred = resolveContinuationPointParam2Value(point, branchType, packedStateDimension)
+      if (Number.isFinite(inferred)) {
+        return inferred as number
+      }
+      return resolveBranchParameterFallback(secondaryParameterLabel)
+    }
+    const buildBranchParameterHoverText = (point: ContinuationPoint): string => {
+      const lines: string[] = []
+      const primaryValue = Number.isFinite(point.param_value)
+        ? (point.param_value as number)
+        : resolveBranchParameterFallback(primaryParameterLabel)
+      if (Number.isFinite(primaryValue)) {
+        lines.push(
+          `${primaryParameterLabel}: ${formatContinuationHoverParameterValue(primaryValue as number)}`
+        )
+      }
+      const secondaryValue = secondaryParameterLabel ? resolveSecondaryParameterValue(point) : null
+      if (
+        secondaryParameterLabel &&
+        secondaryParameterLabel !== primaryParameterLabel &&
+        Number.isFinite(secondaryValue)
+      ) {
+        lines.push(
+          `${secondaryParameterLabel}: ${formatContinuationHoverParameterValue(secondaryValue as number)}`
+        )
+      }
+      return lines.join('<br>')
+    }
+    const branchParameterHoverTextByPointIndex = branch.data.points.map(buildBranchParameterHoverText)
+    const resolvePointParameterHoverText = (pointIndex: number): string =>
+      branchParameterHoverTextByPointIndex[pointIndex] ?? ''
+    const buildBranchTraceParameterText = (pointIndices: number[]): string[] | null => {
+      const labels = pointIndices.map(resolvePointParameterHoverText)
+      return labels.some((label) => label.length > 0) ? labels : null
+    }
+    const appendBranchParameterHoverText = (label: string, pointIndex: number): string => {
+      const parameterText = resolvePointParameterHoverText(pointIndex)
+      return parameterText ? `${label}<br>${parameterText}` : label
+    }
 
     if (MANIFOLD_CURVE_BRANCH_TYPES.has(branch.branchType)) {
       const fallbackDim = branch.data.points[0]?.state.length ?? 0
@@ -3627,7 +3721,7 @@ function buildSceneTraces(
     const resolveDisplayState = (point: ContinuationPoint): number[] => {
       const equilibriumState = resolveContinuationPointEquilibriumState(
         point,
-        branch.data.branch_type,
+        branchType,
         packedStateDimension
       )
       const source =
@@ -3653,14 +3747,6 @@ function buildSceneTraces(
       ) {
         return point.param_value
       }
-      const branchType = branch.data.branch_type
-      const param2Ref =
-        branchType &&
-        typeof branchType === 'object' &&
-        'param2_ref' in branchType &&
-        branchType.param2_ref
-          ? branchType.param2_ref
-          : branch.parameter2Ref
       if (
         param2Ref?.kind !== 'frozen_var' ||
         param2Ref.variableName !== variableName
@@ -3748,6 +3834,7 @@ function buildSceneTraces(
       if (pointIndices.length === 0) {
         continue
       }
+      const branchTraceParameterText = buildBranchTraceParameterText(pointIndices)
 
       if (projectionPlotDim >= 3) {
         traces.push({
@@ -3760,6 +3847,7 @@ function buildSceneTraces(
           z: zMax,
           customdata: pointIndices,
           line: { color: node.render.color, width: lineWidth, dash: lineDash },
+          ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
         })
         traces.push({
           type: 'scatter3d',
@@ -3772,6 +3860,7 @@ function buildSceneTraces(
           customdata: pointIndices,
           line: { color: node.render.color, width: lineWidth, dash: lineDash },
           showlegend: false,
+          ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
         })
       } else {
         traces.push({
@@ -3783,6 +3872,7 @@ function buildSceneTraces(
           y: yMax,
           customdata: pointIndices,
           line: { color: node.render.color, width: lineWidth, dash: lineDash },
+          ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
         })
         traces.push({
           type: 'scatter',
@@ -3794,6 +3884,7 @@ function buildSceneTraces(
           customdata: pointIndices,
           line: { color: node.render.color, width: lineWidth, dash: lineDash },
           showlegend: false,
+          ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
         })
       }
       if (selectedBranchPointIndex !== null && selectedPointLabel) {
@@ -3838,14 +3929,6 @@ function buildSceneTraces(
       if (branch.parameterRef?.kind === 'frozen_var') {
         parameterAxisVariables.add(branch.parameterRef.variableName)
       }
-      const branchType = branch.data.branch_type
-      const param2Ref =
-        branchType &&
-        typeof branchType === 'object' &&
-        'param2_ref' in branchType &&
-        branchType.param2_ref
-          ? branchType.param2_ref
-          : branch.parameter2Ref
       if (param2Ref?.kind === 'frozen_var') {
         parameterAxisVariables.add(param2Ref.variableName)
       }
@@ -3870,6 +3953,7 @@ function buildSceneTraces(
         }
         if (x.length > 0) {
           const isCodim1Curve = CODIM1_BIFURCATION_CURVE_BRANCH_TYPES.has(branch.branchType)
+          const branchTraceParameterText = buildBranchTraceParameterText(pointIndices)
           const positionByPointIndex = new Map<number, number>()
           pointIndices.forEach((pointIndex, position) => {
             if (!positionByPointIndex.has(pointIndex)) {
@@ -3886,6 +3970,7 @@ function buildSceneTraces(
             customdata: pointIndices,
             line: { color: node.render.color, width: lineWidth, dash: lineDash },
             ...(isCodim1Curve ? {} : { marker: { color: node.render.color, size: markerSize } }),
+            ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
           })
           if (isCodim1Curve && branch.data.bifurcations.length > 0) {
             const bx: number[] = []
@@ -3904,7 +3989,12 @@ function buildSceneTraces(
               bifIndices.push(bifIndex)
               const logicalIndex = indices[bifIndex]
               const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : bifIndex
-              labels.push(formatBifurcationLabel(displayIndex, point.stability))
+              labels.push(
+                appendBranchParameterHoverText(
+                  formatBifurcationLabel(displayIndex, point.stability),
+                  bifIndex
+                )
+              )
             }
             if (bx.length > 0) {
               traces.push({
@@ -4006,6 +4096,7 @@ function buildSceneTraces(
           pointIndices.push(idx)
         }
         if (xMax.length > 0) {
+          const branchTraceParameterText = buildBranchTraceParameterText(pointIndices)
           traces.push({
             type: 'scatter',
             mode: 'lines',
@@ -4015,6 +4106,7 @@ function buildSceneTraces(
             y: yMax,
             customdata: pointIndices,
             line: { color: node.render.color, width: lineWidth, dash: lineDash },
+            ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
           })
           traces.push({
             type: 'scatter',
@@ -4026,6 +4118,7 @@ function buildSceneTraces(
             customdata: pointIndices,
             line: { color: node.render.color, width: lineWidth, dash: lineDash },
             showlegend: false,
+            ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
           })
           if (selectedBranchPointIndex !== null && selectedPointLabel) {
             const selectedPosition = pointIndices.indexOf(selectedBranchPointIndex)
@@ -4084,14 +4177,17 @@ function buildSceneTraces(
           subsystemSnapshot: branchSnapshot,
           projection,
         })
+        const pointParameterHoverText = resolvePointParameterHoverText(idx)
         for (const trace of pointTraces) {
           if (
             (trace.type === 'scatter' || trace.type === 'scatter3d') &&
             Array.isArray(trace.x)
           ) {
-            ;(trace as Data & { customdata?: Array<number | null> }).customdata = trace.x.map(
-              () => idx
-            )
+            ;(trace as Data & { customdata?: Array<number | null>; text?: string[] }).customdata =
+              trace.x.map(() => idx)
+            if (pointParameterHoverText) {
+              ;(trace as Data & { text?: string[] }).text = trace.x.map(() => pointParameterHoverText)
+            }
           }
           traces.push(trace)
         }
@@ -4195,6 +4291,7 @@ function buildSceneTraces(
     const renderPointMarkers = !isEquilibriumBranch && !isCodim1BifurcationCurve
     const renderBifurcationMarkers =
       (isEquilibriumBranch || isCodim1BifurcationCurve) && branch.data.bifurcations.length > 0
+    const branchTraceParameterText = buildBranchTraceParameterText(pointIndices)
     const positionByPointIndex = new Map<number, number>()
     pointIndices.forEach((pointIndex, position) => {
       if (!positionByPointIndex.has(pointIndex)) {
@@ -4213,6 +4310,7 @@ function buildSceneTraces(
         customdata: pointIndices,
         line: { color: node.render.color, width: lineWidth, dash: lineDash },
         ...(renderPointMarkers ? { marker: { color: node.render.color, size: markerSize } } : {}),
+        ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
       })
       if (renderBifurcationMarkers) {
         const bx: number[] = []
@@ -4236,7 +4334,12 @@ function buildSceneTraces(
           bifIndices.push(bifIndex)
           const logicalIndex = indices[bifIndex]
           const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : bifIndex
-          labels.push(formatBifurcationLabel(displayIndex, point.stability))
+          labels.push(
+            appendBranchParameterHoverText(
+              formatBifurcationLabel(displayIndex, point.stability),
+              bifIndex
+            )
+          )
         }
         if (bx.length > 0) {
           traces.push({
@@ -4270,6 +4373,7 @@ function buildSceneTraces(
         customdata: pointIndices,
         line: { color: node.render.color, width: lineWidth, dash: lineDash },
         ...(renderPointMarkers ? { marker: { color: node.render.color, size: markerSize } } : {}),
+        ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
       })
       if (renderBifurcationMarkers) {
         const bx: number[] = []
@@ -4288,7 +4392,12 @@ function buildSceneTraces(
           bifIndices.push(bifIndex)
           const logicalIndex = indices[bifIndex]
           const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : bifIndex
-          labels.push(formatBifurcationLabel(displayIndex, point.stability))
+          labels.push(
+            appendBranchParameterHoverText(
+              formatBifurcationLabel(displayIndex, point.stability),
+              bifIndex
+            )
+          )
         }
         if (bx.length > 0) {
           traces.push({
