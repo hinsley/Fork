@@ -24,7 +24,11 @@ import type {
   Scene,
   SystemConfig,
 } from '../system/types'
-import type { BranchPointSelection, OrbitPointSelection } from './branchPointSelection'
+import type {
+  BranchPointSelection,
+  LimitCyclePointSelection,
+  OrbitPointSelection,
+} from './branchPointSelection'
 import { nowIso } from '../utils/determinism'
 import { buildSubsystemSnapshot } from '../system/subsystemGateway'
 
@@ -56,6 +60,7 @@ vi.mock('../viewports/plotly/PlotlyViewport', () => ({
 type RenderPanelOverrides = {
   branchPointSelection?: BranchPointSelection
   orbitPointSelection?: OrbitPointSelection
+  limitCyclePointSelection?: LimitCyclePointSelection
   selectedNodeId?: string | null
   isoclineGeometryCache?: Record<
     string,
@@ -76,6 +81,7 @@ function renderPanel(
       selectedNodeId={overrides.selectedNodeId ?? null}
       branchPointSelection={overrides.branchPointSelection}
       orbitPointSelection={overrides.orbitPointSelection}
+      limitCyclePointSelection={overrides.limitCyclePointSelection}
       theme="light"
       onSelectViewport={vi.fn()}
       onSelectObject={vi.fn()}
@@ -236,6 +242,138 @@ describe('ViewportPanel view state wiring', () => {
       'x: %{x:.6g}<br>y: %{y:.6g}<br>z: %{z:.6g}<br>t: %{text}<extra></extra>'
     )
     expect(orbitTrace?.text).toEqual(['0.000', '0.100', '0.200'])
+  })
+
+  it('selects limit cycle points from scene clicks using trace customdata', () => {
+    const config: SystemConfig = {
+      name: 'LC_Click_System',
+      equations: ['y', '-x'],
+      params: [0.2],
+      paramNames: ['mu'],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: 'LC_Click_System', config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = sceneResult.system
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Click_Target',
+      systemName: config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_A' },
+      ntst: 2,
+      ncol: 1,
+      period: 2,
+      state: [1, 0, 0, 1, -1, 0, 2],
+      createdAt: nowIso(),
+    }
+    const limitCycleResult = addObject(system, limitCycle)
+    system = limitCycleResult.system
+    const onSelectObject = vi.fn()
+    const onSelectLimitCyclePoint = vi.fn()
+
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        theme="light"
+        onSelectViewport={vi.fn()}
+        onSelectObject={onSelectObject}
+        onSelectLimitCyclePoint={onSelectLimitCyclePoint}
+        onReorderViewport={vi.fn()}
+        onResizeViewport={vi.fn()}
+        onToggleViewport={vi.fn()}
+        onCreateScene={vi.fn()}
+        onCreateBifurcation={vi.fn()}
+        onRenameViewport={vi.fn()}
+        onDeleteViewport={vi.fn()}
+      />
+    )
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props?.onPointClick).toBeDefined()
+
+    props?.onPointClick?.({
+      uid: limitCycleResult.nodeId,
+      customdata: 1,
+    })
+
+    expect(onSelectObject).toHaveBeenCalledWith(limitCycleResult.nodeId)
+    expect(onSelectLimitCyclePoint).toHaveBeenCalledWith({
+      limitCycleId: limitCycleResult.nodeId,
+      pointIndex: 1,
+    })
+  })
+
+  it('renders selected limit-cycle markers and hover text without time', () => {
+    const config: SystemConfig = {
+      name: 'LC_Selected_Point_System',
+      equations: ['y', '-x'],
+      params: [0.2],
+      paramNames: ['mu'],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: 'LC_Selected_Point_System', config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = sceneResult.system
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Selected_Point',
+      systemName: config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_A' },
+      ntst: 2,
+      ncol: 1,
+      period: 2,
+      state: [1, 0, 0, 1, -1, 0, 2],
+      createdAt: nowIso(),
+    }
+    const limitCycleResult = addObject(system, limitCycle)
+    system = limitCycleResult.system
+
+    renderPanel(system, {
+      limitCyclePointSelection: { limitCycleId: limitCycleResult.nodeId, pointIndex: 1 },
+    })
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+
+    const selectedTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === `${limitCycle.name} selected point` &&
+        'mode' in trace &&
+        trace.mode === 'markers'
+    ) as
+      | {
+          type?: string
+          x?: number[]
+          y?: number[]
+          customdata?: number[]
+          marker?: { symbol?: string }
+          showlegend?: boolean
+        }
+      | undefined
+
+    expect(selectedTrace?.type).toBe('scatter')
+    expect(selectedTrace?.x).toEqual([0])
+    expect(selectedTrace?.y).toEqual([1])
+    expect(selectedTrace?.customdata).toEqual([1])
+    expect(selectedTrace?.marker?.symbol).toBe('circle-open')
+    expect(selectedTrace?.showlegend).toBe(false)
+
+    const limitCycleTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === limitCycle.name &&
+        'mode' in trace &&
+        trace.mode === 'lines'
+    ) as { hovertemplate?: string } | undefined
+    expect(limitCycleTrace?.hovertemplate).toBe(
+      'x: %{x:.6g}<br>y: %{y:.6g}<extra></extra>'
+    )
   })
 
   it('omits axis ranges from 2D layouts but seeds initialView', () => {

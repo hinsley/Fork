@@ -2186,6 +2186,9 @@ export function InspectorDetailsPanel({
   const [orbitPreviewPage, setOrbitPreviewPage] = useState(0)
   const [orbitPreviewInput, setOrbitPreviewInput] = useState('1')
   const [orbitPreviewError, setOrbitPreviewError] = useState<string | null>(null)
+  const [limitCyclePreviewPage, setLimitCyclePreviewPage] = useState(0)
+  const [limitCyclePreviewInput, setLimitCyclePreviewInput] = useState('1')
+  const [limitCyclePreviewError, setLimitCyclePreviewError] = useState<string | null>(null)
   const [lyapunovDraft, setLyapunovDraft] = useState<LyapunovDraft>(() =>
     makeLyapunovDraft()
   )
@@ -2494,6 +2497,32 @@ export function InspectorDetailsPanel({
     limitCycleSnapshot,
     limitCycleStateDimension,
   ])
+  const limitCyclePreviewPageCount = useMemo(() => {
+    if (limitCycleProfilePoints.length === 0) return 0
+    return Math.ceil(limitCycleProfilePoints.length / ORBIT_PREVIEW_PAGE_SIZE)
+  }, [limitCycleProfilePoints.length])
+  const limitCyclePreviewVarNames = useMemo(() => {
+    if (!limitCycle || limitCycleProfilePoints.length === 0) return []
+    const baseNames =
+      limitCycleSnapshot?.baseVarNames.length === systemDraft.varNames.length
+        ? limitCycleSnapshot.baseVarNames
+        : systemDraft.varNames
+    return baseNames.map((name, index) => {
+      const fallback = name || `x${index + 1}`
+      return limitCycleSnapshot && isVariableFrozen(limitCycleSnapshot, name)
+        ? `${fallback}*`
+        : fallback
+    })
+  }, [limitCycle, limitCycleProfilePoints.length, limitCycleSnapshot, systemDraft.varNames])
+  const limitCyclePreviewStart = limitCyclePreviewPage * ORBIT_PREVIEW_PAGE_SIZE
+  const limitCyclePreviewEnd = Math.min(
+    limitCyclePreviewStart + ORBIT_PREVIEW_PAGE_SIZE,
+    limitCycleProfilePoints.length
+  )
+  const limitCyclePreviewRows = limitCycleProfilePoints.slice(
+    limitCyclePreviewStart,
+    limitCyclePreviewEnd
+  )
   const selectedLimitCyclePoint =
     selectedLimitCyclePointIndex !== null &&
     selectedLimitCyclePointIndex >= 0 &&
@@ -4222,6 +4251,49 @@ export function InspectorDetailsPanel({
       return
     }
     setOrbitPreviewPageIndex(target - 1)
+  }
+
+  const setLimitCyclePreviewPageIndex = useCallback(
+    (page: number) => {
+      if (limitCycleProfilePoints.length === 0) return
+      const maxPage = Math.max(limitCyclePreviewPageCount - 1, 0)
+      const nextPage = Math.min(Math.max(page, 0), maxPage)
+      setLimitCyclePreviewPage(nextPage)
+      setLimitCyclePreviewInput((nextPage + 1).toString())
+      setLimitCyclePreviewError(null)
+    },
+    [limitCyclePreviewPageCount, limitCycleProfilePoints.length]
+  )
+
+  useEffect(() => {
+    if (limitCycleProfilePoints.length === 0 || selectedLimitCyclePointIndex === null) return
+    if (
+      selectedLimitCyclePointIndex < 0 ||
+      selectedLimitCyclePointIndex >= limitCycleProfilePoints.length
+    ) {
+      return
+    }
+    const targetPage = Math.floor(selectedLimitCyclePointIndex / ORBIT_PREVIEW_PAGE_SIZE)
+    setLimitCyclePreviewPageIndex(targetPage)
+  }, [
+    limitCyclePointSelection,
+    limitCycleProfilePoints.length,
+    selectedLimitCyclePointIndex,
+    setLimitCyclePreviewPageIndex,
+  ])
+
+  const handleLimitCyclePreviewJump = () => {
+    if (!limitCycle || limitCyclePreviewPageCount === 0) return
+    const target = parseInteger(limitCyclePreviewInput)
+    if (target === null) {
+      setLimitCyclePreviewError('Enter a valid page number.')
+      return
+    }
+    if (target < 1 || target > limitCyclePreviewPageCount) {
+      setLimitCyclePreviewError(`Page must be between 1 and ${limitCyclePreviewPageCount}.`)
+      return
+    }
+    setLimitCyclePreviewPageIndex(target - 1)
   }
 
   const handlePasteSystemParams = async () => {
@@ -8981,57 +9053,154 @@ export function InspectorDetailsPanel({
                 )}
               </div>
               <div className="inspector-section">
-                <div className="inspector-subheading-row">
-                  <h4 className="inspector-subheading">State</h4>
-                  {limitCycle.state.length > 0 ? (
-                    <div className="inspector-subheading-actions">
-                      <button
-                        type="button"
-                        className="inspector-inline-button"
-                        onClick={() =>
-                          void writeClipboardText(
-                            formatPointValues(selectedLimitCyclePoint ?? limitCycle.state)
-                          )
-                        }
-                      >
-                        {selectedLimitCyclePoint ? 'Copy point' : 'Copy state'}
-                      </button>
-                      {selectedLimitCyclePoint && onLimitCyclePointSelect ? (
+                <h4 className="inspector-subheading">Data preview</h4>
+                {limitCycleProfilePoints.length > 0 ? (
+                  <div className="orbit-preview">
+                    <div className="orbit-preview__controls">
+                      <div className="inspector-row inspector-row--nav">
                         <button
                           type="button"
-                          className="inspector-inline-button"
-                          onClick={() => onLimitCyclePointSelect(null)}
+                          onClick={() => setLimitCyclePreviewPageIndex(0)}
+                          disabled={limitCyclePreviewPage <= 0}
+                          data-testid="limit-cycle-preview-start"
                         >
-                          Clear
+                          Start
                         </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setLimitCyclePreviewPageIndex(limitCyclePreviewPage - 1)
+                          }
+                          disabled={limitCyclePreviewPage <= 0}
+                          data-testid="limit-cycle-preview-prev"
+                        >
+                          Previous
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setLimitCyclePreviewPageIndex(limitCyclePreviewPage + 1)
+                          }
+                          disabled={limitCyclePreviewPage >= limitCyclePreviewPageCount - 1}
+                          data-testid="limit-cycle-preview-next"
+                        >
+                          Next
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setLimitCyclePreviewPageIndex(limitCyclePreviewPageCount - 1)
+                          }
+                          disabled={limitCyclePreviewPage >= limitCyclePreviewPageCount - 1}
+                          data-testid="limit-cycle-preview-end"
+                        >
+                          End
+                        </button>
+                      </div>
+                      <span className="orbit-preview__page">
+                        Page {limitCyclePreviewPage + 1} of {limitCyclePreviewPageCount}
+                      </span>
+                      <label>
+                        Jump to page
+                        <div className="inspector-row orbit-preview__jump">
+                          <input
+                            type="number"
+                            min={1}
+                            max={limitCyclePreviewPageCount}
+                            value={limitCyclePreviewInput}
+                            onChange={(event) => {
+                              setLimitCyclePreviewInput(event.target.value)
+                              setLimitCyclePreviewError(null)
+                            }}
+                            data-testid="limit-cycle-preview-page-input"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleLimitCyclePreviewJump}
+                            data-testid="limit-cycle-preview-page-jump"
+                          >
+                            Jump
+                          </button>
+                        </div>
+                      </label>
+                      {limitCyclePreviewError ? (
+                        <div className="field-error">{limitCyclePreviewError}</div>
+                      ) : null}
+                      <div className="orbit-preview__summary">
+                        Showing {limitCyclePreviewStart + 1}–{limitCyclePreviewEnd} of{' '}
+                        {limitCycleProfilePoints.length.toLocaleString()}
+                      </div>
+                      {selectedLimitCyclePoint ? (
+                        <div className="inspector-inline-actions">
+                          <span className="inspector-meta">
+                            Selected point #{selectedLimitCyclePointIndex}
+                          </span>
+                          <button
+                            type="button"
+                            className="inspector-inline-button"
+                            onClick={() =>
+                              void writeClipboardText(formatPointValues(selectedLimitCyclePoint))
+                            }
+                          >
+                            Copy state
+                          </button>
+                          {onLimitCyclePointSelect ? (
+                            <button
+                              type="button"
+                              className="inspector-inline-button"
+                              onClick={() => onLimitCyclePointSelect(null)}
+                            >
+                              Clear
+                            </button>
+                          ) : null}
+                        </div>
                       ) : null}
                     </div>
-                  ) : null}
-                </div>
-                {limitCycle.state.length > 0 ? (
-                  <div className="inspector-data">
-                    {selectedLimitCyclePoint ? (
-                      <div>
-                        Selected point {selectedLimitCyclePointIndex}: [
-                        {selectedLimitCyclePoint
-                          .slice(0, Math.min(selectedLimitCyclePoint.length, 8))
-                          .map((value) => formatFixed(value, 4))
-                          .join(', ')}
-                        {selectedLimitCyclePoint.length > 8 ? ', ...' : ''}]
-                      </div>
-                    ) : null}
-                    <div>Length: {limitCycle.state.length}</div>
-                    <div>
-                      Preview: [
-                      {limitCycle.state
-                        .slice(0, Math.min(limitCycle.state.length, 8))
-                        .map((value) => formatFixed(value, 4))
-                        .join(', ')}
-                      {limitCycle.state.length > 8 ? ', ...' : ''}]
+                    <div
+                      className="orbit-preview__table"
+                      role="region"
+                      aria-label="Limit cycle data preview"
+                    >
+                      <table className="orbit-preview__table-grid">
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            {limitCyclePreviewVarNames.map((name, index) => (
+                              <th key={`limit-cycle-preview-col-${index}`}>{name}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {limitCyclePreviewRows.map((point, rowIndex) => {
+                            const pointIndex = limitCyclePreviewStart + rowIndex
+                            const isSelected = pointIndex === selectedLimitCyclePointIndex
+                            return (
+                              <tr
+                                key={`limit-cycle-preview-row-${pointIndex}`}
+                                className={isSelected ? 'is-selected' : undefined}
+                                onClick={() => {
+                                  if (!onLimitCyclePointSelect || !selectedNodeId) return
+                                  onLimitCyclePointSelect({
+                                    limitCycleId: selectedNodeId,
+                                    pointIndex,
+                                  })
+                                }}
+                              >
+                                <td>{pointIndex}</td>
+                                {limitCyclePreviewVarNames.map((_, varIndex) => (
+                                  <td key={`limit-cycle-preview-cell-${rowIndex}-${varIndex}`}>
+                                    {formatFixed(point[varIndex] ?? Number.NaN, 4)}
+                                  </td>
+                                ))}
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 ) : (
-                  <p className="empty-state">No state stored yet.</p>
+                  <p className="empty-state">No limit cycle profile points stored yet.</p>
                 )}
               </div>
               <div className="inspector-section">

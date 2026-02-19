@@ -92,6 +92,9 @@ behavior.
     marker style as bifurcation diagrams (`circle-open` overlay);
   - selected orbit-point markers in scenes render as dedicated `circle-open`
     overlay traces so inspector point selection is visible in state space;
+  - limit-cycle object traces set explicit `hovertemplate` strings so hover
+    labels use active scene axis variable names and omit time/phase; selected
+    limit-cycle points also render as dedicated `circle-open` overlay traces;
   - cycle-like continuation branches (limit cycle, isochrone, homoclinic
     related) use envelope rendering (min/max traces) for one-free-variable
     projections, rather than plotting every cycle profile point.

@@ -1110,6 +1110,99 @@ describe('InspectorDetailsPanel', () => {
     expect(within(rows[1]).getByText('20')).toBeVisible()
   })
 
+  it('renders paged limit-cycle data preview and keeps selected rows in view', async () => {
+    const user = userEvent.setup()
+    let system = createSystem({
+      name: 'Limit_Cycle_Preview_Nav',
+      config: {
+        name: 'Limit_Cycle_Preview_Nav',
+        equations: ['y', '-x'],
+        params: [0.2],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const ntst = 12
+    const ncol = 2
+    const period = 8
+    const profilePointCount = ntst * ncol + 1
+    const state: number[] = []
+    for (let index = 0; index < profilePointCount; index += 1) {
+      const theta = (index / (profilePointCount - 1)) * Math.PI * 2
+      state.push(Math.cos(theta), Math.sin(theta))
+    }
+    state.push(period)
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Preview_Nav',
+      systemName: system.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_A' },
+      ntst,
+      ncol,
+      period,
+      state,
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(system, limitCycle)
+    system = added.system
+    const onLimitCyclePointSelect = vi.fn()
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={added.nodeId}
+        view="selection"
+        theme="light"
+        limitCyclePointSelection={{ limitCycleId: added.nodeId, pointIndex: 17 }}
+        onLimitCyclePointSelect={onLimitCyclePointSelect}
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    const limitCycleDataToggle = screen.getByTestId('limit-cycle-data-toggle')
+    const limitCycleDataDetails = limitCycleDataToggle.closest('details')
+    if (limitCycleDataDetails && !limitCycleDataDetails.open) {
+      await user.click(limitCycleDataToggle)
+    }
+
+    expect(screen.getByText('Page 2 of 3')).toBeVisible()
+    await user.click(screen.getByTestId('limit-cycle-preview-next'))
+    expect(screen.getByText('Page 3 of 3')).toBeVisible()
+
+    const selectedRow = document.querySelector('.orbit-preview__table-grid tbody tr.is-selected')
+    expect(selectedRow).toBeNull()
+
+    const tableRegion = screen.getByRole('region', { name: 'Limit cycle data preview' })
+    const rows = within(tableRegion).getAllByRole('row')
+    await user.click(rows[1])
+    expect(onLimitCyclePointSelect).toHaveBeenCalledWith({
+      limitCycleId: added.nodeId,
+      pointIndex: 20,
+    })
+  })
+
   it('creates limit cycle continuation from orbit data', async () => {
     const user = userEvent.setup()
     const { system, objectNodeId } = createDemoSystem()

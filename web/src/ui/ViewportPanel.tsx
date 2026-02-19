@@ -74,6 +74,7 @@ type ViewportPanelProps = {
   selectedNodeId: string | null
   branchPointSelection?: BranchPointSelection
   orbitPointSelection?: OrbitPointSelection
+  limitCyclePointSelection?: LimitCyclePointSelection
   theme: 'light' | 'dark'
   onSelectViewport: (id: string) => void
   onSelectObject: (id: string) => void
@@ -112,6 +113,7 @@ type ViewportTileProps = {
   selectedNodeId: string | null
   branchPointSelection?: BranchPointSelection
   orbitPointSelection?: OrbitPointSelection
+  limitCyclePointSelection?: LimitCyclePointSelection
   mapRange: [number, number] | null
   mapFunctionSamples: MapFunctionSamples | null
   draggingId: string | null
@@ -1356,6 +1358,9 @@ type LimitCycleTraceConfig = {
   allowPackedTail?: boolean
   subsystemSnapshot?: SubsystemSnapshot | null
   projection?: ReturnType<typeof resolveBranchPointDisplayProjection>
+  hoverTemplate3D?: string
+  hoverTemplate2D?: string
+  hoverTemplate1D?: string
 }
 
 function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
@@ -1376,6 +1381,9 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
     allowPackedTail,
     subsystemSnapshot,
     projection,
+    hoverTemplate3D,
+    hoverTemplate2D,
+    hoverTemplate1D,
   } = config
   const traces: Data[] = []
   if (!state || state.length === 0 || dim <= 0) return traces
@@ -1439,6 +1447,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
         z,
         customdata,
         line: { color, width: lineWidth },
+        ...(hoverTemplate3D ? { hovertemplate: hoverTemplate3D } : {}),
         ...(showLegend === undefined ? {} : { showlegend: showLegend }),
       })
       if (hasFiniteClosureCoords) {
@@ -1468,6 +1477,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
         y,
         customdata,
         line: { color, width: lineWidth },
+        ...(hoverTemplate2D ? { hovertemplate: hoverTemplate2D } : {}),
         ...(showLegend === undefined ? {} : { showlegend: showLegend }),
       })
       if (hasFiniteClosureCoords) {
@@ -1500,6 +1510,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
         y,
         customdata,
         line: { color, width: lineWidth },
+        ...(hoverTemplate1D ? { hovertemplate: hoverTemplate1D } : {}),
         ...(showLegend === undefined ? {} : { showlegend: showLegend }),
       })
       if (hasFiniteClosureCoords) {
@@ -1533,6 +1544,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
       z: [fallback[2]],
       customdata: [0],
       marker: { color, size: pointSize },
+      ...(hoverTemplate3D ? { hovertemplate: hoverTemplate3D } : {}),
       ...(showLegend === undefined ? {} : { showlegend: showLegend }),
     })
   } else if (plotDim === 2) {
@@ -1545,6 +1557,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
       y: [fallback[1]],
       customdata: [0],
       marker: { color, size: pointSize },
+      ...(hoverTemplate2D ? { hovertemplate: hoverTemplate2D } : {}),
       ...(showLegend === undefined ? {} : { showlegend: showLegend }),
     })
   } else if (plotDim === 1) {
@@ -1557,6 +1570,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
       y: [fallback[0]],
       customdata: [0],
       marker: { color, size: pointSize },
+      ...(hoverTemplate1D ? { hovertemplate: hoverTemplate1D } : {}),
       ...(showLegend === undefined ? {} : { showlegend: showLegend }),
     })
   }
@@ -2414,6 +2428,7 @@ function buildSceneTraces(
   mapFunctionSamples?: MapFunctionSamples | null,
   branchPointSelection?: BranchPointSelection | null,
   orbitPointSelection?: OrbitPointSelection | null,
+  limitCyclePointSelection?: LimitCyclePointSelection | null,
   plotSize?: PlotSize | null
 ): Data[] {
   const traces: Data[] = []
@@ -2809,6 +2824,10 @@ function buildSceneTraces(
 
     if (object.type === 'limit_cycle') {
       const highlight = nodeId === selectedNodeId
+      const selectedLimitCyclePointIndex =
+        limitCyclePointSelection?.limitCycleId === nodeId
+          ? limitCyclePointSelection.pointIndex
+          : null
       const renderTarget = limitCycleRenderTargets[nodeId] ?? null
       let state = object.state
       let ntst = object.ntst
@@ -2857,6 +2876,25 @@ function buildSceneTraces(
         }
       }
       const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
+      const displayDimension = subsystemSnapshot?.baseVarNames.length ?? packedStateDimension
+      const objectPlotDim = Math.max(
+        1,
+        Math.min(projectionPlotDim, Math.max(1, displayDimension), 3)
+      )
+      const axisOrder = resolveAxisOrder(
+        Math.max(1, displayDimension),
+        objectPlotDim,
+        projectionAxisIndices
+      )
+      const axisX = axisOrder[0] ?? 0
+      const axisY = axisOrder[1] ?? Math.min(1, Math.max(0, displayDimension - 1))
+      const axisZ = axisOrder[2] ?? Math.min(2, Math.max(0, displayDimension - 1))
+      const axisLabelX = system.config.varNames[axisX] ?? 'x'
+      const axisLabelY = system.config.varNames[axisY] ?? 'y'
+      const axisLabelZ = system.config.varNames[axisZ] ?? 'z'
+      const hoverTemplate3D = `${axisLabelX}: %{x:.6g}<br>${axisLabelY}: %{y:.6g}<br>${axisLabelZ}: %{z:.6g}<extra></extra>`
+      const hoverTemplate2D = `${axisLabelX}: %{x:.6g}<br>${axisLabelY}: %{y:.6g}<extra></extra>`
+      const hoverTemplate1D = `${axisLabelX}: %{y:.6g}<extra></extra>`
       traces.push(
         ...buildLimitCycleTraces({
           state,
@@ -2874,8 +2912,88 @@ function buildSceneTraces(
           plotDim: projectionPlotDim,
           subsystemSnapshot,
           projection,
+          hoverTemplate3D,
+          hoverTemplate2D,
+          hoverTemplate1D,
         })
       )
+      if (selectedLimitCyclePointIndex !== null && selectedLimitCyclePointIndex >= 0) {
+        const markerSize = (highlight ? node.render.pointSize + 2 : node.render.pointSize) + 4
+        const selectedLabel = `Selected point: ${selectedLimitCyclePointIndex}`
+        const marker = {
+          color: node.render.color,
+          size: markerSize,
+          symbol: 'circle-open' as const,
+          line: { color: node.render.color, width: 2 },
+        }
+        let selected3D: { x: number; y: number; z: number } | null = null
+        let selected2D: { x: number; y: number } | null = null
+        for (let traceIndex = traces.length - 1; traceIndex >= 0; traceIndex -= 1) {
+          const trace = traces[traceIndex]
+          if (!('uid' in trace) || trace.uid !== nodeId) continue
+          const customdata = (trace as Data & { customdata?: unknown[] }).customdata
+          if (!Array.isArray(customdata) || customdata.length === 0) continue
+          if (trace.type === 'scatter3d') {
+            if (!Array.isArray(trace.x) || !Array.isArray(trace.y) || !Array.isArray(trace.z)) {
+              continue
+            }
+            for (let i = 0; i < customdata.length; i += 1) {
+              if (resolveNumericPointIndex(customdata[i]) !== selectedLimitCyclePointIndex) continue
+              const valueX = trace.x[i]
+              const valueY = trace.y[i]
+              const valueZ = trace.z[i]
+              if (!Number.isFinite(valueX) || !Number.isFinite(valueY) || !Number.isFinite(valueZ)) {
+                continue
+              }
+              selected3D = { x: valueX as number, y: valueY as number, z: valueZ as number }
+              break
+            }
+            if (selected3D) break
+            continue
+          }
+          if (trace.type === 'scatter' && Array.isArray(trace.x) && Array.isArray(trace.y)) {
+            for (let i = 0; i < customdata.length; i += 1) {
+              if (resolveNumericPointIndex(customdata[i]) !== selectedLimitCyclePointIndex) continue
+              const valueX = trace.x[i]
+              const valueY = trace.y[i]
+              if (!Number.isFinite(valueX) || !Number.isFinite(valueY)) continue
+              selected2D = { x: valueX as number, y: valueY as number }
+              break
+            }
+            if (selected2D) break
+          }
+        }
+        if (selected3D) {
+          traces.push({
+            type: 'scatter3d',
+            mode: 'markers',
+            name: `${object.name} selected point`,
+            uid: nodeId,
+            x: [selected3D.x],
+            y: [selected3D.y],
+            z: [selected3D.z],
+            customdata: [selectedLimitCyclePointIndex],
+            marker,
+            text: [selectedLabel],
+            showlegend: false,
+            hovertemplate: '%{text}<extra></extra>',
+          })
+        } else if (selected2D) {
+          traces.push({
+            type: 'scatter',
+            mode: 'markers',
+            name: `${object.name} selected point`,
+            uid: nodeId,
+            x: [selected2D.x],
+            y: [selected2D.y],
+            customdata: [selectedLimitCyclePointIndex],
+            marker,
+            text: [selectedLabel],
+            showlegend: false,
+            hovertemplate: '%{text}<extra></extra>',
+          })
+        }
+      }
       continue
     }
 
@@ -5546,6 +5664,7 @@ function ViewportTile({
   selectedNodeId,
   branchPointSelection,
   orbitPointSelection,
+  limitCyclePointSelection,
   mapRange,
   mapFunctionSamples,
   draggingId,
@@ -5793,10 +5912,12 @@ function ViewportTile({
       mapFunctionSamples,
       branchPointSelection ?? null,
       orbitPointSelection ?? null,
+      limitCyclePointSelection ?? null,
       plotAreaSize
     )
   }, [
     branchPointSelection,
+    limitCyclePointSelection,
     orbitPointSelection,
     mapFunctionSamples,
     mapRange,
@@ -5956,6 +6077,7 @@ export function ViewportPanel({
   selectedNodeId,
   branchPointSelection,
   orbitPointSelection,
+  limitCyclePointSelection,
   theme,
   onSelectViewport,
   onSelectObject,
@@ -6333,6 +6455,7 @@ export function ViewportPanel({
                 selectedNodeId={selectedNodeId}
                 branchPointSelection={branchPointSelection}
                 orbitPointSelection={orbitPointSelection}
+                limitCyclePointSelection={limitCyclePointSelection}
                 mapRange={mapRangeValues}
                 mapFunctionSamples={activeMapFunction}
                 draggingId={draggingId}
