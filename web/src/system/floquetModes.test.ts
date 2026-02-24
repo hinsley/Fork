@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  cycleManifoldFloquetEligibility,
   normalizeFloquetMultipliersForRendering,
   resolveTrivialFloquetModeIndex,
 } from './floquetModes'
@@ -31,5 +32,40 @@ describe('floquetModes helpers', () => {
     const normalized = normalizeFloquetMultipliersForRendering(multipliers)
     expect(normalized[0]).toEqual({ re: 0, im: 0 })
     expect(normalized[1]).toEqual({ re: 0.25, im: 0 })
+  })
+
+  it('matches cycle-manifold Floquet eligibility to core thresholds', () => {
+    expect(cycleManifoldFloquetEligibility({ re: 1.2, im: 0 }, 'Unstable')).toEqual({
+      eligible: true,
+    })
+    expect(cycleManifoldFloquetEligibility({ re: -1.2, im: 0 }, 'Unstable')).toEqual({
+      eligible: true,
+    })
+    expect(cycleManifoldFloquetEligibility({ re: 0.8, im: 0 }, 'Stable')).toEqual({
+      eligible: true,
+    })
+    expect(cycleManifoldFloquetEligibility({ re: -0.8, im: 0 }, 'Stable')).toEqual({
+      eligible: true,
+    })
+    expect(cycleManifoldFloquetEligibility({ re: 1.0, im: 0 }, 'Unstable')).toEqual({
+      eligible: false,
+      reason: 'trivial',
+    })
+    expect(cycleManifoldFloquetEligibility({ re: 0.7, im: 1e-6 }, 'Stable')).toEqual({
+      eligible: false,
+      reason: 'complex',
+    })
+    expect(cycleManifoldFloquetEligibility({ re: 1.2, im: 0 }, 'Stable')).toEqual({
+      eligible: false,
+      reason: 'wrong_side',
+    })
+    expect(cycleManifoldFloquetEligibility({ re: -1.2, im: 0 }, 'Stable')).toEqual({
+      eligible: false,
+      reason: 'wrong_side',
+    })
+    expect(cycleManifoldFloquetEligibility({ re: -0.8, im: 0 }, 'Unstable')).toEqual({
+      eligible: false,
+      reason: 'wrong_side',
+    })
   })
 })

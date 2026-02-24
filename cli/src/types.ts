@@ -186,7 +186,9 @@ export interface EquilibriumManifold2DSettings {
 
 export interface LimitCycleManifold2DSettings {
   stability: ManifoldStability;
+  direction?: ManifoldDirection;
   floquet_index?: number;
+  parameter_index?: number;
   profile?: Manifold2DProfile;
   initial_radius: number;
   leaf_delta: number;
@@ -294,6 +296,7 @@ export type BranchType =
   | {
       type: 'ManifoldCycle2D';
       stability: ManifoldStability;
+      direction?: ManifoldDirection;
       floquet_index: number;
       ntst: number;
       ncol: number;

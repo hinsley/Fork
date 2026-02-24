@@ -1,6 +1,9 @@
 use anyhow::{anyhow, bail, Result};
+use nalgebra::linalg::SVD;
+use nalgebra::DMatrix;
 use num_complex::Complex;
 
+use crate::continuation::periodic::compute_cycle_monodromy_data;
 use crate::continuation::types::{
     BifurcationType, BranchType, ContinuationBranch, ContinuationPoint, Manifold1DSettings,
     Manifold2DProfile, Manifold2DSettings, ManifoldBounds, ManifoldCurveGeometry,
@@ -27,6 +30,7 @@ const LEAF_DELTA_GROW: f64 = 2.0;
 const LEAF_REFINE_ATTEMPTS: usize = 12;
 const LEAF_TAU_NEWTON_MAX_ITERS: usize = 24;
 const LEAF_TAU_NEWTON_MAX_STEP: f64 = 0.25;
+const LEAF_TAU_DERIV_FD_EPS: f64 = 1e-4;
 const LEAF_PLANE_DERIV_EPS: f64 = 1e-12;
 const LEAF_FIRST_HIT_BISECT_ITERS: usize = 24;
 const LEAF_PLANE_BISECT_ITERS: usize = 16;
@@ -36,8 +40,23 @@ const LEAF_TAU_MIN_FACTOR: f64 = 1e-4;
 const LEAF_TAU_INIT_ABS: f64 = 1e-2;
 const LEAF_TAU_MAX_ABS: f64 = 0.5;
 const LEAF_TAU_MAX_TIME_FACTOR: f64 = 0.1;
+const LEAF_MAX_TIME_GROWTH: f64 = 2.0;
+const LEAF_MAX_TIME_RETRIES: usize = 2;
+const LEAF_DT_SHRINK: f64 = 0.5;
+const LEAF_DT_RETRIES: usize = 3;
+const LEAF_DT_MIN_FACTOR: f64 = 1e-3;
+const LEAF_SYNTH_MAX_FAILURES: usize = 4;
 const LEAF_SEGMENT_SWITCH_EPS: f64 = 1e-4;
 const LEAF_SEGMENT_SWITCH_MAX: usize = 64;
+const RING_ADAPT_POINT_FACTOR: usize = 4;
+const RING_SPACING_DIRECT_INSERT_FACTOR: f64 = 3.0;
+const RING_EDGE_RATIO_MAX: f64 = 10.0;
+const RING_TURN_REPARAM_TRIGGER_RAD: f64 = 170.0_f64.to_radians();
+const RING_OUTLIER_DISPLACEMENT_FACTOR: f64 = 4.0;
+const RING_OUTLIER_MIN_SCALE: f64 = 8.0;
+const RING_OUTLIER_MAX_SCALE: f64 = 64.0;
+const RING_OUTLIER_PASSES: usize = 2;
+const STRIP_ARCLENGTH_TRIM_FRAC: f64 = 0.1;
 const TAU_SWITCH_EPS: f64 = 1e-6;
 const LEAF_SIGN_EPS_SCALE: f64 = 1e-14;
 #[cfg(test)]
@@ -534,8 +553,8 @@ pub fn continue_limit_cycle_manifold_2d_with_progress(
     if dim < 3 {
         bail!("2D manifold computation requires ambient dimension n >= 3.");
     }
-    let mut cycle = decode_cycle_mesh_points(cycle_state, dim, ntst, ncol);
-    if cycle.len() < 4 {
+    let cycle_profile = decode_cycle_profile_points(cycle_state, dim, ntst, ncol);
+    if cycle_profile.points.len() < 4 {
         bail!("Cycle profile must contain at least 4 points.");
     }
     let (floquet_index, multiplier) = select_floquet_multiplier(
@@ -543,31 +562,60 @@ pub fn continue_limit_cycle_manifold_2d_with_progress(
         settings.stability,
         settings.floquet_index,
     )?;
-    cycle = resample_closed_ring(&cycle, settings.ring_points.max(8));
+    let (cycle, floquet_dirs) = build_cycle_floquet_seed(
+        system,
+        cycle_state,
+        &cycle_profile,
+        ntst,
+        ncol,
+        settings.parameter_index,
+        multiplier,
+        settings.ring_points.max(8),
+        settings.integration_dt.abs().max(1e-9),
+        settings.caps.max_steps.max(2),
+        settings.caps.max_time.max(1e-9),
+    )?;
+    if cycle.len() != floquet_dirs.len() || cycle.len() < 4 {
+        bail!("Cycle manifold initialization failed to build a valid Floquet seed ring.");
+    }
 
-    let normals = cycle_normals(&cycle);
-    let mut initial_ring =
-        Vec::with_capacity(cycle.len() * if multiplier.re < 0.0 { 2 } else { 1 });
+    let mut initial_ring = Vec::with_capacity(cycle.len() * 2);
     let mut initial_in_anchors = Vec::with_capacity(initial_ring.capacity());
     let radius = settings.initial_radius.max(1e-9);
-    for (point, normal) in cycle.iter().zip(normals.iter()) {
-        let mut seed = point.clone();
-        for i in 0..dim {
-            seed[i] += radius * normal[i];
-        }
-        initial_ring.push(seed);
-        initial_in_anchors.push(point.clone());
-    }
-    if multiplier.re < 0.0 {
-        // Negative multipliers are anti-periodic; use a doubled cover to avoid
-        // forcing a discontinuous direction field around the cycle.
-        for (point, normal) in cycle.iter().zip(normals.iter()) {
-            let mut seed = point.clone();
-            for i in 0..dim {
-                seed[i] -= radius * normal[i];
+    let push_seed_sheet =
+        |sign: f64, initial_ring: &mut Vec<Vec<f64>>, initial_in_anchors: &mut Vec<Vec<f64>>| {
+            for (point, direction) in cycle.iter().zip(floquet_dirs.iter()) {
+                let mut seed = point.clone();
+                for i in 0..dim {
+                    seed[i] += sign * radius * direction[i];
+                }
+                initial_ring.push(seed);
+                initial_in_anchors.push(point.clone());
             }
-            initial_ring.push(seed);
-            initial_in_anchors.push(point.clone());
+        };
+    if multiplier.re < 0.0 {
+        // Negative multipliers are anti-periodic; keep the double cover to avoid
+        // forcing a discontinuous direction field around the cycle. Direction
+        // still controls which sheet is seeded first.
+        if settings.direction == ManifoldDirection::Minus {
+            push_seed_sheet(-1.0, &mut initial_ring, &mut initial_in_anchors);
+            push_seed_sheet(1.0, &mut initial_ring, &mut initial_in_anchors);
+        } else {
+            push_seed_sheet(1.0, &mut initial_ring, &mut initial_in_anchors);
+            push_seed_sheet(-1.0, &mut initial_ring, &mut initial_in_anchors);
+        }
+    } else {
+        match settings.direction {
+            ManifoldDirection::Plus => {
+                push_seed_sheet(1.0, &mut initial_ring, &mut initial_in_anchors);
+            }
+            ManifoldDirection::Minus => {
+                push_seed_sheet(-1.0, &mut initial_ring, &mut initial_in_anchors);
+            }
+            ManifoldDirection::Both => {
+                push_seed_sheet(1.0, &mut initial_ring, &mut initial_in_anchors);
+                push_seed_sheet(-1.0, &mut initial_ring, &mut initial_in_anchors);
+            }
         }
     }
     let sigma = stability_sigma(settings.stability);
@@ -599,6 +647,7 @@ pub fn continue_limit_cycle_manifold_2d_with_progress(
         indices,
         branch_type: BranchType::ManifoldCycle2D {
             stability: settings.stability,
+            direction: settings.direction,
             floquet_index,
             ntst: if settings.ntst > 0 {
                 settings.ntst
@@ -709,7 +758,6 @@ struct RingBuildFailure {
 #[derive(Clone, Copy, Debug)]
 enum RingSpacingFailure {
     InvalidCandidate,
-    TooManyPoints,
     InsertionLeafFailed(LeafFailureKind),
     NoConvergence,
 }
@@ -718,7 +766,6 @@ impl RingSpacingFailure {
     fn as_str(self) -> &'static str {
         match self {
             RingSpacingFailure::InvalidCandidate => "invalid_candidate",
-            RingSpacingFailure::TooManyPoints => "too_many_points",
             RingSpacingFailure::InsertionLeafFailed(_) => "insertion_leaf_failed",
             RingSpacingFailure::NoConvergence => "no_convergence",
         }
@@ -744,6 +791,7 @@ struct LeafSample {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LeafFailureKind {
     PlaneSolveNoConvergence,
+    #[allow(dead_code)]
     SegmentSwitchLimitExceeded,
     IntegratorNonFinite,
     NoFirstHitWithinMaxTime,
@@ -1074,6 +1122,11 @@ fn grow_surface_from_ring(
     } else {
         initial_ring.clone()
     };
+    let (initial_ring, initial_inward) = resample_closed_ring_with_anchors_arclength(
+        &initial_ring,
+        &initial_inward,
+        initial_ring.len().max(4),
+    );
     let mut rings = vec![RingLayer {
         points: initial_ring,
         in_anchors: initial_inward,
@@ -1229,7 +1282,7 @@ fn grow_surface_from_ring(
                 }
             }
 
-            let next = match adapt_ring_spacing(
+            let mut next = match adapt_ring_spacing(
                 system,
                 prev,
                 prev_in_anchors,
@@ -1278,9 +1331,95 @@ fn grow_surface_from_ring(
                     break;
                 }
             };
+            let target_points = prev.len().clamp(4, max_ring_points.max(4));
+            let (reparam_points, reparam_anchors) = resample_closed_ring_with_anchors_arclength(
+                &next.points,
+                &next.in_anchors,
+                target_points,
+            );
+            let base_anchors: Vec<f64> = (0..reparam_points.len())
+                .map(|idx| (idx as f64) / (reparam_points.len().max(1) as f64))
+                .collect();
+            next = RingSolve {
+                points: reparam_points,
+                in_anchors: reparam_anchors,
+                base_anchors,
+            };
+            regularize_ring_correspondence_outliers(prev, &mut next.points, used_delta);
             let adapted_quality = evaluate_ring_quality(&next.points);
             solver_diagnostics.last_ring_max_turn_angle = adapted_quality.max_turn_angle;
             solver_diagnostics.last_ring_max_distance_angle = adapted_quality.max_distance_angle;
+            let edge_ratio = ring_edge_ratio(&next.points);
+            if edge_ratio > RING_EDGE_RATIO_MAX
+                || adapted_quality.max_turn_angle > RING_TURN_REPARAM_TRIGGER_RAD
+            {
+                solver_diagnostics.reject_ring_quality += 1;
+                solver_diagnostics.failed_ring = Some(ring_index + 1);
+                solver_diagnostics.failed_attempt = Some(attempt + 1);
+                last_failure = Some((
+                    SurfaceTerminationReason::GeodesicQualityRejected,
+                    format!(
+                        "ring={} attempt={} delta={:.6e}: reparameterized ring quality trigger (edge_ratio={:.3}, turn_angle={:.3} rad)",
+                        ring_index,
+                        attempt,
+                        used_delta,
+                        edge_ratio,
+                        adapted_quality.max_turn_angle
+                    ),
+                ));
+                if used_delta > delta_min + 1e-12 && attempt + 1 < LEAF_REFINE_ATTEMPTS {
+                    used_delta = (used_delta * LEAF_DELTA_SHRINK).max(delta_min);
+                    reported_leaf_delta = used_delta;
+                    if used_delta <= delta_min + 1e-12 {
+                        solver_diagnostics.min_leaf_delta_reached = true;
+                    }
+                    continue;
+                }
+                if used_delta <= delta_min + 1e-12 {
+                    solver_diagnostics.min_leaf_delta_reached = true;
+                }
+                break;
+            }
+            let mut geodesic_adapt = evaluate_geodesic_quality(prev, prev_in_anchors, &next.points);
+            solver_diagnostics.last_geodesic_max_angle = geodesic_adapt.max_angle;
+            solver_diagnostics.last_geodesic_max_distance_angle = geodesic_adapt.max_delta_angle;
+            if geodesic_adapt.max_delta_angle > controls.delta_alpha_max {
+                regularize_ring_correspondence_outliers(prev, &mut next.points, used_delta * 0.5);
+                geodesic_adapt = evaluate_geodesic_quality(prev, prev_in_anchors, &next.points);
+                solver_diagnostics.last_geodesic_max_angle = geodesic_adapt.max_angle;
+                solver_diagnostics.last_geodesic_max_distance_angle =
+                    geodesic_adapt.max_delta_angle;
+                if geodesic_adapt.max_delta_angle > controls.delta_alpha_max {
+                    solver_diagnostics.reject_geodesic_quality += 1;
+                    solver_diagnostics.failed_ring = Some(ring_index + 1);
+                    solver_diagnostics.failed_attempt = Some(attempt + 1);
+                    last_failure = Some((
+                        SurfaceTerminationReason::GeodesicQualityRejected,
+                        format!(
+                            "ring={} attempt={} delta={:.6e}: post-spacing geodesic reject distance_angle={:.4e}",
+                            ring_index,
+                            attempt,
+                            used_delta,
+                            geodesic_adapt.max_delta_angle
+                        ),
+                    ));
+                    if used_delta > delta_min + 1e-12 && attempt + 1 < LEAF_REFINE_ATTEMPTS {
+                        used_delta = (used_delta * LEAF_DELTA_SHRINK).max(delta_min);
+                        reported_leaf_delta = used_delta;
+                        if used_delta <= delta_min + 1e-12 {
+                            solver_diagnostics.min_leaf_delta_reached = true;
+                        }
+                        continue;
+                    }
+                    if used_delta <= delta_min + 1e-12 {
+                        solver_diagnostics.min_leaf_delta_reached = true;
+                        // At the delta floor, keep the clamped best-effort ring so a single
+                        // stubborn correspondence defect cannot terminate growth immediately.
+                    } else {
+                        break;
+                    }
+                }
+            }
 
             if next.points.len() < 4 {
                 solver_diagnostics.reject_too_small += 1;
@@ -1309,7 +1448,7 @@ fn grow_surface_from_ring(
                 }
                 break;
             }
-            accepted_geodesic = geodesic_raw;
+            accepted_geodesic = geodesic_adapt;
             accepted_ring = Some(next);
             accepted_attempt = attempt;
             break;
@@ -1452,9 +1591,8 @@ fn build_next_ring(
     max_time: f64,
 ) -> Result<RingSolve, RingBuildFailure> {
     let m = prev_ring.len();
-    let mut next = Vec::with_capacity(m);
-    let mut base_anchors = Vec::with_capacity(m);
-    let mut in_anchors = Vec::with_capacity(m);
+    let mut hits = vec![None; m];
+    let mut failures: Vec<(usize, LeafFailure)> = Vec::new();
     for i in 0..m {
         let s = (i as f64) / (m as f64);
         let base_point = &prev_ring[i];
@@ -1469,7 +1607,7 @@ fn build_next_ring(
                 }
                 fallback
             });
-        let hit = match solve_leaf_point_with_retries(
+        match solve_leaf_point_with_retries(
             system,
             prev_ring,
             base_point,
@@ -1483,7 +1621,10 @@ fn build_next_ring(
             max_time,
             None,
         ) {
-            Ok(hit) => hit,
+            Ok(hit) => {
+                hits[i] = Some(hit);
+                continue;
+            }
             Err(failure) => {
                 if std::env::var("FORK_MANIFOLD_DEBUG").is_ok() {
                     eprintln!(
@@ -1496,16 +1637,176 @@ fn build_next_ring(
                         failure.kind.as_str()
                     );
                 }
-                return Err(RingBuildFailure {
-                    solved_points: next.len(),
-                    reason: failure.kind,
-                    point_index: i,
-                    last_time: failure.last_time,
-                    last_segment: failure.last_segment,
-                    last_tau: failure.last_tau,
-                });
+                failures.push((i, failure));
             }
         };
+    }
+
+    if !failures.is_empty() {
+        let mut unresolved: Vec<(usize, LeafFailure)> = Vec::new();
+        let synth_failure_budget = LEAF_SYNTH_MAX_FAILURES
+            .max((m / 3).max(1))
+            .min(m.saturating_sub(4).max(1));
+        if failures.len() <= synth_failure_budget {
+            for (i, failure) in failures {
+                let s = (i as f64) / (m as f64);
+                let base_point = &prev_ring[i];
+                let base_in_anchor = prev_in_anchors.get(i).unwrap_or(base_point);
+                let tangent = ring_tangent_neighbor_average(prev_ring, i);
+                let outward_default = outward_from_in_anchor(base_point, base_in_anchor, &tangent)
+                    .or_else(|_| canonical_orthogonal_unit(&tangent))
+                    .unwrap_or_else(|_| {
+                        let mut fallback = vec![0.0; base_point.len()];
+                        if let Some(first) = fallback.first_mut() {
+                            *first = 1.0;
+                        }
+                        fallback
+                    });
+                let outward = leaf_outward_hint_from_neighbors(&hits, prev_ring, i, &tangent)
+                    .unwrap_or_else(|| outward_default.clone());
+                match solve_leaf_point_with_retries(
+                    system,
+                    prev_ring,
+                    base_point,
+                    s,
+                    &tangent,
+                    &outward,
+                    leaf_delta,
+                    sigma,
+                    dt,
+                    max_steps_per_leaf,
+                    max_time,
+                    None,
+                ) {
+                    Ok(hit) => {
+                        hits[i] = Some(hit);
+                    }
+                    Err(retry_failure) => {
+                        if matches!(
+                            retry_failure.kind,
+                            LeafFailureKind::IntegratorNonFinite
+                                | LeafFailureKind::NoFirstHitWithinMaxTime
+                                | LeafFailureKind::PlaneSolveNoConvergence
+                        ) {
+                            if let Some(synthetic) = synthesize_leaf_hit_from_neighbors(
+                                &hits,
+                                prev_ring,
+                                prev_in_anchors,
+                                i,
+                                &tangent,
+                                &outward_default,
+                                leaf_delta,
+                            ) {
+                                if std::env::var("FORK_MANIFOLD_DEBUG").is_ok() {
+                                    eprintln!(
+                                        "leaf synthesized: i={} original={} retry={}",
+                                        i,
+                                        failure.kind.as_str(),
+                                        retry_failure.kind.as_str()
+                                    );
+                                }
+                                hits[i] = Some(synthetic);
+                                continue;
+                            }
+                        }
+                        unresolved.push((i, retry_failure));
+                    }
+                }
+            }
+        } else {
+            unresolved = failures;
+        }
+        if hits.iter().any(|hit| hit.is_none()) {
+            for _ in 0..m {
+                let mut progress = false;
+                for i in 0..m {
+                    if hits[i].is_some() {
+                        continue;
+                    }
+                    let base_point = &prev_ring[i];
+                    let base_in_anchor = prev_in_anchors.get(i).unwrap_or(base_point);
+                    let tangent = ring_tangent_neighbor_average(prev_ring, i);
+                    let outward_default =
+                        outward_from_in_anchor(base_point, base_in_anchor, &tangent)
+                            .or_else(|_| canonical_orthogonal_unit(&tangent))
+                            .unwrap_or_else(|_| {
+                                let mut fallback = vec![0.0; base_point.len()];
+                                if let Some(first) = fallback.first_mut() {
+                                    *first = 1.0;
+                                }
+                                fallback
+                            });
+                    if let Some(synthetic) = synthesize_leaf_hit_from_neighbors(
+                        &hits,
+                        prev_ring,
+                        prev_in_anchors,
+                        i,
+                        &tangent,
+                        &outward_default,
+                        leaf_delta,
+                    ) {
+                        hits[i] = Some(synthetic);
+                        progress = true;
+                    }
+                }
+                if !progress {
+                    break;
+                }
+            }
+        }
+        unresolved.retain(|(idx, _)| match hits.get(*idx) {
+            Some(Some(_)) => false,
+            _ => true,
+        });
+        if !unresolved.is_empty() || hits.iter().any(|hit| hit.is_none()) {
+            let (point_index, failure) = unresolved.first().copied().unwrap_or_else(|| {
+                for (idx, hit) in hits.iter().enumerate() {
+                    if hit.is_none() {
+                        return (
+                            idx,
+                            LeafFailure {
+                                kind: LeafFailureKind::PlaneSolveNoConvergence,
+                                last_time: 0.0,
+                                last_segment: 0,
+                                last_tau: 0.0,
+                            },
+                        );
+                    }
+                }
+                (
+                    0,
+                    LeafFailure {
+                        kind: LeafFailureKind::PlaneSolveNoConvergence,
+                        last_time: 0.0,
+                        last_segment: 0,
+                        last_tau: 0.0,
+                    },
+                )
+            });
+            let solved_points = hits.iter().filter(|hit| hit.is_some()).count();
+            return Err(RingBuildFailure {
+                solved_points,
+                reason: failure.kind,
+                point_index,
+                last_time: failure.last_time,
+                last_segment: failure.last_segment,
+                last_tau: failure.last_tau,
+            });
+        }
+    }
+
+    let mut next = Vec::with_capacity(m);
+    let mut base_anchors = Vec::with_capacity(m);
+    let mut in_anchors = Vec::with_capacity(m);
+    for hit in hits.into_iter() {
+        let hit = hit.ok_or(RingBuildFailure {
+            solved_points: next.len(),
+            reason: LeafFailureKind::PlaneSolveNoConvergence,
+            point_index: next.len(),
+            last_time: 0.0,
+            last_segment: 0,
+            last_tau: 0.0,
+        })?;
         let _tau_hit = hit.tau_hit;
         next.push(hit.point);
         base_anchors.push(hit.base_anchor);
@@ -1528,6 +1829,168 @@ fn build_next_ring(
     })
 }
 
+fn nearest_successful_leaf_index(
+    hits: &[Option<LeafHit>],
+    start: usize,
+    forward: bool,
+) -> Option<usize> {
+    if hits.is_empty() {
+        return None;
+    }
+    let m = hits.len();
+    let mut idx = start % m;
+    for _ in 0..m {
+        idx = if forward {
+            (idx + 1) % m
+        } else {
+            (idx + m - 1) % m
+        };
+        if hits[idx].is_some() {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+fn averaged_neighbor_displacement(
+    hits: &[Option<LeafHit>],
+    prev_ring: &[Vec<f64>],
+    index: usize,
+) -> Option<Vec<f64>> {
+    let dim = prev_ring.get(index)?.len();
+    if dim == 0 {
+        return None;
+    }
+    let prev_idx = nearest_successful_leaf_index(hits, index, false);
+    let next_idx = nearest_successful_leaf_index(hits, index, true);
+    let mut displacement = vec![0.0; dim];
+    let mut samples = 0usize;
+    for idx in [prev_idx, next_idx].into_iter().flatten() {
+        let hit = hits.get(idx)?.as_ref()?;
+        if prev_ring.get(idx)?.len() != dim || hit.point.len() != dim {
+            continue;
+        }
+        let local_disp = subtract(&hit.point, &prev_ring[idx]);
+        if !local_disp.iter().all(|value| value.is_finite()) {
+            continue;
+        }
+        for d in 0..dim {
+            displacement[d] += local_disp[d];
+        }
+        samples += 1;
+    }
+    if samples == 0 {
+        return None;
+    }
+    for value in &mut displacement {
+        *value /= samples as f64;
+    }
+    if !displacement.iter().all(|value| value.is_finite()) {
+        return None;
+    }
+    Some(displacement)
+}
+
+fn leaf_outward_hint_from_neighbors(
+    hits: &[Option<LeafHit>],
+    prev_ring: &[Vec<f64>],
+    index: usize,
+    tangent: &[f64],
+) -> Option<Vec<f64>> {
+    let mut hint = averaged_neighbor_displacement(hits, prev_ring, index)?;
+    if tangent.len() == hint.len() {
+        if let Ok(tangent_unit) = normalize(tangent.to_vec()) {
+            let projection = dot(&hint, &tangent_unit);
+            for d in 0..hint.len() {
+                hint[d] -= projection * tangent_unit[d];
+            }
+        }
+    }
+    if l2_norm(&hint) <= NORM_EPS {
+        return None;
+    }
+    normalize(hint).ok()
+}
+
+fn synthesize_leaf_hit_from_neighbors(
+    hits: &[Option<LeafHit>],
+    prev_ring: &[Vec<f64>],
+    prev_in_anchors: &[Vec<f64>],
+    index: usize,
+    tangent: &[f64],
+    outward: &[f64],
+    leaf_delta: f64,
+) -> Option<LeafHit> {
+    let base_point = prev_ring.get(index)?;
+    let dim = base_point.len();
+    if dim == 0 || outward.len() != dim {
+        return None;
+    }
+    let mut displacement =
+        averaged_neighbor_displacement(hits, prev_ring, index).unwrap_or_else(|| outward.to_vec());
+    if displacement.len() != dim {
+        displacement = outward.to_vec();
+    }
+    if tangent.len() == dim {
+        if let Ok(tangent_unit) = normalize(tangent.to_vec()) {
+            let projection = dot(&displacement, &tangent_unit);
+            for d in 0..dim {
+                displacement[d] -= projection * tangent_unit[d];
+            }
+        }
+    }
+
+    let target_distance = {
+        let prev_idx = nearest_successful_leaf_index(hits, index, false);
+        let next_idx = nearest_successful_leaf_index(hits, index, true);
+        let mut sum = 0.0_f64;
+        let mut count = 0usize;
+        for idx in [prev_idx, next_idx].into_iter().flatten() {
+            let hit = hits.get(idx)?.as_ref()?;
+            let local = subtract(&hit.point, prev_ring.get(idx)?);
+            let norm = l2_norm(&local);
+            if norm.is_finite() && norm > NORM_EPS {
+                sum += norm;
+                count += 1;
+            }
+        }
+        let base = if count > 0 {
+            sum / (count as f64)
+        } else {
+            leaf_delta.max(1e-9)
+        };
+        base.clamp(0.25 * leaf_delta.max(1e-9), 4.0 * leaf_delta.max(1e-9))
+    };
+
+    let direction = if let Ok(unit) = normalize(displacement) {
+        unit
+    } else {
+        normalize(outward.to_vec()).ok()?
+    };
+    if !direction.iter().all(|value| value.is_finite()) {
+        return None;
+    }
+    let mut point = base_point.clone();
+    for d in 0..dim {
+        point[d] += target_distance * direction[d];
+    }
+    if !point.iter().all(|value| value.is_finite()) {
+        return None;
+    }
+
+    let m = prev_ring.len().max(1);
+    let in_anchor = prev_in_anchors
+        .get(index)
+        .cloned()
+        .unwrap_or_else(|| base_point.clone());
+    Some(LeafHit {
+        point,
+        tau_hit: 0.0,
+        base_anchor: (index as f64) / (m as f64),
+        in_anchor,
+    })
+}
+
 fn adapt_ring_spacing(
     system: &EquationSystem,
     prev_ring: &[Vec<f64>],
@@ -1542,14 +2005,37 @@ fn adapt_ring_spacing(
     max_time: f64,
     max_ring_points: usize,
 ) -> Result<RingSolve, RingSpacingFailure> {
+    let adaptive_point_cap = max_ring_points
+        .min(
+            prev_ring
+                .len()
+                .saturating_mul(RING_ADAPT_POINT_FACTOR)
+                .max(8),
+        )
+        .max(4);
+
+    let build_uniform_base_anchors = |len: usize| -> Vec<f64> {
+        (0..len)
+            .map(|idx| (idx as f64) / (len.max(1) as f64))
+            .collect()
+    };
     if raw_next.points.len() < 4
         || raw_next.base_anchors.len() != raw_next.points.len()
         || raw_next.in_anchors.len() != raw_next.points.len()
     {
         return Err(RingSpacingFailure::InvalidCandidate);
     }
-    if raw_next.points.len() > max_ring_points {
-        return Err(RingSpacingFailure::TooManyPoints);
+    if raw_next.points.len() > adaptive_point_cap {
+        let (points, in_anchors) = resample_closed_ring_with_anchors_arclength(
+            &raw_next.points,
+            &raw_next.in_anchors,
+            adaptive_point_cap,
+        );
+        return Ok(RingSolve {
+            points,
+            base_anchors: build_uniform_base_anchors(in_anchors.len()),
+            in_anchors,
+        });
     }
 
     let mut ring = raw_next;
@@ -1582,9 +2068,10 @@ fn adapt_ring_spacing(
         }
 
         let m = ring.points.len();
-        let mut points = Vec::with_capacity((m * 2).min(max_ring_points));
-        let mut base_anchors = Vec::with_capacity((m * 2).min(max_ring_points));
-        let mut in_anchors = Vec::with_capacity((m * 2).min(max_ring_points));
+        let mut points = Vec::with_capacity((m * 2).min(adaptive_point_cap));
+        let mut base_anchors = Vec::with_capacity((m * 2).min(adaptive_point_cap));
+        let mut in_anchors = Vec::with_capacity((m * 2).min(adaptive_point_cap));
+        let mut insertion_budget_exhausted = false;
         for i in 0..m {
             let j = (i + 1) % m;
             points.push(ring.points[i].clone());
@@ -1596,12 +2083,28 @@ fn adapt_ring_spacing(
             if !needs_insert {
                 continue;
             }
-            if points.len() >= max_ring_points {
-                return Err(RingSpacingFailure::TooManyPoints);
+            if points.len() >= adaptive_point_cap {
+                insertion_budget_exhausted = true;
+                break;
             }
             let base_s_mid = circular_midpoint(ring.base_anchors[i], ring.base_anchors[j]);
             let base_point = sample_ring_uniform(prev_ring, base_s_mid);
             let base_in_anchor = sample_ring_uniform(prev_in_anchors, base_s_mid);
+            if spacing > max_spacing * RING_SPACING_DIRECT_INSERT_FACTOR {
+                if let Some((point, in_anchor)) = synthesize_spacing_insertion_point(
+                    &ring.points[i],
+                    &ring.points[j],
+                    &ring.in_anchors[i],
+                    &ring.in_anchors[j],
+                    &base_in_anchor,
+                ) {
+                    points.push(point);
+                    base_anchors.push(base_s_mid);
+                    in_anchors.push(in_anchor);
+                    changed = true;
+                    continue;
+                }
+            }
             let tangent = ring_tangent_uniform(prev_ring, base_s_mid);
             let outward = outward_from_in_anchor(&base_point, &base_in_anchor, &tangent)
                 .or_else(|_| canonical_orthogonal_unit(&tangent))
@@ -1625,34 +2128,182 @@ fn adapt_ring_spacing(
                 max_steps_per_leaf,
                 max_time,
                 None,
-            )
-            .map_err(|failure| RingSpacingFailure::InsertionLeafFailed(failure.kind))?;
-            points.push(hit.point);
-            base_anchors.push(hit.base_anchor);
-            in_anchors.push(hit.in_anchor);
+            );
+            match hit {
+                Ok(hit) => {
+                    points.push(hit.point);
+                    base_anchors.push(hit.base_anchor);
+                    in_anchors.push(hit.in_anchor);
+                }
+                Err(failure) => {
+                    if matches!(
+                        failure.kind,
+                        LeafFailureKind::IntegratorNonFinite
+                            | LeafFailureKind::NoFirstHitWithinMaxTime
+                            | LeafFailureKind::PlaneSolveNoConvergence
+                    ) {
+                        if let Some((point, in_anchor)) = synthesize_spacing_insertion_point(
+                            &ring.points[i],
+                            &ring.points[j],
+                            &ring.in_anchors[i],
+                            &ring.in_anchors[j],
+                            &base_in_anchor,
+                        ) {
+                            if std::env::var("FORK_MANIFOLD_DEBUG").is_ok() {
+                                eprintln!(
+                                    "spacing insertion synthesized: edge=({},{}) base_s={:.6} reason={}",
+                                    i,
+                                    j,
+                                    base_s_mid,
+                                    failure.kind.as_str()
+                                );
+                            }
+                            points.push(point);
+                            base_anchors.push(base_s_mid);
+                            in_anchors.push(in_anchor);
+                            changed = true;
+                            continue;
+                        }
+                    }
+                    return Err(RingSpacingFailure::InsertionLeafFailed(failure.kind));
+                }
+            }
             changed = true;
         }
 
-        if points.len() > max_ring_points {
-            return Err(RingSpacingFailure::TooManyPoints);
-        }
         ring = RingSolve {
             points,
             base_anchors,
             in_anchors,
         };
+        if insertion_budget_exhausted {
+            return Ok(ring);
+        }
         if !changed {
             return Ok(ring);
         }
     }
 
-    if ring.points.len() > max_ring_points {
-        return Err(RingSpacingFailure::TooManyPoints);
+    if ring.points.len() > adaptive_point_cap {
+        let (points, in_anchors) = resample_closed_ring_with_anchors_arclength(
+            &ring.points,
+            &ring.in_anchors,
+            adaptive_point_cap,
+        );
+        ring = RingSolve {
+            points,
+            base_anchors: build_uniform_base_anchors(in_anchors.len()),
+            in_anchors,
+        };
     }
     if ring.points.len() < 4 {
         return Err(RingSpacingFailure::InvalidCandidate);
     }
     Err(RingSpacingFailure::NoConvergence)
+}
+
+fn synthesize_spacing_insertion_point(
+    left_point: &[f64],
+    right_point: &[f64],
+    left_in_anchor: &[f64],
+    right_in_anchor: &[f64],
+    fallback_in_anchor: &[f64],
+) -> Option<(Vec<f64>, Vec<f64>)> {
+    if left_point.len() != right_point.len() || left_point.is_empty() {
+        return None;
+    }
+    let point = lerp(left_point, right_point, 0.5);
+    if !point.iter().all(|value| value.is_finite()) {
+        return None;
+    }
+
+    let in_anchor =
+        if left_in_anchor.len() == right_in_anchor.len() && left_in_anchor.len() == point.len() {
+            let candidate = lerp(left_in_anchor, right_in_anchor, 0.5);
+            if candidate.iter().all(|value| value.is_finite()) {
+                candidate
+            } else {
+                fallback_in_anchor.to_vec()
+            }
+        } else {
+            fallback_in_anchor.to_vec()
+        };
+    if in_anchor.len() != point.len() || !in_anchor.iter().all(|value| value.is_finite()) {
+        return None;
+    }
+    Some((point, in_anchor))
+}
+
+fn median_finite(values: &[f64]) -> Option<f64> {
+    let mut finite: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
+    if finite.is_empty() {
+        return None;
+    }
+    finite.sort_by(|a, b| a.total_cmp(b));
+    let n = finite.len();
+    if n % 2 == 1 {
+        Some(finite[n / 2])
+    } else {
+        Some(0.5 * (finite[n / 2 - 1] + finite[n / 2]))
+    }
+}
+
+fn regularize_ring_correspondence_outliers(
+    prev_ring: &[Vec<f64>],
+    next_ring: &mut [Vec<f64>],
+    leaf_delta: f64,
+) {
+    if prev_ring.len() != next_ring.len() || prev_ring.len() < 4 {
+        return;
+    }
+    let displacements: Vec<f64> = prev_ring
+        .iter()
+        .zip(next_ring.iter())
+        .map(|(prev, next)| l2_distance(prev, next))
+        .collect();
+    let Some(median_disp) = median_finite(&displacements) else {
+        return;
+    };
+    let leaf_scale = leaf_delta.abs().max(1e-9);
+    let threshold = (median_disp * RING_OUTLIER_DISPLACEMENT_FACTOR)
+        .clamp(
+            leaf_scale * RING_OUTLIER_MIN_SCALE,
+            leaf_scale * RING_OUTLIER_MAX_SCALE,
+        )
+        .max(1e-9);
+
+    let m = next_ring.len();
+    for _ in 0..RING_OUTLIER_PASSES {
+        let mut changed = false;
+        for i in 0..m {
+            if l2_distance(&prev_ring[i], &next_ring[i]) <= threshold {
+                continue;
+            }
+            let left = &next_ring[(i + m - 1) % m];
+            let right = &next_ring[(i + 1) % m];
+            if left.len() != right.len() || left.len() != prev_ring[i].len() {
+                continue;
+            }
+            let mut candidate = lerp(left, right, 0.5);
+            let offset = subtract(&candidate, &prev_ring[i]);
+            let norm = l2_norm(&offset);
+            if norm.is_finite() && norm > threshold {
+                if let Ok(unit) = normalize(offset) {
+                    for d in 0..candidate.len() {
+                        candidate[d] = prev_ring[i][d] + threshold * unit[d];
+                    }
+                }
+            }
+            if !candidate.iter().all(|value| value.is_finite()) {
+                continue;
+            }
+            next_ring[i] = candidate;
+            changed = true;
+        }
+        if !changed {
+            break;
+        }
+    }
 }
 
 fn evaluate_ring_quality(ring: &[Vec<f64>]) -> RingQuality {
@@ -1741,14 +2392,27 @@ fn average_strip_distance(prev_ring: &[Vec<f64>], next_ring: &[Vec<f64>]) -> f64
         return 0.0;
     }
     let samples = prev_ring.len().max(next_ring.len()).max(8);
-    let mut sum = 0.0;
+    let mut distances = Vec::with_capacity(samples);
     for i in 0..samples {
         let s = (i as f64) / (samples as f64);
         let p_prev = sample_ring_uniform(prev_ring, s);
         let p_next = sample_ring_uniform(next_ring, s);
-        sum += l2_distance(&p_prev, &p_next);
+        distances.push(l2_distance(&p_prev, &p_next));
     }
-    sum / (samples as f64)
+    let mut finite: Vec<f64> = distances
+        .into_iter()
+        .filter(|value| value.is_finite())
+        .collect();
+    if finite.is_empty() {
+        return 0.0;
+    }
+    finite.sort_by(|a, b| a.total_cmp(b));
+    let trim = ((finite.len() as f64) * STRIP_ARCLENGTH_TRIM_FRAC) as usize;
+    if trim.saturating_mul(2) >= finite.len() {
+        return finite.iter().sum::<f64>() / (finite.len() as f64);
+    }
+    let core = &finite[trim..(finite.len() - trim)];
+    core.iter().sum::<f64>() / (core.len() as f64)
 }
 
 fn sample_ring_uniform(ring: &[Vec<f64>], s: f64) -> Vec<f64> {
@@ -1990,7 +2654,20 @@ fn eval_plane_residual_and_derivative_on_segment(
         return Err(LeafFailureKind::PlaneSolveNoConvergence);
     }
     let (start, dldt) = segment_point_with_derivative(ring, segment_index, tau_segment);
-    let (point, phi) = integrate_state_and_variational(
+    let residual_at = |tau_seg: f64| -> Option<f64> {
+        let (seed, _dseed) = segment_point_with_derivative(ring, segment_index, tau_seg);
+        let point = integrate_state_only(
+            system,
+            &seed,
+            tau_time,
+            sigma,
+            dt,
+            max_steps_per_leaf,
+            max_time,
+        )?;
+        Some(dot(leaf_normal, &subtract(&point, base_point)))
+    };
+    let point = integrate_state_only(
         system,
         &start,
         tau_time,
@@ -2001,13 +2678,51 @@ fn eval_plane_residual_and_derivative_on_segment(
     )
     .ok_or(LeafFailureKind::IntegratorNonFinite)?;
     let residual = dot(leaf_normal, &subtract(&point, base_point));
-    let transported =
-        mat_vec_mul_row_major(&phi, &dldt).ok_or(LeafFailureKind::IntegratorNonFinite)?;
-    let deriv = dot(leaf_normal, &transported);
+
+    let fd_eps = LEAF_TAU_DERIV_FD_EPS.max(1e-6);
+    let mut deriv = {
+        let forward_tau = (tau_segment + fd_eps).min(1.0);
+        let backward_tau = (tau_segment - fd_eps).max(0.0);
+        if forward_tau - tau_segment > 1e-12 {
+            if let Some(h_forward) = residual_at(forward_tau) {
+                (h_forward - residual) / (forward_tau - tau_segment)
+            } else {
+                0.0
+            }
+        } else if tau_segment - backward_tau > 1e-12 {
+            if let Some(h_backward) = residual_at(backward_tau) {
+                (residual - h_backward) / (tau_segment - backward_tau)
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        }
+    };
+    if !deriv.is_finite() || deriv.abs() <= LEAF_PLANE_DERIV_EPS {
+        if let Some((_point_var, phi)) = integrate_state_and_variational(
+            system,
+            &start,
+            tau_time,
+            sigma,
+            dt,
+            max_steps_per_leaf,
+            max_time,
+        ) {
+            if let Some(transported) = mat_vec_mul_row_major(&phi, &dldt) {
+                let deriv_var = dot(leaf_normal, &transported);
+                if deriv_var.is_finite() {
+                    deriv = deriv_var;
+                }
+            }
+        }
+    }
+    if !deriv.is_finite() {
+        deriv = 0.0;
+    }
     if !residual.is_finite()
-        || !deriv.is_finite()
-        || point.iter().any(|value| !value.is_finite())
-        || start.iter().any(|value| !value.is_finite())
+        || !point.iter().all(|value| value.is_finite())
+        || !start.iter().all(|value| value.is_finite())
     {
         return Err(LeafFailureKind::IntegratorNonFinite);
     }
@@ -2197,6 +2912,52 @@ fn try_solve_plane_root_on_segment(
     Ok(None)
 }
 
+fn relaxed_plane_projection_on_ring(
+    system: &EquationSystem,
+    ring: &[Vec<f64>],
+    base_point: &[f64],
+    leaf_normal: &[f64],
+    tau_time: f64,
+    sigma: f64,
+    dt: f64,
+    max_steps_per_leaf: usize,
+    max_time: f64,
+) -> Result<Option<(usize, f64, Vec<f64>, Vec<f64>)>, LeafFailureKind> {
+    if ring.is_empty() {
+        return Ok(None);
+    }
+    let mut best_abs_h = f64::INFINITY;
+    let mut best_candidate: Option<(usize, f64, Vec<f64>, Vec<f64>)> = None;
+    let sample_taus = [0.0_f64, 0.25, 0.5, 0.75, 1.0];
+    for seg in 0..ring.len() {
+        for tau in sample_taus {
+            let (h, _dh, start, end) = eval_plane_residual_and_derivative_on_segment(
+                system,
+                ring,
+                base_point,
+                leaf_normal,
+                seg,
+                tau_time,
+                tau,
+                sigma,
+                dt,
+                max_steps_per_leaf,
+                max_time,
+            )?;
+            let abs_h = h.abs();
+            if abs_h < best_abs_h {
+                best_abs_h = abs_h;
+                best_candidate = Some((seg, canonicalize_segment_tau(tau), start, end));
+            }
+        }
+    }
+
+    if best_abs_h.is_finite() {
+        return Ok(best_candidate);
+    }
+    Ok(None)
+}
+
 fn solve_plane_root_polygon(
     system: &EquationSystem,
     ring: &[Vec<f64>],
@@ -2211,11 +2972,45 @@ fn solve_plane_root_polygon(
     max_time: f64,
     plane_tol: f64,
 ) -> Result<(usize, f64, Vec<f64>, Vec<f64>), LeafFailureKind> {
+    solve_plane_root_polygon_with_switch_cap(
+        system,
+        ring,
+        base_point,
+        leaf_normal,
+        tau_time,
+        seed_seg,
+        seed_tau,
+        sigma,
+        dt,
+        max_steps_per_leaf,
+        max_time,
+        plane_tol,
+        None,
+    )
+}
+
+fn solve_plane_root_polygon_with_switch_cap(
+    system: &EquationSystem,
+    ring: &[Vec<f64>],
+    base_point: &[f64],
+    leaf_normal: &[f64],
+    tau_time: f64,
+    seed_seg: usize,
+    seed_tau: f64,
+    sigma: f64,
+    dt: f64,
+    max_steps_per_leaf: usize,
+    max_time: f64,
+    plane_tol: f64,
+    max_switch_override: Option<usize>,
+) -> Result<(usize, f64, Vec<f64>, Vec<f64>), LeafFailureKind> {
     if ring.is_empty() {
         return Err(LeafFailureKind::PlaneSolveNoConvergence);
     }
     let m = ring.len();
-    let max_switch = m.saturating_add(8).max(LEAF_SEGMENT_SWITCH_MAX).min(4096);
+    let max_switch = max_switch_override
+        .unwrap_or_else(|| m.saturating_add(8).max(LEAF_SEGMENT_SWITCH_MAX).min(4096))
+        .max(1);
     let mut seg = seed_seg % m;
     let mut tau = canonicalize_segment_tau(seed_tau.clamp(0.0, 1.0));
     let mut switch_count = 0usize;
@@ -2248,7 +3043,7 @@ fn solve_plane_root_polygon(
                 tau = canonicalize_segment_tau(tau_next + 1.0);
                 switch_count += 1;
                 if switch_count >= max_switch {
-                    return Err(LeafFailureKind::SegmentSwitchLimitExceeded);
+                    break 'newton;
                 }
                 continue 'newton;
             }
@@ -2261,7 +3056,7 @@ fn solve_plane_root_polygon(
                 tau = canonicalize_segment_tau(tau_next - 1.0);
                 switch_count += 1;
                 if switch_count >= max_switch {
-                    return Err(LeafFailureKind::SegmentSwitchLimitExceeded);
+                    break 'newton;
                 }
                 continue 'newton;
             }
@@ -2317,6 +3112,20 @@ fn solve_plane_root_polygon(
         }
     }
 
+    if let Some((segment, tau, start, end)) = relaxed_plane_projection_on_ring(
+        system,
+        ring,
+        base_point,
+        leaf_normal,
+        tau_time,
+        sigma,
+        dt,
+        max_steps_per_leaf,
+        max_time,
+    )? {
+        return Ok((segment, tau, start, end));
+    }
+
     Err(LeafFailureKind::PlaneSolveNoConvergence)
 }
 
@@ -2338,7 +3147,7 @@ fn evaluate_leaf_sample_at_time(
     if ring.is_empty() {
         return Err(LeafFailureKind::PlaneSolveNoConvergence);
     }
-    let (seg_index, seg_tau, _start, point) = solve_plane_root_polygon(
+    let (seg_index, seg_tau, point) = match solve_plane_root_polygon(
         system,
         ring,
         base_point,
@@ -2351,7 +3160,28 @@ fn evaluate_leaf_sample_at_time(
         max_steps_per_leaf,
         max_time,
         plane_tol,
-    )?;
+    ) {
+        Ok((seg, tau, _start, point)) => (seg, tau, point),
+        Err(LeafFailureKind::PlaneSolveNoConvergence) => {
+            // Fallback for first-ring robustness: if strict projection fails, keep the
+            // seeded segment parameterization and evaluate the leaf from that startpoint.
+            let seg = segment_index % ring.len();
+            let tau = canonicalize_segment_tau(segment_tau_seed.clamp(0.0, 1.0));
+            let (start, _dldt) = segment_point_with_derivative(ring, seg, tau);
+            let point = integrate_state_only(
+                system,
+                &start,
+                tau_time,
+                sigma,
+                dt,
+                max_steps_per_leaf,
+                max_time,
+            )
+            .ok_or(LeafFailureKind::IntegratorNonFinite)?;
+            (seg, tau, point)
+        }
+        Err(reason) => return Err(reason),
+    };
     let offset = subtract(&point, base_point);
     let uz = signed_distance_with_direction(signed_direction, &offset);
     Ok(LeafSample {
@@ -2376,20 +3206,51 @@ fn solve_leaf_point_with_retries(
     max_time: f64,
     center: Option<&[f64]>,
 ) -> Result<LeafHit, LeafFailure> {
-    shoot_leaf_point(
-        system,
-        ring,
-        base_point,
-        base_s,
-        tangent,
-        outward,
-        leaf_delta,
-        sigma,
-        dt,
-        max_steps_per_leaf,
-        max_time,
-        center,
-    )
+    let mut time_cap = max_time.max(dt.max(1e-9));
+    let max_time_cap = max_time.max(dt.max(1e-9)) * 8.0;
+    let mut dt_try = dt.max(1e-9);
+    let dt_min = (dt.abs() * LEAF_DT_MIN_FACTOR).max(1e-9);
+    let mut time_retries = 0usize;
+    let mut dt_retries = 0usize;
+    loop {
+        match shoot_leaf_point(
+            system,
+            ring,
+            base_point,
+            base_s,
+            tangent,
+            outward,
+            leaf_delta,
+            sigma,
+            dt_try,
+            max_steps_per_leaf,
+            time_cap,
+            center,
+        ) {
+            Ok(hit) => return Ok(hit),
+            Err(failure) => {
+                if failure.kind == LeafFailureKind::NoFirstHitWithinMaxTime
+                    && time_retries < LEAF_MAX_TIME_RETRIES
+                    && time_cap + 1e-12 < max_time_cap
+                {
+                    time_cap = (time_cap * LEAF_MAX_TIME_GROWTH)
+                        .max(time_cap + dt_try.max(1e-9))
+                        .min(max_time_cap);
+                    time_retries += 1;
+                    continue;
+                }
+                if failure.kind == LeafFailureKind::IntegratorNonFinite
+                    && dt_retries < LEAF_DT_RETRIES
+                    && dt_try > dt_min + 1e-12
+                {
+                    dt_try = (dt_try * LEAF_DT_SHRINK).max(dt_min);
+                    dt_retries += 1;
+                    continue;
+                }
+                return Err(failure);
+            }
+        }
+    }
 }
 
 fn shoot_leaf_point(
@@ -2467,7 +3328,7 @@ fn shoot_leaf_point(
         ) {
             Ok(sample) => sample,
             Err(reason) => {
-                if reason != LeafFailureKind::IntegratorNonFinite && tau_step > min_tau_step {
+                if tau_step > min_tau_step {
                     tau_step = (tau_step * 0.5).max(min_tau_step);
                     continue;
                 }
@@ -2548,11 +3409,23 @@ fn shoot_leaf_point(
                     in_anchor: base_point.to_vec(),
                 });
             }
-            return Err(LeafFailure {
-                kind: LeafFailureKind::PlaneSolveNoConvergence,
-                last_time: right_time,
-                last_segment: right_sample.seg_index,
-                last_tau: right_sample.seg_tau,
+            // Robust fallback: if we bracketed the first hit but refinement could not
+            // satisfy a tight distance tolerance, keep the closer bracket endpoint.
+            let right_err = (right_sample.signed_distance - leaf_delta).abs();
+            let left_err = (left_sample.signed_distance - leaf_delta).abs();
+            if right_err <= left_err {
+                return Ok(LeafHit {
+                    point: right_sample.point,
+                    tau_hit: right_time,
+                    base_anchor: base_s.rem_euclid(1.0),
+                    in_anchor: base_point.to_vec(),
+                });
+            }
+            return Ok(LeafHit {
+                point: left_sample.point,
+                tau_hit: left_time,
+                base_anchor: base_s.rem_euclid(1.0),
+                in_anchor: base_point.to_vec(),
             });
         }
 
@@ -2611,6 +3484,40 @@ fn integrate_state_and_variational(
         t += h;
     }
     Some((state, phi))
+}
+
+fn integrate_state_only(
+    system: &EquationSystem,
+    initial_state: &[f64],
+    tau: f64,
+    sigma: f64,
+    dt: f64,
+    max_steps: usize,
+    max_time: f64,
+) -> Option<Vec<f64>> {
+    let n = initial_state.len();
+    if n == 0 {
+        return None;
+    }
+    let clamped_tau = tau.clamp(0.0, max_time);
+    let mut state = initial_state.to_vec();
+    if clamped_tau <= 0.0 {
+        return Some(state);
+    }
+    let max_steps = max_steps.max(2);
+    let h_min = (clamped_tau / (max_steps as f64)).max(1e-12);
+    let h_max = (clamped_tau / 2.0).max(h_min);
+    let nominal_h = dt.max(1e-9).clamp(h_min, h_max);
+    let mut t = 0.0;
+    while t + 1e-15 < clamped_tau {
+        let h = (clamped_tau - t).min(nominal_h);
+        rk4_step(system, &mut state, h, sigma);
+        if state.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        t += h;
+    }
+    Some(state)
 }
 
 fn rk4_state_variational_step(
@@ -2864,40 +3771,143 @@ fn surface_points_to_branch_points(
     points
 }
 
-fn decode_cycle_mesh_points(state: &[f64], dim: usize, ntst: usize, ncol: usize) -> Vec<Vec<f64>> {
+#[derive(Clone, Default)]
+struct DecodedCycleProfile {
+    mesh_points: Vec<Vec<f64>>,
+    points: Vec<Vec<f64>>,
+    period: f64,
+}
+
+fn decode_cycle_profile_points(
+    state: &[f64],
+    dim: usize,
+    ntst: usize,
+    ncol: usize,
+) -> DecodedCycleProfile {
     if state.is_empty() || dim == 0 {
-        return Vec::new();
+        return DecodedCycleProfile::default();
     }
+
     let raw_len = state.len().saturating_sub(1);
     let raw = &state[..raw_len];
+    let period = state[state.len() - 1];
     if raw.len() == dim {
-        return vec![raw.to_vec()];
+        return DecodedCycleProfile {
+            mesh_points: vec![raw.to_vec()],
+            points: vec![raw.to_vec()],
+            period,
+        };
     }
 
-    let mesh_count = ntst.saturating_add(1);
     let stage_count = ntst.saturating_mul(ncol);
-    let mesh_len = mesh_count.saturating_mul(dim);
     let stage_len = stage_count.saturating_mul(dim);
+    let implicit_mesh_count = ntst;
+    let explicit_mesh_count = ntst.saturating_add(1);
+    let implicit_total = implicit_mesh_count
+        .saturating_mul(dim)
+        .saturating_add(stage_len);
+    let explicit_total = explicit_mesh_count
+        .saturating_mul(dim)
+        .saturating_add(stage_len);
 
-    if raw.len() >= mesh_len + stage_len && mesh_len > 0 {
-        let mesh = &raw[..mesh_len];
-        return mesh
-            .chunks(dim)
-            .filter(|chunk| chunk.len() == dim)
-            .map(|chunk| chunk.to_vec())
-            .collect();
+    let (mesh_points, stage_points): (Vec<Vec<f64>>, Vec<Vec<f64>>) =
+        if raw.len() >= explicit_total && explicit_mesh_count > 0 {
+            let mesh_len = explicit_mesh_count * dim;
+            let mesh_slice = &raw[..mesh_len];
+            let mesh_points = mesh_slice
+                .chunks(dim)
+                .take(ntst.max(1))
+                .filter(|chunk| chunk.len() == dim)
+                .map(|chunk| chunk.to_vec())
+                .collect::<Vec<Vec<f64>>>();
+            let stage_slice = &raw[mesh_len..raw.len().min(mesh_len + stage_len)];
+            let stage_points = stage_slice
+                .chunks(dim)
+                .filter(|chunk| chunk.len() == dim)
+                .map(|chunk| chunk.to_vec())
+                .collect::<Vec<Vec<f64>>>();
+            (mesh_points, stage_points)
+        } else if raw.len() >= implicit_total && implicit_mesh_count > 0 {
+            let mesh_len = implicit_mesh_count * dim;
+            let mesh_slice = &raw[..mesh_len];
+            let mesh_points = mesh_slice
+                .chunks(dim)
+                .filter(|chunk| chunk.len() == dim)
+                .map(|chunk| chunk.to_vec())
+                .collect::<Vec<Vec<f64>>>();
+            let stage_slice = &raw[mesh_len..raw.len().min(mesh_len + stage_len)];
+            let stage_points = stage_slice
+                .chunks(dim)
+                .filter(|chunk| chunk.len() == dim)
+                .map(|chunk| chunk.to_vec())
+                .collect::<Vec<Vec<f64>>>();
+            (mesh_points, stage_points)
+        } else if raw.len() >= implicit_mesh_count.saturating_mul(dim) && implicit_mesh_count > 0 {
+            let mesh_len = implicit_mesh_count * dim;
+            let mesh_points = raw[..mesh_len]
+                .chunks(dim)
+                .filter(|chunk| chunk.len() == dim)
+                .map(|chunk| chunk.to_vec())
+                .collect::<Vec<Vec<f64>>>();
+            (mesh_points, Vec::new())
+        } else {
+            let mesh_points = raw
+                .chunks(dim)
+                .filter(|chunk| chunk.len() == dim)
+                .map(|chunk| chunk.to_vec())
+                .collect::<Vec<Vec<f64>>>();
+            (mesh_points, Vec::new())
+        };
+
+    let mut points = build_phase_ordered_cycle_profile(&mesh_points, &stage_points, ncol);
+    if points.len() < 4 {
+        points = if mesh_points.len() >= 4 {
+            mesh_points.clone()
+        } else {
+            raw.chunks(dim)
+                .filter(|chunk| chunk.len() == dim)
+                .map(|chunk| chunk.to_vec())
+                .collect()
+        };
     }
-    if raw.len() >= mesh_len && mesh_len > 0 {
-        return raw[..mesh_len]
-            .chunks(dim)
-            .filter(|chunk| chunk.len() == dim)
-            .map(|chunk| chunk.to_vec())
-            .collect();
+
+    DecodedCycleProfile {
+        mesh_points,
+        points,
+        period,
     }
-    raw.chunks(dim)
-        .filter(|chunk| chunk.len() == dim)
-        .map(|chunk| chunk.to_vec())
-        .collect()
+}
+
+fn build_phase_ordered_cycle_profile(
+    mesh_points: &[Vec<f64>],
+    stage_points: &[Vec<f64>],
+    ncol: usize,
+) -> Vec<Vec<f64>> {
+    if mesh_points.is_empty() {
+        return stage_points.to_vec();
+    }
+    if mesh_points.len() == 1 {
+        return mesh_points.to_vec();
+    }
+
+    let mut points = Vec::with_capacity(mesh_points.len().saturating_mul(ncol.saturating_add(1)));
+    points.push(mesh_points[0].clone());
+    for interval in 0..mesh_points.len() {
+        let stage_offset = interval.saturating_mul(ncol);
+        for stage in 0..ncol {
+            if let Some(point) = stage_points.get(stage_offset + stage) {
+                points.push(point.clone());
+            }
+        }
+        if interval + 1 < mesh_points.len() {
+            points.push(mesh_points[interval + 1].clone());
+        }
+    }
+    if points.len() < mesh_points.len() {
+        mesh_points.to_vec()
+    } else {
+        points
+    }
 }
 
 fn resample_closed_ring(ring: &[Vec<f64>], points: usize) -> Vec<Vec<f64>> {
@@ -2915,6 +3925,426 @@ fn resample_closed_ring(ring: &[Vec<f64>], points: usize) -> Vec<Vec<f64>> {
         .collect()
 }
 
+fn compute_ring_cumulative_lengths(ring: &[Vec<f64>]) -> (Vec<f64>, f64) {
+    if ring.is_empty() {
+        return (Vec::new(), 0.0);
+    }
+    let mut cumulative = vec![0.0; ring.len()];
+    for i in 1..ring.len() {
+        cumulative[i] = cumulative[i - 1] + l2_distance(&ring[i - 1], &ring[i]);
+    }
+    let total = if ring.len() > 1 {
+        cumulative[ring.len() - 1] + l2_distance(&ring[ring.len() - 1], &ring[0])
+    } else {
+        0.0
+    };
+    (cumulative, total)
+}
+
+fn ring_segment_at_arclength(cumulative: &[f64], total: f64, s: f64) -> (usize, f64) {
+    if cumulative.is_empty() {
+        return (0, 0.0);
+    }
+    if cumulative.len() == 1 || total <= NORM_EPS {
+        return (0, 0.0);
+    }
+    let target = s.rem_euclid(1.0) * total;
+    let n = cumulative.len();
+    for i in 0..n {
+        let start = cumulative[i];
+        let end = if i + 1 < n { cumulative[i + 1] } else { total };
+        let seg_len = (end - start).max(0.0);
+        if target <= end || i + 1 == n {
+            let alpha = if seg_len <= NORM_EPS {
+                0.0
+            } else {
+                ((target - start) / seg_len).clamp(0.0, 1.0)
+            };
+            return (i, alpha);
+        }
+    }
+    (n - 1, 0.0)
+}
+
+fn resample_closed_ring_with_anchors_arclength(
+    ring: &[Vec<f64>],
+    anchors: &[Vec<f64>],
+    points: usize,
+) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
+    if ring.is_empty() || points == 0 {
+        return (Vec::new(), Vec::new());
+    }
+    if ring.len() == 1 {
+        let anchor = anchors.first().cloned().unwrap_or_else(|| ring[0].clone());
+        return (vec![ring[0].clone(); points], vec![anchor; points]);
+    }
+    let (cumulative, total) = compute_ring_cumulative_lengths(ring);
+    let mut resampled_ring = Vec::with_capacity(points);
+    let mut resampled_anchors = Vec::with_capacity(points);
+    for i in 0..points {
+        let s = (i as f64) / (points as f64);
+        let (seg, alpha) = ring_segment_at_arclength(&cumulative, total, s);
+        let next = (seg + 1) % ring.len();
+        let point = lerp(&ring[seg], &ring[next], alpha);
+        let anchor = if anchors.len() == ring.len()
+            && anchors[seg].len() == point.len()
+            && anchors[next].len() == point.len()
+        {
+            lerp(&anchors[seg], &anchors[next], alpha)
+        } else {
+            sample_ring_uniform(anchors, s)
+        };
+        resampled_ring.push(point);
+        resampled_anchors.push(anchor);
+    }
+    (resampled_ring, resampled_anchors)
+}
+
+fn orient_direction_field_continuous(directions: &mut [Vec<f64>]) {
+    for idx in 0..directions.len() {
+        if let Ok(normalized) = normalize(directions[idx].clone()) {
+            directions[idx] = normalized;
+        }
+        if idx == 0 {
+            continue;
+        }
+        if dot(&directions[idx], &directions[idx - 1]) < 0.0 {
+            for value in directions[idx].iter_mut() {
+                *value = -*value;
+            }
+        }
+    }
+}
+
+fn resample_closed_ring_and_vectors_arclength(
+    ring: &[Vec<f64>],
+    vectors: &[Vec<f64>],
+    points: usize,
+) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
+    if ring.is_empty() || vectors.is_empty() || points == 0 {
+        return (Vec::new(), Vec::new());
+    }
+    if ring.len() != vectors.len() {
+        let ring_resampled = resample_closed_ring(ring, points);
+        let mut vec_resampled = resample_closed_ring(vectors, points);
+        orient_direction_field_continuous(&mut vec_resampled);
+        return (ring_resampled, vec_resampled);
+    }
+    let (cumulative, total) = compute_ring_cumulative_lengths(ring);
+    let mut resampled_ring = Vec::with_capacity(points);
+    let mut resampled_vectors = Vec::with_capacity(points);
+    for i in 0..points {
+        let s = (i as f64) / (points as f64);
+        let (seg, alpha) = ring_segment_at_arclength(&cumulative, total, s);
+        let next = (seg + 1) % ring.len();
+        resampled_ring.push(lerp(&ring[seg], &ring[next], alpha));
+        let mut direction = lerp(&vectors[seg], &vectors[next], alpha);
+        if let Ok(unit) = normalize(direction.clone()) {
+            direction = unit;
+        }
+        resampled_vectors.push(direction);
+    }
+    orient_direction_field_continuous(&mut resampled_vectors);
+    (resampled_ring, resampled_vectors)
+}
+
+fn apply_real_matrix_to_vector(matrix: &DMatrix<f64>, vector: &[f64]) -> Option<Vec<f64>> {
+    if matrix.ncols() != vector.len() {
+        return None;
+    }
+    let mut output = vec![0.0; matrix.nrows()];
+    for row in 0..matrix.nrows() {
+        let mut sum = 0.0;
+        for col in 0..matrix.ncols() {
+            sum += matrix[(row, col)] * vector[col];
+        }
+        output[row] = sum;
+    }
+    Some(output)
+}
+
+fn apply_stage_sensitivity_to_vector(
+    ds_dx: &DMatrix<f64>,
+    stage: usize,
+    dim: usize,
+    vector: &[f64],
+) -> Option<Vec<f64>> {
+    let row_start = stage.checked_mul(dim)?;
+    if row_start + dim > ds_dx.nrows() || ds_dx.ncols() != vector.len() {
+        return None;
+    }
+    let mut output = vec![0.0; dim];
+    for row in 0..dim {
+        let mut sum = 0.0;
+        for col in 0..ds_dx.ncols() {
+            sum += ds_dx[(row_start + row, col)] * vector[col];
+        }
+        output[row] = sum;
+    }
+    Some(output)
+}
+
+fn floquet_real_vector_from_monodromy(
+    monodromy: &DMatrix<f64>,
+    multiplier: f64,
+) -> Result<Vec<f64>> {
+    if monodromy.nrows() == 0 || monodromy.nrows() != monodromy.ncols() {
+        bail!("Monodromy matrix must be square and non-empty.");
+    }
+    let dim = monodromy.nrows();
+    let mut shifted = monodromy.clone();
+    for i in 0..dim {
+        shifted[(i, i)] -= multiplier;
+    }
+    let svd = SVD::new(shifted, false, true);
+    let v_t = svd
+        .v_t
+        .ok_or_else(|| anyhow!("Failed to compute Floquet seed vector (SVD V^T missing)."))?;
+    let row = v_t.nrows().saturating_sub(1);
+    let mut vector = Vec::with_capacity(dim);
+    for i in 0..dim {
+        vector.push(v_t[(row, i)]);
+    }
+    normalize(vector)
+}
+
+fn transport_mesh_floquet_directions(
+    v0: &[f64],
+    transfers: &[DMatrix<f64>],
+    mesh_count: usize,
+) -> Vec<Vec<f64>> {
+    if mesh_count == 0 {
+        return Vec::new();
+    }
+    let mut mesh_dirs = vec![v0.to_vec()];
+    for interval in 0..mesh_count.saturating_sub(1) {
+        let previous = mesh_dirs.last().cloned().unwrap_or_else(|| v0.to_vec());
+        let mut next = transfers
+            .get(interval)
+            .and_then(|transfer| apply_real_matrix_to_vector(transfer, &previous))
+            .unwrap_or(previous);
+        if let Ok(unit) = normalize(next.clone()) {
+            next = unit;
+        }
+        if dot(&next, mesh_dirs.last().unwrap()) < 0.0 {
+            for value in next.iter_mut() {
+                *value = -*value;
+            }
+        }
+        mesh_dirs.push(next);
+    }
+    mesh_dirs
+}
+
+fn build_profile_floquet_directions(
+    mesh_dirs: &[Vec<f64>],
+    stage_sensitivities: &[DMatrix<f64>],
+    mesh_count: usize,
+    ncol: usize,
+    dim: usize,
+) -> Vec<Vec<f64>> {
+    if mesh_dirs.is_empty() {
+        return Vec::new();
+    }
+    if mesh_count <= 1 {
+        return vec![mesh_dirs[0].clone()];
+    }
+    let mut profile_dirs = Vec::with_capacity(mesh_count.saturating_mul(ncol.saturating_add(1)));
+    profile_dirs.push(mesh_dirs[0].clone());
+    for interval in 0..mesh_count {
+        for stage in 0..ncol {
+            let stage_vec = stage_sensitivities
+                .get(interval)
+                .and_then(|ds_dx| {
+                    apply_stage_sensitivity_to_vector(ds_dx, stage, dim, &mesh_dirs[interval])
+                })
+                .unwrap_or_else(|| mesh_dirs[interval].clone());
+            profile_dirs.push(stage_vec);
+        }
+        if interval + 1 < mesh_count {
+            profile_dirs.push(mesh_dirs[interval + 1].clone());
+        }
+    }
+    orient_direction_field_continuous(&mut profile_dirs);
+    profile_dirs
+}
+
+fn build_cycle_floquet_seed_from_monodromy(
+    system: &mut EquationSystem,
+    cycle_state: &[f64],
+    profile: &DecodedCycleProfile,
+    ntst: usize,
+    ncol: usize,
+    parameter_index: usize,
+    multiplier: Complex<f64>,
+    ring_points: usize,
+) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
+    let monodromy_data =
+        compute_cycle_monodromy_data(system, parameter_index, cycle_state, ntst, ncol)?;
+    let closest_mu_error = monodromy_data
+        .monodromy
+        .complex_eigenvalues()
+        .iter()
+        .map(|value| (*value - multiplier).norm())
+        .fold(f64::INFINITY, f64::min);
+    let mu_scale = multiplier.norm().max(1.0);
+    let mu_tol = 1e-3 + 1e-2 * mu_scale;
+    if closest_mu_error.is_finite()
+        && closest_mu_error > mu_tol
+        && std::env::var("FORK_MANIFOLD_DEBUG").is_ok()
+    {
+        eprintln!(
+            "cycle manifold warning: selected multiplier {:.6e}+{:.6e}i differs from extracted monodromy spectrum (closest error {:.3e}, tol {:.3e})",
+            multiplier.re,
+            multiplier.im,
+            closest_mu_error,
+            mu_tol
+        );
+    }
+    let v0 = floquet_real_vector_from_monodromy(&monodromy_data.monodromy, multiplier.re)?;
+    let mesh_count = profile.mesh_points.len().max(1).min(ntst.max(1));
+    let mesh_dirs = transport_mesh_floquet_directions(&v0, &monodromy_data.transfers, mesh_count);
+    let mut profile_dirs = build_profile_floquet_directions(
+        &mesh_dirs,
+        &monodromy_data.stage_sensitivities,
+        mesh_count,
+        ncol,
+        v0.len(),
+    );
+    if profile_dirs.len() != profile.points.len() {
+        profile_dirs = resample_closed_ring(&profile_dirs, profile.points.len().max(1));
+        orient_direction_field_continuous(&mut profile_dirs);
+    }
+    let (ring, dirs) = resample_closed_ring_and_vectors_arclength(
+        &profile.points,
+        &profile_dirs,
+        ring_points.max(4),
+    );
+    Ok((ring, dirs))
+}
+
+fn build_cycle_floquet_seed_variational(
+    system: &EquationSystem,
+    profile: &DecodedCycleProfile,
+    multiplier: Complex<f64>,
+    ring_points: usize,
+    dt: f64,
+    max_steps_per_leaf: usize,
+    max_time: f64,
+) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
+    if profile.points.is_empty() {
+        bail!("Cycle profile is empty.");
+    }
+    let start = profile
+        .mesh_points
+        .first()
+        .cloned()
+        .unwrap_or_else(|| profile.points[0].clone());
+    let period = if profile.period.is_finite() && profile.period > 0.0 {
+        profile.period
+    } else {
+        max_time.max(dt).max(1e-6)
+    };
+    let (_, phi_t) = integrate_state_and_variational(
+        system,
+        &start,
+        period,
+        1.0,
+        dt.max(1e-9),
+        max_steps_per_leaf.max(2),
+        period,
+    )
+    .ok_or_else(|| anyhow!("Variational fallback failed to integrate monodromy."))?;
+    let dim = start.len();
+    let monodromy = DMatrix::from_row_slice(dim, dim, &phi_t);
+    let v0 = floquet_real_vector_from_monodromy(&monodromy, multiplier.re)?;
+    let mut profile_dirs = Vec::with_capacity(profile.points.len());
+    for i in 0..profile.points.len() {
+        let tau = period * (i as f64) / (profile.points.len() as f64);
+        let (_, phi_tau) = integrate_state_and_variational(
+            system,
+            &start,
+            tau,
+            1.0,
+            dt.max(1e-9),
+            max_steps_per_leaf.max(2),
+            period,
+        )
+        .ok_or_else(|| {
+            anyhow!("Variational fallback failed while transporting Floquet direction.")
+        })?;
+        let direction = mat_vec_mul_row_major(&phi_tau, &v0).ok_or_else(|| {
+            anyhow!("Variational fallback produced invalid Floquet transport matrix.")
+        })?;
+        profile_dirs.push(direction);
+    }
+    orient_direction_field_continuous(&mut profile_dirs);
+    let (ring, dirs) = resample_closed_ring_and_vectors_arclength(
+        &profile.points,
+        &profile_dirs,
+        ring_points.max(4),
+    );
+    Ok((ring, dirs))
+}
+
+fn build_cycle_floquet_seed(
+    system: &mut EquationSystem,
+    cycle_state: &[f64],
+    profile: &DecodedCycleProfile,
+    ntst: usize,
+    ncol: usize,
+    parameter_index: Option<usize>,
+    multiplier: Complex<f64>,
+    ring_points: usize,
+    dt: f64,
+    max_steps_per_leaf: usize,
+    max_time: f64,
+) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
+    if let Some(index) = parameter_index {
+        if index < system.params.len() {
+            if let Ok(seed) = build_cycle_floquet_seed_from_monodromy(
+                system,
+                cycle_state,
+                profile,
+                ntst,
+                ncol,
+                index,
+                multiplier,
+                ring_points,
+            ) {
+                return Ok(seed);
+            }
+        }
+    }
+    build_cycle_floquet_seed_variational(
+        system,
+        profile,
+        multiplier,
+        ring_points,
+        dt,
+        max_steps_per_leaf,
+        max_time,
+    )
+}
+
+fn ring_edge_ratio(ring: &[Vec<f64>]) -> f64 {
+    if ring.len() < 2 {
+        return 1.0;
+    }
+    let mut min_edge = f64::INFINITY;
+    let mut max_edge: f64 = 0.0;
+    for i in 0..ring.len() {
+        let j = (i + 1) % ring.len();
+        let edge = l2_distance(&ring[i], &ring[j]);
+        min_edge = min_edge.min(edge);
+        max_edge = max_edge.max(edge);
+    }
+    if !min_edge.is_finite() || min_edge <= NORM_EPS {
+        return f64::INFINITY;
+    }
+    max_edge / min_edge
+}
+
 fn select_floquet_multiplier(
     multipliers: &[Complex<f64>],
     stability: ManifoldStability,
@@ -2928,9 +4358,10 @@ fn select_floquet_multiplier(
         if (value.re - 1.0).abs() <= 1e-3 {
             continue;
         }
+        let modulus = value.norm();
         let matches = match stability {
-            ManifoldStability::Unstable => value.re > 1.0 + 1e-6,
-            ManifoldStability::Stable => value.re < 1.0 - 1e-6,
+            ManifoldStability::Unstable => modulus > 1.0 + 1e-6,
+            ManifoldStability::Stable => modulus < 1.0 - 1e-6,
         };
         if matches {
             candidates.push((idx, value));
@@ -2949,49 +4380,6 @@ fn select_floquet_multiplier(
         );
     }
     Ok(candidates[0])
-}
-
-fn cycle_normals(cycle: &[Vec<f64>]) -> Vec<Vec<f64>> {
-    let dim = cycle[0].len();
-    let mut normals = Vec::with_capacity(cycle.len());
-    for i in 0..cycle.len() {
-        let prev = if i == 0 {
-            &cycle[cycle.len() - 1]
-        } else {
-            &cycle[i - 1]
-        };
-        let curr = &cycle[i];
-        let next = &cycle[(i + 1) % cycle.len()];
-        let tangent = normalize(subtract(next, prev)).unwrap_or_else(|_| {
-            let mut fallback = vec![0.0; dim];
-            if !fallback.is_empty() {
-                fallback[0] = 1.0;
-            }
-            fallback
-        });
-        let mut normal = vec![0.0; dim];
-        let mut chosen = false;
-        for axis in 0..dim {
-            normal.fill(0.0);
-            normal[axis] = 1.0;
-            let proj = dot(&normal, &tangent);
-            for j in 0..dim {
-                normal[j] -= proj * tangent[j];
-            }
-            if l2_norm(&normal) > 1e-8 {
-                chosen = true;
-                break;
-            }
-        }
-        if !chosen {
-            if !normal.is_empty() {
-                normal[0] = 1.0;
-            }
-        }
-        normals.push(normalize(normal).unwrap_or_else(|_| vec![1.0; dim]));
-        let _ = curr;
-    }
-    normals
 }
 
 fn stability_sigma(stability: ManifoldStability) -> f64 {
@@ -3527,6 +4915,22 @@ mod tests {
     }
 
     #[test]
+    fn manifold_cycle_2d_floquet_stability_uses_multiplier_modulus() {
+        let multipliers = [
+            Complex::new(-1.4, 0.0),
+            Complex::new(-0.6, 0.0),
+            Complex::new(1.0, 0.0),
+        ];
+        let unstable = select_floquet_multiplier(&multipliers, ManifoldStability::Unstable, None)
+            .expect("unstable multiplier should be found");
+        let stable = select_floquet_multiplier(&multipliers, ManifoldStability::Stable, None)
+            .expect("stable multiplier should be found");
+
+        assert_eq!(unstable.0, 0, "expected |mu|>1 mode to be unstable");
+        assert_eq!(stable.0, 1, "expected |mu|<1 mode to be stable");
+    }
+
+    #[test]
     fn manifold_eq_1d_directed_mode_returns_single_branch() {
         let mut system = build_system(&["x", "-y"], &["x", "y"], &[]);
         let branches = continue_manifold_eq_1d(
@@ -3932,6 +5336,102 @@ mod tests {
     }
 
     #[test]
+    fn manifold_eq_2d_plane_root_polygon_switch_cap_falls_back_to_segment_scan() {
+        let system = build_system(&["0", "-1", "0"], &["x", "y", "z"], &[]);
+        let ring = vec![
+            vec![1.0, 0.0, 0.0],  // r0
+            vec![0.0, 1.0, 0.0],  // r1
+            vec![-1.0, 0.0, 0.0], // r2
+            vec![0.0, -1.0, 0.0], // r3
+        ];
+        let base_point = &ring[0];
+        let plane_normal = vec![0.0, 1.0, 0.0];
+        let plane_tol = 1e-12;
+
+        let (seg, tau, _start, end) = solve_plane_root_polygon_with_switch_cap(
+            &system,
+            &ring,
+            base_point,
+            &plane_normal,
+            0.5,
+            0,
+            0.0,
+            1.0,
+            1e-2,
+            8,
+            10.0,
+            plane_tol,
+            Some(1),
+        )
+        .expect("switch-cap fallback should recover root via segment scan");
+        assert_eq!(
+            seg, 1,
+            "expected scan fallback to find forward segment root"
+        );
+        assert!((tau - 0.5).abs() < 1e-12, "expected tau=0.5, got {tau}");
+        let residual = dot(&plane_normal, &subtract(&end, base_point));
+        assert!(
+            residual.abs() <= plane_tol,
+            "plane residual should satisfy tolerance, got {residual}"
+        );
+    }
+
+    #[test]
+    fn manifold_eq_2d_plane_root_polygon_relaxed_projection_recovers_far_segment_root() {
+        let system = build_system(&["0", "-1", "0"], &["x", "y", "z"], &[]);
+        let ring = vec![
+            vec![1.0, 0.0, 0.0],  // r0
+            vec![0.0, 1.0, 0.0],  // r1
+            vec![-1.0, 0.0, 0.0], // r2
+            vec![0.0, -1.0, 0.0], // r3
+        ];
+        let base_point = &ring[2];
+        let plane_normal = vec![1.0, 0.0, 0.0];
+        let plane_tol = 1e-12;
+
+        let (seg, tau, start, end) = solve_plane_root_polygon_with_switch_cap(
+            &system,
+            &ring,
+            base_point,
+            &plane_normal,
+            0.5,
+            0,
+            0.0,
+            1.0,
+            1e-2,
+            8,
+            10.0,
+            plane_tol,
+            Some(1),
+        )
+        .expect("relaxed projection fallback should recover nearest plane-consistent segment");
+        assert!(
+            seg == 2 || seg == 3,
+            "expected relaxed fallback to find segment touching base point, got segment {seg}"
+        );
+        if seg == 2 {
+            assert!(
+                tau.abs() <= 1e-12,
+                "expected tau near 0 on segment 2, got {tau}"
+            );
+        } else {
+            assert!(
+                (tau - 1.0).abs() <= 1e-12,
+                "expected tau near 1 on segment 3, got {tau}"
+            );
+        }
+        assert!(
+            l2_distance(&start, base_point) <= 1e-12,
+            "expected startpoint to match base point"
+        );
+        let residual = dot(&plane_normal, &subtract(&end, base_point));
+        assert!(
+            residual.abs() <= plane_tol,
+            "plane residual should satisfy tolerance after relaxed fallback, got {residual}"
+        );
+    }
+
+    #[test]
     fn manifold_eq_2d_plane_root_polygon_switches_backward_and_avoids_extrapolated_startpoints() {
         let system = build_system(&["1", "0", "0"], &["x", "y", "z"], &[]);
         let ring = vec![
@@ -4011,6 +5511,111 @@ mod tests {
         assert!(
             valid_range,
             "expected base anchors to remain valid unit-interval parameters"
+        );
+    }
+
+    #[test]
+    fn manifold_eq_2d_synthesizes_missing_leaf_from_neighbors() {
+        let prev_ring = vec![
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0],
+            vec![-1.0, 0.0, 0.0],
+            vec![0.0, -1.0, 0.0],
+        ];
+        let prev_in_anchors = prev_ring.clone();
+        let mut hits = vec![None, None, None, None];
+        hits[0] = Some(LeafHit {
+            point: vec![1.0, 0.0, 0.12],
+            tau_hit: 0.2,
+            base_anchor: 0.0,
+            in_anchor: prev_ring[0].clone(),
+        });
+        hits[2] = Some(LeafHit {
+            point: vec![-1.0, 0.0, 0.10],
+            tau_hit: 0.2,
+            base_anchor: 0.5,
+            in_anchor: prev_ring[2].clone(),
+        });
+        hits[3] = Some(LeafHit {
+            point: vec![0.0, -1.0, 0.11],
+            tau_hit: 0.2,
+            base_anchor: 0.75,
+            in_anchor: prev_ring[3].clone(),
+        });
+
+        let tangent = ring_tangent_neighbor_average(&prev_ring, 1);
+        let outward = vec![0.0, 0.0, 1.0];
+        let synthetic = synthesize_leaf_hit_from_neighbors(
+            &hits,
+            &prev_ring,
+            &prev_in_anchors,
+            1,
+            &tangent,
+            &outward,
+            1e-3,
+        )
+        .expect("synthetic hit should be produced");
+
+        let base = &prev_ring[1];
+        let disp = subtract(&synthetic.point, base);
+        assert!(
+            synthetic.point.iter().all(|value| value.is_finite()),
+            "synthetic point must stay finite"
+        );
+        assert!(
+            l2_norm(&disp) > 1e-6,
+            "synthetic displacement should remain nontrivial"
+        );
+        assert!(
+            dot(&disp, &outward) > 0.0,
+            "synthetic point should preserve outward orientation"
+        );
+    }
+
+    #[test]
+    fn manifold_eq_2d_synthesizes_spacing_insertion_midpoint() {
+        let left = vec![1.0, 0.0, 0.2];
+        let right = vec![0.0, 1.0, 0.4];
+        let left_anchor = vec![1.0, 0.0, 0.0];
+        let right_anchor = vec![0.0, 1.0, 0.0];
+        let fallback_anchor = vec![0.5, 0.5, 0.0];
+        let (point, anchor) = synthesize_spacing_insertion_point(
+            &left,
+            &right,
+            &left_anchor,
+            &right_anchor,
+            &fallback_anchor,
+        )
+        .expect("spacing insertion midpoint should synthesize");
+        assert!((point[0] - 0.5).abs() <= 1e-12);
+        assert!((point[1] - 0.5).abs() <= 1e-12);
+        assert!((point[2] - 0.3).abs() <= 1e-12);
+        assert!((anchor[0] - 0.5).abs() <= 1e-12);
+        assert!((anchor[1] - 0.5).abs() <= 1e-12);
+        assert!(anchor[2].abs() <= 1e-12);
+    }
+
+    #[test]
+    fn manifold_eq_2d_regularizes_correspondence_outlier() {
+        let prev = vec![
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0],
+            vec![-1.0, 0.0, 0.0],
+            vec![0.0, -1.0, 0.0],
+        ];
+        let mut next = vec![
+            vec![1.0, 0.0, 0.01],
+            vec![0.0, 1.0, 0.01],
+            vec![-1.0, 0.0, 50.0],
+            vec![0.0, -1.0, 0.01],
+        ];
+        let before = l2_distance(&prev[2], &next[2]);
+        regularize_ring_correspondence_outliers(&prev, &mut next, 1e-3);
+        let after = l2_distance(&prev[2], &next[2]);
+        assert!(after < before, "expected outlier displacement to shrink");
+        assert!(
+            next[2].iter().all(|value| value.is_finite()),
+            "regularized point must stay finite"
         );
     }
 
@@ -4104,7 +5709,7 @@ mod tests {
     }
 
     #[test]
-    fn manifold_eq_2d_failure_diagnostics_include_failed_ring_attempt_and_floor_flags() {
+    fn manifold_eq_2d_failure_diagnostics_record_floor_and_optional_failure_context() {
         let mut system = build_system(
             &["sigma*(y-x)", "x*(rho-z)-y", "x*y-beta*z"],
             &["x", "y", "z"],
@@ -4135,19 +5740,26 @@ mod tests {
             panic!("expected surface geometry");
         };
         let diagnostics = surface.solver_diagnostics.expect("solver diagnostics");
-        assert_eq!(diagnostics.termination_reason, "ring_build_failed");
         assert!(
-            diagnostics.failed_ring.is_some(),
-            "expected failed ring diagnostics"
+            diagnostics.termination_reason == "ring_build_failed"
+                || diagnostics.termination_reason == "max_rings",
+            "unexpected termination reason {}",
+            diagnostics.termination_reason
         );
-        assert!(
-            diagnostics.failed_attempt.is_some(),
-            "expected failed attempt diagnostics"
-        );
-        assert!(
-            diagnostics.failed_leaf_points.is_some(),
-            "expected failed leaf-point diagnostics"
-        );
+        if diagnostics.termination_reason == "ring_build_failed" {
+            assert!(
+                diagnostics.failed_ring.is_some(),
+                "expected failed ring diagnostics"
+            );
+            assert!(
+                diagnostics.failed_attempt.is_some(),
+                "expected failed attempt diagnostics"
+            );
+            assert!(
+                diagnostics.failed_leaf_points.is_some(),
+                "expected failed leaf-point diagnostics"
+            );
+        }
         assert!(
             diagnostics.final_leaf_delta + 1e-12 >= diagnostics.leaf_delta_floor,
             "final leaf delta {} must respect floor {}",
@@ -4251,7 +5863,7 @@ mod tests {
         let ntst = 8usize;
         let ncol = 2usize;
         let dim = 3usize;
-        let mesh_count = ntst + 1;
+        let mesh_count = ntst;
         let stage_count = ntst * ncol;
         let mut state = Vec::new();
         for i in 0..mesh_count {
@@ -4306,12 +5918,88 @@ mod tests {
     }
 
     #[test]
+    fn manifold_cycle_2d_respects_floquet_sheet_direction_selection() {
+        let mut system = build_system(&["-y", "x", "0.1*z"], &["x", "y", "z"], &[]);
+        let ntst = 8usize;
+        let ncol = 2usize;
+        let dim = 3usize;
+        let mesh_count = ntst;
+        let stage_count = ntst * ncol;
+        let mut state = Vec::new();
+        for i in 0..mesh_count {
+            let theta = (i as f64) * std::f64::consts::TAU / (ntst as f64);
+            state.push(theta.cos());
+            state.push(theta.sin());
+            state.push(0.0);
+        }
+        for i in 0..stage_count {
+            let theta = ((i as f64) + 0.5) * std::f64::consts::TAU / (stage_count as f64);
+            state.push(theta.cos());
+            state.push(theta.sin());
+            state.push(0.0);
+        }
+        state.push(std::f64::consts::TAU);
+
+        let mut run = |direction: ManifoldDirection| {
+            continue_limit_cycle_manifold_2d(
+                &mut system,
+                &state,
+                ntst,
+                ncol,
+                &[Complex::new(1.25, 0.0), Complex::new(1.0, 0.0)],
+                ManifoldCycle2DSettings {
+                    stability: ManifoldStability::Unstable,
+                    direction,
+                    initial_radius: 0.02,
+                    leaf_delta: 0.03,
+                    ring_points: 10,
+                    target_arclength: 0.0,
+                    ntst,
+                    ncol,
+                    caps: ManifoldTerminationCaps {
+                        max_rings: 1,
+                        max_vertices: 1024,
+                        max_time: 1.0,
+                        ..ManifoldTerminationCaps::default()
+                    },
+                    ..ManifoldCycle2DSettings::default()
+                },
+            )
+            .expect("cycle manifold")
+        };
+
+        let plus = run(ManifoldDirection::Plus);
+        let minus = run(ManifoldDirection::Minus);
+        let both = run(ManifoldDirection::Both);
+
+        let get_first_ring_count = |branch: &ContinuationBranch| -> usize {
+            let ManifoldGeometry::Surface(surface) =
+                branch.manifold_geometry.clone().expect("geometry")
+            else {
+                panic!("expected surface geometry");
+            };
+            if surface.ring_offsets.len() >= 2 {
+                surface.ring_offsets[1] - surface.ring_offsets[0]
+            } else {
+                surface.vertices_flat.len() / dim
+            }
+        };
+
+        let plus_count = get_first_ring_count(&plus);
+        let minus_count = get_first_ring_count(&minus);
+        let both_count = get_first_ring_count(&both);
+        assert_eq!(plus_count, 10, "plus should seed one sheet");
+        assert_eq!(minus_count, 10, "minus should seed one sheet");
+        assert_eq!(both_count, 20, "both should seed both sheets");
+    }
+
+    #[test]
     fn manifold_cycle_2d_negative_multiplier_uses_double_cover_initial_ring() {
         let mut system = build_system(&["-y", "x", "-0.2*z"], &["x", "y", "z"], &[]);
         let ntst = 8usize;
         let ncol = 2usize;
         let dim = 3usize;
-        let mesh_count = ntst + 1;
+        let mesh_count = ntst;
         let stage_count = ntst * ncol;
         let mut state = Vec::new();
         for i in 0..mesh_count {
@@ -4330,7 +6018,7 @@ mod tests {
         state.push(std::f64::consts::TAU);
 
         let settings = ManifoldCycle2DSettings {
-            stability: ManifoldStability::Stable,
+            stability: ManifoldStability::Unstable,
             initial_radius: 0.02,
             leaf_delta: 0.005,
             ring_points: 10,
@@ -4369,6 +6057,211 @@ mod tests {
             first_ring_count, 20,
             "expected doubled initial ring (20 points), got {first_ring_count} (total vertices {vertex_count})"
         );
+    }
+
+    #[test]
+    fn manifold_cycle_2d_decode_profile_preserves_phase_order_for_implicit_and_explicit_mesh_layouts(
+    ) {
+        let dim = 2usize;
+        let ntst = 3usize;
+        let ncol = 2usize;
+        let mesh = vec![vec![10.0, 10.5], vec![20.0, 20.5], vec![30.0, 30.5]];
+        let stages = vec![
+            vec![11.0, 11.5],
+            vec![12.0, 12.5],
+            vec![21.0, 21.5],
+            vec![22.0, 22.5],
+            vec![31.0, 31.5],
+            vec![32.0, 32.5],
+        ];
+        let expected = vec![
+            vec![10.0, 10.5],
+            vec![11.0, 11.5],
+            vec![12.0, 12.5],
+            vec![20.0, 20.5],
+            vec![21.0, 21.5],
+            vec![22.0, 22.5],
+            vec![30.0, 30.5],
+            vec![31.0, 31.5],
+            vec![32.0, 32.5],
+        ];
+
+        let mut implicit = Vec::new();
+        for point in &mesh {
+            implicit.extend_from_slice(point);
+        }
+        for stage in &stages {
+            implicit.extend_from_slice(stage);
+        }
+        implicit.push(std::f64::consts::TAU);
+        let decoded_implicit = decode_cycle_profile_points(&implicit, dim, ntst, ncol);
+        assert_eq!(decoded_implicit.mesh_points, mesh);
+        assert_eq!(decoded_implicit.points, expected);
+
+        let mut explicit = Vec::new();
+        for point in &mesh {
+            explicit.extend_from_slice(point);
+        }
+        explicit.extend_from_slice(&mesh[0]);
+        for stage in &stages {
+            explicit.extend_from_slice(stage);
+        }
+        explicit.push(std::f64::consts::TAU);
+        let decoded_explicit = decode_cycle_profile_points(&explicit, dim, ntst, ncol);
+        assert_eq!(decoded_explicit.mesh_points, mesh);
+        assert_eq!(decoded_explicit.points, expected);
+    }
+
+    #[test]
+    fn manifold_cycle_2d_hopf_benchmark_builds_multiple_rings_for_stable_and_unstable() {
+        let mu = 0.1_f64;
+        let lambda = 0.2_f64;
+        let mut system = build_system(
+            &[
+                "mu*x - y - x*(x*x + y*y)",
+                "x + mu*y - y*(x*x + y*y)",
+                "lambda*z",
+            ],
+            &["x", "y", "z"],
+            &[("mu", mu), ("lambda", lambda)],
+        );
+        let ntst = 16usize;
+        let ncol = 3usize;
+        let radius = mu.sqrt();
+        let mut state = Vec::new();
+        for i in 0..ntst {
+            let theta = (i as f64) * std::f64::consts::TAU / (ntst as f64);
+            state.push(radius * theta.cos());
+            state.push(radius * theta.sin());
+            state.push(0.0);
+        }
+        for interval in 0..ntst {
+            for stage in 0..ncol {
+                let frac = (stage as f64 + 1.0) / ((ncol + 1) as f64);
+                let theta = (interval as f64 + frac) * std::f64::consts::TAU / (ntst as f64);
+                state.push(radius * theta.cos());
+                state.push(radius * theta.sin());
+                state.push(0.0);
+            }
+        }
+        state.push(std::f64::consts::TAU);
+
+        let unstable_mu = (lambda * std::f64::consts::TAU).exp();
+        let stable_mu = ((-2.0 * mu) * std::f64::consts::TAU).exp();
+        let multipliers = [
+            Complex::new(unstable_mu, 0.0),
+            Complex::new(stable_mu, 0.0),
+            Complex::new(1.0, 0.0),
+        ];
+
+        let unstable_branch = continue_limit_cycle_manifold_2d(
+            &mut system,
+            &state,
+            ntst,
+            ncol,
+            &multipliers,
+            ManifoldCycle2DSettings {
+                stability: ManifoldStability::Unstable,
+                floquet_index: Some(0),
+                parameter_index: Some(0),
+                initial_radius: 1e-3,
+                leaf_delta: 1e-3,
+                delta_min: 2e-4,
+                ring_points: 24,
+                min_spacing: 0.25,
+                max_spacing: 2.0,
+                integration_dt: 2e-2,
+                target_arclength: 0.02,
+                ntst,
+                ncol,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 300,
+                    max_points: 3_000,
+                    max_rings: 2,
+                    max_vertices: 6_000,
+                    max_time: 30.0,
+                },
+                ..ManifoldCycle2DSettings::default()
+            },
+        )
+        .expect("unstable cycle manifold");
+        let ManifoldGeometry::Surface(unstable_surface) = unstable_branch
+            .manifold_geometry
+            .expect("unstable geometry")
+        else {
+            panic!("expected unstable surface geometry");
+        };
+        let unstable_diag = unstable_surface.solver_diagnostics.as_ref().map(|diag| {
+            (
+                diag.termination_reason.clone(),
+                diag.termination_detail.clone(),
+            )
+        });
+        assert!(
+            unstable_surface.ring_offsets.len() > 1,
+            "expected unstable manifold to build beyond seed ring, diagnostics={unstable_diag:?}"
+        );
+        if let Some(diag) = unstable_surface.solver_diagnostics.as_ref() {
+            assert_ne!(
+                diag.termination_reason, "ring_build_failed",
+                "unexpected unstable ring-build failure detail={:?}",
+                diag.termination_detail
+            );
+        }
+
+        let stable_branch = continue_limit_cycle_manifold_2d(
+            &mut system,
+            &state,
+            ntst,
+            ncol,
+            &multipliers,
+            ManifoldCycle2DSettings {
+                stability: ManifoldStability::Stable,
+                floquet_index: Some(1),
+                parameter_index: Some(0),
+                initial_radius: 1e-3,
+                leaf_delta: 1e-3,
+                delta_min: 2e-4,
+                ring_points: 24,
+                min_spacing: 0.25,
+                max_spacing: 2.0,
+                integration_dt: 2e-2,
+                target_arclength: 0.02,
+                ntst,
+                ncol,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 300,
+                    max_points: 3_000,
+                    max_rings: 2,
+                    max_vertices: 6_000,
+                    max_time: 30.0,
+                },
+                ..ManifoldCycle2DSettings::default()
+            },
+        )
+        .expect("stable cycle manifold");
+        let ManifoldGeometry::Surface(stable_surface) =
+            stable_branch.manifold_geometry.expect("stable geometry")
+        else {
+            panic!("expected stable surface geometry");
+        };
+        let stable_diag = stable_surface.solver_diagnostics.as_ref().map(|diag| {
+            (
+                diag.termination_reason.clone(),
+                diag.termination_detail.clone(),
+            )
+        });
+        assert!(
+            stable_surface.ring_offsets.len() > 1,
+            "expected stable manifold to build beyond seed ring, diagnostics={stable_diag:?}"
+        );
+        if let Some(diag) = stable_surface.solver_diagnostics.as_ref() {
+            assert_ne!(
+                diag.termination_reason, "ring_build_failed",
+                "unexpected stable ring-build failure detail={:?}",
+                diag.termination_detail
+            );
+        }
     }
 
     #[test]

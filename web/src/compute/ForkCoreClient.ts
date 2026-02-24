@@ -183,7 +183,9 @@ export type EquilibriumManifold2DSettingsRequest = {
 
 export type LimitCycleManifold2DSettingsRequest = {
   stability: ManifoldStability
+  direction?: 'Plus' | 'Minus' | 'Both'
   floquet_index?: number
+  parameter_index?: number
   profile?: Manifold2DProfile
   initial_radius: number
   leaf_delta: number

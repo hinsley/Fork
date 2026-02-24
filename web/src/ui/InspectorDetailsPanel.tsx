@@ -93,7 +93,10 @@ import {
   mapStateRowsToDisplay,
   stateVectorToDisplay,
 } from '../system/subsystemGateway'
-import { normalizeFloquetMultipliersForRendering } from '../system/floquetModes'
+import {
+  cycleManifoldFloquetEligibility,
+  normalizeFloquetMultipliersForRendering,
+} from '../system/floquetModes'
 
 type InspectorDetailsPanelProps = {
   system: System
@@ -379,6 +382,7 @@ type EquilibriumManifoldDraft = {
 type LimitCycleManifoldDraft = {
   name: string
   stability: ManifoldStability
+  direction: ManifoldDirection
   profile: EquilibriumManifoldProfileDraft
   floquetIndex: string
   initialRadius: string
@@ -1297,6 +1301,7 @@ function makeLimitCycleManifoldDraft(
   return {
     name: `manifold_${baseName}_2d`,
     stability: 'Unstable',
+    direction: 'Plus',
     profile: 'local_preview',
     floquetIndex: '0',
     initialRadius: '1e-3',
@@ -4090,14 +4095,40 @@ export function InspectorDetailsPanel({
     limitCycleFloquetIndices,
     limitCycleFloquetColors
   )
-  const limitCycleFloquetIndexOptions = useMemo(
+  const limitCycleManifoldEligibleFloquetIndexOptions = useMemo(
     () =>
-      limitCycleRenderableMultipliers.map((_, index) => ({
-        value: index.toString(),
-        label: (index + 1).toString(),
-      })),
-    [limitCycleRenderableMultipliers]
+      limitCycleDisplayMultipliers
+        .map((value, index) => ({ value, index }))
+        .filter(({ value }) =>
+          cycleManifoldFloquetEligibility(value, limitCycleManifoldDraft.stability).eligible
+        )
+        .map(({ value, index }) => ({
+          value: index.toString(),
+          label: `${index + 1} (${formatComplexValue(value)})`,
+        })),
+    [limitCycleDisplayMultipliers, limitCycleManifoldDraft.stability]
   )
+  const limitCycleManifoldEligibleFloquetIndexSet = useMemo(
+    () => new Set(limitCycleManifoldEligibleFloquetIndexOptions.map((option) => option.value)),
+    [limitCycleManifoldEligibleFloquetIndexOptions]
+  )
+  useEffect(() => {
+    setLimitCycleManifoldDraft((prev) => {
+      if (limitCycleManifoldEligibleFloquetIndexOptions.length === 0) {
+        return prev.floquetIndex === '' ? prev : { ...prev, floquetIndex: '' }
+      }
+      if (limitCycleManifoldEligibleFloquetIndexSet.has(prev.floquetIndex)) {
+        return prev
+      }
+      return {
+        ...prev,
+        floquetIndex: limitCycleManifoldEligibleFloquetIndexOptions[0]?.value ?? '',
+      }
+    })
+  }, [
+    limitCycleManifoldEligibleFloquetIndexOptions,
+    limitCycleManifoldEligibleFloquetIndexSet,
+  ])
   const limitCycleMultiplierPlot = useMemo(() => {
     if (limitCycleModeMultipliers.length === 0) return null
     return buildEigenvaluePlot(limitCycleModeMultipliers, plotlyTheme, {
@@ -5088,11 +5119,24 @@ export function InspectorDetailsPanel({
       return
     }
 
+    if (limitCycleManifoldEligibleFloquetIndexOptions.length === 0) {
+      setLimitCycleManifoldError(
+        'No eligible Floquet multipliers for the selected manifold stability (requires real, nontrivial, matching side).'
+      )
+      return
+    }
+
     let floquetIndex: number | undefined
     if (limitCycleManifoldDraft.floquetIndex.trim().length > 0) {
       const parsed = parseDraftInteger(limitCycleManifoldDraft.floquetIndex)
       if (parsed === null || parsed < 0) {
         setLimitCycleManifoldError('Floquet index must be a non-negative integer.')
+        return
+      }
+      if (!limitCycleManifoldEligibleFloquetIndexSet.has(parsed.toString())) {
+        setLimitCycleManifoldError(
+          'Selected Floquet index is not eligible for this manifold stability.'
+        )
         return
       }
       floquetIndex = parsed
@@ -5104,6 +5148,7 @@ export function InspectorDetailsPanel({
       name,
       settings: {
         stability: limitCycleManifoldDraft.stability,
+        direction: limitCycleManifoldDraft.direction,
         floquet_index: floquetIndex,
         profile:
           limitCycleManifoldDraft.profile === 'lorenz_global'
@@ -9586,6 +9631,22 @@ export function InspectorDetailsPanel({
                       </select>
                     </label>
                     <label>
+                      Direction
+                      <select
+                        value={limitCycleManifoldDraft.direction}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            direction: event.target.value as ManifoldDirection,
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-direction"
+                      >
+                        <option value="Plus">plus</option>
+                        <option value="Minus">minus</option>
+                      </select>
+                    </label>
+                    <label>
                       Floquet index
                       <select
                         value={limitCycleManifoldDraft.floquetIndex}
@@ -9596,14 +9657,20 @@ export function InspectorDetailsPanel({
                           }))
                         }
                         data-testid="limit-cycle-manifold-floquet-index"
+                        disabled={limitCycleManifoldEligibleFloquetIndexOptions.length === 0}
                       >
-                        {limitCycleFloquetIndexOptions.map((option) => (
+                        {limitCycleManifoldEligibleFloquetIndexOptions.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
                         ))}
                       </select>
                     </label>
+                    {limitCycleManifoldEligibleFloquetIndexOptions.length === 0 ? (
+                      <div className="field-warning">
+                        No eligible Floquet multipliers for the selected stability.
+                      </div>
+                    ) : null}
                     <label>
                       Initial radius
                       <input

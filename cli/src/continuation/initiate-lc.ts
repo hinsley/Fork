@@ -14,6 +14,7 @@ import {
   ContinuationPoint,
   LimitCycleManifold2DSettings,
   LimitCycleObject,
+  ManifoldDirection,
   ManifoldTerminationCaps
 } from '../types';
 import {
@@ -1063,6 +1064,7 @@ export async function initiateLimitCycleManifold2DFromPoint(
 
   let branchName = `lcm2d_${sourceBranch.name}_idx${pointIdx}`;
   let stability: 'Stable' | 'Unstable' = 'Unstable';
+  let manifoldDirection: ManifoldDirection = 'Plus';
   let floquetIndexInput = '';
   let initialRadiusInput = '1e-4';
   let leafDeltaInput = '2e-2';
@@ -1121,6 +1123,25 @@ export async function initiateLimitCycleManifold2DFromPoint(
           default: floquetIndexInput
         });
         floquetIndexInput = value;
+      }
+    },
+    {
+      id: 'direction',
+      label: 'Floquet sheet direction',
+      section: 'Manifold Selection',
+      getDisplay: () => manifoldDirection,
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          type: 'rawlist',
+          name: 'value',
+          message: 'Select Floquet normal mode sign:',
+          choices: [
+            { name: 'Plus', value: 'Plus' },
+            { name: 'Minus', value: 'Minus' }
+          ],
+          default: manifoldDirection
+        });
+        manifoldDirection = value;
       }
     },
     {
@@ -1306,9 +1327,12 @@ export async function initiateLimitCycleManifold2DFromPoint(
       continue;
     }
 
+    const parameterIndex = sysConfig.paramNames.indexOf(sourceBranch.parameterName);
     const settings: LimitCycleManifold2DSettings = {
       stability,
+      direction: manifoldDirection,
       floquet_index: floquetIndex,
+      parameter_index: parameterIndex >= 0 ? parameterIndex : undefined,
       profile: 'LocalPreview',
       initial_radius: Math.max(parseFloatOrDefault(initialRadiusInput, 1e-4), Number.EPSILON),
       leaf_delta: Math.max(parseFloatOrDefault(leafDeltaInput, 2e-3), Number.EPSILON),
@@ -1358,6 +1382,7 @@ export async function initiateLimitCycleManifold2DFromPoint(
       branchData.branch_type = branchData.branch_type ?? {
         type: 'ManifoldCycle2D',
         stability: settings.stability,
+        direction: settings.direction,
         floquet_index: settings.floquet_index ?? 0,
         ntst: sourceNtst,
         ncol: sourceNcol,

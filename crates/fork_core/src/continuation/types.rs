@@ -78,6 +78,10 @@ fn default_manifold_delta_alpha_max() -> f64 {
     1.0
 }
 
+fn default_cycle_manifold_direction() -> ManifoldDirection {
+    ManifoldDirection::Plus
+}
+
 /// Stable/unstable selector for invariant manifold computations.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ManifoldStability {
@@ -248,8 +252,12 @@ impl Default for Manifold2DSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ManifoldCycle2DSettings {
     pub stability: ManifoldStability,
+    #[serde(default = "default_cycle_manifold_direction")]
+    pub direction: ManifoldDirection,
     #[serde(default)]
     pub floquet_index: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameter_index: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<Manifold2DProfile>,
     #[serde(default = "default_manifold_eps")]
@@ -290,7 +298,9 @@ impl Default for ManifoldCycle2DSettings {
     fn default() -> Self {
         Self {
             stability: ManifoldStability::Unstable,
+            direction: default_cycle_manifold_direction(),
             floquet_index: None,
+            parameter_index: None,
             profile: None,
             initial_radius: default_manifold_eps(),
             leaf_delta: default_manifold_leaf_delta(),
@@ -488,6 +498,8 @@ pub enum BranchType {
     },
     ManifoldCycle2D {
         stability: ManifoldStability,
+        #[serde(default = "default_cycle_manifold_direction")]
+        direction: ManifoldDirection,
         floquet_index: usize,
         ntst: usize,
         ncol: usize,

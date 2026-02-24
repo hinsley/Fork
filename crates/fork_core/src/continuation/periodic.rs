@@ -1222,23 +1222,19 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
     }
 }
 
-/// Shooting-based Floquet multiplier extraction from Jacobian.
-///
-/// We compute the monodromy by chaining local transfer matrices through each interval:
-/// M = T_{ntst-1} * T_{ntst-2} * ... * T_1 * T_0
-///
-/// For each interval, we eliminate stages using collocation equations and get the
-/// mesh-to-mesh transfer from continuity:
-/// T_i = -C_{next}^{-1} * (C_x + C_s * ds_dx)
-///
-/// This approach correctly handles our implicit periodicity BVP where last continuity
-/// equation wraps to x_0.
-pub fn extract_multipliers_shooting(
+#[derive(Debug, Clone)]
+pub(crate) struct MonodromyData {
+    pub monodromy: DMatrix<f64>,
+    pub transfers: Vec<DMatrix<f64>>,
+    pub stage_sensitivities: Vec<DMatrix<f64>>,
+}
+
+pub(crate) fn extract_monodromy_data_from_collocation_jacobian(
     jac: &DMatrix<f64>,
     dim: usize,
     ntst: usize,
     ncol: usize,
-) -> Result<Vec<Complex<f64>>> {
+) -> Result<MonodromyData> {
     // Our Jacobian layout:
     // - Rows 0 to ntst*ncol*dim - 1: Stage residuals (collocation equations)
     // - Rows ntst*ncol*dim to ntst*ncol*dim + ntst*dim - 1: Continuity equations
@@ -1256,6 +1252,8 @@ pub fn extract_multipliers_shooting(
 
     // Build monodromy by chaining local transfer matrices
     let mut monodromy = DMatrix::<f64>::identity(dim, dim);
+    let mut transfers = Vec::with_capacity(ntst);
+    let mut stage_sensitivities = Vec::with_capacity(ntst);
 
     for interval in 0..ntst {
         let cont_row = continuity_row_start + interval * dim;
@@ -1323,10 +1321,165 @@ pub fn extract_multipliers_shooting(
 
         // Chain: M = T_i * M
         monodromy = &t_i * &monodromy;
+        stage_sensitivities.push(ds_dx);
+        transfers.push(t_i);
     }
 
-    let eigenvalues: Vec<Complex<f64>> = monodromy.complex_eigenvalues().iter().cloned().collect();
+    Ok(MonodromyData {
+        monodromy,
+        transfers,
+        stage_sensitivities,
+    })
+}
+
+/// Shooting-based Floquet multiplier extraction from Jacobian.
+///
+/// We compute the monodromy by chaining local transfer matrices through each interval:
+/// M = T_{ntst-1} * T_{ntst-2} * ... * T_1 * T_0
+///
+/// For each interval, we eliminate stages using collocation equations and get the
+/// mesh-to-mesh transfer from continuity:
+/// T_i = -C_{next}^{-1} * (C_x + C_s * ds_dx)
+///
+/// This approach correctly handles our implicit periodicity BVP where last continuity
+/// equation wraps to x_0.
+pub fn extract_multipliers_shooting(
+    jac: &DMatrix<f64>,
+    dim: usize,
+    ntst: usize,
+    ncol: usize,
+) -> Result<Vec<Complex<f64>>> {
+    let monodromy_data = extract_monodromy_data_from_collocation_jacobian(jac, dim, ntst, ncol)?;
+    let eigenvalues: Vec<Complex<f64>> = monodromy_data
+        .monodromy
+        .complex_eigenvalues()
+        .iter()
+        .cloned()
+        .collect();
     Ok(eigenvalues)
+}
+
+fn decode_cycle_collocation_state(
+    cycle_state: &[f64],
+    dim: usize,
+    ntst: usize,
+    ncol: usize,
+) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>, f64, Vec<f64>)> {
+    let stage_len = ntst * ncol * dim;
+    let implicit_mesh_len = ntst * dim;
+    let explicit_mesh_len = ntst.saturating_add(1) * dim;
+    let implicit_len = implicit_mesh_len + stage_len + 1;
+    let explicit_len = explicit_mesh_len + stage_len + 1;
+    if cycle_state.len() != implicit_len && cycle_state.len() != explicit_len {
+        bail!(
+            "Invalid limit-cycle state length for Floquet mode computation: expected {} or {}, got {}.",
+            implicit_len,
+            explicit_len,
+            cycle_state.len()
+        );
+    }
+    let period = cycle_state[cycle_state.len() - 1];
+    if !period.is_finite() || period <= 0.0 {
+        bail!("Cycle period must be a positive finite number.");
+    }
+
+    let mesh_count = if cycle_state.len() == explicit_len {
+        ntst + 1
+    } else {
+        ntst
+    };
+    let mesh_len = mesh_count * dim;
+    let raw = &cycle_state[..cycle_state.len() - 1];
+    let stage_offset = mesh_len;
+
+    let mut mesh_states = Vec::with_capacity(ntst);
+    for interval in 0..ntst {
+        let start = interval * dim;
+        mesh_states.push(raw[start..start + dim].to_vec());
+    }
+    let mut stage_states = Vec::with_capacity(ntst * ncol);
+    for stage_index in 0..(ntst * ncol) {
+        let start = stage_offset + stage_index * dim;
+        stage_states.push(raw[start..start + dim].to_vec());
+    }
+
+    let mut packed_implicit = Vec::with_capacity(implicit_len);
+    for point in &mesh_states {
+        packed_implicit.extend_from_slice(point);
+    }
+    for point in &stage_states {
+        packed_implicit.extend_from_slice(point);
+    }
+    packed_implicit.push(period);
+
+    Ok((mesh_states, stage_states, period, packed_implicit))
+}
+
+fn build_cycle_phase_direction(mesh_states: &[Vec<f64>], dim: usize) -> Vec<f64> {
+    let mut phase_direction = if mesh_states.len() > 1 {
+        mesh_states[1]
+            .iter()
+            .zip(mesh_states[0].iter())
+            .map(|(a, b)| a - b)
+            .collect::<Vec<_>>()
+    } else {
+        vec![0.0; dim]
+    };
+    let phase_norm = phase_direction.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if phase_norm > 1e-12 {
+        for value in phase_direction.iter_mut() {
+            *value /= phase_norm;
+        }
+    } else {
+        phase_direction = vec![0.0; dim];
+        phase_direction[0] = 1.0;
+    }
+    phase_direction
+}
+
+pub(crate) fn compute_cycle_monodromy_data(
+    system: &mut EquationSystem,
+    param_index: usize,
+    cycle_state: &[f64],
+    ntst: usize,
+    ncol: usize,
+) -> Result<MonodromyData> {
+    let dim = system.equations.len();
+    if dim == 0 {
+        bail!("System has zero dimension.");
+    }
+    if ntst < 2 {
+        bail!("Monodromy extraction requires ntst >= 2.");
+    }
+    if ncol == 0 {
+        bail!("Monodromy extraction requires ncol >= 1.");
+    }
+    if param_index >= system.params.len() {
+        bail!("Parameter index out of bounds for monodromy extraction.");
+    }
+
+    let (mesh_states, _stage_states, _period, packed_implicit) =
+        decode_cycle_collocation_state(cycle_state, dim, ntst, ncol)?;
+    let phase_anchor = mesh_states[0].clone();
+    let phase_direction = build_cycle_phase_direction(&mesh_states, dim);
+
+    let param_value = system.params[param_index];
+    let mut problem = PeriodicOrbitCollocationProblem::new(
+        system,
+        param_index,
+        ntst,
+        ncol,
+        phase_anchor,
+        phase_direction,
+    )?;
+
+    let mut aug_state = DVector::zeros(1 + packed_implicit.len());
+    aug_state[0] = param_value;
+    for (index, value) in packed_implicit.iter().enumerate() {
+        aug_state[index + 1] = *value;
+    }
+    let jac = problem.extended_jacobian(&aug_state)?;
+    extract_monodromy_data_from_collocation_jacobian(&jac, dim, ntst, ncol)
 }
 
 pub fn compute_limit_cycle_floquet_modes(
@@ -1350,52 +1503,10 @@ pub fn compute_limit_cycle_floquet_modes(
         bail!("Parameter index out of bounds for Floquet mode computation.");
     }
 
-    let mesh_len = ntst * dim;
-    let stage_len = ntst * ncol * dim;
-    let expected_len = mesh_len + stage_len + 1;
-    if cycle_state.len() != expected_len {
-        bail!(
-            "Invalid limit-cycle state length for Floquet mode computation: expected {}, got {}.",
-            expected_len,
-            cycle_state.len()
-        );
-    }
-    let period = cycle_state[expected_len - 1];
-    if !period.is_finite() || period <= 0.0 {
-        bail!("Cycle period must be a positive finite number.");
-    }
-
-    let mut mesh_states = Vec::with_capacity(ntst);
-    for interval in 0..ntst {
-        let start = interval * dim;
-        mesh_states.push(cycle_state[start..start + dim].to_vec());
-    }
-    let stage_offset = mesh_len;
-    let mut stage_states = Vec::with_capacity(ntst * ncol);
-    for stage_index in 0..(ntst * ncol) {
-        let start = stage_offset + stage_index * dim;
-        stage_states.push(cycle_state[start..start + dim].to_vec());
-    }
-
+    let (mesh_states, stage_states, _period, packed_implicit) =
+        decode_cycle_collocation_state(cycle_state, dim, ntst, ncol)?;
     let phase_anchor = mesh_states[0].clone();
-    let mut phase_direction = if ntst > 1 {
-        mesh_states[1]
-            .iter()
-            .zip(mesh_states[0].iter())
-            .map(|(a, b)| a - b)
-            .collect::<Vec<_>>()
-    } else {
-        vec![0.0; dim]
-    };
-    let phase_norm = phase_direction.iter().map(|v| v * v).sum::<f64>().sqrt();
-    if phase_norm > 1e-12 {
-        for value in phase_direction.iter_mut() {
-            *value /= phase_norm;
-        }
-    } else {
-        phase_direction = vec![0.0; dim];
-        phase_direction[0] = 1.0;
-    }
+    let phase_direction = build_cycle_phase_direction(&mesh_states, dim);
 
     let param_value = system.params[param_index];
     let mut problem = PeriodicOrbitCollocationProblem::new(
@@ -1407,91 +1518,18 @@ pub fn compute_limit_cycle_floquet_modes(
         phase_direction,
     )?;
 
-    let mut aug_state = DVector::zeros(1 + cycle_state.len());
+    let mut aug_state = DVector::zeros(1 + packed_implicit.len());
     aug_state[0] = param_value;
-    for (index, value) in cycle_state.iter().enumerate() {
+    for (index, value) in packed_implicit.iter().enumerate() {
         aug_state[index + 1] = *value;
     }
     let jac = problem.extended_jacobian(&aug_state)?;
+    let monodromy_data = extract_monodromy_data_from_collocation_jacobian(&jac, dim, ntst, ncol)?;
+    let monodromy = monodromy_data.monodromy;
+    let interval_ds_dx = monodromy_data.stage_sensitivities;
+    let interval_transfers = monodromy_data.transfers;
 
-    let ncol_coord = ncol * dim;
-    let mesh_col_start = 1usize;
-    let stage_col_start = mesh_col_start + ntst * dim;
-    let continuity_row_start = ntst * ncol * dim;
-
-    let mut interval_ds_dx: Vec<DMatrix<f64>> = Vec::with_capacity(ntst);
-    let mut interval_transfers: Vec<DMatrix<f64>> = Vec::with_capacity(ntst);
-    let mut monodromy = DMatrix::<f64>::identity(dim, dim);
-
-    for interval in 0..ntst {
-        let cont_row = continuity_row_start + interval * dim;
-        let coll_row_start = interval * ncol_coord;
-        let stage_col = stage_col_start + interval * ncol_coord;
-        let mesh_col = mesh_col_start + interval * dim;
-        let next_mesh_col = mesh_col_start + ((interval + 1) % ntst) * dim;
-
-        let mut g_x = DMatrix::<f64>::zeros(ncol_coord, dim);
-        for r in 0..ncol_coord {
-            for c in 0..dim {
-                g_x[(r, c)] = jac[(coll_row_start + r, mesh_col + c)];
-            }
-        }
-
-        let mut g_s = DMatrix::<f64>::zeros(ncol_coord, ncol_coord);
-        for r in 0..ncol_coord {
-            for c in 0..ncol_coord {
-                g_s[(r, c)] = jac[(coll_row_start + r, stage_col + c)];
-            }
-        }
-
-        let ds_dx = match g_s.clone().lu().solve(&-&g_x) {
-            Some(solution) => solution,
-            None => bail!(
-                "Floquet mode computation failed: singular stage block at interval {}.",
-                interval
-            ),
-        };
-
-        let mut c_x = DMatrix::<f64>::zeros(dim, dim);
-        for r in 0..dim {
-            for c in 0..dim {
-                c_x[(r, c)] = jac[(cont_row + r, mesh_col + c)];
-            }
-        }
-
-        let mut c_s = DMatrix::<f64>::zeros(dim, ncol_coord);
-        for r in 0..dim {
-            for c in 0..ncol_coord {
-                c_s[(r, c)] = jac[(cont_row + r, stage_col + c)];
-            }
-        }
-
-        let mut c_next = DMatrix::<f64>::zeros(dim, dim);
-        for r in 0..dim {
-            for c in 0..dim {
-                c_next[(r, c)] = jac[(cont_row + r, next_mesh_col + c)];
-            }
-        }
-
-        let effective_c_x = &c_x + &c_s * &ds_dx;
-        let transfer = match c_next.clone().lu().solve(&-&effective_c_x) {
-            Some(solution) => solution,
-            None => bail!(
-                "Floquet mode computation failed: singular continuity block at interval {}.",
-                interval
-            ),
-        };
-
-        monodromy = &transfer * &monodromy;
-        interval_ds_dx.push(ds_dx);
-        interval_transfers.push(transfer);
-    }
-
-    let multipliers: Vec<Complex<f64>> = monodromy
-        .complex_eigenvalues()
-        .iter()
-        .cloned()
-        .collect();
+    let multipliers: Vec<Complex<f64>> = monodromy.complex_eigenvalues().iter().cloned().collect();
     if multipliers.is_empty() {
         bail!("Floquet mode computation failed: no multipliers returned.");
     }
@@ -2072,6 +2110,99 @@ mod tests {
             "expected discrete period {} but got {}",
             expected_period_steps,
             setup.guess.period
+        );
+    }
+
+    fn synthetic_scalar_monodromy_jacobian() -> DMatrix<f64> {
+        let dim = 1usize;
+        let ntst = 2usize;
+        let ncol = 1usize;
+        let rows = ntst * ncol * dim + ntst * dim + 1;
+        let cols = 1 + ntst * dim + ntst * ncol * dim + 1;
+        let mut jac = DMatrix::<f64>::zeros(rows, cols);
+
+        // Interval 0 blocks:
+        // ds/dx = -g_x / g_s = -1/2 = -0.5
+        jac[(0, 1)] = 1.0; // G_x
+        jac[(0, 3)] = 2.0; // G_s
+                           // T0 = - (c_x + c_s * ds/dx) / c_next = -(1.2 + 0.4 * -0.5) / 2 = -0.5
+        jac[(2, 1)] = 1.2; // C_x
+        jac[(2, 3)] = 0.4; // C_s
+        jac[(2, 2)] = 2.0; // C_next
+
+        // Interval 1 blocks:
+        // ds/dx = -g_x / g_s = -(-2)/4 = 0.5
+        jac[(1, 2)] = -2.0; // G_x
+        jac[(1, 4)] = 4.0; // G_s
+                           // T1 = - (c_x + c_s * ds/dx) / c_next = -(0.6 + 0.8 * 0.5) / 1 = -1.0
+        jac[(3, 2)] = 0.6; // C_x
+        jac[(3, 4)] = 0.8; // C_s
+        jac[(3, 1)] = 1.0; // C_next (wrap to x_0)
+
+        jac
+    }
+
+    #[test]
+    fn monodromy_helper_extracts_expected_scalar_transfers_and_chain() {
+        let dim = 1usize;
+        let ntst = 2usize;
+        let ncol = 1usize;
+        let jac = synthetic_scalar_monodromy_jacobian();
+
+        let data = extract_monodromy_data_from_collocation_jacobian(&jac, dim, ntst, ncol)
+            .expect("monodromy extraction should succeed");
+
+        assert_eq!(data.transfers.len(), ntst);
+        assert_eq!(data.stage_sensitivities.len(), ntst);
+
+        let ds0 = data.stage_sensitivities[0][(0, 0)];
+        let ds1 = data.stage_sensitivities[1][(0, 0)];
+        assert!((ds0 + 0.5).abs() < 1e-12, "expected ds0=-0.5, got {}", ds0);
+        assert!((ds1 - 0.5).abs() < 1e-12, "expected ds1=0.5, got {}", ds1);
+
+        let t0 = data.transfers[0][(0, 0)];
+        let t1 = data.transfers[1][(0, 0)];
+        assert!((t0 + 0.5).abs() < 1e-12, "expected T0=-0.5, got {}", t0);
+        assert!((t1 + 1.0).abs() < 1e-12, "expected T1=-1.0, got {}", t1);
+
+        let chained = (&data.transfers[1] * &data.transfers[0])[(0, 0)];
+        let monodromy = data.monodromy[(0, 0)];
+        assert!(
+            (chained - 0.5).abs() < 1e-12,
+            "expected chained monodromy 0.5, got {}",
+            chained
+        );
+        assert!(
+            (monodromy - chained).abs() < 1e-12,
+            "monodromy should equal chained transfers: M={}, chain={}",
+            monodromy,
+            chained
+        );
+    }
+
+    #[test]
+    fn monodromy_helper_matches_shooting_multiplier_extraction() {
+        let dim = 1usize;
+        let ntst = 2usize;
+        let ncol = 1usize;
+        let jac = synthetic_scalar_monodromy_jacobian();
+        let data = extract_monodromy_data_from_collocation_jacobian(&jac, dim, ntst, ncol)
+            .expect("monodromy extraction should succeed");
+        let multipliers =
+            extract_multipliers_shooting(&jac, dim, ntst, ncol).expect("multiplier extraction");
+
+        assert_eq!(multipliers.len(), dim);
+        let lambda = multipliers[0];
+        assert!(
+            lambda.im.abs() < 1e-12,
+            "expected real multiplier, got {:?}",
+            lambda
+        );
+        assert!(
+            (lambda.re - data.monodromy[(0, 0)]).abs() < 1e-12,
+            "expected multiplier {} to match monodromy {}",
+            lambda.re,
+            data.monodromy[(0, 0)]
         );
     }
 

@@ -1170,6 +1170,7 @@ export type LimitCycleManifold2DRequest = {
   name: string
   settings: {
     stability: ManifoldStability
+    direction?: ManifoldDirection
     floquet_index?: number
     profile?: Manifold2DProfile
     initial_radius: number
@@ -3582,6 +3583,14 @@ export function AppProvider({
           throw new Error('Floquet index must be a non-negative integer.')
         }
         if (
+          settings.direction !== undefined &&
+          settings.direction !== 'Plus' &&
+          settings.direction !== 'Minus' &&
+          settings.direction !== 'Both'
+        ) {
+          throw new Error('Cycle manifold direction must be Plus, Minus, or Both.')
+        }
+        if (
           settings.ntst !== undefined &&
           (!Number.isFinite(settings.ntst) || settings.ntst <= 0 || !Number.isInteger(settings.ntst))
         ) {
@@ -3657,6 +3666,7 @@ export function AppProvider({
           seedNcol,
           'Limit cycle'
         )
+        const parameterIndex = system.paramNames.indexOf(limitCycle.parameterName)
         const branchData = await client.runLimitCycleManifold2D(
           {
             system: runConfig,
@@ -3666,6 +3676,8 @@ export function AppProvider({
             floquetMultipliers: floquet,
             settings: {
               ...settings,
+              direction: settings.direction ?? 'Plus',
+              parameter_index: parameterIndex >= 0 ? parameterIndex : undefined,
               ntst: settings.ntst ?? seedNtst,
               ncol: settings.ncol ?? seedNcol,
               caps: { ...settings.caps },

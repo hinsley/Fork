@@ -10,7 +10,7 @@ Implemented branches:
 
 - `eq_manifold_1d`: 1D stable/unstable manifolds of equilibria
 - `eq_manifold_2d`: 2D stable/unstable manifolds of equilibria
-- `cycle_manifold_2d`: 2D stable/unstable manifolds of limit cycles
+- `cycle_manifold_2d`: 2D stable/unstable manifolds of limit cycles (**experimental**)
 
 Not implemented yet:
 
@@ -57,6 +57,12 @@ CLI:
 - Selected object must be a limit cycle with multipliers available.
 - Ambient dimension must be `n >= 3`.
 - Selected side must have an eligible real nontrivial Floquet mode.
+  - real: `|Im(mu)| <= 1e-8`
+  - nontrivial: `|mu - 1| > 1e-3`
+  - stable side: `|mu| < 1 - 1e-6`
+  - unstable side: `|mu| > 1 + 1e-6`
+
+Detailed LC 2D notes: `docs/limit_cycle_manifold_2d_experimental.md`.
 
 ## Solver Overview
 
@@ -263,6 +269,7 @@ Fields:
 
 - `Kind`
 - `Floquet index`
+- `Direction` (`plus` or `minus`)
 - `Initial radius`
 - `Leaf delta`
 - `Ring points`
@@ -282,6 +289,7 @@ Termination caps shown:
 Note:
 
 - The cycle manifold panel currently does not expose `Delta min`, spacing, or alpha thresholds in the Web form even though the core supports them.
+- `cycle_manifold_2d` is experimental; see `docs/limit_cycle_manifold_2d_experimental.md` for troubleshooting and tuning guidance.
 
 ## CLI Notes
 
@@ -406,6 +414,7 @@ Then adjust only as needed:
 
 - Map manifold workflows are not available yet.
 - 2D ring-growth robustness is still being improved for difficult geometries.
+- `cycle_manifold_2d` (limit-cycle 2D manifolds) is experimental and may require substantial tuning.
 - Branch extension for manifold branches is not exposed as a continuation extension workflow.
 
 ## Developer Touchpoints

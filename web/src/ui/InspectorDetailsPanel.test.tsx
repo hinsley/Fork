@@ -4842,6 +4842,104 @@ describe('InspectorDetailsPanel', () => {
     expect(Array.from(eig1d.options).map((option) => option.textContent)).toEqual(['2', '5'])
   })
 
+  it('filters limit-cycle manifold Floquet options and auto-corrects selection by stability', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({
+      name: 'LC_Manifold_Filter_System',
+      config: {
+        name: 'LC_Manifold_Filter_System',
+        equations: ['y', '-x'],
+        params: [0.2],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Filter',
+      systemName: baseSystem.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_Filter' },
+      ntst: 4,
+      ncol: 2,
+      period: 6.0,
+      state: [1, 0, 0, 1, -1, 0, 0, -1, 6.0],
+      parameters: [0.2],
+      parameterName: 'mu',
+      floquetMultipliers: [
+        { re: 1.0, im: 0.0 },
+        { re: 1.3, im: 0.0 },
+        { re: 0.6, im: 0.0 },
+        { re: 0.8, im: 0.2 },
+        { re: 0.9995, im: 0.0 },
+      ],
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(baseSystem, limitCycle)
+
+    render(
+      <InspectorDetailsPanel
+        system={added.system}
+        selectedNodeId={added.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumManifold1D={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumManifold2D={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateIsochroneCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleManifold2D={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('limit-cycle-manifold-toggle'))
+
+    const direction = screen.getByTestId(
+      'limit-cycle-manifold-direction'
+    ) as HTMLSelectElement
+    expect(Array.from(direction.options).map((option) => option.value)).toEqual([
+      'Plus',
+      'Minus',
+    ])
+    expect(direction.value).toBe('Plus')
+
+    const floquetIndex = screen.getByTestId(
+      'limit-cycle-manifold-floquet-index'
+    ) as HTMLSelectElement
+
+    await waitFor(() => {
+      expect(Array.from(floquetIndex.options).map((option) => option.value)).toEqual(['1'])
+      expect(floquetIndex.value).toBe('1')
+    })
+
+    await user.selectOptions(screen.getByTestId('limit-cycle-manifold-stability'), 'Stable')
+
+    await waitFor(() => {
+      expect(Array.from(floquetIndex.options).map((option) => option.value)).toEqual(['2'])
+      expect(floquetIndex.value).toBe('2')
+    })
+  })
+
   it('jumps to the newest branch point after extension', async () => {
     const user = userEvent.setup()
     const { system, branchNodeId } = createDemoSystem()

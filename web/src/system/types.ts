@@ -327,6 +327,7 @@ export type BranchType =
   | {
       type: 'ManifoldCycle2D'
       stability: ManifoldStability
+      direction?: ManifoldDirection
       floquet_index: number
       ntst: number
       ncol: number
