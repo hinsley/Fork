@@ -37,8 +37,8 @@ test('rossler hopf to limit cycle continuation rejects neutral saddle', async ({
   await page.getByTestId('branch-point-jump').click()
   await expect(page.getByText('Stability: NeutralSaddle')).toBeVisible({ timeout: 20_000 })
 
-  await page.getByTestId('limit-cycle-from-hopf-toggle').click()
+  await expect(page.getByTestId('limit-cycle-from-hopf-toggle')).toHaveCount(0)
   await expect(
     page.getByText('Select a Hopf bifurcation point to continue a limit cycle.')
-  ).toBeVisible()
+  ).toHaveCount(0)
 })

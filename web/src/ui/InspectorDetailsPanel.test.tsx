@@ -4092,7 +4092,7 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.queryByText('Cycle from PD')).toBeNull()
   })
 
-  it('shows "Limit Cycle from Hopf" guidance for non-Hopf equilibrium points', () => {
+  it('hides "Limit Cycle from Hopf" for non-Hopf equilibrium points', () => {
     const config: SystemConfig = {
       name: 'Flow_Menu_No_Hopf',
       equations: ['x', '-x'],
@@ -4174,11 +4174,10 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    const hopfToggle = screen.getByTestId('limit-cycle-from-hopf-toggle')
-    fireEvent.click(hopfToggle)
+    expect(screen.queryByTestId('limit-cycle-from-hopf-toggle')).toBeNull()
     expect(
-      screen.getByText('Select a Hopf bifurcation point to continue a limit cycle.')
-    ).toBeInTheDocument()
+      screen.queryByText('Select a Hopf bifurcation point to continue a limit cycle.')
+    ).toBeNull()
   })
 
   it('hides "Limit Cycle from Hopf" for limit-cycle and homoclinic branches', () => {

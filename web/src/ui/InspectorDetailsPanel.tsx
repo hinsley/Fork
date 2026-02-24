@@ -3959,8 +3959,8 @@ export function InspectorDetailsPanel({
     selectedBranchPoint?.stability === 'PeriodDoubling'
   const showLimitCycleFromHopf =
     !isDiscreteMap &&
-    hasSelectedBranchPoint &&
-    isHopfSourceBranch
+    isHopfSourceBranch &&
+    isHopfPointSelected
   const showLimitCycleFromPD = isPeriodDoublingPointSelected
   const branchSupportsContinueFromPoint =
     branch?.branchType === 'equilibrium' ||
