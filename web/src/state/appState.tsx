@@ -1461,7 +1461,15 @@ export function AppProvider({
   const systemSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestSystemRef = useRef<System | null>(null)
   const isoclineWarmupSystemIdRef = useRef<string | null>(null)
-  const isoclineWarmupControllersRef = useRef(new Map<string, AbortController>())
+  const isoclineWarmupControllersRef = useRef(
+    new Map<
+      string,
+      {
+        signature: string
+        controller: AbortController
+      }
+    >()
+  )
 
   useEffect(() => {
     latestSystemRef.current = state.system
@@ -1472,8 +1480,8 @@ export function AppProvider({
     return () => {
       if (uiSaveTimer.current) clearTimeout(uiSaveTimer.current)
       if (systemSaveTimer.current) clearTimeout(systemSaveTimer.current)
-      for (const controller of warmupControllers.values()) {
-        controller.abort()
+      for (const job of warmupControllers.values()) {
+        job.controller.abort()
       }
       warmupControllers.clear()
       isoclineWarmupSystemIdRef.current = null
@@ -2354,37 +2362,62 @@ export function AppProvider({
 
   useEffect(() => {
     const system = state.system
+    const warmupControllers = isoclineWarmupControllersRef.current
     if (!system) {
-      for (const controller of isoclineWarmupControllersRef.current.values()) {
-        controller.abort()
+      for (const job of warmupControllers.values()) {
+        job.controller.abort()
       }
-      isoclineWarmupControllersRef.current.clear()
+      warmupControllers.clear()
       isoclineWarmupSystemIdRef.current = null
       return
     }
-    if (isoclineWarmupSystemIdRef.current === system.id) return
-    isoclineWarmupSystemIdRef.current = system.id
-    for (const controller of isoclineWarmupControllersRef.current.values()) {
-      controller.abort()
+
+    if (isoclineWarmupSystemIdRef.current !== system.id) {
+      for (const job of warmupControllers.values()) {
+        job.controller.abort()
+      }
+      warmupControllers.clear()
+      isoclineWarmupSystemIdRef.current = system.id
     }
-    isoclineWarmupControllersRef.current.clear()
+
+    const staleWarmupIds = new Set(warmupControllers.keys())
 
     for (const [isoclineId, object] of Object.entries(system.objects)) {
       if (object.type !== 'isocline' || !object.lastComputed) continue
+      staleWarmupIds.delete(isoclineId)
       const signature = buildIsoclineSnapshotSignature(object.lastComputed)
       const cached = state.isoclineGeometryCache[isoclineId]
-      if (cached && cached.signature === signature) continue
+      const existingJob = warmupControllers.get(isoclineId)
+      if (cached && cached.signature === signature) {
+        if (existingJob) {
+          existingJob.controller.abort()
+          warmupControllers.delete(isoclineId)
+        }
+        continue
+      }
+      if (existingJob) {
+        if (existingJob.signature === signature) continue
+        existingJob.controller.abort()
+        warmupControllers.delete(isoclineId)
+      }
       const controller = new AbortController()
-      isoclineWarmupControllersRef.current.set(isoclineId, controller)
+      warmupControllers.set(isoclineId, { signature, controller })
       void computeIsocline(
         { isoclineId, useLastComputedSettings: true },
         { signal: controller.signal, silent: true }
       ).finally(() => {
-        const current = isoclineWarmupControllersRef.current.get(isoclineId)
-        if (current === controller) {
-          isoclineWarmupControllersRef.current.delete(isoclineId)
+        const current = warmupControllers.get(isoclineId)
+        if (current?.controller === controller) {
+          warmupControllers.delete(isoclineId)
         }
       })
+    }
+
+    for (const staleId of staleWarmupIds) {
+      const staleJob = warmupControllers.get(staleId)
+      if (!staleJob) continue
+      staleJob.controller.abort()
+      warmupControllers.delete(staleId)
     }
   }, [computeIsocline, state.isoclineGeometryCache, state.system])
 

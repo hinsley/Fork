@@ -309,6 +309,65 @@ describe('appState lazy hydration', () => {
       store.loadEntitiesCalls.some((call) => call.branchIds.includes(branchId))
     ).toBe(true)
   })
+
+  it('warms cached isocline geometry after lazy entity hydration', async () => {
+    const base = createSystem({ name: 'Lazy_Isocline_Warmup' })
+    const isocline: IsoclineObject = {
+      type: 'isocline',
+      name: 'Iso_Lazy',
+      systemName: base.config.name,
+      source: { kind: 'custom', expression: 'x' },
+      level: 0,
+      axes: [
+        { variableName: 'x', min: -2, max: 2, samples: 24 },
+        { variableName: 'y', min: -2, max: 2, samples: 24 },
+      ],
+      frozenState: [0, 0],
+      parameters: [...base.config.params],
+      lastComputed: {
+        source: { kind: 'custom', expression: 'x + y' },
+        expression: 'x + y',
+        level: 1.25,
+        axes: [
+          { variableName: 'x', min: -1, max: 1, samples: 16 },
+          { variableName: 'y', min: -1, max: 1, samples: 16 },
+        ],
+        frozenState: [0, 0],
+        parameters: [...base.config.params],
+        computedAt: '2026-02-06T00:00:00.000Z',
+      },
+    }
+    const added = addObject(base, isocline)
+    const store = new LazyHydrationStore([added.system])
+    const client = new MockForkCoreClient(0)
+    const captured: Array<{ expression: string; level: number }> = []
+    client.computeIsocline = async (request) => {
+      captured.push({ expression: request.expression, level: request.level })
+      return {
+        geometry: 'segments',
+        dim: request.system.varNames.length,
+        points: [0, 0, 1, 1],
+        segments: [0, 1],
+      }
+    }
+    const { getContext } = setupAppWithStore(store, { clientOverride: client })
+
+    await act(async () => {
+      await getContext().actions.openSystem(added.system.id)
+    })
+
+    await waitFor(() => {
+      expect(getContext().state.system?.objects[added.nodeId]).toBeDefined()
+      expect(getContext().state.error).toBeNull()
+    })
+    await waitFor(() => {
+      expect(getContext().state.isoclineGeometryCache[added.nodeId]).toBeDefined()
+    })
+    expect(captured).toEqual([{ expression: 'x + y', level: 1.25 }])
+    expect(
+      store.loadEntitiesCalls.some((call) => call.objectIds.includes(added.nodeId))
+    ).toBe(true)
+  })
 })
 
 describe('appState rename persistence routing', () => {
