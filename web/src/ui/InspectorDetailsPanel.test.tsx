@@ -4842,6 +4842,99 @@ describe('InspectorDetailsPanel', () => {
     expect(Array.from(eig1d.options).map((option) => option.textContent)).toEqual(['2', '5'])
   })
 
+  it('auto-picks equilibrium manifold mode when only one mode is eligible for selected stability', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({
+      name: 'Manifold_Mode_AutoPick_System',
+      config: {
+        name: 'Manifold_Mode_AutoPick_System',
+        equations: ['x', 'y', 'z'],
+        params: [0],
+        paramNames: ['mu'],
+        varNames: ['x', 'y', 'z'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq_Mode',
+      systemName: baseSystem.config.name,
+      solution: {
+        state: [0, 0, 0],
+        residual_norm: 0,
+        iterations: 2,
+        jacobian: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+        eigenpairs: [
+          { value: { re: 0.6, im: 0 }, vector: [{ re: 1, im: 0 }, { re: 0, im: 0 }, { re: 0, im: 0 }] },
+          { value: { re: -0.4, im: 0.9 }, vector: [{ re: 0, im: 0 }, { re: 1, im: 0 }, { re: 0, im: 0 }] },
+          { value: { re: -0.4, im: -0.9 }, vector: [{ re: 0, im: 0 }, { re: 0, im: 0 }, { re: 1, im: 0 }] },
+        ],
+      },
+    }
+    const added = addObject(baseSystem, equilibrium)
+
+    render(
+      <InspectorDetailsPanel
+        system={added.system}
+        selectedNodeId={added.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumManifold1D={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumManifold2D={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateIsochroneCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleManifold2D={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('equilibrium-manifold-toggle'))
+
+    const modeSelect = screen.getByTestId('equilibrium-manifold-mode') as HTMLSelectElement
+    expect(modeSelect.value).toBe('surface_2d')
+    expect(Array.from(modeSelect.options).map((option) => option.textContent)).toEqual([
+      '2D surface',
+    ])
+    expect(modeSelect).toBeDisabled()
+
+    await user.selectOptions(screen.getByTestId('equilibrium-manifold-stability'), 'Unstable')
+    await waitFor(() => {
+      expect(modeSelect.value).toBe('curve_1d')
+      expect(Array.from(modeSelect.options).map((option) => option.textContent)).toEqual([
+        '1D curve',
+      ])
+    })
+    expect(modeSelect).toBeDisabled()
+
+    await user.selectOptions(screen.getByTestId('equilibrium-manifold-stability'), 'Stable')
+    await waitFor(() => {
+      expect(modeSelect.value).toBe('surface_2d')
+      expect(Array.from(modeSelect.options).map((option) => option.textContent)).toEqual([
+        '2D surface',
+      ])
+    })
+  })
+
   it('filters limit-cycle manifold Floquet options and auto-corrects selection by stability', async () => {
     const user = userEvent.setup()
     const baseSystem = createSystem({

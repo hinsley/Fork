@@ -2310,6 +2310,39 @@ export function InspectorDetailsPanel({
     () => new Set(equilibriumManifoldEligibleRealIndexOptions.map((option) => option.value)),
     [equilibriumManifoldEligibleRealIndexOptions]
   )
+  const equilibriumManifoldSupportsSurface = systemDraft.varNames.length >= 3
+  const equilibriumManifoldModeOptions = useMemo(
+    (): Array<{ value: EquilibriumManifoldMode; label: string }> => {
+      const options: Array<{ value: EquilibriumManifoldMode; label: string }> = []
+      if (equilibriumManifoldEligibleRealIndexOptions.length > 0) {
+        options.push({ value: 'curve_1d', label: '1D curve' })
+      }
+      if (
+        equilibriumManifoldSupportsSurface &&
+        equilibriumManifoldEligibleIndexOptions.length >= 2
+      ) {
+        options.push({ value: 'surface_2d', label: '2D surface' })
+      }
+      if (options.length > 0) {
+        return options
+      }
+      return equilibriumManifoldSupportsSurface
+        ? [
+            { value: 'curve_1d', label: '1D curve' },
+            { value: 'surface_2d', label: '2D surface' },
+          ]
+        : [{ value: 'curve_1d', label: '1D curve' }]
+    },
+    [
+      equilibriumManifoldEligibleIndexOptions.length,
+      equilibriumManifoldEligibleRealIndexOptions.length,
+      equilibriumManifoldSupportsSurface,
+    ]
+  )
+  const equilibriumManifoldModeOptionSet = useMemo(
+    () => new Set(equilibriumManifoldModeOptions.map((option) => option.value)),
+    [equilibriumManifoldModeOptions]
+  )
   const [limitCycleFromHopfDraft, setLimitCycleFromHopfDraft] =
     useState<LimitCycleFromHopfDraft>(() => makeLimitCycleFromHopfDraft(system.config))
   const [limitCycleFromHopfError, setLimitCycleFromHopfError] = useState<string | null>(
@@ -3112,6 +3145,24 @@ export function InspectorDetailsPanel({
     equilibriumManifoldEligibleRealIndexOptions,
     equilibriumManifoldEligibleRealIndexSet,
   ])
+
+  useEffect(() => {
+    setEquilibriumManifoldDraft((prev) => {
+      const resolvedMode =
+        equilibriumManifoldModeOptions.length === 1
+          ? equilibriumManifoldModeOptions[0].value
+          : equilibriumManifoldModeOptionSet.has(prev.mode)
+            ? prev.mode
+            : equilibriumManifoldModeOptions[0]?.value ?? prev.mode
+      if (resolvedMode === prev.mode) {
+        return prev
+      }
+      return {
+        ...prev,
+        mode: resolvedMode,
+      }
+    })
+  }, [equilibriumManifoldModeOptions, equilibriumManifoldModeOptionSet])
 
   useEffect(() => {
     if (!limitCycle) return
@@ -8745,11 +8796,14 @@ export function InspectorDetailsPanel({
                               }
                             })
                           }
-                          disabled={systemDraft.varNames.length < 3}
+                          disabled={equilibriumManifoldModeOptions.length <= 1}
                           data-testid="equilibrium-manifold-mode"
                         >
-                          <option value="curve_1d">1D curve</option>
-                          <option value="surface_2d">2D surface</option>
+                          {equilibriumManifoldModeOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
                       </label>
 
