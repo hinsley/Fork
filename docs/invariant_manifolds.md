@@ -65,6 +65,7 @@ Map cycle fan-out:
 
 - `mapIterations = 1`: one cycle point (fixed point), one branch per requested direction.
 - `mapIterations > 1`: one branch per `(cycle point, direction)`.
+- For `mapIterations > 1`, Fork computes one representative curve on `F^n` and propagates it with `F^k` to emit the remaining cycle-phase branches.
 - Branch names for cycle fan-out: `name_p{idx}_{dir}` where:
   - `idx` is 1-based cycle-point index (`p1`, `p2`, ...)
   - `dir` is `plus` or `minus`
@@ -104,10 +105,12 @@ The 1D workflow computes a trajectory branch seeded from the equilibrium along a
     - unstable manifold uses forward flow
     - stable manifold uses reversed flow internally
   - Map systems:
-    - unstable manifold uses forward map iteration (`x_{k+1} = F(x_k)`)
-    - stable manifold uses inverse-map stepping by solving preimages with Newton:
-      - solve `F(y) = x_k` for `y`
-      - use one-step map Jacobian in the Newton solve
+    - for `mapIterations = n`, solve a representative branch on the `n`-iterate map `F^n`
+    - unstable manifold growth uses forward `F^n` mapping
+    - stable manifold growth uses inverse-map stepping on `F^n` via Newton preimages
+      - solve `F^n(y) = x_k` for `y`
+      - use Jacobian of `F^n` in the Newton solve
+    - emit additional cycle-phase branches by forward propagation `F^k` of the representative curve
     - mapped fundamental-domain samples are adaptively refined (spacing + turn/curvature checks) before appending branch points
 - Directed modes:
   - `Both` computes `Plus` and `Minus`

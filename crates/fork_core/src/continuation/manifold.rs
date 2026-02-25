@@ -261,38 +261,57 @@ fn continue_manifold_eq_1d_map(
         bail!("Map cycle seed generation failed: no cycle points available.");
     }
     let dim = system.equations.len();
+    let representative = &cycle_points[0];
+    let eig = select_real_eigenmode_with_kind(
+        system,
+        SystemKind::Map {
+            iterations: map_iterations,
+        },
+        representative,
+        settings.stability,
+        settings.eig_index,
+    )?;
     let mut branches = Vec::new();
-    for (cycle_point_index, cycle_point) in cycle_points.iter().enumerate() {
-        let eig = select_real_eigenmode_with_kind(
-            system,
-            SystemKind::Map {
-                iterations: map_iterations,
-            },
-            cycle_point,
-            settings.stability,
-            settings.eig_index,
-        )?;
-        for direction in directions.iter().copied() {
-            let sign = if direction == ManifoldDirection::Minus {
-                -1.0
-            } else {
-                1.0
-            };
-            let mut seed = cycle_point.clone();
-            for i in 0..dim {
-                seed[i] += sign * settings.eps * eig.vector[i];
-            }
+    for direction in directions.iter().copied() {
+        let sign = if direction == ManifoldDirection::Minus {
+            -1.0
+        } else {
+            1.0
+        };
+        let mut seed = representative.clone();
+        for i in 0..dim {
+            seed[i] += sign * settings.eps * eig.vector[i];
+        }
 
-            let (points, arclength) = build_map_manifold_curve(
+        let (base_points, base_arclength) = build_map_manifold_curve(
+            system,
+            &seed,
+            representative,
+            settings.stability,
+            map_iterations,
+            settings.target_arclength,
+            settings.caps,
+            settings.bounds.as_ref(),
+        )?;
+
+        for cycle_point_index in 0..map_iterations {
+            let points = if cycle_point_index == 0 {
+                base_points.clone()
+            } else if let Some(mapped) = propagate_curve_by_map_steps(
                 system,
-                &seed,
-                &cycle_points,
+                &base_points,
                 cycle_point_index,
-                settings.stability,
-                settings.target_arclength,
-                settings.caps,
                 settings.bounds.as_ref(),
-            )?;
+            ) {
+                mapped
+            } else {
+                continue;
+            };
+            let arclength = if cycle_point_index == 0 {
+                base_arclength.clone()
+            } else {
+                curve_arclength(&points)
+            };
 
             branches.push(build_eq_1d_branch(
                 &points,
@@ -4638,19 +4657,18 @@ fn integrate_trajectory_samples(
 fn build_map_manifold_curve(
     system: &EquationSystem,
     seed: &[f64],
-    cycle_points: &[Vec<f64>],
-    cycle_point_index: usize,
+    representative_point: &[f64],
     stability: ManifoldStability,
+    map_step_iterations: usize,
     target_arclength: f64,
     caps: ManifoldTerminationCaps,
     bounds: Option<&ManifoldBounds>,
 ) -> Result<(Vec<Vec<f64>>, Vec<f64>)> {
-    if cycle_points.is_empty() {
-        bail!("Map manifold seeding requires at least one cycle point.");
+    if representative_point.len() != seed.len() {
+        bail!("Map manifold representative point dimension mismatch.");
     }
-    let cycle_len = cycle_points.len();
-    if cycle_points.iter().any(|point| point.len() != seed.len()) {
-        bail!("Cycle point dimensions do not match manifold state dimension.");
+    if map_step_iterations == 0 {
+        bail!("Map manifold step iterations must be greater than zero.");
     }
 
     let target = target_arclength.max(0.0);
@@ -4658,30 +4676,21 @@ fn build_map_manifold_curve(
     let step_limit = caps.max_iterations.unwrap_or(caps.max_steps).max(1);
     let domain_subdivisions = ((max_points as f64).sqrt().round() as usize).clamp(8, 32);
 
-    let start_ref = cycle_point_index % cycle_len;
-    let mut end_ref = match stability {
-        ManifoldStability::Unstable => (start_ref + 1) % cycle_len,
-        ManifoldStability::Stable => {
-            if cycle_len == 1 {
-                0
-            } else {
-                (start_ref + cycle_len - 1) % cycle_len
-            }
-        }
-    };
     let domain_end = match stability {
         ManifoldStability::Unstable => {
-            let mut mapped = vec![0.0; seed.len()];
-            system.apply(0.0, seed, &mut mapped);
-            mapped
+            match apply_map_iterates(system, seed, map_step_iterations) {
+                Some(mapped) => mapped,
+                None => return Ok((vec![seed.to_vec()], vec![0.0])),
+            }
         }
         ManifoldStability::Stable => {
             let preimage = solve_map_preimage_newton(
                 system,
                 seed,
-                &cycle_points[end_ref],
-                &cycle_points[end_ref],
-                &cycle_points[start_ref],
+                representative_point,
+                representative_point,
+                representative_point,
+                map_step_iterations,
             )?;
             let Some(value) = preimage else {
                 return Ok((vec![seed.to_vec()], vec![0.0]));
@@ -4750,16 +4759,6 @@ fn build_map_manifold_curve(
         if points.len() >= max_points || (target > 0.0 && cumulative_arc >= target) {
             break;
         }
-        let next_end_ref = match stability {
-            ManifoldStability::Unstable => (end_ref + 1) % cycle_len,
-            ManifoldStability::Stable => {
-                if cycle_len == 1 {
-                    0
-                } else {
-                    (end_ref + cycle_len - 1) % cycle_len
-                }
-            }
-        };
 
         let mut next_samples = Vec::with_capacity(domain_samples.len());
         let mut previous_q: Option<Vec<f64>> = None;
@@ -4769,8 +4768,10 @@ fn build_map_manifold_curve(
         for (sample_index, q) in domain_samples.iter().enumerate() {
             let mapped = match stability {
                 ManifoldStability::Unstable => {
-                    let mut value = vec![0.0; q.len()];
-                    system.apply(0.0, q, &mut value);
+                    let Some(value) = apply_map_iterates(system, q, map_step_iterations) else {
+                        failed = true;
+                        break;
+                    };
                     value
                 }
                 ManifoldStability::Stable => {
@@ -4793,8 +4794,9 @@ fn build_map_manifold_curve(
                         system,
                         q,
                         &guess,
-                        &cycle_points[next_end_ref],
-                        &cycle_points[end_ref],
+                        representative_point,
+                        representative_point,
+                        map_step_iterations,
                     )?;
                     let Some(value) = preimage else {
                         failed = true;
@@ -4840,10 +4842,9 @@ fn build_map_manifold_curve(
                 system,
                 &mut domain_samples,
                 &mut next_samples,
+                representative_point,
                 stability,
-                cycle_points,
-                end_ref,
-                next_end_ref,
+                map_step_iterations,
                 spacing_target,
                 max_domain_samples,
                 bounds,
@@ -4883,7 +4884,6 @@ fn build_map_manifold_curve(
         }
 
         domain_samples = next_samples;
-        end_ref = next_end_ref;
     }
 
     Ok((points, arclength))
@@ -4893,10 +4893,9 @@ fn refine_map_domain_samples(
     system: &EquationSystem,
     domain_samples: &mut Vec<Vec<f64>>,
     mapped_samples: &mut Vec<Vec<f64>>,
+    representative_point: &[f64],
     stability: ManifoldStability,
-    cycle_points: &[Vec<f64>],
-    current_ref: usize,
-    next_ref: usize,
+    map_step_iterations: usize,
     spacing_target: f64,
     max_domain_samples: usize,
     bounds: Option<&ManifoldBounds>,
@@ -4948,8 +4947,10 @@ fn refine_map_domain_samples(
             );
             let mapped_mid = match stability {
                 ManifoldStability::Unstable => {
-                    let mut value = vec![0.0; q_mid.len()];
-                    system.apply(0.0, &q_mid, &mut value);
+                    let Some(value) = apply_map_iterates(system, &q_mid, map_step_iterations)
+                    else {
+                        continue;
+                    };
                     value
                 }
                 ManifoldStability::Stable => {
@@ -4962,8 +4963,9 @@ fn refine_map_domain_samples(
                         system,
                         &q_mid,
                         &guess,
-                        &cycle_points[next_ref],
-                        &cycle_points[current_ref],
+                        representative_point,
+                        representative_point,
+                        map_step_iterations,
                     )?;
                     let Some(value) = preimage else {
                         continue;
@@ -5060,12 +5062,76 @@ fn polyline_arclength(points: &[Vec<f64>]) -> f64 {
         .sum()
 }
 
+fn curve_arclength(points: &[Vec<f64>]) -> Vec<f64> {
+    if points.is_empty() {
+        return Vec::new();
+    }
+    let mut arclength = Vec::with_capacity(points.len());
+    let mut cumulative = 0.0;
+    arclength.push(0.0);
+    for segment in points.windows(2) {
+        cumulative += l2_distance(&segment[0], &segment[1]);
+        arclength.push(cumulative);
+    }
+    arclength
+}
+
+fn apply_map_iterates(
+    system: &EquationSystem,
+    state: &[f64],
+    iterations: usize,
+) -> Option<Vec<f64>> {
+    if iterations == 0 {
+        return Some(state.to_vec());
+    }
+    let mut current = state.to_vec();
+    let mut mapped = vec![0.0; state.len()];
+    for _ in 0..iterations {
+        system.apply(0.0, &current, &mut mapped);
+        if mapped.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        std::mem::swap(&mut current, &mut mapped);
+    }
+    Some(current)
+}
+
+fn propagate_curve_by_map_steps(
+    system: &EquationSystem,
+    base_points: &[Vec<f64>],
+    steps: usize,
+    bounds: Option<&ManifoldBounds>,
+) -> Option<Vec<Vec<f64>>> {
+    if base_points.is_empty() {
+        return Some(Vec::new());
+    }
+    if steps == 0 {
+        return Some(base_points.to_vec());
+    }
+    let mut out = Vec::with_capacity(base_points.len());
+    for point in base_points {
+        let mapped = apply_map_iterates(system, point, steps)?;
+        if let Some(box_bounds) = bounds {
+            if !inside_bounds(&mapped, box_bounds) {
+                break;
+            }
+        }
+        out.push(mapped);
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 fn solve_map_preimage_newton(
     system: &EquationSystem,
     target: &[f64],
     initial_guess: &[f64],
     prev_cycle_point: &[f64],
     current_cycle_point: &[f64],
+    map_iterations: usize,
 ) -> Result<Option<Vec<f64>>> {
     if target.len() != initial_guess.len()
         || target.len() != prev_cycle_point.len()
@@ -5077,9 +5143,15 @@ fn solve_map_preimage_newton(
     if dim == 0 {
         return Ok(Some(Vec::new()));
     }
+    let map_iterations = map_iterations.max(1);
 
-    let step_jacobian =
-        compute_system_jacobian(system, SystemKind::Map { iterations: 1 }, prev_cycle_point)?;
+    let step_jacobian = compute_system_jacobian(
+        system,
+        SystemKind::Map {
+            iterations: map_iterations,
+        },
+        prev_cycle_point,
+    )?;
     let rhs = subtract(target, current_cycle_point);
     let linearized_guess =
         if let Some(offset) = solve_dense_linear_system(dim, &step_jacobian, &rhs) {
@@ -5099,10 +5171,10 @@ fn solve_map_preimage_newton(
 
     let mut map_value = vec![0.0; dim];
     for _ in 0..MAP_PREIMAGE_NEWTON_MAX_ITERS {
-        system.apply(0.0, &guess, &mut map_value);
-        if map_value.iter().any(|value| !value.is_finite()) {
+        let Some(value) = apply_map_iterates(system, &guess, map_iterations) else {
             return Ok(None);
-        }
+        };
+        map_value = value;
         let residual: Vec<f64> = map_value
             .iter()
             .zip(target.iter())
@@ -5113,7 +5185,13 @@ fn solve_map_preimage_newton(
             return Ok(Some(guess));
         }
 
-        let jacobian = compute_system_jacobian(system, SystemKind::Map { iterations: 1 }, &guess)?;
+        let jacobian = compute_system_jacobian(
+            system,
+            SystemKind::Map {
+                iterations: map_iterations,
+            },
+            &guess,
+        )?;
         let Some(delta) = solve_dense_linear_system(dim, &jacobian, &residual) else {
             return Ok(None);
         };
@@ -5129,11 +5207,11 @@ fn solve_map_preimage_newton(
                 step_scale *= 0.5;
                 continue;
             }
-            system.apply(0.0, &candidate, &mut map_value);
-            if map_value.iter().any(|value| !value.is_finite()) {
+            let Some(value) = apply_map_iterates(system, &candidate, map_iterations) else {
                 step_scale *= 0.5;
                 continue;
-            }
+            };
+            map_value = value;
             let candidate_residual = map_value
                 .iter()
                 .zip(target.iter())
@@ -5152,10 +5230,10 @@ fn solve_map_preimage_newton(
         }
     }
 
-    system.apply(0.0, &guess, &mut map_value);
-    if map_value.iter().any(|value| !value.is_finite()) {
+    let Some(value) = apply_map_iterates(system, &guess, map_iterations) else {
         return Ok(None);
-    }
+    };
+    map_value = value;
     let residual_norm = map_value
         .iter()
         .zip(target.iter())
@@ -5802,6 +5880,72 @@ mod tests {
             assert!(
                 seen_minus[idx],
                 "missing minus branch for cycle point {idx}"
+            );
+        }
+    }
+
+    #[test]
+    fn manifold_eq_1d_map_cycle_branches_propagate_from_representative_curve() {
+        let mut system = build_system(&["1.5*x + 0.1"], &["x"], &[]);
+        let branches = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &[0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Plus,
+                eps: 1e-4,
+                target_arclength: 0.25,
+                integration_dt: 1.0,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 32,
+                    max_points: 512,
+                    max_time: 1.0,
+                    max_iterations: Some(6),
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect("map cycle manifold");
+        assert_eq!(branches.len(), 2, "expected one branch per cycle point");
+        let mut rep_branch: Option<&ContinuationBranch> = None;
+        let mut propagated_branch: Option<&ContinuationBranch> = None;
+        for branch in &branches {
+            let BranchType::ManifoldEq1D {
+                cycle_point_index, ..
+            } = &branch.branch_type
+            else {
+                panic!("expected 1D manifold branch type");
+            };
+            match cycle_point_index {
+                Some(0) => rep_branch = Some(branch),
+                Some(1) => propagated_branch = Some(branch),
+                _ => {}
+            }
+        }
+        let rep_branch = rep_branch.expect("missing representative branch");
+        let propagated_branch = propagated_branch.expect("missing propagated branch");
+        assert!(
+            rep_branch.points.len() > 8,
+            "expected representative branch to contain enough points"
+        );
+        assert_eq!(
+            rep_branch.points.len(),
+            propagated_branch.points.len(),
+            "propagated branch should preserve representative sampling"
+        );
+
+        for (rep_point, propagated_point) in rep_branch
+            .points
+            .iter()
+            .zip(propagated_branch.points.iter())
+        {
+            let mut mapped = vec![0.0; rep_point.state.len()];
+            system.apply(0.0, &rep_point.state, &mut mapped);
+            assert!(
+                l2_distance(&mapped, &propagated_point.state) <= 1e-10,
+                "expected cycle phase branch to be one map iterate of representative branch"
             );
         }
     }
