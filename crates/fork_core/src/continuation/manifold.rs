@@ -70,6 +70,10 @@ const MAP_MANIFOLD_REAL_TOL: f64 = 1e-8;
 const MAP_MANIFOLD_SIDE_TOL: f64 = 1e-6;
 const MAP_PREIMAGE_NEWTON_TOL: f64 = 1e-10;
 const MAP_PREIMAGE_NEWTON_MAX_ITERS: usize = 24;
+const MAP_DOMAIN_ALPHA_MAX: f64 = 0.3;
+const MAP_DOMAIN_DELTA_MAX_FACTOR: f64 = 1.5;
+const MAP_DOMAIN_MAX_REFINEMENT_PASSES: usize = 12;
+const MAP_DOMAIN_MAX_INSERTIONS_PER_PASS: usize = 256;
 
 #[derive(Clone)]
 struct RealEigenMode {
@@ -4652,9 +4656,7 @@ fn build_map_manifold_curve(
     let target = target_arclength.max(0.0);
     let max_points = caps.max_points.max(2);
     let step_limit = caps.max_iterations.unwrap_or(caps.max_steps).max(1);
-    let domain_subdivisions = (max_points.saturating_sub(1) / step_limit.max(1))
-        .max(2)
-        .min(64);
+    let domain_subdivisions = ((max_points as f64).sqrt().round() as usize).clamp(8, 32);
 
     let start_ref = cycle_point_index % cycle_len;
     let mut end_ref = match stability {
@@ -4696,6 +4698,16 @@ fn build_map_manifold_curve(
         let alpha = (sub as f64) / (domain_subdivisions as f64);
         domain_samples.push(lerp(seed, &domain_end, alpha));
     }
+    let initial_domain_arc = polyline_arclength(&domain_samples);
+    let mut spacing_target = if target > 0.0 && max_points > 1 {
+        target / ((max_points - 1) as f64)
+    } else {
+        initial_domain_arc / (domain_subdivisions as f64)
+    };
+    if !spacing_target.is_finite() || spacing_target <= NORM_EPS {
+        spacing_target = (initial_domain_arc / (domain_subdivisions as f64)).max(1e-6);
+    }
+    spacing_target = spacing_target.max(1e-9);
 
     let mut points = vec![domain_samples[0].clone()];
     let mut arclength = vec![0.0];
@@ -4803,27 +4815,6 @@ fn build_map_manifold_curve(
                 }
             }
 
-            if sample_index > 0 {
-                let last_point = points.last().cloned().unwrap_or_else(|| mapped.clone());
-                let step_arc = l2_distance(&last_point, &mapped);
-                if !step_arc.is_finite() {
-                    failed = true;
-                    break;
-                }
-                if target > 0.0 && cumulative_arc + step_arc >= target && step_arc > NORM_EPS {
-                    let alpha_hit = ((target - cumulative_arc) / step_arc).clamp(0.0, 1.0);
-                    points.push(lerp(&last_point, &mapped, alpha_hit));
-                    arclength.push(target);
-                    return Ok((points, arclength));
-                }
-                cumulative_arc += step_arc;
-                points.push(mapped.clone());
-                arclength.push(cumulative_arc);
-                if points.len() >= max_points || (target > 0.0 && cumulative_arc >= target) {
-                    return Ok((points, arclength));
-                }
-            }
-
             previous_q = Some(q.clone());
             previous_mapped = Some(mapped.clone());
             next_samples.push(mapped);
@@ -4832,12 +4823,241 @@ fn build_map_manifold_curve(
         if failed || next_samples.len() != domain_samples.len() {
             break;
         }
+        if let Some(last_point) = points.last() {
+            if !next_samples.is_empty() {
+                next_samples[0] = last_point.clone();
+            }
+        }
+
+        let remaining_room = max_points.saturating_sub(points.len());
+        if remaining_room > 1 {
+            let base_add = next_samples.len().saturating_sub(1);
+            let extra_capacity = remaining_room.saturating_sub(base_add);
+            let max_domain_samples = next_samples
+                .len()
+                .saturating_add(extra_capacity.min(MAP_DOMAIN_MAX_INSERTIONS_PER_PASS * 2));
+            refine_map_domain_samples(
+                system,
+                &mut domain_samples,
+                &mut next_samples,
+                stability,
+                cycle_points,
+                end_ref,
+                next_end_ref,
+                spacing_target,
+                max_domain_samples,
+                bounds,
+            )?;
+        }
+
+        for mapped in next_samples.iter().skip(1) {
+            let last_point = points.last().cloned().unwrap_or_else(|| mapped.clone());
+            let step_arc = l2_distance(&last_point, mapped);
+            if !step_arc.is_finite() {
+                failed = true;
+                break;
+            }
+            if target > 0.0 && cumulative_arc + step_arc >= target && step_arc > NORM_EPS {
+                let alpha_hit = ((target - cumulative_arc) / step_arc).clamp(0.0, 1.0);
+                points.push(lerp(&last_point, mapped, alpha_hit));
+                arclength.push(target);
+                return Ok((points, arclength));
+            }
+            cumulative_arc += step_arc;
+            points.push(mapped.clone());
+            arclength.push(cumulative_arc);
+            if points.len() >= max_points || (target > 0.0 && cumulative_arc >= target) {
+                return Ok((points, arclength));
+            }
+        }
+        if failed {
+            break;
+        }
+
+        if target <= 0.0 && next_samples.len() >= 2 {
+            let current_avg =
+                polyline_arclength(&next_samples) / ((next_samples.len().saturating_sub(1)) as f64);
+            if current_avg.is_finite() && current_avg > 0.0 {
+                spacing_target = spacing_target.max(0.5 * current_avg);
+            }
+        }
 
         domain_samples = next_samples;
         end_ref = next_end_ref;
     }
 
     Ok((points, arclength))
+}
+
+fn refine_map_domain_samples(
+    system: &EquationSystem,
+    domain_samples: &mut Vec<Vec<f64>>,
+    mapped_samples: &mut Vec<Vec<f64>>,
+    stability: ManifoldStability,
+    cycle_points: &[Vec<f64>],
+    current_ref: usize,
+    next_ref: usize,
+    spacing_target: f64,
+    max_domain_samples: usize,
+    bounds: Option<&ManifoldBounds>,
+) -> Result<()> {
+    if mapped_samples.len() < 2 || domain_samples.len() != mapped_samples.len() {
+        return Ok(());
+    }
+    let delta_max = (MAP_DOMAIN_DELTA_MAX_FACTOR * spacing_target.max(1e-9)).max(1e-12);
+    let delta_alpha_max = (delta_max * MAP_DOMAIN_ALPHA_MAX).max(1e-12);
+
+    for _ in 0..MAP_DOMAIN_MAX_REFINEMENT_PASSES {
+        if mapped_samples.len() >= max_domain_samples {
+            break;
+        }
+        let mut insertion_indices = collect_map_refinement_intervals(
+            mapped_samples,
+            delta_max,
+            MAP_DOMAIN_ALPHA_MAX,
+            delta_alpha_max,
+        );
+        if insertion_indices.is_empty() {
+            break;
+        }
+        if insertion_indices.len() > MAP_DOMAIN_MAX_INSERTIONS_PER_PASS {
+            insertion_indices.truncate(MAP_DOMAIN_MAX_INSERTIONS_PER_PASS);
+        }
+        let available = max_domain_samples.saturating_sub(mapped_samples.len());
+        if available == 0 {
+            break;
+        }
+        if insertion_indices.len() > available {
+            insertion_indices.truncate(available);
+        }
+        if insertion_indices.is_empty() {
+            break;
+        }
+
+        let mut offset = 0usize;
+        let mut inserted = 0usize;
+        for idx in insertion_indices {
+            let insert_at = idx + offset;
+            if insert_at + 1 >= domain_samples.len() || insert_at + 1 >= mapped_samples.len() {
+                continue;
+            }
+            let q_mid = lerp(
+                &domain_samples[insert_at],
+                &domain_samples[insert_at + 1],
+                0.5,
+            );
+            let mapped_mid = match stability {
+                ManifoldStability::Unstable => {
+                    let mut value = vec![0.0; q_mid.len()];
+                    system.apply(0.0, &q_mid, &mut value);
+                    value
+                }
+                ManifoldStability::Stable => {
+                    let guess = lerp(
+                        &mapped_samples[insert_at],
+                        &mapped_samples[insert_at + 1],
+                        0.5,
+                    );
+                    let preimage = solve_map_preimage_newton(
+                        system,
+                        &q_mid,
+                        &guess,
+                        &cycle_points[next_ref],
+                        &cycle_points[current_ref],
+                    )?;
+                    let Some(value) = preimage else {
+                        continue;
+                    };
+                    value
+                }
+            };
+            if mapped_mid.iter().any(|value| !value.is_finite()) {
+                continue;
+            }
+            if let Some(box_bounds) = bounds {
+                if !inside_bounds(&mapped_mid, box_bounds) {
+                    continue;
+                }
+            }
+            domain_samples.insert(insert_at + 1, q_mid);
+            mapped_samples.insert(insert_at + 1, mapped_mid);
+            offset += 1;
+            inserted += 1;
+        }
+        if inserted == 0 {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn collect_map_refinement_intervals(
+    mapped_samples: &[Vec<f64>],
+    delta_max: f64,
+    alpha_max: f64,
+    delta_alpha_max: f64,
+) -> Vec<usize> {
+    if mapped_samples.len() < 2 {
+        return Vec::new();
+    }
+    let mut intervals = Vec::new();
+    for i in 0..(mapped_samples.len() - 1) {
+        let delta = l2_distance(&mapped_samples[i], &mapped_samples[i + 1]);
+        if delta.is_finite() && delta > delta_max {
+            intervals.push(i);
+        }
+    }
+    if mapped_samples.len() >= 3 {
+        for i in 1..(mapped_samples.len() - 1) {
+            let delta_prev = l2_distance(&mapped_samples[i - 1], &mapped_samples[i]);
+            let delta_next = l2_distance(&mapped_samples[i], &mapped_samples[i + 1]);
+            if !delta_prev.is_finite() || !delta_next.is_finite() {
+                continue;
+            }
+            if delta_prev <= NORM_EPS || delta_next <= NORM_EPS {
+                continue;
+            }
+            let alpha = map_turn_angle(
+                &mapped_samples[i - 1],
+                &mapped_samples[i],
+                &mapped_samples[i + 1],
+            );
+            if !alpha.is_finite() {
+                continue;
+            }
+            if alpha > alpha_max
+                || delta_prev * alpha > delta_alpha_max
+                || delta_next * alpha > delta_alpha_max
+            {
+                intervals.push(if delta_prev >= delta_next { i - 1 } else { i });
+            }
+        }
+    }
+    intervals.sort_unstable();
+    intervals.dedup();
+    intervals
+}
+
+fn map_turn_angle(prev: &[f64], current: &[f64], next: &[f64]) -> f64 {
+    let v0 = subtract(prev, current);
+    let v1 = subtract(next, current);
+    let n0 = l2_norm(&v0);
+    let n1 = l2_norm(&v1);
+    if n0 <= NORM_EPS || n1 <= NORM_EPS {
+        return 0.0;
+    }
+    let cos_theta = (dot(&v0, &v1) / (n0 * n1)).clamp(-1.0, 1.0);
+    cos_theta.acos()
+}
+
+fn polyline_arclength(points: &[Vec<f64>]) -> f64 {
+    if points.len() < 2 {
+        return 0.0;
+    }
+    points
+        .windows(2)
+        .map(|segment| l2_distance(&segment[0], &segment[1]))
+        .sum()
 }
 
 fn solve_map_preimage_newton(
@@ -5695,6 +5915,47 @@ mod tests {
             branch.points.len() > 20,
             "expected dense map sampling between iterates, got {} points",
             branch.points.len()
+        );
+    }
+
+    #[test]
+    fn manifold_eq_1d_map_stable_refines_far_field_spacing() {
+        let mut system = build_system(&["0.4*x"], &["x"], &[]);
+        let branches = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Stable,
+                direction: ManifoldDirection::Plus,
+                eps: 1e-4,
+                target_arclength: 1.0,
+                integration_dt: 1.0,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 32,
+                    max_points: 1_200,
+                    max_time: 1.0,
+                    max_iterations: Some(12),
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect("stable map manifold with adaptive refinement");
+        let branch = &branches[0];
+        assert!(
+            branch.points.len() > 100,
+            "expected dense stable manifold sampling, got {} points",
+            branch.points.len()
+        );
+        let max_jump = branch
+            .points
+            .windows(2)
+            .map(|pair| l2_distance(&pair[0].state, &pair[1].state))
+            .fold(0.0_f64, f64::max);
+        assert!(
+            max_jump < 0.02,
+            "expected bounded far-field spacing from adaptive refinement, max jump={max_jump}"
         );
     }
 
