@@ -294,24 +294,32 @@ fn continue_manifold_eq_1d_map(
             settings.bounds.as_ref(),
         )?;
 
+        let mut propagated_points = base_points.clone();
         for cycle_point_index in 0..map_iterations {
             let points = if cycle_point_index == 0 {
-                base_points.clone()
-            } else if let Some(mapped) = propagate_curve_by_map_steps(
-                system,
-                &base_points,
-                cycle_point_index,
-                settings.bounds.as_ref(),
-            ) {
-                mapped
+                propagated_points.clone()
             } else {
-                continue;
+                let mapped = propagate_curve_by_map_steps(
+                    system,
+                    &propagated_points,
+                    1,
+                    settings.bounds.as_ref(),
+                )
+                .or_else(|| {
+                    propagate_curve_by_map_steps(
+                        system,
+                        &base_points,
+                        cycle_point_index,
+                        settings.bounds.as_ref(),
+                    )
+                });
+                let Some(points) = mapped else {
+                    continue;
+                };
+                propagated_points = points.clone();
+                points
             };
-            let arclength = if cycle_point_index == 0 {
-                base_arclength.clone()
-            } else {
-                curve_arclength(&points)
-            };
+            let arclength = cycle_component_arclength(&base_arclength, points.len());
 
             branches.push(build_eq_1d_branch(
                 &points,
@@ -5062,16 +5070,19 @@ fn polyline_arclength(points: &[Vec<f64>]) -> f64 {
         .sum()
 }
 
-fn curve_arclength(points: &[Vec<f64>]) -> Vec<f64> {
-    if points.is_empty() {
+fn cycle_component_arclength(reference_arclength: &[f64], point_count: usize) -> Vec<f64> {
+    if point_count == 0 {
         return Vec::new();
     }
-    let mut arclength = Vec::with_capacity(points.len());
-    let mut cumulative = 0.0;
-    arclength.push(0.0);
-    for segment in points.windows(2) {
-        cumulative += l2_distance(&segment[0], &segment[1]);
-        arclength.push(cumulative);
+    if reference_arclength.is_empty() {
+        return vec![0.0; point_count];
+    }
+
+    let take = reference_arclength.len().min(point_count);
+    let mut arclength = reference_arclength[..take].to_vec();
+    if arclength.len() < point_count {
+        let last = *arclength.last().unwrap_or(&0.0);
+        arclength.resize(point_count, last);
     }
     arclength
 }
@@ -5946,6 +5957,76 @@ mod tests {
             assert!(
                 l2_distance(&mapped, &propagated_point.state) <= 1e-10,
                 "expected cycle phase branch to be one map iterate of representative branch"
+            );
+            assert!(
+                (rep_point.param_value - propagated_point.param_value).abs() <= 1e-12,
+                "expected cycle phase branch to reuse representative arclength parameterization"
+            );
+        }
+    }
+
+    #[test]
+    fn manifold_eq_1d_map_cycle_stable_branches_reuse_representative_arclength() {
+        let mut system = build_system(&["0.6*x + 0.1"], &["x"], &[]);
+        let branches = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &[0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Stable,
+                direction: ManifoldDirection::Plus,
+                eps: 1e-4,
+                target_arclength: 0.25,
+                integration_dt: 1.0,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 32,
+                    max_points: 512,
+                    max_time: 1.0,
+                    max_iterations: Some(6),
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect("stable map cycle manifold");
+        assert_eq!(branches.len(), 2, "expected one branch per cycle point");
+        let rep_branch = branches
+            .iter()
+            .find(|branch| {
+                matches!(
+                    &branch.branch_type,
+                    BranchType::ManifoldEq1D {
+                        cycle_point_index: Some(0),
+                        ..
+                    }
+                )
+            })
+            .expect("missing representative branch");
+        let propagated_branch = branches
+            .iter()
+            .find(|branch| {
+                matches!(
+                    &branch.branch_type,
+                    BranchType::ManifoldEq1D {
+                        cycle_point_index: Some(1),
+                        ..
+                    }
+                )
+            })
+            .expect("missing propagated branch");
+        assert_eq!(
+            rep_branch.points.len(),
+            propagated_branch.points.len(),
+            "propagated stable branch should preserve representative sampling"
+        );
+        for (rep_point, propagated_point) in rep_branch
+            .points
+            .iter()
+            .zip(propagated_branch.points.iter())
+        {
+            assert!(
+                (rep_point.param_value - propagated_point.param_value).abs() <= 1e-12,
+                "expected stable cycle phase branch to reuse representative arclength parameterization"
             );
         }
     }

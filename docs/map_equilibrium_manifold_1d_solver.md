@@ -46,8 +46,9 @@ For each branch direction:
    - evaluates inserted points exactly with `F^n` (unstable) or preimage Newton (stable)
 5. Append accepted mapped points to the representative manifold polyline until termination.
 6. For `mapIterations = n > 1`, generate the remaining phase branches by propagation:
-   - branch at cycle point `k` is `F^k(representative_curve)` for `k = 1..n-1`
-   - this guarantees phase-consistent cycle branches.
+   - propagate one phase at a time (`p0 -> p1 -> ... -> p{n-1}`) instead of remapping each branch from `p0`
+   - branch at cycle point `k` is still `F^k(representative_curve)` for `k = 1..n-1`
+   - each cycle-phase branch reuses the representative arclength schedule (`param_value`), keeping phase components aligned in branch parameterization.
 
 Important:
 

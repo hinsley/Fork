@@ -110,7 +110,8 @@ The 1D workflow computes a trajectory branch seeded from the equilibrium along a
     - stable manifold growth uses inverse-map stepping on `F^n` via Newton preimages
       - solve `F^n(y) = x_k` for `y`
       - use Jacobian of `F^n` in the Newton solve
-    - emit additional cycle-phase branches by forward propagation `F^k` of the representative curve
+    - emit additional cycle-phase branches by forward propagation of the representative curve phase-by-phase (`p0 -> p1 -> ...`), equivalent to `F^k` at phase `k`
+    - cycle-phase branches reuse the representative arclength schedule (`param_value`) so branch components at each cycle point stay arclength-aligned
     - mapped fundamental-domain samples are adaptively refined (spacing + turn/curvature checks) before appending branch points
 - Directed modes:
   - `Both` computes `Plus` and `Minus`
