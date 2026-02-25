@@ -151,7 +151,8 @@ export class WasmBridge {
 
     createEquilibriumManifold1DRunner(
         equilibriumState: number[],
-        settings: EquilibriumManifold1DSettings
+        settings: EquilibriumManifold1DSettings,
+        mapIterations?: number
     ): ManifoldRunner<EquilibriumManifold1DResult> {
         if (!wasmModule) throw new Error("WASM module not loaded");
         if (typeof (wasmModule as any).WasmEqManifold1DRunner !== 'function') {
@@ -159,6 +160,10 @@ export class WasmBridge {
                 "Equilibrium 1D manifold runner is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
             );
         }
+        const iterations =
+            this.config.type === "map"
+                ? Math.max(1, Math.trunc(mapIterations ?? 1))
+                : 1;
 
         return new wasmModule.WasmEqManifold1DRunner(
             this.config.equations,
@@ -166,6 +171,7 @@ export class WasmBridge {
             this.config.paramNames,
             this.config.varNames,
             this.config.type || "flow",
+            iterations,
             new Float64Array(equilibriumState),
             settings
         ) as ManifoldRunner<EquilibriumManifold1DResult>;
@@ -223,9 +229,14 @@ export class WasmBridge {
 
     runEquilibriumManifold1D(
         equilibriumState: number[],
-        settings: EquilibriumManifold1DSettings
+        settings: EquilibriumManifold1DSettings,
+        mapIterations?: number
     ): EquilibriumManifold1DResult {
-        const runner = this.createEquilibriumManifold1DRunner(equilibriumState, settings);
+        const runner = this.createEquilibriumManifold1DRunner(
+            equilibriumState,
+            settings,
+            mapIterations
+        );
         return this.runManifoldRunnerToCompletion(runner);
     }
 

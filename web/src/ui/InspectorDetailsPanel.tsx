@@ -1262,7 +1262,8 @@ function makeEquilibriumManifoldDraft(
   system: SystemConfig,
   equilibrium?: EquilibriumObject | null
 ): EquilibriumManifoldDraft {
-  const mode: EquilibriumManifoldMode = system.varNames.length >= 3 ? 'surface_2d' : 'curve_1d'
+  const mode: EquilibriumManifoldMode =
+    system.type === 'map' ? 'curve_1d' : system.varNames.length >= 3 ? 'surface_2d' : 'curve_1d'
   const surfaceDefaults = mode === 'surface_2d'
   const profile: EquilibriumManifoldProfileDraft = surfaceDefaults ? 'lorenz_global' : 'local_preview'
   const profileDefaults = makeSurfaceProfileDefaults(profile)
@@ -2278,30 +2279,40 @@ export function InspectorDetailsPanel({
   )
   const equilibriumManifoldEligibleIndexOptions = useMemo(() => {
     const wantsUnstable = equilibriumManifoldDraft.stability === 'Unstable'
+    const isMap = systemDraft.type === 'map'
     return equilibriumEigenpairs
       .map((pair, index) => ({ pair, index }))
-      .filter(({ pair }) =>
-        wantsUnstable ? pair.value.re > 1e-9 : pair.value.re < -1e-9
-      )
+      .filter(({ pair }) => {
+        if (isMap) {
+          if (Math.abs(pair.value.im) > 1e-8) return false
+          const modulus = Math.hypot(pair.value.re, pair.value.im)
+          return wantsUnstable ? modulus > 1 + 1e-6 : modulus < 1 - 1e-6
+        }
+        return wantsUnstable ? pair.value.re > 1e-9 : pair.value.re < -1e-9
+      })
       .map(({ index }) => ({
         value: index.toString(),
         label: (index + 1).toString(),
       }))
-  }, [equilibriumEigenpairs, equilibriumManifoldDraft.stability])
+  }, [equilibriumEigenpairs, equilibriumManifoldDraft.stability, systemDraft.type])
   const equilibriumManifoldEligibleRealIndexOptions = useMemo(() => {
     const wantsUnstable = equilibriumManifoldDraft.stability === 'Unstable'
+    const isMap = systemDraft.type === 'map'
     return equilibriumEigenpairs
       .map((pair, index) => ({ pair, index }))
-      .filter(
-        ({ pair }) =>
-          Math.abs(pair.value.im) <= 1e-8 &&
-          (wantsUnstable ? pair.value.re > 1e-9 : pair.value.re < -1e-9)
-      )
+      .filter(({ pair }) => {
+        if (Math.abs(pair.value.im) > 1e-8) return false
+        if (isMap) {
+          const modulus = Math.hypot(pair.value.re, pair.value.im)
+          return wantsUnstable ? modulus > 1 + 1e-6 : modulus < 1 - 1e-6
+        }
+        return wantsUnstable ? pair.value.re > 1e-9 : pair.value.re < -1e-9
+      })
       .map(({ index }) => ({
         value: index.toString(),
         label: (index + 1).toString(),
       }))
-  }, [equilibriumEigenpairs, equilibriumManifoldDraft.stability])
+  }, [equilibriumEigenpairs, equilibriumManifoldDraft.stability, systemDraft.type])
   const equilibriumManifoldEligibleIndexSet = useMemo(
     () => new Set(equilibriumManifoldEligibleIndexOptions.map((option) => option.value)),
     [equilibriumManifoldEligibleIndexOptions]
@@ -2313,6 +2324,9 @@ export function InspectorDetailsPanel({
   const equilibriumManifoldSupportsSurface = systemDraft.varNames.length >= 3
   const equilibriumManifoldModeOptions = useMemo(
     (): Array<{ value: EquilibriumManifoldMode; label: string }> => {
+      if (systemDraft.type === 'map') {
+        return [{ value: 'curve_1d', label: '1D curve' }]
+      }
       const options: Array<{ value: EquilibriumManifoldMode; label: string }> = []
       if (equilibriumManifoldEligibleRealIndexOptions.length > 0) {
         options.push({ value: 'curve_1d', label: '1D curve' })
@@ -2337,6 +2351,7 @@ export function InspectorDetailsPanel({
       equilibriumManifoldEligibleIndexOptions.length,
       equilibriumManifoldEligibleRealIndexOptions.length,
       equilibriumManifoldSupportsSurface,
+      systemDraft.type,
     ]
   )
   const equilibriumManifoldModeOptionSet = useMemo(
@@ -3084,13 +3099,13 @@ export function InspectorDetailsPanel({
     if (!equilibrium) return
     setEquilibriumManifoldDraft((prev) => {
       const defaults = makeEquilibriumManifoldDraft(system.config, equilibrium)
-      const supportsSurface = systemDraft.varNames.length >= 3
+      const supportsSurface = systemDraft.type !== 'map' && systemDraft.varNames.length >= 3
       const mode = supportsSurface ? prev.mode : 'curve_1d'
       const defaultName = mode === 'surface_2d' ? defaults.name : `manifold_${toCliSafeName(equilibrium.name)}_1d`
       const name = prev.name.trim().length > 0 ? prev.name : defaultName
       return { ...prev, mode, name }
     })
-  }, [equilibrium, system.config, systemDraft.varNames.length])
+  }, [equilibrium, system.config, systemDraft.type, systemDraft.varNames.length])
 
   useEffect(() => {
     setEquilibriumManifoldDraft((prev) => {
@@ -4874,10 +4889,6 @@ export function InspectorDetailsPanel({
       setEquilibriumManifoldError('Apply valid system settings before computing manifolds.')
       return
     }
-    if (systemDraft.type === 'map') {
-      setEquilibriumManifoldError('Invariant manifolds are currently available for flow systems only.')
-      return
-    }
     if (!equilibrium || !selectedNodeId) {
       setEquilibriumManifoldError(`Select the ${equilibriumLabelLower} to continue.`)
       return
@@ -4950,6 +4961,7 @@ export function InspectorDetailsPanel({
       await onCreateEquilibriumManifold1D({
         equilibriumId: selectedNodeId,
         name,
+        mapIterations: systemDraft.type === 'map' ? equilibriumMapIterations ?? 1 : undefined,
         settings: {
           stability: equilibriumManifoldDraft.stability,
           direction: equilibriumManifoldDraft.direction,
@@ -4960,6 +4972,11 @@ export function InspectorDetailsPanel({
           caps: parsedCaps.caps,
         },
       })
+      return
+    }
+
+    if (systemDraft.type === 'map') {
+      setEquilibriumManifoldError('Map systems currently support 1D equilibrium manifolds only.')
       return
     }
 
@@ -8742,7 +8759,7 @@ export function InspectorDetailsPanel({
                   ) : null}
                   {systemDraft.type === 'map' ? (
                     <p className="empty-state">
-                      Invariant manifolds are available for flow systems only.
+                      Map systems currently support 1D equilibrium manifolds only.
                     </p>
                   ) : null}
                   {!equilibrium.solution ? (
@@ -9203,7 +9220,7 @@ export function InspectorDetailsPanel({
                       ) : null}
                       <button
                         onClick={handleCreateEquilibriumManifold}
-                        disabled={runDisabled || systemDraft.type === 'map'}
+                        disabled={runDisabled}
                         data-testid="equilibrium-manifold-submit"
                       >
                         Compute

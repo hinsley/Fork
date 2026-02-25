@@ -4,7 +4,10 @@ This guide documents the current stable/unstable manifold feature set in Fork, i
 
 ## Scope and Current Status
 
-Fork currently supports invariant manifolds for **flow systems** (`dx/dt = f(x, p)`) only.
+Fork supports invariant manifolds for:
+
+- **Flow systems** (`dx/dt = f(x, p)`)
+- **Map systems** (`x_{k+1} = F(x_k, p)`) for **equilibrium 1D manifolds** (fixed points and `n`-cycles)
 
 Implemented branches:
 
@@ -14,7 +17,8 @@ Implemented branches:
 
 Not implemented yet:
 
-- Invariant manifolds for discrete maps
+- 2D equilibrium manifolds for discrete maps
+- 2D cycle manifolds for discrete maps
 
 ## Where to Run
 
@@ -26,7 +30,7 @@ Web UI:
 CLI:
 
 - Continuation menus provide:
-  - 1D equilibrium manifold
+  - 1D equilibrium manifold (flow + map)
   - 2D equilibrium manifold
   - 2D limit-cycle manifold
 
@@ -34,12 +38,24 @@ CLI:
 
 ### Equilibrium 1D
 
-- System must be a flow system.
+- System can be flow or map.
 - Selected equilibrium must be solved.
 - Chosen side must have at least one eligible **real** mode:
-  - `Unstable`: real part `> 0`
-  - `Stable`: real part `< 0`
+  - Flow:
+    - `Unstable`: real part `> 0`
+    - `Stable`: real part `< 0`
+  - Map:
+    - `Unstable`: `|lambda| > 1 + 1e-6`
+    - `Stable`: `|lambda| < 1 - 1e-6`
 - In the Web UI, the `Eigen index` list is filtered to eligible real modes for the selected side.
+
+Map cycle fan-out:
+
+- `mapIterations = 1`: one cycle point (fixed point), one branch per requested direction.
+- `mapIterations > 1`: one branch per `(cycle point, direction)`.
+- Branch names for cycle fan-out: `name_p{idx}_{dir}` where:
+  - `idx` is 1-based cycle-point index (`p1`, `p2`, ...)
+  - `dir` is `plus` or `minus`
 
 ### Equilibrium 2D
 
@@ -72,8 +88,14 @@ The 1D workflow computes a trajectory branch seeded from the equilibrium along a
 
 - Seed: `x_seed = x_eq + sign * eps * v`
 - Side handling:
-  - unstable manifold uses forward flow
-  - stable manifold uses reversed flow internally
+  - Flow systems:
+    - unstable manifold uses forward flow
+    - stable manifold uses reversed flow internally
+  - Map systems:
+    - unstable manifold uses forward map iteration (`x_{k+1} = F(x_k)`)
+    - stable manifold uses inverse-map stepping by solving preimages with Newton:
+      - solve `F(y) = x_k` for `y`
+      - use one-step map Jacobian in the Newton solve
 - Directed modes:
   - `Both` computes `Plus` and `Minus`
   - `Plus` computes one branch
@@ -83,12 +105,13 @@ Targeting:
 
 - Primary target is `target_arclength`.
 - Internally, the solver uses an arclength-hit boundary solve in time.
-- If the target is not reachable under caps/time, it falls back to the maximal reachable trajectory under current caps.
+- If the target is not reachable under caps/time/step budgets, it falls back to the maximal reachable trajectory under current caps.
 
 Output:
 
 - Branch points use `param_value = arclength`.
 - Full curve geometry is persisted in `manifold_geometry`.
+- Map runs also store `map_iterations` and `cycle_point_index` in `branch_type` metadata for each emitted branch.
 
 ## 2D Ring-Growth Solver (Equilibrium and Cycle)
 

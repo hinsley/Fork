@@ -9,10 +9,13 @@ use crate::continuation::types::{
     Manifold2DProfile, Manifold2DSettings, ManifoldBounds, ManifoldCurveGeometry,
     ManifoldCycle2DSettings, ManifoldDirection, ManifoldEigenKind, ManifoldGeometry,
     ManifoldRingDiagnostic, ManifoldStability, ManifoldSurfaceGeometry,
-    ManifoldSurfaceSolverDiagnostics,
+    ManifoldSurfaceSolverDiagnostics, ManifoldTerminationCaps,
 };
 use crate::equation_engine::EquationSystem;
-use crate::equilibrium::{compute_jacobian, solve_equilibrium, NewtonSettings, SystemKind};
+use crate::equilibrium::{
+    compute_jacobian, compute_map_cycle_points, compute_system_jacobian, solve_equilibrium,
+    NewtonSettings, SystemKind,
+};
 use crate::traits::DynamicalSystem;
 
 const EIG_IM_TOL: f64 = 1e-8;
@@ -63,6 +66,10 @@ const LEAF_SIGN_EPS_SCALE: f64 = 1e-14;
 const SOURCE_PARAM_MONO_EPS: f64 = 1e-6;
 const MANIFOLD_1D_ARCLENGTH_TOL: f64 = 1e-8;
 const MANIFOLD_1D_ARCLENGTH_MAX_ITERS: usize = 96;
+const MAP_MANIFOLD_REAL_TOL: f64 = 1e-8;
+const MAP_MANIFOLD_SIDE_TOL: f64 = 1e-6;
+const MAP_PREIMAGE_NEWTON_TOL: f64 = 1e-10;
+const MAP_PREIMAGE_NEWTON_MAX_ITERS: usize = 24;
 
 #[derive(Clone)]
 struct RealEigenMode {
@@ -83,6 +90,16 @@ pub fn continue_manifold_eq_1d(
     equilibrium_state: &[f64],
     settings: Manifold1DSettings,
 ) -> Result<Vec<ContinuationBranch>> {
+    continue_manifold_eq_1d_with_kind(system, SystemKind::Flow, equilibrium_state, settings)
+}
+
+/// Compute one-dimensional stable/unstable manifolds of a flow equilibrium or map cycle.
+pub fn continue_manifold_eq_1d_with_kind(
+    system: &mut EquationSystem,
+    kind: SystemKind,
+    equilibrium_state: &[f64],
+    settings: Manifold1DSettings,
+) -> Result<Vec<ContinuationBranch>> {
     let dim = system.equations.len();
     if dim == 0 {
         bail!("System dimension must be greater than zero.");
@@ -94,12 +111,6 @@ pub fn continue_manifold_eq_1d(
             equilibrium_state.len()
         );
     }
-    let eig = select_real_eigenmode(
-        system,
-        equilibrium_state,
-        settings.stability,
-        settings.eig_index,
-    )?;
     let mut directions = Vec::new();
     match settings.direction {
         ManifoldDirection::Both => {
@@ -110,9 +121,38 @@ pub fn continue_manifold_eq_1d(
         ManifoldDirection::Minus => directions.push(ManifoldDirection::Minus),
     }
 
+    match kind {
+        SystemKind::Flow => {
+            continue_manifold_eq_1d_flow(system, equilibrium_state, settings, &directions)
+        }
+        SystemKind::Map { iterations } => continue_manifold_eq_1d_map(
+            system,
+            equilibrium_state,
+            settings,
+            iterations,
+            &directions,
+        ),
+    }
+}
+
+fn continue_manifold_eq_1d_flow(
+    system: &mut EquationSystem,
+    equilibrium_state: &[f64],
+    settings: Manifold1DSettings,
+    directions: &[ManifoldDirection],
+) -> Result<Vec<ContinuationBranch>> {
+    let dim = system.equations.len();
+    let eig = select_real_eigenmode_with_kind(
+        system,
+        SystemKind::Flow,
+        equilibrium_state,
+        settings.stability,
+        settings.eig_index,
+    )?;
+
     let sigma = stability_sigma(settings.stability);
     let mut branches = Vec::new();
-    for direction in directions {
+    for direction in directions.iter().copied() {
         let sign = if direction == ManifoldDirection::Minus {
             -1.0
         } else {
@@ -182,42 +222,139 @@ pub fn continue_manifold_eq_1d(
             *last_arc = terminal_arclength.max(previous_arc);
         }
 
-        let branch_points: Vec<ContinuationPoint> = points
-            .iter()
-            .enumerate()
-            .map(|(idx, point)| ContinuationPoint {
-                state: point.clone(),
-                param_value: arclength[idx],
-                stability: BifurcationType::None,
-                eigenvalues: Vec::new(),
-                cycle_points: None,
-            })
-            .collect();
-        let geometry = ManifoldGeometry::Curve(ManifoldCurveGeometry {
-            dim,
-            points_flat: flatten_points(&points),
-            arclength,
+        branches.push(build_eq_1d_branch(
+            &points,
+            &arclength,
+            settings.stability,
             direction,
-        });
-        let indices: Vec<i32> = (0..branch_points.len() as i32).collect();
-        branches.push(ContinuationBranch {
-            points: branch_points,
-            bifurcations: Vec::new(),
-            indices,
-            branch_type: BranchType::ManifoldEq1D {
-                stability: settings.stability,
-                direction,
-                eig_index: eig.index,
-                method: "shooting_bvp".to_string(),
-                caps: settings.caps,
-            },
-            upoldp: None,
-            homoc_context: None,
-            resume_state: None,
-            manifold_geometry: Some(geometry),
-        });
+            eig.index,
+            settings.caps,
+            "shooting_bvp",
+            None,
+            None,
+        ));
     }
     Ok(branches)
+}
+
+fn continue_manifold_eq_1d_map(
+    system: &mut EquationSystem,
+    equilibrium_state: &[f64],
+    settings: Manifold1DSettings,
+    map_iterations: usize,
+    directions: &[ManifoldDirection],
+) -> Result<Vec<ContinuationBranch>> {
+    if map_iterations == 0 {
+        bail!("Map iteration count must be greater than zero.");
+    }
+
+    let cycle_points = if map_iterations > 1 {
+        compute_map_cycle_points(system, equilibrium_state, map_iterations)
+    } else {
+        vec![equilibrium_state.to_vec()]
+    };
+    if cycle_points.is_empty() {
+        bail!("Map cycle seed generation failed: no cycle points available.");
+    }
+    let dim = system.equations.len();
+    let mut branches = Vec::new();
+    for (cycle_point_index, cycle_point) in cycle_points.iter().enumerate() {
+        let eig = select_real_eigenmode_with_kind(
+            system,
+            SystemKind::Map {
+                iterations: map_iterations,
+            },
+            cycle_point,
+            settings.stability,
+            settings.eig_index,
+        )?;
+        for direction in directions.iter().copied() {
+            let sign = if direction == ManifoldDirection::Minus {
+                -1.0
+            } else {
+                1.0
+            };
+            let mut seed = cycle_point.clone();
+            for i in 0..dim {
+                seed[i] += sign * settings.eps * eig.vector[i];
+            }
+
+            let (points, arclength) = build_map_manifold_curve(
+                system,
+                &seed,
+                &cycle_points,
+                cycle_point_index,
+                settings.stability,
+                settings.target_arclength,
+                settings.integration_dt,
+                settings.caps,
+                settings.bounds.as_ref(),
+            )?;
+
+            branches.push(build_eq_1d_branch(
+                &points,
+                &arclength,
+                settings.stability,
+                direction,
+                eig.index,
+                settings.caps,
+                "map_iterate_bvp",
+                Some(map_iterations),
+                Some(cycle_point_index),
+            ));
+        }
+    }
+    Ok(branches)
+}
+
+fn build_eq_1d_branch(
+    points: &[Vec<f64>],
+    arclength: &[f64],
+    stability: ManifoldStability,
+    direction: ManifoldDirection,
+    eig_index: usize,
+    caps: ManifoldTerminationCaps,
+    method: &str,
+    map_iterations: Option<usize>,
+    cycle_point_index: Option<usize>,
+) -> ContinuationBranch {
+    let dim = points.first().map_or(0, |point| point.len());
+    let branch_points: Vec<ContinuationPoint> = points
+        .iter()
+        .enumerate()
+        .map(|(idx, point)| ContinuationPoint {
+            state: point.clone(),
+            param_value: arclength.get(idx).copied().unwrap_or(0.0),
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+        })
+        .collect();
+    let geometry = ManifoldGeometry::Curve(ManifoldCurveGeometry {
+        dim,
+        points_flat: flatten_points(points),
+        arclength: arclength.to_vec(),
+        direction,
+    });
+    let indices: Vec<i32> = (0..branch_points.len() as i32).collect();
+    ContinuationBranch {
+        points: branch_points,
+        bifurcations: Vec::new(),
+        indices,
+        branch_type: BranchType::ManifoldEq1D {
+            stability,
+            direction,
+            eig_index,
+            method: method.to_string(),
+            caps,
+            map_iterations,
+            cycle_point_index,
+        },
+        upoldp: None,
+        homoc_context: None,
+        resume_state: None,
+        manifold_geometry: Some(geometry),
+    }
 }
 
 fn apply_eq_2d_profile(settings: &mut Manifold2DSettings) {
@@ -846,15 +983,16 @@ struct Basis2D {
     indices: [usize; 2],
 }
 
-fn select_real_eigenmode(
+fn select_real_eigenmode_with_kind(
     system: &EquationSystem,
+    kind: SystemKind,
     equilibrium_state: &[f64],
     stability: ManifoldStability,
     requested_index: Option<usize>,
 ) -> Result<RealEigenMode> {
     let result = solve_equilibrium(
         system,
-        SystemKind::Flow,
+        kind,
         equilibrium_state,
         NewtonSettings {
             max_steps: 8,
@@ -867,7 +1005,8 @@ fn select_real_eigenmode(
         if pair.value.im.abs() > EIG_IM_TOL {
             continue;
         }
-        if !matches_stability(pair.value.re, stability) {
+        if !matches_stability_for_kind(Complex::new(pair.value.re, pair.value.im), kind, stability)
+        {
             continue;
         }
         let vector: Vec<f64> = pair.vector.iter().map(|entry| entry.re).collect();
@@ -4396,6 +4535,28 @@ fn matches_stability(real_part: f64, stability: ManifoldStability) -> bool {
     }
 }
 
+fn matches_stability_map(multiplier: Complex<f64>, stability: ManifoldStability) -> bool {
+    if multiplier.im.abs() > MAP_MANIFOLD_REAL_TOL {
+        return false;
+    }
+    let modulus = multiplier.norm();
+    match stability {
+        ManifoldStability::Unstable => modulus > 1.0 + MAP_MANIFOLD_SIDE_TOL,
+        ManifoldStability::Stable => modulus < 1.0 - MAP_MANIFOLD_SIDE_TOL,
+    }
+}
+
+fn matches_stability_for_kind(
+    eigenvalue: Complex<f64>,
+    kind: SystemKind,
+    stability: ManifoldStability,
+) -> bool {
+    match kind {
+        SystemKind::Flow => matches_stability(eigenvalue.re, stability),
+        SystemKind::Map { .. } => matches_stability_map(eigenvalue, stability),
+    }
+}
+
 fn integrate_flow_with_arclength(
     system: &EquationSystem,
     initial_state: &[f64],
@@ -4469,6 +4630,197 @@ fn integrate_trajectory_samples(
         }
     }
     (points, arclength)
+}
+
+fn build_map_manifold_curve(
+    system: &EquationSystem,
+    seed: &[f64],
+    cycle_points: &[Vec<f64>],
+    cycle_point_index: usize,
+    stability: ManifoldStability,
+    target_arclength: f64,
+    integration_dt: f64,
+    caps: ManifoldTerminationCaps,
+    bounds: Option<&ManifoldBounds>,
+) -> Result<(Vec<Vec<f64>>, Vec<f64>)> {
+    if cycle_points.is_empty() {
+        bail!("Map manifold seeding requires at least one cycle point.");
+    }
+    let cycle_len = cycle_points.len();
+    if cycle_points.iter().any(|point| point.len() != seed.len()) {
+        bail!("Cycle point dimensions do not match manifold state dimension.");
+    }
+
+    let mut points = vec![seed.to_vec()];
+    let mut arclength = vec![0.0];
+    if let Some(box_bounds) = bounds {
+        if !inside_bounds(seed, box_bounds) {
+            return Ok((points, arclength));
+        }
+    }
+
+    let target = target_arclength.max(0.0);
+    let dt = integration_dt.abs().max(1e-9);
+    let max_points = caps.max_points.max(2);
+    let step_limit_caps = caps
+        .max_steps
+        .max(1)
+        .min(max_points.saturating_sub(1).max(1));
+    let max_time_steps = (caps.max_time.max(dt) / dt).floor().max(1.0) as usize;
+    let step_limit = step_limit_caps.min(max_time_steps).max(1);
+
+    let mut current = seed.to_vec();
+    let mut cumulative_arc = 0.0;
+    let mut reference_index = cycle_point_index % cycle_len;
+    for _ in 0..step_limit {
+        let (next, next_reference_index) = match stability {
+            ManifoldStability::Unstable => {
+                let mut value = vec![0.0; current.len()];
+                system.apply(0.0, &current, &mut value);
+                (value, (reference_index + 1) % cycle_len)
+            }
+            ManifoldStability::Stable => {
+                let prev_reference_index = if cycle_len == 1 {
+                    0
+                } else {
+                    (reference_index + cycle_len - 1) % cycle_len
+                };
+                let preimage = solve_map_preimage_newton(
+                    system,
+                    &current,
+                    &cycle_points[prev_reference_index],
+                    &cycle_points[reference_index],
+                )?;
+                let Some(value) = preimage else {
+                    break;
+                };
+                (value, prev_reference_index)
+            }
+        };
+
+        if next.iter().any(|value| !value.is_finite()) {
+            break;
+        }
+        if let Some(box_bounds) = bounds {
+            if !inside_bounds(&next, box_bounds) {
+                break;
+            }
+        }
+
+        let step_arc = l2_distance(&current, &next);
+        if !step_arc.is_finite() {
+            break;
+        }
+
+        if target > 0.0 && cumulative_arc + step_arc >= target && step_arc > NORM_EPS {
+            let alpha = ((target - cumulative_arc) / step_arc).clamp(0.0, 1.0);
+            let terminal = lerp(&current, &next, alpha);
+            points.push(terminal);
+            arclength.push(target);
+            break;
+        }
+
+        cumulative_arc += step_arc;
+        points.push(next.clone());
+        arclength.push(cumulative_arc);
+        current = next;
+        reference_index = next_reference_index;
+
+        if points.len() >= max_points {
+            break;
+        }
+        if target > 0.0 && cumulative_arc >= target {
+            break;
+        }
+    }
+
+    Ok((points, arclength))
+}
+
+fn solve_map_preimage_newton(
+    system: &EquationSystem,
+    target: &[f64],
+    prev_cycle_point: &[f64],
+    current_cycle_point: &[f64],
+) -> Result<Option<Vec<f64>>> {
+    if target.len() != prev_cycle_point.len() || target.len() != current_cycle_point.len() {
+        bail!("Map preimage solve dimension mismatch.");
+    }
+    let dim = target.len();
+    if dim == 0 {
+        return Ok(Some(Vec::new()));
+    }
+
+    let step_jacobian =
+        compute_system_jacobian(system, SystemKind::Map { iterations: 1 }, prev_cycle_point)?;
+    let rhs = subtract(target, current_cycle_point);
+    let mut guess = if let Some(offset) = solve_dense_linear_system(dim, &step_jacobian, &rhs) {
+        prev_cycle_point
+            .iter()
+            .zip(offset.iter())
+            .map(|(base, delta)| base + delta)
+            .collect::<Vec<_>>()
+    } else {
+        prev_cycle_point.to_vec()
+    };
+
+    let mut map_value = vec![0.0; dim];
+    for _ in 0..MAP_PREIMAGE_NEWTON_MAX_ITERS {
+        system.apply(0.0, &guess, &mut map_value);
+        if map_value.iter().any(|value| !value.is_finite()) {
+            return Ok(None);
+        }
+        let residual: Vec<f64> = map_value
+            .iter()
+            .zip(target.iter())
+            .map(|(value, target_value)| value - target_value)
+            .collect();
+        let residual_norm = l2_norm(&residual);
+        if residual_norm <= MAP_PREIMAGE_NEWTON_TOL {
+            return Ok(Some(guess));
+        }
+
+        let jacobian = compute_system_jacobian(system, SystemKind::Map { iterations: 1 }, &guess)?;
+        let Some(delta) = solve_dense_linear_system(dim, &jacobian, &residual) else {
+            return Ok(None);
+        };
+        for i in 0..dim {
+            guess[i] -= delta[i];
+        }
+        if guess.iter().any(|value| !value.is_finite()) {
+            return Ok(None);
+        }
+    }
+
+    system.apply(0.0, &guess, &mut map_value);
+    if map_value.iter().any(|value| !value.is_finite()) {
+        return Ok(None);
+    }
+    let residual_norm = map_value
+        .iter()
+        .zip(target.iter())
+        .map(|(value, target_value)| (value - target_value) * (value - target_value))
+        .sum::<f64>()
+        .sqrt();
+    if residual_norm <= 1e-7 {
+        Ok(Some(guess))
+    } else {
+        Ok(None)
+    }
+}
+
+fn solve_dense_linear_system(dim: usize, matrix: &[f64], rhs: &[f64]) -> Option<Vec<f64>> {
+    if dim == 0 {
+        return Some(Vec::new());
+    }
+    if matrix.len() != dim * dim || rhs.len() != dim {
+        return None;
+    }
+    let a = DMatrix::from_row_slice(dim, dim, matrix);
+    let b = nalgebra::DVector::from_column_slice(rhs);
+    a.lu()
+        .solve(&b)
+        .map(|solution| solution.iter().copied().collect())
 }
 
 fn solve_arclength_hit_bvp(
@@ -4958,6 +5310,180 @@ mod tests {
     }
 
     #[test]
+    fn manifold_eq_1d_map_fixed_point_records_map_metadata() {
+        let mut system = build_system(&["2*x"], &["x"], &[]);
+        let branches = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Plus,
+                eps: 1e-3,
+                target_arclength: 0.05,
+                integration_dt: 1.0,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 16,
+                    max_points: 64,
+                    max_time: 16.0,
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect("map manifold");
+        assert_eq!(branches.len(), 1);
+        let branch = &branches[0];
+        assert!(branch.points.len() >= 2);
+        let BranchType::ManifoldEq1D {
+            map_iterations,
+            cycle_point_index,
+            ..
+        } = &branch.branch_type
+        else {
+            panic!("expected 1D map manifold branch type");
+        };
+        assert_eq!(*map_iterations, Some(1));
+        assert_eq!(*cycle_point_index, Some(0));
+    }
+
+    #[test]
+    fn manifold_eq_1d_map_stable_uses_inverse_preimage_steps() {
+        let mut system = build_system(&["0.5*x"], &["x"], &[]);
+        let branches = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Stable,
+                direction: ManifoldDirection::Plus,
+                eps: 1e-4,
+                target_arclength: 0.2,
+                integration_dt: 1.0,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 16,
+                    max_points: 64,
+                    max_time: 16.0,
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect("stable map manifold");
+        assert_eq!(branches.len(), 1);
+        let branch = &branches[0];
+        assert!(
+            branch.points.len() >= 3,
+            "expected multiple inverse iterations for stable map manifold"
+        );
+        let first_abs = branch
+            .points
+            .first()
+            .map(|point| point.state[0].abs())
+            .unwrap_or(0.0);
+        let last_abs = branch
+            .points
+            .last()
+            .map(|point| point.state[0].abs())
+            .unwrap_or(0.0);
+        assert!(
+            last_abs > first_abs + 1e-8,
+            "expected inverse map stepping to move away from the cycle: first={first_abs}, last={last_abs}"
+        );
+    }
+
+    #[test]
+    fn manifold_eq_1d_map_cycle_fanout_emits_per_point_and_direction() {
+        let mut system = build_system(&["2*x"], &["x"], &[]);
+        let branches = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 3 },
+            &[0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Both,
+                eps: 1e-4,
+                target_arclength: 0.1,
+                integration_dt: 1.0,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 8,
+                    max_points: 64,
+                    max_time: 8.0,
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect("map cycle manifold");
+        assert_eq!(branches.len(), 6);
+        let mut seen_plus = [false; 3];
+        let mut seen_minus = [false; 3];
+        for branch in &branches {
+            let BranchType::ManifoldEq1D {
+                direction,
+                map_iterations,
+                cycle_point_index,
+                ..
+            } = &branch.branch_type
+            else {
+                panic!("expected 1D manifold branch type");
+            };
+            assert_eq!(*map_iterations, Some(3));
+            let idx = cycle_point_index.expect("map manifold branch should include cycle index");
+            assert!(idx < 3);
+            match direction {
+                ManifoldDirection::Plus => seen_plus[idx] = true,
+                ManifoldDirection::Minus => seen_minus[idx] = true,
+                ManifoldDirection::Both => panic!("unexpected Both direction for emitted branch"),
+            }
+        }
+        for idx in 0..3 {
+            assert!(seen_plus[idx], "missing plus branch for cycle point {idx}");
+            assert!(
+                seen_minus[idx],
+                "missing minus branch for cycle point {idx}"
+            );
+        }
+    }
+
+    #[test]
+    fn manifold_eq_1d_map_stability_uses_multiplier_modulus() {
+        let mut unstable_system = build_system(&["-1.4*x"], &["x"], &[]);
+        let unstable = continue_manifold_eq_1d_with_kind(
+            &mut unstable_system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Plus,
+                eps: 1e-4,
+                target_arclength: 0.05,
+                integration_dt: 1.0,
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect("modulus-unstable map manifold");
+        assert_eq!(unstable.len(), 1);
+
+        let mut stable_system = build_system(&["-0.6*x"], &["x"], &[]);
+        let stable = continue_manifold_eq_1d_with_kind(
+            &mut stable_system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Stable,
+                direction: ManifoldDirection::Plus,
+                eps: 1e-4,
+                target_arclength: 0.05,
+                integration_dt: 1.0,
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect("modulus-stable map manifold");
+        assert_eq!(stable.len(), 1);
+    }
+
+    #[test]
     fn manifold_eq_2d_builds_surface_geometry() {
         let mut system = build_system(&["1.5*x", "0.8*y", "-z"], &["x", "y", "z"], &[]);
         let equilibrium = [0.0, 0.0, 0.0];
@@ -5076,66 +5602,6 @@ mod tests {
             "surface did not grow away from equilibrium (max radius {max_radius}, ring count {}, vertex count {})",
             surface.ring_offsets.len(),
             surface.vertices_flat.len() / 3
-        );
-    }
-
-    #[test]
-    fn manifold_eq_2d_rossler_unstable_focus_pair_initialization_produces_surface_geometry() {
-        let mut system = build_system(
-            &["-y-z", "x+a*y", "b+z*(x-c)"],
-            &["x", "y", "z"],
-            &[("a", 0.2), ("b", 0.2), ("c", 5.7)],
-        );
-
-        let a = 0.2_f64;
-        let b = 0.2_f64;
-        let c = 5.7_f64;
-        let disc = (c * c - 4.0 * a * b).sqrt();
-        let z = (c - disc) / (2.0 * a);
-        let equilibrium = [a * z, -z, z];
-
-        let branch = continue_manifold_eq_2d(
-            &mut system,
-            &equilibrium,
-            Manifold2DSettings {
-                stability: ManifoldStability::Unstable,
-                initial_radius: 1e-4,
-                leaf_delta: 1e-4,
-                ring_points: 32,
-                integration_dt: 1e-2,
-                target_radius: 2e-3,
-                target_arclength: 2e-3,
-                caps: ManifoldTerminationCaps {
-                    max_rings: 3,
-                    max_vertices: 800,
-                    max_time: 1.0,
-                    ..ManifoldTerminationCaps::default()
-                },
-                ..Manifold2DSettings::default()
-            },
-        )
-        .expect("rossler unstable manifold");
-
-        let BranchType::ManifoldEq2D {
-            stability,
-            eig_kind,
-            ..
-        } = branch.branch_type
-        else {
-            panic!("expected 2D manifold branch type");
-        };
-        assert_eq!(stability, ManifoldStability::Unstable);
-        assert_eq!(eig_kind, ManifoldEigenKind::ComplexPair);
-
-        let ManifoldGeometry::Surface(surface) = branch.manifold_geometry.expect("geometry") else {
-            panic!("expected surface geometry");
-        };
-        assert!(!surface.triangles.is_empty());
-        assert_eq!(surface.ring_offsets.first().copied(), Some(1));
-        assert!(
-            surface.vertices_flat.len() >= 3 * 33,
-            "unexpectedly small surface payload: {} coordinates",
-            surface.vertices_flat.len()
         );
     }
 
@@ -6391,200 +6857,6 @@ mod tests {
         assert!(
             max_z >= 2.0,
             "Lorenz global profile should leave the tiny local patch (max |z|={max_z})"
-        );
-    }
-
-    #[test]
-    fn manifold_eq_2d_lorenz_large_target_run_reports_stop_diagnostics() {
-        let mut system = build_system(
-            &["sigma*(y-x)", "x*(rho-z)-y", "x*y-beta*z"],
-            &["x", "y", "z"],
-            &[("sigma", 10.0), ("rho", 28.0), ("beta", 8.0 / 3.0)],
-        );
-        let branch = continue_manifold_eq_2d(
-            &mut system,
-            &[0.0, 0.0, 0.0],
-            Manifold2DSettings {
-                stability: ManifoldStability::Stable,
-                initial_radius: 1e-3,
-                leaf_delta: 2e-3,
-                ring_points: 48,
-                integration_dt: 1e-2,
-                target_radius: 128.0,
-                target_arclength: 50.0,
-                caps: ManifoldTerminationCaps {
-                    max_rings: 500,
-                    max_vertices: 200_000,
-                    max_time: 50.0,
-                    ..ManifoldTerminationCaps::default()
-                },
-                ..Manifold2DSettings::default()
-            },
-        )
-        .expect("lorenz stable manifold");
-        let ManifoldGeometry::Surface(surface) = branch.manifold_geometry.expect("geometry") else {
-            panic!("expected surface geometry");
-        };
-        let diagnostics = surface
-            .solver_diagnostics
-            .expect("expected solver diagnostics on 2D manifold geometry");
-        assert!(
-            !diagnostics.termination_reason.trim().is_empty(),
-            "expected a non-empty termination reason"
-        );
-        assert!(
-            diagnostics.ring_attempts > 0,
-            "expected at least one ring attempt"
-        );
-        assert!(
-            diagnostics.termination_detail.is_some(),
-            "expected detailed termination context, got {:?}",
-            diagnostics.termination_detail
-        );
-    }
-
-    #[test]
-    fn manifold_eq_2d_lorenz_global_default_scale_avoids_ring_build_failure_and_reaches_twenty_rings(
-    ) {
-        let mut system = build_system(
-            &["sigma*(y-x)", "x*(rho-z)-y", "x*y-beta*z"],
-            &["x", "y", "z"],
-            &[("sigma", 10.0), ("rho", 28.0), ("beta", 8.0 / 3.0)],
-        );
-        let branch = continue_manifold_eq_2d(
-            &mut system,
-            &[0.0, 0.0, 0.0],
-            Manifold2DSettings {
-                stability: ManifoldStability::Stable,
-                initial_radius: 1.0,
-                leaf_delta: 1.0,
-                delta_min: 0.01,
-                ring_points: 20,
-                min_spacing: 0.25,
-                max_spacing: 2.0,
-                alpha_min: 0.3,
-                alpha_max: 0.4,
-                delta_alpha_min: 0.01,
-                delta_alpha_max: 1.0,
-                integration_dt: 1e-3,
-                target_radius: 40.0,
-                target_arclength: 100.0,
-                caps: ManifoldTerminationCaps {
-                    max_steps: 2000,
-                    max_points: 8000,
-                    max_rings: 60,
-                    max_vertices: 200_000,
-                    max_time: 200.0,
-                },
-                ..Manifold2DSettings::default()
-            },
-        )
-        .expect("lorenz stable manifold");
-        let ManifoldGeometry::Surface(surface) = branch.manifold_geometry.expect("geometry") else {
-            panic!("expected surface geometry");
-        };
-        let diagnostics = surface
-            .solver_diagnostics
-            .expect("expected solver diagnostics on 2D manifold geometry");
-        assert!(
-            diagnostics.termination_reason != "ring_build_failed"
-                && diagnostics.termination_reason != "ring_spacing_failed"
-                && diagnostics.termination_reason != "integrator_failure",
-            "unexpected Lorenz global termination reason={} detail={:?}",
-            diagnostics.termination_reason,
-            diagnostics.termination_detail
-        );
-        assert!(
-            surface.ring_offsets.len() >= 20 || diagnostics.termination_reason == "target_radius",
-            "expected >=20 rings or target-radius termination, got rings={} reason={} detail={:?}",
-            surface.ring_offsets.len(),
-            diagnostics.termination_reason,
-            diagnostics.termination_detail
-        );
-        if diagnostics.termination_reason == "target_radius" {
-            let max_radius = surface
-                .vertices_flat
-                .chunks(3)
-                .map(l2_norm)
-                .fold(0.0_f64, f64::max);
-            assert!(
-                max_radius >= 39.0,
-                "target-radius run terminated early without reaching large radius (max_radius={max_radius})"
-            );
-        }
-        assert_eq!(
-            diagnostics.leaf_fail_plane_root_not_bracketed, 0,
-            "PlaneRootNotBracketed should be recovered via segment switching"
-        );
-    }
-
-    #[test]
-    fn manifold_eq_2d_lorenz_global_default_scale_no_segment_switch_limit_failures_even_with_small_delta_min(
-    ) {
-        let mut system = build_system(
-            &["sigma*(y-x)", "x*(rho-z)-y", "x*y-beta*z"],
-            &["x", "y", "z"],
-            &[("sigma", 10.0), ("rho", 28.0), ("beta", 8.0 / 3.0)],
-        );
-        let branch = continue_manifold_eq_2d(
-            &mut system,
-            &[0.0, 0.0, 0.0],
-            Manifold2DSettings {
-                stability: ManifoldStability::Stable,
-                initial_radius: 1.0,
-                leaf_delta: 1.0,
-                delta_min: 1e-3,
-                ring_points: 20,
-                min_spacing: 0.25,
-                max_spacing: 2.0,
-                alpha_min: 0.3,
-                alpha_max: 0.4,
-                delta_alpha_min: 0.01,
-                delta_alpha_max: 1.0,
-                integration_dt: 1e-3,
-                target_radius: 40.0,
-                target_arclength: 100.0,
-                caps: ManifoldTerminationCaps {
-                    max_steps: 2000,
-                    max_points: 8_000,
-                    max_rings: 200,
-                    max_vertices: 200_000,
-                    max_time: 200.0,
-                },
-                ..Manifold2DSettings::default()
-            },
-        )
-        .expect("lorenz stable manifold");
-        let ManifoldGeometry::Surface(surface) = branch.manifold_geometry.expect("geometry") else {
-            panic!("expected surface geometry");
-        };
-        let diagnostics = surface
-            .solver_diagnostics
-            .expect("expected solver diagnostics on 2D manifold geometry");
-        assert_ne!(
-            diagnostics.termination_reason, "ring_build_failed",
-            "unexpected ring-build failure detail={:?}",
-            diagnostics.termination_detail
-        );
-        assert_eq!(
-            diagnostics.leaf_fail_segment_switch_limit, 0,
-            "segment-switch limit failures should be eliminated; detail={:?}",
-            diagnostics.termination_detail
-        );
-        assert!(
-            diagnostics.termination_reason == "target_radius"
-                || diagnostics.termination_reason == "target_arclength"
-                || diagnostics.termination_reason == "max_rings",
-            "unexpected termination reason={} detail={:?}",
-            diagnostics.termination_reason,
-            diagnostics.termination_detail
-        );
-        assert!(
-            surface.ring_offsets.len() >= 30 || diagnostics.termination_reason == "target_radius",
-            "expected substantial ring growth before stop, got rings={} reason={} detail={:?}",
-            surface.ring_offsets.len(),
-            diagnostics.termination_reason,
-            diagnostics.termination_detail
         );
     }
 

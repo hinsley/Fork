@@ -1,9 +1,10 @@
 //! Stepped runner wrapper for 1D equilibrium manifolds.
 
 use fork_core::continuation::{
-    continue_manifold_eq_1d, ContinuationBranch, Manifold1DSettings, StepResult,
+    continue_manifold_eq_1d_with_kind, ContinuationBranch, Manifold1DSettings, StepResult,
 };
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
+use fork_core::equilibrium::SystemKind;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 
@@ -22,15 +23,17 @@ impl WasmEqManifold1DRunner {
         param_names: Vec<String>,
         var_names: Vec<String>,
         system_type: &str,
+        map_iterations: u32,
         equilibrium_state: Vec<f64>,
         settings_val: JsValue,
     ) -> Result<WasmEqManifold1DRunner, JsValue> {
         console_error_panic_hook::set_once();
-        if system_type == "map" {
-            return Err(JsValue::from_str(
-                "Invariant manifolds are currently available for flow systems only.",
-            ));
-        }
+        let kind = match system_type {
+            "map" => SystemKind::Map {
+                iterations: map_iterations as usize,
+            },
+            _ => SystemKind::Flow,
+        };
 
         let settings: Manifold1DSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid manifold settings: {}", e)))?;
@@ -44,8 +47,11 @@ impl WasmEqManifold1DRunner {
         let mut system = EquationSystem::new(bytecodes, params);
         system.set_maps(compiler.param_map, compiler.var_map);
 
-        let branches = continue_manifold_eq_1d(&mut system, &equilibrium_state, settings)
-            .map_err(|e| JsValue::from_str(&format!("1D manifold computation failed: {}", e)))?;
+        let branches =
+            continue_manifold_eq_1d_with_kind(&mut system, kind, &equilibrium_state, settings)
+                .map_err(|e| {
+                    JsValue::from_str(&format!("1D manifold computation failed: {}", e))
+                })?;
         let points = branches.iter().map(|branch| branch.points.len()).sum();
         let last_param = branches
             .iter()

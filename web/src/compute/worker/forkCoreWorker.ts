@@ -320,6 +320,7 @@ type WasmModule = {
     paramNames: string[],
     varNames: string[],
     systemType: string,
+    mapIterations: number,
     equilibriumState: Float64Array,
     settings: Record<string, unknown>
   ) => {
@@ -831,6 +832,7 @@ async function runEquilibriumManifold1D(
     request.system.paramNames,
     request.system.varNames,
     request.system.type,
+    request.mapIterations ?? 1,
     new Float64Array(request.equilibriumState),
     { ...request.settings }
   )

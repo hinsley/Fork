@@ -865,11 +865,11 @@ export async function showPointDetails(
   if (branchType === 'equilibrium') {
     // For equilibrium branches, always offer to create a new equilibrium branch
     choices.push({ name: `Create New ${equilibriumLabel} Branch`, value: 'NEW_EQ_BRANCH' });
+    choices.push({
+      name: `Compute 1D ${equilibriumLabel} Manifold`,
+      value: 'RUN_EQ_MANIFOLD_1D'
+    });
     if (sysConfig.type === 'flow') {
-      choices.push({
-        name: 'Compute 1D Equilibrium Manifold',
-        value: 'RUN_EQ_MANIFOLD_1D'
-      });
       if (sysConfig.equations.length >= 3) {
         choices.push({
           name: 'Compute 2D Equilibrium Manifold',

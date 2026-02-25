@@ -4934,6 +4934,258 @@ describe('InspectorDetailsPanel', () => {
     })
   })
 
+  it('restricts map equilibrium manifold mode options to 1D', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({
+      name: 'Map_Manifold_Mode_System',
+      config: {
+        name: 'Map_Manifold_Mode_System',
+        equations: ['mu * x * (1 - x)', '0.6 * y', '0.4 * z'],
+        params: [2.8],
+        paramNames: ['mu'],
+        varNames: ['x', 'y', 'z'],
+        solver: 'discrete',
+        type: 'map',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq_Map_Mode',
+      systemName: baseSystem.config.name,
+      solution: {
+        state: [0.3, 0.0, 0.0],
+        residual_norm: 0,
+        iterations: 2,
+        jacobian: [1.2, 0, 0, 0, 0.7, 0, 0, 0, 0.5],
+        eigenpairs: [
+          { value: { re: 1.2, im: 0 }, vector: [{ re: 1, im: 0 }, { re: 0, im: 0 }, { re: 0, im: 0 }] },
+          { value: { re: 0.7, im: 0 }, vector: [{ re: 0, im: 0 }, { re: 1, im: 0 }, { re: 0, im: 0 }] },
+          { value: { re: 0.2, im: 0.8 }, vector: [{ re: 0, im: 0 }, { re: 0, im: 0 }, { re: 1, im: 0 }] },
+        ],
+        cycle_points: [[0.3, 0.0, 0.0], [0.6, 0.0, 0.0]],
+      },
+      lastSolverParams: {
+        initialGuess: [0.2, 0.0, 0.0],
+        maxSteps: 16,
+        dampingFactor: 1,
+        mapIterations: 2,
+      },
+      parameters: [...baseSystem.config.params],
+    }
+    const added = addObject(baseSystem, equilibrium)
+
+    render(
+      <InspectorDetailsPanel
+        system={added.system}
+        selectedNodeId={added.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumManifold1D={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumManifold2D={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateIsochroneCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleManifold2D={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('equilibrium-manifold-toggle'))
+
+    expect(
+      screen.getByText('Map systems currently support 1D equilibrium manifolds only.')
+    ).toBeInTheDocument()
+    const modeSelect = screen.getByTestId('equilibrium-manifold-mode') as HTMLSelectElement
+    expect(modeSelect.value).toBe('curve_1d')
+    expect(Array.from(modeSelect.options).map((option) => option.textContent)).toEqual([
+      '1D curve',
+    ])
+    expect(modeSelect).toBeDisabled()
+  })
+
+  it('filters map equilibrium manifold eigen-indexes by multiplier modulus side', async () => {
+    const user = userEvent.setup()
+    const baseSystem = createSystem({
+      name: 'Map_Manifold_Filter_System',
+      config: {
+        name: 'Map_Manifold_Filter_System',
+        equations: ['mu * x * (1 - x)', '0.7 * y'],
+        params: [3.1],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'discrete',
+        type: 'map',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq_Map_Filter',
+      systemName: baseSystem.config.name,
+      solution: {
+        state: [0.2, 0.0],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [1.2, 0, 0, 0.8],
+        eigenpairs: [
+          { value: { re: 1.2, im: 0 }, vector: [{ re: 1, im: 0 }, { re: 0, im: 0 }] },
+          { value: { re: 0.9, im: 0 }, vector: [{ re: 0, im: 0 }, { re: 1, im: 0 }] },
+          { value: { re: -1.3, im: 0 }, vector: [{ re: 1, im: 0 }, { re: 0, im: 0 }] },
+          { value: { re: -0.8, im: 0 }, vector: [{ re: 0, im: 0 }, { re: 1, im: 0 }] },
+          { value: { re: 0.7, im: 0.4 }, vector: [{ re: 1, im: 0 }, { re: 0, im: 0 }] },
+        ],
+      },
+      parameters: [...baseSystem.config.params],
+    }
+    const added = addObject(baseSystem, equilibrium)
+
+    render(
+      <InspectorDetailsPanel
+        system={added.system}
+        selectedNodeId={added.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumManifold1D={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumManifold2D={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateIsochroneCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleManifold2D={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('equilibrium-manifold-toggle'))
+    const eigIndex = screen.getByTestId('equilibrium-manifold-eig-index') as HTMLSelectElement
+    expect(Array.from(eigIndex.options).map((option) => option.textContent)).toEqual(['1', '3'])
+
+    await user.selectOptions(screen.getByTestId('equilibrium-manifold-stability'), 'Stable')
+    await waitFor(() => {
+      expect(Array.from(eigIndex.options).map((option) => option.textContent)).toEqual([
+        '2',
+        '4',
+      ])
+    })
+  })
+
+  it('passes mapIterations when running map equilibrium manifold 1D', async () => {
+    const user = userEvent.setup()
+    const onCreateEquilibriumManifold1D = vi.fn().mockResolvedValue(undefined)
+    const baseSystem = createSystem({
+      name: 'Map_Manifold_Request_System',
+      config: {
+        name: 'Map_Manifold_Request_System',
+        equations: ['mu * x * (1 - x)'],
+        params: [3.2],
+        paramNames: ['mu'],
+        varNames: ['x'],
+        solver: 'discrete',
+        type: 'map',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq_Map_Request',
+      systemName: baseSystem.config.name,
+      solution: {
+        state: [0.2],
+        residual_norm: 0,
+        iterations: 2,
+        jacobian: [1.4],
+        eigenpairs: [{ value: { re: 1.4, im: 0 }, vector: [{ re: 1, im: 0 }] }],
+        cycle_points: [[0.2], [0.7]],
+      },
+      lastSolverParams: {
+        initialGuess: [0.2],
+        maxSteps: 20,
+        dampingFactor: 1,
+        mapIterations: 2,
+      },
+      parameters: [...baseSystem.config.params],
+    }
+    const added = addObject(baseSystem, equilibrium)
+
+    render(
+      <InspectorDetailsPanel
+        system={added.system}
+        selectedNodeId={added.nodeId}
+        view="selection"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumManifold1D={onCreateEquilibriumManifold1D}
+        onCreateEquilibriumManifold2D={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateIsochroneCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleManifold2D={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    await user.click(screen.getByTestId('equilibrium-manifold-toggle'))
+    await user.click(screen.getByTestId('equilibrium-manifold-submit'))
+
+    await waitFor(() => {
+      expect(onCreateEquilibriumManifold1D).toHaveBeenCalledTimes(1)
+    })
+    const request = onCreateEquilibriumManifold1D.mock.calls[0]?.[0]
+    expect(request.mapIterations).toBe(2)
+    expect(request.settings.stability).toBe('Unstable')
+    expect(request.settings.direction).toBe('Both')
+  })
+
   it('filters limit-cycle manifold Floquet options and auto-corrects selection by stability', async () => {
     const user = userEvent.setup()
     const baseSystem = createSystem({

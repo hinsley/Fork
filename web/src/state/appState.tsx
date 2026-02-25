@@ -1162,6 +1162,7 @@ export type LimitCycleHopfContinuationRequest = {
 export type EquilibriumManifold1DRequest = {
   equilibriumId: string
   name: string
+  mapIterations?: number
   settings: {
     stability: ManifoldStability
     direction: ManifoldDirection
@@ -3264,9 +3265,6 @@ export function AppProvider({
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
         }
-        if (system.type === 'map') {
-          throw new Error('Invariant manifolds are currently available for flow systems only.')
-        }
 
         const equilibrium = state.system.objects[request.equilibriumId]
         if (!equilibrium || equilibrium.type !== 'equilibrium') {
@@ -3304,6 +3302,46 @@ export function AppProvider({
         ) {
           throw new Error('Eigenvalue index must be a non-negative integer.')
         }
+        if (
+          system.type === 'map' &&
+          request.mapIterations !== undefined &&
+          (!Number.isFinite(request.mapIterations) ||
+            request.mapIterations <= 0 ||
+            !Number.isInteger(request.mapIterations))
+        ) {
+          throw new Error('Cycle length must be a positive integer.')
+        }
+
+        const mapIterations =
+          system.type === 'map'
+            ? (() => {
+                const requested = request.mapIterations
+                if (
+                  Number.isFinite(requested) &&
+                  (requested as number) > 0 &&
+                  Number.isInteger(requested)
+                ) {
+                  return Math.trunc(requested as number)
+                }
+                const fromSolver = equilibrium.lastSolverParams?.mapIterations
+                if (
+                  Number.isFinite(fromSolver) &&
+                  (fromSolver as number) > 0 &&
+                  Number.isInteger(fromSolver)
+                ) {
+                  return Math.trunc(fromSolver as number)
+                }
+                const fromCycle = equilibrium.solution?.cycle_points?.length
+                if (
+                  Number.isFinite(fromCycle) &&
+                  (fromCycle as number) > 0 &&
+                  Number.isInteger(fromCycle)
+                ) {
+                  return Math.trunc(fromCycle as number)
+                }
+                return 1
+              })()
+            : undefined
 
         const baseParams = resolveObjectParams(system, equilibrium.customParameters)
         const { snapshot, runConfig } = buildObjectSubsystemRunConfig(
@@ -3320,6 +3358,7 @@ export function AppProvider({
           {
             system: runConfig,
             equilibriumState: reducedEquilibriumState,
+            mapIterations,
             settings: {
               ...settings,
               caps: { ...settings.caps },
@@ -3346,6 +3385,7 @@ export function AppProvider({
         let nextSystem = state.system
         const reservedNames = new Set<string>()
         const createdNodeIds: string[] = []
+        const useMapCycleNaming = system.type === 'map' && (mapIterations ?? 1) > 1
         for (let index = 0; index < branchDataList.length; index += 1) {
           const branchData = branchDataList[index]
           const normalized = normalizeBranchEigenvalues(branchData, {
@@ -3359,10 +3399,20 @@ export function AppProvider({
             branchType.type === 'ManifoldEq1D'
               ? branchType.direction
               : null
+          const cyclePointIndex =
+            branchType &&
+            typeof branchType === 'object' &&
+            'type' in branchType &&
+            branchType.type === 'ManifoldEq1D' &&
+            Number.isFinite(branchType.cycle_point_index)
+              ? Math.max(0, Math.trunc(branchType.cycle_point_index as number))
+              : index
           const branchName =
-            branchDataList.length === 1
-              ? name
-              : `${name}_${resolveManifoldDirectionSuffix(direction)}`
+            useMapCycleNaming
+              ? `${name}_p${cyclePointIndex + 1}_${resolveManifoldDirectionSuffix(direction)}`
+              : branchDataList.length === 1
+                ? name
+                : `${name}_${resolveManifoldDirectionSuffix(direction)}`
           if (reservedNames.has(branchName) || branchNameExists(nextSystem, request.equilibriumId, branchName)) {
             throw new Error(`Branch "${branchName}" already exists.`)
           }
@@ -3374,9 +3424,9 @@ export function AppProvider({
             systemName: system.name,
             parameterName: 'manifold',
             parentObjectId: request.equilibriumId,
-          startObjectId: request.equilibriumId,
-          parentObject: equilibrium.name,
-          startObject: equilibrium.name,
+            startObjectId: request.equilibriumId,
+            parentObject: equilibrium.name,
+            startObject: equilibrium.name,
             branchType: 'eq_manifold_1d',
             data: normalized,
             settings: buildManifoldBranchSettings({
@@ -3385,6 +3435,7 @@ export function AppProvider({
             }),
             timestamp: new Date().toISOString(),
             params: [...baseParams],
+            mapIterations: system.type === 'map' ? mapIterations : undefined,
             subsystemSnapshot: snapshot,
           }
 

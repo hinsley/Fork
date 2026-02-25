@@ -488,6 +488,10 @@ pub enum BranchType {
         eig_index: usize,
         method: String,
         caps: ManifoldTerminationCaps,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        map_iterations: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cycle_point_index: Option<usize>,
     },
     ManifoldEq2D {
         stability: ManifoldStability,

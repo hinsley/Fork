@@ -389,11 +389,13 @@ export function runEquilibriumManifold1DWithProgress(
   bridge: WasmBridge,
   equilibriumState: number[],
   settings: EquilibriumManifold1DSettings,
-  label: string
+  label: string,
+  mapIterations?: number
 ): EquilibriumManifold1DResult {
   const runner = bridge.createEquilibriumManifold1DRunner(
     equilibriumState,
-    settings
+    settings,
+    mapIterations
   );
 
   return runContinuationRunnerWithProgress(runner, label);

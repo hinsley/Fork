@@ -315,6 +315,8 @@ export type BranchType =
       eig_index: number
       method: string
       caps: ManifoldTerminationCaps
+      map_iterations?: number
+      cycle_point_index?: number
     }
   | {
       type: 'ManifoldEq2D'

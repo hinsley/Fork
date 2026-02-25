@@ -208,6 +208,7 @@ export type LimitCycleManifold2DSettingsRequest = {
 export type EquilibriumManifold1DRequest = {
   system: SystemConfig
   equilibriumState: number[]
+  mapIterations?: number
   settings: EquilibriumManifold1DSettingsRequest
 }
 

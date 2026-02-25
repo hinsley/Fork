@@ -3427,3 +3427,235 @@ describe('appState homoclinic and homotopy actions', () => {
     expect(getContext().state.error).toContain('missing fixed time metadata')
   })
 })
+
+describe('appState equilibrium manifold actions', () => {
+  const manifoldCaps = {
+    max_steps: 40,
+    max_points: 120,
+    max_rings: 40,
+    max_vertices: 120,
+    max_time: 10,
+  }
+
+  it('forwards map iterations and applies cycle-point naming for map 1D manifolds', async () => {
+    const base = createSystem({
+      name: 'Map_Manifold_AppState',
+      config: {
+        name: 'Map_Manifold_AppState',
+        equations: ['mu * x * (1 - x)'],
+        params: [3.2],
+        paramNames: ['mu'],
+        varNames: ['x'],
+        solver: 'discrete',
+        type: 'map',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq_Map',
+      systemName: base.config.name,
+      solution: {
+        state: [0.2],
+        residual_norm: 0,
+        iterations: 2,
+        jacobian: [1.2],
+        eigenpairs: [{ value: { re: 1.2, im: 0 }, vector: [{ re: 1, im: 0 }] }],
+        cycle_points: [[0.2], [0.7]],
+      },
+      lastSolverParams: {
+        initialGuess: [0.2],
+        maxSteps: 20,
+        dampingFactor: 1,
+        mapIterations: 2,
+      },
+      parameters: [...base.config.params],
+    }
+    const added = addObject(base, equilibrium)
+    const client = new MockForkCoreClient(0)
+    let capturedMapIterations: number | undefined
+    client.runEquilibriumManifold1D = async (request) => {
+      capturedMapIterations = request.mapIterations
+      const makeBranch = (direction: 'Plus' | 'Minus', cyclePointIndex: number) => {
+        const sign = direction === 'Plus' ? 1 : -1
+        const offset = cyclePointIndex * 0.1
+        return {
+          points: [
+            {
+              state: [0.2 + offset],
+              param_value: 0,
+              stability: 'None' as const,
+              eigenvalues: [],
+            },
+            {
+              state: [0.2 + offset + sign * 0.05],
+              param_value: 0.05,
+              stability: 'None' as const,
+              eigenvalues: [],
+            },
+          ],
+          bifurcations: [],
+          indices: [0, 1],
+          branch_type: {
+            type: 'ManifoldEq1D' as const,
+            stability: 'Unstable' as const,
+            direction,
+            eig_index: 0,
+            method: 'test',
+            caps: manifoldCaps,
+            map_iterations: 2,
+            cycle_point_index: cyclePointIndex,
+          },
+          manifold_geometry: {
+            type: 'Curve' as const,
+            dim: 1,
+            points_flat: [0.2 + offset, 0.2 + offset + sign * 0.05],
+            arclength: [0, 0.05],
+            direction,
+          },
+        }
+      }
+      return [
+        makeBranch('Plus', 0),
+        makeBranch('Minus', 0),
+        makeBranch('Plus', 1),
+        makeBranch('Minus', 1),
+      ]
+    }
+    const { getContext } = setupApp(added.system, client)
+
+    await act(async () => {
+      await getContext().actions.createEquilibriumManifold1D({
+        equilibriumId: added.nodeId,
+        name: 'map_branch',
+        mapIterations: 2,
+        settings: {
+          stability: 'Unstable',
+          direction: 'Both',
+          eig_index: 0,
+          eps: 1e-3,
+          target_arclength: 0.05,
+          integration_dt: 1,
+          caps: manifoldCaps,
+        },
+      })
+    })
+
+    await waitFor(() => {
+      const next = getContext().state.system
+      expect(next).not.toBeNull()
+      expect(capturedMapIterations).toBe(2)
+      const expectedNames = [
+        'map_branch_p1_plus',
+        'map_branch_p1_minus',
+        'map_branch_p2_plus',
+        'map_branch_p2_minus',
+      ]
+      for (const name of expectedNames) {
+        const branchId = findBranchIdByName(next!, name)
+        expect(next!.branches[branchId].mapIterations).toBe(2)
+      }
+    })
+  })
+
+  it('keeps flow 1D manifold naming unchanged', async () => {
+    const base = createSystem({
+      name: 'Flow_Manifold_AppState',
+      config: {
+        name: 'Flow_Manifold_AppState',
+        equations: ['x'],
+        params: [0],
+        paramNames: ['mu'],
+        varNames: ['x'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq_Flow',
+      systemName: base.config.name,
+      solution: {
+        state: [0],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [1],
+        eigenpairs: [{ value: { re: 1.1, im: 0 }, vector: [{ re: 1, im: 0 }] }],
+      },
+      parameters: [...base.config.params],
+    }
+    const added = addObject(base, equilibrium)
+    const client = new MockForkCoreClient(0)
+    client.runEquilibriumManifold1D = async () => [
+      {
+        points: [
+          { state: [0], param_value: 0, stability: 'None' as const, eigenvalues: [] },
+          { state: [0.05], param_value: 0.05, stability: 'None' as const, eigenvalues: [] },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: {
+          type: 'ManifoldEq1D' as const,
+          stability: 'Unstable' as const,
+          direction: 'Plus' as const,
+          eig_index: 0,
+          method: 'test',
+          caps: manifoldCaps,
+        },
+        manifold_geometry: {
+          type: 'Curve' as const,
+          dim: 1,
+          points_flat: [0, 0.05],
+          arclength: [0, 0.05],
+          direction: 'Plus' as const,
+        },
+      },
+      {
+        points: [
+          { state: [0], param_value: 0, stability: 'None' as const, eigenvalues: [] },
+          { state: [-0.05], param_value: 0.05, stability: 'None' as const, eigenvalues: [] },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: {
+          type: 'ManifoldEq1D' as const,
+          stability: 'Unstable' as const,
+          direction: 'Minus' as const,
+          eig_index: 0,
+          method: 'test',
+          caps: manifoldCaps,
+        },
+        manifold_geometry: {
+          type: 'Curve' as const,
+          dim: 1,
+          points_flat: [0, -0.05],
+          arclength: [0, 0.05],
+          direction: 'Minus' as const,
+        },
+      },
+    ]
+    const { getContext } = setupApp(added.system, client)
+
+    await act(async () => {
+      await getContext().actions.createEquilibriumManifold1D({
+        equilibriumId: added.nodeId,
+        name: 'flow_branch',
+        settings: {
+          stability: 'Unstable',
+          direction: 'Both',
+          eig_index: 0,
+          eps: 1e-3,
+          target_arclength: 0.05,
+          integration_dt: 1,
+          caps: manifoldCaps,
+        },
+      })
+    })
+
+    await waitFor(() => {
+      const next = getContext().state.system
+      expect(next).not.toBeNull()
+      expect(findBranchIdByName(next!, 'flow_branch_plus')).toBeTruthy()
+      expect(findBranchIdByName(next!, 'flow_branch_minus')).toBeTruthy()
+    })
+  })
+})

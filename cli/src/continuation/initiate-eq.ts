@@ -397,10 +397,10 @@ export async function initiateEquilibriumManifold1DFromPoint(
   const sysConfig = Storage.loadSystem(sysName);
   const parentObject = sourceBranch.parentObject;
 
-  if (sysConfig.type !== 'flow') {
-    printError('Equilibrium manifold continuation is only available for flow systems.');
-    return null;
-  }
+  const mapIterations =
+    sysConfig.type === 'map'
+      ? Math.max(1, Math.trunc(sourceBranch.mapIterations ?? point.cycle_points?.length ?? 1))
+      : 1;
 
   let branchName = `eqm1d_${sourceBranch.name}_idx${pointIdx}`;
   let stability: 'Stable' | 'Unstable' = 'Unstable';
@@ -418,9 +418,13 @@ export async function initiateEquilibriumManifold1DFromPoint(
     return eigenvalues
       .map((value, index) => ({ value, index }))
       .filter(({ value }) => Math.abs(value.im ?? 0) <= 1e-8)
-      .filter(({ value }) =>
-        stability === 'Unstable' ? (value.re ?? 0) > 1e-9 : (value.re ?? 0) < -1e-9
-      )
+      .filter(({ value }) => {
+        if (sysConfig.type === 'map') {
+          const modulus = Math.hypot(value.re ?? 0, value.im ?? 0);
+          return stability === 'Unstable' ? modulus > 1 + 1e-6 : modulus < 1 - 1e-6;
+        }
+        return stability === 'Unstable' ? (value.re ?? 0) > 1e-9 : (value.re ?? 0) < -1e-9;
+      })
       .map(({ index }) => index);
   };
 
@@ -648,7 +652,14 @@ export async function initiateEquilibriumManifold1DFromPoint(
     const directions: ManifoldDirection[] =
       direction === 'Both' ? ['Plus', 'Minus'] : [direction];
     const existing = new Set(Storage.listBranches(sysName, parentObject));
-    const names = directions.map(dir => manifold1DBranchName(branchName, dir, direction));
+    const names =
+      sysConfig.type === 'map' && mapIterations > 1
+        ? Array.from({ length: mapIterations }, (_, cyclePointIndex) =>
+            directions.map(
+              dir => `${branchName}_p${cyclePointIndex + 1}_${dir.toLowerCase()}`
+            )
+          ).flat()
+        : directions.map(dir => manifold1DBranchName(branchName, dir, direction));
     const duplicate = names.find(name => existing.has(name));
     if (duplicate) {
       printError(`Branch "${duplicate}" already exists.`);
@@ -685,7 +696,8 @@ export async function initiateEquilibriumManifold1DFromPoint(
         bridge,
         point.state,
         settings,
-        'Eq Manifold 1D'
+        'Eq Manifold 1D',
+        mapIterations
       );
 
       if (!Array.isArray(manifoldBranchesRaw) || manifoldBranchesRaw.length === 0) {
@@ -694,34 +706,20 @@ export async function initiateEquilibriumManifold1DFromPoint(
       }
 
       const branches = manifoldBranchesRaw.map(branch => normalizeBranchEigenvalues(branch));
-      const branchByDirection = new Map<ManifoldDirection, ContinuationBranchData>();
-      const unsorted: ContinuationBranchData[] = [];
-      for (const branchData of branches) {
-        const dir = manifoldDirectionFromBranchData(branchData);
-        if (dir === 'Plus' || dir === 'Minus') {
-          branchByDirection.set(dir, branchData);
-        } else {
-          unsorted.push(branchData);
-        }
-      }
-
       const requestedDirections: ManifoldDirection[] =
         direction === 'Both' ? ['Plus', 'Minus'] : [direction];
 
       const savedBranches: ContinuationObject[] = [];
       const existingNames = new Set(Storage.listBranches(sysName, parentObject));
-      for (let i = 0; i < requestedDirections.length; i++) {
-        const requestedDirection = requestedDirections[i];
-        const branchData =
-          branchByDirection.get(requestedDirection) ??
-          unsorted[i] ??
-          branches[i];
-        if (!branchData) continue;
-
-        const resolvedDirection =
-          manifoldDirectionFromBranchData(branchData) ??
-          requestedDirection;
-        const resolvedName = manifold1DBranchName(branchName, resolvedDirection, direction);
+      const saveBranch = (
+        branchData: ContinuationBranchData,
+        resolvedDirection: ManifoldDirection,
+        cyclePointIndex: number
+      ): ContinuationObject | null => {
+        const resolvedName =
+          sysConfig.type === 'map' && mapIterations > 1
+            ? `${branchName}_p${cyclePointIndex + 1}_${resolvedDirection.toLowerCase()}`
+            : manifold1DBranchName(branchName, resolvedDirection, direction);
         if (existingNames.has(resolvedName)) {
           printError(`Branch "${resolvedName}" already exists.`);
           return null;
@@ -733,7 +731,13 @@ export async function initiateEquilibriumManifold1DFromPoint(
           direction: resolvedDirection,
           eig_index: settings.eig_index ?? 0,
           method: 'shooting_bvp',
-          caps: settings.caps
+          caps: settings.caps,
+          ...(sysConfig.type === 'map'
+            ? {
+                map_iterations: mapIterations,
+                cycle_point_index: cyclePointIndex,
+              }
+            : {})
         };
 
         const branchSettings: EquilibriumManifold1DSettings = {
@@ -752,11 +756,84 @@ export async function initiateEquilibriumManifold1DFromPoint(
           data: branchData,
           settings: branchSettings,
           timestamp: new Date().toISOString(),
-          params: [...runConfig.params]
+          params: [...runConfig.params],
+          mapIterations: sysConfig.type === 'map' ? mapIterations : undefined
         };
         Storage.saveBranch(sysName, parentObject, continuation);
         existingNames.add(resolvedName);
-        savedBranches.push(continuation);
+        return continuation;
+      };
+
+      if (sysConfig.type === 'map' && mapIterations > 1) {
+        const directionRank = (value: ManifoldDirection): number => {
+          if (value === 'Plus') return 0;
+          if (value === 'Minus') return 1;
+          return 2;
+        };
+        const branchesWithCycle = branches
+          .map((branchData, idx) => {
+            const resolvedDirection =
+              manifoldDirectionFromBranchData(branchData) ??
+              requestedDirections[idx % requestedDirections.length] ??
+              requestedDirections[0];
+            const branchTypeData = branchData.branch_type as any;
+            const fallbackCyclePointIndex = Math.floor(idx / requestedDirections.length);
+            const cyclePointIndex =
+              Number.isFinite(branchTypeData?.cycle_point_index)
+                ? Math.max(0, Math.trunc(branchTypeData.cycle_point_index))
+                : fallbackCyclePointIndex;
+            return {
+              branchData,
+              resolvedDirection,
+              cyclePointIndex
+            };
+          })
+          .sort((a, b) => {
+            const byCycle = a.cyclePointIndex - b.cyclePointIndex;
+            if (byCycle !== 0) return byCycle;
+            return directionRank(a.resolvedDirection) - directionRank(b.resolvedDirection);
+          });
+
+        for (const entry of branchesWithCycle) {
+          const saved = saveBranch(
+            entry.branchData,
+            entry.resolvedDirection,
+            entry.cyclePointIndex
+          );
+          if (!saved) {
+            return null;
+          }
+          savedBranches.push(saved);
+        }
+      } else {
+        const branchByDirection = new Map<ManifoldDirection, ContinuationBranchData>();
+        const unsorted: ContinuationBranchData[] = [];
+        for (const branchData of branches) {
+          const dir = manifoldDirectionFromBranchData(branchData);
+          if (dir === 'Plus' || dir === 'Minus') {
+            branchByDirection.set(dir, branchData);
+          } else {
+            unsorted.push(branchData);
+          }
+        }
+
+        for (let i = 0; i < requestedDirections.length; i++) {
+          const requestedDirection = requestedDirections[i];
+          const branchData =
+            branchByDirection.get(requestedDirection) ??
+            unsorted[i] ??
+            branches[i];
+          if (!branchData) continue;
+
+          const resolvedDirection =
+            manifoldDirectionFromBranchData(branchData) ??
+            requestedDirection;
+          const saved = saveBranch(branchData, resolvedDirection, i);
+          if (!saved) {
+            return null;
+          }
+          savedBranches.push(saved);
+        }
       }
 
       if (savedBranches.length === 0) {

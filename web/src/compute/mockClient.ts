@@ -454,46 +454,64 @@ export class MockForkCoreClient implements ForkCoreClient {
         opts?.onProgress?.(progress)
 
         const branches: EquilibriumManifold1DResult = []
+        const isMap = request.system.type === 'map'
+        const mapIterations =
+          isMap && Number.isFinite(request.mapIterations)
+            ? Math.max(1, Math.trunc(request.mapIterations as number))
+            : 1
+        const cyclePointIndices =
+          isMap && mapIterations > 1 ? Array.from({ length: mapIterations }, (_, index) => index) : [0]
         const directions =
           request.settings.direction === 'Both'
             ? (['Plus', 'Minus'] as const)
             : ([request.settings.direction] as const)
-        for (const direction of directions) {
-          const sign = direction === 'Minus' ? -1 : 1
-          const points: Array<{ state: number[]; param_value: number; stability: 'None'; eigenvalues: [] }> = []
-          const pointsFlat: number[] = []
-          const arclength: number[] = []
-          const count = 24
-          for (let i = 0; i < count; i += 1) {
-            const t = i / (count - 1)
-            const arc = t * request.settings.target_arclength
-            const state = request.equilibriumState.map((value, index) =>
-              index === 0 ? value + sign * arc : value
-            )
-            points.push({ state, param_value: arc, stability: 'None', eigenvalues: [] })
-            pointsFlat.push(...state)
-            arclength.push(arc)
+        for (const cyclePointIndex of cyclePointIndices) {
+          for (const direction of directions) {
+            const sign = direction === 'Minus' ? -1 : 1
+            const points: Array<{ state: number[]; param_value: number; stability: 'None'; eigenvalues: [] }> =
+              []
+            const pointsFlat: number[] = []
+            const arclength: number[] = []
+            const count = 24
+            for (let i = 0; i < count; i += 1) {
+              const t = i / (count - 1)
+              const arc = t * request.settings.target_arclength
+              const state = request.equilibriumState.map((value, index) =>
+                index === 0
+                  ? value + cyclePointIndex * 0.05 + sign * arc
+                  : value + (isMap ? cyclePointIndex * 0.01 : 0)
+              )
+              points.push({ state, param_value: arc, stability: 'None', eigenvalues: [] })
+              pointsFlat.push(...state)
+              arclength.push(arc)
+            }
+            branches.push({
+              points,
+              bifurcations: [],
+              indices: points.map((_, index) => index),
+              branch_type: {
+                type: 'ManifoldEq1D',
+                stability: request.settings.stability,
+                direction,
+                eig_index: request.settings.eig_index ?? 0,
+                method: isMap ? 'mock_map' : 'mock',
+                caps: request.settings.caps,
+                ...(isMap
+                  ? {
+                      map_iterations: mapIterations,
+                      cycle_point_index: cyclePointIndex,
+                    }
+                  : {}),
+              },
+              manifold_geometry: {
+                type: 'Curve',
+                dim: request.system.varNames.length,
+                points_flat: pointsFlat,
+                arclength,
+                direction,
+              },
+            })
           }
-          branches.push({
-            points,
-            bifurcations: [],
-            indices: points.map((_, index) => index),
-            branch_type: {
-              type: 'ManifoldEq1D',
-              stability: request.settings.stability,
-              direction,
-              eig_index: request.settings.eig_index ?? 0,
-              method: 'mock',
-              caps: request.settings.caps,
-            },
-            manifold_geometry: {
-              type: 'Curve',
-              dim: request.system.varNames.length,
-              points_flat: pointsFlat,
-              arclength,
-              direction,
-            },
-          })
         }
         return branches
       },
