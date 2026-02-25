@@ -31,6 +31,7 @@ type ObjectsTreeProps = {
   onCreateOrbit: () => void
   onCreateEquilibrium: () => void
   onCreateIsocline?: () => void
+  onDuplicateNode?: (id: string) => void | Promise<void>
   onDeleteNode: (id: string) => void
 }
 
@@ -118,6 +119,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       onCreateOrbit,
       onCreateEquilibrium,
       onCreateIsocline = () => {},
+      onDuplicateNode = () => {},
       onDeleteNode,
     },
     ref
@@ -458,6 +460,23 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
             >
               Rename
             </button>
+            {(() => {
+              const node = system.nodes[nodeContextMenu.id]
+              if (!node || (node.kind !== 'object' && node.kind !== 'branch')) return null
+              return (
+                <button
+                  className="context-menu__item"
+                  onClick={() => {
+                    const nodeId = nodeContextMenu.id
+                    setNodeContextMenu(null)
+                    void onDuplicateNode(nodeId)
+                  }}
+                  data-testid="object-context-duplicate"
+                >
+                  Duplicate
+                </button>
+              )
+            })()}
             <button
               className="context-menu__item"
               onClick={() => {

@@ -363,6 +363,7 @@ function App() {
                 onCreateOrbit={createOrbit}
                 onCreateEquilibrium={createEquilibrium}
                 onCreateIsocline={createIsocline}
+                onDuplicateNode={actions.duplicateNode}
                 onDeleteNode={actions.deleteNode}
               />
             </Panel>
@@ -402,6 +403,7 @@ function App() {
                 onCreateScene={createScene}
                 onCreateBifurcation={createBifurcation}
                 onRenameViewport={actions.renameNode}
+                onDuplicateViewport={actions.duplicateNode}
                 onDeleteViewport={actions.deleteNode}
                 onSampleMap1DFunction={actions.sampleMap1DFunction}
                 isoclineGeometryCache={state.isoclineGeometryCache}

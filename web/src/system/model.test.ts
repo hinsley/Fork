@@ -5,6 +5,7 @@ import {
   addBifurcationDiagram,
   addScene,
   createSystem,
+  duplicateNode,
   moveNode,
   normalizeSystem,
   reorderNode,
@@ -399,5 +400,278 @@ describe('system model', () => {
     if (renamedOrbit.type === 'orbit' && originalOrbit.type === 'orbit') {
       expect(renamedOrbit.data).toBe(originalOrbit.data)
     }
+  })
+
+  it('duplicates an object together with its continuation branch subtree', () => {
+    const base = createSystem({
+      name: 'Duplicate_Object_Subtree',
+      config: {
+        name: 'Duplicate_Object_Subtree',
+        equations: ['y', '-x'],
+        params: [0],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_A',
+      systemName: base.config.name,
+      data: [[0, 0, 1]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+      parameters: [0],
+    }
+    const withOrbit = addObject(base, orbit)
+    const settings: ContinuationObject['settings'] = {
+      step_size: 0.01,
+      min_step_size: 1e-5,
+      max_step_size: 0.1,
+      max_steps: 10,
+      corrector_steps: 3,
+      corrector_tolerance: 1e-6,
+      step_tolerance: 1e-6,
+    }
+    const rootBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'root_branch',
+      systemName: base.config.name,
+      parameterName: 'mu',
+      parentObjectId: withOrbit.nodeId,
+      startObjectId: withOrbit.nodeId,
+      parentObject: orbit.name,
+      startObject: orbit.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [{ state: [0, 0], param_value: 0, stability: 'None', eigenvalues: [] }],
+        bifurcations: [],
+        indices: [0],
+      },
+      settings,
+      timestamp: new Date().toISOString(),
+      params: [0],
+    }
+    const withRootBranch = addBranch(withOrbit.system, rootBranch, withOrbit.nodeId)
+    const childBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'child_branch',
+      systemName: base.config.name,
+      parameterName: 'mu',
+      parentObjectId: withOrbit.nodeId,
+      startObjectId: withRootBranch.nodeId,
+      parentObject: orbit.name,
+      startObject: rootBranch.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [{ state: [0, 0], param_value: 0, stability: 'None', eigenvalues: [] }],
+        bifurcations: [],
+        indices: [0],
+      },
+      settings,
+      timestamp: new Date().toISOString(),
+      params: [0],
+    }
+    const withChildBranch = addBranch(withRootBranch.system, childBranch, withRootBranch.nodeId)
+
+    const duplicated = duplicateNode(withChildBranch.system, withOrbit.nodeId)
+    expect(duplicated).toBeTruthy()
+    if (!duplicated) {
+      throw new Error('Expected duplicated object subtree.')
+    }
+
+    const duplicateObjectId = duplicated.nodeId
+    const duplicateObjectNode = duplicated.system.nodes[duplicateObjectId]
+    expect(duplicateObjectNode.name).toBe('Orbit_A_copy')
+    expect(Object.keys(duplicated.system.objects)).toHaveLength(2)
+
+    const rootIndex = duplicated.system.rootIds.indexOf(withOrbit.nodeId)
+    expect(duplicated.system.rootIds[rootIndex + 1]).toBe(duplicateObjectId)
+
+    const duplicateRootBranchId = duplicateObjectNode.children[0]
+    const duplicateRootBranchNode = duplicated.system.nodes[duplicateRootBranchId]
+    const duplicateRootBranch = duplicated.system.branches[duplicateRootBranchId]
+    expect(duplicateRootBranch.parentObjectId).toBe(duplicateObjectId)
+    expect(duplicateRootBranch.startObjectId).toBe(duplicateObjectId)
+    expect(duplicateRootBranch.parentObject).toBe('Orbit_A_copy')
+    expect(duplicateRootBranch.startObject).toBe('Orbit_A_copy')
+
+    const duplicateChildBranchId = duplicateRootBranchNode.children[0]
+    const duplicateChildBranch = duplicated.system.branches[duplicateChildBranchId]
+    expect(duplicateChildBranch.parentObjectId).toBe(duplicateObjectId)
+    expect(duplicateChildBranch.startObjectId).toBe(duplicateRootBranchId)
+    expect(duplicateChildBranch.parentObject).toBe('Orbit_A_copy')
+    expect(duplicateChildBranch.startObject).toBe(duplicateRootBranch.name)
+  })
+
+  it('duplicates continuation branch children as sibling branches without creating objects', () => {
+    const base = createSystem({
+      name: 'Duplicate_Branch_Subtree',
+      config: {
+        name: 'Duplicate_Branch_Subtree',
+        equations: ['y', '-x'],
+        params: [0],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_B',
+      systemName: base.config.name,
+      data: [[0, 0, 1]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+      parameters: [0],
+    }
+    const withOrbit = addObject(base, orbit)
+    const settings: ContinuationObject['settings'] = {
+      step_size: 0.01,
+      min_step_size: 1e-5,
+      max_step_size: 0.1,
+      max_steps: 10,
+      corrector_steps: 3,
+      corrector_tolerance: 1e-6,
+      step_tolerance: 1e-6,
+    }
+    const rootBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'root_branch',
+      systemName: base.config.name,
+      parameterName: 'mu',
+      parentObjectId: withOrbit.nodeId,
+      startObjectId: withOrbit.nodeId,
+      parentObject: orbit.name,
+      startObject: orbit.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [{ state: [0, 0], param_value: 0, stability: 'None', eigenvalues: [] }],
+        bifurcations: [],
+        indices: [0],
+      },
+      settings,
+      timestamp: new Date().toISOString(),
+      params: [0],
+    }
+    const withRootBranch = addBranch(withOrbit.system, rootBranch, withOrbit.nodeId)
+    const childBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'child_branch',
+      systemName: base.config.name,
+      parameterName: 'mu',
+      parentObjectId: withOrbit.nodeId,
+      startObjectId: withRootBranch.nodeId,
+      parentObject: orbit.name,
+      startObject: rootBranch.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [{ state: [0, 0], param_value: 0, stability: 'None', eigenvalues: [] }],
+        bifurcations: [],
+        indices: [0],
+      },
+      settings,
+      timestamp: new Date().toISOString(),
+      params: [0],
+    }
+    const withChildBranch = addBranch(withRootBranch.system, childBranch, withRootBranch.nodeId)
+
+    const duplicated = duplicateNode(withChildBranch.system, withRootBranch.nodeId)
+    expect(duplicated).toBeTruthy()
+    if (!duplicated) {
+      throw new Error('Expected duplicated branch subtree.')
+    }
+
+    expect(Object.keys(duplicated.system.objects)).toHaveLength(1)
+    const duplicateRootBranchId = duplicated.nodeId
+    const objectChildren = duplicated.system.nodes[withOrbit.nodeId].children
+    const sourceIndex = objectChildren.indexOf(withRootBranch.nodeId)
+    expect(objectChildren[sourceIndex + 1]).toBe(duplicateRootBranchId)
+
+    const duplicateRootBranchNode = duplicated.system.nodes[duplicateRootBranchId]
+    const duplicateRootBranch = duplicated.system.branches[duplicateRootBranchId]
+    expect(duplicateRootBranch.name).toBe('root_branch_copy')
+    expect(duplicateRootBranch.parentObjectId).toBe(withOrbit.nodeId)
+    expect(duplicateRootBranch.startObjectId).toBe(withOrbit.nodeId)
+    expect(duplicateRootBranch.parentObject).toBe(orbit.name)
+    expect(duplicateRootBranch.startObject).toBe(orbit.name)
+
+    const duplicateChildBranchId = duplicateRootBranchNode.children[0]
+    const duplicateChildBranch = duplicated.system.branches[duplicateChildBranchId]
+    expect(duplicateChildBranch.name).toBe('child_branch_copy')
+    expect(duplicateChildBranch.parentObjectId).toBe(withOrbit.nodeId)
+    expect(duplicateChildBranch.startObjectId).toBe(duplicateRootBranchId)
+    expect(duplicateChildBranch.parentObject).toBe(orbit.name)
+    expect(duplicateChildBranch.startObject).toBe('root_branch_copy')
+  })
+
+  it('duplicates scene and diagram viewports as siblings with copied UI state', () => {
+    let system = createSystem({ name: 'Duplicate_Viewports' })
+    const sceneAdded = addScene(system, 'Scene_A')
+    system = sceneAdded.system
+    system = updateScene(system, sceneAdded.nodeId, {
+      selectedNodeIds: ['node-1'],
+      display: 'selection',
+      axisRanges: { x: [-2, 2] },
+      viewRevision: 3,
+    })
+    system.ui.viewportHeights[sceneAdded.nodeId] = 320
+
+    const sceneDuplicate = duplicateNode(system, sceneAdded.nodeId)
+    expect(sceneDuplicate).toBeTruthy()
+    if (!sceneDuplicate) {
+      throw new Error('Expected duplicated scene.')
+    }
+    const duplicatedSceneId = sceneDuplicate.nodeId
+    const sceneRootIndex = sceneDuplicate.system.rootIds.indexOf(sceneAdded.nodeId)
+    expect(sceneDuplicate.system.rootIds[sceneRootIndex + 1]).toBe(duplicatedSceneId)
+    expect(sceneDuplicate.system.nodes[duplicatedSceneId].name).toBe('Scene_A_copy')
+    expect(sceneDuplicate.system.ui.viewportHeights[duplicatedSceneId]).toBe(320)
+    expect(
+      sceneDuplicate.system.scenes.find((scene) => scene.id === duplicatedSceneId)
+    ).toMatchObject({
+      name: 'Scene_A_copy',
+      selectedNodeIds: ['node-1'],
+      display: 'selection',
+      axisRanges: { x: [-2, 2] },
+      viewRevision: 3,
+    })
+
+    const diagramAdded = addBifurcationDiagram(sceneDuplicate.system, 'Diagram_A')
+    const withDiagram = updateBifurcationDiagram(diagramAdded.system, diagramAdded.nodeId, {
+      selectedBranchIds: ['branch-1'],
+      xAxis: { kind: 'parameter', name: 'mu' },
+      yAxis: { kind: 'state', name: 'x' },
+      axisRanges: { x: [0, 1], y: [-1, 1] },
+      viewRevision: 4,
+    })
+    withDiagram.ui.viewportHeights[diagramAdded.nodeId] = 280
+
+    const diagramDuplicate = duplicateNode(withDiagram, diagramAdded.nodeId)
+    expect(diagramDuplicate).toBeTruthy()
+    if (!diagramDuplicate) {
+      throw new Error('Expected duplicated diagram.')
+    }
+    const duplicatedDiagramId = diagramDuplicate.nodeId
+    const diagramRootIndex = diagramDuplicate.system.rootIds.indexOf(diagramAdded.nodeId)
+    expect(diagramDuplicate.system.rootIds[diagramRootIndex + 1]).toBe(duplicatedDiagramId)
+    expect(diagramDuplicate.system.nodes[duplicatedDiagramId].name).toBe('Diagram_A_copy')
+    expect(diagramDuplicate.system.ui.viewportHeights[duplicatedDiagramId]).toBe(280)
+    expect(
+      diagramDuplicate.system.bifurcationDiagrams.find(
+        (diagram) => diagram.id === duplicatedDiagramId
+      )
+    ).toMatchObject({
+      name: 'Diagram_A_copy',
+      selectedBranchIds: ['branch-1'],
+      xAxis: { kind: 'parameter', name: 'mu' },
+      yAxis: { kind: 'state', name: 'x' },
+      axisRanges: { x: [0, 1], y: [-1, 1] },
+      viewRevision: 4,
+    })
   })
 })

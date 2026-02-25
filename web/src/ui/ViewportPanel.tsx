@@ -88,6 +88,7 @@ type ViewportPanelProps = {
   onCreateScene: (targetId?: string | null) => void
   onCreateBifurcation: (targetId?: string | null) => void
   onRenameViewport: (id: string, name: string) => void
+  onDuplicateViewport?: (id: string) => void | Promise<void>
   onDeleteViewport: (id: string) => void
   onSampleMap1DFunction?: (
     request: SampleMap1DFunctionRequest,
@@ -6367,6 +6368,7 @@ export function ViewportPanel({
   onCreateScene,
   onCreateBifurcation,
   onRenameViewport,
+  onDuplicateViewport = () => {},
   onDeleteViewport,
   onSampleMap1DFunction,
   isoclineGeometryCache,
@@ -6788,6 +6790,17 @@ export function ViewportPanel({
             data-testid="viewport-context-rename"
           >
             Rename
+          </button>
+          <button
+            className="context-menu__item"
+            onClick={() => {
+              const nodeId = nodeContextMenu.id
+              setNodeContextMenu(null)
+              void onDuplicateViewport(nodeId)
+            }}
+            data-testid="viewport-context-duplicate"
+          >
+            Duplicate
           </button>
           <button
             className="context-menu__item"

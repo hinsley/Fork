@@ -1,4 +1,5 @@
-import { render, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { Data, Layout } from 'plotly.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ViewportPanel } from './ViewportPanel'
@@ -113,6 +114,37 @@ function buildIsoclineSignature(object: IsoclineObject): string {
 describe('ViewportPanel view state wiring', () => {
   beforeEach(() => {
     plotlyCalls.length = 0
+  })
+
+  it('opens a viewport context menu and duplicates a viewport', async () => {
+    const user = userEvent.setup()
+    let system = createSystem({ name: 'Viewport_Duplicate_System' })
+    const sceneResult = addScene(system, 'Scene_1')
+    system = sceneResult.system
+    const onDuplicateViewport = vi.fn()
+
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        theme="light"
+        onSelectViewport={vi.fn()}
+        onSelectObject={vi.fn()}
+        onReorderViewport={vi.fn()}
+        onResizeViewport={vi.fn()}
+        onToggleViewport={vi.fn()}
+        onCreateScene={vi.fn()}
+        onCreateBifurcation={vi.fn()}
+        onRenameViewport={vi.fn()}
+        onDuplicateViewport={onDuplicateViewport}
+        onDeleteViewport={vi.fn()}
+      />
+    )
+
+    fireEvent.contextMenu(screen.getByTestId(`viewport-header-${sceneResult.nodeId}`))
+    await user.click(screen.getByTestId('viewport-context-duplicate'))
+
+    expect(onDuplicateViewport).toHaveBeenCalledWith(sceneResult.nodeId)
   })
 
   it('falls back to event point index when selecting orbit points from scene traces', () => {

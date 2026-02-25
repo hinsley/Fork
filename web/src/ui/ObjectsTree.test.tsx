@@ -165,6 +165,36 @@ describe('ObjectsTree', () => {
     confirmSpy.mockRestore()
   })
 
+  it('opens a context menu and duplicates object and branch nodes', async () => {
+    const user = userEvent.setup()
+    const { system, objectNodeId, branchNodeId } = createDemoSystem()
+    const onDuplicateNode = vi.fn()
+
+    render(
+      <ObjectsTree
+        system={system}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={vi.fn()}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDuplicateNode={onDuplicateNode}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    fireEvent.contextMenu(screen.getByTestId(`object-tree-row-${objectNodeId}`))
+    await user.click(screen.getByTestId('object-context-duplicate'))
+    expect(onDuplicateNode).toHaveBeenCalledWith(objectNodeId)
+
+    fireEvent.contextMenu(screen.getByTestId(`object-tree-row-${branchNodeId}`))
+    await user.click(screen.getByTestId('object-context-duplicate'))
+    expect(onDuplicateNode).toHaveBeenLastCalledWith(branchNodeId)
+  })
+
   it('opens the create menu and triggers a create action', async () => {
     const user = userEvent.setup()
     const { system } = createDemoSystem()

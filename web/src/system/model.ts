@@ -463,6 +463,270 @@ export function reorderNode(system: System, nodeId: string, targetId: string): S
   return next
 }
 
+function duplicateName(baseName: string, existingNames: Set<string>): string {
+  let candidate = `${baseName}_copy`
+  let suffix = 2
+  while (existingNames.has(candidate)) {
+    candidate = `${baseName}_copy_${suffix}`
+    suffix += 1
+  }
+  existingNames.add(candidate)
+  return candidate
+}
+
+function reserveUniqueName(name: string, existingNames: Set<string>): string {
+  if (!existingNames.has(name)) {
+    existingNames.add(name)
+    return name
+  }
+  return duplicateName(name, existingNames)
+}
+
+function resolveEntityNameById(system: System, id: string | undefined, fallback: string): string {
+  if (!id) return fallback
+  return (
+    system.nodes[id]?.name ??
+    system.objects[id]?.name ??
+    system.branches[id]?.name ??
+    fallback
+  )
+}
+
+function branchParentKey(parentObjectId: string | undefined, parentObjectName: string): string {
+  if (parentObjectId) return `id:${parentObjectId}`
+  return `name:${parentObjectName}`
+}
+
+function duplicateNodeId(kind: TreeNode['kind']): string {
+  if (kind === 'scene') return makeId('scene')
+  if (kind === 'diagram') return makeId('diagram')
+  return makeId('node')
+}
+
+export function duplicateNode(
+  system: System,
+  nodeId: string
+): { system: System; nodeId: string } | null {
+  const sourceRoot = system.nodes[nodeId]
+  if (!sourceRoot || sourceRoot.kind === 'camera') return null
+
+  const next = structuredClone(system)
+  const updatedAt = nowIso()
+  const idMap = new Map<string, string>()
+  const duplicatedBranchOldIds: string[] = []
+  const sourceScenesById = new Map(system.scenes.map((scene) => [scene.id, scene]))
+  const sourceDiagramsById = new Map(
+    system.bifurcationDiagrams.map((diagram) => [diagram.id, diagram])
+  )
+  const objectNames = new Set(Object.values(next.objects).map((obj) => obj.name))
+  const sceneNames = new Set(next.scenes.map((scene) => scene.name))
+  const diagramNames = new Set(next.bifurcationDiagrams.map((diagram) => diagram.name))
+
+  const rootName =
+    sourceRoot.kind === 'object'
+      ? duplicateName(sourceRoot.name, objectNames)
+      : sourceRoot.kind === 'scene'
+        ? duplicateName(sourceRoot.name, sceneNames)
+        : sourceRoot.kind === 'diagram'
+          ? duplicateName(sourceRoot.name, diagramNames)
+          : sourceRoot.name
+
+  const cloneSubtree = (
+    sourceId: string,
+    parentId: string | null,
+    isRoot: boolean
+  ): string | null => {
+    const sourceNode = system.nodes[sourceId]
+    if (!sourceNode) return null
+
+    let nextName = sourceNode.name
+    if (isRoot) {
+      nextName = rootName
+    } else if (sourceNode.kind === 'object') {
+      nextName = reserveUniqueName(sourceNode.name, objectNames)
+    } else if (sourceNode.kind === 'scene') {
+      nextName = reserveUniqueName(sourceNode.name, sceneNames)
+    } else if (sourceNode.kind === 'diagram') {
+      nextName = reserveUniqueName(sourceNode.name, diagramNames)
+    }
+
+    const newId = duplicateNodeId(sourceNode.kind)
+    idMap.set(sourceId, newId)
+
+    const clonedNode: TreeNode = {
+      ...sourceNode,
+      id: newId,
+      name: nextName,
+      parentId,
+      children: [],
+    }
+    next.nodes[newId] = clonedNode
+
+    if (sourceNode.kind === 'object') {
+      const object = system.objects[sourceId]
+      if (!object) return null
+      next.objects[newId] = { ...object, id: newId, name: nextName }
+      next.index.objects[newId] = {
+        id: newId,
+        name: nextName,
+        objectType: object.type,
+        shard: shardForEntityId(newId),
+        updatedAt,
+      }
+    } else if (sourceNode.kind === 'branch') {
+      const branch = system.branches[sourceId]
+      if (!branch) return null
+      duplicatedBranchOldIds.push(sourceId)
+      next.branches[newId] = { ...branch, id: newId, name: nextName }
+      next.index.branches[newId] = {
+        id: newId,
+        name: nextName,
+        branchType: branch.branchType,
+        parentObjectId: branch.parentObjectId ?? null,
+        startObjectId: branch.startObjectId ?? null,
+        shard: shardForEntityId(newId),
+        updatedAt,
+      }
+    } else if (sourceNode.kind === 'scene') {
+      const scene = sourceScenesById.get(sourceId)
+      if (!scene) return null
+      next.scenes.push({
+        ...structuredClone(scene),
+        id: newId,
+        name: nextName,
+      })
+    } else if (sourceNode.kind === 'diagram') {
+      const diagram = sourceDiagramsById.get(sourceId)
+      if (!diagram) return null
+      next.bifurcationDiagrams.push({
+        ...structuredClone(diagram),
+        id: newId,
+        name: nextName,
+      })
+    }
+
+    sourceNode.children.forEach((childId) => {
+      const childDuplicateId = cloneSubtree(childId, newId, false)
+      if (childDuplicateId) {
+        clonedNode.children.push(childDuplicateId)
+      }
+    })
+
+    return newId
+  }
+
+  const rootParentId =
+    sourceRoot.parentId && next.nodes[sourceRoot.parentId] ? sourceRoot.parentId : null
+  const duplicatedRootId = cloneSubtree(nodeId, rootParentId, true)
+  if (!duplicatedRootId) return null
+
+  const siblings = rootParentId ? next.nodes[rootParentId]?.children : next.rootIds
+  if (!siblings) return null
+  const sourceIndex = siblings.indexOf(nodeId)
+  if (sourceIndex === -1) {
+    siblings.push(duplicatedRootId)
+  } else {
+    siblings.splice(sourceIndex + 1, 0, duplicatedRootId)
+  }
+
+  const duplicatedBranchNewIds = new Set<string>()
+  duplicatedBranchOldIds.forEach((oldBranchId) => {
+    const newBranchId = idMap.get(oldBranchId)
+    if (!newBranchId) return
+    duplicatedBranchNewIds.add(newBranchId)
+    const branch = next.branches[newBranchId]
+    const branchNode = next.nodes[newBranchId]
+    if (!branch || !branchNode) return
+    const parentNode = branchNode.parentId ? next.nodes[branchNode.parentId] : null
+    const remappedParentObjectId =
+      (branch.parentObjectId
+        ? (idMap.get(branch.parentObjectId) ?? branch.parentObjectId)
+        : undefined) ?? (parentNode?.kind === 'object' ? parentNode.id : undefined)
+    const remappedStartObjectId = branch.startObjectId
+      ? idMap.get(branch.startObjectId) ?? branch.startObjectId
+      : remappedParentObjectId
+    branch.parentObjectId = remappedParentObjectId
+    branch.startObjectId = remappedStartObjectId
+  })
+
+  const branchNamesByParent = new Map<string, Set<string>>()
+  Object.entries(next.branches).forEach(([id, branch]) => {
+    if (duplicatedBranchNewIds.has(id)) return
+    const key = branchParentKey(branch.parentObjectId, branch.parentObject)
+    const names = branchNamesByParent.get(key) ?? new Set<string>()
+    names.add(branch.name)
+    branchNamesByParent.set(key, names)
+  })
+
+  duplicatedBranchOldIds.forEach((oldBranchId) => {
+    const newBranchId = idMap.get(oldBranchId)
+    if (!newBranchId) return
+    const branch = next.branches[newBranchId]
+    const node = next.nodes[newBranchId]
+    if (!branch || !node) return
+    const key = branchParentKey(branch.parentObjectId, branch.parentObject)
+    const names = branchNamesByParent.get(key) ?? new Set<string>()
+    const isRootBranchDuplicate = sourceRoot.kind === 'branch' && oldBranchId === nodeId
+    const nextName = isRootBranchDuplicate
+      ? duplicateName(branch.name, names)
+      : reserveUniqueName(branch.name, names)
+    branchNamesByParent.set(key, names)
+    branch.name = nextName
+    node.name = nextName
+  })
+
+  duplicatedBranchOldIds.forEach((oldBranchId) => {
+    const newBranchId = idMap.get(oldBranchId)
+    if (!newBranchId) return
+    const branch = next.branches[newBranchId]
+    if (!branch) return
+    branch.parentObject = resolveEntityNameById(next, branch.parentObjectId, branch.parentObject)
+    branch.startObject = resolveEntityNameById(next, branch.startObjectId, branch.startObject)
+    next.index.branches[newBranchId] = {
+      id: newBranchId,
+      name: branch.name,
+      branchType: branch.branchType,
+      parentObjectId: branch.parentObjectId ?? null,
+      startObjectId: branch.startObjectId ?? null,
+      shard: shardForEntityId(newBranchId),
+      updatedAt,
+    }
+  })
+
+  for (const [sourceId, duplicateId] of idMap.entries()) {
+    const height = next.ui.viewportHeights[sourceId]
+    if (Number.isFinite(height) && height > 0) {
+      next.ui.viewportHeights[duplicateId] = height
+    }
+  }
+
+  const sourceTargets = system.ui.limitCycleRenderTargets ?? {}
+  const nextTargets = { ...(next.ui.limitCycleRenderTargets ?? {}) }
+  let targetsChanged = false
+  for (const [sourceId, duplicateId] of idMap.entries()) {
+    if (system.nodes[sourceId]?.kind !== 'object') continue
+    const target = sourceTargets[sourceId]
+    if (!target) continue
+    if (target.type === 'object') {
+      nextTargets[duplicateId] = { type: 'object' }
+      targetsChanged = true
+      continue
+    }
+    nextTargets[duplicateId] = {
+      type: 'branch',
+      branchId: idMap.get(target.branchId) ?? target.branchId,
+      pointIndex: target.pointIndex,
+    }
+    targetsChanged = true
+  }
+  if (targetsChanged) {
+    next.ui.limitCycleRenderTargets = nextTargets
+  }
+
+  next.updatedAt = updatedAt
+  return { system: next, nodeId: duplicatedRootId }
+}
+
 export function removeNode(system: System, nodeId: string): System {
   const next = structuredClone(system)
   const node = next.nodes[nodeId]

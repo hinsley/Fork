@@ -48,6 +48,7 @@ import {
   addBranch,
   addObject,
   addScene,
+  duplicateNode as duplicateSystemNode,
   mergeLoadedEntities,
   moveNode,
   reorderNode,
@@ -178,6 +179,37 @@ function collectVisibleEntityIds(system: System): { objectIds: string[]; branchI
       stack.push(...node.children)
     }
   }
+  return {
+    objectIds: [...objectIds],
+    branchIds: [...branchIds],
+  }
+}
+
+function collectSubtreeEntityIds(
+  system: System,
+  rootNodeId: string
+): { objectIds: string[]; branchIds: string[] } {
+  const objectIds = new Set<string>()
+  const branchIds = new Set<string>()
+  const stack = [rootNodeId]
+  const visited = new Set<string>()
+
+  while (stack.length > 0) {
+    const nodeId = stack.pop()
+    if (!nodeId || visited.has(nodeId)) continue
+    visited.add(nodeId)
+    const node = system.nodes[nodeId]
+    if (!node) continue
+    if (node.kind === 'object' && system.index.objects[nodeId]) {
+      objectIds.add(nodeId)
+    } else if (node.kind === 'branch' && system.index.branches[nodeId]) {
+      branchIds.add(nodeId)
+    }
+    if (node.children.length > 0) {
+      stack.push(...node.children)
+    }
+  }
+
   return {
     objectIds: [...objectIds],
     branchIds: [...branchIds],
@@ -1382,6 +1414,7 @@ type AppActions = {
     objectId: string,
     target: LimitCycleRenderTarget | null
   ) => void
+  duplicateNode: (nodeId: string) => Promise<void>
   deleteNode: (nodeId: string) => Promise<void>
   createOrbitObject: (name: string) => Promise<string | null>
   createEquilibriumObject: (name: string) => Promise<string | null>
@@ -2143,6 +2176,41 @@ export function AppProvider({
       scheduleUiSave(system)
     },
     [scheduleUiSave, state.system]
+  )
+
+  const duplicateNodeAction = useCallback(
+    async (nodeId: string) => {
+      if (!state.system) return
+      const sourceNode = state.system.nodes[nodeId]
+      if (!sourceNode) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        let systemForDuplication = state.system
+        if (sourceNode.kind === 'object' || sourceNode.kind === 'branch') {
+          const subtreeEntities = collectSubtreeEntityIds(systemForDuplication, nodeId)
+          const loaded = await ensureEntitiesLoaded(subtreeEntities)
+          if (loaded) {
+            systemForDuplication = loaded
+          }
+        }
+        const duplicated = duplicateSystemNode(systemForDuplication, nodeId)
+        if (!duplicated) return
+        const selected = selectNode(duplicated.system, duplicated.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        const duplicatedNode = selected.nodes[duplicated.nodeId]
+        if (duplicatedNode?.kind === 'scene' || duplicatedNode?.kind === 'diagram') {
+          await store.saveUi(selected)
+        } else {
+          await store.save(selected)
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [ensureEntitiesLoaded, state.system, store]
   )
 
   const deleteNodeAction = useCallback(
@@ -6673,6 +6741,7 @@ export function AppProvider({
       updateScene: updateSceneAction,
       updateBifurcationDiagram: updateBifurcationDiagramAction,
       setLimitCycleRenderTarget: setLimitCycleRenderTargetAction,
+      duplicateNode: duplicateNodeAction,
       deleteNode: deleteNodeAction,
       createOrbitObject,
       createEquilibriumObject,
@@ -6764,6 +6833,7 @@ export function AppProvider({
       updateSceneAction,
       updateBifurcationDiagramAction,
       setLimitCycleRenderTargetAction,
+      duplicateNodeAction,
       deleteNodeAction,
       createIsoclineObject,
       computeIsocline,
