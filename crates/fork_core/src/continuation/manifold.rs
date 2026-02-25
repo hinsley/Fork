@@ -4649,113 +4649,192 @@ fn build_map_manifold_curve(
         bail!("Cycle point dimensions do not match manifold state dimension.");
     }
 
-    let mut points = vec![seed.to_vec()];
+    let target = target_arclength.max(0.0);
+    let max_points = caps.max_points.max(2);
+    let step_limit = caps.max_iterations.unwrap_or(caps.max_steps).max(1);
+    let domain_subdivisions = (max_points.saturating_sub(1) / step_limit.max(1))
+        .max(2)
+        .min(64);
+
+    let start_ref = cycle_point_index % cycle_len;
+    let mut end_ref = match stability {
+        ManifoldStability::Unstable => (start_ref + 1) % cycle_len,
+        ManifoldStability::Stable => {
+            if cycle_len == 1 {
+                0
+            } else {
+                (start_ref + cycle_len - 1) % cycle_len
+            }
+        }
+    };
+    let domain_end = match stability {
+        ManifoldStability::Unstable => {
+            let mut mapped = vec![0.0; seed.len()];
+            system.apply(0.0, seed, &mut mapped);
+            mapped
+        }
+        ManifoldStability::Stable => {
+            let preimage = solve_map_preimage_newton(
+                system,
+                seed,
+                &cycle_points[end_ref],
+                &cycle_points[end_ref],
+                &cycle_points[start_ref],
+            )?;
+            let Some(value) = preimage else {
+                return Ok((vec![seed.to_vec()], vec![0.0]));
+            };
+            value
+        }
+    };
+    if domain_end.iter().any(|value| !value.is_finite()) {
+        return Ok((vec![seed.to_vec()], vec![0.0]));
+    }
+
+    let mut domain_samples = Vec::with_capacity(domain_subdivisions + 1);
+    for sub in 0..=domain_subdivisions {
+        let alpha = (sub as f64) / (domain_subdivisions as f64);
+        domain_samples.push(lerp(seed, &domain_end, alpha));
+    }
+
+    let mut points = vec![domain_samples[0].clone()];
     let mut arclength = vec![0.0];
     if let Some(box_bounds) = bounds {
-        if !inside_bounds(seed, box_bounds) {
+        if !inside_bounds(&points[0], box_bounds) {
+            return Ok((points, arclength));
+        }
+    }
+    let mut cumulative_arc = 0.0;
+
+    for sample in domain_samples.iter().skip(1) {
+        if sample.iter().any(|value| !value.is_finite()) {
+            return Ok((points, arclength));
+        }
+        if let Some(box_bounds) = bounds {
+            if !inside_bounds(sample, box_bounds) {
+                return Ok((points, arclength));
+            }
+        }
+        let last_point = points.last().cloned().unwrap_or_else(|| sample.clone());
+        let step_arc = l2_distance(&last_point, sample);
+        if !step_arc.is_finite() {
+            return Ok((points, arclength));
+        }
+        if target > 0.0 && cumulative_arc + step_arc >= target && step_arc > NORM_EPS {
+            let alpha_hit = ((target - cumulative_arc) / step_arc).clamp(0.0, 1.0);
+            points.push(lerp(&last_point, sample, alpha_hit));
+            arclength.push(target);
+            return Ok((points, arclength));
+        }
+        cumulative_arc += step_arc;
+        points.push(sample.clone());
+        arclength.push(cumulative_arc);
+        if points.len() >= max_points || (target > 0.0 && cumulative_arc >= target) {
             return Ok((points, arclength));
         }
     }
 
-    let target = target_arclength.max(0.0);
-    let max_points = caps.max_points.max(2);
-    let step_limit = caps.max_iterations.unwrap_or(caps.max_steps).max(1);
-    let map_spacing = if target > 0.0 {
-        Some((target / (max_points.saturating_sub(1).max(1) as f64)).max(NORM_EPS))
-    } else {
-        None
-    };
-
-    let mut current = seed.to_vec();
-    let mut cumulative_arc = 0.0;
-    let mut reference_index = cycle_point_index % cycle_len;
-    for _ in 0..step_limit {
-        let (next, next_reference_index) = match stability {
-            ManifoldStability::Unstable => {
-                let mut value = vec![0.0; current.len()];
-                system.apply(0.0, &current, &mut value);
-                (value, (reference_index + 1) % cycle_len)
-            }
+    for _ in 1..step_limit {
+        if points.len() >= max_points || (target > 0.0 && cumulative_arc >= target) {
+            break;
+        }
+        let next_end_ref = match stability {
+            ManifoldStability::Unstable => (end_ref + 1) % cycle_len,
             ManifoldStability::Stable => {
-                let prev_reference_index = if cycle_len == 1 {
+                if cycle_len == 1 {
                     0
                 } else {
-                    (reference_index + cycle_len - 1) % cycle_len
-                };
-                let preimage = solve_map_preimage_newton(
-                    system,
-                    &current,
-                    &cycle_points[prev_reference_index],
-                    &cycle_points[reference_index],
-                )?;
-                let Some(value) = preimage else {
-                    break;
-                };
-                (value, prev_reference_index)
+                    (end_ref + cycle_len - 1) % cycle_len
+                }
             }
         };
 
-        if next.iter().any(|value| !value.is_finite()) {
-            break;
-        }
-        if let Some(box_bounds) = bounds {
-            if !inside_bounds(&next, box_bounds) {
+        let mut next_samples = Vec::with_capacity(domain_samples.len());
+        let mut previous_q: Option<Vec<f64>> = None;
+        let mut previous_mapped: Option<Vec<f64>> = None;
+        let mut failed = false;
+
+        for (sample_index, q) in domain_samples.iter().enumerate() {
+            let mapped = match stability {
+                ManifoldStability::Unstable => {
+                    let mut value = vec![0.0; q.len()];
+                    system.apply(0.0, q, &mut value);
+                    value
+                }
+                ManifoldStability::Stable => {
+                    let guess = if sample_index == 0 {
+                        domain_samples.last().cloned().unwrap_or_else(|| q.clone())
+                    } else if let (Some(prev_q), Some(prev_mapped)) =
+                        (previous_q.as_ref(), previous_mapped.as_ref())
+                    {
+                        prev_mapped
+                            .iter()
+                            .zip(q.iter().zip(prev_q.iter()))
+                            .map(|(value, (q_value, prev_q_value))| {
+                                value + (q_value - prev_q_value)
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        domain_samples.last().cloned().unwrap_or_else(|| q.clone())
+                    };
+                    let preimage = solve_map_preimage_newton(
+                        system,
+                        q,
+                        &guess,
+                        &cycle_points[next_end_ref],
+                        &cycle_points[end_ref],
+                    )?;
+                    let Some(value) = preimage else {
+                        failed = true;
+                        break;
+                    };
+                    value
+                }
+            };
+
+            if mapped.iter().any(|value| !value.is_finite()) {
+                failed = true;
                 break;
             }
-        }
-
-        let step_arc = l2_distance(&current, &next);
-        if !step_arc.is_finite() {
-            break;
-        }
-        let mut subdivisions = 1usize;
-        if let Some(desired_spacing) = map_spacing {
-            let arc_window = if target > 0.0 {
-                (target - cumulative_arc).max(0.0).min(step_arc)
-            } else {
-                step_arc
-            };
-            if arc_window > NORM_EPS {
-                subdivisions = (arc_window / desired_spacing).ceil().max(1.0) as usize;
-            }
-        }
-        let remaining_slots = max_points.saturating_sub(points.len());
-        if remaining_slots == 0 {
-            break;
-        }
-        subdivisions = subdivisions.clamp(1, remaining_slots);
-
-        for sub in 1..=subdivisions {
-            let alpha = (sub as f64) / (subdivisions as f64);
-            let sample = if sub == subdivisions {
-                next.clone()
-            } else {
-                lerp(&current, &next, alpha)
-            };
-            let sample_arc = cumulative_arc + alpha * step_arc;
-
-            if target > 0.0 && sample_arc >= target && step_arc > NORM_EPS {
-                let hit_alpha = ((target - cumulative_arc) / step_arc).clamp(0.0, 1.0);
-                let terminal = lerp(&current, &next, hit_alpha);
-                points.push(terminal);
-                arclength.push(target);
-                return Ok((points, arclength));
+            if let Some(box_bounds) = bounds {
+                if !inside_bounds(&mapped, box_bounds) {
+                    failed = true;
+                    break;
+                }
             }
 
-            points.push(sample);
-            arclength.push(sample_arc);
-            if points.len() >= max_points {
-                return Ok((points, arclength));
+            if sample_index > 0 {
+                let last_point = points.last().cloned().unwrap_or_else(|| mapped.clone());
+                let step_arc = l2_distance(&last_point, &mapped);
+                if !step_arc.is_finite() {
+                    failed = true;
+                    break;
+                }
+                if target > 0.0 && cumulative_arc + step_arc >= target && step_arc > NORM_EPS {
+                    let alpha_hit = ((target - cumulative_arc) / step_arc).clamp(0.0, 1.0);
+                    points.push(lerp(&last_point, &mapped, alpha_hit));
+                    arclength.push(target);
+                    return Ok((points, arclength));
+                }
+                cumulative_arc += step_arc;
+                points.push(mapped.clone());
+                arclength.push(cumulative_arc);
+                if points.len() >= max_points || (target > 0.0 && cumulative_arc >= target) {
+                    return Ok((points, arclength));
+                }
             }
+
+            previous_q = Some(q.clone());
+            previous_mapped = Some(mapped.clone());
+            next_samples.push(mapped);
         }
 
-        cumulative_arc += step_arc;
-        current = next;
-        reference_index = next_reference_index;
-
-        if target > 0.0 && cumulative_arc >= target {
+        if failed || next_samples.len() != domain_samples.len() {
             break;
         }
+
+        domain_samples = next_samples;
+        end_ref = next_end_ref;
     }
 
     Ok((points, arclength))
@@ -4764,10 +4843,14 @@ fn build_map_manifold_curve(
 fn solve_map_preimage_newton(
     system: &EquationSystem,
     target: &[f64],
+    initial_guess: &[f64],
     prev_cycle_point: &[f64],
     current_cycle_point: &[f64],
 ) -> Result<Option<Vec<f64>>> {
-    if target.len() != prev_cycle_point.len() || target.len() != current_cycle_point.len() {
+    if target.len() != initial_guess.len()
+        || target.len() != prev_cycle_point.len()
+        || target.len() != current_cycle_point.len()
+    {
         bail!("Map preimage solve dimension mismatch.");
     }
     let dim = target.len();
@@ -4778,14 +4861,20 @@ fn solve_map_preimage_newton(
     let step_jacobian =
         compute_system_jacobian(system, SystemKind::Map { iterations: 1 }, prev_cycle_point)?;
     let rhs = subtract(target, current_cycle_point);
-    let mut guess = if let Some(offset) = solve_dense_linear_system(dim, &step_jacobian, &rhs) {
-        prev_cycle_point
-            .iter()
-            .zip(offset.iter())
-            .map(|(base, delta)| base + delta)
-            .collect::<Vec<_>>()
+    let linearized_guess =
+        if let Some(offset) = solve_dense_linear_system(dim, &step_jacobian, &rhs) {
+            prev_cycle_point
+                .iter()
+                .zip(offset.iter())
+                .map(|(base, delta)| base + delta)
+                .collect::<Vec<_>>()
+        } else {
+            prev_cycle_point.to_vec()
+        };
+    let mut guess = if initial_guess.iter().all(|value| value.is_finite()) {
+        initial_guess.to_vec()
     } else {
-        prev_cycle_point.to_vec()
+        linearized_guess
     };
 
     let mut map_value = vec![0.0; dim];
@@ -5560,10 +5649,20 @@ mod tests {
         .expect("map manifold with iteration cap");
         assert_eq!(branches.len(), 1);
         let branch = &branches[0];
-        assert_eq!(
-            branch.points.len(),
-            3,
-            "expected seed + exactly two map iterates when max_iterations=2"
+        assert!(branch.points.len() > 3);
+        let seed = branch
+            .points
+            .first()
+            .map(|point| point.state[0])
+            .unwrap_or(0.0);
+        let terminal = branch
+            .points
+            .last()
+            .map(|point| point.state[0])
+            .unwrap_or(0.0);
+        assert!(
+            (terminal - 4.0 * seed).abs() <= 1e-10,
+            "expected two map-domain growth steps when max_iterations=2: seed={seed}, terminal={terminal}"
         );
     }
 
