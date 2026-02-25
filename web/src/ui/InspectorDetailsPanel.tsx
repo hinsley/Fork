@@ -273,7 +273,6 @@ type LimitCycleFromPDDraft = {
   limitCycleName: string
   branchName: string
   amplitude: string
-  ncol: string
   stepSize: string
   maxSteps: string
   minStepSize: string
@@ -1080,7 +1079,6 @@ function makeLimitCycleFromPDDraft(): LimitCycleFromPDDraft {
     limitCycleName: '',
     branchName: '',
     amplitude: '0.01',
-    ncol: '4',
     stepSize: '0.01',
     maxSteps: '300',
     minStepSize: '1e-5',
@@ -2632,13 +2630,6 @@ export function InspectorDetailsPanel({
     }
     return { ntst: 20, ncol: 4 }
   }, [branch])
-
-  useEffect(() => {
-    setLimitCycleFromPDDraft((prev) => ({
-      ...prev,
-      ncol: limitCycleMesh.ncol.toString(),
-    }))
-  }, [branch, limitCycleMesh.ncol])
 
   const limitCyclePointMetrics = useMemo(() => {
     if (
@@ -5975,12 +5966,6 @@ export function InspectorDetailsPanel({
       return
     }
 
-    const parsedNcol = parseInteger(limitCycleFromPDDraft.ncol)
-    if (parsedNcol === null || parsedNcol <= 0) {
-      setLimitCycleFromPDError('NCOL must be a positive integer.')
-      return
-    }
-
     const { settings, error } = buildContinuationSettings({
       name: '',
       parameterName: branchParameterName,
@@ -6005,7 +5990,6 @@ export function InspectorDetailsPanel({
       limitCycleName,
       branchName,
       amplitude,
-      ncol: parsedNcol,
       settings,
       forward: limitCycleFromPDDraft.forward,
     })
@@ -13231,25 +13215,6 @@ export function InspectorDetailsPanel({
                             data-testid="limit-cycle-from-pd-amplitude"
                           />
                         </label>
-                        {systemDraft.type === 'map' ? null : (
-                          <label>
-                            NCOL
-                            <input
-                              type="number"
-                              value={limitCycleFromPDDraft.ncol}
-                              onChange={(event) =>
-                                setLimitCycleFromPDDraft((prev) => ({
-                                  ...prev,
-                                  ncol: event.target.value,
-                                }))
-                              }
-                              data-testid="limit-cycle-from-pd-ncol"
-                            />
-                            <span className="field-help">
-                              Collocation points per mesh interval.
-                            </span>
-                          </label>
-                        )}
                         <label>
                           Direction
                           <select

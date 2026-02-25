@@ -687,7 +687,6 @@ describe('appState limit cycle render targets', () => {
         limitCycleName: 'LC_PD_New',
         branchName: 'lc_pd_new_mu',
         amplitude: 0.1,
-        ncol: 4,
         settings: continuationSettings,
         forward: true,
       })
@@ -2168,7 +2167,6 @@ describe('appState branch-point object parameter inheritance', () => {
         limitCycleName: 'LC_PD_Custom',
         branchName: 'lc_pd_custom_mu',
         amplitude: 0.1,
-        ncol: 4,
         settings: continuationSettings,
         forward: true,
       })
@@ -2196,7 +2194,6 @@ describe('appState branch-point object parameter inheritance', () => {
         limitCycleName: 'LC_PD_Defaults',
         branchName: 'lc_pd_defaults_mu',
         amplitude: 0.1,
-        ncol: 4,
         settings: continuationSettings,
         forward: true,
       })

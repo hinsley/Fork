@@ -3758,8 +3758,6 @@ describe('InspectorDetailsPanel', () => {
     await user.type(screen.getByTestId('limit-cycle-from-pd-branch-name'), 'lc_pd_branch')
     await user.clear(screen.getByTestId('limit-cycle-from-pd-amplitude'))
     await user.type(screen.getByTestId('limit-cycle-from-pd-amplitude'), '0.01')
-    await user.clear(screen.getByTestId('limit-cycle-from-pd-ncol'))
-    await user.type(screen.getByTestId('limit-cycle-from-pd-ncol'), '4')
     await user.selectOptions(
       screen.getByTestId('limit-cycle-from-pd-direction'),
       'forward'
@@ -3786,7 +3784,6 @@ describe('InspectorDetailsPanel', () => {
       limitCycleName: 'lc_pd',
       branchName: 'lc_pd_branch',
       amplitude: 0.01,
-      ncol: 4,
       settings: {
         step_size: 0.01,
         max_steps: 50,

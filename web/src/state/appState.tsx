@@ -1109,7 +1109,6 @@ export type LimitCyclePDContinuationRequest = {
   limitCycleName: string
   branchName: string
   amplitude: number
-  ncol: number
   settings: ContinuationSettings
   forward: boolean
 }
@@ -5769,9 +5768,6 @@ export function AppProvider({
         if (!Number.isFinite(request.amplitude) || request.amplitude <= 0) {
           throw new Error('Amplitude must be a positive number.')
         }
-        if (!Number.isFinite(request.ncol) || request.ncol <= 0) {
-          throw new Error('NCOL must be a positive integer.')
-        }
 
         const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
         const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
@@ -5790,6 +5786,10 @@ export function AppProvider({
           sourceNtst = branchType.ntst
           sourceNcol = branchType.ncol
         }
+        const runNtst = Math.max(1, Math.round(sourceNtst))
+        // PD seeds are packed with the source branch discretization. Until
+        // init_lc_from_pd supports source/target NCOL conversion, inherit NCOL.
+        const runNcol = Math.max(1, Math.round(sourceNcol))
 
         const baseParams = getBranchParams(state.system, sourceBranch)
         let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
@@ -5807,14 +5807,14 @@ export function AppProvider({
             lcState: projectLimitCyclePackedStateForSnapshot(
               snapshot,
               point.state,
-              sourceNtst,
-              sourceNcol,
+              runNtst,
+              runNcol,
               'PD point'
             ),
             parameterName,
             paramValue: point.param_value,
-            ntst: Math.round(sourceNtst),
-            ncol: Math.round(request.ncol),
+            ntst: runNtst,
+            ncol: runNcol,
             amplitude: request.amplitude,
             settings: request.settings,
             forward: request.forward,
@@ -5845,8 +5845,8 @@ export function AppProvider({
           branch_type:
             branchData.branch_type ?? {
               type: 'LimitCycle' as const,
-              ntst: Math.round(sourceNtst * 2),
-              ncol: Math.round(request.ncol),
+              ntst: runNtst * 2,
+              ncol: runNcol,
             },
         }, { stateDimension: snapshot.freeVariableNames.length })
 
@@ -5860,8 +5860,8 @@ export function AppProvider({
           throw new Error('Limit cycle continuation returned an invalid period.')
         }
 
-        let objNtst = Math.round(sourceNtst * 2)
-        let objNcol = Math.round(request.ncol)
+        let objNtst = runNtst * 2
+        let objNcol = runNcol
         const normalizedType = normalizedBranchData.branch_type
         if (normalizedType?.type === 'LimitCycle') {
           objNtst = normalizedType.ntst
