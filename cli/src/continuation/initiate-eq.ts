@@ -41,7 +41,8 @@ const DEFAULT_MANIFOLD_CAPS: ManifoldTerminationCaps = {
   max_points: 2000,
   max_rings: 256,
   max_vertices: 20000,
-  max_time: 100
+  max_time: 100,
+  max_iterations: 2000,
 };
 
 function parseOptionalIndex(input: string): number | undefined {
@@ -401,6 +402,7 @@ export async function initiateEquilibriumManifold1DFromPoint(
     sysConfig.type === 'map'
       ? Math.max(1, Math.trunc(sourceBranch.mapIterations ?? point.cycle_points?.length ?? 1))
       : 1;
+  const isMapSystem = sysConfig.type === 'map';
 
   let branchName = `eqm1d_${sourceBranch.name}_idx${pointIdx}`;
   let stability: 'Stable' | 'Unstable' = 'Unstable';
@@ -413,6 +415,7 @@ export async function initiateEquilibriumManifold1DFromPoint(
   let maxPointsInput = DEFAULT_MANIFOLD_CAPS.max_points.toString();
   let maxVerticesInput = DEFAULT_MANIFOLD_CAPS.max_vertices.toString();
   let maxTimeInput = DEFAULT_MANIFOLD_CAPS.max_time.toString();
+  let maxIterationsInput = (DEFAULT_MANIFOLD_CAPS.max_iterations ?? DEFAULT_MANIFOLD_CAPS.max_steps).toString();
   const eligibleRealEigenIndices = (): number[] => {
     const eigenvalues = point.eigenvalues ?? [];
     return eigenvalues
@@ -540,20 +543,22 @@ export async function initiateEquilibriumManifold1DFromPoint(
         targetArclengthInput = value;
       }
     },
-    {
-      id: 'integrationDt',
-      label: 'Integration dt',
-      section: 'Numerics',
-      getDisplay: () => integrationDtInput,
-      edit: async () => {
-        const { value } = await inquirer.prompt({
-          name: 'value',
-          message: 'Integration dt:',
-          default: integrationDtInput
-        });
-        integrationDtInput = value;
-      }
-    },
+    ...(!isMapSystem
+      ? [{
+          id: 'integrationDt',
+          label: 'Integration dt',
+          section: 'Numerics',
+          getDisplay: () => integrationDtInput,
+          edit: async () => {
+            const { value } = await inquirer.prompt({
+              name: 'value',
+              message: 'Integration dt:',
+              default: integrationDtInput
+            });
+            integrationDtInput = value;
+          }
+        } as ConfigEntry]
+      : []),
     {
       id: 'maxSteps',
       label: 'Caps: max steps',
@@ -596,20 +601,35 @@ export async function initiateEquilibriumManifold1DFromPoint(
         maxVerticesInput = value;
       }
     },
-    {
-      id: 'maxTime',
-      label: 'Caps: max time',
-      section: 'Termination Caps',
-      getDisplay: () => maxTimeInput,
-      edit: async () => {
-        const { value } = await inquirer.prompt({
-          name: 'value',
-          message: 'Maximum integration time:',
-          default: maxTimeInput
-        });
-        maxTimeInput = value;
-      }
-    }
+    ...(isMapSystem
+      ? [{
+          id: 'maxIterations',
+          label: 'Caps: max iterations',
+          section: 'Termination Caps',
+          getDisplay: () => maxIterationsInput,
+          edit: async () => {
+            const { value } = await inquirer.prompt({
+              name: 'value',
+              message: 'Maximum map iterations:',
+              default: maxIterationsInput
+            });
+            maxIterationsInput = value;
+          }
+        } as ConfigEntry]
+      : [{
+          id: 'maxTime',
+          label: 'Caps: max time',
+          section: 'Termination Caps',
+          getDisplay: () => maxTimeInput,
+          edit: async () => {
+            const { value } = await inquirer.prompt({
+              name: 'value',
+              message: 'Maximum integration time:',
+              default: maxTimeInput
+            });
+            maxTimeInput = value;
+          }
+        } as ConfigEntry])
   ];
 
   while (true) {
@@ -672,13 +692,26 @@ export async function initiateEquilibriumManifold1DFromPoint(
       eig_index: eigIndex ?? eligible[0],
       eps: Math.max(parseFloatOrDefault(epsInput, 1e-4), Number.EPSILON),
       target_arclength: Math.max(targetArclength, Number.EPSILON),
-      integration_dt: Math.max(parseFloatOrDefault(integrationDtInput, 1e-2), Number.EPSILON),
+      integration_dt: isMapSystem
+        ? 1
+        : Math.max(parseFloatOrDefault(integrationDtInput, 1e-2), Number.EPSILON),
       caps: {
         max_steps: Math.max(parseIntOrDefault(maxStepsInput, DEFAULT_MANIFOLD_CAPS.max_steps), 1),
         max_points: Math.max(parseIntOrDefault(maxPointsInput, DEFAULT_MANIFOLD_CAPS.max_points), 2),
         max_rings: DEFAULT_MANIFOLD_CAPS.max_rings,
         max_vertices: Math.max(parseIntOrDefault(maxVerticesInput, DEFAULT_MANIFOLD_CAPS.max_vertices), 3),
-        max_time: Math.max(parseFloatOrDefault(maxTimeInput, DEFAULT_MANIFOLD_CAPS.max_time), Number.EPSILON)
+        max_time: isMapSystem
+          ? 1
+          : Math.max(parseFloatOrDefault(maxTimeInput, DEFAULT_MANIFOLD_CAPS.max_time), Number.EPSILON),
+        max_iterations: isMapSystem
+          ? Math.max(
+              parseIntOrDefault(
+                maxIterationsInput,
+                DEFAULT_MANIFOLD_CAPS.max_iterations ?? DEFAULT_MANIFOLD_CAPS.max_steps
+              ),
+              1
+            )
+          : undefined,
       }
     };
 

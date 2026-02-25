@@ -348,6 +348,7 @@ type ManifoldCapsDraft = {
   maxRings: string
   maxVertices: string
   maxTime: string
+  maxIterations: string
 }
 
 type EquilibriumManifoldMode = 'curve_1d' | 'surface_2d'
@@ -1209,6 +1210,7 @@ function makeSurfaceProfileDefaults(
         maxRings: '200',
         maxVertices: '200000',
         maxTime: '200',
+        maxIterations: '',
       },
     }
   }
@@ -1238,6 +1240,7 @@ function makeDefaultManifoldCapsDraft(preset: ManifoldCapsPreset = 'curve_1d'): 
       maxRings: '240',
       maxVertices: '50000',
       maxTime: '200',
+      maxIterations: '',
     }
   }
   if (preset === 'cycle_2d') {
@@ -1247,6 +1250,7 @@ function makeDefaultManifoldCapsDraft(preset: ManifoldCapsPreset = 'curve_1d'): 
       maxRings: '48',
       maxVertices: '8000',
       maxTime: '2',
+      maxIterations: '',
     }
   }
   return {
@@ -1255,6 +1259,7 @@ function makeDefaultManifoldCapsDraft(preset: ManifoldCapsPreset = 'curve_1d'): 
     maxRings: '500',
     maxVertices: '200000',
     maxTime: '1000',
+    maxIterations: '2000',
   }
 }
 
@@ -1324,24 +1329,46 @@ function makeLimitCycleManifoldDraft(
 }
 
 function parseManifoldCapsDraft(
-  draft: ManifoldCapsDraft
+  draft: ManifoldCapsDraft,
+  options?: {
+    requireMaxTime?: boolean
+    requireMaxIterations?: boolean
+  }
 ): { caps: ManifoldTerminationCaps | null; error: string | null } {
+  const requireMaxTime = options?.requireMaxTime ?? true
+  const requireMaxIterations = options?.requireMaxIterations ?? false
   const max_steps = parseDraftInteger(draft.maxSteps)
   const max_points = parseDraftInteger(draft.maxPoints)
   const max_rings = parseDraftInteger(draft.maxRings)
   const max_vertices = parseDraftInteger(draft.maxVertices)
   const max_time = parseDraftNumber(draft.maxTime)
+  const max_iterations = parseDraftInteger(draft.maxIterations)
   if (
     max_steps === null ||
     max_points === null ||
     max_rings === null ||
-    max_vertices === null ||
-    max_time === null
+    max_vertices === null
   ) {
     return { caps: null, error: 'Manifold caps must be numeric.' }
   }
-  if (max_steps <= 0 || max_points <= 0 || max_rings <= 0 || max_vertices <= 0 || max_time <= 0) {
+  if (max_steps <= 0 || max_points <= 0 || max_rings <= 0 || max_vertices <= 0) {
     return { caps: null, error: 'Manifold caps must be positive.' }
+  }
+  if (requireMaxTime && (max_time === null || max_time <= 0)) {
+    return { caps: null, error: 'Manifold max time must be positive.' }
+  }
+  if (
+    !requireMaxTime &&
+    max_time !== null &&
+    max_time <= 0
+  ) {
+    return { caps: null, error: 'Manifold max time must be positive when provided.' }
+  }
+  if (requireMaxIterations && (max_iterations === null || max_iterations <= 0)) {
+    return { caps: null, error: 'Manifold max iterations must be a positive integer.' }
+  }
+  if (!requireMaxIterations && max_iterations !== null && max_iterations <= 0) {
+    return { caps: null, error: 'Manifold max iterations must be a positive integer.' }
   }
   return {
     caps: {
@@ -1349,7 +1376,8 @@ function parseManifoldCapsDraft(
       max_points,
       max_rings,
       max_vertices,
-      max_time,
+      max_time: max_time ?? 1,
+      max_iterations: max_iterations ?? undefined,
     },
     error: null,
   }
@@ -4908,7 +4936,11 @@ export function InspectorDetailsPanel({
       return
     }
 
-    const parsedCaps = parseManifoldCapsDraft(equilibriumManifoldDraft.caps)
+    const isMapCurve1D = systemDraft.type === 'map' && equilibriumManifoldDraft.mode === 'curve_1d'
+    const parsedCaps = parseManifoldCapsDraft(equilibriumManifoldDraft.caps, {
+      requireMaxTime: !isMapCurve1D,
+      requireMaxIterations: isMapCurve1D,
+    })
     if (!parsedCaps.caps) {
       setEquilibriumManifoldError(parsedCaps.error ?? 'Invalid manifold caps.')
       return
@@ -4917,7 +4949,8 @@ export function InspectorDetailsPanel({
     if (equilibriumManifoldDraft.mode === 'curve_1d') {
       const eps = parseDraftNumber(equilibriumManifoldDraft.eps)
       const targetArclength = parseDraftNumber(equilibriumManifoldDraft.targetArclength)
-      const integrationDt = parseDraftNumber(equilibriumManifoldDraft.integrationDt)
+      const parsedIntegrationDt = parseDraftNumber(equilibriumManifoldDraft.integrationDt)
+      const integrationDt = systemDraft.type === 'map' ? 1 : parsedIntegrationDt
       if (
         eps === null ||
         targetArclength === null ||
@@ -8881,19 +8914,21 @@ export function InspectorDetailsPanel({
                               data-testid="equilibrium-manifold-eps"
                             />
                           </label>
-                          <label>
-                            Integration dt
-                            <input
-                              value={equilibriumManifoldDraft.integrationDt}
-                              onChange={(event) =>
-                                setEquilibriumManifoldDraft((prev) => ({
-                                  ...prev,
-                                  integrationDt: event.target.value,
-                                }))
-                              }
-                              data-testid="equilibrium-manifold-integration-dt"
-                            />
-                          </label>
+                          {systemDraft.type !== 'map' ? (
+                            <label>
+                              Integration dt
+                              <input
+                                value={equilibriumManifoldDraft.integrationDt}
+                                onChange={(event) =>
+                                  setEquilibriumManifoldDraft((prev) => ({
+                                    ...prev,
+                                    integrationDt: event.target.value,
+                                  }))
+                                }
+                                data-testid="equilibrium-manifold-integration-dt"
+                              />
+                            </label>
+                          ) : null}
                           <label>
                             Target arclength
                             <input
@@ -9202,19 +9237,35 @@ export function InspectorDetailsPanel({
                           data-testid="equilibrium-manifold-caps-max-vertices"
                         />
                       </label>
-                      <label>
-                        Max time
-                        <input
-                          value={equilibriumManifoldDraft.caps.maxTime}
-                          onChange={(event) =>
-                            setEquilibriumManifoldDraft((prev) => ({
-                              ...prev,
-                              caps: { ...prev.caps, maxTime: event.target.value },
-                            }))
-                          }
-                          data-testid="equilibrium-manifold-caps-max-time"
-                        />
-                      </label>
+                      {systemDraft.type === 'map' && equilibriumManifoldDraft.mode === 'curve_1d' ? (
+                        <label>
+                          Max iterations
+                          <input
+                            value={equilibriumManifoldDraft.caps.maxIterations}
+                            onChange={(event) =>
+                              setEquilibriumManifoldDraft((prev) => ({
+                                ...prev,
+                                caps: { ...prev.caps, maxIterations: event.target.value },
+                              }))
+                            }
+                            data-testid="equilibrium-manifold-caps-max-iterations"
+                          />
+                        </label>
+                      ) : (
+                        <label>
+                          Max time
+                          <input
+                            value={equilibriumManifoldDraft.caps.maxTime}
+                            onChange={(event) =>
+                              setEquilibriumManifoldDraft((prev) => ({
+                                ...prev,
+                                caps: { ...prev.caps, maxTime: event.target.value },
+                              }))
+                            }
+                            data-testid="equilibrium-manifold-caps-max-time"
+                          />
+                        </label>
+                      )}
                       {equilibriumManifoldError ? (
                         <div className="field-error">{equilibriumManifoldError}</div>
                       ) : null}

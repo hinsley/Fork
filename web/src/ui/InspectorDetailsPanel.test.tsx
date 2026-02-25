@@ -5175,6 +5175,12 @@ describe('InspectorDetailsPanel', () => {
     )
 
     await user.click(screen.getByTestId('equilibrium-manifold-toggle'))
+    expect(screen.queryByTestId('equilibrium-manifold-integration-dt')).toBeNull()
+    const maxIterationsInput = screen.getByTestId(
+      'equilibrium-manifold-caps-max-iterations'
+    ) as HTMLInputElement
+    await user.clear(maxIterationsInput)
+    await user.type(maxIterationsInput, '345')
     await user.click(screen.getByTestId('equilibrium-manifold-submit'))
 
     await waitFor(() => {
@@ -5184,6 +5190,8 @@ describe('InspectorDetailsPanel', () => {
     expect(request.mapIterations).toBe(2)
     expect(request.settings.stability).toBe('Unstable')
     expect(request.settings.direction).toBe('Both')
+    expect(request.settings.integration_dt).toBe(1)
+    expect(request.settings.caps.max_iterations).toBe(345)
   })
 
   it('filters limit-cycle manifold Floquet options and auto-corrects selection by stability', async () => {

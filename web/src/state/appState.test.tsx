@@ -3473,8 +3473,10 @@ describe('appState equilibrium manifold actions', () => {
     const added = addObject(base, equilibrium)
     const client = new MockForkCoreClient(0)
     let capturedMapIterations: number | undefined
+    let capturedMaxIterations: number | undefined
     client.runEquilibriumManifold1D = async (request) => {
       capturedMapIterations = request.mapIterations
+      capturedMaxIterations = request.settings.caps.max_iterations
       const makeBranch = (direction: 'Plus' | 'Minus', cyclePointIndex: number) => {
         const sign = direction === 'Plus' ? 1 : -1
         const offset = cyclePointIndex * 0.1
@@ -3544,6 +3546,7 @@ describe('appState equilibrium manifold actions', () => {
       const next = getContext().state.system
       expect(next).not.toBeNull()
       expect(capturedMapIterations).toBe(2)
+      expect(capturedMaxIterations).toBe(manifoldCaps.max_steps)
       const expectedNames = [
         'map_branch_p1_plus',
         'map_branch_p1_minus',

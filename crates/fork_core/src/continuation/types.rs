@@ -124,6 +124,8 @@ pub struct ManifoldTerminationCaps {
     pub max_vertices: usize,
     #[serde(default = "default_manifold_max_time")]
     pub max_time: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_iterations: Option<usize>,
 }
 
 impl Default for ManifoldTerminationCaps {
@@ -134,6 +136,7 @@ impl Default for ManifoldTerminationCaps {
             max_rings: default_manifold_max_rings(),
             max_vertices: default_manifold_max_vertices(),
             max_time: default_manifold_max_time(),
+            max_iterations: None,
         }
     }
 }

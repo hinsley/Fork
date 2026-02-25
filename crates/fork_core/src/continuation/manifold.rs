@@ -286,7 +286,6 @@ fn continue_manifold_eq_1d_map(
                 cycle_point_index,
                 settings.stability,
                 settings.target_arclength,
-                settings.integration_dt,
                 settings.caps,
                 settings.bounds.as_ref(),
             )?;
@@ -4639,7 +4638,6 @@ fn build_map_manifold_curve(
     cycle_point_index: usize,
     stability: ManifoldStability,
     target_arclength: f64,
-    integration_dt: f64,
     caps: ManifoldTerminationCaps,
     bounds: Option<&ManifoldBounds>,
 ) -> Result<(Vec<Vec<f64>>, Vec<f64>)> {
@@ -4660,14 +4658,13 @@ fn build_map_manifold_curve(
     }
 
     let target = target_arclength.max(0.0);
-    let dt = integration_dt.abs().max(1e-9);
     let max_points = caps.max_points.max(2);
-    let step_limit_caps = caps
-        .max_steps
-        .max(1)
-        .min(max_points.saturating_sub(1).max(1));
-    let max_time_steps = (caps.max_time.max(dt) / dt).floor().max(1.0) as usize;
-    let step_limit = step_limit_caps.min(max_time_steps).max(1);
+    let step_limit = caps.max_iterations.unwrap_or(caps.max_steps).max(1);
+    let map_spacing = if target > 0.0 {
+        Some((target / (max_points.saturating_sub(1).max(1) as f64)).max(NORM_EPS))
+    } else {
+        None
+    };
 
     let mut current = seed.to_vec();
     let mut cumulative_arc = 0.0;
@@ -4711,24 +4708,51 @@ fn build_map_manifold_curve(
         if !step_arc.is_finite() {
             break;
         }
-
-        if target > 0.0 && cumulative_arc + step_arc >= target && step_arc > NORM_EPS {
-            let alpha = ((target - cumulative_arc) / step_arc).clamp(0.0, 1.0);
-            let terminal = lerp(&current, &next, alpha);
-            points.push(terminal);
-            arclength.push(target);
+        let mut subdivisions = 1usize;
+        if let Some(desired_spacing) = map_spacing {
+            let arc_window = if target > 0.0 {
+                (target - cumulative_arc).max(0.0).min(step_arc)
+            } else {
+                step_arc
+            };
+            if arc_window > NORM_EPS {
+                subdivisions = (arc_window / desired_spacing).ceil().max(1.0) as usize;
+            }
+        }
+        let remaining_slots = max_points.saturating_sub(points.len());
+        if remaining_slots == 0 {
             break;
+        }
+        subdivisions = subdivisions.clamp(1, remaining_slots);
+
+        for sub in 1..=subdivisions {
+            let alpha = (sub as f64) / (subdivisions as f64);
+            let sample = if sub == subdivisions {
+                next.clone()
+            } else {
+                lerp(&current, &next, alpha)
+            };
+            let sample_arc = cumulative_arc + alpha * step_arc;
+
+            if target > 0.0 && sample_arc >= target && step_arc > NORM_EPS {
+                let hit_alpha = ((target - cumulative_arc) / step_arc).clamp(0.0, 1.0);
+                let terminal = lerp(&current, &next, hit_alpha);
+                points.push(terminal);
+                arclength.push(target);
+                return Ok((points, arclength));
+            }
+
+            points.push(sample);
+            arclength.push(sample_arc);
+            if points.len() >= max_points {
+                return Ok((points, arclength));
+            }
         }
 
         cumulative_arc += step_arc;
-        points.push(next.clone());
-        arclength.push(cumulative_arc);
         current = next;
         reference_index = next_reference_index;
 
-        if points.len() >= max_points {
-            break;
-        }
         if target > 0.0 && cumulative_arc >= target {
             break;
         }
@@ -4784,10 +4808,37 @@ fn solve_map_preimage_newton(
         let Some(delta) = solve_dense_linear_system(dim, &jacobian, &residual) else {
             return Ok(None);
         };
-        for i in 0..dim {
-            guess[i] -= delta[i];
+        let mut step_scale = 1.0f64;
+        let mut accepted = false;
+        while step_scale >= 1e-4 {
+            let candidate: Vec<f64> = guess
+                .iter()
+                .zip(delta.iter())
+                .map(|(x, d)| x - step_scale * d)
+                .collect();
+            if candidate.iter().any(|value| !value.is_finite()) {
+                step_scale *= 0.5;
+                continue;
+            }
+            system.apply(0.0, &candidate, &mut map_value);
+            if map_value.iter().any(|value| !value.is_finite()) {
+                step_scale *= 0.5;
+                continue;
+            }
+            let candidate_residual = map_value
+                .iter()
+                .zip(target.iter())
+                .map(|(value, target_value)| (value - target_value) * (value - target_value))
+                .sum::<f64>()
+                .sqrt();
+            if candidate_residual + 1e-14 < residual_norm {
+                guess = candidate;
+                accepted = true;
+                break;
+            }
+            step_scale *= 0.5;
         }
-        if guess.iter().any(|value| !value.is_finite()) {
+        if !accepted {
             return Ok(None);
         }
     }
@@ -5481,6 +5532,71 @@ mod tests {
         )
         .expect("modulus-stable map manifold");
         assert_eq!(stable.len(), 1);
+    }
+
+    #[test]
+    fn manifold_eq_1d_map_uses_max_iterations_cap() {
+        let mut system = build_system(&["2*x"], &["x"], &[]);
+        let branches = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Plus,
+                eps: 1e-4,
+                target_arclength: 10.0,
+                integration_dt: 1e-6,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 128,
+                    max_points: 128,
+                    max_time: 1e-12,
+                    max_iterations: Some(2),
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect("map manifold with iteration cap");
+        assert_eq!(branches.len(), 1);
+        let branch = &branches[0];
+        assert_eq!(
+            branch.points.len(),
+            3,
+            "expected seed + exactly two map iterates when max_iterations=2"
+        );
+    }
+
+    #[test]
+    fn manifold_eq_1d_map_densifies_between_iterates() {
+        let mut system = build_system(&["10*x"], &["x"], &[]);
+        let branches = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Plus,
+                eps: 1e-3,
+                target_arclength: 1.0,
+                integration_dt: 1.0,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 8,
+                    max_points: 200,
+                    max_time: 1.0,
+                    max_iterations: Some(8),
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect("map manifold with densified samples");
+        let branch = &branches[0];
+        assert!(
+            branch.points.len() > 20,
+            "expected dense map sampling between iterates, got {} points",
+            branch.points.len()
+        );
     }
 
     #[test]
@@ -6646,6 +6762,7 @@ mod tests {
                     max_rings: 2,
                     max_vertices: 6_000,
                     max_time: 30.0,
+                    max_iterations: None,
                 },
                 ..ManifoldCycle2DSettings::default()
             },
@@ -6701,6 +6818,7 @@ mod tests {
                     max_rings: 2,
                     max_vertices: 6_000,
                     max_time: 30.0,
+                    max_iterations: None,
                 },
                 ..ManifoldCycle2DSettings::default()
             },
@@ -6922,6 +7040,7 @@ mod tests {
                     max_rings: 4,
                     max_vertices: 2_000,
                     max_time: 1.0,
+                    max_iterations: None,
                 },
                 ..Manifold2DSettings::default()
             },

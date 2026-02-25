@@ -134,6 +134,7 @@ export interface ManifoldTerminationCaps {
   max_rings: number
   max_vertices: number
   max_time: number
+  max_iterations?: number
 }
 
 export interface ManifoldCurveGeometry {

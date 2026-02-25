@@ -232,7 +232,15 @@ function validateObjectName(name: string, label: string): string | null {
   return null
 }
 
-function validateManifoldCaps(caps: ManifoldTerminationCaps): string | null {
+function validateManifoldCaps(
+  caps: ManifoldTerminationCaps,
+  options?: {
+    requireMaxTime?: boolean
+    requireMaxIterations?: boolean
+  }
+): string | null {
+  const requireMaxTime = options?.requireMaxTime ?? true
+  const requireMaxIterations = options?.requireMaxIterations ?? false
   if (!Number.isFinite(caps.max_steps) || caps.max_steps <= 0 || !Number.isInteger(caps.max_steps)) {
     return 'Manifold max steps must be a positive integer.'
   }
@@ -249,8 +257,32 @@ function validateManifoldCaps(caps: ManifoldTerminationCaps): string | null {
   ) {
     return 'Manifold max vertices must be a positive integer.'
   }
-  if (!Number.isFinite(caps.max_time) || caps.max_time <= 0) {
+  if (requireMaxTime && (!Number.isFinite(caps.max_time) || caps.max_time <= 0)) {
     return 'Manifold max time must be a positive number.'
+  }
+  if (
+    !requireMaxTime &&
+    Number.isFinite(caps.max_time) &&
+    (caps.max_time as number) <= 0
+  ) {
+    return 'Manifold max time must be positive when provided.'
+  }
+  if (
+    requireMaxIterations &&
+    (!Number.isFinite(caps.max_iterations) ||
+      (caps.max_iterations as number) <= 0 ||
+      !Number.isInteger(caps.max_iterations))
+  ) {
+    return 'Manifold max iterations must be a positive integer for map systems.'
+  }
+  if (
+    !requireMaxIterations &&
+    caps.max_iterations !== undefined &&
+    (!Number.isFinite(caps.max_iterations) ||
+      (caps.max_iterations as number) <= 0 ||
+      !Number.isInteger(caps.max_iterations))
+  ) {
+    return 'Manifold max iterations must be a positive integer.'
   }
   return null
 }
@@ -2055,7 +2087,7 @@ export function AppProvider({
             ...(object.frozenVariables?.frozenValuesByVarName ?? {}),
           }
           const applyParamValue = (ref: ParameterRef | null, value: number | undefined) => {
-            if (!ref || !Number.isFinite(value)) return
+            if (!ref || value === undefined || !Number.isFinite(value)) return
             if (ref.kind === 'native_param') {
               const paramIndex = system.config.paramNames.indexOf(ref.name)
               if (paramIndex < 0 || paramIndex >= nextParams.length) return
@@ -2759,7 +2791,7 @@ export function AppProvider({
               seedNcol = Math.max(1, Math.trunc(branchType.ncol as number))
             }
             const applyParamValue = (ref: ParameterRef | null, value: number | undefined) => {
-              if (!ref || !Number.isFinite(value)) return
+              if (!ref || value === undefined || !Number.isFinite(value)) return
               if (ref.kind !== 'native_param') return
               const paramIndex = system.paramNames.indexOf(ref.name)
               if (paramIndex < 0 || paramIndex >= baseParams.length) return
@@ -3281,7 +3313,19 @@ export function AppProvider({
         }
 
         const settings = request.settings
-        const capsError = validateManifoldCaps(settings.caps)
+        const normalizedCaps: ManifoldTerminationCaps =
+          system.type === 'map'
+            ? {
+                ...settings.caps,
+                max_iterations:
+                  settings.caps.max_iterations ??
+                  Math.max(1, Math.trunc(settings.caps.max_steps)),
+              }
+            : settings.caps
+        const capsError = validateManifoldCaps(normalizedCaps, {
+          requireMaxTime: system.type !== 'map',
+          requireMaxIterations: system.type === 'map',
+        })
         if (capsError) {
           throw new Error(capsError)
         }
@@ -3291,7 +3335,10 @@ export function AppProvider({
         if (!Number.isFinite(settings.target_arclength) || settings.target_arclength <= 0) {
           throw new Error('Target arclength must be a positive number.')
         }
-        if (!Number.isFinite(settings.integration_dt) || settings.integration_dt === 0) {
+        if (
+          system.type !== 'map' &&
+          (!Number.isFinite(settings.integration_dt) || settings.integration_dt === 0)
+        ) {
           throw new Error('Integration dt must be non-zero.')
         }
         if (
@@ -3361,7 +3408,7 @@ export function AppProvider({
             mapIterations,
             settings: {
               ...settings,
-              caps: { ...settings.caps },
+              caps: { ...normalizedCaps },
             },
           },
           {
@@ -3430,7 +3477,7 @@ export function AppProvider({
             branchType: 'eq_manifold_1d',
             data: normalized,
             settings: buildManifoldBranchSettings({
-              caps: settings.caps,
+              caps: normalizedCaps,
               integrationDt: settings.integration_dt,
             }),
             timestamp: new Date().toISOString(),
@@ -3818,7 +3865,8 @@ export function AppProvider({
           seedNcol,
           'Limit cycle'
         )
-        const parameterIndex = system.paramNames.indexOf(limitCycle.parameterName)
+        const parameterName = limitCycle.parameterName ?? ''
+        const parameterIndex = system.paramNames.indexOf(parameterName)
         const branchData = await client.runLimitCycleManifold2D(
           {
             system: runConfig,
