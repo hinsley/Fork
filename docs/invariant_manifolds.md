@@ -20,6 +20,18 @@ Not implemented yet:
 - 2D equilibrium manifolds for discrete maps
 - 2D cycle manifolds for discrete maps
 
+## Map 1D Algorithm References
+
+Map equilibrium 1D solver design follows the Krauskopf-Osinga fundamental-domain growth approach and related modern implementations:
+
+- Krauskopf and Osinga (1998), JCP 146(1), DOI: [10.1006/jcph.1998.6059](https://doi.org/10.1006/jcph.1998.6059)
+- 1997 preprint: [hdl.handle.net/11299/3145](https://hdl.handle.net/11299/3145)
+- GrowFundCurv1D reference implementation: [github.com/dcjulio/Computing-1D-manifolds-in-maps](https://github.com/dcjulio/Computing-1D-manifolds-in-maps)
+
+Detailed map-solver usage and troubleshooting guide:
+
+- `docs/map_equilibrium_manifold_1d_solver.md`
+
 ## Where to Run
 
 Web UI:
@@ -96,6 +108,7 @@ The 1D workflow computes a trajectory branch seeded from the equilibrium along a
     - stable manifold uses inverse-map stepping by solving preimages with Newton:
       - solve `F(y) = x_k` for `y`
       - use one-step map Jacobian in the Newton solve
+    - mapped fundamental-domain samples are adaptively refined (spacing + turn/curvature checks) before appending branch points
 - Directed modes:
   - `Both` computes `Plus` and `Minus`
   - `Plus` computes one branch
@@ -431,11 +444,12 @@ Then adjust only as needed:
 
 - Keep `Direction = both` initially.
 - Start with modest `Target arclength` and increase in stages.
-- Lower `Integration dt` if polyline quality is too coarse.
+- Flow only: lower `Integration dt` if polyline quality is too coarse.
+- Map only: increase `Max points` and `Max iterations`; `Integration dt` is a shared-schema placeholder and is not used for map growth.
 
 ## Known Limitations
 
-- Map manifold workflows are not available yet.
+- 2D map manifolds are not available yet.
 - 2D ring-growth robustness is still being improved for difficult geometries.
 - `cycle_manifold_2d` (limit-cycle 2D manifolds) is experimental and may require substantial tuning.
 - Branch extension for manifold branches is not exposed as a continuation extension workflow.
