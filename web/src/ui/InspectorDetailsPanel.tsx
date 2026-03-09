@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Data, Layout } from 'plotly.js'
 import type {
+  AnalysisViewport,
   BifurcationAxis,
   BifurcationDiagram,
   ClvRenderStyle,
@@ -97,6 +98,7 @@ import {
   cycleManifoldFloquetEligibility,
   normalizeFloquetMultipliersForRendering,
 } from '../system/floquetModes'
+import { AnalysisViewportInspector } from './AnalysisViewportInspector'
 
 type InspectorDetailsPanelProps = {
   system: System
@@ -126,6 +128,10 @@ type InspectorDetailsPanelProps = {
     opts?: { signal?: AbortSignal; silent?: boolean }
   ) => Promise<unknown>
   onUpdateScene: (id: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
+  onUpdateAnalysisViewport?: (
+    id: string,
+    update: Partial<Omit<AnalysisViewport, 'id' | 'name'>>
+  ) => void
   onUpdateBifurcationDiagram: (
     id: string,
     update: Partial<Omit<BifurcationDiagram, 'id' | 'name'>>
@@ -1852,6 +1858,7 @@ export function InspectorDetailsPanel({
   onUpdateIsoclineObject = () => {},
   onComputeIsocline = async () => null,
   onUpdateScene,
+  onUpdateAnalysisViewport,
   onUpdateBifurcationDiagram,
   onSetLimitCycleRenderTarget,
   onUpdateSystem,
@@ -1943,6 +1950,9 @@ export function InspectorDetailsPanel({
   }, [onRename, selectionNameDraft, selectionNode])
   const scene = selectedNodeId
     ? system.scenes.find((entry) => entry.id === selectedNodeId)
+    : undefined
+  const analysis = selectedNodeId
+    ? system.analysisViewports.find((entry) => entry.id === selectedNodeId)
     : undefined
   const diagram = selectedNodeId
     ? system.bifurcationDiagrams.find((entry) => entry.id === selectedNodeId)
@@ -10436,6 +10446,14 @@ export function InspectorDetailsPanel({
                 )}
               </div>
             </div>
+          ) : null}
+
+          {analysis ? (
+            <AnalysisViewportInspector
+              system={system}
+              viewport={analysis}
+              onUpdateAnalysisViewport={onUpdateAnalysisViewport ?? (() => undefined)}
+            />
           ) : null}
 
           {diagram ? (

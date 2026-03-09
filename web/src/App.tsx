@@ -157,6 +157,13 @@ function App() {
     await actions.addBifurcationDiagram(name, targetId)
   }
 
+  const createAnalysis = async (targetId?: string | null) => {
+    if (!system) return
+    const names = system.analysisViewports.map((viewport) => viewport.name)
+    const name = nextObjectName('Return_Map', names)
+    await actions.addAnalysisViewport(name, targetId)
+  }
+
   const updatePreview = (side: 'left' | 'right', nextWidth: number, workspaceWidth: number) => {
     const rawOffset =
       side === 'left' ? nextWidth : workspaceWidth - nextWidth - SPLITTER_WIDTH
@@ -285,6 +292,7 @@ function App() {
         onUpdateObjectParams={actions.updateObjectParams}
         onUpdateObjectFrozenVariables={actions.updateObjectFrozenVariables}
         onUpdateScene={actions.updateScene}
+        onUpdateAnalysisViewport={actions.updateAnalysisViewport}
         onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
         onSetLimitCycleRenderTarget={actions.setLimitCycleRenderTarget}
         onUpdateSystem={actions.updateSystem}
@@ -401,11 +409,14 @@ function App() {
                 onResizeViewport={actions.updateViewportHeight}
                 onToggleViewport={actions.toggleExpanded}
                 onCreateScene={createScene}
+                onCreateAnalysis={createAnalysis}
                 onCreateBifurcation={createBifurcation}
                 onRenameViewport={actions.renameNode}
                 onDuplicateViewport={actions.duplicateNode}
                 onDeleteViewport={actions.deleteNode}
                 onSampleMap1DFunction={actions.sampleMap1DFunction}
+                onComputeEventSeriesFromOrbit={actions.computeEventSeriesFromOrbit}
+                onComputeEventSeriesFromSamples={actions.computeEventSeriesFromSamples}
                 isoclineGeometryCache={state.isoclineGeometryCache}
               />
             </Panel>
@@ -449,6 +460,7 @@ function App() {
                 onUpdateIsoclineObject={actions.updateIsoclineObject}
                 onComputeIsocline={actions.computeIsocline}
                 onUpdateScene={actions.updateScene}
+                onUpdateAnalysisViewport={actions.updateAnalysisViewport}
                 onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
                 onSetLimitCycleRenderTarget={actions.setLimitCycleRenderTarget}
                 onUpdateSystem={actions.updateSystem}

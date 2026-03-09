@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { IndexedDbSystemStore } from './indexedDb'
-import { addObject, createSystem, updateLayout, updateObject, updateSystem } from './model'
+import {
+  addAnalysisViewport,
+  addObject,
+  createSystem,
+  updateAnalysisViewport,
+  updateLayout,
+  updateObject,
+  updateSystem,
+} from './model'
 import type { OrbitObject } from './types'
 
 async function createLegacyDb(name: string, version = 1): Promise<void> {
@@ -102,19 +110,27 @@ describe('IndexedDbSystemStore', () => {
     const store = makeStore()
     try {
       const base = createSystem({ name: 'IndexedDB_System' })
-      await store.save(base)
+      const analysisAdded = addAnalysisViewport(base, 'Return_Map')
+      const baseWithAnalysis = updateAnalysisViewport(analysisAdded.system, analysisAdded.nodeId, {
+        sourceNodeIds: [analysisAdded.nodeId],
+      })
+      await store.save(baseWithAnalysis)
 
-      const updated = updateSystem(base, { ...base.config, name: 'IndexedDB_System_Updated' })
+      const updated = updateSystem(baseWithAnalysis, {
+        ...baseWithAnalysis.config,
+        name: 'IndexedDB_System_Updated',
+      })
       await store.save(updated)
 
-      const uiOnly = updateLayout(base, {
-        leftWidth: base.ui.layout.leftWidth + 20,
+      const uiOnly = updateLayout(baseWithAnalysis, {
+        leftWidth: baseWithAnalysis.ui.layout.leftWidth + 20,
       })
       await store.saveUi(uiOnly)
 
-      const loaded = await store.load(base.id)
+      const loaded = await store.load(baseWithAnalysis.id)
       expect(loaded.name).toBe('IndexedDB_System_Updated')
       expect(loaded.ui.layout.leftWidth).toBe(uiOnly.ui.layout.leftWidth)
+      expect(loaded.analysisViewports).toEqual(baseWithAnalysis.analysisViewports)
     } finally {
       await store.clear()
     }

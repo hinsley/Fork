@@ -497,7 +497,7 @@ export interface CovariantLyapunovData {
   vectors: number[][][]
 }
 
-export type NodeKind = 'object' | 'branch' | 'scene' | 'diagram' | 'camera'
+export type NodeKind = 'object' | 'branch' | 'scene' | 'diagram' | 'analysis' | 'camera'
 
 export interface ClvRenderStyle {
   enabled: boolean
@@ -538,7 +538,13 @@ export interface TreeNode {
   id: string
   name: string
   kind: NodeKind
-  objectType?: AnalysisObject['type'] | 'branch' | 'scene' | 'bifurcation' | 'camera'
+  objectType?:
+    | AnalysisObject['type']
+    | 'branch'
+    | 'scene'
+    | 'bifurcation'
+    | 'analysis'
+    | 'camera'
   parentId: string | null
   children: string[]
   visibility: boolean
@@ -570,6 +576,56 @@ export interface Scene {
   selectedNodeIds: string[]
   display: 'all' | 'selection'
 }
+
+export type EventSeriesMode = 'every_iterate' | 'cross_up' | 'cross_down' | 'cross_either'
+
+export interface AnalysisEventSpec {
+  mode: EventSeriesMode
+  expression: string
+  level: number
+}
+
+export type AnalysisAxisSpec =
+  | {
+      kind: 'observable'
+      expression: string
+      label?: string | null
+      hitOffset: -1 | 0 | 1
+    }
+  | {
+      kind: 'hit_index'
+      label?: string | null
+    }
+  | {
+      kind: 'delta_time'
+      label?: string | null
+    }
+
+export interface AnalysisViewportAdvanced {
+  skipHits: number
+  hitStride: number
+  maxHits: number
+  connectPoints: boolean
+}
+
+export interface ReturnMapViewport {
+  id: string
+  name: string
+  kind: 'return_map'
+  axisRanges: AxisRanges
+  viewRevision: number
+  sourceNodeIds: string[]
+  display: 'all' | 'selection'
+  event: AnalysisEventSpec
+  axes: {
+    x: AnalysisAxisSpec
+    y: AnalysisAxisSpec
+    z?: AnalysisAxisSpec | null
+  }
+  advanced: AnalysisViewportAdvanced
+}
+
+export type AnalysisViewport = ReturnMapViewport
 
 export interface BifurcationDiagram {
   id: string
@@ -637,6 +693,7 @@ export interface System {
   branches: Record<string, ContinuationObject>
   scenes: Scene[]
   bifurcationDiagrams: BifurcationDiagram[]
+  analysisViewports: AnalysisViewport[]
   ui: SystemUiState
   updatedAt: string
 }
@@ -658,6 +715,7 @@ export interface SystemUiSnapshot {
   rootIds: string[]
   scenes: Scene[]
   bifurcationDiagrams: BifurcationDiagram[]
+  analysisViewports: AnalysisViewport[]
   ui: SystemUiState
 }
 

@@ -1,5 +1,6 @@
 import { InspectorDetailsPanel } from './InspectorDetailsPanel'
 import type {
+  AnalysisViewport,
   BifurcationDiagram,
   LimitCycleRenderTarget,
   Scene,
@@ -59,6 +60,10 @@ type SystemSettingsDialogProps = {
     frozenValuesByVarName: Record<string, number>
   ) => void
   onUpdateScene: (id: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
+  onUpdateAnalysisViewport?: (
+    id: string,
+    update: Partial<Omit<AnalysisViewport, 'id' | 'name'>>
+  ) => void
   onUpdateBifurcationDiagram: (
     id: string,
     update: Partial<Omit<BifurcationDiagram, 'id' | 'name'>>
@@ -134,6 +139,7 @@ export function SystemSettingsDialog({
   onUpdateObjectParams,
   onUpdateObjectFrozenVariables,
   onUpdateScene,
+  onUpdateAnalysisViewport,
   onUpdateBifurcationDiagram,
   onSetLimitCycleRenderTarget,
   onUpdateSystem,
@@ -201,6 +207,7 @@ export function SystemSettingsDialog({
             onUpdateObjectParams={onUpdateObjectParams}
             onUpdateObjectFrozenVariables={onUpdateObjectFrozenVariables}
             onUpdateScene={onUpdateScene}
+            onUpdateAnalysisViewport={onUpdateAnalysisViewport}
             onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
             onSetLimitCycleRenderTarget={onSetLimitCycleRenderTarget}
             onUpdateSystem={onUpdateSystem}

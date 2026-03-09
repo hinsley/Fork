@@ -84,6 +84,7 @@ export class MemorySystemStore implements SystemStore {
     next.rootIds = [...system.rootIds]
     next.scenes = structuredClone(system.scenes)
     next.bifurcationDiagrams = structuredClone(system.bifurcationDiagrams)
+    next.analysisViewports = structuredClone(system.analysisViewports)
     next.ui = structuredClone(system.ui)
     next.updatedAt = system.updatedAt
     this.systems.set(system.id, next)

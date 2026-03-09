@@ -1,5 +1,6 @@
 import { InspectorDetailsPanel } from './InspectorDetailsPanel'
 import type {
+  AnalysisViewport,
   BifurcationDiagram,
   IsoclineObject,
   LimitCycleRenderTarget,
@@ -67,6 +68,10 @@ type InspectorPanelProps = {
     opts?: { signal?: AbortSignal; silent?: boolean }
   ) => Promise<unknown>
   onUpdateScene: (id: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
+  onUpdateAnalysisViewport: (
+    id: string,
+    update: Partial<Omit<AnalysisViewport, 'id' | 'name'>>
+  ) => void
   onUpdateBifurcationDiagram: (
     id: string,
     update: Partial<Omit<BifurcationDiagram, 'id' | 'name'>>
@@ -142,6 +147,7 @@ export function InspectorPanel({
   onUpdateIsoclineObject,
   onComputeIsocline,
   onUpdateScene,
+  onUpdateAnalysisViewport,
   onUpdateBifurcationDiagram,
   onSetLimitCycleRenderTarget,
   onUpdateSystem,
@@ -192,6 +198,7 @@ export function InspectorPanel({
           onUpdateIsoclineObject={onUpdateIsoclineObject}
           onComputeIsocline={onComputeIsocline}
           onUpdateScene={onUpdateScene}
+          onUpdateAnalysisViewport={onUpdateAnalysisViewport}
           onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
           onSetLimitCycleRenderTarget={onSetLimitCycleRenderTarget}
           onUpdateSystem={onUpdateSystem}

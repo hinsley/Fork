@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  addAnalysisViewport,
   addBranch,
   addObject,
   addBifurcationDiagram,
@@ -8,10 +9,12 @@ import {
   duplicateNode,
   moveNode,
   normalizeSystem,
+  removeNode,
   reorderNode,
   renameNode,
   selectNode,
   toggleNodeVisibility,
+  updateAnalysisViewport,
   updateBifurcationDiagram,
   updateNodeRender,
   updateScene,
@@ -136,14 +139,17 @@ describe('system model', () => {
     const system = createSystem({ name: 'Legacy' })
     const { system: withScene } = addScene(system, 'Scene')
     const { system: withDiagram } = addBifurcationDiagram(withScene, 'Diagram')
-    const legacy = structuredClone(withDiagram) as typeof withDiagram
+    const { system: withAnalysis } = addAnalysisViewport(withDiagram, 'Return_Map')
+    const legacy = structuredClone(withAnalysis) as typeof withAnalysis
     delete (legacy.scenes[0] as { viewRevision?: number }).viewRevision
     delete (legacy.bifurcationDiagrams[0] as { viewRevision?: number }).viewRevision
+    delete (legacy.analysisViewports[0] as { viewRevision?: number }).viewRevision
 
     const normalized = normalizeSystem(legacy)
 
     expect(normalized.scenes[0].viewRevision).toBe(0)
     expect(normalized.bifurcationDiagrams[0].viewRevision).toBe(0)
+    expect(normalized.analysisViewports[0].viewRevision).toBe(0)
   })
 
   it('keeps viewRevision stable across non-view updates', () => {
@@ -312,6 +318,31 @@ describe('system model', () => {
     expect(renamed.objects).toBe(withScene.system.objects)
     expect(renamed.branches).toBe(withScene.system.branches)
     expect(renamed.rootIds).toBe(withScene.system.rootIds)
+  })
+
+  it('renames analysis viewport nodes without cloning object or branch payload maps', () => {
+    const base = createSystem({ name: 'Analysis_Rename_Ref' })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit A',
+      systemName: base.config.name,
+      data: [[0, 0, 1]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+    }
+    const withObject = addObject(base, orbit)
+    const withAnalysis = addAnalysisViewport(withObject.system, 'Return Map A')
+
+    const renamed = renameNode(withAnalysis.system, withAnalysis.nodeId, 'Return Map B')
+
+    expect(renamed.nodes[withAnalysis.nodeId].name).toBe('Return Map B')
+    expect(
+      renamed.analysisViewports.find((viewport) => viewport.id === withAnalysis.nodeId)?.name
+    ).toBe('Return Map B')
+    expect(renamed.objects).toBe(withAnalysis.system.objects)
+    expect(renamed.branches).toBe(withAnalysis.system.branches)
+    expect(renamed.rootIds).toBe(withAnalysis.system.rootIds)
   })
 
   it('renames objects with dependency rewrites using copy-on-write updates', () => {
@@ -674,4 +705,100 @@ describe('system model', () => {
       viewRevision: 4,
     })
   })
+  it('duplicates analysis viewports as siblings with copied UI state', () => {
+    let system = createSystem({ name: 'Duplicate_Analysis_Viewport' })
+    const analysisAdded = addAnalysisViewport(system, 'Return_Map_A')
+    system = updateAnalysisViewport(analysisAdded.system, analysisAdded.nodeId, {
+      sourceNodeIds: ['node-1'],
+      display: 'selection',
+      axisRanges: { x: [-1, 1], y: [0, 2] },
+      viewRevision: 6,
+      event: {
+        mode: 'cross_down',
+        expression: 'mu',
+        level: 0.25,
+      },
+      axes: {
+        x: { kind: 'observable', expression: 'mu', hitOffset: 0, label: 'mu@n' },
+        y: { kind: 'observable', expression: 'x', hitOffset: 1, label: 'x@n+1' },
+        z: { kind: 'hit_index', label: 'n' },
+      },
+      advanced: {
+        skipHits: 2,
+        hitStride: 3,
+        maxHits: 120,
+        connectPoints: true,
+      },
+    })
+    system.ui.viewportHeights[analysisAdded.nodeId] = 260
+
+    const analysisDuplicate = duplicateNode(system, analysisAdded.nodeId)
+    expect(analysisDuplicate).toBeTruthy()
+    if (!analysisDuplicate) {
+      throw new Error('Expected duplicated analysis viewport.')
+    }
+    const duplicatedAnalysisId = analysisDuplicate.nodeId
+    const analysisRootIndex = analysisDuplicate.system.rootIds.indexOf(analysisAdded.nodeId)
+    expect(analysisDuplicate.system.rootIds[analysisRootIndex + 1]).toBe(duplicatedAnalysisId)
+    expect(analysisDuplicate.system.nodes[duplicatedAnalysisId].name).toBe('Return_Map_A_copy')
+    expect(analysisDuplicate.system.ui.viewportHeights[duplicatedAnalysisId]).toBe(260)
+    expect(
+      analysisDuplicate.system.analysisViewports.find((viewport) => viewport.id === duplicatedAnalysisId)
+    ).toMatchObject({
+      name: 'Return_Map_A_copy',
+      sourceNodeIds: [],
+      display: 'selection',
+      axisRanges: { x: [-1, 1], y: [0, 2] },
+      viewRevision: 6,
+      event: {
+        mode: 'cross_down',
+        expression: 'mu',
+        level: 0.25,
+      },
+      axes: {
+        x: { kind: 'observable', expression: 'mu', hitOffset: 0, label: 'mu@n' },
+        y: { kind: 'observable', expression: 'x', hitOffset: 1, label: 'x@n+1' },
+        z: { kind: 'hit_index', label: 'n' },
+      },
+      advanced: {
+        skipHits: 2,
+        hitStride: 3,
+        maxHits: 120,
+        connectPoints: true,
+      },
+    })
+  })
+
+  it('removes deleted source nodes from analysis viewport source selections', () => {
+    const base = createSystem({ name: 'Analysis_Remove_Cleanup' })
+    const orbitA: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_A',
+      systemName: base.config.name,
+      data: [[0, 0, 1]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+    }
+    const orbitB: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_B',
+      systemName: base.config.name,
+      data: [[0, 1, 0]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+    }
+    const withOrbitA = addObject(base, orbitA)
+    const withOrbitB = addObject(withOrbitA.system, orbitB)
+    const analysisAdded = addAnalysisViewport(withOrbitB.system, 'Return_Map')
+    const configured = updateAnalysisViewport(analysisAdded.system, analysisAdded.nodeId, {
+      sourceNodeIds: [withOrbitA.nodeId, withOrbitB.nodeId],
+    })
+
+    const cleaned = removeNode(configured, withOrbitA.nodeId)
+
+    expect(cleaned.analysisViewports[0]?.sourceNodeIds).toEqual([withOrbitB.nodeId])
+  })
+
 })

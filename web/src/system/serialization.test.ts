@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  addAnalysisViewport,
   addObject,
   addScene,
   createSystem,
+  updateAnalysisViewport,
   updateLayout,
   updateNodeRender,
   updateViewportHeights,
@@ -33,7 +35,21 @@ describe('system serialization', () => {
       dt: 0.1,
     }
     const { system: withObject, nodeId } = addObject(withScene, orbit)
-    const withLayout = updateLayout(withObject, { leftWidth: 360 })
+    const analysisAdded = addAnalysisViewport(withObject, 'Return Map 1')
+    const withAnalysis = updateAnalysisViewport(analysisAdded.system, analysisAdded.nodeId, {
+      sourceNodeIds: [nodeId],
+      event: {
+        mode: 'cross_up',
+        expression: 'mu',
+        level: 0,
+      },
+      axes: {
+        x: { kind: 'observable', expression: 'mu', hitOffset: 0, label: 'mu@n' },
+        y: { kind: 'observable', expression: 'x', hitOffset: 1, label: 'x@n+1' },
+        z: null,
+      },
+    })
+    const withLayout = updateLayout(withAnalysis, { leftWidth: 360 })
     const viewportId = sceneId
     const withHeights = updateViewportHeights(withLayout, { [viewportId]: 320 })
     const withRender = updateNodeRender(withHeights, nodeId, {
@@ -49,12 +65,17 @@ describe('system serialization', () => {
     expect(restored.nodes[nodeId].render.color).toBe('#ff0000')
     expect(restored.nodes[nodeId].render.lineWidth).toBe(5)
     expect(restored.objects[nodeId].name).toBe('Orbit A')
+    expect(restored.analysisViewports).toEqual(withRender.analysisViewports)
   })
 
   it('merges UI and data bundles back into a system', () => {
     const base = createSystem({ name: 'Split' })
     const { system: withScene, nodeId: sceneId } = addScene(base, 'Scene 1')
-    const withLayout = updateLayout(withScene, { rightWidth: 400 })
+    const analysisAdded = addAnalysisViewport(withScene, 'Return Map 1')
+    const withAnalysis = updateAnalysisViewport(analysisAdded.system, analysisAdded.nodeId, {
+      sourceNodeIds: [sceneId],
+    })
+    const withLayout = updateLayout(withAnalysis, { rightWidth: 400 })
     const viewportId = sceneId
     const withHeights = updateViewportHeights(withLayout, { [viewportId]: 280 })
 
@@ -62,9 +83,11 @@ describe('system serialization', () => {
     const uiBundle = serializeSystemUi(withHeights)
     const merged = mergeSystem(dataBundle.system, uiBundle.ui)
 
+    expect('analysisViewports' in (dataBundle.system as unknown as Record<string, unknown>)).toBe(false)
     expect(merged.ui.layout.rightWidth).toBe(400)
     expect(merged.ui.viewportHeights[viewportId]).toBe(280)
     expect(merged.config.name).toBe('Split')
+    expect(merged.analysisViewports).toEqual(withHeights.analysisViewports)
   })
 
   it('extracts UI from legacy bundles', () => {
@@ -74,6 +97,7 @@ describe('system serialization', () => {
 
     expect(data.id).toBe(system.id)
     expect(ui?.rootIds.length).toBe(0)
+    expect(ui?.analysisViewports).toEqual([])
     expect(ui?.ui.layout.leftWidth).toBe(system.ui.layout.leftWidth)
   })
 

@@ -43,7 +43,7 @@ function unsupportedSchemaError(version: number): Error {
 
 export function splitSystem(system: System): { data: SystemData; ui: SystemUiSnapshot } {
   const clone = structuredClone(system)
-  const { nodes, rootIds, scenes, bifurcationDiagrams, ui, ...data } = clone
+  const { nodes, rootIds, scenes, bifurcationDiagrams, analysisViewports, ui, ...data } = clone
   return {
     data: data as SystemData,
     ui: {
@@ -53,6 +53,7 @@ export function splitSystem(system: System): { data: SystemData; ui: SystemUiSna
       rootIds,
       scenes,
       bifurcationDiagrams,
+      analysisViewports,
       ui,
     },
   }
@@ -66,6 +67,7 @@ export function mergeSystem(data: SystemData, ui?: SystemUiSnapshot): System {
     rootIds: structuredClone(ui?.rootIds ?? []),
     scenes: structuredClone(ui?.scenes ?? []),
     bifurcationDiagrams: structuredClone(ui?.bifurcationDiagrams ?? []),
+    analysisViewports: structuredClone(ui?.analysisViewports ?? []),
     ui: structuredClone(ui?.ui ?? {}),
     updatedAt,
   } as System
@@ -88,6 +90,7 @@ export function serializeSystemUi(system: System): SystemUiBundle {
     rootIds: structuredClone(system.rootIds),
     scenes: structuredClone(system.scenes),
     bifurcationDiagrams: structuredClone(system.bifurcationDiagrams),
+    analysisViewports: structuredClone(system.analysisViewports),
     ui: structuredClone(system.ui),
   }
   return {

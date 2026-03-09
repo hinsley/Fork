@@ -3,12 +3,14 @@ import { strFromU8, unzipSync } from 'fflate'
 import { downloadSystem, readSystemFile } from './importExport'
 import { buildSystemArchiveBytes } from './archive'
 import {
+  addAnalysisViewport,
   addBifurcationDiagram,
   addBranch,
   addObject,
   addScene,
   createSystem,
   selectNode,
+  updateAnalysisViewport,
   updateLayout,
   updateNodeRender,
   updateViewportHeights,
@@ -256,6 +258,20 @@ function createRichSystem(): {
 
   system = addScene(system, 'Scene_A').system
   system = addBifurcationDiagram(system, 'Diagram_A').system
+  const analysisAdded = addAnalysisViewport(system, 'Return_Map_A')
+  system = updateAnalysisViewport(analysisAdded.system, analysisAdded.nodeId, {
+    sourceNodeIds: [orbitAdded.nodeId, limitCycleAdded.nodeId],
+    event: {
+      mode: 'cross_up',
+      expression: 'mu',
+      level: 0,
+    },
+    axes: {
+      x: { kind: 'observable', expression: 'mu', hitOffset: 0, label: 'mu@n' },
+      y: { kind: 'observable', expression: 'x', hitOffset: 1, label: 'x@n+1' },
+      z: null,
+    },
+  })
   system = updateLayout(system, { leftWidth: 310, rightWidth: 360 })
   system = updateViewportHeights(system, { [limitCycleAdded.nodeId]: 520 })
   system = updateNodeRender(system, limitCycleAdded.nodeId, {
@@ -324,6 +340,7 @@ describe('system import/export (zip)', () => {
     expect(restored.rootIds).toEqual(ids.system.rootIds)
     expect(restored.scenes).toEqual(ids.system.scenes)
     expect(restored.bifurcationDiagrams).toEqual(ids.system.bifurcationDiagrams)
+    expect(restored.analysisViewports).toEqual(ids.system.analysisViewports)
     expect(Object.keys(restored.index.objects).sort()).toEqual(
       Object.keys(ids.system.index.objects).sort()
     )
@@ -377,6 +394,7 @@ describe('system import/export (zip)', () => {
       const loaded = await opfs.load(imported.id)
 
       expect(loaded.name).toBe(ids.system.name)
+      expect(loaded.analysisViewports).toEqual(ids.system.analysisViewports)
       expect(Object.keys(loaded.index.objects).sort()).toEqual(
         Object.keys(ids.system.index.objects).sort()
       )

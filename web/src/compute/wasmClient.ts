@@ -1,7 +1,10 @@
 import type {
+  ComputeEventSeriesFromOrbitRequest,
+  ComputeEventSeriesFromSamplesRequest,
   ComputeIsoclineRequest,
   ComputeIsoclineResult,
   Codim1CurveBranch,
+  EventSeriesResult,
   ContinuationProgress,
   ContinuationExtensionRequest,
   ContinuationExtensionResult,
@@ -48,6 +51,12 @@ import { makeStableId } from '../utils/determinism'
 type WorkerRequest =
   | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
   | { id: string; kind: 'sampleMap1DFunction'; payload: SampleMap1DFunctionRequest }
+  | { id: string; kind: 'computeEventSeriesFromOrbit'; payload: ComputeEventSeriesFromOrbitRequest }
+  | {
+      id: string
+      kind: 'computeEventSeriesFromSamples'
+      payload: ComputeEventSeriesFromSamplesRequest
+    }
   | { id: string; kind: 'computeIsocline'; payload: ComputeIsoclineRequest }
   | { id: string; kind: 'computeLyapunovExponents'; payload: LyapunovExponentsRequest }
   | { id: string; kind: 'computeCovariantLyapunovVectors'; payload: CovariantLyapunovRequest }
@@ -117,6 +126,7 @@ type WorkerResponse =
       result:
         | SimulateOrbitResult
         | SampleMap1DFunctionResult
+        | EventSeriesResult
         | ComputeIsoclineResult
         | number[]
         | CovariantLyapunovResponse
@@ -146,6 +156,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
         value:
           | SimulateOrbitResult
           | SampleMap1DFunctionResult
+          | EventSeriesResult
           | ComputeIsoclineResult
           | number[]
           | CovariantLyapunovResponse
@@ -212,6 +223,30 @@ export class WasmForkCoreClient implements ForkCoreClient {
     const job = this.queue.enqueue(
       'sampleMap1DFunction',
       (signal) => this.runWorker('sampleMap1DFunction', request, signal),
+      opts
+    )
+    return await job.promise
+  }
+
+  async computeEventSeriesFromOrbit(
+    request: ComputeEventSeriesFromOrbitRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<EventSeriesResult> {
+    const job = this.queue.enqueue(
+      'computeEventSeriesFromOrbit',
+      (signal) => this.runWorker('computeEventSeriesFromOrbit', request, signal),
+      opts
+    )
+    return await job.promise
+  }
+
+  async computeEventSeriesFromSamples(
+    request: ComputeEventSeriesFromSamplesRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<EventSeriesResult> {
+    const job = this.queue.enqueue(
+      'computeEventSeriesFromSamples',
+      (signal) => this.runWorker('computeEventSeriesFromSamples', request, signal),
       opts
     )
     return await job.promise
@@ -545,6 +580,16 @@ export class WasmForkCoreClient implements ForkCoreClient {
     signal: AbortSignal
   ): Promise<SampleMap1DFunctionResult>
   private runWorker(
+    kind: 'computeEventSeriesFromOrbit',
+    payload: ComputeEventSeriesFromOrbitRequest,
+    signal: AbortSignal
+  ): Promise<EventSeriesResult>
+  private runWorker(
+    kind: 'computeEventSeriesFromSamples',
+    payload: ComputeEventSeriesFromSamplesRequest,
+    signal: AbortSignal
+  ): Promise<EventSeriesResult>
+  private runWorker(
     kind: 'computeIsocline',
     payload: ComputeIsoclineRequest,
     signal: AbortSignal
@@ -674,6 +719,8 @@ export class WasmForkCoreClient implements ForkCoreClient {
     kind:
       | 'simulateOrbit'
       | 'sampleMap1DFunction'
+      | 'computeEventSeriesFromOrbit'
+      | 'computeEventSeriesFromSamples'
       | 'computeIsocline'
       | 'computeLyapunovExponents'
       | 'computeCovariantLyapunovVectors'
@@ -699,6 +746,8 @@ export class WasmForkCoreClient implements ForkCoreClient {
     payload:
       | SimulateOrbitRequest
       | SampleMap1DFunctionRequest
+      | ComputeEventSeriesFromOrbitRequest
+      | ComputeEventSeriesFromSamplesRequest
       | ComputeIsoclineRequest
       | LyapunovExponentsRequest
       | CovariantLyapunovRequest
@@ -726,6 +775,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
   ): Promise<
     | SimulateOrbitResult
     | SampleMap1DFunctionResult
+    | EventSeriesResult
     | ComputeIsoclineResult
     | number[]
     | CovariantLyapunovResponse
@@ -748,8 +798,12 @@ export class WasmForkCoreClient implements ForkCoreClient {
         ? { id, kind, payload: payload as SimulateOrbitRequest }
         : kind === 'sampleMap1DFunction'
           ? { id, kind, payload: payload as SampleMap1DFunctionRequest }
-          : kind === 'computeIsocline'
-            ? { id, kind, payload: payload as ComputeIsoclineRequest }
+          : kind === 'computeEventSeriesFromOrbit'
+            ? { id, kind, payload: payload as ComputeEventSeriesFromOrbitRequest }
+            : kind === 'computeEventSeriesFromSamples'
+              ? { id, kind, payload: payload as ComputeEventSeriesFromSamplesRequest }
+              : kind === 'computeIsocline'
+                ? { id, kind, payload: payload as ComputeIsoclineRequest }
         : kind === 'computeLyapunovExponents'
           ? { id, kind, payload: payload as LyapunovExponentsRequest }
           : kind === 'computeCovariantLyapunovVectors'
@@ -803,6 +857,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
     const promise = new Promise<
       | SimulateOrbitResult
       | SampleMap1DFunctionResult
+      | EventSeriesResult
       | ComputeIsoclineResult
       | number[]
       | CovariantLyapunovResponse

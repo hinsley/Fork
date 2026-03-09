@@ -5,6 +5,7 @@ import type {
   Manifold2DProfile,
   ManifoldStability,
   EquilibriumSolution,
+  EventSeriesMode,
   SystemConfig,
 } from '../system/types'
 
@@ -30,6 +31,44 @@ export type SimulateOrbitResult = {
   t_start: number
   t_end: number
   dt: number
+}
+
+export type EventSeriesOrderedSample = {
+  time?: number | null
+  state: number[]
+}
+
+export type EventSeriesHit = {
+  order: number
+  sample_index: number
+  time?: number | null
+  state: number[]
+  observable_values: number[]
+}
+
+export type EventSeriesResult = {
+  hits: EventSeriesHit[]
+}
+
+export type ComputeEventSeriesFromOrbitRequest = {
+  system: SystemConfig
+  initialState: number[]
+  startTime: number
+  steps: number
+  dt: number
+  mode: EventSeriesMode
+  eventExpression: string
+  eventLevel: number
+  observableExpressions: string[]
+}
+
+export type ComputeEventSeriesFromSamplesRequest = {
+  system: SystemConfig
+  samples: EventSeriesOrderedSample[]
+  mode: EventSeriesMode
+  eventExpression: string
+  eventLevel: number
+  observableExpressions: string[]
 }
 
 export type SampleMap1DFunctionRequest = {
@@ -463,6 +502,14 @@ export interface ForkCoreClient {
     request: SampleMap1DFunctionRequest,
     opts?: { signal?: AbortSignal }
   ): Promise<SampleMap1DFunctionResult>
+  computeEventSeriesFromOrbit(
+    request: ComputeEventSeriesFromOrbitRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<EventSeriesResult>
+  computeEventSeriesFromSamples(
+    request: ComputeEventSeriesFromSamplesRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<EventSeriesResult>
   computeIsocline(
     request: ComputeIsoclineRequest,
     opts?: { signal?: AbortSignal }
