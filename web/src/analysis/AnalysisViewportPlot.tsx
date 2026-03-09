@@ -415,6 +415,34 @@ function buildLayout(
   }
 }
 
+function hashNumberSequence(values: Iterable<number>): string {
+  let hash = 0x811c9dc5
+  let count = 0
+  for (const value of values) {
+    const normalized = Number.isFinite(value)
+      ? Object.is(value, -0)
+        ? '-0'
+        : String(value)
+      : Number.isNaN(value)
+        ? 'NaN'
+        : value > 0
+          ? 'Infinity'
+          : '-Infinity'
+    for (let index = 0; index < normalized.length; index += 1) {
+      hash ^= normalized.charCodeAt(index)
+      hash = Math.imul(hash, 0x01000193)
+    }
+    hash ^= 0x2c
+    hash = Math.imul(hash, 0x01000193)
+    count += 1
+  }
+  return `${count}:${(hash >>> 0).toString(16).padStart(8, '0')}`
+}
+
+function hashMatrixRows(rows: readonly number[][]): string {
+  return hashNumberSequence(rows.flat())
+}
+
 function buildSourceSignature(system: System, sourceId: string): Record<string, unknown> {
   const node = system.nodes[sourceId]
   const nodeSignature = {
@@ -430,6 +458,7 @@ function buildSourceSignature(system: System, sourceId: string): Record<string, 
       dt: object.dt,
       tStart: object.t_start,
       tEnd: object.t_end,
+      dataHash: hashMatrixRows(object.data),
       params: object.customParameters ?? object.parameters ?? null,
       frozen: object.frozenVariables?.frozenValuesByVarName ?? null,
       snapshot: object.subsystemSnapshot?.hash ?? null,
@@ -444,6 +473,7 @@ function buildSourceSignature(system: System, sourceId: string): Record<string, 
       ncol: object.ncol,
       period: object.period,
       stateLength: object.state.length,
+      stateHash: hashNumberSequence(object.state),
       params: object.customParameters ?? object.parameters ?? null,
       frozen: object.frozenVariables?.frozenValuesByVarName ?? null,
       snapshot: object.subsystemSnapshot?.hash ?? null,
@@ -458,6 +488,7 @@ function buildSourceSignature(system: System, sourceId: string): Record<string, 
       type: branch.branchType,
       points: geometry?.points_flat.length ?? 0,
       dim: geometry?.dim ?? 0,
+      pointsHash: geometry ? hashNumberSequence(geometry.points_flat) : null,
       params: branch.params ?? null,
       snapshot: branch.subsystemSnapshot?.hash ?? null,
       node: nodeSignature,
@@ -591,8 +622,9 @@ export function AnalysisViewportPlot({
     [eventExpression, selectedNodeId, sourceIds, system, viewport]
   )
   const cacheRef = useRef(new Map<string, ComputedTraceState>())
-  const [traceState, setTraceState] = useState<ComputedTraceState>(() => {
-    return cacheRef.current.get(signature) ?? { traces: EMPTY_TRACES, message: null }
+  const [traceState, setTraceState] = useState<ComputedTraceState>({
+    traces: EMPTY_TRACES,
+    message: null,
   })
 
   useEffect(() => {
