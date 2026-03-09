@@ -416,6 +416,11 @@ function buildLayout(
 }
 
 function buildSourceSignature(system: System, sourceId: string): Record<string, unknown> {
+  const node = system.nodes[sourceId]
+  const nodeSignature = {
+    name: node?.name ?? null,
+    render: node?.render ?? null,
+  }
   const object = system.objects[sourceId]
   if (object?.type === 'orbit') {
     return {
@@ -428,6 +433,7 @@ function buildSourceSignature(system: System, sourceId: string): Record<string, 
       params: object.customParameters ?? object.parameters ?? null,
       frozen: object.frozenVariables?.frozenValuesByVarName ?? null,
       snapshot: object.subsystemSnapshot?.hash ?? null,
+      node: nodeSignature,
     }
   }
   if (object?.type === 'limit_cycle') {
@@ -441,6 +447,7 @@ function buildSourceSignature(system: System, sourceId: string): Record<string, 
       params: object.customParameters ?? object.parameters ?? null,
       frozen: object.frozenVariables?.frozenValuesByVarName ?? null,
       snapshot: object.subsystemSnapshot?.hash ?? null,
+      node: nodeSignature,
     }
   }
   const branch = system.branches[sourceId]
@@ -453,9 +460,10 @@ function buildSourceSignature(system: System, sourceId: string): Record<string, 
       dim: geometry?.dim ?? 0,
       params: branch.params ?? null,
       snapshot: branch.subsystemSnapshot?.hash ?? null,
+      node: nodeSignature,
     }
   }
-  return { id: sourceId, type: 'unknown' }
+  return { id: sourceId, type: 'unknown', node: nodeSignature }
 }
 
 async function computeSourceTrace(
