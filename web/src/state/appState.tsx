@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import type {
+  ComputeEventSeriesFromOrbitRequest,
+  ComputeEventSeriesFromSamplesRequest,
   ComputeIsoclineRequest as CoreComputeIsoclineRequest,
   ComputeIsoclineResult,
   ContinuationProgress,
   CovariantLyapunovRequest as CoreCovariantLyapunovRequest,
   CovariantLyapunovResponse,
+  EventSeriesResult,
   ForkCoreClient,
   LimitCycleFloquetModesRequest as CoreLimitCycleFloquetModesRequest,
   LyapunovExponentsRequest as CoreLyapunovExponentsRequest,
@@ -16,6 +19,7 @@ import type { JobTiming } from '../compute/jobQueue'
 import { createSystem } from '../system/model'
 import type {
   AnalysisObject,
+  AnalysisViewport,
   BifurcationDiagram,
   ContinuationObject,
   ContinuationPoint,
@@ -44,6 +48,7 @@ import type {
 } from '../system/types'
 import type { LoadedEntities, SystemStore } from '../system/store'
 import {
+  addAnalysisViewport,
   addBifurcationDiagram,
   addBranch,
   addObject,
@@ -57,6 +62,7 @@ import {
   selectNode,
   toggleNodeExpanded,
   toggleNodeVisibility,
+  updateAnalysisViewport,
   updateBifurcationDiagram,
   updateLimitCycleRenderTarget,
   updateLayout,
@@ -1438,6 +1444,10 @@ type AppActions = {
     update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>
   ) => void
   updateScene: (sceneId: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
+  updateAnalysisViewport: (
+    viewportId: string,
+    update: Partial<Omit<AnalysisViewport, 'id' | 'name'>>
+  ) => void
   updateBifurcationDiagram: (
     diagramId: string,
     update: Partial<Omit<BifurcationDiagram, 'id' | 'name'>>
@@ -1460,6 +1470,22 @@ type AppActions = {
     request: SampleMap1DFunctionRequest,
     opts?: { signal?: AbortSignal }
   ) => Promise<SampleMap1DFunctionResult>
+  computeEventSeriesFromOrbit: (
+    request: ComputeEventSeriesFromOrbitRequest,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<EventSeriesResult>
+  computeEventSeriesFromSamples: (
+    request: ComputeEventSeriesFromSamplesRequest,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<EventSeriesResult>
+  validateAnalysisExpression: (
+    request: {
+      system: SystemConfig
+      expression: string
+      role: 'event' | 'observable'
+    },
+    opts?: { signal?: AbortSignal }
+  ) => Promise<void>
   computeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
   computeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
   computeLimitCycleFloquetModes: (request: LimitCycleFloquetModesRequest) => Promise<void>
@@ -1487,6 +1513,7 @@ type AppActions = {
     request: HomoclinicFromHomotopySaddleRequest
   ) => Promise<void>
   addScene: (name: string, targetId?: string | null) => Promise<void>
+  addAnalysisViewport: (name: string, targetId?: string | null) => Promise<void>
   addBifurcationDiagram: (name: string, targetId?: string | null) => Promise<void>
   importSystem: (file: File) => Promise<void>
   ensureObjectLoaded: (id: string) => Promise<void>
@@ -1853,7 +1880,7 @@ export function AppProvider({
       }
       const system = renameNode(state.system, nodeId, trimmedName)
       dispatch({ type: 'SET_SYSTEM', system })
-      if (node.kind === 'scene' || node.kind === 'diagram') {
+      if (node.kind === 'scene' || node.kind === 'diagram' || node.kind === 'analysis') {
         scheduleUiSave(system)
       } else {
         scheduleSystemSave(system)
@@ -2210,6 +2237,16 @@ export function AppProvider({
     [scheduleUiSave, state.system]
   )
 
+  const updateAnalysisViewportAction = useCallback(
+    (viewportId: string, update: Partial<Omit<AnalysisViewport, 'id' | 'name'>>) => {
+      if (!state.system) return
+      const system = updateAnalysisViewport(state.system, viewportId, update)
+      dispatch({ type: 'SET_SYSTEM', system })
+      scheduleUiSave(system)
+    },
+    [scheduleUiSave, state.system]
+  )
+
   const duplicateNodeAction = useCallback(
     async (nodeId: string) => {
       if (!state.system) return
@@ -2230,7 +2267,11 @@ export function AppProvider({
         const selected = selectNode(duplicated.system, duplicated.nodeId)
         dispatch({ type: 'SET_SYSTEM', system: selected })
         const duplicatedNode = selected.nodes[duplicated.nodeId]
-        if (duplicatedNode?.kind === 'scene' || duplicatedNode?.kind === 'diagram') {
+        if (
+          duplicatedNode?.kind === 'scene' ||
+          duplicatedNode?.kind === 'diagram' ||
+          duplicatedNode?.kind === 'analysis'
+        ) {
           await store.saveUi(selected)
         } else {
           await store.save(selected)
@@ -2250,10 +2291,15 @@ export function AppProvider({
       if (!state.system) return
       dispatch({ type: 'SET_BUSY', busy: true })
       try {
+        const node = state.system.nodes[nodeId]
         const system = removeNode(state.system, nodeId)
         dispatch({ type: 'SET_SYSTEM', system })
         dispatch({ type: 'REMOVE_ISOCLINE_GEOMETRY', isoclineId: nodeId })
-        await store.save(system)
+        if (node?.kind === 'scene' || node?.kind === 'diagram' || node?.kind === 'analysis') {
+          await store.saveUi(system)
+        } else {
+          await store.save(system)
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         dispatch({ type: 'SET_ERROR', error: message })
@@ -2390,6 +2436,46 @@ export function AppProvider({
         dispatch({ type: 'SET_ERROR', error: message })
         throw err
       }
+    },
+    [client]
+  )
+
+  const computeEventSeriesFromOrbit = useCallback(
+    async (request: ComputeEventSeriesFromOrbitRequest, opts?: { signal?: AbortSignal }) =>
+      await client.computeEventSeriesFromOrbit(request, opts),
+    [client]
+  )
+
+  const computeEventSeriesFromSamples = useCallback(
+    async (request: ComputeEventSeriesFromSamplesRequest, opts?: { signal?: AbortSignal }) =>
+      await client.computeEventSeriesFromSamples(request, opts),
+    [client]
+  )
+
+  const validateAnalysisExpression = useCallback(
+    async (
+      request: {
+        system: SystemConfig
+        expression: string
+        role: 'event' | 'observable'
+      },
+      opts?: { signal?: AbortSignal }
+    ) => {
+      if (request.expression.trim().length === 0) {
+        throw new Error('Expression is required.')
+      }
+      await client.computeEventSeriesFromSamples(
+        {
+          system: request.system,
+          samples: [],
+          mode: 'cross_up',
+          eventExpression: request.role === 'event' ? request.expression : '0',
+          eventLevel: 0,
+          observableExpressions:
+            request.role === 'observable' ? [request.expression] : [],
+        },
+        opts
+      )
     },
     [client]
   )
@@ -6800,6 +6886,33 @@ export function AppProvider({
     [state.system, store]
   )
 
+  const addAnalysisViewportAction = useCallback(
+    async (name: string, targetId?: string | null) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        const trimmedName = name.trim()
+        const nameError = validateObjectName(trimmedName, 'Analysis viewport')
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        const created = addAnalysisViewport(state.system, trimmedName)
+        const updated =
+          targetId && targetId !== created.nodeId
+            ? reorderNode(created.system, created.nodeId, targetId)
+            : created.system
+        dispatch({ type: 'SET_SYSTEM', system: updated })
+        await store.saveUi(updated)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [state.system, store]
+  )
+
   const importSystem = useCallback(
     async (file: File) => {
       dispatch({ type: 'SET_BUSY', busy: true })
@@ -6838,6 +6951,7 @@ export function AppProvider({
       updateObjectFrozenVariables: updateObjectFrozenVariablesAction,
       updateIsoclineObject: updateIsoclineObjectAction,
       updateScene: updateSceneAction,
+      updateAnalysisViewport: updateAnalysisViewportAction,
       updateBifurcationDiagram: updateBifurcationDiagramAction,
       setLimitCycleRenderTarget: setLimitCycleRenderTargetAction,
       duplicateNode: duplicateNodeAction,
@@ -6848,6 +6962,9 @@ export function AppProvider({
       runOrbit,
       computeIsocline,
       sampleMap1DFunction,
+      computeEventSeriesFromOrbit,
+      computeEventSeriesFromSamples,
+      validateAnalysisExpression,
       computeLyapunovExponents,
       computeCovariantLyapunovVectors,
       computeLimitCycleFloquetModes,
@@ -6871,6 +6988,7 @@ export function AppProvider({
       createHomotopySaddleFromEquilibrium,
       createHomoclinicFromHomotopySaddle,
       addScene: addSceneAction,
+      addAnalysisViewport: addAnalysisViewportAction,
       addBifurcationDiagram: addBifurcationDiagramAction,
       importSystem,
       ensureObjectLoaded,
@@ -6885,6 +7003,9 @@ export function AppProvider({
       createOrbitObject,
       runOrbit,
       sampleMap1DFunction,
+      computeEventSeriesFromOrbit,
+      computeEventSeriesFromSamples,
+      validateAnalysisExpression,
       computeLyapunovExponents,
       computeCovariantLyapunovVectors,
       computeLimitCycleFloquetModes,
@@ -6930,6 +7051,7 @@ export function AppProvider({
       updateObjectFrozenVariablesAction,
       updateIsoclineObjectAction,
       updateSceneAction,
+      updateAnalysisViewportAction,
       updateBifurcationDiagramAction,
       setLimitCycleRenderTargetAction,
       duplicateNodeAction,
@@ -6937,6 +7059,7 @@ export function AppProvider({
       createIsoclineObject,
       computeIsocline,
       addSceneAction,
+      addAnalysisViewportAction,
       importSystem,
       ensureObjectLoaded,
       ensureBranchLoaded,

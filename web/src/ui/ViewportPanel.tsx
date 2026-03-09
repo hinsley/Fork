@@ -9,6 +9,7 @@ import {
 } from 'react'
 import type { Data, Layout } from 'plotly.js'
 import type {
+  AnalysisViewport,
   AxisRange,
   BifurcationAxis,
   BifurcationDiagram,
@@ -29,7 +30,10 @@ import type {
   TreeNode,
 } from '../system/types'
 import type {
+  ComputeEventSeriesFromOrbitRequest,
+  ComputeEventSeriesFromSamplesRequest,
   ComputeIsoclineResult,
+  EventSeriesResult,
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
 } from '../compute/ForkCoreClient'
@@ -60,6 +64,7 @@ import {
 } from '../system/subsystemGateway'
 import { normalizeFloquetMultipliersForRendering } from '../system/floquetModes'
 import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/PlotlyViewport'
+import { AnalysisViewportPlot } from '../analysis/AnalysisViewportPlot'
 import type { PlotlyRelayoutEvent } from '../viewports/plotly/usePlotViewport'
 import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
@@ -82,10 +87,19 @@ type ViewportPanelProps = {
   onSelectBranchPoint?: (selection: BranchPointSelection) => void
   onSelectOrbitPoint?: (selection: OrbitPointSelection) => void
   onSelectLimitCyclePoint?: (selection: LimitCyclePointSelection) => void
+  onComputeEventSeriesFromOrbit?: (
+    request: ComputeEventSeriesFromOrbitRequest,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<EventSeriesResult>
+  onComputeEventSeriesFromSamples?: (
+    request: ComputeEventSeriesFromSamplesRequest,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<EventSeriesResult>
   onReorderViewport: (nodeId: string, targetId: string) => void
   onResizeViewport: (id: string, height: number) => void
   onToggleViewport: (id: string) => void
   onCreateScene: (targetId?: string | null) => void
+  onCreateAnalysis?: (targetId?: string | null) => void
   onCreateBifurcation: (targetId?: string | null) => void
   onRenameViewport: (id: string, name: string) => void
   onDuplicateViewport?: (id: string) => void | Promise<void>
@@ -106,6 +120,7 @@ type ViewportPanelProps = {
 type ViewportEntry = {
   node: TreeNode
   scene?: Scene
+  analysis?: AnalysisViewport
   diagram?: BifurcationDiagram
 }
 
@@ -127,6 +142,14 @@ type ViewportTileProps = {
   onSelectBranchPoint?: (selection: BranchPointSelection) => void
   onSelectOrbitPoint?: (selection: OrbitPointSelection) => void
   onSelectLimitCyclePoint?: (selection: LimitCyclePointSelection) => void
+  onComputeEventSeriesFromOrbit?: (
+    request: ComputeEventSeriesFromOrbitRequest,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<EventSeriesResult>
+  onComputeEventSeriesFromSamples?: (
+    request: ComputeEventSeriesFromSamplesRequest,
+    opts?: { signal?: AbortSignal }
+    ) => Promise<EventSeriesResult>
   onReorderViewport: (nodeId: string, targetId: string) => void
   onResizeStart: (id: string, event: React.PointerEvent) => void
   onToggleViewport: (id: string) => void
@@ -5941,6 +5964,8 @@ function ViewportTile({
   mapFunctionSamples,
   draggingId,
   dragOverId,
+  onComputeEventSeriesFromOrbit,
+  onComputeEventSeriesFromSamples,
   setDraggingId,
   setDragOverId,
   onSelectViewport,
@@ -5960,7 +5985,7 @@ function ViewportTile({
   plotlyTheme,
   isoclineGeometryCache,
 }: ViewportTileProps) {
-  const { node, scene, diagram } = entry
+  const { node, scene, analysis, diagram } = entry
   const systemId = system.id
   const systemName = system.name
   const systemConfig = system.config
@@ -5970,6 +5995,7 @@ function ViewportTile({
   const systemObjects = system.objects
   const systemBranches = system.branches
   const systemScenes = system.scenes
+  const systemAnalysisViewports = system.analysisViewports
   const systemDiagrams = system.bifurcationDiagrams
   const uiLayout = system.ui.layout
   const uiViewportHeights = system.ui.viewportHeights
@@ -5986,6 +6012,7 @@ function ViewportTile({
       branches: systemBranches,
       scenes: systemScenes,
       bifurcationDiagrams: systemDiagrams,
+      analysisViewports: systemAnalysisViewports,
       ui: {
         selectedNodeId: null,
         layout: uiLayout,
@@ -6006,6 +6033,7 @@ function ViewportTile({
       systemObjects,
       systemRootIds,
       systemScenes,
+      systemAnalysisViewports,
       uiLayout,
       uiViewportHeights,
     ]
@@ -6020,7 +6048,8 @@ function ViewportTile({
       ? selectedNode.id
       : null
   const selectedViewportId =
-    selectedNode && (selectedNode.kind === 'scene' || selectedNode.kind === 'diagram')
+    selectedNode &&
+    (selectedNode.kind === 'scene' || selectedNode.kind === 'diagram' || selectedNode.kind === 'analysis')
       ? selectedNode.id
       : null
   const sceneTraceSelectedNodeId = scene?.display === 'selection' ? selectedPlotNodeId : null
@@ -6142,7 +6171,7 @@ function ViewportTile({
     )
   }, [branchPointSelection, diagram, diagramTraceSelectedNodeId, traceSystem])
 
-  const viewRevision = scene?.viewRevision ?? diagram?.viewRevision ?? 0
+  const viewRevision = scene?.viewRevision ?? analysis?.viewRevision ?? diagram?.viewRevision ?? 0
   const initialView = useMemo(() => {
     if (scene) return buildSceneInitialView(traceSystem, scene)
     if (diagram) return buildDiagramInitialView(diagram)
@@ -6237,8 +6266,12 @@ function ViewportTile({
     sceneTraces,
   ])
 
-  const label = scene ? 'State Space' : 'Bifurcation Diagram'
-  const viewportTypeClass = diagram ? 'viewport-tile--diagram' : ''
+  const label = scene ? 'State Space' : analysis ? 'Event Map' : 'Bifurcation Diagram'
+  const viewportTypeClass = diagram
+    ? 'viewport-tile--diagram'
+    : analysis
+      ? 'viewport-tile--analysis'
+      : ''
 
   return (
     <section
@@ -6327,17 +6360,29 @@ function ViewportTile({
       {isCollapsed ? null : (
         <>
           <div className="viewport-tile__body">
-            <PlotlyViewport
-              plotId={node.id}
-              data={data}
-              layout={layout}
-              viewRevision={viewRevision}
-              persistView
-              initialView={initialView}
-              testId={`plotly-viewport-${node.id}`}
-              onPointClick={scene || diagram ? handlePointClick : undefined}
-              onResize={scene ? handleResize : undefined}
-            />
+            {analysis ? (
+              <AnalysisViewportPlot
+                system={system}
+                viewport={analysis}
+                selectedNodeId={selectedNodeId}
+                plotlyTheme={plotlyTheme}
+                onSelectSource={onSelectObject}
+                onComputeEventSeriesFromOrbit={onComputeEventSeriesFromOrbit}
+                onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
+              />
+            ) : (
+              <PlotlyViewport
+                plotId={node.id}
+                data={data}
+                layout={layout}
+                viewRevision={viewRevision}
+                persistView
+                initialView={initialView}
+                testId={`plotly-viewport-${node.id}`}
+                onPointClick={scene || diagram ? handlePointClick : undefined}
+                onResize={scene ? handleResize : undefined}
+              />
+            )}
           </div>
           <div
             className="viewport-resize-handle"
@@ -6366,11 +6411,14 @@ export function ViewportPanel({
   onResizeViewport,
   onToggleViewport,
   onCreateScene,
+  onCreateAnalysis,
   onCreateBifurcation,
   onRenameViewport,
   onDuplicateViewport = () => {},
   onDeleteViewport,
   onSampleMap1DFunction,
+  onComputeEventSeriesFromOrbit,
+  onComputeEventSeriesFromSamples,
   isoclineGeometryCache,
 }: ViewportPanelProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -6405,6 +6453,7 @@ export function ViewportPanel({
   const systemNodes = system.nodes
   const systemObjects = system.objects
   const systemScenes = system.scenes
+  const systemAnalysisViewports = system.analysisViewports
   const systemDiagrams = system.bifurcationDiagrams
   const mapRangeSource = useMemo<VisibleObjectSource>(
     () => ({
@@ -6424,6 +6473,10 @@ export function ViewportPanel({
         const scene = systemScenes.find((entry) => entry.id === nodeId)
         if (!scene) continue
         entries.push({ node, scene })
+      } else if (node.kind === 'analysis') {
+        const analysis = systemAnalysisViewports.find((entry) => entry.id === nodeId)
+        if (!analysis) continue
+        entries.push({ node, analysis })
       } else if (node.kind === 'diagram') {
         const diagram = systemDiagrams.find((entry) => entry.id === nodeId)
         if (!diagram) continue
@@ -6431,7 +6484,7 @@ export function ViewportPanel({
       }
     }
     return entries
-  }, [systemDiagrams, systemNodes, systemRootIds, systemScenes])
+  }, [systemAnalysisViewports, systemDiagrams, systemNodes, systemRootIds, systemScenes])
 
   const hasMapCobwebScene = useMemo(() => {
     return viewports.some((entry) => {
@@ -6680,6 +6733,16 @@ export function ViewportPanel({
       <button
         className="context-menu__item"
         onClick={() => {
+          onCreateAnalysis?.(createMenu.targetId)
+          setCreateMenu(null)
+        }}
+        data-testid="viewport-create-analysis"
+      >
+        Event Map
+      </button>
+      <button
+        className="context-menu__item"
+        onClick={() => {
           onCreateBifurcation(createMenu.targetId)
           setCreateMenu(null)
         }}
@@ -6746,6 +6809,8 @@ export function ViewportPanel({
                 onSelectBranchPoint={onSelectBranchPoint}
                 onSelectOrbitPoint={onSelectOrbitPoint}
                 onSelectLimitCyclePoint={onSelectLimitCyclePoint}
+                onComputeEventSeriesFromOrbit={onComputeEventSeriesFromOrbit}
+                onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
                 onReorderViewport={onReorderViewport}
                 onResizeStart={startResize}
                 onToggleViewport={onToggleViewport}

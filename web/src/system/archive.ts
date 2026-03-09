@@ -69,6 +69,7 @@ function buildArchiveEntries(system: System): ArchiveFileMap {
     rootIds: [...normalized.rootIds],
     scenes: structuredClone(normalized.scenes),
     bifurcationDiagrams: structuredClone(normalized.bifurcationDiagrams),
+    analysisViewports: structuredClone(normalized.analysisViewports),
     ui: structuredClone(normalized.ui),
   }
   entries['manifest.json'] = encodeJson(manifest)
@@ -192,6 +193,7 @@ export function parseSystemArchiveBytes(raw: Uint8Array): System {
     branches,
     scenes: structuredClone(ui.scenes),
     bifurcationDiagrams: structuredClone(ui.bifurcationDiagrams),
+    analysisViewports: structuredClone(ui.analysisViewports),
     ui: structuredClone(ui.ui),
     updatedAt: meta.updatedAt,
   }

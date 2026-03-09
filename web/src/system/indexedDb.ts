@@ -149,6 +149,7 @@ function buildUiRecord(system: System): UiRecord {
       rootIds: [...system.rootIds],
       scenes: structuredClone(system.scenes),
       bifurcationDiagrams: structuredClone(system.bifurcationDiagrams),
+      analysisViewports: structuredClone(system.analysisViewports),
       ui: structuredClone(system.ui),
     },
   }
@@ -295,6 +296,7 @@ function buildSkeletonSystem(
     branches: {},
     scenes: structuredClone(ui.scenes),
     bifurcationDiagrams: structuredClone(ui.bifurcationDiagrams),
+    analysisViewports: structuredClone(ui.analysisViewports),
     ui: structuredClone(ui.ui),
     updatedAt: meta.updatedAt,
   })

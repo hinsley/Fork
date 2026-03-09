@@ -72,6 +72,11 @@ behavior.
   (if present) into a one-time `initialView` payload for `usePlotViewport`.
   `scene.camera` is only restored for 3-axis projections; 1-axis and 2-axis
   projections restore axis ranges.
+- `web/src/analysis/AnalysisViewportPlot.tsx`: analysis return/event maps use
+  `PlotlyViewport` with declarative 2D/3D scatter layouts and one-time
+  `initialView` range restoration derived from persisted analysis
+  `axisRanges`; no direct Plotly mutation is added beyond the shared viewport
+  wrapper.
 - `web/src/ui/ViewportPanel.tsx`: map function sampling requests are limited to
   true 1D map systems (`varNames.length === 1`) and only when at least one
   visible scene is currently in `map_cobweb_1d` mode.

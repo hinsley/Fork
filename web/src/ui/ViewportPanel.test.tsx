@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
 import type { Data, Layout } from 'plotly.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -6,12 +7,14 @@ import { ViewportPanel } from './ViewportPanel'
 import type { ComputeIsoclineResult } from '../compute/ForkCoreClient'
 import {
   addObject,
+  addAnalysisViewport,
   addBranch,
   addBifurcationDiagram,
   addScene,
   updateNodeRender,
   createSystem,
   updateLimitCycleRenderTarget,
+  updateAnalysisViewport,
   updateBifurcationDiagram,
   updateScene,
 } from '../system/model'
@@ -3833,4 +3836,123 @@ describe('ViewportPanel view state wiring', () => {
     )
     expect(cobwebTrace).toBeFalsy()
   })
+
+  it('updates event map traces when source render styles change', async () => {
+    const config: SystemConfig = {
+      name: 'Analysis_Render_System',
+      equations: ['y', '-x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: 'Analysis_Render_System', config })
+    const analysisResult = addAnalysisViewport(system, 'Event_Map_1')
+    system = analysisResult.system
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Render_Target',
+      systemName: config.name,
+      data: [
+        [0, 0, 1],
+        [0.1, 1, 0],
+      ],
+      t_start: 0,
+      t_end: 0.1,
+      dt: 0.1,
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+    system = updateAnalysisViewport(system, analysisResult.nodeId, {
+      sourceNodeIds: [orbitResult.nodeId],
+      event: {
+        mode: 'cross_up',
+        source: { kind: 'custom', expression: 'x' },
+        level: 0,
+      },
+      axes: {
+        x: { kind: 'observable', expression: 'x', hitOffset: 0, label: 'x@n' },
+        y: { kind: 'hit_index', label: 'n' },
+        z: null,
+      },
+    })
+    system = updateNodeRender(system, orbitResult.nodeId, { pointSize: 5, lineWidth: 2 })
+    const onComputeEventSeriesFromSamples = vi.fn().mockResolvedValue({
+      hits: [
+        {
+          order: 0,
+          sample_index: 1,
+          time: 0.1,
+          state: [1, 0],
+          observable_values: [1],
+        },
+      ],
+    })
+
+    function Wrapper() {
+      const [state, setState] = useState(system)
+      return (
+        <>
+          <ViewportPanel
+            system={state}
+            selectedNodeId={null}
+            theme="light"
+            onSelectViewport={vi.fn()}
+            onSelectObject={vi.fn()}
+            onReorderViewport={vi.fn()}
+            onResizeViewport={vi.fn()}
+            onToggleViewport={vi.fn()}
+            onCreateScene={vi.fn()}
+            onCreateAnalysis={vi.fn()}
+            onCreateBifurcation={vi.fn()}
+            onRenameViewport={vi.fn()}
+            onDeleteViewport={vi.fn()}
+            onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
+          />
+          <button
+            data-testid="update-analysis-render"
+            onClick={() => {
+              setState((prev) =>
+                updateNodeRender(prev, orbitResult.nodeId, { pointSize: 11, lineWidth: 7 })
+              )
+            }}
+          >
+            Update render
+          </button>
+        </>
+      )
+    }
+
+    render(<Wrapper />)
+
+    const latestCallFor = () => {
+      const calls = plotlyCalls.filter(
+        (entry) => entry.plotId === analysisResult.nodeId && entry.data.length > 0
+      )
+      return calls[calls.length - 1]
+    }
+
+    await waitFor(() => {
+      const props = latestCallFor()
+      expect(props).toBeTruthy()
+      const trace = props?.data[0] as
+        | { marker?: { size?: number }; line?: { width?: number } }
+        | undefined
+      expect(trace?.marker?.size).toBe(5)
+      expect(trace?.line?.width).toBe(2)
+    })
+
+    fireEvent.click(screen.getByTestId('update-analysis-render'))
+
+    await waitFor(() => {
+      const props = latestCallFor()
+      const trace = props?.data[0] as
+        | { marker?: { size?: number }; line?: { width?: number } }
+        | undefined
+      expect(trace?.marker?.size).toBe(11)
+      expect(trace?.line?.width).toBe(7)
+    })
+  })
+
 })

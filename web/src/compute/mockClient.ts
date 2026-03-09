@@ -1,7 +1,12 @@
 import type {
+  ComputeEventSeriesFromOrbitRequest,
+  ComputeEventSeriesFromSamplesRequest,
   ComputeIsoclineRequest,
   ComputeIsoclineResult,
   Codim1CurveBranch,
+  EventSeriesHit,
+  EventSeriesOrderedSample,
+  EventSeriesResult,
   ContinuationProgress,
   ContinuationExtensionRequest,
   ContinuationExtensionResult,
@@ -48,6 +53,94 @@ import { isDeterministicMode } from '../utils/determinism'
 
 function delay(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms))
+}
+
+function compileMockExpression(expression: string, argNames: string[]): (...values: number[]) => number {
+  return new Function(...argNames, `return (${expression});`) as (...values: number[]) => number
+}
+
+function evaluateMockExpression(
+  expression: string,
+  varNames: string[],
+  paramNames: string[],
+  state: number[],
+  params: number[]
+): number {
+  const evaluator = compileMockExpression(expression, [...varNames, ...paramNames])
+  const values = [
+    ...varNames.map((_, index) => state[index] ?? 0),
+    ...paramNames.map((_, index) => params[index] ?? 0),
+  ]
+  const result = evaluator(...values)
+  return typeof result === 'number' && Number.isFinite(result) ? result : Number.NaN
+}
+
+function interpolateMockState(a: number[], b: number[], tau: number): number[] {
+  return a.map((value, index) => value + ((b[index] ?? value) - value) * tau)
+}
+
+function matchesMockCrossing(mode: string, prevValue: number, nextValue: number): boolean {
+  if (mode === 'cross_up') return prevValue < 0 && nextValue >= 0
+  if (mode === 'cross_down') return prevValue > 0 && nextValue <= 0
+  if (mode === 'cross_either') {
+    return (prevValue < 0 && nextValue >= 0) || (prevValue > 0 && nextValue <= 0)
+  }
+  return false
+}
+
+function buildMockEventSeries(request: ComputeEventSeriesFromSamplesRequest): EventSeriesResult {
+  const { system, samples, eventExpression, eventLevel, observableExpressions, mode } = request
+  const observables = (state: number[]) =>
+    observableExpressions.map((expression) =>
+      evaluateMockExpression(expression, system.varNames, system.paramNames, state, system.params)
+    )
+  if (mode === 'every_iterate') {
+    return {
+      hits: samples.map((sample, index) => ({
+        order: index,
+        sample_index: index,
+        time: sample.time ?? null,
+        state: [...sample.state],
+        observable_values: observables(sample.state),
+      })),
+    }
+  }
+  const hits: EventSeriesHit[] = []
+  for (let index = 1; index < samples.length; index += 1) {
+    const prev = samples[index - 1]
+    const next = samples[index]
+    const prevValue =
+      evaluateMockExpression(
+        eventExpression,
+        system.varNames,
+        system.paramNames,
+        prev.state,
+        system.params
+      ) - eventLevel
+    const nextValue =
+      evaluateMockExpression(
+        eventExpression,
+        system.varNames,
+        system.paramNames,
+        next.state,
+        system.params
+      ) - eventLevel
+    if (!matchesMockCrossing(mode, prevValue, nextValue)) continue
+    const tau = nextValue === prevValue ? 1 : Math.min(Math.max(-prevValue / (nextValue - prevValue), 0), 1)
+    const state = interpolateMockState(prev.state, next.state, tau)
+    const time =
+      prev.time == null || next.time == null
+        ? next.time ?? null
+        : prev.time + ((next.time - prev.time) * tau)
+    hits.push({
+      order: hits.length,
+      sample_index: index,
+      time,
+      state,
+      observable_values: observables(state),
+    })
+  }
+  return { hits }
 }
 
 export class MockForkCoreClient implements ForkCoreClient {
@@ -137,6 +230,63 @@ export class MockForkCoreClient implements ForkCoreClient {
           y.push(t)
         }
         return { x, y }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async computeEventSeriesFromOrbit(
+    request: ComputeEventSeriesFromOrbitRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<EventSeriesResult> {
+    const job = this.queue.enqueue(
+      'computeEventSeriesFromOrbit',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        const samples: EventSeriesOrderedSample[] = []
+        for (let index = 0; index <= request.steps; index += 1) {
+          const time = request.startTime + index * request.dt
+          const state = request.initialState.map((value, axis) => {
+            const phase = time + axis * 0.7
+            return value + Math.sin(phase)
+          })
+          samples.push({ time, state })
+        }
+        return buildMockEventSeries({
+          system: request.system,
+          samples,
+          mode: request.mode,
+          eventExpression: request.eventExpression,
+          eventLevel: request.eventLevel,
+          observableExpressions: request.observableExpressions,
+        })
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async computeEventSeriesFromSamples(
+    request: ComputeEventSeriesFromSamplesRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<EventSeriesResult> {
+    const job = this.queue.enqueue(
+      'computeEventSeriesFromSamples',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+        return buildMockEventSeries(request)
       },
       opts
     )

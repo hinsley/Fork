@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { OpfsSystemStore } from './opfs'
-import { addBranch, addObject, createSystem, updateLayout, updateObject } from './model'
+import {
+  addAnalysisViewport,
+  addBranch,
+  addObject,
+  createSystem,
+  updateAnalysisViewport,
+  updateLayout,
+  updateObject,
+} from './model'
 import type { ContinuationObject, ContinuationSettings, OrbitObject, System } from './types'
 import { installMockOpfs } from '../test/opfsMock'
 import { nowIso } from '../utils/determinism'
@@ -102,9 +110,23 @@ function createOpfsFixture(): {
     params: [...withOrbitB.system.config.params],
   }
   const withBranch = addBranch(withOrbitB.system, branch, withOrbitA.nodeId)
+  const analysisAdded = addAnalysisViewport(withBranch.system, 'Return_Map')
+  const withAnalysis = updateAnalysisViewport(analysisAdded.system, analysisAdded.nodeId, {
+    sourceNodeIds: [withOrbitA.nodeId, withOrbitB.nodeId],
+    event: {
+      mode: 'cross_up',
+      source: { kind: 'custom', expression: 'x' },
+      level: 0,
+    },
+    axes: {
+      x: { kind: 'observable', expression: 'x', hitOffset: 0, label: 'x@n' },
+      y: { kind: 'observable', expression: 'y', hitOffset: 1, label: 'y@n+1' },
+      z: null,
+    },
+  })
 
   return {
-    system: withBranch.system,
+    system: withAnalysis,
     orbitAId: withOrbitA.nodeId,
     orbitBId: withOrbitB.nodeId,
     branchId: withBranch.nodeId,
@@ -135,6 +157,7 @@ describe('OpfsSystemStore v3', () => {
     expect(Object.keys(skeleton.index.branches).sort()).toEqual(
       Object.keys(fixture.system.index.branches).sort()
     )
+    expect(skeleton.analysisViewports).toEqual(fixture.system.analysisViewports)
     expect(skeleton.objects).toEqual({})
     expect(skeleton.branches).toEqual({})
 
@@ -240,5 +263,8 @@ describe('OpfsSystemStore v3', () => {
     expect(getMockFile(root, objectAPath).writeCount).toBe(beforeObjectA)
     expect(getMockFile(root, objectBPath).writeCount).toBe(beforeObjectB)
     expect(getMockFile(root, branchPath).writeCount).toBe(beforeBranch)
+
+    const loaded = await store.load(fixture.system.id)
+    expect(loaded.analysisViewports).toEqual(fixture.system.analysisViewports)
   })
 })

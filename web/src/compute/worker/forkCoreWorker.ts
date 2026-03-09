@@ -1,24 +1,31 @@
 /// <reference lib="webworker" />
 
 import type {
+  ComputeEventSeriesFromOrbitRequest,
+  ComputeEventSeriesFromSamplesRequest,
   ComputeIsoclineRequest,
   ComputeIsoclineResult,
   Codim1CurveBranch,
   ContinuationProgress,
   ContinuationExtensionRequest,
   ContinuationExtensionResult,
+  CovariantLyapunovRequest,
+  CovariantLyapunovResponse,
+  EquilibriumContinuationRequest,
+  EquilibriumContinuationResult,
   EquilibriumManifold1DRequest,
   EquilibriumManifold1DResult,
   EquilibriumManifold2DRequest,
   EquilibriumManifold2DResult,
-  EquilibriumContinuationRequest,
-  EquilibriumContinuationResult,
+  EventSeriesResult,
+  FoldCurveContinuationRequest,
   HomoclinicContinuationResult,
   HomoclinicFromHomoclinicRequest,
   HomoclinicFromHomotopySaddleRequest,
   HomoclinicFromLargeCycleRequest,
   HomotopySaddleContinuationResult,
   HomotopySaddleFromEquilibriumRequest,
+  HopfCurveContinuationRequest,
   IsochroneCurveContinuationRequest,
   LimitCycleContinuationFromHopfRequest,
   LimitCycleContinuationFromOrbitRequest,
@@ -28,18 +35,14 @@ import type {
   LimitCycleFloquetModesResult,
   LimitCycleManifold2DRequest,
   LimitCycleManifold2DResult,
-  MapCycleContinuationFromPDRequest,
-  CovariantLyapunovRequest,
-  CovariantLyapunovResponse,
-  FoldCurveContinuationRequest,
-  HopfCurveContinuationRequest,
   LyapunovExponentsRequest,
+  MapCycleContinuationFromPDRequest,
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
-  SolveEquilibriumRequest,
-  SolveEquilibriumResult,
   SimulateOrbitRequest,
   SimulateOrbitResult,
+  SolveEquilibriumRequest,
+  SolveEquilibriumResult,
   ValidateSystemRequest,
   ValidateSystemResult,
 } from '../ForkCoreClient'
@@ -48,6 +51,12 @@ import { discardHomoclinicInitialApproximationPoint } from '../../system/continu
 type WorkerRequest =
   | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
   | { id: string; kind: 'sampleMap1DFunction'; payload: SampleMap1DFunctionRequest }
+  | { id: string; kind: 'computeEventSeriesFromOrbit'; payload: ComputeEventSeriesFromOrbitRequest }
+  | {
+      id: string
+      kind: 'computeEventSeriesFromSamples'
+      payload: ComputeEventSeriesFromSamplesRequest
+    }
   | { id: string; kind: 'computeIsocline'; payload: ComputeIsoclineRequest }
   | { id: string; kind: 'computeLyapunovExponents'; payload: LyapunovExponentsRequest }
   | { id: string; kind: 'computeCovariantLyapunovVectors'; payload: CovariantLyapunovRequest }
@@ -117,6 +126,7 @@ type WorkerResponse =
       result:
         | SimulateOrbitResult
         | SampleMap1DFunctionResult
+        | EventSeriesResult
         | ComputeIsoclineResult
         | number[]
         | CovariantLyapunovResponse
@@ -150,6 +160,10 @@ type WasmModule = {
     set_t: (t: number) => void
     get_t: () => number
     step: (dt: number) => void
+    compute_event_series_from_orbit?: (request: Record<string, unknown>) => EventSeriesResult
+    computeEventSeriesFromOrbit?: (request: Record<string, unknown>) => EventSeriesResult
+    compute_event_series_from_samples?: (request: Record<string, unknown>) => EventSeriesResult
+    computeEventSeriesFromSamples?: (request: Record<string, unknown>) => EventSeriesResult
     compute_isocline?: (
       expression: string,
       level: number,
@@ -589,6 +603,84 @@ async function runSampleMap1DFunction(
   }
 
   return { x: xValues, y: yValues }
+}
+
+async function runComputeEventSeriesFromOrbit(
+  request: ComputeEventSeriesFromOrbitRequest,
+  signal: AbortSignal
+): Promise<EventSeriesResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+  abortIfNeeded(signal)
+
+  const computeEventSeries =
+    system.compute_event_series_from_orbit ?? system.computeEventSeriesFromOrbit
+  if (typeof computeEventSeries !== 'function') {
+    throw new Error(
+      'Event-series computation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  const result = computeEventSeries.call(system, {
+    var_names: request.system.varNames,
+    param_names: request.system.paramNames,
+    initial_state: request.initialState,
+    start_time: request.startTime,
+    steps: request.steps,
+    dt: request.dt,
+    mode: request.mode,
+    event_expression: request.eventExpression,
+    event_level: request.eventLevel,
+    observable_expressions: request.observableExpressions,
+  })
+  abortIfNeeded(signal)
+  return result
+}
+
+async function runComputeEventSeriesFromSamples(
+  request: ComputeEventSeriesFromSamplesRequest,
+  signal: AbortSignal
+): Promise<EventSeriesResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = new wasm.WasmSystem(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.solver,
+    request.system.type
+  )
+  abortIfNeeded(signal)
+
+  const computeEventSeries =
+    system.compute_event_series_from_samples ?? system.computeEventSeriesFromSamples
+  if (typeof computeEventSeries !== 'function') {
+    throw new Error(
+      'Event-series computation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  const result = computeEventSeries.call(system, {
+    var_names: request.system.varNames,
+    param_names: request.system.paramNames,
+    samples: request.samples.map((sample) => ({
+      state: sample.state,
+      time: sample.time ?? null,
+    })),
+    mode: request.mode,
+    event_expression: request.eventExpression,
+    event_level: request.eventLevel,
+    observable_expressions: request.observableExpressions,
+  })
+  abortIfNeeded(signal)
+  return result
 }
 
 async function runComputeIsocline(
@@ -1730,6 +1822,20 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     if (message.kind === 'sampleMap1DFunction') {
       const result = await runSampleMap1DFunction(message.payload, controller.signal)
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'computeEventSeriesFromOrbit') {
+      const result = await runComputeEventSeriesFromOrbit(message.payload, controller.signal)
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'computeEventSeriesFromSamples') {
+      const result = await runComputeEventSeriesFromSamples(message.payload, controller.signal)
       const response: WorkerResponse = { id: message.id, ok: true, result }
       ctx.postMessage(response)
       return

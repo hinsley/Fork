@@ -1,5 +1,9 @@
 import type {
+  AnalysisAxisSpec,
   AnalysisObject,
+  AnalysisViewport,
+  AnalysisViewportAdvanced,
+  AnalysisEventSpec,
   BifurcationAxis,
   BifurcationDiagram,
   ContinuationObject,
@@ -56,6 +60,95 @@ const DEFAULT_SCENE: Scene = {
   axisVariables: null,
   selectedNodeIds: [],
   display: 'all',
+}
+
+const DEFAULT_ANALYSIS_EVENT: AnalysisEventSpec = {
+  mode: 'cross_up',
+  source: {
+    kind: 'custom',
+    expression: 'x',
+  },
+  level: 0,
+}
+
+const DEFAULT_ANALYSIS_ADVANCED: AnalysisViewportAdvanced = {
+  skipHits: 0,
+  hitStride: 1,
+  maxHits: 2000,
+  connectPoints: false,
+}
+
+function defaultObservableAxis(
+  expression: string,
+  hitOffset: number,
+  label?: string
+): AnalysisAxisSpec {
+  return {
+    kind: 'observable',
+    expression,
+    hitOffset,
+    label,
+  }
+}
+
+function defaultReturnMapViewport(
+  config: SystemConfig,
+  id: string,
+  name: string
+): AnalysisViewport {
+  const firstVar = config.varNames[0] ?? 'x'
+  const remaining = config.varNames.filter((varName) => varName !== firstVar)
+  if (config.type === 'map') {
+    return {
+      id,
+      name,
+      kind: 'return_map',
+      axisRanges: {},
+      viewRevision: 0,
+      sourceNodeIds: [],
+      display: 'all',
+      event: {
+        ...DEFAULT_ANALYSIS_EVENT,
+        mode: 'every_iterate',
+        source: {
+          kind: 'custom',
+          expression: firstVar,
+        },
+      },
+      axes: {
+        x: defaultObservableAxis(firstVar, 0, `${firstVar}@n`),
+        y: defaultObservableAxis(firstVar, 1, `${firstVar}@n+1`),
+        z: null,
+      },
+      advanced: structuredClone(DEFAULT_ANALYSIS_ADVANCED),
+    }
+  }
+
+  const xExpression = remaining[0] ?? firstVar
+  const yExpression = remaining[1] ?? remaining[0] ?? firstVar
+  const yOffset: -1 | 0 | 1 = remaining.length >= 2 ? 0 : 1
+  return {
+    id,
+    name,
+    kind: 'return_map',
+    axisRanges: {},
+    viewRevision: 0,
+    sourceNodeIds: [],
+    display: 'all',
+    event: {
+      ...DEFAULT_ANALYSIS_EVENT,
+      source: {
+        kind: 'custom',
+        expression: firstVar,
+      },
+    },
+    axes: {
+      x: defaultObservableAxis(xExpression, 0, `${xExpression}@n`),
+      y: defaultObservableAxis(yExpression, yOffset, `${yExpression}@${yOffset === 0 ? 'n' : 'n+1'}`),
+      z: null,
+    },
+    advanced: structuredClone(DEFAULT_ANALYSIS_ADVANCED),
+  }
 }
 
 export const DEFAULT_RENDER: RenderStyle = {
@@ -128,6 +221,7 @@ export function createSystem(args: { name: string; config?: SystemConfig }): Sys
     branches: {},
     scenes: [],
     bifurcationDiagrams: [],
+    analysisViewports: [],
     ui: structuredClone(DEFAULT_UI),
     updatedAt: nowIso(),
   }
@@ -324,6 +418,26 @@ export function addBifurcationDiagram(
   return { system: next, nodeId: node.id }
 }
 
+export function addAnalysisViewport(
+  system: System,
+  name: string
+): { system: System; nodeId: string } {
+  const next = structuredClone(system)
+  const analysisId = makeId('analysis')
+  const node = createTreeNode({
+    id: analysisId,
+    name,
+    kind: 'analysis',
+    objectType: 'analysis',
+    parentId: null,
+  })
+  next.nodes[node.id] = node
+  next.rootIds.push(node.id)
+  next.analysisViewports.push(defaultReturnMapViewport(next.config, analysisId, name))
+  next.updatedAt = nowIso()
+  return { system: next, nodeId: node.id }
+}
+
 export function renameNode(system: System, nodeId: string, newName: string): System {
   const node = system.nodes[nodeId]
   if (!node) return system
@@ -376,6 +490,16 @@ export function renameNode(system: System, nodeId: string, newName: string): Sys
     }
   }
 
+  const analysisIndex = system.analysisViewports.findIndex((entry) => entry.id === nodeId)
+  let nextAnalysisViewports = system.analysisViewports
+  if (analysisIndex !== -1) {
+    nextAnalysisViewports = [...system.analysisViewports]
+    nextAnalysisViewports[analysisIndex] = {
+      ...nextAnalysisViewports[analysisIndex],
+      name: newName,
+    }
+  }
+
   return {
     ...system,
     index: nextIndex,
@@ -384,6 +508,7 @@ export function renameNode(system: System, nodeId: string, newName: string): Sys
     branches: nextBranches,
     scenes: nextScenes,
     bifurcationDiagrams: nextBifurcationDiagrams,
+    analysisViewports: nextAnalysisViewports,
     updatedAt,
   }
 }
@@ -497,9 +622,164 @@ function branchParentKey(parentObjectId: string | undefined, parentObjectName: s
   return `name:${parentObjectName}`
 }
 
+function isAnalysisSourceNode(
+  system: Pick<System, 'nodes' | 'branches' | 'index'>,
+  nodeId: string
+): boolean {
+  const node = system.nodes[nodeId]
+  if (!node) return false
+  if (node.kind === 'object') {
+    return node.objectType === 'orbit' || node.objectType === 'limit_cycle'
+  }
+  if (node.kind !== 'branch') return false
+  const branchType =
+    system.branches[nodeId]?.branchType ?? system.index.branches[nodeId]?.branchType ?? null
+  return branchType === 'eq_manifold_1d'
+}
+
+function normalizeAnalysisAxis(axis: AnalysisAxisSpec | null | undefined): AnalysisAxisSpec {
+  if (!axis || axis.kind === 'hit_index' || axis.kind === 'delta_time') {
+    return axis?.kind === 'delta_time'
+      ? {
+          kind: 'delta_time',
+          hitOffset:
+            typeof axis.hitOffset === 'number' && Number.isFinite(axis.hitOffset)
+              ? Math.trunc(axis.hitOffset)
+              : 0,
+          label: axis.label ?? null,
+        }
+      : axis?.kind === 'hit_index'
+        ? { kind: 'hit_index', label: axis.label ?? null }
+        : defaultObservableAxis('x', 0)
+  }
+  const hitOffset =
+    typeof axis.hitOffset === 'number' && Number.isFinite(axis.hitOffset)
+      ? Math.trunc(axis.hitOffset)
+      : 0
+  return {
+    kind: 'observable',
+    expression: typeof axis.expression === 'string' ? axis.expression : 'x',
+    hitOffset,
+    label: axis.label ?? null,
+  }
+}
+
+function normalizeAnalysisEventSource(
+  system: Pick<System, 'config'>,
+  source: AnalysisEventSpec['source'] | null | undefined,
+  legacyExpression?: unknown
+): AnalysisEventSpec['source'] {
+  const firstVar = system.config.varNames[0] ?? 'x'
+  if (source?.kind === 'custom') {
+    return {
+      kind: 'custom',
+      expression:
+        typeof source.expression === 'string'
+          ? source.expression
+          : typeof legacyExpression === 'string'
+            ? legacyExpression
+            : firstVar,
+    }
+  }
+  if (
+    source?.kind === 'flow_derivative' &&
+    system.config.type === 'flow' &&
+    system.config.varNames.includes(source.variableName)
+  ) {
+    return {
+      kind: 'flow_derivative',
+      variableName: source.variableName,
+    }
+  }
+  if (
+    source?.kind === 'map_increment' &&
+    system.config.type === 'map' &&
+    system.config.varNames.includes(source.variableName)
+  ) {
+    return {
+      kind: 'map_increment',
+      variableName: source.variableName,
+    }
+  }
+  if (typeof legacyExpression === 'string') {
+    return {
+      kind: 'custom',
+      expression: legacyExpression,
+    }
+  }
+  return {
+    kind: 'custom',
+    expression: firstVar,
+  }
+}
+
+function normalizeAnalysisAdvanced(
+  advanced: Partial<AnalysisViewportAdvanced> | null | undefined
+): AnalysisViewportAdvanced {
+  const skipHits =
+    typeof advanced?.skipHits === 'number' && Number.isFinite(advanced.skipHits)
+      ? Math.max(0, Math.floor(advanced.skipHits))
+      : DEFAULT_ANALYSIS_ADVANCED.skipHits
+  const hitStride =
+    typeof advanced?.hitStride === 'number' && Number.isFinite(advanced.hitStride)
+      ? Math.max(1, Math.floor(advanced.hitStride))
+      : DEFAULT_ANALYSIS_ADVANCED.hitStride
+  const maxHits =
+    typeof advanced?.maxHits === 'number' && Number.isFinite(advanced.maxHits)
+      ? Math.max(1, Math.floor(advanced.maxHits))
+      : DEFAULT_ANALYSIS_ADVANCED.maxHits
+  return {
+    skipHits,
+    hitStride,
+    maxHits,
+    connectPoints: Boolean(advanced?.connectPoints),
+  }
+}
+
+function normalizeAnalysisViewport(
+  system: Pick<System, 'config' | 'nodes' | 'branches' | 'index'>,
+  viewport: AnalysisViewport
+): AnalysisViewport {
+  const fallback = defaultReturnMapViewport(system.config, viewport.id, viewport.name)
+  const legacyEvent = viewport.event as (AnalysisEventSpec & { expression?: unknown }) | undefined
+  const sourceNodeIds = Array.isArray(viewport.sourceNodeIds)
+    ? viewport.sourceNodeIds.filter((nodeId) => isAnalysisSourceNode(system, nodeId))
+    : []
+  const event = {
+    mode:
+      viewport.event?.mode === 'every_iterate' ||
+      viewport.event?.mode === 'cross_up' ||
+      viewport.event?.mode === 'cross_down' ||
+      viewport.event?.mode === 'cross_either'
+        ? viewport.event.mode
+        : fallback.event.mode,
+    source: normalizeAnalysisEventSource(system, viewport.event?.source, legacyEvent?.expression),
+    level:
+      typeof viewport.event?.level === 'number' && Number.isFinite(viewport.event.level)
+        ? viewport.event.level
+        : fallback.event.level,
+  }
+  return {
+    ...fallback,
+    ...viewport,
+    sourceNodeIds,
+    display: viewport.display === 'selection' ? 'selection' : 'all',
+    axisRanges: viewport.axisRanges ?? {},
+    viewRevision: viewport.viewRevision ?? 0,
+    event,
+    axes: {
+      x: normalizeAnalysisAxis(viewport.axes?.x),
+      y: normalizeAnalysisAxis(viewport.axes?.y),
+      z: viewport.axes?.z ? normalizeAnalysisAxis(viewport.axes.z) : null,
+    },
+    advanced: normalizeAnalysisAdvanced(viewport.advanced),
+  }
+}
+
 function duplicateNodeId(kind: TreeNode['kind']): string {
   if (kind === 'scene') return makeId('scene')
   if (kind === 'diagram') return makeId('diagram')
+  if (kind === 'analysis') return makeId('analysis')
   return makeId('node')
 }
 
@@ -518,9 +798,13 @@ export function duplicateNode(
   const sourceDiagramsById = new Map(
     system.bifurcationDiagrams.map((diagram) => [diagram.id, diagram])
   )
+  const sourceAnalysisById = new Map(
+    system.analysisViewports.map((viewport) => [viewport.id, viewport])
+  )
   const objectNames = new Set(Object.values(next.objects).map((obj) => obj.name))
   const sceneNames = new Set(next.scenes.map((scene) => scene.name))
   const diagramNames = new Set(next.bifurcationDiagrams.map((diagram) => diagram.name))
+  const analysisNames = new Set(next.analysisViewports.map((viewport) => viewport.name))
 
   const rootName =
     sourceRoot.kind === 'object'
@@ -529,7 +813,9 @@ export function duplicateNode(
         ? duplicateName(sourceRoot.name, sceneNames)
         : sourceRoot.kind === 'diagram'
           ? duplicateName(sourceRoot.name, diagramNames)
-          : sourceRoot.name
+          : sourceRoot.kind === 'analysis'
+            ? duplicateName(sourceRoot.name, analysisNames)
+            : sourceRoot.name
 
   const cloneSubtree = (
     sourceId: string,
@@ -548,6 +834,8 @@ export function duplicateNode(
       nextName = reserveUniqueName(sourceNode.name, sceneNames)
     } else if (sourceNode.kind === 'diagram') {
       nextName = reserveUniqueName(sourceNode.name, diagramNames)
+    } else if (sourceNode.kind === 'analysis') {
+      nextName = reserveUniqueName(sourceNode.name, analysisNames)
     }
 
     const newId = duplicateNodeId(sourceNode.kind)
@@ -600,6 +888,14 @@ export function duplicateNode(
       if (!diagram) return null
       next.bifurcationDiagrams.push({
         ...structuredClone(diagram),
+        id: newId,
+        name: nextName,
+      })
+    } else if (sourceNode.kind === 'analysis') {
+      const viewport = sourceAnalysisById.get(sourceId)
+      if (!viewport) return null
+      next.analysisViewports.push({
+        ...structuredClone(viewport),
         id: newId,
         name: nextName,
       })
@@ -768,6 +1064,12 @@ export function removeNode(system: System, nodeId: string): System {
   next.bifurcationDiagrams = next.bifurcationDiagrams.filter(
     (diagram) => !removalSet.has(diagram.id)
   )
+  next.analysisViewports = next.analysisViewports
+    .filter((viewport) => !removalSet.has(viewport.id))
+    .map((viewport) => ({
+      ...viewport,
+      sourceNodeIds: viewport.sourceNodeIds.filter((id) => !removalSet.has(id)),
+    }))
 
   next.scenes = next.scenes.map((scene) => ({
     ...scene,
@@ -922,6 +1224,25 @@ export function updateBifurcationDiagram(
   }
 }
 
+export function updateAnalysisViewport(
+  system: System,
+  viewportId: string,
+  update: Partial<Omit<AnalysisViewport, 'id' | 'name' | 'kind'>>
+): System {
+  const index = system.analysisViewports.findIndex((entry) => entry.id === viewportId)
+  if (index === -1) return system
+  const nextViewports = [...system.analysisViewports]
+  nextViewports[index] = normalizeAnalysisViewport(system, {
+    ...nextViewports[index],
+    ...update,
+  })
+  return {
+    ...system,
+    analysisViewports: nextViewports,
+    updatedAt: nowIso(),
+  }
+}
+
 export function updateSystem(system: System, config: SystemConfig): System {
   const next = structuredClone(system)
   const previousName = next.config.name
@@ -1032,6 +1353,7 @@ export function normalizeSystem(system: System): System {
     index?: SystemIndex
     scenes?: Scene[]
     bifurcationDiagrams?: BifurcationDiagram[]
+    analysisViewports?: AnalysisViewport[]
     ui?: SystemUiState & { layout?: Partial<SystemLayout> }
   }
   const existingIndex = structuredClone(next.index ?? emptySystemIndex())
@@ -1087,6 +1409,14 @@ export function normalizeSystem(system: System): System {
     })
   }
 
+  if (!next.analysisViewports) {
+    next.analysisViewports = []
+  } else {
+    next.analysisViewports = next.analysisViewports.map((viewport) =>
+      normalizeAnalysisViewport(next as System, viewport)
+    )
+  }
+
   const ensureRootNode = (
     id: string,
     name: string,
@@ -1115,6 +1445,9 @@ export function normalizeSystem(system: System): System {
 
   next.bifurcationDiagrams.forEach((diagram) => {
     ensureRootNode(diagram.id, diagram.name, 'diagram', 'bifurcation')
+  })
+  next.analysisViewports.forEach((viewport) => {
+    ensureRootNode(viewport.id, viewport.name, 'analysis', 'analysis')
   })
 
   const objectNameToNodeId = new Map<string, string>()
