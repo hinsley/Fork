@@ -64,7 +64,10 @@ const DEFAULT_SCENE: Scene = {
 
 const DEFAULT_ANALYSIS_EVENT: AnalysisEventSpec = {
   mode: 'cross_up',
-  expression: 'x',
+  source: {
+    kind: 'custom',
+    expression: 'x',
+  },
   level: 0,
 }
 
@@ -77,7 +80,7 @@ const DEFAULT_ANALYSIS_ADVANCED: AnalysisViewportAdvanced = {
 
 function defaultObservableAxis(
   expression: string,
-  hitOffset: -1 | 0 | 1,
+  hitOffset: number,
   label?: string
 ): AnalysisAxisSpec {
   return {
@@ -107,7 +110,10 @@ function defaultReturnMapViewport(
       event: {
         ...DEFAULT_ANALYSIS_EVENT,
         mode: 'every_iterate',
-        expression: firstVar,
+        source: {
+          kind: 'custom',
+          expression: firstVar,
+        },
       },
       axes: {
         x: defaultObservableAxis(firstVar, 0, `${firstVar}@n`),
@@ -131,7 +137,10 @@ function defaultReturnMapViewport(
     display: 'all',
     event: {
       ...DEFAULT_ANALYSIS_EVENT,
-      expression: firstVar,
+      source: {
+        kind: 'custom',
+        expression: firstVar,
+      },
     },
     axes: {
       x: defaultObservableAxis(xExpression, 0, `${xExpression}@n`),
@@ -631,17 +640,76 @@ function isAnalysisSourceNode(
 function normalizeAnalysisAxis(axis: AnalysisAxisSpec | null | undefined): AnalysisAxisSpec {
   if (!axis || axis.kind === 'hit_index' || axis.kind === 'delta_time') {
     return axis?.kind === 'delta_time'
-      ? { kind: 'delta_time', label: axis.label ?? null }
+      ? {
+          kind: 'delta_time',
+          hitOffset:
+            typeof axis.hitOffset === 'number' && Number.isFinite(axis.hitOffset)
+              ? Math.trunc(axis.hitOffset)
+              : 0,
+          label: axis.label ?? null,
+        }
       : axis?.kind === 'hit_index'
         ? { kind: 'hit_index', label: axis.label ?? null }
         : defaultObservableAxis('x', 0)
   }
-  const hitOffset = axis.hitOffset === -1 || axis.hitOffset === 1 ? axis.hitOffset : 0
+  const hitOffset =
+    typeof axis.hitOffset === 'number' && Number.isFinite(axis.hitOffset)
+      ? Math.trunc(axis.hitOffset)
+      : 0
   return {
     kind: 'observable',
-    expression: axis.expression || 'x',
+    expression: typeof axis.expression === 'string' ? axis.expression : 'x',
     hitOffset,
     label: axis.label ?? null,
+  }
+}
+
+function normalizeAnalysisEventSource(
+  system: Pick<System, 'config'>,
+  source: AnalysisEventSpec['source'] | null | undefined,
+  legacyExpression?: unknown
+): AnalysisEventSpec['source'] {
+  const firstVar = system.config.varNames[0] ?? 'x'
+  if (source?.kind === 'custom') {
+    return {
+      kind: 'custom',
+      expression:
+        typeof source.expression === 'string'
+          ? source.expression
+          : typeof legacyExpression === 'string'
+            ? legacyExpression
+            : firstVar,
+    }
+  }
+  if (
+    source?.kind === 'flow_derivative' &&
+    system.config.type === 'flow' &&
+    system.config.varNames.includes(source.variableName)
+  ) {
+    return {
+      kind: 'flow_derivative',
+      variableName: source.variableName,
+    }
+  }
+  if (
+    source?.kind === 'map_increment' &&
+    system.config.type === 'map' &&
+    system.config.varNames.includes(source.variableName)
+  ) {
+    return {
+      kind: 'map_increment',
+      variableName: source.variableName,
+    }
+  }
+  if (typeof legacyExpression === 'string') {
+    return {
+      kind: 'custom',
+      expression: legacyExpression,
+    }
+  }
+  return {
+    kind: 'custom',
+    expression: firstVar,
   }
 }
 
@@ -673,6 +741,7 @@ function normalizeAnalysisViewport(
   viewport: AnalysisViewport
 ): AnalysisViewport {
   const fallback = defaultReturnMapViewport(system.config, viewport.id, viewport.name)
+  const legacyEvent = viewport.event as (AnalysisEventSpec & { expression?: unknown }) | undefined
   const sourceNodeIds = Array.isArray(viewport.sourceNodeIds)
     ? viewport.sourceNodeIds.filter((nodeId) => isAnalysisSourceNode(system, nodeId))
     : []
@@ -684,7 +753,7 @@ function normalizeAnalysisViewport(
       viewport.event?.mode === 'cross_either'
         ? viewport.event.mode
         : fallback.event.mode,
-    expression: viewport.event?.expression || fallback.event.expression,
+    source: normalizeAnalysisEventSource(system, viewport.event?.source, legacyEvent?.expression),
     level:
       typeof viewport.event?.level === 'number' && Number.isFinite(viewport.event.level)
         ? viewport.event.level

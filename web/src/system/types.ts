@@ -581,7 +581,7 @@ export type EventSeriesMode = 'every_iterate' | 'cross_up' | 'cross_down' | 'cro
 
 export interface AnalysisEventSpec {
   mode: EventSeriesMode
-  expression: string
+  source: IsoclineSource
   level: number
 }
 
@@ -590,7 +590,7 @@ export type AnalysisAxisSpec =
       kind: 'observable'
       expression: string
       label?: string | null
-      hitOffset: -1 | 0 | 1
+      hitOffset: number
     }
   | {
       kind: 'hit_index'
@@ -599,6 +599,7 @@ export type AnalysisAxisSpec =
   | {
       kind: 'delta_time'
       label?: string | null
+      hitOffset: number
     }
 
 export interface AnalysisViewportAdvanced {

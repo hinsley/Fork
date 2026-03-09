@@ -1,4 +1,11 @@
-import type { AnalysisAxisSpec, AnalysisViewport, System } from '../system/types'
+import type {
+  AnalysisAxisSpec,
+  AnalysisEventSpec,
+  AnalysisViewport,
+  IsoclineSource,
+  System,
+  SystemConfig,
+} from '../system/types'
 
 export type AnalysisSourceEntry = {
   id: string
@@ -7,9 +14,36 @@ export type AnalysisSourceEntry = {
   visible: boolean
 }
 
-function formatObservableOffset(hitOffset: -1 | 0 | 1): string {
+export function formatAnalysisHitOffset(hitOffset: number): string {
   if (hitOffset === 0) return 'n'
   return hitOffset > 0 ? `n+${hitOffset}` : `n${hitOffset}`
+}
+
+export function resolveAnalysisSourceExpression(
+  systemConfig: SystemConfig,
+  source: IsoclineSource
+): string {
+  if (source.kind === 'custom') return source.expression
+  const index = systemConfig.varNames.indexOf(source.variableName)
+  if (index < 0 || index >= systemConfig.equations.length) return ''
+  if (source.kind === 'flow_derivative') {
+    return systemConfig.equations[index] ?? ''
+  }
+  return `(${systemConfig.equations[index] ?? ''}) - (${source.variableName})`
+}
+
+export function resolveAnalysisEventExpression(
+  systemConfig: SystemConfig,
+  event: AnalysisEventSpec
+): string {
+  if (event.mode === 'every_iterate') {
+    return systemConfig.varNames[0] ?? systemConfig.paramNames[0] ?? '0'
+  }
+  return resolveAnalysisSourceExpression(systemConfig, event.source)
+}
+
+export function normalizeAnalysisExpressionError(message: string): string {
+  return message.replace(/^Event expression error:\s*/i, '').trim()
 }
 
 function formatSourceTypeLabel(system: System, nodeId: string): string {
@@ -82,8 +116,8 @@ export function resolveAnalysisAxisLabel(axis: AnalysisAxisSpec): string {
   const trimmedLabel = axis.label?.trim()
   if (trimmedLabel) return trimmedLabel
   if (axis.kind === 'observable') {
-    return `${axis.expression}@${formatObservableOffset(axis.hitOffset)}`
+    return `${axis.expression}@${formatAnalysisHitOffset(axis.hitOffset)}`
   }
   if (axis.kind === 'hit_index') return 'Hit index'
-  return 'Delta t'
+  return `Delta t@${formatAnalysisHitOffset(axis.hitOffset)}`
 }

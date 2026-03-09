@@ -715,7 +715,7 @@ describe('system model', () => {
       viewRevision: 6,
       event: {
         mode: 'cross_down',
-        expression: 'mu',
+        source: { kind: 'custom', expression: 'mu' },
         level: 0.25,
       },
       axes: {
@@ -752,7 +752,7 @@ describe('system model', () => {
       viewRevision: 6,
       event: {
         mode: 'cross_down',
-        expression: 'mu',
+        source: { kind: 'custom', expression: 'mu' },
         level: 0.25,
       },
       axes: {

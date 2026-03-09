@@ -3,6 +3,7 @@ import { addAnalysisViewport, addBranch, addObject, createSystem } from '../syst
 import type { ContinuationObject, LimitCycleObject, OrbitObject } from '../system/types'
 import {
   collectAnalysisSourceEntries,
+  resolveAnalysisEventExpression,
   resolveAnalysisAxisLabel,
   resolveAnalysisSourceIds,
 } from './analysisViewportUtils'
@@ -117,10 +118,40 @@ describe('analysisViewportUtils', () => {
       resolveAnalysisAxisLabel({
         kind: 'observable',
         expression: 'sigma',
-        hitOffset: 1,
+        hitOffset: 2,
       })
-    ).toBe('sigma@n+1')
+    ).toBe('sigma@n+2')
     expect(resolveAnalysisAxisLabel({ kind: 'hit_index' })).toBe('Hit index')
-    expect(resolveAnalysisAxisLabel({ kind: 'delta_time' })).toBe('Delta t')
+    expect(resolveAnalysisAxisLabel({ kind: 'delta_time', hitOffset: -1 })).toBe('Delta t@n-1')
+  })
+
+  it('resolves derived event expressions and every-iterate fallbacks', () => {
+    const system = createSystem({
+      name: 'Analysis_Event_Expressions',
+      config: {
+        name: 'Analysis_Event_Expressions',
+        equations: ['sigma * (y - x)', 'x * (rho - z) - y', 'x * y - beta * z'],
+        params: [10, 28, 8 / 3],
+        paramNames: ['sigma', 'rho', 'beta'],
+        varNames: ['x', 'y', 'z'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+
+    expect(
+      resolveAnalysisEventExpression(system.config, {
+        mode: 'cross_up',
+        source: { kind: 'flow_derivative', variableName: 'x' },
+        level: 0,
+      })
+    ).toBe('sigma * (y - x)')
+    expect(
+      resolveAnalysisEventExpression(system.config, {
+        mode: 'every_iterate',
+        source: { kind: 'custom', expression: '' },
+        level: 0,
+      })
+    ).toBe('x')
   })
 })

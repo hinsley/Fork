@@ -132,6 +132,14 @@ type InspectorDetailsPanelProps = {
     id: string,
     update: Partial<Omit<AnalysisViewport, 'id' | 'name'>>
   ) => void
+  onValidateAnalysisExpression?: (
+    request: {
+      system: SystemConfig
+      expression: string
+      role: 'event' | 'observable'
+    },
+    opts?: { signal?: AbortSignal }
+  ) => Promise<void>
   onUpdateBifurcationDiagram: (
     id: string,
     update: Partial<Omit<BifurcationDiagram, 'id' | 'name'>>
@@ -1859,6 +1867,7 @@ export function InspectorDetailsPanel({
   onComputeIsocline = async () => null,
   onUpdateScene,
   onUpdateAnalysisViewport,
+  onValidateAnalysisExpression,
   onUpdateBifurcationDiagram,
   onSetLimitCycleRenderTarget,
   onUpdateSystem,
@@ -10453,6 +10462,7 @@ export function InspectorDetailsPanel({
               system={system}
               viewport={analysis}
               onUpdateAnalysisViewport={onUpdateAnalysisViewport ?? (() => undefined)}
+              onValidateAnalysisExpression={onValidateAnalysisExpression}
             />
           ) : null}
 

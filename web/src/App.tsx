@@ -160,7 +160,7 @@ function App() {
   const createAnalysis = async (targetId?: string | null) => {
     if (!system) return
     const names = system.analysisViewports.map((viewport) => viewport.name)
-    const name = nextObjectName('Return_Map', names)
+    const name = nextObjectName('Event_Map', names)
     await actions.addAnalysisViewport(name, targetId)
   }
 
@@ -293,6 +293,7 @@ function App() {
         onUpdateObjectFrozenVariables={actions.updateObjectFrozenVariables}
         onUpdateScene={actions.updateScene}
         onUpdateAnalysisViewport={actions.updateAnalysisViewport}
+        onValidateAnalysisExpression={actions.validateAnalysisExpression}
         onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
         onSetLimitCycleRenderTarget={actions.setLimitCycleRenderTarget}
         onUpdateSystem={actions.updateSystem}
@@ -461,6 +462,7 @@ function App() {
                 onComputeIsocline={actions.computeIsocline}
                 onUpdateScene={actions.updateScene}
                 onUpdateAnalysisViewport={actions.updateAnalysisViewport}
+                onValidateAnalysisExpression={actions.validateAnalysisExpression}
                 onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
                 onSetLimitCycleRenderTarget={actions.setLimitCycleRenderTarget}
                 onUpdateSystem={actions.updateSystem}

@@ -1,8 +1,12 @@
-import { useMemo, useState } from 'react'
-import type { AnalysisAxisSpec, AnalysisViewport, System } from '../system/types'
+import { useEffect, useMemo, useState } from 'react'
+import type { AnalysisAxisSpec, AnalysisViewport, System, SystemConfig } from '../system/types'
 import {
   collectAnalysisSourceEntries,
+  formatAnalysisHitOffset,
+  normalizeAnalysisExpressionError,
   resolveAnalysisAxisLabel,
+  resolveAnalysisEventExpression,
+  resolveAnalysisSourceExpression,
 } from '../analysis/analysisViewportUtils'
 
 type AnalysisViewportInspectorProps = {
@@ -12,24 +16,31 @@ type AnalysisViewportInspectorProps = {
     id: string,
     update: Partial<Omit<AnalysisViewport, 'id' | 'name'>>
   ) => void
+  onValidateAnalysisExpression?: (
+    request: {
+      system: SystemConfig
+      expression: string
+      role: 'event' | 'observable'
+    },
+    opts?: { signal?: AbortSignal }
+  ) => Promise<void>
 }
 
-function defaultObservableAxis(system: System, hitOffset: -1 | 0 | 1): AnalysisAxisSpec {
+type AxisKey = 'x' | 'y' | 'z'
+type AxisErrors = Record<AxisKey, string | null>
+
+function defaultObservableAxis(system: System, hitOffset: number): AnalysisAxisSpec {
   const expression = system.config.varNames[0] ?? system.config.paramNames[0] ?? 'x'
-  return {
-    kind: 'observable',
-    expression,
-    hitOffset,
-    label: null,
-  }
+  return { kind: 'observable', expression, hitOffset, label: null }
 }
 
 function axisKindValue(axis: AnalysisAxisSpec | null | undefined): string {
-  if (!axis) return 'none'
-  return axis.kind
+  return axis?.kind ?? 'none'
 }
 
-function eventModeOptions(system: System): Array<{ value: AnalysisViewport['event']['mode']; label: string }> {
+function eventModeOptions(
+  system: System
+): Array<{ value: AnalysisViewport['event']['mode']; label: string }> {
   const options: Array<{ value: AnalysisViewport['event']['mode']; label: string }> = [
     { value: 'cross_up', label: 'Crossing up' },
     { value: 'cross_down', label: 'Crossing down' },
@@ -41,12 +52,24 @@ function eventModeOptions(system: System): Array<{ value: AnalysisViewport['even
   return options
 }
 
+function primaryVariable(system: System): string {
+  return system.config.varNames[0] ?? ''
+}
+
+function parseInteger(value: string, fallback = 0): number {
+  const next = Number(value)
+  return Number.isFinite(next) ? Math.trunc(next) : fallback
+}
+
 export function AnalysisViewportInspector({
   system,
   viewport,
   onUpdateAnalysisViewport,
+  onValidateAnalysisExpression,
 }: AnalysisViewportInspectorProps) {
   const [sourceSearch, setSourceSearch] = useState('')
+  const [eventError, setEventError] = useState<string | null>(null)
+  const [axisErrors, setAxisErrors] = useState<AxisErrors>({ x: null, y: null, z: null })
   const sourceEntries = useMemo(() => collectAnalysisSourceEntries(system), [system])
   const selectedSourceSet = useMemo(
     () => new Set(viewport.sourceNodeIds),
@@ -66,38 +89,110 @@ export function AnalysisViewportInspector({
     () => sourceEntries.filter((entry) => selectedSourceSet.has(entry.id)),
     [selectedSourceSet, sourceEntries]
   )
+  const eventExpression = useMemo(
+    () => resolveAnalysisEventExpression(system.config, viewport.event),
+    [system.config, viewport.event]
+  )
+  const eventSourceKind = viewport.event.source.kind
+  const eventSourceVariable = useMemo(() => {
+    if (viewport.event.source.kind === 'custom') return primaryVariable(system)
+    return system.config.varNames.includes(viewport.event.source.variableName)
+      ? viewport.event.source.variableName
+      : primaryVariable(system)
+  }, [system, viewport.event.source])
+  const resolvedSourceExpression = useMemo(
+    () => resolveAnalysisSourceExpression(system.config, viewport.event.source),
+    [system.config, viewport.event.source]
+  )
 
-  const updateAxes = (update: Partial<AnalysisViewport['axes']>) => {
+  useEffect(() => {
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        let nextEventError: string | null = null
+        const nextAxisErrors: AxisErrors = { x: null, y: null, z: null }
+
+        if (viewport.event.mode !== 'every_iterate') {
+          if (eventExpression.trim().length === 0) {
+            nextEventError = 'Expression is required.'
+          } else if (onValidateAnalysisExpression) {
+            try {
+              await onValidateAnalysisExpression(
+                { system: system.config, expression: eventExpression, role: 'event' },
+                { signal: controller.signal }
+              )
+            } catch (error) {
+              if (!(error instanceof Error && error.name === 'AbortError')) {
+                nextEventError = normalizeAnalysisExpressionError(
+                  error instanceof Error ? error.message : String(error)
+                )
+              }
+            }
+          }
+        }
+
+        const axes: Array<[AxisKey, AnalysisAxisSpec | null | undefined]> = [
+          ['x', viewport.axes.x],
+          ['y', viewport.axes.y],
+          ['z', viewport.axes.z],
+        ]
+        for (const [key, axis] of axes) {
+          if (axis?.kind !== 'observable') continue
+          if (axis.expression.trim().length === 0) {
+            nextAxisErrors[key] = 'Expression is required.'
+            continue
+          }
+          if (!onValidateAnalysisExpression) continue
+          try {
+            await onValidateAnalysisExpression(
+              { system: system.config, expression: axis.expression, role: 'observable' },
+              { signal: controller.signal }
+            )
+          } catch (error) {
+            if (!(error instanceof Error && error.name === 'AbortError')) {
+              nextAxisErrors[key] = normalizeAnalysisExpressionError(
+                error instanceof Error ? error.message : String(error)
+              )
+            }
+          }
+        }
+
+        if (!controller.signal.aborted) {
+          setEventError(nextEventError)
+          setAxisErrors(nextAxisErrors)
+        }
+      })()
+    }, 150)
+
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [eventExpression, onValidateAnalysisExpression, system.config, viewport.axes, viewport.event])
+
+  const updateAxis = (key: AxisKey, nextAxis: AnalysisAxisSpec | null) => {
     onUpdateAnalysisViewport(viewport.id, {
       axes: {
         ...viewport.axes,
-        ...update,
+        [key]: nextAxis,
       },
     })
   }
 
-  const updateAxis = (
-    key: 'x' | 'y' | 'z',
-    nextAxis: AnalysisAxisSpec | null
-  ) => {
-    updateAxes({ [key]: nextAxis } as Partial<AnalysisViewport['axes']>)
-  }
-
   const renderAxisEditor = (
-    key: 'x' | 'y' | 'z',
+    key: AxisKey,
     title: string,
     axis: AnalysisAxisSpec | null,
     options?: { allowNone?: boolean }
   ) => {
     const allowNone = options?.allowNone ?? false
-    const kind = axisKindValue(axis)
     return (
       <div className="inspector-subsection" key={`analysis-axis-${key}`}>
         <h4 className="inspector-subheading">{title}</h4>
         <label>
           Axis value
           <select
-            value={kind}
+            value={axisKindValue(axis)}
             onChange={(event) => {
               const nextKind = event.target.value
               if (nextKind === 'none') {
@@ -109,12 +204,16 @@ export function AnalysisViewportInspector({
                 return
               }
               if (nextKind === 'delta_time') {
-                updateAxis(key, { kind: 'delta_time', label: axis?.label ?? null })
+                updateAxis(key, {
+                  kind: 'delta_time',
+                  hitOffset: axis?.kind === 'delta_time' ? axis.hitOffset : 0,
+                  label: axis?.label ?? null,
+                })
                 return
               }
               updateAxis(
                 key,
-                axis && axis.kind === 'observable'
+                axis?.kind === 'observable'
                   ? axis
                   : defaultObservableAxis(system, key === 'y' ? 1 : 0)
               )
@@ -143,30 +242,40 @@ export function AnalysisViewportInspector({
                   <input
                     value={axis.expression}
                     onChange={(event) =>
-                      updateAxis(key, {
-                        ...axis,
-                        expression: event.target.value,
-                      })
+                      updateAxis(key, { ...axis, expression: event.target.value })
                     }
                     placeholder="State or parameter expression"
+                    data-testid={`analysis-axis-expression-${key}`}
                   />
                 </label>
+                {axisErrors[key] ? (
+                  <div
+                    className="field-error"
+                    data-testid={`analysis-axis-expression-error-${key}`}
+                  >
+                    {axisErrors[key]}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+            {axis.kind === 'observable' || axis.kind === 'delta_time' ? (
+              <>
                 <label>
-                  Sampled hit
-                  <select
+                  Hit offset
+                  <input
+                    type="number"
+                    step={1}
                     value={axis.hitOffset}
                     onChange={(event) =>
                       updateAxis(key, {
                         ...axis,
-                        hitOffset: Number(event.target.value) as -1 | 0 | 1,
+                        hitOffset: parseInteger(event.target.value),
                       })
                     }
-                  >
-                    <option value={-1}>n-1</option>
-                    <option value={0}>n</option>
-                    <option value={1}>n+1</option>
-                  </select>
+                    data-testid={`analysis-axis-hit-offset-${key}`}
+                  />
                 </label>
+                <p className="empty-state">Using hit {formatAnalysisHitOffset(axis.hitOffset)}.</p>
               </>
             ) : null}
           </>
@@ -177,7 +286,7 @@ export function AnalysisViewportInspector({
 
   return (
     <div className="inspector-section">
-      <h3>Return / Event Map</h3>
+      <h3>Event Map</h3>
       <div className="inspector-subsection">
         <h4 className="inspector-subheading">Sources</h4>
         <label>
@@ -293,40 +402,122 @@ export function AnalysisViewportInspector({
             ))}
           </select>
         </label>
-        <label>
-          Event expression
-          <input
-            value={viewport.event.expression}
-            onChange={(event) =>
-              onUpdateAnalysisViewport(viewport.id, {
-                event: {
-                  ...viewport.event,
-                  expression: event.target.value,
-                },
-              })
-            }
-            placeholder="State or parameter expression"
-            data-testid="analysis-event-expression"
-          />
-        </label>
-        <label>
-          Event level
-          <input
-            type="number"
-            value={viewport.event.level}
-            onChange={(event) => {
-              const value = Number(event.target.value)
-              onUpdateAnalysisViewport(viewport.id, {
-                event: {
-                  ...viewport.event,
-                  level: Number.isFinite(value) ? value : 0,
-                },
-              })
-            }}
-            step="any"
-            data-testid="analysis-event-level"
-          />
-        </label>
+        {viewport.event.mode === 'every_iterate' ? (
+          <p className="empty-state">
+            Every iterate uses each landing iterate directly. Event expression and level are ignored
+            in this mode.
+          </p>
+        ) : (
+          <>
+            <label>
+              Source
+              <select
+                value={eventSourceKind}
+                onChange={(event) => {
+                  const nextKind = event.target.value as
+                    | 'custom'
+                    | 'flow_derivative'
+                    | 'map_increment'
+                  if (nextKind === 'custom') {
+                    onUpdateAnalysisViewport(viewport.id, {
+                      event: {
+                        ...viewport.event,
+                        source:
+                          viewport.event.source.kind === 'custom'
+                            ? viewport.event.source
+                            : { kind: 'custom', expression: resolvedSourceExpression },
+                      },
+                    })
+                    return
+                  }
+                  onUpdateAnalysisViewport(viewport.id, {
+                    event: {
+                      ...viewport.event,
+                      source: { kind: nextKind, variableName: eventSourceVariable },
+                    },
+                  })
+                }}
+                data-testid="analysis-event-source-kind"
+              >
+                <option value="custom">Custom expression</option>
+                {system.config.type === 'map' ? (
+                  <option value="map_increment">Map increment (x_n+1 - x_n)</option>
+                ) : (
+                  <option value="flow_derivative">Time derivative (dx/dt)</option>
+                )}
+              </select>
+            </label>
+            {eventSourceKind === 'custom' ? (
+              <label>
+                Expression
+                <input
+                  value={viewport.event.source.kind === 'custom' ? viewport.event.source.expression : ''}
+                  onChange={(event) =>
+                    onUpdateAnalysisViewport(viewport.id, {
+                      event: {
+                        ...viewport.event,
+                        source: { kind: 'custom', expression: event.target.value },
+                      },
+                    })
+                  }
+                  placeholder="State or parameter expression"
+                  data-testid="analysis-event-expression"
+                />
+              </label>
+            ) : (
+              <label>
+                Variable
+                <select
+                  value={eventSourceVariable}
+                  onChange={(event) =>
+                    onUpdateAnalysisViewport(viewport.id, {
+                      event: {
+                        ...viewport.event,
+                        source: {
+                          kind: eventSourceKind as 'flow_derivative' | 'map_increment',
+                          variableName: event.target.value,
+                        },
+                      },
+                    })
+                  }
+                  data-testid="analysis-event-source-variable"
+                >
+                  {system.config.varNames.map((name) => (
+                    <option key={`analysis-event-var-${name}`} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {eventError ? (
+              <div className="field-error" data-testid="analysis-event-expression-error">
+                {eventError}
+              </div>
+            ) : null}
+            <label>
+              Event level
+              <input
+                type="number"
+                value={viewport.event.level}
+                onChange={(event) => {
+                  const value = Number(event.target.value)
+                  onUpdateAnalysisViewport(viewport.id, {
+                    event: {
+                      ...viewport.event,
+                      level: Number.isFinite(value) ? value : 0,
+                    },
+                  })
+                }}
+                step="any"
+                data-testid="analysis-event-level"
+              />
+            </label>
+            <p className="empty-state" data-testid="analysis-event-resolved-expression">
+              f(x, p) = {eventExpression || '∅'}
+            </p>
+          </>
+        )}
       </div>
 
       <div className="inspector-subsection">

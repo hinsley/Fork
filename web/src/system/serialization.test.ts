@@ -40,7 +40,7 @@ describe('system serialization', () => {
       sourceNodeIds: [nodeId],
       event: {
         mode: 'cross_up',
-        expression: 'mu',
+        source: { kind: 'custom', expression: 'mu' },
         level: 0,
       },
       axes: {

@@ -1478,6 +1478,14 @@ type AppActions = {
     request: ComputeEventSeriesFromSamplesRequest,
     opts?: { signal?: AbortSignal }
   ) => Promise<EventSeriesResult>
+  validateAnalysisExpression: (
+    request: {
+      system: SystemConfig
+      expression: string
+      role: 'event' | 'observable'
+    },
+    opts?: { signal?: AbortSignal }
+  ) => Promise<void>
   computeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
   computeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
   computeLimitCycleFloquetModes: (request: LimitCycleFloquetModesRequest) => Promise<void>
@@ -2433,33 +2441,41 @@ export function AppProvider({
   )
 
   const computeEventSeriesFromOrbit = useCallback(
-    async (request: ComputeEventSeriesFromOrbitRequest, opts?: { signal?: AbortSignal }) => {
-      try {
-        return await client.computeEventSeriesFromOrbit(request, opts)
-      } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') {
-          throw err
-        }
-        const message = err instanceof Error ? err.message : String(err)
-        dispatch({ type: 'SET_ERROR', error: message })
-        throw err
-      }
-    },
+    async (request: ComputeEventSeriesFromOrbitRequest, opts?: { signal?: AbortSignal }) =>
+      await client.computeEventSeriesFromOrbit(request, opts),
     [client]
   )
 
   const computeEventSeriesFromSamples = useCallback(
-    async (request: ComputeEventSeriesFromSamplesRequest, opts?: { signal?: AbortSignal }) => {
-      try {
-        return await client.computeEventSeriesFromSamples(request, opts)
-      } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') {
-          throw err
-        }
-        const message = err instanceof Error ? err.message : String(err)
-        dispatch({ type: 'SET_ERROR', error: message })
-        throw err
+    async (request: ComputeEventSeriesFromSamplesRequest, opts?: { signal?: AbortSignal }) =>
+      await client.computeEventSeriesFromSamples(request, opts),
+    [client]
+  )
+
+  const validateAnalysisExpression = useCallback(
+    async (
+      request: {
+        system: SystemConfig
+        expression: string
+        role: 'event' | 'observable'
+      },
+      opts?: { signal?: AbortSignal }
+    ) => {
+      if (request.expression.trim().length === 0) {
+        throw new Error('Expression is required.')
       }
+      await client.computeEventSeriesFromSamples(
+        {
+          system: request.system,
+          samples: [],
+          mode: 'cross_up',
+          eventExpression: request.role === 'event' ? request.expression : '0',
+          eventLevel: 0,
+          observableExpressions:
+            request.role === 'observable' ? [request.expression] : [],
+        },
+        opts
+      )
     },
     [client]
   )
@@ -6948,6 +6964,7 @@ export function AppProvider({
       sampleMap1DFunction,
       computeEventSeriesFromOrbit,
       computeEventSeriesFromSamples,
+      validateAnalysisExpression,
       computeLyapunovExponents,
       computeCovariantLyapunovVectors,
       computeLimitCycleFloquetModes,
@@ -6988,6 +7005,7 @@ export function AppProvider({
       sampleMap1DFunction,
       computeEventSeriesFromOrbit,
       computeEventSeriesFromSamples,
+      validateAnalysisExpression,
       computeLyapunovExponents,
       computeCovariantLyapunovVectors,
       computeLimitCycleFloquetModes,

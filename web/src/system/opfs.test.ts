@@ -115,7 +115,7 @@ function createOpfsFixture(): {
     sourceNodeIds: [withOrbitA.nodeId, withOrbitB.nodeId],
     event: {
       mode: 'cross_up',
-      expression: 'x',
+      source: { kind: 'custom', expression: 'x' },
       level: 0,
     },
     axes: {

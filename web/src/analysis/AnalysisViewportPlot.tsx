@@ -27,7 +27,9 @@ import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/Plotl
 import type { PlotlyRelayoutEvent } from '../viewports/plotly/usePlotViewport'
 import type { PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
 import {
+  normalizeAnalysisExpressionError,
   resolveAnalysisAxisLabel,
+  resolveAnalysisEventExpression,
   resolveAnalysisSourceIds,
 } from './analysisViewportUtils'
 
@@ -116,6 +118,10 @@ function resolveObservableExpressions(viewport: AnalysisViewport): string[] {
     expressions.push(axis.expression)
   }
   return expressions
+}
+
+function hasBlankObservableExpression(axis: AnalysisAxisSpec | null | undefined): boolean {
+  return axis?.kind === 'observable' && axis.expression.trim().length === 0
 }
 
 function resolveCompatibleSnapshot(
@@ -226,8 +232,8 @@ function resolveAxisValue(
     const order = hits[currentIndex]?.order
     return Number.isFinite(order) ? order : currentIndex
   }
-  const currentTime = hits[currentIndex]?.time
-  const nextTime = hits[currentIndex + 1]?.time
+  const currentTime = hits[currentIndex + axis.hitOffset]?.time
+  const nextTime = hits[currentIndex + axis.hitOffset + 1]?.time
   if (!Number.isFinite(currentTime) || !Number.isFinite(nextTime)) return null
   return (nextTime as number) - (currentTime as number)
 }
@@ -456,6 +462,7 @@ async function computeSourceTrace(
   system: System,
   viewport: AnalysisViewport,
   sourceId: string,
+  eventExpression: string,
   observableExpressions: string[],
   signal: AbortSignal,
   handlers: Pick<
@@ -486,7 +493,7 @@ async function computeSourceTrace(
           steps: Math.max(object.data.length - 1, 1),
           dt: object.dt,
           mode: viewport.event.mode,
-          eventExpression: viewport.event.expression,
+          eventExpression,
           eventLevel: viewport.event.level,
           observableExpressions,
         }, { signal })
@@ -494,7 +501,7 @@ async function computeSourceTrace(
           system: runConfig,
           samples: buildSamplesFromOrbit(systemConfig, object) ?? [],
           mode: viewport.event.mode,
-          eventExpression: viewport.event.expression,
+          eventExpression,
           eventLevel: viewport.event.level,
           observableExpressions,
         }, { signal })
@@ -512,7 +519,7 @@ async function computeSourceTrace(
         system: { ...systemConfig, params },
         samples,
         mode: viewport.event.mode,
-        eventExpression: viewport.event.expression,
+        eventExpression,
         eventLevel: viewport.event.level,
         observableExpressions,
       },
@@ -531,7 +538,7 @@ async function computeSourceTrace(
         system: { ...systemConfig, params: getBranchParams(system, branch) },
         samples,
         mode: viewport.event.mode,
-        eventExpression: viewport.event.expression,
+        eventExpression,
         eventLevel: viewport.event.level,
         observableExpressions,
       },
@@ -552,6 +559,10 @@ export function AnalysisViewportPlot({
   onComputeEventSeriesFromOrbit,
   onComputeEventSeriesFromSamples,
 }: AnalysisViewportPlotProps) {
+  const eventExpression = useMemo(
+    () => resolveAnalysisEventExpression(system.config, viewport.event),
+    [system.config, viewport.event]
+  )
   const sourceIds = useMemo(
     () => resolveAnalysisSourceIds(system, viewport, selectedNodeId),
     [selectedNodeId, system, viewport]
@@ -562,12 +573,14 @@ export function AnalysisViewportPlot({
         viewport,
         selectedNodeId: viewport.display === 'selection' ? selectedNodeId : null,
         systemType: system.config.type,
+        equations: system.config.equations,
         varNames: system.config.varNames,
         paramNames: system.config.paramNames,
         params: system.config.params,
+        eventExpression,
         sources: sourceIds.map((sourceId) => buildSourceSignature(system, sourceId)),
       }),
-    [selectedNodeId, sourceIds, system, viewport]
+    [eventExpression, selectedNodeId, sourceIds, system, viewport]
   )
   const cacheRef = useRef(new Map<string, ComputedTraceState>())
   const [traceState, setTraceState] = useState<ComputedTraceState>(() => {
@@ -591,6 +604,30 @@ export function AnalysisViewportPlot({
       return
     }
 
+    if (viewport.event.mode !== 'every_iterate' && eventExpression.trim().length === 0) {
+      const next = {
+        traces: EMPTY_TRACES,
+        message: 'Event expression is required.',
+      }
+      setTraceState(next)
+      cacheRef.current.set(signature, next)
+      return
+    }
+
+    if (
+      hasBlankObservableExpression(viewport.axes.x) ||
+      hasBlankObservableExpression(viewport.axes.y) ||
+      hasBlankObservableExpression(viewport.axes.z)
+    ) {
+      const next = {
+        traces: EMPTY_TRACES,
+        message: 'Observable axis expressions are required.',
+      }
+      setTraceState(next)
+      cacheRef.current.set(signature, next)
+      return
+    }
+
     if (sourceIds.length === 0) {
       const next = {
         traces: EMPTY_TRACES,
@@ -606,16 +643,17 @@ export function AnalysisViewportPlot({
 
     let cancelled = false
     const controller = new AbortController()
-    setTraceState({ traces: EMPTY_TRACES, message: 'Computing return map…' })
+    setTraceState({ traces: EMPTY_TRACES, message: 'Computing event map…' })
 
     void Promise.allSettled(
-      sourceIds.map((sourceId) =>
-        computeSourceTrace(
-          system,
-          viewport,
-          sourceId,
-          resolveObservableExpressions(viewport),
-          controller.signal,
+          sourceIds.map((sourceId) =>
+            computeSourceTrace(
+              system,
+              viewport,
+              sourceId,
+              eventExpression,
+              resolveObservableExpressions(viewport),
+              controller.signal,
           {
             onComputeEventSeriesFromOrbit,
             onComputeEventSeriesFromSamples,
@@ -639,7 +677,7 @@ export function AnalysisViewportPlot({
               ? null
               : rejected
                 ? rejected.reason instanceof Error
-                  ? rejected.reason.message
+                  ? normalizeAnalysisExpressionError(rejected.reason.message)
                   : String(rejected.reason)
                 : 'No event hits matched the current source, event, and axis settings.',
         }
@@ -651,7 +689,10 @@ export function AnalysisViewportPlot({
         if (error instanceof Error && error.name === 'AbortError') return
         const next = {
           traces: EMPTY_TRACES,
-          message: error instanceof Error ? error.message : String(error),
+          message:
+            error instanceof Error
+              ? normalizeAnalysisExpressionError(error.message)
+              : String(error),
         }
         setTraceState(next)
       })
@@ -663,6 +704,7 @@ export function AnalysisViewportPlot({
   }, [
     onComputeEventSeriesFromOrbit,
     onComputeEventSeriesFromSamples,
+    eventExpression,
     signature,
     sourceIds,
     system,

@@ -72,6 +72,14 @@ type InspectorPanelProps = {
     id: string,
     update: Partial<Omit<AnalysisViewport, 'id' | 'name'>>
   ) => void
+  onValidateAnalysisExpression?: (
+    request: {
+      system: SystemConfig
+      expression: string
+      role: 'event' | 'observable'
+    },
+    opts?: { signal?: AbortSignal }
+  ) => Promise<void>
   onUpdateBifurcationDiagram: (
     id: string,
     update: Partial<Omit<BifurcationDiagram, 'id' | 'name'>>
@@ -148,6 +156,7 @@ export function InspectorPanel({
   onComputeIsocline,
   onUpdateScene,
   onUpdateAnalysisViewport,
+  onValidateAnalysisExpression,
   onUpdateBifurcationDiagram,
   onSetLimitCycleRenderTarget,
   onUpdateSystem,
@@ -199,6 +208,7 @@ export function InspectorPanel({
           onComputeIsocline={onComputeIsocline}
           onUpdateScene={onUpdateScene}
           onUpdateAnalysisViewport={onUpdateAnalysisViewport}
+          onValidateAnalysisExpression={onValidateAnalysisExpression}
           onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
           onSetLimitCycleRenderTarget={onSetLimitCycleRenderTarget}
           onUpdateSystem={onUpdateSystem}

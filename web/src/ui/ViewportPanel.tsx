@@ -6266,7 +6266,7 @@ function ViewportTile({
     sceneTraces,
   ])
 
-  const label = scene ? 'State Space' : analysis ? 'Return / Event Map' : 'Bifurcation Diagram'
+  const label = scene ? 'State Space' : analysis ? 'Event Map' : 'Bifurcation Diagram'
   const viewportTypeClass = diagram
     ? 'viewport-tile--diagram'
     : analysis
@@ -6738,7 +6738,7 @@ export function ViewportPanel({
         }}
         data-testid="viewport-create-analysis"
       >
-        Return / Event Map
+        Event Map
       </button>
       <button
         className="context-menu__item"
