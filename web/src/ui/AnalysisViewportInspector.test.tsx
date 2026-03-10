@@ -70,6 +70,40 @@ describe('AnalysisViewportInspector', () => {
     })
   })
 
+  it('adds removable positivity constraints with local validation', async () => {
+    const onValidateAnalysisExpression = vi.fn(
+      async ({ expression }: { expression: string }) => {
+        if (expression === 'xyy') {
+          throw new Error('Event expression error: Unknown variable or parameter: xyy')
+        }
+      }
+    )
+    renderInspector(onValidateAnalysisExpression)
+
+    fireEvent.click(screen.getByTestId('analysis-add-constraint'))
+    const input = await screen.findByTestId('analysis-constraint-expression-0')
+    expect(screen.queryByTestId('analysis-constraints-empty')).toBeNull()
+
+    fireEvent.change(input, { target: { value: '' } })
+    await waitFor(() => {
+      expect(screen.getByTestId('analysis-constraint-expression-error-0')).toHaveTextContent(
+        'Expression is required.'
+      )
+    })
+
+    fireEvent.change(input, { target: { value: 'xyy' } })
+    await waitFor(() => {
+      expect(screen.getByTestId('analysis-constraint-expression-error-0')).toHaveTextContent(
+        'Unknown variable or parameter: xyy'
+      )
+    })
+
+    fireEvent.click(screen.getByTestId('analysis-remove-constraint-0'))
+    await waitFor(() => {
+      expect(screen.getByTestId('analysis-constraints-empty')).toBeInTheDocument()
+    })
+  })
+
   it('supports derived event sources and arbitrary delta-n hit offsets', async () => {
     renderInspector()
 

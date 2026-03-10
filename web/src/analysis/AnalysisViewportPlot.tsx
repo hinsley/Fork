@@ -29,6 +29,7 @@ import type { PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
 import {
   normalizeAnalysisExpressionError,
   resolveAnalysisAxisLabel,
+  resolveAnalysisConstraintExpressions,
   resolveAnalysisEventExpression,
   resolveAnalysisSourceIds,
 } from './analysisViewportUtils'
@@ -120,8 +121,39 @@ function resolveObservableExpressions(viewport: AnalysisViewport): string[] {
   return expressions
 }
 
+function resolveConstraintExpressions(viewport: AnalysisViewport): string[] {
+  const expressions: string[] = []
+  const seen = new Set<string>()
+  for (const expression of resolveAnalysisConstraintExpressions(viewport.event)) {
+    if (seen.has(expression)) continue
+    seen.add(expression)
+    expressions.push(expression)
+  }
+  return expressions
+}
+
+function combineRequestedExpressions(
+  observableExpressions: string[],
+  constraintExpressions: string[]
+): string[] {
+  const requested = [...observableExpressions]
+  const seen = new Set(requested)
+  for (const expression of constraintExpressions) {
+    if (seen.has(expression)) continue
+    seen.add(expression)
+    requested.push(expression)
+  }
+  return requested
+}
+
 function hasBlankObservableExpression(axis: AnalysisAxisSpec | null | undefined): boolean {
   return axis?.kind === 'observable' && axis.expression.trim().length === 0
+}
+
+function hasBlankConstraintExpression(viewport: AnalysisViewport): boolean {
+  return resolveAnalysisConstraintExpressions(viewport.event).some(
+    (expression) => expression.trim().length === 0
+  )
 }
 
 function resolveCompatibleSnapshot(
@@ -333,6 +365,22 @@ function buildTraceFromHits(
   } satisfies Data
 }
 
+function filterHitsByConstraints(
+  hits: EventSeriesHit[],
+  constraintExpressions: string[],
+  observableIndexByExpression: Map<string, number>
+): EventSeriesHit[] {
+  if (constraintExpressions.length === 0) return hits
+  return hits.filter((hit) =>
+    constraintExpressions.every((expression) => {
+      const observableIndex = observableIndexByExpression.get(expression)
+      if (observableIndex === undefined) return false
+      const value = hit.observable_values[observableIndex]
+      return Number.isFinite(value) && value > 0
+    })
+  )
+}
+
 function buildLayout(
   viewport: AnalysisViewport,
   plotlyTheme: PlotlyThemeTokens,
@@ -502,7 +550,8 @@ async function computeSourceTrace(
   viewport: AnalysisViewport,
   sourceId: string,
   eventExpression: string,
-  observableExpressions: string[],
+  requestedExpressions: string[],
+  constraintExpressions: string[],
   signal: AbortSignal,
   handlers: Pick<
     AnalysisViewportPlotProps,
@@ -511,7 +560,7 @@ async function computeSourceTrace(
 ): Promise<Data | null> {
   const systemConfig = system.config
   const observableIndexByExpression = new Map(
-    observableExpressions.map((expression, index) => [expression, index])
+    requestedExpressions.map((expression, index) => [expression, index])
   )
   const object = system.objects[sourceId]
 
@@ -534,7 +583,7 @@ async function computeSourceTrace(
           mode: viewport.event.mode,
           eventExpression,
           eventLevel: viewport.event.level,
-          observableExpressions,
+          observableExpressions: requestedExpressions,
         }, { signal })
       : await handlers.onComputeEventSeriesFromSamples!({
           system: runConfig,
@@ -542,10 +591,16 @@ async function computeSourceTrace(
           mode: viewport.event.mode,
           eventExpression,
           eventLevel: viewport.event.level,
-          observableExpressions,
+          observableExpressions: requestedExpressions,
         }, { signal })
 
-    return buildTraceFromHits(system, viewport, sourceId, result.hits, observableIndexByExpression)
+    return buildTraceFromHits(
+      system,
+      viewport,
+      sourceId,
+      filterHitsByConstraints(result.hits, constraintExpressions, observableIndexByExpression),
+      observableIndexByExpression
+    )
   }
 
   if (object?.type === 'limit_cycle') {
@@ -560,11 +615,17 @@ async function computeSourceTrace(
         mode: viewport.event.mode,
         eventExpression,
         eventLevel: viewport.event.level,
-        observableExpressions,
+        observableExpressions: requestedExpressions,
       },
       { signal }
     )
-    return buildTraceFromHits(system, viewport, sourceId, result.hits, observableIndexByExpression)
+    return buildTraceFromHits(
+      system,
+      viewport,
+      sourceId,
+      filterHitsByConstraints(result.hits, constraintExpressions, observableIndexByExpression),
+      observableIndexByExpression
+    )
   }
 
   const branch = system.branches[sourceId]
@@ -579,11 +640,17 @@ async function computeSourceTrace(
         mode: viewport.event.mode,
         eventExpression,
         eventLevel: viewport.event.level,
-        observableExpressions,
+        observableExpressions: requestedExpressions,
       },
       { signal }
     )
-    return buildTraceFromHits(system, viewport, sourceId, result.hits, observableIndexByExpression)
+    return buildTraceFromHits(
+      system,
+      viewport,
+      sourceId,
+      filterHitsByConstraints(result.hits, constraintExpressions, observableIndexByExpression),
+      observableIndexByExpression
+    )
   }
 
   return null
@@ -601,6 +668,12 @@ export function AnalysisViewportPlot({
   const eventExpression = useMemo(
     () => resolveAnalysisEventExpression(system.config, viewport.event),
     [system.config, viewport.event]
+  )
+  const observableExpressions = useMemo(() => resolveObservableExpressions(viewport), [viewport])
+  const constraintExpressions = useMemo(() => resolveConstraintExpressions(viewport), [viewport])
+  const requestedExpressions = useMemo(
+    () => combineRequestedExpressions(observableExpressions, constraintExpressions),
+    [constraintExpressions, observableExpressions]
   )
   const sourceIds = useMemo(
     () => resolveAnalysisSourceIds(system, viewport, selectedNodeId),
@@ -668,6 +741,16 @@ export function AnalysisViewportPlot({
       return
     }
 
+    if (hasBlankConstraintExpression(viewport)) {
+      const next = {
+        traces: EMPTY_TRACES,
+        message: 'Constraint expressions are required.',
+      }
+      setTraceState(next)
+      cacheRef.current.set(signature, next)
+      return
+    }
+
     if (sourceIds.length === 0) {
       const next = {
         traces: EMPTY_TRACES,
@@ -692,7 +775,8 @@ export function AnalysisViewportPlot({
               viewport,
               sourceId,
               eventExpression,
-              resolveObservableExpressions(viewport),
+              requestedExpressions,
+              constraintExpressions,
               controller.signal,
           {
             onComputeEventSeriesFromOrbit,
@@ -745,6 +829,9 @@ export function AnalysisViewportPlot({
     onComputeEventSeriesFromOrbit,
     onComputeEventSeriesFromSamples,
     eventExpression,
+    constraintExpressions,
+    observableExpressions,
+    requestedExpressions,
     signature,
     sourceIds,
     system,

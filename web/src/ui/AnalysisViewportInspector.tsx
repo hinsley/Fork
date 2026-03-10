@@ -4,6 +4,7 @@ import {
   collectAnalysisSourceEntries,
   normalizeAnalysisExpressionError,
   resolveAnalysisAxisLabel,
+  resolveAnalysisConstraintExpressions,
   resolveAnalysisEventExpression,
   resolveAnalysisSourceExpression,
 } from '../analysis/analysisViewportUtils'
@@ -27,6 +28,7 @@ type AnalysisViewportInspectorProps = {
 
 type AxisKey = 'x' | 'y' | 'z'
 type AxisErrors = Record<AxisKey, string | null>
+type ConstraintErrors = Array<string | null>
 
 function defaultObservableAxis(system: System, hitOffset: number): AnalysisAxisSpec {
   const expression = system.config.varNames[0] ?? system.config.paramNames[0] ?? 'x'
@@ -69,6 +71,7 @@ export function AnalysisViewportInspector({
   const [sourceSearch, setSourceSearch] = useState('')
   const [eventError, setEventError] = useState<string | null>(null)
   const [axisErrors, setAxisErrors] = useState<AxisErrors>({ x: null, y: null, z: null })
+  const [constraintErrors, setConstraintErrors] = useState<ConstraintErrors>([])
   const sourceEntries = useMemo(() => collectAnalysisSourceEntries(system), [system])
   const selectedSourceSet = useMemo(
     () => new Set(viewport.sourceNodeIds),
@@ -103,6 +106,10 @@ export function AnalysisViewportInspector({
     () => resolveAnalysisSourceExpression(system.config, viewport.event.source),
     [system.config, viewport.event.source]
   )
+  const positivityConstraints = useMemo(
+    () => resolveAnalysisConstraintExpressions(viewport.event),
+    [viewport.event]
+  )
 
   useEffect(() => {
     const controller = new AbortController()
@@ -110,6 +117,7 @@ export function AnalysisViewportInspector({
       void (async () => {
         let nextEventError: string | null = null
         const nextAxisErrors: AxisErrors = { x: null, y: null, z: null }
+        const nextConstraintErrors: ConstraintErrors = positivityConstraints.map(() => null)
 
         if (viewport.event.mode !== 'every_iterate') {
           if (eventExpression.trim().length === 0) {
@@ -126,6 +134,27 @@ export function AnalysisViewportInspector({
                   error instanceof Error ? error.message : String(error)
                 )
               }
+            }
+          }
+        }
+
+        for (let index = 0; index < positivityConstraints.length; index += 1) {
+          const expression = positivityConstraints[index] ?? ''
+          if (expression.trim().length === 0) {
+            nextConstraintErrors[index] = 'Expression is required.'
+            continue
+          }
+          if (!onValidateAnalysisExpression) continue
+          try {
+            await onValidateAnalysisExpression(
+              { system: system.config, expression, role: 'observable' },
+              { signal: controller.signal }
+            )
+          } catch (error) {
+            if (!(error instanceof Error && error.name === 'AbortError')) {
+              nextConstraintErrors[index] = normalizeAnalysisExpressionError(
+                error instanceof Error ? error.message : String(error)
+              )
             }
           }
         }
@@ -159,6 +188,7 @@ export function AnalysisViewportInspector({
         if (!controller.signal.aborted) {
           setEventError(nextEventError)
           setAxisErrors(nextAxisErrors)
+          setConstraintErrors(nextConstraintErrors)
         }
       })()
     }, 150)
@@ -167,13 +197,29 @@ export function AnalysisViewportInspector({
       controller.abort()
       window.clearTimeout(timer)
     }
-  }, [eventExpression, onValidateAnalysisExpression, system.config, viewport.axes, viewport.event])
+  }, [
+    eventExpression,
+    onValidateAnalysisExpression,
+    positivityConstraints,
+    system.config,
+    viewport.axes,
+    viewport.event,
+  ])
 
   const updateAxis = (key: AxisKey, nextAxis: AnalysisAxisSpec | null) => {
     onUpdateAnalysisViewport(viewport.id, {
       axes: {
         ...viewport.axes,
         [key]: nextAxis,
+      },
+    })
+  }
+
+  const updateConstraints = (positivityConstraintValues: string[]) => {
+    onUpdateAnalysisViewport(viewport.id, {
+      event: {
+        ...viewport.event,
+        positivityConstraints: positivityConstraintValues,
       },
     })
   }
@@ -516,6 +562,64 @@ export function AnalysisViewportInspector({
             </p>
           </>
         )}
+        <div className="inspector-subsection">
+          <h4 className="inspector-subheading">Positivity constraints</h4>
+          <p className="empty-state">
+            Keep only hits where every listed expression is strictly positive. Leave this empty to
+            accept all hits.
+          </p>
+          {positivityConstraints.length > 0 ? (
+            <>
+              {positivityConstraints.map((constraint, index) => (
+                <div key={`analysis-constraint-${index}`}>
+                  <label>
+                    Constraint {index + 1}
+                    <input
+                      value={constraint}
+                      onChange={(event) => {
+                        const next = [...positivityConstraints]
+                        next[index] = event.target.value
+                        updateConstraints(next)
+                      }}
+                      placeholder="Expression > 0"
+                      data-testid={`analysis-constraint-expression-${index}`}
+                    />
+                  </label>
+                  {constraintErrors[index] ? (
+                    <div
+                      className="field-error"
+                      data-testid={`analysis-constraint-expression-error-${index}`}
+                    >
+                      {constraintErrors[index]}
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateConstraints(
+                        positivityConstraints.filter((_, constraintIndex) => constraintIndex !== index)
+                      )
+                    }
+                    data-testid={`analysis-remove-constraint-${index}`}
+                  >
+                    Remove constraint
+                  </button>
+                </div>
+              ))}
+            </>
+          ) : (
+            <p className="empty-state" data-testid="analysis-constraints-empty">
+              No positivity constraints.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => updateConstraints([...positivityConstraints, ''])}
+            data-testid="analysis-add-constraint"
+          >
+            Add positivity constraint
+          </button>
+        </div>
       </div>
 
       <div className="inspector-subsection">

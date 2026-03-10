@@ -583,6 +583,7 @@ export interface AnalysisEventSpec {
   mode: EventSeriesMode
   source: IsoclineSource
   level: number
+  positivityConstraints?: string[]
 }
 
 export type AnalysisAxisSpec =

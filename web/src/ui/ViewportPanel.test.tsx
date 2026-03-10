@@ -3955,4 +3955,102 @@ describe('ViewportPanel view state wiring', () => {
     })
   })
 
+  it('filters event map hits through positivity constraints', async () => {
+    const config: SystemConfig = {
+      name: 'Analysis_Constraint_System',
+      equations: ['y', '-x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: 'Analysis_Constraint_System', config })
+    const analysisResult = addAnalysisViewport(system, 'Event_Map_1')
+    system = analysisResult.system
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Constraint_Target',
+      systemName: config.name,
+      data: [
+        [0, 0, 1],
+        [0.1, 1, 0],
+        [0.2, 2, -1],
+      ],
+      t_start: 0,
+      t_end: 0.2,
+      dt: 0.1,
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+    system = updateAnalysisViewport(system, analysisResult.nodeId, {
+      sourceNodeIds: [orbitResult.nodeId],
+      event: {
+        mode: 'cross_up',
+        source: { kind: 'custom', expression: 'x' },
+        level: 0,
+        positivityConstraints: ['y'],
+      },
+      axes: {
+        x: { kind: 'observable', expression: 'x', hitOffset: 0, label: 'x@n' },
+        y: { kind: 'hit_index', label: 'n' },
+        z: null,
+      },
+    })
+    const onComputeEventSeriesFromSamples = vi.fn().mockResolvedValue({
+      hits: [
+        {
+          order: 0,
+          sample_index: 1,
+          time: 0.1,
+          state: [1, 0],
+          observable_values: [1, 2],
+        },
+        {
+          order: 1,
+          sample_index: 2,
+          time: 0.2,
+          state: [2, -1],
+          observable_values: [2, -3],
+        },
+      ],
+    })
+
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        theme="light"
+        onSelectViewport={vi.fn()}
+        onSelectObject={vi.fn()}
+        onReorderViewport={vi.fn()}
+        onResizeViewport={vi.fn()}
+        onToggleViewport={vi.fn()}
+        onCreateScene={vi.fn()}
+        onCreateAnalysis={vi.fn()}
+        onCreateBifurcation={vi.fn()}
+        onRenameViewport={vi.fn()}
+        onDeleteViewport={vi.fn()}
+        onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
+      />
+    )
+
+    await waitFor(() => {
+      const calls = plotlyCalls.filter(
+        (entry) => entry.plotId === analysisResult.nodeId && entry.data.length > 0
+      )
+      const props = calls[calls.length - 1]
+      const trace = props?.data[0] as { x?: number[]; y?: number[] } | undefined
+      expect(trace?.x).toEqual([1])
+      expect(trace?.y).toEqual([0])
+    })
+
+    expect(onComputeEventSeriesFromSamples).toHaveBeenCalledWith(
+      expect.objectContaining({
+        observableExpressions: ['x', 'y'],
+      }),
+      expect.anything()
+    )
+  })
+
 })

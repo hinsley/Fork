@@ -69,6 +69,7 @@ const DEFAULT_ANALYSIS_EVENT: AnalysisEventSpec = {
     expression: 'x',
   },
   level: 0,
+  positivityConstraints: [],
 }
 
 const DEFAULT_ANALYSIS_ADVANCED: AnalysisViewportAdvanced = {
@@ -758,6 +759,11 @@ function normalizeAnalysisViewport(
       typeof viewport.event?.level === 'number' && Number.isFinite(viewport.event.level)
         ? viewport.event.level
         : fallback.event.level,
+    positivityConstraints: Array.isArray(viewport.event?.positivityConstraints)
+      ? viewport.event.positivityConstraints.map((constraint) =>
+          typeof constraint === 'string' ? constraint : ''
+        )
+      : fallback.event.positivityConstraints,
   }
   return {
     ...fallback,

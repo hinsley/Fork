@@ -152,6 +152,18 @@ describe('system model', () => {
     expect(normalized.analysisViewports[0].viewRevision).toBe(0)
   })
 
+  it('normalizes missing analysis positivity constraints to an empty list', () => {
+    const system = createSystem({ name: 'Legacy_Analysis_Constraints' })
+    const { system: withAnalysis } = addAnalysisViewport(system, 'Event_Map')
+    const legacy = structuredClone(withAnalysis)
+    delete (legacy.analysisViewports[0].event as { positivityConstraints?: string[] })
+      .positivityConstraints
+
+    const normalized = normalizeSystem(legacy)
+
+    expect(normalized.analysisViewports[0].event.positivityConstraints).toEqual([])
+  })
+
   it('keeps viewRevision stable across non-view updates', () => {
     let system = createSystem({ name: 'View_Revision' })
     const sceneResult = addScene(system, 'Scene')

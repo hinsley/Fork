@@ -43,7 +43,11 @@ export function resolveAnalysisEventExpression(
 }
 
 export function normalizeAnalysisExpressionError(message: string): string {
-  return message.replace(/^Event expression error:\s*/i, '').trim()
+  return message.replace(/^(Event|Observable|Constraint) expression error:\s*/i, '').trim()
+}
+
+export function resolveAnalysisConstraintExpressions(event: AnalysisEventSpec): string[] {
+  return Array.isArray(event.positivityConstraints) ? event.positivityConstraints : []
 }
 
 function formatSourceTypeLabel(system: System, nodeId: string): string {
