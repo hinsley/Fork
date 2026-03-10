@@ -119,5 +119,5 @@ export function resolveAnalysisAxisLabel(axis: AnalysisAxisSpec): string {
     return `${axis.expression}@${formatAnalysisHitOffset(axis.hitOffset)}`
   }
   if (axis.kind === 'hit_index') return 'Hit index'
-  return `Delta t@${formatAnalysisHitOffset(axis.hitOffset)}`
+  return `Delta n@${formatAnalysisHitOffset(axis.hitOffset)}`
 }

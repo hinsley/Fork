@@ -70,7 +70,7 @@ describe('AnalysisViewportInspector', () => {
     })
   })
 
-  it('supports derived event sources and arbitrary delta-t hit offsets', async () => {
+  it('supports derived event sources and arbitrary delta-n hit offsets', async () => {
     renderInspector()
 
     fireEvent.change(screen.getByTestId('analysis-event-source-kind'), {
@@ -89,6 +89,6 @@ describe('AnalysisViewportInspector', () => {
     fireEvent.change(offsetInput, { target: { value: '3' } })
 
     expect((offsetInput as HTMLInputElement).value).toBe('3')
-    expect(screen.getByText('Using hit n+3.')).toBeInTheDocument()
+    expect(screen.queryByText(/Using hit /)).not.toBeInTheDocument()
   })
 })

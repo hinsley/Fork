@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import type { AnalysisAxisSpec, AnalysisViewport, System, SystemConfig } from '../system/types'
 import {
   collectAnalysisSourceEntries,
-  formatAnalysisHitOffset,
   normalizeAnalysisExpressionError,
   resolveAnalysisAxisLabel,
   resolveAnalysisEventExpression,
@@ -222,7 +221,7 @@ export function AnalysisViewportInspector({
             {allowNone ? <option value="none">Disabled</option> : null}
             <option value="observable">Observable expression</option>
             <option value="hit_index">Hit index</option>
-            <option value="delta_time">Delta t</option>
+            <option value="delta_time">Delta n</option>
           </select>
         </label>
         {axis ? (
@@ -275,7 +274,6 @@ export function AnalysisViewportInspector({
                     data-testid={`analysis-axis-hit-offset-${key}`}
                   />
                 </label>
-                <p className="empty-state">Using hit {formatAnalysisHitOffset(axis.hitOffset)}.</p>
               </>
             ) : null}
           </>

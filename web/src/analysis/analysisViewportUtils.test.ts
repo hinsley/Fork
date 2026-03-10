@@ -122,7 +122,7 @@ describe('analysisViewportUtils', () => {
       })
     ).toBe('sigma@n+2')
     expect(resolveAnalysisAxisLabel({ kind: 'hit_index' })).toBe('Hit index')
-    expect(resolveAnalysisAxisLabel({ kind: 'delta_time', hitOffset: -1 })).toBe('Delta t@n-1')
+    expect(resolveAnalysisAxisLabel({ kind: 'delta_time', hitOffset: -1 })).toBe('Delta n@n-1')
   })
 
   it('resolves derived event expressions and every-iterate fallbacks', () => {
