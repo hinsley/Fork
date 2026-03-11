@@ -3,7 +3,7 @@ import type { AnalysisAxisSpec, AnalysisViewport, System, SystemConfig } from '.
 import {
   collectAnalysisSourceEntries,
   normalizeAnalysisExpressionError,
-  resolveAnalysisAxisLabel,
+  resolveAnalysisAxisLabelForSystem,
   resolveAnalysisConstraintExpressions,
   resolveAnalysisEventExpression,
   resolveAnalysisSourceExpression,
@@ -267,7 +267,9 @@ export function AnalysisViewportInspector({
             {allowNone ? <option value="none">Disabled</option> : null}
             <option value="observable">Observable expression</option>
             <option value="hit_index">Hit index</option>
-            <option value="delta_time">Delta n</option>
+            <option value="delta_time">
+              {system.config.type === 'map' ? 'Delta n' : 'Delta t'}
+            </option>
           </select>
         </label>
         {axis ? (
@@ -277,7 +279,7 @@ export function AnalysisViewportInspector({
               <input
                 value={axis.label ?? ''}
                 onChange={(event) => updateAxis(key, { ...axis, label: event.target.value })}
-                placeholder={resolveAnalysisAxisLabel(axis)}
+                placeholder={resolveAnalysisAxisLabelForSystem(axis, system.config.type)}
               />
             </label>
             {axis.kind === 'observable' ? (

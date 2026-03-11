@@ -4,7 +4,7 @@ import type { ContinuationObject, LimitCycleObject, OrbitObject } from '../syste
 import {
   collectAnalysisSourceEntries,
   resolveAnalysisEventExpression,
-  resolveAnalysisAxisLabel,
+  resolveAnalysisAxisLabelForSystem,
   resolveAnalysisSourceIds,
 } from './analysisViewportUtils'
 
@@ -115,14 +115,22 @@ describe('analysisViewportUtils', () => {
 
   it('formats implicit axis labels', () => {
     expect(
-      resolveAnalysisAxisLabel({
-        kind: 'observable',
-        expression: 'sigma',
-        hitOffset: 2,
-      })
+      resolveAnalysisAxisLabelForSystem(
+        {
+          kind: 'observable',
+          expression: 'sigma',
+          hitOffset: 2,
+        },
+        'flow'
+      )
     ).toBe('sigma@n+2')
-    expect(resolveAnalysisAxisLabel({ kind: 'hit_index' })).toBe('Hit index')
-    expect(resolveAnalysisAxisLabel({ kind: 'delta_time', hitOffset: -1 })).toBe('Delta n@n-1')
+    expect(resolveAnalysisAxisLabelForSystem({ kind: 'hit_index' }, 'flow')).toBe('Hit index')
+    expect(
+      resolveAnalysisAxisLabelForSystem({ kind: 'delta_time', hitOffset: -1 }, 'flow')
+    ).toBe('Delta t@n-1')
+    expect(
+      resolveAnalysisAxisLabelForSystem({ kind: 'delta_time', hitOffset: -1 }, 'map')
+    ).toBe('Delta n@n-1')
   })
 
   it('resolves derived event expressions and every-iterate fallbacks', () => {

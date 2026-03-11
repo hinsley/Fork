@@ -28,7 +28,7 @@ import type { PlotlyRelayoutEvent } from '../viewports/plotly/usePlotViewport'
 import type { PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
 import {
   normalizeAnalysisExpressionError,
-  resolveAnalysisAxisLabel,
+  resolveAnalysisAxisLabelForSystem,
   resolveAnalysisConstraintExpressions,
   resolveAnalysisEventExpression,
   resolveAnalysisSourceIds,
@@ -313,9 +313,9 @@ function buildTraceFromHits(
   if (x.length === 0) return null
 
   const axisLabels = {
-    x: resolveAnalysisAxisLabel(viewport.axes.x),
-    y: resolveAnalysisAxisLabel(viewport.axes.y),
-    z: zAxis ? resolveAnalysisAxisLabel(zAxis) : null,
+    x: resolveAnalysisAxisLabelForSystem(viewport.axes.x, system.config.type),
+    y: resolveAnalysisAxisLabelForSystem(viewport.axes.y, system.config.type),
+    z: zAxis ? resolveAnalysisAxisLabelForSystem(zAxis, system.config.type) : null,
   }
   const hovertemplate = zAxis
     ? `${axisLabels.x}: %{x}<br>${axisLabels.y}: %{y}<br>${axisLabels.z}: %{z}<br>hit: %{customdata}<extra>${node.name}</extra>`
@@ -382,13 +382,14 @@ function filterHitsByConstraints(
 }
 
 function buildLayout(
+  system: System,
   viewport: AnalysisViewport,
   plotlyTheme: PlotlyThemeTokens,
   message: string | null,
   hasData: boolean
 ): Partial<Layout> {
-  const xLabel = resolveAnalysisAxisLabel(viewport.axes.x)
-  const yLabel = resolveAnalysisAxisLabel(viewport.axes.y)
+  const xLabel = resolveAnalysisAxisLabelForSystem(viewport.axes.x, system.config.type)
+  const yLabel = resolveAnalysisAxisLabelForSystem(viewport.axes.y, system.config.type)
   const zAxis = viewport.axes.z ?? null
   const annotations: NonNullable<Layout['annotations']> = message
     ? [
@@ -433,7 +434,10 @@ function buildLayout(
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
         zaxis: {
-          title: { text: resolveAnalysisAxisLabel(zAxis), font: { color: plotlyTheme.text } },
+          title: {
+            text: resolveAnalysisAxisLabelForSystem(zAxis, system.config.type),
+            font: { color: plotlyTheme.text },
+          },
           tickfont: { color: plotlyTheme.text },
           zerolinecolor: 'rgba(120,120,120,0.3)',
         },
@@ -839,8 +843,8 @@ export function AnalysisViewportPlot({
   ])
 
   const layout = useMemo(
-    () => buildLayout(viewport, plotlyTheme, traceState.message, traceState.traces.length > 0),
-    [plotlyTheme, traceState.message, traceState.traces.length, viewport]
+    () => buildLayout(system, viewport, plotlyTheme, traceState.message, traceState.traces.length > 0),
+    [plotlyTheme, system, traceState.message, traceState.traces.length, viewport]
   )
   const initialView = useMemo(() => buildInitialView(viewport), [viewport])
   const handlePointClick = useCallback(

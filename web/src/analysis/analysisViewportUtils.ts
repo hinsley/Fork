@@ -117,11 +117,18 @@ export function resolveAnalysisSourceIds(
 }
 
 export function resolveAnalysisAxisLabel(axis: AnalysisAxisSpec): string {
+  return resolveAnalysisAxisLabelForSystem(axis, 'flow')
+}
+
+export function resolveAnalysisAxisLabelForSystem(
+  axis: AnalysisAxisSpec,
+  systemType: SystemConfig['type']
+): string {
   const trimmedLabel = axis.label?.trim()
   if (trimmedLabel) return trimmedLabel
   if (axis.kind === 'observable') {
     return `${axis.expression}@${formatAnalysisHitOffset(axis.hitOffset)}`
   }
   if (axis.kind === 'hit_index') return 'Hit index'
-  return `Delta n@${formatAnalysisHitOffset(axis.hitOffset)}`
+  return `${systemType === 'map' ? 'Delta n' : 'Delta t'}@${formatAnalysisHitOffset(axis.hitOffset)}`
 }
