@@ -3192,6 +3192,18 @@ function buildSceneTraces(
       selectedOrbitNodeId === nodeId && orbitPointSelection?.orbitId === nodeId
         ? orbitPointSelection.pointIndex
         : null
+    const selectedOrbitHitIndex =
+      selectedOrbitNodeId === nodeId && orbitPointSelection?.orbitId === nodeId
+        ? orbitPointSelection.hitIndex ?? null
+        : null
+    const selectedOrbitHitTime =
+      selectedOrbitNodeId === nodeId && orbitPointSelection?.orbitId === nodeId
+        ? orbitPointSelection.time ?? null
+        : null
+    const selectedOrbitHitState =
+      selectedOrbitNodeId === nodeId && orbitPointSelection?.orbitId === nodeId
+        ? orbitPointSelection.state ?? null
+        : null
     const appendSelectedOrbitMarker = () => {
       if (
         selectedOrbitPointIndex === null ||
@@ -3203,15 +3215,26 @@ function buildSceneTraces(
       const row = rows[selectedOrbitPointIndex]
       if (!row) return
       const markerSize = (highlight ? node.render.pointSize + 2 : node.render.pointSize) + 4
-      const selectedLabel = `Selected point: ${selectedOrbitPointIndex}`
+      const selectedLabel =
+        selectedOrbitHitIndex !== null
+          ? `Selected hit: ${selectedOrbitHitIndex}`
+          : `Selected point: ${selectedOrbitPointIndex}`
       const marker = {
         color: node.render.color,
         size: markerSize,
         symbol: 'circle-open' as const,
         line: { color: node.render.color, width: 2 },
       }
+      const selectedState =
+        Array.isArray(selectedOrbitHitState) && selectedOrbitHitState.length === dimension
+          ? selectedOrbitHitState
+          : row.slice(1)
+      const selectedTime =
+        typeof selectedOrbitHitTime === 'number' && Number.isFinite(selectedOrbitHitTime)
+          ? selectedOrbitHitTime
+          : row[0]
       if (isMap1D) {
-        const value = row[axisX + 1]
+        const value = selectedState[axisX]
         if (!Number.isFinite(value)) return
         traces.push({
           type: 'scatter',
@@ -3229,9 +3252,9 @@ function buildSceneTraces(
         return
       }
       if (objectPlotDim >= 3) {
-        const valueX = row[axisX + 1]
-        const valueY = row[axisY + 1]
-        const valueZ = row[axisZ + 1]
+        const valueX = selectedState[axisX]
+        const valueY = selectedState[axisY]
+        const valueZ = selectedState[axisZ]
         if (!Number.isFinite(valueX) || !Number.isFinite(valueY) || !Number.isFinite(valueZ)) {
           return
         }
@@ -3252,8 +3275,8 @@ function buildSceneTraces(
         return
       }
       if (objectPlotDim >= 2) {
-        const valueX = row[axisX + 1]
-        const valueY = row[axisY + 1]
+        const valueX = selectedState[axisX]
+        const valueY = selectedState[axisY]
         if (!Number.isFinite(valueX) || !Number.isFinite(valueY)) return
         traces.push({
           type: 'scatter',
@@ -3270,14 +3293,14 @@ function buildSceneTraces(
         })
         return
       }
-      const value = row[axisX + 1]
-      if (!Number.isFinite(row[0]) || !Number.isFinite(value)) return
+      const value = selectedState[axisX]
+      if (!Number.isFinite(selectedTime) || !Number.isFinite(value)) return
       traces.push({
         type: 'scatter',
         mode: 'markers',
         name: `${object.name} selected point`,
         uid: nodeId,
-        x: [row[0]],
+        x: [selectedTime],
         y: [value],
         customdata: [selectedOrbitPointIndex],
         marker,
@@ -6367,6 +6390,7 @@ function ViewportTile({
                 selectedNodeId={selectedNodeId}
                 plotlyTheme={plotlyTheme}
                 onSelectSource={onSelectObject}
+                onSelectOrbitPoint={onSelectOrbitPoint}
                 onComputeEventSeriesFromOrbit={onComputeEventSeriesFromOrbit}
                 onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
               />

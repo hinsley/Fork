@@ -280,6 +280,68 @@ describe('ViewportPanel view state wiring', () => {
     expect(orbitTrace?.text).toEqual(['0.000', '0.100', '0.200'])
   })
 
+  it('renders selected orbit hit markers from exact event-hit state', () => {
+    const config: SystemConfig = {
+      name: 'Orbit_Selected_Hit_System',
+      equations: ['x', 'y', 'z'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: 'Orbit_Selected_Hit_System', config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = sceneResult.system
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Selected_Hit',
+      systemName: system.config.name,
+      data: [
+        [0, 1, 2, 3],
+        [0.1, 4, 5, 6],
+        [0.2, 7, 8, 9],
+      ],
+      t_start: 0,
+      t_end: 0.2,
+      dt: 0.1,
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+
+    renderPanel(system, {
+      selectedNodeId: orbitResult.nodeId,
+      orbitPointSelection: {
+        orbitId: orbitResult.nodeId,
+        pointIndex: 1,
+        hitIndex: 3,
+        time: 0.125,
+        state: [10, 11, 12],
+      },
+    })
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const selectedTrace = props?.data.find(
+      (trace) =>
+        'name' in trace &&
+        trace.name === `${orbit.name} selected point` &&
+        'mode' in trace &&
+        trace.mode === 'markers'
+    ) as
+      | {
+          x?: number[]
+          y?: number[]
+          z?: number[]
+          text?: string[]
+        }
+      | undefined
+
+    expect(selectedTrace?.x).toEqual([10])
+    expect(selectedTrace?.y).toEqual([11])
+    expect(selectedTrace?.z).toEqual([12])
+    expect(selectedTrace?.text).toEqual(['Selected hit: 3'])
+  })
+
   it('does not render selected orbit-point markers when no orbit object is selected (flow)', () => {
     const config: SystemConfig = {
       name: 'Orbit_Selected_Point_Flow_No_Selected_Orbit',
@@ -3952,6 +4014,114 @@ describe('ViewportPanel view state wiring', () => {
         | undefined
       expect(trace?.marker?.size).toBe(11)
       expect(trace?.line?.width).toBe(7)
+    })
+  })
+
+  it('selects orbit hits from event map clicks using hit-offset-0 metadata', async () => {
+    const config: SystemConfig = {
+      name: 'Analysis_Click_System',
+      equations: ['y', '-x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    let system = createSystem({ name: 'Analysis_Click_System', config })
+    const analysisResult = addAnalysisViewport(system, 'Event_Map_1')
+    system = analysisResult.system
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Click_Target',
+      systemName: config.name,
+      data: [
+        [0, 0, 1],
+        [0.1, 1, 0],
+        [0.2, 2, -1],
+      ],
+      t_start: 0,
+      t_end: 0.2,
+      dt: 0.1,
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+    system = updateAnalysisViewport(system, analysisResult.nodeId, {
+      sourceNodeIds: [orbitResult.nodeId],
+      event: {
+        mode: 'cross_up',
+        source: { kind: 'custom', expression: 'x' },
+        level: 0,
+        positivityConstraints: [],
+      },
+      axes: {
+        x: { kind: 'observable', expression: 'x', hitOffset: 1, label: 'x@n+1' },
+        y: { kind: 'observable', expression: 'x', hitOffset: 0, label: 'x@n' },
+        z: null,
+      },
+    })
+    const onSelectObject = vi.fn()
+    const onSelectOrbitPoint = vi.fn()
+    const onComputeEventSeriesFromSamples = vi.fn().mockResolvedValue({
+      hits: [
+        {
+          order: 2,
+          sample_index: 1,
+          time: 0.125,
+          state: [0.5, 0.25],
+          observable_values: [1.5],
+        },
+        {
+          order: 3,
+          sample_index: 2,
+          time: 0.2,
+          state: [2, -1],
+          observable_values: [2],
+        },
+      ],
+    })
+
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        theme="light"
+        onSelectViewport={vi.fn()}
+        onSelectObject={onSelectObject}
+        onSelectOrbitPoint={onSelectOrbitPoint}
+        onReorderViewport={vi.fn()}
+        onResizeViewport={vi.fn()}
+        onToggleViewport={vi.fn()}
+        onCreateScene={vi.fn()}
+        onCreateAnalysis={vi.fn()}
+        onCreateBifurcation={vi.fn()}
+        onRenameViewport={vi.fn()}
+        onDeleteViewport={vi.fn()}
+        onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
+      />
+    )
+
+    await waitFor(() => {
+      const props = plotlyCalls.find(
+        (entry) => entry.plotId === analysisResult.nodeId && entry.data.length > 0
+      )
+      expect(props?.onPointClick).toBeDefined()
+      const trace = props?.data[0] as { customdata?: unknown[] } | undefined
+      const customdata = trace?.customdata?.[0]
+      expect(customdata).toBeTruthy()
+
+      props?.onPointClick?.({
+        uid: orbitResult.nodeId,
+        customdata,
+      })
+    })
+
+    expect(onSelectObject).toHaveBeenCalledWith(orbitResult.nodeId)
+    expect(onSelectOrbitPoint).toHaveBeenCalledWith({
+      orbitId: orbitResult.nodeId,
+      pointIndex: 1,
+      hitIndex: 2,
+      time: 0.125,
+      state: [0.5, 0.25],
     })
   })
 

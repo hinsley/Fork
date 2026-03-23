@@ -6,6 +6,9 @@ export type BranchPointSelection = {
 export type OrbitPointSelection = {
   orbitId: string
   pointIndex: number
+  hitIndex?: number | null
+  time?: number | null
+  state?: number[] | null
 } | null
 
 export type LimitCyclePointSelection = {

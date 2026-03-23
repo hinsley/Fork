@@ -40,6 +40,13 @@ type AnalysisViewportPlotProps = {
   selectedNodeId: string | null
   plotlyTheme: PlotlyThemeTokens
   onSelectSource: (id: string) => void
+  onSelectOrbitPoint?: (selection: {
+    orbitId: string
+    pointIndex: number
+    hitIndex?: number | null
+    time?: number | null
+    state?: number[] | null
+  }) => void
   onComputeEventSeriesFromOrbit?: (
     request: ComputeEventSeriesFromOrbitRequest,
     opts?: { signal?: AbortSignal }
@@ -61,6 +68,40 @@ const LINE_STYLE_DASH = {
   dashed: 'dash',
   dotted: 'dot',
 } as const
+
+type AnalysisTracePointMeta = {
+  hitIndex: number
+  sampleIndex: number
+  time: number | null
+  state: number[] | null
+}
+
+function parseAnalysisTracePointMeta(value: unknown): AnalysisTracePointMeta | null {
+  if (typeof value !== 'string') return null
+  try {
+    const parsed = JSON.parse(value) as Partial<AnalysisTracePointMeta>
+    if (
+      typeof parsed.hitIndex !== 'number' ||
+      !Number.isFinite(parsed.hitIndex) ||
+      typeof parsed.sampleIndex !== 'number' ||
+      !Number.isFinite(parsed.sampleIndex)
+    ) {
+      return null
+    }
+    return {
+      hitIndex: parsed.hitIndex,
+      sampleIndex: parsed.sampleIndex,
+      time:
+        typeof parsed.time === 'number' && Number.isFinite(parsed.time) ? parsed.time : null,
+      state:
+        Array.isArray(parsed.state) && parsed.state.every((entry) => typeof entry === 'number')
+          ? [...parsed.state]
+          : null,
+    }
+  } catch {
+    return null
+  }
+}
 
 function appendAxisRangeSnapshot(
   snapshot: PlotlyRelayoutEvent,
@@ -283,7 +324,8 @@ function buildTraceFromHits(
   const x: number[] = []
   const y: number[] = []
   const z: number[] = []
-  const customdata: number[] = []
+  const customdata: string[] = []
+  const text: string[] = []
   const skipHits = Math.max(0, Math.trunc(viewport.advanced.skipHits))
   const hitStride = Math.max(1, Math.trunc(viewport.advanced.hitStride))
   const maxHits = Math.max(1, Math.trunc(viewport.advanced.maxHits))
@@ -306,7 +348,17 @@ function buildTraceFromHits(
     if (zAxis) {
       z.push(zValue as number)
     }
-    customdata.push(hits[hitIndex]?.order ?? hitIndex)
+    const hit = hits[hitIndex]
+    const hitIndexValue = hit?.order ?? hitIndex
+    customdata.push(
+      JSON.stringify({
+        hitIndex: hitIndexValue,
+        sampleIndex: hit?.sample_index ?? hitIndexValue,
+        time: typeof hit?.time === 'number' && Number.isFinite(hit.time) ? hit.time : null,
+        state: Array.isArray(hit?.state) ? hit.state : null,
+      } satisfies AnalysisTracePointMeta)
+    )
+    text.push(String(hitIndexValue))
     plotted += 1
   }
 
@@ -318,8 +370,8 @@ function buildTraceFromHits(
     z: zAxis ? resolveAnalysisAxisLabelForSystem(zAxis, system.config.type) : null,
   }
   const hovertemplate = zAxis
-    ? `${axisLabels.x}: %{x}<br>${axisLabels.y}: %{y}<br>${axisLabels.z}: %{z}<br>hit: %{customdata}<extra>${node.name}</extra>`
-    : `${axisLabels.x}: %{x}<br>${axisLabels.y}: %{y}<br>hit: %{customdata}<extra>${node.name}</extra>`
+    ? `${axisLabels.x}: %{x}<br>${axisLabels.y}: %{y}<br>${axisLabels.z}: %{z}<br>hit: %{text}<extra>${node.name}</extra>`
+    : `${axisLabels.x}: %{x}<br>${axisLabels.y}: %{y}<br>hit: %{text}<extra>${node.name}</extra>`
 
   if (zAxis) {
     return {
@@ -331,6 +383,7 @@ function buildTraceFromHits(
       y,
       z,
       customdata,
+      text,
       hovertemplate,
       marker: {
         color: render.color,
@@ -352,6 +405,7 @@ function buildTraceFromHits(
     x,
     y,
     customdata,
+    text,
     hovertemplate,
     marker: {
       color: render.color,
@@ -666,6 +720,7 @@ export function AnalysisViewportPlot({
   selectedNodeId,
   plotlyTheme,
   onSelectSource,
+  onSelectOrbitPoint,
   onComputeEventSeriesFromOrbit,
   onComputeEventSeriesFromSamples,
 }: AnalysisViewportPlotProps) {
@@ -849,11 +904,28 @@ export function AnalysisViewportPlot({
   const initialView = useMemo(() => buildInitialView(viewport), [viewport])
   const handlePointClick = useCallback(
     (point: PlotlyPointClick) => {
-      if (typeof point.uid === 'string') {
-        onSelectSource(point.uid)
-      }
+      if (typeof point.uid !== 'string') return
+      onSelectSource(point.uid)
+      const node = system.nodes[point.uid]
+      const object = system.objects[point.uid]
+      if (node?.kind !== 'object' || object?.type !== 'orbit') return
+      const metadata = parseAnalysisTracePointMeta(point.customdata)
+      if (!metadata) return
+      onSelectOrbitPoint?.({
+        orbitId: point.uid,
+        pointIndex: Math.max(0, Math.round(metadata.sampleIndex)),
+        hitIndex:
+          typeof metadata.hitIndex === 'number' && Number.isFinite(metadata.hitIndex)
+            ? Math.max(0, Math.round(metadata.hitIndex))
+            : null,
+        time:
+          typeof metadata.time === 'number' && Number.isFinite(metadata.time)
+            ? metadata.time
+            : null,
+        state: Array.isArray(metadata.state) ? [...metadata.state] : null,
+      })
     },
-    [onSelectSource]
+    [onSelectOrbitPoint, onSelectSource, system.nodes, system.objects]
   )
 
   return (
