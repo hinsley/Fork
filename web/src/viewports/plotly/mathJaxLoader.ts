@@ -38,7 +38,9 @@ function configureMathJax(win: MathJaxWindow) {
       ...existing.tex,
     },
     svg: {
-      fontCache: 'global',
+      // Use self-contained SVG output so newly introduced glyphs render on
+      // incremental Plotly updates instead of depending on a page-global cache.
+      fontCache: 'local',
       ...existing.svg,
     },
     startup: {
@@ -52,6 +54,10 @@ function createTestMathJax(win: MathJaxWindow) {
   const ready = Promise.resolve()
   win.MathJax = {
     ...win.MathJax,
+    svg: {
+      fontCache: 'local',
+      ...win.MathJax?.svg,
+    },
     startup: {
       promise: ready,
       typeset: false,

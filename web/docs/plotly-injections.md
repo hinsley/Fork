@@ -17,7 +17,9 @@ behavior.
   ensure the bundled MathJax v3 `tex-svg` runtime is available before
   `Plotly.react()` so axis titles, legend names, annotations, and other Plotly
   labels can render LaTeX math when user-provided text includes MathJax
-  delimiters.
+  delimiters. The loader now uses MathJax SVG `fontCache: 'local'` so
+  incrementally updated labels remain self-contained and newly introduced
+  glyphs render without requiring a full page reload.
 - `web/src/viewports/plotly/plotlyAdapter.ts`: title strings that mix MathJax
   markup with plain text are normalized into Plotly's documented whole-label
   LaTeX form before rendering, because Plotly drops non-math fragments when
