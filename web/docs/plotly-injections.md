@@ -11,7 +11,13 @@ behavior.
 - `web/src/viewports/plotly/plotlyAdapter.ts`: `renderPlot()` uses
   `Plotly.react()` on every `data`/`layout` change (forced rerender). It passes
   a config that changes defaults: `displaylogo: false`, `displayModeBar: true`,
-  `responsive: true`, `scrollZoom: true`, `doubleClick: false`.
+  `responsive: true`, `scrollZoom: true`, `doubleClick: false`,
+  `typesetMath: true`.
+- `web/src/viewports/plotly/mathJaxLoader.ts`: Plotly render/preload paths
+  ensure the bundled MathJax v3 `tex-svg` runtime is available before
+  `Plotly.react()` so axis titles, legend names, annotations, and other Plotly
+  labels can render LaTeX math when user-provided text includes MathJax
+  delimiters.
 - `web/src/viewports/plotly/plotlyAdapter.ts`: wraps `Plotly.react()`,
   `Plotly.newPlot()`, and `Plotly.Plots.resize()` with test-only perf counters
   when `window.__E2E__` is enabled.
@@ -133,5 +139,8 @@ behavior.
   verify Orbit Data preview selection/page jumps.
 - `web/e2e/plotly-view-state.spec.ts`: reads `node._fullLayout` to inspect
   camera state in tests.
+- `web/e2e/plotly-mathjax-labels.spec.ts`: uses `window.Plotly.relayout()` to
+  set a LaTeX axis title and asserts Plotly's generated math-title SVG group
+  appears inside the viewport.
 - `web/src/test/setup.ts`: mocks `plotlyAdapter` to avoid loading Plotly during
   unit tests.

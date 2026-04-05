@@ -1,4 +1,5 @@
 import type { Layout, Data } from 'plotly.js'
+import { ensureMathJaxReady, preloadMathJax } from './mathJaxLoader'
 
 type PlotlyModule = {
   relayout?: (container: HTMLElement, update: Record<string, unknown>) => MaybePromise<void>
@@ -12,6 +13,7 @@ type PlotlyModule = {
       responsive: boolean
       scrollZoom: boolean
       doubleClick: boolean
+      typesetMath: boolean
     }
   ) => Promise<void>
   purge: (container: HTMLElement) => void
@@ -141,6 +143,7 @@ async function loadPlotly(): Promise<PlotlyModule> {
 
 export function preloadPlotly() {
   void loadPlotly()
+  preloadMathJax()
 }
 
 export function isPlotlyLoaded() {
@@ -153,7 +156,7 @@ export async function renderPlot(
   layout: Partial<Layout>,
   opts?: { signal?: AbortSignal }
 ) {
-  const Plotly = await loadPlotly()
+  const [Plotly] = await Promise.all([loadPlotly(), ensureMathJaxReady()])
   if (opts?.signal?.aborted) return
   const sceneKeys = Object.keys(layout).filter((key) => key.startsWith('scene'))
   const hasScene = sceneKeys.length > 0
@@ -220,6 +223,7 @@ export async function renderPlot(
     responsive: true,
     scrollZoom: true,
     doubleClick: false,
+    typesetMath: true,
   })
 }
 

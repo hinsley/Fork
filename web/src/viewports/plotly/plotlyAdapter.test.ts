@@ -51,6 +51,7 @@ describe('plotlyAdapter camera guard', () => {
   beforeEach(() => {
     vi.resetModules()
     vi.unmock('./plotlyAdapter')
+    delete (window as Window & { MathJax?: unknown }).MathJax
   })
 
   it('injects camera into react when uirevision is stable and layout omits camera', async () => {
@@ -64,8 +65,10 @@ describe('plotlyAdapter camera guard', () => {
     expect(reactSpy).toHaveBeenCalledTimes(1)
     expect(relayoutSpy).not.toHaveBeenCalled()
     const layoutArg = reactSpy.mock.calls[0]?.[2] as { scene?: { camera?: unknown } }
+    const configArg = reactSpy.mock.calls[0]?.[3] as { typesetMath?: boolean }
     const injected = layoutArg?.scene?.camera as { eye?: { x?: number; y?: number; z?: number } }
     expect(injected?.eye).toEqual(camera.eye)
+    expect(configArg?.typesetMath).toBe(true)
   })
 
   it('does not override explicit camera in layout', async () => {
