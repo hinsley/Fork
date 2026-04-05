@@ -1,5 +1,7 @@
 import mathJaxBundleUrl from 'mathjax/es5/tex-svg.js?url'
 
+const FORK_MATHJAX_SCRIPT_SELECTOR = 'script[data-fork-mathjax="true"]'
+
 type MathJaxConfig = {
   startup?: {
     promise?: Promise<unknown>
@@ -65,9 +67,9 @@ function getStartupPromise(win: MathJaxWindow) {
 }
 
 function injectMathJaxScript(win: MathJaxWindow) {
-  const existingScript = document.querySelector(
-    'script[data-fork-mathjax="true"]'
-  ) as HTMLScriptElement | null
+  const existingScript = document.querySelector(FORK_MATHJAX_SCRIPT_SELECTOR) as
+    | HTMLScriptElement
+    | null
 
   return new Promise<void>((resolve, reject) => {
     const finish = () => {
@@ -92,7 +94,7 @@ function injectMathJaxScript(win: MathJaxWindow) {
     const script = document.createElement('script')
     script.src = mathJaxBundleUrl
     script.async = true
-    script.dataset.forkMathJax = 'true'
+    script.setAttribute('data-fork-mathjax', 'true')
     script.addEventListener('load', finish, { once: true })
     script.addEventListener('error', handleError, { once: true })
     ;(document.head ?? document.body ?? document.documentElement).appendChild(script)
