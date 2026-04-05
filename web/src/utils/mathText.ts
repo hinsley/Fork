@@ -5,6 +5,25 @@ const MATHJAX_WRAPPERS = [
   { open: '$', close: '$' },
 ] as const
 
+const MATH_SAFE_TEXT_PATTERN = /^[\s0-9+\-*/=<>()[\],.:;|]+$/
+
+type MathSegment = {
+  kind: 'math'
+  raw: string
+  content: string
+  open: (typeof MATHJAX_WRAPPERS)[number]['open']
+  close: (typeof MATHJAX_WRAPPERS)[number]['close']
+  start: number
+  end: number
+}
+
+type TextSegment = {
+  kind: 'text'
+  raw: string
+}
+
+type MathTextSegment = MathSegment | TextSegment
+
 function isEscaped(text: string, index: number): boolean {
   let backslashCount = 0
   for (let cursor = index - 1; cursor >= 0 && text[cursor] === '\\'; cursor -= 1) {
@@ -27,60 +46,88 @@ function findDelimiter(text: string, delimiter: string, fromIndex = 0): number {
   return -1
 }
 
-function findPairedDelimiterSegment(
+function tryMatchMathSegment(
   text: string,
-  open: string,
-  close: string
-): { start: number; end: number } | null {
-  let searchStart = 0
-  while (searchStart < text.length) {
-    const start = findDelimiter(text, open, searchStart)
-    if (start < 0) return null
-    let endSearch = start + open.length
-    while (endSearch < text.length) {
-      const endStart = findDelimiter(text, close, endSearch)
-      if (endStart < 0) return null
-      if (endStart > start + open.length) {
-        return { start, end: endStart + close.length }
-      }
-      endSearch = endStart + close.length
-    }
-    searchStart = start + open.length
+  start: number,
+  wrapper: (typeof MATHJAX_WRAPPERS)[number]
+): MathSegment | null {
+  if (!text.startsWith(wrapper.open, start)) return null
+  if (wrapper.open.startsWith('$') && isEscaped(text, start)) return null
+  if (wrapper.open === '$' && (text[start - 1] === '$' || text[start + 1] === '$')) {
+    return null
   }
-  return null
-}
 
-function findSingleDollarSegment(text: string): { start: number; end: number } | null {
-  for (let start = 0; start < text.length; start += 1) {
-    if (text[start] !== '$' || isEscaped(text, start)) continue
-    if (text[start - 1] === '$' || text[start + 1] === '$') continue
-    for (let end = start + 1; end < text.length; end += 1) {
-      if (text[end] !== '$' || isEscaped(text, end)) continue
-      if (text[end - 1] === '$' || text[end + 1] === '$') continue
-      if (end > start + 1) {
-        return { start, end: end + 1 }
-      }
-      break
-    }
-  }
-  return null
-}
-
-function findMathJaxSegment(text: string): { start: number; end: number } | null {
-  for (const wrapper of MATHJAX_WRAPPERS) {
-    if (wrapper.open === '$') {
-      const segment = findSingleDollarSegment(text)
-      if (segment) return segment
+  let endSearch = start + wrapper.open.length
+  while (endSearch < text.length) {
+    const endStart = findDelimiter(text, wrapper.close, endSearch)
+    if (endStart < 0) return null
+    if (wrapper.close === '$' && (text[endStart - 1] === '$' || text[endStart + 1] === '$')) {
+      endSearch = endStart + wrapper.close.length
       continue
     }
-    const segment = findPairedDelimiterSegment(text, wrapper.open, wrapper.close)
-    if (segment) return segment
+    if (endStart === start + wrapper.open.length) {
+      endSearch = endStart + wrapper.close.length
+      continue
+    }
+    return {
+      kind: 'math',
+      raw: text.slice(start, endStart + wrapper.close.length),
+      content: text.slice(start + wrapper.open.length, endStart),
+      open: wrapper.open,
+      close: wrapper.close,
+      start,
+      end: endStart + wrapper.close.length,
+    }
   }
   return null
+}
+
+function findNextMathSegment(text: string, fromIndex = 0): MathSegment | null {
+  for (let start = fromIndex; start < text.length; start += 1) {
+    for (const wrapper of MATHJAX_WRAPPERS) {
+      const segment = tryMatchMathSegment(text, start, wrapper)
+      if (segment) return segment
+    }
+  }
+  return null
+}
+
+function tokenizeMathText(text: string): MathTextSegment[] {
+  const segments: MathTextSegment[] = []
+  let cursor = 0
+  while (cursor < text.length) {
+    const segment = findNextMathSegment(text, cursor)
+    if (!segment) {
+      segments.push({ kind: 'text', raw: text.slice(cursor) })
+      break
+    }
+    if (segment.start > cursor) {
+      segments.push({ kind: 'text', raw: text.slice(cursor, segment.start) })
+    }
+    segments.push(segment)
+    cursor = segment.end
+  }
+  return segments
+}
+
+function escapeTextForMathJax(text: string): string {
+  return text
+    .replace(/\\/g, '\\textbackslash{}')
+    .replace(/([{}#$%&_])/g, '\\$1')
+    .replace(/\^/g, '\\textasciicircum{}')
+    .replace(/~/g, '\\textasciitilde{}')
+}
+
+function normalizePlainTextSegmentForMath(text: string): string {
+  if (text.length === 0) return ''
+  if (MATH_SAFE_TEXT_PATTERN.test(text)) {
+    return text
+  }
+  return `\\text{${escapeTextForMathJax(text)}}`
 }
 
 export function containsMathJaxMarkup(text: string): boolean {
-  return findMathJaxSegment(text) !== null
+  return tokenizeMathText(text).some((segment) => segment.kind === 'math')
 }
 
 export function appendMathJaxWrappedSuffix(label: string, suffix: string): string {
@@ -88,13 +135,34 @@ export function appendMathJaxWrappedSuffix(label: string, suffix: string): strin
   const start = label.indexOf(trimmed)
   const leading = start >= 0 ? label.slice(0, start) : ''
   const trailing = start >= 0 ? label.slice(start + trimmed.length) : ''
-  for (const wrapper of MATHJAX_WRAPPERS) {
-    if (!trimmed.startsWith(wrapper.open) || !trimmed.endsWith(wrapper.close)) continue
-    const segment = findMathJaxSegment(trimmed)
-    if (!segment || segment.start !== 0 || segment.end !== trimmed.length) continue
-    const content = trimmed.slice(wrapper.open.length, trimmed.length - wrapper.close.length)
-    if (content.length === 0) continue
-    return `${leading}${wrapper.open}${content}${suffix}${wrapper.close}${trailing}`
+  const segments = tokenizeMathText(trimmed)
+  if (segments.length === 1 && segments[0]?.kind === 'math' && segments[0].raw === trimmed) {
+    return `${leading}${segments[0].open}${segments[0].content}${suffix}${segments[0].close}${trailing}`
   }
   return `${label}${suffix}`
+}
+
+export function normalizeMathJaxForPlotly(text: string): string {
+  const segments = tokenizeMathText(text)
+  const mathSegments = segments.filter((segment) => segment.kind === 'math')
+  if (mathSegments.length === 0) return text
+
+  const trimmed = text.trim()
+  const trimmedSegments = tokenizeMathText(trimmed)
+  if (
+    trimmedSegments.length === 1 &&
+    trimmedSegments[0]?.kind === 'math' &&
+    trimmedSegments[0].raw === trimmed
+  ) {
+    return text
+  }
+
+  const body = segments
+    .map((segment) =>
+      segment.kind === 'math'
+        ? segment.content
+        : normalizePlainTextSegmentForMath(segment.raw)
+    )
+    .join('')
+  return `${'$'}${body}${'$'}`
 }

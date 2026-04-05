@@ -1,47 +1,58 @@
 import { expect, test } from '@playwright/test'
 import { createHarness } from './harness'
 
-test('plotly renders MathJax axis titles when labels use LaTeX delimiters', async ({ page }) => {
+test('plotly normalizes mixed MathJax labels for 2D analysis axes', async ({ page }) => {
   test.setTimeout(60_000)
 
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: true })
 
   await harness.openSystem('Lorenz')
-  await harness.createScene()
+  await harness.createOrbit()
+  await harness.runOrbit()
+  await page.getByTestId('viewport-insert-empty').click()
+  await page.getByTestId('viewport-create-analysis').click()
+  await page.locator('[data-testid^="viewport-header-"]').first().click()
 
   const viewport = page.locator('[data-testid^="plotly-viewport-"]').first()
-  await page.waitForFunction(() =>
-    document.querySelector('[data-testid^="plotly-viewport-"]')?.classList.contains('js-plotly-plot')
-  )
   await expect(viewport).toBeVisible()
 
-  const applied = await page.evaluate(async () => {
-    const node = document.querySelector('[data-testid^="plotly-viewport-"]') as HTMLElement | null
-    const Plotly = (window as unknown as {
-      Plotly?: { relayout?: (target: HTMLElement, update: Record<string, unknown>) => Promise<void> }
-    }).Plotly
-    if (!node || !Plotly?.relayout) return false
+  const labels = page.getByLabel('Label')
+  await labels.nth(0).fill('$x_1^2$+2')
+  await labels.nth(1).fill('value \\(y\\)')
 
-    await Plotly.relayout(node, {
-      'xaxis.title.text': '$x_1^2$',
+  await expect
+    .poll(async () => {
+      return page.evaluate(() => {
+        const node = document.querySelector('[data-testid^="plotly-viewport-"]') as
+          | (HTMLElement & {
+              _fullLayout?: {
+                xaxis?: { title?: { text?: string } }
+                yaxis?: { title?: { text?: string } }
+              }
+            })
+          | null
+        return JSON.stringify({
+          xTitle: node?._fullLayout?.xaxis?.title?.text ?? null,
+          yTitle: node?._fullLayout?.yaxis?.title?.text ?? null,
+          hasXMathGroup: document.querySelectorAll('.xtitle-math-group').length > 0,
+          hasYMathGroup: document.querySelectorAll('.ytitle-math-group').length > 0,
+        })
+      })
     })
-    return true
-  })
-
-  if (!applied) {
-    throw new Error('Plotly.relayout was not available in the browser context.')
-  }
-
-  await page.waitForFunction(() => {
-    const node = document.querySelector('[data-testid^="plotly-viewport-"]')
-    return Boolean(node?.querySelector('.xtitle-math-group'))
-  })
-
-  await expect(viewport.locator('.xtitle-math-group').first()).toBeVisible()
+    .toBe(
+      JSON.stringify({
+        xTitle: '$x_1^2+2$',
+        yTitle: '$\\text{value }y$',
+        hasXMathGroup: true,
+        hasYMathGroup: true,
+      })
+    )
 })
 
-test('plotly renders MathJax 3D analysis labels through annotation fallback', async ({ page }) => {
+test('plotly renders normalized mixed MathJax labels through 3D annotation fallback', async ({
+  page,
+}) => {
   test.setTimeout(60_000)
 
   const harness = createHarness(page)
@@ -62,7 +73,7 @@ test('plotly renders MathJax 3D analysis labels through annotation fallback', as
   const labels = page.getByLabel('Label')
   await labels.nth(0).fill('\\(x\\)')
   await labels.nth(1).fill('$y$')
-  await labels.nth(2).fill('value \\(z_{n+1}\\)')
+  await labels.nth(2).fill('$z_{n+1}$+2')
 
   await expect
     .poll(async () => {
@@ -95,7 +106,7 @@ test('plotly renders MathJax 3D analysis labels through annotation fallback', as
     })
     .toBe(
       JSON.stringify({
-        annotationTexts: ['\\(x\\)', '$y$', 'value \\(z_{n+1}\\)'],
+        annotationTexts: ['\\(x\\)', '$y$', '$z_{n+1}+2$'],
         titles: ['', '', ''],
         hasMathGroup: true,
       })

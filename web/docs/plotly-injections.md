@@ -18,6 +18,10 @@ behavior.
   `Plotly.react()` so axis titles, legend names, annotations, and other Plotly
   labels can render LaTeX math when user-provided text includes MathJax
   delimiters.
+- `web/src/viewports/plotly/plotlyAdapter.ts`: title strings that mix MathJax
+  markup with plain text are normalized into Plotly's documented whole-label
+  LaTeX form before rendering, because Plotly drops non-math fragments when
+  inline delimiters only wrap part of a title.
 - `web/src/viewports/plotly/plotlyAdapter.ts`: wraps `Plotly.react()`,
   `Plotly.newPlot()`, and `Plotly.Plots.resize()` with test-only perf counters
   when `window.__E2E__` is enabled.

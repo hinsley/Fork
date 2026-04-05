@@ -1,6 +1,6 @@
 import type { Layout, Data } from 'plotly.js'
 import { ensureMathJaxReady, preloadMathJax } from './mathJaxLoader'
-import { containsMathJaxMarkup } from '../../utils/mathText'
+import { containsMathJaxMarkup, normalizeMathJaxForPlotly } from '../../utils/mathText'
 
 type PlotlyModule = {
   relayout?: (container: HTMLElement, update: Record<string, unknown>) => MaybePromise<void>
@@ -320,6 +320,40 @@ function buildSceneMathTitleAnnotations(
   return [...fallback.baseAnnotations, ...generated]
 }
 
+function normalizePlotlyTitleText(value: unknown, path: string[] = []): unknown {
+  if (typeof value === 'string') {
+    const leaf = path[path.length - 1]
+    const parent = path[path.length - 2]
+    if (leaf === 'title' || (leaf === 'text' && parent === 'title')) {
+      return normalizeMathJaxForPlotly(value)
+    }
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    let changed = false
+    const next = value.map((entry, index) => {
+      const normalized = normalizePlotlyTitleText(entry, [...path, String(index)])
+      if (normalized !== entry) changed = true
+      return normalized
+    })
+    return changed ? next : value
+  }
+
+  if (!value || typeof value !== 'object') return value
+
+  const obj = value as Record<string, unknown>
+  let next: Record<string, unknown> | null = null
+  for (const [key, entry] of Object.entries(obj)) {
+    const normalized = normalizePlotlyTitleText(entry, [...path, key])
+    if (normalized !== entry) {
+      if (!next) next = { ...obj }
+      next[key] = normalized
+    }
+  }
+  return next ?? value
+}
+
 async function loadPlotly(): Promise<PlotlyModule> {
   if (plotlyModule) return plotlyModule
   if (!plotlyPromise) {
@@ -351,11 +385,12 @@ export async function renderPlot(
 ) {
   const [Plotly] = await Promise.all([loadPlotly(), ensureMathJaxReady()])
   if (opts?.signal?.aborted) return
+  const normalizedLayout = normalizePlotlyTitleText(layout) as Partial<Layout>
   const managedSceneKeys = sceneMathTitleKeys.get(container) ?? new Set<string>()
   const mathTitleFallback =
     Plotly.relayout
-      ? prepareSceneMathTitleFallback(layout, managedSceneKeys)
-      : { layout, fallbacks: [] as SceneMathTitleFallback[] }
+      ? prepareSceneMathTitleFallback(normalizedLayout, managedSceneKeys)
+      : { layout: normalizedLayout, fallbacks: [] as SceneMathTitleFallback[] }
   const sceneKeys = Object.keys(mathTitleFallback.layout).filter((key) => key.startsWith('scene'))
   const hasScene = sceneKeys.length > 0
   const layoutHasCamera = sceneKeys.some((key) => {

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { appendMathJaxWrappedSuffix, containsMathJaxMarkup } from './mathText'
+import {
+  appendMathJaxWrappedSuffix,
+  containsMathJaxMarkup,
+  normalizeMathJaxForPlotly,
+} from './mathText'
 
 describe('mathText', () => {
   it('detects MathJax markup for supported delimiters', () => {
@@ -17,5 +21,14 @@ describe('mathText', () => {
     expect(appendMathJaxWrappedSuffix('\\(z\\)', '_n')).toBe('\\(z_n\\)')
     expect(appendMathJaxWrappedSuffix('\\[z\\]', '_{n+1}')).toBe('\\[z_{n+1}\\]')
     expect(appendMathJaxWrappedSuffix('z', '_n')).toBe('z_n')
+  })
+
+  it('normalizes mixed MathJax labels into Plotly-compatible whole-label math', () => {
+    expect(normalizeMathJaxForPlotly('$z_{n+1}$+2')).toBe('$z_{n+1}+2$')
+    expect(normalizeMathJaxForPlotly('\\(z_{n+1}\\)+2')).toBe('$z_{n+1}+2$')
+    expect(normalizeMathJaxForPlotly('value \\(y\\)')).toBe('$\\text{value }y$')
+    expect(normalizeMathJaxForPlotly('$x$ value')).toBe('$x\\text{ value}$')
+    expect(normalizeMathJaxForPlotly('$x$')).toBe('$x$')
+    expect(normalizeMathJaxForPlotly('plain text')).toBe('plain text')
   })
 })

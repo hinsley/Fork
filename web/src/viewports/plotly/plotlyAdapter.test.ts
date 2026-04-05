@@ -96,6 +96,25 @@ describe('plotlyAdapter camera guard', () => {
     expect(relayoutSpy).not.toHaveBeenCalled()
   })
 
+  it('normalizes mixed MathJax text in 2D titles before rendering', async () => {
+    const { reactSpy, relayoutSpy } = mockPlotly()
+    const { renderPlot } = await loadAdapter()
+    const container = makeContainer('plot-1')
+
+    await renderPlot(container, [], {
+      xaxis: { title: { text: '$z_{n+1}$+2' } },
+      yaxis: { title: { text: 'plain y' } },
+    })
+
+    const layoutArg = reactSpy.mock.calls[0]?.[2] as {
+      xaxis?: { title?: { text?: string } }
+      yaxis?: { title?: { text?: string } }
+    }
+    expect(layoutArg?.xaxis?.title?.text).toBe('$z_{n+1}+2$')
+    expect(layoutArg?.yaxis?.title?.text).toBe('plain y')
+    expect(relayoutSpy).not.toHaveBeenCalled()
+  })
+
   it('replaces 3D scene titles containing MathJax markup with scene annotations', async () => {
     const { reactSpy, relayoutSpy } = mockPlotly()
     const { renderPlot } = await loadAdapter()
@@ -109,7 +128,7 @@ describe('plotlyAdapter camera guard', () => {
       scene: {
         xaxis: { title: { text: 'value \\(y\\)', font: { color: '#123456', size: 17 } } },
         yaxis: { title: { text: 'plain y' } },
-        zaxis: { title: { text: '$z_{n+1}$' } },
+        zaxis: { title: { text: '$z_{n+1}$+2' } },
       },
     })
 
@@ -131,7 +150,7 @@ describe('plotlyAdapter camera guard', () => {
     const annotations = relayoutArg['scene.annotations'] as Array<Record<string, unknown>>
     expect(annotations).toHaveLength(2)
     expect(annotations[0]).toMatchObject({
-      text: 'value \\(y\\)',
+      text: '$\\text{value }y$',
       showarrow: false,
       font: { color: '#123456', size: 17 },
       x: 10.8,
@@ -139,7 +158,7 @@ describe('plotlyAdapter camera guard', () => {
       z: 5,
     })
     expect(annotations[1]).toMatchObject({
-      text: '$z_{n+1}$',
+      text: '$z_{n+1}+2$',
       showarrow: false,
       x: 0,
       y: -2,
