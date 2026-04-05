@@ -26,6 +26,11 @@ behavior.
   not specify a camera. The guard only uses a validated camera spec (no model
   persistence, no continuous injection) to prevent the first style update from
   resetting the camera.
+- `web/src/viewports/plotly/plotlyAdapter.ts`: when a 3D `scene.*axis.title`
+  contains MathJax markup, native scene titles are blanked before
+  `Plotly.react()` and reintroduced as `scene.annotations` via
+  `Plotly.relayout()`, because Plotly's native 3D axis-title path does not
+  typeset MathJax correctly.
 - `web/src/viewports/plotly/plotlyAdapter.ts`: `relayoutPlot()` wraps
   `Plotly.relayout()` for one-time view restores.
 - `web/src/viewports/plotly/PlotlyViewport.tsx`: `preloadPlotly()` is invoked on

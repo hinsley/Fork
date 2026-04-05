@@ -67,6 +67,7 @@ import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/Plotl
 import { AnalysisViewportPlot } from '../analysis/AnalysisViewportPlot'
 import type { PlotlyRelayoutEvent } from '../viewports/plotly/usePlotViewport'
 import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
+import { appendMathJaxWrappedSuffix } from '../utils/mathText'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
 import { clampMenuX } from './contextMenu'
 import type {
@@ -3187,7 +3188,9 @@ function buildSceneTraces(
     const flowHoverTemplate1D = `t: %{text}<br>${axisLabelX}: %{y:.6g}<extra></extra>`
     const mapHoverTemplate3D = `${axisLabelX}: %{x:.6g}<br>${axisLabelY}: %{y:.6g}<br>${axisLabelZ}: %{z:.6g}<br>n: %{text}<extra></extra>`
     const mapHoverTemplate2D = `${axisLabelX}: %{x:.6g}<br>${axisLabelY}: %{y:.6g}<br>n: %{text}<extra></extra>`
-    const mapHoverTemplate1D = `${axisLabelX}_n: %{x:.6g}<br>${axisLabelX}_{n+1}: %{y:.6g}<br>n: %{text}<extra></extra>`
+    const mapHoverLabelX = appendMathJaxWrappedSuffix(axisLabelX, '_n')
+    const mapHoverLabelY = appendMathJaxWrappedSuffix(axisLabelX, '_{n+1}')
+    const mapHoverTemplate1D = `${mapHoverLabelX}: %{x:.6g}<br>${mapHoverLabelY}: %{y:.6g}<br>n: %{text}<extra></extra>`
     const selectedOrbitPointIndex =
       selectedOrbitNodeId === nodeId && orbitPointSelection?.orbitId === nodeId
         ? orbitPointSelection.pointIndex
@@ -3551,7 +3554,9 @@ function buildSceneTraces(
     const axisLabelZ = axisVarZ || 'z'
     const branchHoverTemplate3D = `${axisLabelX}: %{x:.6g}<br>${axisLabelY}: %{y:.6g}<br>${axisLabelZ}: %{z:.6g}<br>%{text}<extra></extra>`
     const branchHoverTemplate2D = `${axisLabelX}: %{x:.6g}<br>${axisLabelY}: %{y:.6g}<br>%{text}<extra></extra>`
-    const branchHoverTemplateMap1D = `${axisLabelX}_n: %{x:.6g}<br>${axisLabelX}_{n+1}: %{y:.6g}<br>%{text}<extra></extra>`
+    const branchHoverLabelX = appendMathJaxWrappedSuffix(axisLabelX, '_n')
+    const branchHoverLabelY = appendMathJaxWrappedSuffix(axisLabelX, '_{n+1}')
+    const branchHoverTemplateMap1D = `${branchHoverLabelX}: %{x:.6g}<br>${branchHoverLabelY}: %{y:.6g}<br>%{text}<extra></extra>`
     const branchHoverTemplateTimeSeries1D = `${axisLabelX}: %{y:.6g}<br>%{text}<extra></extra>`
     const branchSnapshot = resolveBranchSnapshot(system, branch)
     const packedStateDimension =
@@ -5786,15 +5791,17 @@ function buildSceneBaseLayout(
   }
 
   if (projection?.kind === 'map_cobweb_1d') {
+    const cobwebXLabel = appendMathJaxWrappedSuffix(xLabel, '_n')
+    const cobwebYLabel = appendMathJaxWrappedSuffix(xLabel, '_{n+1}')
     return {
       ...base,
       xaxis: {
-        title: { text: `${xLabel}_n`, font: { color: plotlyTheme.text } },
+        title: { text: cobwebXLabel, font: { color: plotlyTheme.text } },
         tickfont: { color: plotlyTheme.text },
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },
       yaxis: {
-        title: { text: `${xLabel}_{n+1}`, font: { color: plotlyTheme.text } },
+        title: { text: cobwebYLabel, font: { color: plotlyTheme.text } },
         tickfont: { color: plotlyTheme.text },
         zerolinecolor: 'rgba(120,120,120,0.3)',
       },

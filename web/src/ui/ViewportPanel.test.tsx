@@ -822,6 +822,55 @@ describe('ViewportPanel view state wiring', () => {
     expect(hasFunctionCurve).toBe(false)
   })
 
+  it('keeps cobweb suffixes inside MathJax-wrapped variable labels', () => {
+    const config: SystemConfig = {
+      name: 'Map4DMath',
+      equations: ['x + y', 'y + z', 'z + w', 'w + x'],
+      params: [],
+      paramNames: [],
+      varNames: ['$x$', '$y$', '$z$', '$w$'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    let system = createSystem({ name: 'Map4DMath_System', config })
+    const sceneResult = addScene(system, 'Map Scene Math 1D')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['$z$'],
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'MapOrbit4DMath',
+      systemName: config.name,
+      data: [
+        [0, 0, 1, 2, 3],
+        [1, 0.2, 1.1, 2.1, 3.2],
+        [2, 0.4, 1.3, 2.4, 3.4],
+      ],
+      t_start: 0,
+      t_end: 2,
+      dt: 1,
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    expect(props).toBeTruthy()
+    expect(props?.layout?.xaxis?.title).toMatchObject({ text: '$z_n$' })
+    expect(props?.layout?.yaxis?.title).toMatchObject({ text: '$z_{n+1}$' })
+    const orbitMarkerTrace = props?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === orbitResult.nodeId &&
+        'mode' in trace &&
+        trace.mode === 'markers'
+    ) as { hovertemplate?: string } | undefined
+    expect(orbitMarkerTrace?.hovertemplate).toBe(
+      '$z_n$: %{x:.6g}<br>$z_{n+1}$: %{y:.6g}<br>n: %{text}<extra></extra>'
+    )
+  })
+
   it('suppresses CLV and eigenvector overlays in 1D scene projections', () => {
     const config: SystemConfig = {
       name: 'Flow4D',

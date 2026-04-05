@@ -15,14 +15,14 @@ type PlotlyMockBundle = {
   relayoutSpy: PlotlyMock['relayout']
 }
 
-const makeContainer = (uirevision: string, camera?: Record<string, unknown>) => {
+const makeContainer = (uirevision: string, scene: Record<string, unknown> = {}) => {
   const container = document.createElement('div') as HTMLDivElement & {
     _fullLayout?: Record<string, unknown>
     layout?: Record<string, unknown>
   }
   container._fullLayout = {
     uirevision,
-    scene: camera ? { camera } : {},
+    scene,
   }
   return container
 }
@@ -58,7 +58,7 @@ describe('plotlyAdapter camera guard', () => {
     const { reactSpy, relayoutSpy } = mockPlotly()
     const { renderPlot } = await loadAdapter()
     const camera = { eye: { x: 1, y: 2, z: 3 } }
-    const container = makeContainer('plot-1', camera)
+    const container = makeContainer('plot-1', { camera })
 
     await renderPlot(container, [], { uirevision: 'plot-1', scene: { aspectmode: 'data' } })
 
@@ -75,7 +75,7 @@ describe('plotlyAdapter camera guard', () => {
     const { reactSpy, relayoutSpy } = mockPlotly()
     const { renderPlot } = await loadAdapter()
     const camera = { eye: { x: 4, y: 5, z: 6 } }
-    const container = makeContainer('plot-1', { eye: { x: 1, y: 2, z: 3 } })
+    const container = makeContainer('plot-1', { camera: { eye: { x: 1, y: 2, z: 3 } } })
 
     await renderPlot(container, [], { uirevision: 'plot-1', scene: { camera } })
 
@@ -87,12 +87,63 @@ describe('plotlyAdapter camera guard', () => {
   it('does not reapply camera when uirevision changes', async () => {
     const { reactSpy, relayoutSpy } = mockPlotly()
     const { renderPlot } = await loadAdapter()
-    const container = makeContainer('plot-1', { eye: { x: 1, y: 2, z: 3 } })
+    const container = makeContainer('plot-1', { camera: { eye: { x: 1, y: 2, z: 3 } } })
 
     await renderPlot(container, [], { uirevision: 'plot-2', scene: { aspectmode: 'data' } })
 
     const layoutArg = reactSpy.mock.calls[0]?.[2] as { scene?: { camera?: unknown } }
     expect(layoutArg?.scene?.camera).toBeUndefined()
     expect(relayoutSpy).not.toHaveBeenCalled()
+  })
+
+  it('replaces 3D scene titles containing MathJax markup with scene annotations', async () => {
+    const { reactSpy, relayoutSpy } = mockPlotly()
+    const { renderPlot } = await loadAdapter()
+    const container = makeContainer('plot-1', {
+      xaxis: { range: [0, 10] },
+      yaxis: { range: [-2, 2] },
+      zaxis: { range: [5, 9] },
+    })
+
+    await renderPlot(container, [], {
+      scene: {
+        xaxis: { title: { text: 'value \\(y\\)', font: { color: '#123456', size: 17 } } },
+        yaxis: { title: { text: 'plain y' } },
+        zaxis: { title: { text: '$z_{n+1}$' } },
+      },
+    })
+
+    const layoutArg = reactSpy.mock.calls[0]?.[2] as {
+      scene?: {
+        xaxis?: { title?: { text?: string } }
+        yaxis?: { title?: { text?: string } }
+        zaxis?: { title?: { text?: string } }
+        annotations?: unknown[]
+      }
+    }
+    expect(layoutArg?.scene?.xaxis?.title?.text).toBe('')
+    expect(layoutArg?.scene?.yaxis?.title?.text).toBe('plain y')
+    expect(layoutArg?.scene?.zaxis?.title?.text).toBe('')
+    expect(layoutArg?.scene?.annotations).toEqual([])
+
+    expect(relayoutSpy).toHaveBeenCalledTimes(1)
+    const relayoutArg = relayoutSpy.mock.calls[0]?.[1] as Record<string, unknown>
+    const annotations = relayoutArg['scene.annotations'] as Array<Record<string, unknown>>
+    expect(annotations).toHaveLength(2)
+    expect(annotations[0]).toMatchObject({
+      text: 'value \\(y\\)',
+      showarrow: false,
+      font: { color: '#123456', size: 17 },
+      x: 10.8,
+      y: -2,
+      z: 5,
+    })
+    expect(annotations[1]).toMatchObject({
+      text: '$z_{n+1}$',
+      showarrow: false,
+      x: 0,
+      y: -2,
+      z: 9.32,
+    })
   })
 })

@@ -1,5 +1,6 @@
 import type { Layout, Data } from 'plotly.js'
 import { ensureMathJaxReady, preloadMathJax } from './mathJaxLoader'
+import { containsMathJaxMarkup } from '../../utils/mathText'
 
 type PlotlyModule = {
   relayout?: (container: HTMLElement, update: Record<string, unknown>) => MaybePromise<void>
@@ -29,6 +30,25 @@ type CameraVector = { x: number; y: number; z: number }
 type CameraSpec = { eye: CameraVector; up?: CameraVector; center?: CameraVector }
 type MaybePromise<T> = T | Promise<T>
 type ArrayLike3 = { 0: unknown; 1: unknown; 2: unknown; length: number }
+type SceneAxisKey = 'xaxis' | 'yaxis' | 'zaxis'
+type SceneMathTitleSpec = {
+  axis: SceneAxisKey
+  text: string
+  fontColor?: string
+  fontSize?: number
+}
+type SceneMathTitleFallback = {
+  sceneKey: string
+  baseAnnotations: unknown[]
+  titles: SceneMathTitleSpec[]
+}
+type PlotlyContainer = HTMLElement & {
+  layout?: { uirevision?: string | number }
+  _fullLayout?: Record<string, unknown>
+}
+
+const SCENE_AXIS_KEYS: SceneAxisKey[] = ['xaxis', 'yaxis', 'zaxis']
+const sceneMathTitleKeys = new WeakMap<HTMLElement, Set<string>>()
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
@@ -127,6 +147,179 @@ function unwrapPlotly(mod: unknown): PlotlyModule {
   return candidate as PlotlyModule
 }
 
+function cloneSceneAnnotations(sceneLayout: Record<string, unknown>): unknown[] {
+  const annotations = sceneLayout.annotations
+  return Array.isArray(annotations) ? [...annotations] : []
+}
+
+function extractSceneAxisTitle(
+  sceneLayout: Record<string, unknown>,
+  axisKey: SceneAxisKey
+): { text: string; font: Record<string, unknown> | null } | null {
+  const axis = sceneLayout[axisKey]
+  if (!axis || typeof axis !== 'object') return null
+  const axisLayout = axis as Record<string, unknown>
+  const title = axisLayout.title
+  if (typeof title === 'string') {
+    return { text: title, font: null }
+  }
+  if (!title || typeof title !== 'object') return null
+  const titleLayout = title as Record<string, unknown>
+  if (typeof titleLayout.text !== 'string') return null
+  return {
+    text: titleLayout.text,
+    font:
+      titleLayout.font && typeof titleLayout.font === 'object'
+        ? (titleLayout.font as Record<string, unknown>)
+        : null,
+  }
+}
+
+function blankSceneAxisTitle(
+  sceneLayout: Record<string, unknown>,
+  axisKey: SceneAxisKey
+): Record<string, unknown> {
+  const axis = sceneLayout[axisKey]
+  if (!axis || typeof axis !== 'object') return sceneLayout
+  const axisLayout = axis as Record<string, unknown>
+  const title = axisLayout.title
+  return {
+    ...sceneLayout,
+    [axisKey]: {
+      ...axisLayout,
+      title:
+        title && typeof title === 'object'
+          ? { ...(title as Record<string, unknown>), text: '' }
+          : { text: '' },
+    },
+  }
+}
+
+function resolveFontColor(font: Record<string, unknown> | null): string | undefined {
+  return typeof font?.color === 'string' && font.color.length > 0 ? font.color : undefined
+}
+
+function resolveFontSize(font: Record<string, unknown> | null): number | undefined {
+  return isFiniteNumber(font?.size) ? font.size : undefined
+}
+
+function prepareSceneMathTitleFallback(
+  layout: Partial<Layout>,
+  managedSceneKeys: ReadonlySet<string>
+): { layout: Partial<Layout>; fallbacks: SceneMathTitleFallback[] } {
+  const sceneKeys = Object.keys(layout).filter((key) => key.startsWith('scene'))
+  if (sceneKeys.length === 0) {
+    return { layout, fallbacks: [] }
+  }
+
+  let nextLayout: (Partial<Layout> & Record<string, unknown>) | null = null
+  const fallbacks: SceneMathTitleFallback[] = []
+
+  for (const sceneKey of sceneKeys) {
+    const sceneValue = layout[sceneKey as keyof Layout]
+    if (!sceneValue || typeof sceneValue !== 'object') continue
+    const sceneLayout = sceneValue as Record<string, unknown>
+    let nextSceneLayout: Record<string, unknown> | null = null
+    const titles: SceneMathTitleSpec[] = []
+
+    for (const axisKey of SCENE_AXIS_KEYS) {
+      const title = extractSceneAxisTitle(sceneLayout, axisKey)
+      if (!title || !containsMathJaxMarkup(title.text)) continue
+      titles.push({
+        axis: axisKey,
+        text: title.text,
+        fontColor: resolveFontColor(title.font),
+        fontSize: resolveFontSize(title.font),
+      })
+      nextSceneLayout = blankSceneAxisTitle(nextSceneLayout ?? sceneLayout, axisKey)
+    }
+
+    if (titles.length === 0 && !managedSceneKeys.has(sceneKey)) continue
+
+    if (!nextLayout) {
+      nextLayout = { ...layout }
+    }
+
+    nextLayout[sceneKey] = {
+      ...(nextSceneLayout ?? sceneLayout),
+      annotations: cloneSceneAnnotations(sceneLayout),
+    }
+
+    if (titles.length > 0) {
+      fallbacks.push({
+        sceneKey,
+        baseAnnotations: cloneSceneAnnotations(sceneLayout),
+        titles,
+      })
+    }
+  }
+
+  return { layout: nextLayout ?? layout, fallbacks }
+}
+
+function resolveSceneAxisRange(
+  fullScene: Record<string, unknown> | undefined,
+  axisKey: SceneAxisKey
+): { start: number; end: number; span: number } {
+  const axis = fullScene?.[axisKey]
+  if (axis && typeof axis === 'object') {
+    const range = (axis as Record<string, unknown>).range
+    if (
+      Array.isArray(range) &&
+      range.length >= 2 &&
+      isFiniteNumber(range[0]) &&
+      isFiniteNumber(range[1])
+    ) {
+      const start = range[0]
+      const end = range[1]
+      return { start, end, span: Math.abs(end - start) || 1 }
+    }
+  }
+  return { start: 0, end: 1, span: 1 }
+}
+
+function buildSceneMathTitleAnnotations(
+  fallback: SceneMathTitleFallback,
+  fullScene: Record<string, unknown> | undefined
+): unknown[] {
+  const xRange = resolveSceneAxisRange(fullScene, 'xaxis')
+  const yRange = resolveSceneAxisRange(fullScene, 'yaxis')
+  const zRange = resolveSceneAxisRange(fullScene, 'zaxis')
+  const generated = fallback.titles.map((title) => {
+    const font: Record<string, unknown> = {}
+    if (title.fontColor) font.color = title.fontColor
+    if (title.fontSize) font.size = title.fontSize
+    const base = {
+      text: title.text,
+      showarrow: false,
+      font,
+    } as Record<string, unknown>
+    if (title.axis === 'xaxis') {
+      return {
+        ...base,
+        x: xRange.end + (xRange.end >= xRange.start ? 1 : -1) * xRange.span * 0.08,
+        y: yRange.start,
+        z: zRange.start,
+      }
+    }
+    if (title.axis === 'yaxis') {
+      return {
+        ...base,
+        x: xRange.start,
+        y: yRange.end + (yRange.end >= yRange.start ? 1 : -1) * yRange.span * 0.08,
+        z: zRange.start,
+      }
+    }
+    return {
+      ...base,
+      x: xRange.start,
+      y: yRange.start,
+      z: zRange.end + (zRange.end >= zRange.start ? 1 : -1) * zRange.span * 0.08,
+    }
+  })
+  return [...fallback.baseAnnotations, ...generated]
+}
+
 async function loadPlotly(): Promise<PlotlyModule> {
   if (plotlyModule) return plotlyModule
   if (!plotlyPromise) {
@@ -158,22 +351,25 @@ export async function renderPlot(
 ) {
   const [Plotly] = await Promise.all([loadPlotly(), ensureMathJaxReady()])
   if (opts?.signal?.aborted) return
-  const sceneKeys = Object.keys(layout).filter((key) => key.startsWith('scene'))
+  const managedSceneKeys = sceneMathTitleKeys.get(container) ?? new Set<string>()
+  const mathTitleFallback =
+    Plotly.relayout
+      ? prepareSceneMathTitleFallback(layout, managedSceneKeys)
+      : { layout, fallbacks: [] as SceneMathTitleFallback[] }
+  const sceneKeys = Object.keys(mathTitleFallback.layout).filter((key) => key.startsWith('scene'))
   const hasScene = sceneKeys.length > 0
   const layoutHasCamera = sceneKeys.some((key) => {
-    const value = layout[key as keyof Layout]
+    const value = mathTitleFallback.layout[key as keyof Layout]
     if (!value || typeof value !== 'object') return false
     return 'camera' in (value as Record<string, unknown>)
   })
   const layoutUirevision =
-    typeof layout.uirevision === 'string' || typeof layout.uirevision === 'number'
-      ? String(layout.uirevision)
+    typeof mathTitleFallback.layout.uirevision === 'string' ||
+    typeof mathTitleFallback.layout.uirevision === 'number'
+      ? String(mathTitleFallback.layout.uirevision)
       : null
   const existingUirevision = (() => {
-    const candidate = container as HTMLElement & {
-      layout?: { uirevision?: string | number }
-      _fullLayout?: { uirevision?: string | number }
-    }
+    const candidate = container as PlotlyContainer
     const value = candidate.layout?.uirevision ?? candidate._fullLayout?.uirevision
     if (typeof value === 'string' || typeof value === 'number') return String(value)
     return null
@@ -182,18 +378,19 @@ export async function renderPlot(
   // Guard by injecting a valid pre-react camera spec when uirevision matches and layout omits
   // camera. This avoids model persistence or continuous camera injection; remove if Plotly changes.
   const shouldPreserveCamera =
-    hasScene && !layoutHasCamera && layoutUirevision && existingUirevision === layoutUirevision
-  let layoutToRender = layout
+    hasScene &&
+    !layoutHasCamera &&
+    layoutUirevision &&
+    existingUirevision === layoutUirevision
+  let layoutToRender = mathTitleFallback.layout
   if (shouldPreserveCamera) {
     try {
-      const nextLayout: Partial<Layout> & Record<string, unknown> = { ...layout }
+      const nextLayout: Partial<Layout> & Record<string, unknown> = { ...layoutToRender }
       let injected = false
       for (const key of sceneKeys) {
-        const source = layout[key as keyof Layout]
+        const source = layoutToRender[key as keyof Layout]
         if (!source || typeof source !== 'object') continue
-        const candidate = container as HTMLElement & {
-          _fullLayout?: Record<string, unknown>
-        }
+        const candidate = container as PlotlyContainer
         const scene = candidate._fullLayout?.[key] as
           | { camera?: Record<string, unknown>; _scene?: { camera?: Record<string, unknown> } }
           | undefined
@@ -225,6 +422,30 @@ export async function renderPlot(
     doubleClick: false,
     typesetMath: true,
   })
+  if (opts?.signal?.aborted) return
+  if (mathTitleFallback.fallbacks.length > 0 && Plotly.relayout) {
+    const candidate = container as PlotlyContainer
+    const update = Object.fromEntries(
+      mathTitleFallback.fallbacks.map((fallback) => {
+        const fullScene = candidate._fullLayout?.[fallback.sceneKey]
+        return [
+          `${fallback.sceneKey}.annotations`,
+          buildSceneMathTitleAnnotations(
+            fallback,
+            fullScene && typeof fullScene === 'object'
+              ? (fullScene as Record<string, unknown>)
+              : undefined
+          ),
+        ]
+      })
+    )
+    await Plotly.relayout(container, update)
+    if (opts?.signal?.aborted) return
+  }
+  sceneMathTitleKeys.set(
+    container,
+    new Set(mathTitleFallback.fallbacks.map((fallback) => fallback.sceneKey))
+  )
 }
 
 export async function resizePlot(container: HTMLElement) {
