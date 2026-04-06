@@ -30,12 +30,14 @@ test('viewport content ends where the resize handle begins', async ({ page }) =>
       const bodyRect = body.getBoundingClientRect()
       const viewportRect = viewport.getBoundingClientRect()
       const handleRect = handle.getBoundingClientRect()
+      const handleStyle = getComputedStyle(handle)
 
       return {
         bodyBottom: bodyRect.bottom,
         viewportBottom: viewportRect.bottom,
         handleTop: handleRect.top,
         handleHeight: handleRect.height,
+        handlePosition: handleStyle.position,
       }
     })
 
@@ -47,5 +49,6 @@ test('viewport content ends where the resize handle begins', async ({ page }) =>
       Math.abs((geometry?.viewportBottom ?? 0) - (geometry?.handleTop ?? 0))
     ).toBeLessThanOrEqual(1)
     expect(geometry?.handleHeight).toBeGreaterThan(0)
+    expect(geometry?.handlePosition).toBe('relative')
   }
 })
