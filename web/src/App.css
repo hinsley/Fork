@@ -1090,6 +1090,7 @@
 }
 
 .viewport-tile {
+  --viewport-resize-handle-height: 10px;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--panel-border);
@@ -1245,11 +1246,8 @@
 }
 
 .viewport-resize-handle {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 10px;
+  flex: 0 0 var(--viewport-resize-handle-height);
+  height: var(--viewport-resize-handle-height);
   background: linear-gradient(
     to bottom,
     rgba(0, 0, 0, 0),
