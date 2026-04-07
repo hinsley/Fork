@@ -210,4 +210,20 @@ describe('AnalysisViewportInspector', () => {
         .value
     ).toBe('dashed')
   })
+
+  it('shows cobweb and identity-line controls for delta-t axes at different hit offsets', () => {
+    renderInspector({
+      viewportUpdate: {
+        axes: {
+          x: { kind: 'delta_time', hitOffset: 0, label: 'Delta t@n' },
+          y: { kind: 'delta_time', hitOffset: 2, label: 'Delta t@n+2' },
+          z: null
+        }
+      }
+    })
+
+    expect(screen.queryByText('Connect plotted hits')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Show cobweb')).toBeInTheDocument()
+    expect(screen.getByLabelText('Show identity line')).toBeInTheDocument()
+  })
 })

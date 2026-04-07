@@ -136,9 +136,14 @@ export function resolveAnalysisCobwebAxes(
 ): AnalysisCobwebAxes | null {
   if (viewport.axes.z) return null
   const { x, y } = viewport.axes
-  if (x.kind !== 'observable' || y.kind !== 'observable') return null
-  if (x.hitOffset === y.hitOffset) return null
-  if (x.expression.trim() !== y.expression.trim()) return null
+  if (x.kind === 'observable' && y.kind === 'observable') {
+    if (x.hitOffset === y.hitOffset) return null
+    if (x.expression.trim() !== y.expression.trim()) return null
+  } else if (x.kind === 'delta_time' && y.kind === 'delta_time') {
+    if (x.hitOffset === y.hitOffset) return null
+  } else {
+    return null
+  }
   return x.hitOffset < y.hitOffset
     ? { earlierAxis: 'x', laterAxis: 'y' }
     : { earlierAxis: 'y', laterAxis: 'x' }

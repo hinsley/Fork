@@ -4688,6 +4688,148 @@ describe('ViewportPanel view state wiring', () => {
     })
   })
 
+  it('renders cobweb and identity-line overlays for delta-t event maps with different hit offsets', async () => {
+    const config: SystemConfig = {
+      name: 'Analysis_Delta_T_Cobweb_System',
+      equations: ['x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x'],
+      solver: 'rk4',
+      type: 'flow'
+    }
+    let system = createSystem({ name: 'Analysis_Delta_T_Cobweb_System', config })
+    const analysisResult = addAnalysisViewport(system, 'Event_Map_1')
+    system = analysisResult.system
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Delta_T_Target',
+      systemName: config.name,
+      data: [
+        [0, 0],
+        [0.1, 1],
+        [0.4, 2],
+        [0.9, 3]
+      ],
+      t_start: 0,
+      t_end: 0.9,
+      dt: 0.1
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+    system = updateAnalysisViewport(system, analysisResult.nodeId, {
+      sourceNodeIds: [orbitResult.nodeId],
+      event: {
+        mode: 'cross_up',
+        source: { kind: 'custom', expression: 'x' },
+        level: 0,
+        positivityConstraints: []
+      },
+      axes: {
+        x: { kind: 'delta_time', hitOffset: 0, label: 'Delta t@n' },
+        y: { kind: 'delta_time', hitOffset: 1, label: 'Delta t@n+1' },
+        z: null
+      },
+      advanced: {
+        skipHits: 0,
+        hitStride: 1,
+        maxHits: 2000,
+        connectPoints: true,
+        showIdentityLine: true,
+        identityLineColor: '#224466',
+        identityLineStyle: 'dotted'
+      }
+    })
+    const onComputeEventSeriesFromSamples = vi.fn().mockResolvedValue({
+      hits: [
+        {
+          order: 0,
+          sample_index: 0,
+          time: 0,
+          state: [0],
+          observable_values: [0]
+        },
+        {
+          order: 1,
+          sample_index: 1,
+          time: 0.25,
+          state: [1],
+          observable_values: [1]
+        },
+        {
+          order: 2,
+          sample_index: 2,
+          time: 0.75,
+          state: [2],
+          observable_values: [2]
+        },
+        {
+          order: 3,
+          sample_index: 3,
+          time: 1.5,
+          state: [3],
+          observable_values: [3]
+        }
+      ]
+    })
+
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        theme="light"
+        onSelectViewport={vi.fn()}
+        onSelectObject={vi.fn()}
+        onReorderViewport={vi.fn()}
+        onResizeViewport={vi.fn()}
+        onToggleViewport={vi.fn()}
+        onCreateScene={vi.fn()}
+        onCreateAnalysis={vi.fn()}
+        onCreateBifurcation={vi.fn()}
+        onRenameViewport={vi.fn()}
+        onDeleteViewport={vi.fn()}
+        onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
+      />
+    )
+
+    await waitFor(() => {
+      const props = plotlyCalls
+        .filter(
+          (entry) =>
+            entry.plotId === analysisResult.nodeId && entry.data.length > 0
+        )
+        .at(-1)
+      expect(props).toBeTruthy()
+
+      const identityTrace = props?.data.find(
+        (trace) => 'name' in trace && trace.name === 'Identity line'
+      ) as { x?: number[]; y?: number[]; line?: { color?: string; dash?: string } } | undefined
+      const cobwebTrace = props?.data.find(
+        (trace) =>
+          'name' in trace &&
+          trace.name === 'Orbit_Delta_T_Target cobweb' &&
+          'mode' in trace &&
+          trace.mode === 'lines'
+      ) as { x?: Array<number | null>; y?: Array<number | null> } | undefined
+      const markerTrace = props?.data.find(
+        (trace) =>
+          'uid' in trace &&
+          trace.uid === orbitResult.nodeId &&
+          'mode' in trace &&
+          trace.mode === 'markers'
+      ) as { x?: number[]; y?: number[] } | undefined
+
+      expect(identityTrace?.x).toEqual([0.25, 0.75])
+      expect(identityTrace?.y).toEqual([0.25, 0.75])
+      expect(identityTrace?.line?.color).toBe('#224466')
+      expect(identityTrace?.line?.dash).toBe('dot')
+      expect(markerTrace?.x).toEqual([0.25, 0.5])
+      expect(markerTrace?.y).toEqual([0.5, 0.75])
+      expect(cobwebTrace?.x).toEqual([0.25, 0.25, 0.5, null, 0.5, 0.5, 0.75, null])
+      expect(cobwebTrace?.y).toEqual([0.25, 0.5, 0.5, null, 0.5, 0.75, 0.75, null])
+    })
+  })
+
   it('selects orbit hits from event map clicks using hit-offset-0 metadata', async () => {
     const config: SystemConfig = {
       name: 'Analysis_Click_System',
