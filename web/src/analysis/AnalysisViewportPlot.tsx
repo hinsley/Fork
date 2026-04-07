@@ -8,30 +8,37 @@ import type {
   OrbitObject,
   SubsystemSnapshot,
   System,
-  SystemConfig,
+  SystemConfig
 } from '../system/types'
 import type {
   ComputeEventSeriesFromOrbitRequest,
   ComputeEventSeriesFromSamplesRequest,
   EventSeriesHit,
-  EventSeriesOrderedSample,
+  EventSeriesOrderedSample
 } from '../compute/ForkCoreClient'
-import { extractLimitCycleProfile, getBranchParams } from '../system/continuation'
+import {
+  extractLimitCycleProfile,
+  getBranchParams
+} from '../system/continuation'
 import { DEFAULT_RENDER } from '../system/model'
 import {
   isSubsystemSnapshotCompatible,
   mapStateRowsToDisplay,
-  stateVectorToDisplay,
+  stateVectorToDisplay
 } from '../system/subsystemGateway'
-import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/PlotlyViewport'
+import {
+  PlotlyViewport,
+  type PlotlyPointClick
+} from '../viewports/plotly/PlotlyViewport'
 import type { PlotlyRelayoutEvent } from '../viewports/plotly/usePlotViewport'
 import type { PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
 import {
   normalizeAnalysisExpressionError,
+  resolveAnalysisCobwebAxes,
   resolveAnalysisAxisLabelForSystem,
   resolveAnalysisConstraintExpressions,
   resolveAnalysisEventExpression,
-  resolveAnalysisSourceIds,
+  resolveAnalysisSourceIds
 } from './analysisViewportUtils'
 
 type AnalysisViewportPlotProps = {
@@ -62,11 +69,16 @@ type ComputedTraceState = {
   message: string | null
 }
 
+type AnalysisTraceBundle = {
+  traces: Data[]
+  identityRange: [number, number] | null
+}
+
 const EMPTY_TRACES: Data[] = []
 const LINE_STYLE_DASH = {
   solid: 'solid',
   dashed: 'dash',
-  dotted: 'dot',
+  dotted: 'dot'
 } as const
 
 type AnalysisTracePointMeta = {
@@ -76,7 +88,9 @@ type AnalysisTracePointMeta = {
   state: number[] | null
 }
 
-function parseAnalysisTracePointMeta(value: unknown): AnalysisTracePointMeta | null {
+function parseAnalysisTracePointMeta(
+  value: unknown
+): AnalysisTracePointMeta | null {
   if (typeof value !== 'string') return null
   try {
     const parsed = JSON.parse(value) as Partial<AnalysisTracePointMeta>
@@ -92,11 +106,14 @@ function parseAnalysisTracePointMeta(value: unknown): AnalysisTracePointMeta | n
       hitIndex: parsed.hitIndex,
       sampleIndex: parsed.sampleIndex,
       time:
-        typeof parsed.time === 'number' && Number.isFinite(parsed.time) ? parsed.time : null,
-      state:
-        Array.isArray(parsed.state) && parsed.state.every((entry) => typeof entry === 'number')
-          ? [...parsed.state]
+        typeof parsed.time === 'number' && Number.isFinite(parsed.time)
+          ? parsed.time
           : null,
+      state:
+        Array.isArray(parsed.state) &&
+        parsed.state.every((entry) => typeof entry === 'number')
+          ? [...parsed.state]
+          : null
     }
   } catch {
     return null
@@ -122,7 +139,9 @@ function appendAxisRangeSnapshot(
   }
 }
 
-function buildInitialView(viewport: AnalysisViewport): PlotlyRelayoutEvent | null {
+function buildInitialView(
+  viewport: AnalysisViewport
+): PlotlyRelayoutEvent | null {
   const snapshot: PlotlyRelayoutEvent = {}
   const is3d = Boolean(viewport.axes.z)
   appendAxisRangeSnapshot(snapshot, 'xaxis', viewport.axisRanges.x, is3d)
@@ -165,7 +184,9 @@ function resolveObservableExpressions(viewport: AnalysisViewport): string[] {
 function resolveConstraintExpressions(viewport: AnalysisViewport): string[] {
   const expressions: string[] = []
   const seen = new Set<string>()
-  for (const expression of resolveAnalysisConstraintExpressions(viewport.event)) {
+  for (const expression of resolveAnalysisConstraintExpressions(
+    viewport.event
+  )) {
     if (seen.has(expression)) continue
     seen.add(expression)
     expressions.push(expression)
@@ -187,7 +208,9 @@ function combineRequestedExpressions(
   return requested
 }
 
-function hasBlankObservableExpression(axis: AnalysisAxisSpec | null | undefined): boolean {
+function hasBlankObservableExpression(
+  axis: AnalysisAxisSpec | null | undefined
+): boolean {
   return axis?.kind === 'observable' && axis.expression.trim().length === 0
 }
 
@@ -206,7 +229,111 @@ function resolveCompatibleSnapshot(
 }
 
 function resolveLineDash(style: string | undefined): 'solid' | 'dash' | 'dot' {
-  return LINE_STYLE_DASH[(style as keyof typeof LINE_STYLE_DASH) ?? 'solid'] ?? 'solid'
+  return (
+    LINE_STYLE_DASH[(style as keyof typeof LINE_STYLE_DASH) ?? 'solid'] ??
+    'solid'
+  )
+}
+
+function resolveIdentityRange(
+  x: readonly number[],
+  y: readonly number[]
+): [number, number] | null {
+  let min = Number.POSITIVE_INFINITY
+  let max = Number.NEGATIVE_INFINITY
+  for (const value of [...x, ...y]) {
+    if (!Number.isFinite(value)) continue
+    min = Math.min(min, value)
+    max = Math.max(max, value)
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null
+  if (min === max) {
+    const padding = Math.max(Math.abs(min) * 0.02, 1e-6)
+    return [min - padding, max + padding]
+  }
+  return [min, max]
+}
+
+function mergeIdentityRanges(
+  ranges: Array<[number, number] | null>
+): [number, number] | null {
+  let min = Number.POSITIVE_INFINITY
+  let max = Number.NEGATIVE_INFINITY
+  for (const range of ranges) {
+    if (!range) continue
+    min = Math.min(min, range[0], range[1])
+    max = Math.max(max, range[0], range[1])
+  }
+  return Number.isFinite(min) && Number.isFinite(max) ? [min, max] : null
+}
+
+function buildCobwebTraceFromPoints(
+  x: readonly number[],
+  y: readonly number[],
+  options: {
+    sourceId: string
+    name: string
+    color: string
+    lineWidth: number
+    lineDash: 'solid' | 'dash' | 'dot'
+    earlierAxis: 'x' | 'y'
+  }
+): Data | null {
+  const cobwebX: Array<number | null> = []
+  const cobwebY: Array<number | null> = []
+
+  for (let index = 0; index < x.length; index += 1) {
+    const xValue = x[index]
+    const yValue = y[index]
+    if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) continue
+    if (options.earlierAxis === 'x') {
+      cobwebX.push(xValue, xValue, yValue, null)
+      cobwebY.push(xValue, yValue, yValue, null)
+    } else {
+      cobwebX.push(yValue, xValue, xValue, null)
+      cobwebY.push(yValue, yValue, xValue, null)
+    }
+  }
+
+  if (cobwebX.length === 0) return null
+
+  return {
+    type: 'scattergl',
+    mode: 'lines',
+    uid: options.sourceId,
+    name: `${options.name} cobweb`,
+    x: cobwebX,
+    y: cobwebY,
+    line: {
+      color: options.color,
+      width: options.lineWidth,
+      dash: options.lineDash
+    },
+    hoverinfo: 'skip',
+    showlegend: false
+  } satisfies Data
+}
+
+function buildIdentityLineTrace(
+  viewport: AnalysisViewport,
+  range: [number, number]
+): Data {
+  const min = Math.min(range[0], range[1])
+  const max = Math.max(range[0], range[1])
+  return {
+    type: 'scattergl',
+    mode: 'lines',
+    name: 'Identity line',
+    x: [min, max],
+    y: [min, max],
+    line: {
+      color: viewport.advanced.identityLineColor,
+      width: 1.5,
+      dash: resolveLineDash(viewport.advanced.identityLineStyle)
+    },
+    hoverinfo: 'skip',
+    showlegend: false
+  } satisfies Data
 }
 
 function resolveManifoldCurveGeometry(
@@ -219,7 +346,7 @@ function resolveManifoldCurveGeometry(
   if ('points_flat' in geometry && Array.isArray(geometry.points_flat)) {
     return {
       dim: geometry.dim,
-      points_flat: geometry.points_flat,
+      points_flat: geometry.points_flat
     }
   }
   return null
@@ -230,7 +357,10 @@ function buildSamplesFromOrbit(
   orbit: OrbitObject
 ): EventSeriesOrderedSample[] | null {
   if (orbit.data.length === 0) return null
-  const snapshot = resolveCompatibleSnapshot(systemConfig, orbit.subsystemSnapshot)
+  const snapshot = resolveCompatibleSnapshot(
+    systemConfig,
+    orbit.subsystemSnapshot
+  )
   let rows = orbit.data
   if (snapshot) {
     rows = mapStateRowsToDisplay(snapshot, orbit.data)
@@ -241,7 +371,7 @@ function buildSamplesFromOrbit(
   }
   return rows.map((row) => ({
     time: Number.isFinite(row[0]) ? row[0] : null,
-    state: row.slice(1),
+    state: row.slice(1)
   }))
 }
 
@@ -249,11 +379,20 @@ function buildSamplesFromLimitCycle(
   systemConfig: SystemConfig,
   limitCycle: LimitCycleObject
 ): EventSeriesOrderedSample[] | null {
-  const snapshot = resolveCompatibleSnapshot(systemConfig, limitCycle.subsystemSnapshot)
+  const snapshot = resolveCompatibleSnapshot(
+    systemConfig,
+    limitCycle.subsystemSnapshot
+  )
   const dim = snapshot?.freeVariableNames.length ?? systemConfig.varNames.length
-  const { profilePoints, period } = extractLimitCycleProfile(limitCycle.state, dim, limitCycle.ntst, limitCycle.ncol, {
-    allowPackedTail: true,
-  })
+  const { profilePoints, period } = extractLimitCycleProfile(
+    limitCycle.state,
+    dim,
+    limitCycle.ntst,
+    limitCycle.ncol,
+    {
+      allowPackedTail: true
+    }
+  )
   if (profilePoints.length === 0) return null
   const mappedPoints = snapshot
     ? profilePoints.map((point) => stateVectorToDisplay(snapshot, point))
@@ -264,7 +403,7 @@ function buildSamplesFromLimitCycle(
   const denominator = Math.max(mappedPoints.length - 1, 1)
   return mappedPoints.map((state, index) => ({
     time: Number.isFinite(period) ? (period * index) / denominator : index,
-    state,
+    state
   }))
 }
 
@@ -274,9 +413,16 @@ function buildSamplesFromManifold(
 ): EventSeriesOrderedSample[] | null {
   const geometry = resolveManifoldCurveGeometry(branch.data.manifold_geometry)
   if (!geometry || geometry.dim <= 0) return null
-  const snapshot = resolveCompatibleSnapshot(systemConfig, branch.subsystemSnapshot)
+  const snapshot = resolveCompatibleSnapshot(
+    systemConfig,
+    branch.subsystemSnapshot
+  )
   const samples: EventSeriesOrderedSample[] = []
-  for (let offset = 0; offset < geometry.points_flat.length; offset += geometry.dim) {
+  for (
+    let offset = 0;
+    offset < geometry.points_flat.length;
+    offset += geometry.dim
+  ) {
     const point = geometry.points_flat.slice(offset, offset + geometry.dim)
     if (point.length !== geometry.dim) continue
     const state = snapshot ? stateVectorToDisplay(snapshot, point) : point
@@ -311,16 +457,17 @@ function resolveAxisValue(
   return (nextTime as number) - (currentTime as number)
 }
 
-function buildTraceFromHits(
+function buildTraceBundleFromHits(
   system: System,
   viewport: AnalysisViewport,
   sourceId: string,
   hits: EventSeriesHit[],
   observableIndexByExpression: Map<string, number>
-): Data | null {
+): AnalysisTraceBundle | null {
   const node = system.nodes[sourceId]
   if (!node) return null
   const render = { ...DEFAULT_RENDER, ...(node.render ?? {}) }
+  const lineDash = resolveLineDash(render.lineStyle)
   const x: number[] = []
   const y: number[] = []
   const z: number[] = []
@@ -330,14 +477,25 @@ function buildTraceFromHits(
   const hitStride = Math.max(1, Math.trunc(viewport.advanced.hitStride))
   const maxHits = Math.max(1, Math.trunc(viewport.advanced.maxHits))
   const zAxis = viewport.axes.z ?? null
+  const cobwebAxes = resolveAnalysisCobwebAxes(viewport)
 
   for (
     let hitIndex = skipHits, plotted = 0;
     hitIndex < hits.length && plotted < maxHits;
     hitIndex += hitStride
   ) {
-    const xValue = resolveAxisValue(viewport.axes.x, hits, hitIndex, observableIndexByExpression)
-    const yValue = resolveAxisValue(viewport.axes.y, hits, hitIndex, observableIndexByExpression)
+    const xValue = resolveAxisValue(
+      viewport.axes.x,
+      hits,
+      hitIndex,
+      observableIndexByExpression
+    )
+    const yValue = resolveAxisValue(
+      viewport.axes.y,
+      hits,
+      hitIndex,
+      observableIndexByExpression
+    )
     const zValue = zAxis
       ? resolveAxisValue(zAxis, hits, hitIndex, observableIndexByExpression)
       : null
@@ -354,8 +512,11 @@ function buildTraceFromHits(
       JSON.stringify({
         hitIndex: hitIndexValue,
         sampleIndex: hit?.sample_index ?? hitIndexValue,
-        time: typeof hit?.time === 'number' && Number.isFinite(hit.time) ? hit.time : null,
-        state: Array.isArray(hit?.state) ? hit.state : null,
+        time:
+          typeof hit?.time === 'number' && Number.isFinite(hit.time)
+            ? hit.time
+            : null,
+        state: Array.isArray(hit?.state) ? hit.state : null
       } satisfies AnalysisTracePointMeta)
     )
     text.push(String(hitIndexValue))
@@ -367,7 +528,9 @@ function buildTraceFromHits(
   const axisLabels = {
     x: resolveAnalysisAxisLabelForSystem(viewport.axes.x, system.config.type),
     y: resolveAnalysisAxisLabelForSystem(viewport.axes.y, system.config.type),
-    z: zAxis ? resolveAnalysisAxisLabelForSystem(zAxis, system.config.type) : null,
+    z: zAxis
+      ? resolveAnalysisAxisLabelForSystem(zAxis, system.config.type)
+      : null
   }
   const hovertemplate = zAxis
     ? `${axisLabels.x}: %{x}<br>${axisLabels.y}: %{y}<br>${axisLabels.z}: %{z}<br>hit: %{text}<extra>${node.name}</extra>`
@@ -375,31 +538,55 @@ function buildTraceFromHits(
 
   if (zAxis) {
     return {
-      type: 'scatter3d',
-      mode: viewport.advanced.connectPoints ? 'lines+markers' : 'markers',
-      uid: sourceId,
-      name: node.name,
-      x,
-      y,
-      z,
-      customdata,
-      text,
-      hovertemplate,
-      marker: {
-        color: render.color,
-        size: render.pointSize,
-      },
-      line: {
-        color: render.color,
-        width: render.lineWidth,
-        dash: resolveLineDash(render.lineStyle),
-      },
-    } satisfies Data
+      traces: [
+        {
+          type: 'scatter3d',
+          mode: viewport.advanced.connectPoints ? 'lines+markers' : 'markers',
+          uid: sourceId,
+          name: node.name,
+          x,
+          y,
+          z,
+          customdata,
+          text,
+          hovertemplate,
+          marker: {
+            color: render.color,
+            size: render.pointSize
+          },
+          line: {
+            color: render.color,
+            width: render.lineWidth,
+            dash: lineDash
+          }
+        } satisfies Data
+      ],
+      identityRange: null
+    }
   }
 
-  return {
+  const traces: Data[] = []
+  if (cobwebAxes && viewport.advanced.connectPoints) {
+    const cobwebTrace = buildCobwebTraceFromPoints(x, y, {
+      sourceId,
+      name: node.name,
+      color: render.color,
+      lineWidth: render.lineWidth,
+      lineDash,
+      earlierAxis: cobwebAxes.earlierAxis
+    })
+    if (cobwebTrace) {
+      traces.push(cobwebTrace)
+    }
+  }
+
+  traces.push({
     type: 'scattergl',
-    mode: viewport.advanced.connectPoints ? 'lines+markers' : 'markers',
+    mode: cobwebAxes
+      ? 'markers'
+      : viewport.advanced.connectPoints
+        ? 'lines+markers'
+        : 'markers',
     uid: sourceId,
     name: node.name,
     x,
@@ -409,14 +596,19 @@ function buildTraceFromHits(
     hovertemplate,
     marker: {
       color: render.color,
-      size: render.pointSize,
+      size: render.pointSize
     },
     line: {
       color: render.color,
       width: render.lineWidth,
-      dash: resolveLineDash(render.lineStyle),
-    },
-  } satisfies Data
+      dash: lineDash
+    }
+  } satisfies Data)
+
+  return {
+    traces,
+    identityRange: cobwebAxes ? resolveIdentityRange(x, y) : null
+  }
 }
 
 function filterHitsByConstraints(
@@ -442,8 +634,14 @@ function buildLayout(
   message: string | null,
   hasData: boolean
 ): Partial<Layout> {
-  const xLabel = resolveAnalysisAxisLabelForSystem(viewport.axes.x, system.config.type)
-  const yLabel = resolveAnalysisAxisLabelForSystem(viewport.axes.y, system.config.type)
+  const xLabel = resolveAnalysisAxisLabelForSystem(
+    viewport.axes.x,
+    system.config.type
+  )
+  const yLabel = resolveAnalysisAxisLabelForSystem(
+    viewport.axes.y,
+    system.config.type
+  )
   const zAxis = viewport.axes.z ?? null
   const annotations: NonNullable<Layout['annotations']> = message
     ? [
@@ -454,8 +652,8 @@ function buildLayout(
           xref: 'paper' as const,
           yref: 'paper' as const,
           showarrow: false,
-          font: { color: plotlyTheme.muted, size: 12 },
-        },
+          font: { color: plotlyTheme.muted, size: 12 }
+        }
       ]
     : []
   const base = {
@@ -468,9 +666,9 @@ function buildLayout(
     legend: {
       font: { color: plotlyTheme.text },
       itemclick: false,
-      itemdoubleclick: false,
+      itemdoubleclick: false
     },
-    annotations,
+    annotations
   } satisfies Partial<Layout>
 
   if (zAxis) {
@@ -480,24 +678,24 @@ function buildLayout(
         xaxis: {
           title: { text: xLabel, font: { color: plotlyTheme.text } },
           tickfont: { color: plotlyTheme.text },
-          zerolinecolor: 'rgba(120,120,120,0.3)',
+          zerolinecolor: 'rgba(120,120,120,0.3)'
         },
         yaxis: {
           title: { text: yLabel, font: { color: plotlyTheme.text } },
           tickfont: { color: plotlyTheme.text },
-          zerolinecolor: 'rgba(120,120,120,0.3)',
+          zerolinecolor: 'rgba(120,120,120,0.3)'
         },
         zaxis: {
           title: {
             text: resolveAnalysisAxisLabelForSystem(zAxis, system.config.type),
-            font: { color: plotlyTheme.text },
+            font: { color: plotlyTheme.text }
           },
           tickfont: { color: plotlyTheme.text },
-          zerolinecolor: 'rgba(120,120,120,0.3)',
+          zerolinecolor: 'rgba(120,120,120,0.3)'
         },
         bgcolor: plotlyTheme.background,
-        aspectmode: 'cube',
-      },
+        aspectmode: 'cube'
+      }
     }
   }
 
@@ -509,15 +707,15 @@ function buildLayout(
       tickfont: { color: plotlyTheme.text },
       zerolinecolor: 'rgba(120,120,120,0.3)',
       gridcolor: 'rgba(120,120,120,0.15)',
-      automargin: true,
+      automargin: true
     },
     yaxis: {
       title: { text: yLabel, font: { color: plotlyTheme.text } },
       tickfont: { color: plotlyTheme.text },
       zerolinecolor: 'rgba(120,120,120,0.3)',
       gridcolor: 'rgba(120,120,120,0.15)',
-      automargin: true,
-    },
+      automargin: true
+    }
   }
 }
 
@@ -549,11 +747,14 @@ function hashMatrixRows(rows: readonly number[][]): string {
   return hashNumberSequence(rows.flat())
 }
 
-function buildSourceSignature(system: System, sourceId: string): Record<string, unknown> {
+function buildSourceSignature(
+  system: System,
+  sourceId: string
+): Record<string, unknown> {
   const node = system.nodes[sourceId]
   const nodeSignature = {
     name: node?.name ?? null,
-    render: node?.render ?? null,
+    render: node?.render ?? null
   }
   const object = system.objects[sourceId]
   if (object?.type === 'orbit') {
@@ -568,7 +769,7 @@ function buildSourceSignature(system: System, sourceId: string): Record<string, 
       params: object.customParameters ?? object.parameters ?? null,
       frozen: object.frozenVariables?.frozenValuesByVarName ?? null,
       snapshot: object.subsystemSnapshot?.hash ?? null,
-      node: nodeSignature,
+      node: nodeSignature
     }
   }
   if (object?.type === 'limit_cycle') {
@@ -583,7 +784,7 @@ function buildSourceSignature(system: System, sourceId: string): Record<string, 
       params: object.customParameters ?? object.parameters ?? null,
       frozen: object.frozenVariables?.frozenValuesByVarName ?? null,
       snapshot: object.subsystemSnapshot?.hash ?? null,
-      node: nodeSignature,
+      node: nodeSignature
     }
   }
   const branch = system.branches[sourceId]
@@ -597,7 +798,7 @@ function buildSourceSignature(system: System, sourceId: string): Record<string, 
       pointsHash: geometry ? hashNumberSequence(geometry.points_flat) : null,
       params: branch.params ?? null,
       snapshot: branch.subsystemSnapshot?.hash ?? null,
-      node: nodeSignature,
+      node: nodeSignature
     }
   }
   return { id: sourceId, type: 'unknown', node: nodeSignature }
@@ -615,7 +816,7 @@ async function computeSourceTrace(
     AnalysisViewportPlotProps,
     'onComputeEventSeriesFromOrbit' | 'onComputeEventSeriesFromSamples'
   >
-): Promise<Data | null> {
+): Promise<AnalysisTraceBundle | null> {
   const systemConfig = system.config
   const observableIndexByExpression = new Map(
     requestedExpressions.map((expression, index) => [expression, index])
@@ -623,47 +824,69 @@ async function computeSourceTrace(
   const object = system.objects[sourceId]
 
   if (object?.type === 'orbit') {
-    const params = resolveSourceParams(systemConfig, object.customParameters, object.parameters)
+    const params = resolveSourceParams(
+      systemConfig,
+      object.customParameters,
+      object.parameters
+    )
     const runConfig = { ...systemConfig, params }
-    const snapshot = resolveCompatibleSnapshot(systemConfig, object.subsystemSnapshot)
+    const snapshot = resolveCompatibleSnapshot(
+      systemConfig,
+      object.subsystemSnapshot
+    )
     const canUseExact =
       Boolean(handlers.onComputeEventSeriesFromOrbit) &&
       object.data.length > 0 &&
-      (!snapshot || snapshot.freeVariableNames.length === systemConfig.varNames.length)
+      (!snapshot ||
+        snapshot.freeVariableNames.length === systemConfig.varNames.length)
 
     const result = canUseExact
-      ? await handlers.onComputeEventSeriesFromOrbit!({
-          system: runConfig,
-          initialState: object.data[0].slice(1),
-          startTime: object.t_start,
-          steps: Math.max(object.data.length - 1, 1),
-          dt: object.dt,
-          mode: viewport.event.mode,
-          eventExpression,
-          eventLevel: viewport.event.level,
-          observableExpressions: requestedExpressions,
-        }, { signal })
-      : await handlers.onComputeEventSeriesFromSamples!({
-          system: runConfig,
-          samples: buildSamplesFromOrbit(systemConfig, object) ?? [],
-          mode: viewport.event.mode,
-          eventExpression,
-          eventLevel: viewport.event.level,
-          observableExpressions: requestedExpressions,
-        }, { signal })
+      ? await handlers.onComputeEventSeriesFromOrbit!(
+          {
+            system: runConfig,
+            initialState: object.data[0].slice(1),
+            startTime: object.t_start,
+            steps: Math.max(object.data.length - 1, 1),
+            dt: object.dt,
+            mode: viewport.event.mode,
+            eventExpression,
+            eventLevel: viewport.event.level,
+            observableExpressions: requestedExpressions
+          },
+          { signal }
+        )
+      : await handlers.onComputeEventSeriesFromSamples!(
+          {
+            system: runConfig,
+            samples: buildSamplesFromOrbit(systemConfig, object) ?? [],
+            mode: viewport.event.mode,
+            eventExpression,
+            eventLevel: viewport.event.level,
+            observableExpressions: requestedExpressions
+          },
+          { signal }
+        )
 
-    return buildTraceFromHits(
+    return buildTraceBundleFromHits(
       system,
       viewport,
       sourceId,
-      filterHitsByConstraints(result.hits, constraintExpressions, observableIndexByExpression),
+      filterHitsByConstraints(
+        result.hits,
+        constraintExpressions,
+        observableIndexByExpression
+      ),
       observableIndexByExpression
     )
   }
 
   if (object?.type === 'limit_cycle') {
     if (!handlers.onComputeEventSeriesFromSamples) return null
-    const params = resolveSourceParams(systemConfig, object.customParameters, object.parameters)
+    const params = resolveSourceParams(
+      systemConfig,
+      object.customParameters,
+      object.parameters
+    )
     const samples = buildSamplesFromLimitCycle(systemConfig, object)
     if (!samples || samples.length === 0) return null
     const result = await handlers.onComputeEventSeriesFromSamples(
@@ -673,15 +896,19 @@ async function computeSourceTrace(
         mode: viewport.event.mode,
         eventExpression,
         eventLevel: viewport.event.level,
-        observableExpressions: requestedExpressions,
+        observableExpressions: requestedExpressions
       },
       { signal }
     )
-    return buildTraceFromHits(
+    return buildTraceBundleFromHits(
       system,
       viewport,
       sourceId,
-      filterHitsByConstraints(result.hits, constraintExpressions, observableIndexByExpression),
+      filterHitsByConstraints(
+        result.hits,
+        constraintExpressions,
+        observableIndexByExpression
+      ),
       observableIndexByExpression
     )
   }
@@ -698,15 +925,19 @@ async function computeSourceTrace(
         mode: viewport.event.mode,
         eventExpression,
         eventLevel: viewport.event.level,
-        observableExpressions: requestedExpressions,
+        observableExpressions: requestedExpressions
       },
       { signal }
     )
-    return buildTraceFromHits(
+    return buildTraceBundleFromHits(
       system,
       viewport,
       sourceId,
-      filterHitsByConstraints(result.hits, constraintExpressions, observableIndexByExpression),
+      filterHitsByConstraints(
+        result.hits,
+        constraintExpressions,
+        observableIndexByExpression
+      ),
       observableIndexByExpression
     )
   }
@@ -722,16 +953,23 @@ export function AnalysisViewportPlot({
   onSelectSource,
   onSelectOrbitPoint,
   onComputeEventSeriesFromOrbit,
-  onComputeEventSeriesFromSamples,
+  onComputeEventSeriesFromSamples
 }: AnalysisViewportPlotProps) {
   const eventExpression = useMemo(
     () => resolveAnalysisEventExpression(system.config, viewport.event),
     [system.config, viewport.event]
   )
-  const observableExpressions = useMemo(() => resolveObservableExpressions(viewport), [viewport])
-  const constraintExpressions = useMemo(() => resolveConstraintExpressions(viewport), [viewport])
+  const observableExpressions = useMemo(
+    () => resolveObservableExpressions(viewport),
+    [viewport]
+  )
+  const constraintExpressions = useMemo(
+    () => resolveConstraintExpressions(viewport),
+    [viewport]
+  )
   const requestedExpressions = useMemo(
-    () => combineRequestedExpressions(observableExpressions, constraintExpressions),
+    () =>
+      combineRequestedExpressions(observableExpressions, constraintExpressions),
     [constraintExpressions, observableExpressions]
   )
   const sourceIds = useMemo(
@@ -742,21 +980,24 @@ export function AnalysisViewportPlot({
     () =>
       JSON.stringify({
         viewport,
-        selectedNodeId: viewport.display === 'selection' ? selectedNodeId : null,
+        selectedNodeId:
+          viewport.display === 'selection' ? selectedNodeId : null,
         systemType: system.config.type,
         equations: system.config.equations,
         varNames: system.config.varNames,
         paramNames: system.config.paramNames,
         params: system.config.params,
         eventExpression,
-        sources: sourceIds.map((sourceId) => buildSourceSignature(system, sourceId)),
+        sources: sourceIds.map((sourceId) =>
+          buildSourceSignature(system, sourceId)
+        )
       }),
     [eventExpression, selectedNodeId, sourceIds, system, viewport]
   )
   const cacheRef = useRef(new Map<string, ComputedTraceState>())
   const [traceState, setTraceState] = useState<ComputedTraceState>({
     traces: EMPTY_TRACES,
-    message: null,
+    message: null
   })
 
   useEffect(() => {
@@ -769,17 +1010,20 @@ export function AnalysisViewportPlot({
     if (!onComputeEventSeriesFromSamples) {
       const next = {
         traces: EMPTY_TRACES,
-        message: 'Analysis computation is unavailable in this build.',
+        message: 'Analysis computation is unavailable in this build.'
       }
       setTraceState(next)
       cacheRef.current.set(signature, next)
       return
     }
 
-    if (viewport.event.mode !== 'every_iterate' && eventExpression.trim().length === 0) {
+    if (
+      viewport.event.mode !== 'every_iterate' &&
+      eventExpression.trim().length === 0
+    ) {
       const next = {
         traces: EMPTY_TRACES,
-        message: 'Event expression is required.',
+        message: 'Event expression is required.'
       }
       setTraceState(next)
       cacheRef.current.set(signature, next)
@@ -793,7 +1037,7 @@ export function AnalysisViewportPlot({
     ) {
       const next = {
         traces: EMPTY_TRACES,
-        message: 'Observable axis expressions are required.',
+        message: 'Observable axis expressions are required.'
       }
       setTraceState(next)
       cacheRef.current.set(signature, next)
@@ -803,7 +1047,7 @@ export function AnalysisViewportPlot({
     if (hasBlankConstraintExpression(viewport)) {
       const next = {
         traces: EMPTY_TRACES,
-        message: 'Constraint expressions are required.',
+        message: 'Constraint expressions are required.'
       }
       setTraceState(next)
       cacheRef.current.set(signature, next)
@@ -816,7 +1060,7 @@ export function AnalysisViewportPlot({
         message:
           viewport.display === 'selection'
             ? 'Select an orbit, limit cycle, or 1D manifold source to populate this view.'
-            : 'No compatible visible sources are available for this analysis viewport.',
+            : 'No compatible visible sources are available for this analysis viewport.'
       }
       setTraceState(next)
       cacheRef.current.set(signature, next)
@@ -828,41 +1072,57 @@ export function AnalysisViewportPlot({
     setTraceState({ traces: EMPTY_TRACES, message: 'Computing event map…' })
 
     void Promise.allSettled(
-          sourceIds.map((sourceId) =>
-            computeSourceTrace(
-              system,
-              viewport,
-              sourceId,
-              eventExpression,
-              requestedExpressions,
-              constraintExpressions,
-              controller.signal,
+      sourceIds.map((sourceId) =>
+        computeSourceTrace(
+          system,
+          viewport,
+          sourceId,
+          eventExpression,
+          requestedExpressions,
+          constraintExpressions,
+          controller.signal,
           {
             onComputeEventSeriesFromOrbit,
-            onComputeEventSeriesFromSamples,
+            onComputeEventSeriesFromSamples
           }
         )
       )
     )
       .then((results) => {
         if (cancelled) return
-        const traces = results
-          .filter((result): result is PromiseFulfilledResult<Data | null> => result.status === 'fulfilled')
+        const bundles = results
+          .filter(
+            (
+              result
+            ): result is PromiseFulfilledResult<AnalysisTraceBundle | null> =>
+              result.status === 'fulfilled'
+          )
           .map((result) => result.value)
-          .filter((trace): trace is Data => Boolean(trace))
+          .filter((bundle): bundle is AnalysisTraceBundle => Boolean(bundle))
+        const sourceTraces = bundles.flatMap((bundle) => bundle.traces)
+        const traces = [...sourceTraces]
+        const identityRange =
+          viewport.advanced.showIdentityLine &&
+          resolveAnalysisCobwebAxes(viewport)
+            ? mergeIdentityRanges(bundles.map((bundle) => bundle.identityRange))
+            : null
+        if (identityRange) {
+          traces.unshift(buildIdentityLineTrace(viewport, identityRange))
+        }
         const rejected = results.find(
-          (result): result is PromiseRejectedResult => result.status === 'rejected'
+          (result): result is PromiseRejectedResult =>
+            result.status === 'rejected'
         )
         const next: ComputedTraceState = {
           traces,
           message:
-            traces.length > 0
+            sourceTraces.length > 0
               ? null
               : rejected
                 ? rejected.reason instanceof Error
                   ? normalizeAnalysisExpressionError(rejected.reason.message)
                   : String(rejected.reason)
-                : 'No event hits matched the current source, event, and axis settings.',
+                : 'No event hits matched the current source, event, and axis settings.'
         }
         setTraceState(next)
         cacheRef.current.set(signature, next)
@@ -875,7 +1135,7 @@ export function AnalysisViewportPlot({
           message:
             error instanceof Error
               ? normalizeAnalysisExpressionError(error.message)
-              : String(error),
+              : String(error)
         }
         setTraceState(next)
       })
@@ -894,12 +1154,25 @@ export function AnalysisViewportPlot({
     signature,
     sourceIds,
     system,
-    viewport,
+    viewport
   ])
 
   const layout = useMemo(
-    () => buildLayout(system, viewport, plotlyTheme, traceState.message, traceState.traces.length > 0),
-    [plotlyTheme, system, traceState.message, traceState.traces.length, viewport]
+    () =>
+      buildLayout(
+        system,
+        viewport,
+        plotlyTheme,
+        traceState.message,
+        traceState.traces.length > 0
+      ),
+    [
+      plotlyTheme,
+      system,
+      traceState.message,
+      traceState.traces.length,
+      viewport
+    ]
   )
   const initialView = useMemo(() => buildInitialView(viewport), [viewport])
   const handlePointClick = useCallback(
@@ -915,14 +1188,15 @@ export function AnalysisViewportPlot({
         orbitId: point.uid,
         pointIndex: Math.max(0, Math.round(metadata.sampleIndex)),
         hitIndex:
-          typeof metadata.hitIndex === 'number' && Number.isFinite(metadata.hitIndex)
+          typeof metadata.hitIndex === 'number' &&
+          Number.isFinite(metadata.hitIndex)
             ? Math.max(0, Math.round(metadata.hitIndex))
             : null,
         time:
           typeof metadata.time === 'number' && Number.isFinite(metadata.time)
             ? metadata.time
             : null,
-        state: Array.isArray(metadata.state) ? [...metadata.state] : null,
+        state: Array.isArray(metadata.state) ? [...metadata.state] : null
       })
     },
     [onSelectOrbitPoint, onSelectSource, system.nodes, system.objects]

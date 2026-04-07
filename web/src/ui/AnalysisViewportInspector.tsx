@@ -1,12 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { AnalysisAxisSpec, AnalysisViewport, System, SystemConfig } from '../system/types'
+import type {
+  AnalysisAxisSpec,
+  AnalysisViewport,
+  LineStyle,
+  System,
+  SystemConfig
+} from '../system/types'
 import {
   collectAnalysisSourceEntries,
   normalizeAnalysisExpressionError,
+  resolveAnalysisCobwebAxes,
   resolveAnalysisAxisLabelForSystem,
   resolveAnalysisConstraintExpressions,
   resolveAnalysisEventExpression,
-  resolveAnalysisSourceExpression,
+  resolveAnalysisSourceExpression
 } from '../analysis/analysisViewportUtils'
 
 type AnalysisViewportInspectorProps = {
@@ -30,8 +37,12 @@ type AxisKey = 'x' | 'y' | 'z'
 type AxisErrors = Record<AxisKey, string | null>
 type ConstraintErrors = Array<string | null>
 
-function defaultObservableAxis(system: System, hitOffset: number): AnalysisAxisSpec {
-  const expression = system.config.varNames[0] ?? system.config.paramNames[0] ?? 'x'
+function defaultObservableAxis(
+  system: System,
+  hitOffset: number
+): AnalysisAxisSpec {
+  const expression =
+    system.config.varNames[0] ?? system.config.paramNames[0] ?? 'x'
   return { kind: 'observable', expression, hitOffset, label: null }
 }
 
@@ -42,10 +53,13 @@ function axisKindValue(axis: AnalysisAxisSpec | null | undefined): string {
 function eventModeOptions(
   system: System
 ): Array<{ value: AnalysisViewport['event']['mode']; label: string }> {
-  const options: Array<{ value: AnalysisViewport['event']['mode']; label: string }> = [
+  const options: Array<{
+    value: AnalysisViewport['event']['mode']
+    label: string
+  }> = [
     { value: 'cross_up', label: 'Crossing up' },
     { value: 'cross_down', label: 'Crossing down' },
-    { value: 'cross_either', label: 'Crossing either way' },
+    { value: 'cross_either', label: 'Crossing either way' }
   ]
   if (system.config.type === 'map') {
     options.unshift({ value: 'every_iterate', label: 'Every iterate' })
@@ -66,13 +80,20 @@ export function AnalysisViewportInspector({
   system,
   viewport,
   onUpdateAnalysisViewport,
-  onValidateAnalysisExpression,
+  onValidateAnalysisExpression
 }: AnalysisViewportInspectorProps) {
   const [sourceSearch, setSourceSearch] = useState('')
   const [eventError, setEventError] = useState<string | null>(null)
-  const [axisErrors, setAxisErrors] = useState<AxisErrors>({ x: null, y: null, z: null })
+  const [axisErrors, setAxisErrors] = useState<AxisErrors>({
+    x: null,
+    y: null,
+    z: null
+  })
   const [constraintErrors, setConstraintErrors] = useState<ConstraintErrors>([])
-  const sourceEntries = useMemo(() => collectAnalysisSourceEntries(system), [system])
+  const sourceEntries = useMemo(
+    () => collectAnalysisSourceEntries(system),
+    [system]
+  )
   const selectedSourceSet = useMemo(
     () => new Set(viewport.sourceNodeIds),
     [viewport.sourceNodeIds]
@@ -110,6 +131,10 @@ export function AnalysisViewportInspector({
     () => resolveAnalysisConstraintExpressions(viewport.event),
     [viewport.event]
   )
+  const cobwebAxes = useMemo(
+    () => resolveAnalysisCobwebAxes(viewport),
+    [viewport]
+  )
 
   useEffect(() => {
     const controller = new AbortController()
@@ -117,7 +142,8 @@ export function AnalysisViewportInspector({
       void (async () => {
         let nextEventError: string | null = null
         const nextAxisErrors: AxisErrors = { x: null, y: null, z: null }
-        const nextConstraintErrors: ConstraintErrors = positivityConstraints.map(() => null)
+        const nextConstraintErrors: ConstraintErrors =
+          positivityConstraints.map(() => null)
 
         if (viewport.event.mode !== 'every_iterate') {
           if (eventExpression.trim().length === 0) {
@@ -125,7 +151,11 @@ export function AnalysisViewportInspector({
           } else if (onValidateAnalysisExpression) {
             try {
               await onValidateAnalysisExpression(
-                { system: system.config, expression: eventExpression, role: 'event' },
+                {
+                  system: system.config,
+                  expression: eventExpression,
+                  role: 'event'
+                },
                 { signal: controller.signal }
               )
             } catch (error) {
@@ -162,7 +192,7 @@ export function AnalysisViewportInspector({
         const axes: Array<[AxisKey, AnalysisAxisSpec | null | undefined]> = [
           ['x', viewport.axes.x],
           ['y', viewport.axes.y],
-          ['z', viewport.axes.z],
+          ['z', viewport.axes.z]
         ]
         for (const [key, axis] of axes) {
           if (axis?.kind !== 'observable') continue
@@ -173,7 +203,11 @@ export function AnalysisViewportInspector({
           if (!onValidateAnalysisExpression) continue
           try {
             await onValidateAnalysisExpression(
-              { system: system.config, expression: axis.expression, role: 'observable' },
+              {
+                system: system.config,
+                expression: axis.expression,
+                role: 'observable'
+              },
               { signal: controller.signal }
             )
           } catch (error) {
@@ -203,15 +237,15 @@ export function AnalysisViewportInspector({
     positivityConstraints,
     system.config,
     viewport.axes,
-    viewport.event,
+    viewport.event
   ])
 
   const updateAxis = (key: AxisKey, nextAxis: AnalysisAxisSpec | null) => {
     onUpdateAnalysisViewport(viewport.id, {
       axes: {
         ...viewport.axes,
-        [key]: nextAxis,
-      },
+        [key]: nextAxis
+      }
     })
   }
 
@@ -219,8 +253,17 @@ export function AnalysisViewportInspector({
     onUpdateAnalysisViewport(viewport.id, {
       event: {
         ...viewport.event,
-        positivityConstraints: positivityConstraintValues,
-      },
+        positivityConstraints: positivityConstraintValues
+      }
+    })
+  }
+
+  const updateAdvanced = (advanced: Partial<AnalysisViewport['advanced']>) => {
+    onUpdateAnalysisViewport(viewport.id, {
+      advanced: {
+        ...viewport.advanced,
+        ...advanced
+      }
     })
   }
 
@@ -245,14 +288,17 @@ export function AnalysisViewportInspector({
                 return
               }
               if (nextKind === 'hit_index') {
-                updateAxis(key, { kind: 'hit_index', label: axis?.label ?? null })
+                updateAxis(key, {
+                  kind: 'hit_index',
+                  label: axis?.label ?? null
+                })
                 return
               }
               if (nextKind === 'delta_time') {
                 updateAxis(key, {
                   kind: 'delta_time',
                   hitOffset: axis?.kind === 'delta_time' ? axis.hitOffset : 0,
-                  label: axis?.label ?? null,
+                  label: axis?.label ?? null
                 })
                 return
               }
@@ -278,8 +324,13 @@ export function AnalysisViewportInspector({
               Label
               <input
                 value={axis.label ?? ''}
-                onChange={(event) => updateAxis(key, { ...axis, label: event.target.value })}
-                placeholder={resolveAnalysisAxisLabelForSystem(axis, system.config.type)}
+                onChange={(event) =>
+                  updateAxis(key, { ...axis, label: event.target.value })
+                }
+                placeholder={resolveAnalysisAxisLabelForSystem(
+                  axis,
+                  system.config.type
+                )}
               />
             </label>
             {axis.kind === 'observable' ? (
@@ -289,7 +340,10 @@ export function AnalysisViewportInspector({
                   <input
                     value={axis.expression}
                     onChange={(event) =>
-                      updateAxis(key, { ...axis, expression: event.target.value })
+                      updateAxis(key, {
+                        ...axis,
+                        expression: event.target.value
+                      })
                     }
                     placeholder="State or parameter expression"
                     data-testid={`analysis-axis-expression-${key}`}
@@ -316,7 +370,7 @@ export function AnalysisViewportInspector({
                     onChange={(event) =>
                       updateAxis(key, {
                         ...axis,
-                        hitOffset: parseInteger(event.target.value),
+                        hitOffset: parseInteger(event.target.value)
                       })
                     }
                     data-testid={`analysis-axis-hit-offset-${key}`}
@@ -341,7 +395,7 @@ export function AnalysisViewportInspector({
             value={viewport.display}
             onChange={(event) =>
               onUpdateAnalysisViewport(viewport.id, {
-                display: event.target.value as AnalysisViewport['display'],
+                display: event.target.value as AnalysisViewport['display']
               })
             }
             data-testid="analysis-display"
@@ -351,8 +405,8 @@ export function AnalysisViewportInspector({
           </select>
         </label>
         <p className="empty-state">
-          Explicitly selected sources override the fallback mode. Axis expressions can use state
-          variables and system parameters.
+          Explicitly selected sources override the fallback mode. Axis
+          expressions can use state variables and system parameters.
         </p>
         <label>
           Search compatible sources
@@ -365,7 +419,10 @@ export function AnalysisViewportInspector({
         {selectedEntries.length > 0 ? (
           <div className="scene-object-selected">
             {selectedEntries.map((entry) => (
-              <div className="scene-object-selected__row" key={`analysis-sel-${entry.id}`}>
+              <div
+                className="scene-object-selected__row"
+                key={`analysis-sel-${entry.id}`}
+              >
                 <div className="scene-object-selected__info">
                   <span>{entry.name}</span>
                   <span className="scene-object-selected__meta">
@@ -378,7 +435,9 @@ export function AnalysisViewportInspector({
                   className="scene-object-selected__remove"
                   onClick={() => {
                     onUpdateAnalysisViewport(viewport.id, {
-                      sourceNodeIds: viewport.sourceNodeIds.filter((id) => id !== entry.id),
+                      sourceNodeIds: viewport.sourceNodeIds.filter(
+                        (id) => id !== entry.id
+                      )
                     })
                   }}
                   aria-label={`Remove ${entry.name} from analysis viewport`}
@@ -400,7 +459,10 @@ export function AnalysisViewportInspector({
             {filteredEntries.map((entry) => {
               const checked = selectedSourceSet.has(entry.id)
               return (
-                <label key={`analysis-entry-${entry.id}`} className="scene-object-row">
+                <label
+                  key={`analysis-entry-${entry.id}`}
+                  className="scene-object-row"
+                >
                   <input
                     type="checkbox"
                     checked={checked}
@@ -408,7 +470,9 @@ export function AnalysisViewportInspector({
                       const next = checked
                         ? viewport.sourceNodeIds.filter((id) => id !== entry.id)
                         : [...viewport.sourceNodeIds, entry.id]
-                      onUpdateAnalysisViewport(viewport.id, { sourceNodeIds: next })
+                      onUpdateAnalysisViewport(viewport.id, {
+                        sourceNodeIds: next
+                      })
                     }}
                   />
                   <span className="scene-object-row__name">{entry.name}</span>
@@ -421,7 +485,9 @@ export function AnalysisViewportInspector({
             })}
           </div>
         ) : (
-          <p className="empty-state">No compatible sources match this search.</p>
+          <p className="empty-state">
+            No compatible sources match this search.
+          </p>
         )}
       </div>
 
@@ -435,14 +501,17 @@ export function AnalysisViewportInspector({
               onUpdateAnalysisViewport(viewport.id, {
                 event: {
                   ...viewport.event,
-                  mode: event.target.value as AnalysisViewport['event']['mode'],
-                },
+                  mode: event.target.value as AnalysisViewport['event']['mode']
+                }
               })
             }
             data-testid="analysis-event-mode"
           >
             {eventModeOptions(system).map((option) => (
-              <option key={`analysis-mode-${option.value}`} value={option.value}>
+              <option
+                key={`analysis-mode-${option.value}`}
+                value={option.value}
+              >
                 {option.label}
               </option>
             ))}
@@ -450,8 +519,8 @@ export function AnalysisViewportInspector({
         </label>
         {viewport.event.mode === 'every_iterate' ? (
           <p className="empty-state">
-            Every iterate uses each landing iterate directly. Event expression and level are ignored
-            in this mode.
+            Every iterate uses each landing iterate directly. Event expression
+            and level are ignored in this mode.
           </p>
         ) : (
           <>
@@ -471,25 +540,35 @@ export function AnalysisViewportInspector({
                         source:
                           viewport.event.source.kind === 'custom'
                             ? viewport.event.source
-                            : { kind: 'custom', expression: resolvedSourceExpression },
-                      },
+                            : {
+                                kind: 'custom',
+                                expression: resolvedSourceExpression
+                              }
+                      }
                     })
                     return
                   }
                   onUpdateAnalysisViewport(viewport.id, {
                     event: {
                       ...viewport.event,
-                      source: { kind: nextKind, variableName: eventSourceVariable },
-                    },
+                      source: {
+                        kind: nextKind,
+                        variableName: eventSourceVariable
+                      }
+                    }
                   })
                 }}
                 data-testid="analysis-event-source-kind"
               >
                 <option value="custom">Custom expression</option>
                 {system.config.type === 'map' ? (
-                  <option value="map_increment">Map increment (x_n+1 - x_n)</option>
+                  <option value="map_increment">
+                    Map increment (x_n+1 - x_n)
+                  </option>
                 ) : (
-                  <option value="flow_derivative">Time derivative (dx/dt)</option>
+                  <option value="flow_derivative">
+                    Time derivative (dx/dt)
+                  </option>
                 )}
               </select>
             </label>
@@ -497,13 +576,20 @@ export function AnalysisViewportInspector({
               <label>
                 Expression
                 <input
-                  value={viewport.event.source.kind === 'custom' ? viewport.event.source.expression : ''}
+                  value={
+                    viewport.event.source.kind === 'custom'
+                      ? viewport.event.source.expression
+                      : ''
+                  }
                   onChange={(event) =>
                     onUpdateAnalysisViewport(viewport.id, {
                       event: {
                         ...viewport.event,
-                        source: { kind: 'custom', expression: event.target.value },
-                      },
+                        source: {
+                          kind: 'custom',
+                          expression: event.target.value
+                        }
+                      }
                     })
                   }
                   placeholder="State or parameter expression"
@@ -520,10 +606,12 @@ export function AnalysisViewportInspector({
                       event: {
                         ...viewport.event,
                         source: {
-                          kind: eventSourceKind as 'flow_derivative' | 'map_increment',
-                          variableName: event.target.value,
-                        },
-                      },
+                          kind: eventSourceKind as
+                            | 'flow_derivative'
+                            | 'map_increment',
+                          variableName: event.target.value
+                        }
+                      }
                     })
                   }
                   data-testid="analysis-event-source-variable"
@@ -537,7 +625,10 @@ export function AnalysisViewportInspector({
               </label>
             )}
             {eventError ? (
-              <div className="field-error" data-testid="analysis-event-expression-error">
+              <div
+                className="field-error"
+                data-testid="analysis-event-expression-error"
+              >
                 {eventError}
               </div>
             ) : null}
@@ -551,15 +642,18 @@ export function AnalysisViewportInspector({
                   onUpdateAnalysisViewport(viewport.id, {
                     event: {
                       ...viewport.event,
-                      level: Number.isFinite(value) ? value : 0,
-                    },
+                      level: Number.isFinite(value) ? value : 0
+                    }
                   })
                 }}
                 step="any"
                 data-testid="analysis-event-level"
               />
             </label>
-            <p className="empty-state" data-testid="analysis-event-resolved-expression">
+            <p
+              className="empty-state"
+              data-testid="analysis-event-resolved-expression"
+            >
               f(x, p) = {eventExpression || '∅'}
             </p>
           </>
@@ -567,8 +661,8 @@ export function AnalysisViewportInspector({
         <div className="inspector-subsection">
           <h4 className="inspector-subheading">Positivity constraints</h4>
           <p className="empty-state">
-            Keep only hits where every listed expression is strictly positive. Leave this empty to
-            accept all hits.
+            Keep only hits where every listed expression is strictly positive.
+            Leave this empty to accept all hits.
           </p>
           {positivityConstraints.length > 0 ? (
             <>
@@ -599,7 +693,9 @@ export function AnalysisViewportInspector({
                     type="button"
                     onClick={() =>
                       updateConstraints(
-                        positivityConstraints.filter((_, constraintIndex) => constraintIndex !== index)
+                        positivityConstraints.filter(
+                          (_, constraintIndex) => constraintIndex !== index
+                        )
                       )
                     }
                     data-testid={`analysis-remove-constraint-${index}`}
@@ -628,7 +724,9 @@ export function AnalysisViewportInspector({
         <h4 className="inspector-subheading">Axes</h4>
         {renderAxisEditor('x', 'X axis', viewport.axes.x)}
         {renderAxisEditor('y', 'Y axis', viewport.axes.y)}
-        {renderAxisEditor('z', 'Z axis', viewport.axes.z ?? null, { allowNone: true })}
+        {renderAxisEditor('z', 'Z axis', viewport.axes.z ?? null, {
+          allowNone: true
+        })}
       </div>
 
       <div className="inspector-subsection">
@@ -642,11 +740,10 @@ export function AnalysisViewportInspector({
             value={viewport.advanced.skipHits}
             onChange={(event) => {
               const value = Number(event.target.value)
-              onUpdateAnalysisViewport(viewport.id, {
-                advanced: {
-                  ...viewport.advanced,
-                  skipHits: Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0,
-                },
+              updateAdvanced({
+                skipHits: Number.isFinite(value)
+                  ? Math.max(0, Math.trunc(value))
+                  : 0
               })
             }}
           />
@@ -660,11 +757,10 @@ export function AnalysisViewportInspector({
             value={viewport.advanced.hitStride}
             onChange={(event) => {
               const value = Number(event.target.value)
-              onUpdateAnalysisViewport(viewport.id, {
-                advanced: {
-                  ...viewport.advanced,
-                  hitStride: Number.isFinite(value) ? Math.max(1, Math.trunc(value)) : 1,
-                },
+              updateAdvanced({
+                hitStride: Number.isFinite(value)
+                  ? Math.max(1, Math.trunc(value))
+                  : 1
               })
             }}
           />
@@ -678,11 +774,10 @@ export function AnalysisViewportInspector({
             value={viewport.advanced.maxHits}
             onChange={(event) => {
               const value = Number(event.target.value)
-              onUpdateAnalysisViewport(viewport.id, {
-                advanced: {
-                  ...viewport.advanced,
-                  maxHits: Number.isFinite(value) ? Math.max(1, Math.trunc(value)) : 1,
-                },
+              updateAdvanced({
+                maxHits: Number.isFinite(value)
+                  ? Math.max(1, Math.trunc(value))
+                  : 1
               })
             }}
           />
@@ -692,16 +787,56 @@ export function AnalysisViewportInspector({
             type="checkbox"
             checked={viewport.advanced.connectPoints}
             onChange={(event) =>
-              onUpdateAnalysisViewport(viewport.id, {
-                advanced: {
-                  ...viewport.advanced,
-                  connectPoints: event.target.checked,
-                },
-              })
+              updateAdvanced({ connectPoints: event.target.checked })
+            }
+            data-testid={
+              cobwebAxes ? 'analysis-show-cobweb' : 'analysis-connect-points'
             }
           />
-          Connect plotted hits
+          {cobwebAxes ? 'Show cobweb' : 'Connect plotted hits'}
         </label>
+        {cobwebAxes ? (
+          <>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={viewport.advanced.showIdentityLine}
+                onChange={(event) =>
+                  updateAdvanced({ showIdentityLine: event.target.checked })
+                }
+                data-testid="analysis-show-identity-line"
+              />
+              Show identity line
+            </label>
+            <label>
+              Identity line color
+              <input
+                type="color"
+                value={viewport.advanced.identityLineColor}
+                onChange={(event) =>
+                  updateAdvanced({ identityLineColor: event.target.value })
+                }
+                data-testid="analysis-identity-line-color"
+              />
+            </label>
+            <label>
+              Identity line style
+              <select
+                value={viewport.advanced.identityLineStyle}
+                onChange={(event) =>
+                  updateAdvanced({
+                    identityLineStyle: event.target.value as LineStyle
+                  })
+                }
+                data-testid="analysis-identity-line-style"
+              >
+                <option value="solid">Solid</option>
+                <option value="dashed">Dashed</option>
+                <option value="dotted">Dotted</option>
+              </select>
+            </label>
+          </>
+        ) : null}
       </div>
     </div>
   )

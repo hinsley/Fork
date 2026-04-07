@@ -193,7 +193,13 @@ export interface ManifoldSurfaceGeometry {
 export type ManifoldGeometry =
   | { type: 'Curve'; Curve: ManifoldCurveGeometry }
   | { type: 'Surface'; Surface: ManifoldSurfaceGeometry }
-  | { type: 'Curve'; dim: number; points_flat: number[]; arclength: number[]; direction: ManifoldDirection }
+  | {
+      type: 'Curve'
+      dim: number
+      points_flat: number[]
+      arclength: number[]
+      direction: ManifoldDirection
+    }
   | {
       type: 'Surface'
       dim: number
@@ -497,7 +503,13 @@ export interface CovariantLyapunovData {
   vectors: number[][][]
 }
 
-export type NodeKind = 'object' | 'branch' | 'scene' | 'diagram' | 'analysis' | 'camera'
+export type NodeKind =
+  | 'object'
+  | 'branch'
+  | 'scene'
+  | 'diagram'
+  | 'analysis'
+  | 'camera'
 
 export interface ClvRenderStyle {
   enabled: boolean
@@ -560,7 +572,10 @@ export type AxisRanges = {
   z?: AxisRange | null
 }
 
-export type SceneAxisVariables = [string] | [string, string] | [string, string, string]
+export type SceneAxisVariables =
+  | [string]
+  | [string, string]
+  | [string, string, string]
 
 export interface Scene {
   id: string
@@ -577,7 +592,11 @@ export interface Scene {
   display: 'all' | 'selection'
 }
 
-export type EventSeriesMode = 'every_iterate' | 'cross_up' | 'cross_down' | 'cross_either'
+export type EventSeriesMode =
+  | 'every_iterate'
+  | 'cross_up'
+  | 'cross_down'
+  | 'cross_either'
 
 export interface AnalysisEventSpec {
   mode: EventSeriesMode
@@ -608,6 +627,9 @@ export interface AnalysisViewportAdvanced {
   hitStride: number
   maxHits: number
   connectPoints: boolean
+  showIdentityLine: boolean
+  identityLineColor: string
+  identityLineStyle: LineStyle
 }
 
 export interface ReturnMapViewport {

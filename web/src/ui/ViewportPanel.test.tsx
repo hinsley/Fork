@@ -16,7 +16,7 @@ import {
   updateLimitCycleRenderTarget,
   updateAnalysisViewport,
   updateBifurcationDiagram,
-  updateScene,
+  updateScene
 } from '../system/model'
 import type {
   ContinuationObject,
@@ -26,12 +26,12 @@ import type {
   LimitCycleObject,
   OrbitObject,
   Scene,
-  SystemConfig,
+  SystemConfig
 } from '../system/types'
 import type {
   BranchPointSelection,
   LimitCyclePointSelection,
-  OrbitPointSelection,
+  OrbitPointSelection
 } from './branchPointSelection'
 import { nowIso } from '../utils/determinism'
 import { buildSubsystemSnapshot } from '../system/subsystemGateway'
@@ -58,7 +58,7 @@ vi.mock('../viewports/plotly/PlotlyViewport', () => ({
   PlotlyViewport: (props: PlotlyProps) => {
     plotlyCalls.push(props)
     return <div data-testid={`plotly-${props.plotId}`} />
-  },
+  }
 }))
 
 type RenderPanelOverrides = {
@@ -110,7 +110,7 @@ function buildIsoclineSignature(object: IsoclineObject): string {
     level: snapshot.level,
     axes: snapshot.axes,
     frozenState: snapshot.frozenState,
-    parameters: snapshot.parameters,
+    parameters: snapshot.parameters
   })
 }
 
@@ -144,7 +144,9 @@ describe('ViewportPanel view state wiring', () => {
       />
     )
 
-    fireEvent.contextMenu(screen.getByTestId(`viewport-header-${sceneResult.nodeId}`))
+    fireEvent.contextMenu(
+      screen.getByTestId(`viewport-header-${sceneResult.nodeId}`)
+    )
     await user.click(screen.getByTestId('viewport-context-duplicate'))
 
     expect(onDuplicateViewport).toHaveBeenCalledWith(sceneResult.nodeId)
@@ -161,11 +163,11 @@ describe('ViewportPanel view state wiring', () => {
       data: [
         [0, 0.1, 0.2],
         [0.1, 0.3, 0.4],
-        [0.2, 0.5, 0.6],
+        [0.2, 0.5, 0.6]
       ],
       t_start: 0,
       t_end: 0.2,
-      dt: 0.1,
+      dt: 0.1
     }
     const orbitResult = addObject(system, orbit)
     system = orbitResult.system
@@ -190,18 +192,20 @@ describe('ViewportPanel view state wiring', () => {
       />
     )
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props?.onPointClick).toBeDefined()
 
     props?.onPointClick?.({
       uid: orbitResult.nodeId,
-      pointIndex: 2,
+      pointIndex: 2
     })
 
     expect(onSelectObject).toHaveBeenCalledWith(orbitResult.nodeId)
     expect(onSelectOrbitPoint).toHaveBeenCalledWith({
       orbitId: orbitResult.nodeId,
-      pointIndex: 2,
+      pointIndex: 2
     })
   })
 
@@ -213,7 +217,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: 'Orbit_Selected_Point_System', config })
     const sceneResult = addScene(system, 'Scene 1')
@@ -225,21 +229,23 @@ describe('ViewportPanel view state wiring', () => {
       data: [
         [0, 1, 2, 3],
         [0.1, 4, 5, 6],
-        [0.2, 7, 8, 9],
+        [0.2, 7, 8, 9]
       ],
       t_start: 0,
       t_end: 0.2,
-      dt: 0.1,
+      dt: 0.1
     }
     const orbitResult = addObject(system, orbit)
     system = orbitResult.system
 
     renderPanel(system, {
       selectedNodeId: orbitResult.nodeId,
-      orbitPointSelection: { orbitId: orbitResult.nodeId, pointIndex: 1 },
+      orbitPointSelection: { orbitId: orbitResult.nodeId, pointIndex: 1 }
     })
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const selectedTrace = props?.data.find(
       (trace) =>
@@ -288,7 +294,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: 'Orbit_Selected_Hit_System', config })
     const sceneResult = addScene(system, 'Scene 1')
@@ -300,11 +306,11 @@ describe('ViewportPanel view state wiring', () => {
       data: [
         [0, 1, 2, 3],
         [0.1, 4, 5, 6],
-        [0.2, 7, 8, 9],
+        [0.2, 7, 8, 9]
       ],
       t_start: 0,
       t_end: 0.2,
-      dt: 0.1,
+      dt: 0.1
     }
     const orbitResult = addObject(system, orbit)
     system = orbitResult.system
@@ -316,11 +322,13 @@ describe('ViewportPanel view state wiring', () => {
         pointIndex: 1,
         hitIndex: 3,
         time: 0.125,
-        state: [10, 11, 12],
-      },
+        state: [10, 11, 12]
+      }
     })
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     const selectedTrace = props?.data.find(
       (trace) =>
         'name' in trace &&
@@ -350,7 +358,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene 1')
@@ -362,21 +370,23 @@ describe('ViewportPanel view state wiring', () => {
       data: [
         [0, 1, 2, 3],
         [0.1, 4, 5, 6],
-        [0.2, 7, 8, 9],
+        [0.2, 7, 8, 9]
       ],
       t_start: 0,
       t_end: 0.2,
-      dt: 0.1,
+      dt: 0.1
     }
     const orbitResult = addObject(system, orbit)
     system = orbitResult.system
 
     renderPanel(system, {
       selectedNodeId: null,
-      orbitPointSelection: { orbitId: orbitResult.nodeId, pointIndex: 1 },
+      orbitPointSelection: { orbitId: orbitResult.nodeId, pointIndex: 1 }
     })
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const selectedTrace = props?.data.find(
       (trace) =>
@@ -396,7 +406,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['r'],
       varNames: ['x'],
       solver: 'discrete',
-      type: 'map',
+      type: 'map'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene 1')
@@ -408,21 +418,23 @@ describe('ViewportPanel view state wiring', () => {
       data: [
         [0, 0.2],
         [1, 0.4],
-        [2, 0.6],
+        [2, 0.6]
       ],
       t_start: 0,
       t_end: 2,
-      dt: 1,
+      dt: 1
     }
     const orbitResult = addObject(system, orbit)
     system = orbitResult.system
 
     renderPanel(system, {
       selectedNodeId: null,
-      orbitPointSelection: { orbitId: orbitResult.nodeId, pointIndex: 1 },
+      orbitPointSelection: { orbitId: orbitResult.nodeId, pointIndex: 1 }
     })
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const selectedTrace = props?.data.find(
       (trace) =>
@@ -442,7 +454,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu'],
       varNames: ['x', 'y'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: 'LC_Click_System', config })
     const sceneResult = addScene(system, 'Scene 1')
@@ -456,7 +468,7 @@ describe('ViewportPanel view state wiring', () => {
       ncol: 1,
       period: 2,
       state: [1, 0, 0, 1, -1, 0, 2],
-      createdAt: nowIso(),
+      createdAt: nowIso()
     }
     const limitCycleResult = addObject(system, limitCycle)
     system = limitCycleResult.system
@@ -481,18 +493,20 @@ describe('ViewportPanel view state wiring', () => {
       />
     )
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props?.onPointClick).toBeDefined()
 
     props?.onPointClick?.({
       uid: limitCycleResult.nodeId,
-      customdata: 1,
+      customdata: 1
     })
 
     expect(onSelectObject).toHaveBeenCalledWith(limitCycleResult.nodeId)
     expect(onSelectLimitCyclePoint).toHaveBeenCalledWith({
       limitCycleId: limitCycleResult.nodeId,
-      pointIndex: 1,
+      pointIndex: 1
     })
   })
 
@@ -504,7 +518,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu'],
       varNames: ['x', 'y'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: 'LC_Selected_Point_System', config })
     const sceneResult = addScene(system, 'Scene 1')
@@ -518,16 +532,21 @@ describe('ViewportPanel view state wiring', () => {
       ncol: 1,
       period: 2,
       state: [1, 0, 0, 1, -1, 0, 2],
-      createdAt: nowIso(),
+      createdAt: nowIso()
     }
     const limitCycleResult = addObject(system, limitCycle)
     system = limitCycleResult.system
 
     renderPanel(system, {
-      limitCyclePointSelection: { limitCycleId: limitCycleResult.nodeId, pointIndex: 1 },
+      limitCyclePointSelection: {
+        limitCycleId: limitCycleResult.nodeId,
+        pointIndex: 1
+      }
     })
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
 
     const selectedTrace = props?.data.find(
@@ -574,14 +593,16 @@ describe('ViewportPanel view state wiring', () => {
       camera: {
         eye: { x: 2, y: 3, z: 4 },
         center: { x: 0, y: 0, z: 0 },
-        up: { x: 0, y: 0, z: 1 },
+        up: { x: 0, y: 0, z: 1 }
       },
-      viewRevision: 5,
+      viewRevision: 5
     })
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     expect(props?.layout?.scene).toBeUndefined()
     expect(props?.layout?.xaxis?.range).toBeUndefined()
@@ -591,7 +612,7 @@ describe('ViewportPanel view state wiring', () => {
     expect(props?.viewRevision).toBe(5)
     expect(props?.initialView).toMatchObject({
       'xaxis.range': [-2, 2],
-      'yaxis.range': [1, 3],
+      'yaxis.range': [1, 3]
     })
   })
 
@@ -603,7 +624,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['u', 'v'],
       solver: 'discrete',
-      type: 'map',
+      type: 'map'
     }
     let system = createSystem({ name: 'Map2D_System', config })
     const sceneResult = addScene(system, 'Scene Map 2D')
@@ -615,17 +636,19 @@ describe('ViewportPanel view state wiring', () => {
       data: [
         [0, 1, 2],
         [1, 1.5, 2.5],
-        [2, 2, 3],
+        [2, 2, 3]
       ],
       t_start: 0,
       t_end: 2,
-      dt: 1,
+      dt: 1
     }
     system = addObject(system, orbit).system
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     expect(props?.layout?.scene).toBeUndefined()
     expect(props?.layout?.xaxis?.title).toMatchObject({ text: 'u' })
@@ -651,12 +674,12 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y', 'z', 'w'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: 'Flow4D_System', config })
     const sceneResult = addScene(system, 'Flow Scene 1D')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['w'],
+      axisVariables: ['w']
     })
     const orbit: OrbitObject = {
       type: 'orbit',
@@ -665,17 +688,19 @@ describe('ViewportPanel view state wiring', () => {
       data: [
         [0, 0, 1, 2, 3],
         [0.1, 0.2, 1.1, 2.1, 3.2],
-        [0.2, 0.4, 1.2, 2.2, 3.4],
+        [0.2, 0.4, 1.2, 2.2, 3.4]
       ],
       t_start: 0,
       t_end: 0.2,
-      dt: 0.1,
+      dt: 0.1
     }
     system = addObject(system, orbit).system
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     expect(props?.layout?.scene).toBeUndefined()
     expect(props?.layout?.xaxis?.title).toMatchObject({ text: 't' })
@@ -686,10 +711,14 @@ describe('ViewportPanel view state wiring', () => {
         trace.name === orbit.name &&
         'mode' in trace &&
         trace.mode === 'lines'
-    ) as { x?: number[]; y?: number[]; hovertemplate?: string; text?: string[] } | undefined
+    ) as
+      | { x?: number[]; y?: number[]; hovertemplate?: string; text?: string[] }
+      | undefined
     expect(orbitTrace?.x).toEqual([0, 0.1, 0.2])
     expect(orbitTrace?.y).toEqual([3, 3.2, 3.4])
-    expect(orbitTrace?.hovertemplate).toBe('t: %{text}<br>w: %{y:.6g}<extra></extra>')
+    expect(orbitTrace?.hovertemplate).toBe(
+      't: %{text}<br>w: %{y:.6g}<extra></extra>'
+    )
     expect(orbitTrace?.text).toEqual(['0.000', '0.100', '0.200'])
   })
 
@@ -701,12 +730,12 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y', 'z', 'w'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: 'Flow4D_System', config })
     const sceneResult = addScene(system, 'Flow Scene 2D')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['z', 'x'],
+      axisVariables: ['z', 'x']
     })
     const orbit: OrbitObject = {
       type: 'orbit',
@@ -715,17 +744,19 @@ describe('ViewportPanel view state wiring', () => {
       data: [
         [0, 0, 1, 2, 3],
         [0.1, 0.2, 1.1, 2.1, 3.2],
-        [0.2, 0.4, 1.2, 2.2, 3.4],
+        [0.2, 0.4, 1.2, 2.2, 3.4]
       ],
       t_start: 0,
       t_end: 0.2,
-      dt: 0.1,
+      dt: 0.1
     }
     system = addObject(system, orbit).system
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     expect(props?.layout?.scene).toBeUndefined()
     expect(props?.layout?.xaxis?.title).toMatchObject({ text: 'z' })
@@ -736,7 +767,9 @@ describe('ViewportPanel view state wiring', () => {
         trace.name === orbit.name &&
         'mode' in trace &&
         trace.mode === 'lines'
-    ) as { x?: number[]; y?: number[]; hovertemplate?: string; text?: string[] } | undefined
+    ) as
+      | { x?: number[]; y?: number[]; hovertemplate?: string; text?: string[] }
+      | undefined
     expect(orbitTrace?.x).toEqual([2, 2.1, 2.2])
     expect(orbitTrace?.y).toEqual([0, 0.2, 0.4])
     expect(orbitTrace?.hovertemplate).toBe(
@@ -753,12 +786,12 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y', 'z', 'w'],
       solver: 'discrete',
-      type: 'map',
+      type: 'map'
     }
     let system = createSystem({ name: 'Map4D_System', config })
     const sceneResult = addScene(system, 'Map Scene 1D')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['z'],
+      axisVariables: ['z']
     })
     const orbit: OrbitObject = {
       type: 'orbit',
@@ -767,18 +800,20 @@ describe('ViewportPanel view state wiring', () => {
       data: [
         [0, 0, 1, 2, 3],
         [1, 0.2, 1.1, 2.1, 3.2],
-        [2, 0.4, 1.3, 2.4, 3.4],
+        [2, 0.4, 1.3, 2.4, 3.4]
       ],
       t_start: 0,
       t_end: 2,
-      dt: 1,
+      dt: 1
     }
     const orbitResult = addObject(system, orbit)
     system = orbitResult.system
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     expect(props?.layout?.scene).toBeUndefined()
     expect(props?.layout?.xaxis?.title).toMatchObject({ text: 'z_n' })
@@ -830,12 +865,12 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['$x$', '$y$', '$z$', '$w$'],
       solver: 'discrete',
-      type: 'map',
+      type: 'map'
     }
     let system = createSystem({ name: 'Map4DMath_System', config })
     const sceneResult = addScene(system, 'Map Scene Math 1D')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['$z$'],
+      axisVariables: ['$z$']
     })
     const orbit: OrbitObject = {
       type: 'orbit',
@@ -844,18 +879,20 @@ describe('ViewportPanel view state wiring', () => {
       data: [
         [0, 0, 1, 2, 3],
         [1, 0.2, 1.1, 2.1, 3.2],
-        [2, 0.4, 1.3, 2.4, 3.4],
+        [2, 0.4, 1.3, 2.4, 3.4]
       ],
       t_start: 0,
       t_end: 2,
-      dt: 1,
+      dt: 1
     }
     const orbitResult = addObject(system, orbit)
     system = orbitResult.system
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     expect(props?.layout?.xaxis?.title).toMatchObject({ text: '$z_n$' })
     expect(props?.layout?.yaxis?.title).toMatchObject({ text: '$z_{n+1}$' })
@@ -879,12 +916,12 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y', 'z', 'w'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: 'Flow4D_System', config })
     const sceneResult = addScene(system, 'Flow Scene 1D')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['w'],
+      axisVariables: ['w']
     })
     const orbit: OrbitObject = {
       type: 'orbit',
@@ -893,7 +930,7 @@ describe('ViewportPanel view state wiring', () => {
       data: [
         [0, 0, 1, 2, 3],
         [0.1, 0.2, 1.1, 2.1, 3.2],
-        [0.2, 0.4, 1.2, 2.2, 3.4],
+        [0.2, 0.4, 1.2, 2.2, 3.4]
       ],
       t_start: 0,
       t_end: 0.2,
@@ -901,12 +938,8 @@ describe('ViewportPanel view state wiring', () => {
       covariantVectors: {
         dim: 4,
         times: [0, 0.1, 0.2],
-        vectors: [
-          [[1, 0, 0, 0]],
-          [[1, 0, 0, 0]],
-          [[1, 0, 0, 0]],
-        ],
-      },
+        vectors: [[[1, 0, 0, 0]], [[1, 0, 0, 0]], [[1, 0, 0, 0]]]
+      }
     }
     const orbitResult = addObject(system, orbit)
     system = orbitResult.system
@@ -917,7 +950,7 @@ describe('ViewportPanel view state wiring', () => {
       headScale: 1,
       thickness: 1,
       vectorIndices: [0],
-      colors: ['#ff0000'],
+      colors: ['#ff0000']
     }
 
     const equilibrium: EquilibriumObject = {
@@ -936,11 +969,11 @@ describe('ViewportPanel view state wiring', () => {
               { re: 1, im: 0 },
               { re: 0, im: 0 },
               { re: 0, im: 0 },
-              { re: 0, im: 0 },
-            ],
-          },
-        ],
-      },
+              { re: 0, im: 0 }
+            ]
+          }
+        ]
+      }
     }
     const equilibriumResult = addObject(system, equilibrium)
     system = equilibriumResult.system
@@ -952,12 +985,14 @@ describe('ViewportPanel view state wiring', () => {
       lineLengthScale: 1,
       lineThickness: 1,
       discRadiusScale: 1,
-      discThickness: 1,
+      discThickness: 1
     }
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const orbitTraces = props?.data.filter(
       (trace) => 'uid' in trace && trace.uid === orbitResult.nodeId
@@ -983,16 +1018,18 @@ describe('ViewportPanel view state wiring', () => {
     const sceneResult = addScene(system, 'Scene Auto')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
       axisRanges: { x: null, y: [0, 2] },
-      viewRevision: 1,
+      viewRevision: 1
     })
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     expect(props?.initialView).toMatchObject({
       'xaxis.autorange': true,
-      'yaxis.range': [0, 2],
+      'yaxis.range': [0, 2]
     })
   })
 
@@ -1004,7 +1041,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: '3D_System', config })
     const sceneResult = addScene(system, 'Scene 3D')
@@ -1012,14 +1049,16 @@ describe('ViewportPanel view state wiring', () => {
       camera: {
         eye: { x: 4, y: 5, z: 6 },
         center: { x: 0, y: 0, z: 0 },
-        up: { x: 0, y: 0, z: 1 },
+        up: { x: 0, y: 0, z: 1 }
       },
-      viewRevision: 2,
+      viewRevision: 2
     })
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     expect(props?.layout?.scene?.camera).toBeUndefined()
     expect(props?.layout?.scene?.aspectmode).toBe('cube')
@@ -1028,8 +1067,8 @@ describe('ViewportPanel view state wiring', () => {
       'scene.camera': {
         eye: { x: 4, y: 5, z: 6 },
         center: { x: 0, y: 0, z: 0 },
-        up: { x: 0, y: 0, z: 1 },
-      },
+        up: { x: 0, y: 0, z: 1 }
+      }
     })
   })
 
@@ -1041,18 +1080,20 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: '3D_Missing_Camera', config })
     const sceneResult = addScene(system, 'Scene 3D')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
       camera: undefined as unknown as Scene['camera'],
-      viewRevision: 1,
+      viewRevision: 1
     })
 
     expect(() => renderPanel(system)).not.toThrow()
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     expect(props?.initialView).toBeNull()
   })
@@ -1069,7 +1110,7 @@ describe('ViewportPanel view state wiring', () => {
       level: 0,
       axes: [
         { variableName: 'x', min: -2, max: 2, samples: 24 },
-        { variableName: 'y', min: -2, max: 2, samples: 24 },
+        { variableName: 'y', min: -2, max: 2, samples: 24 }
       ],
       frozenState: [0, 0],
       parameters: [...system.config.params],
@@ -1079,12 +1120,12 @@ describe('ViewportPanel view state wiring', () => {
         level: 0,
         axes: [
           { variableName: 'x', min: -2, max: 2, samples: 24 },
-          { variableName: 'y', min: -2, max: 2, samples: 24 },
+          { variableName: 'y', min: -2, max: 2, samples: 24 }
         ],
         frozenState: [0, 0],
         parameters: [...system.config.params],
-        computedAt: nowIso(),
-      },
+        computedAt: nowIso()
+      }
     }
     const added = addObject(system, isocline)
     const signature = buildIsoclineSignature(isocline)
@@ -1097,13 +1138,15 @@ describe('ViewportPanel view state wiring', () => {
             geometry: 'segments',
             dim: 2,
             points: [-1, 0, 1, 0],
-            segments: [0, 1],
-          },
-        },
-      },
+            segments: [0, 1]
+          }
+        }
+      }
     })
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const trace = props?.data.find(
       (entry) =>
@@ -1127,8 +1170,8 @@ describe('ViewportPanel view state wiring', () => {
         paramNames: ['mu', 'nu'],
         varNames: ['x', 'y'],
         solver: 'rk4',
-        type: 'flow',
-      },
+        type: 'flow'
+      }
     })
     const sceneResult = addScene(system, 'Scene LC')
     system = sceneResult.system
@@ -1141,7 +1184,7 @@ describe('ViewportPanel view state wiring', () => {
       ncol: 1,
       period: 1,
       state: [0, 0, 1, 0, 2, 0, 0.5, 0, 1.5, 0, 1],
-      createdAt: nowIso(),
+      createdAt: nowIso()
     }
     const addedObject = addObject(system, lcObject)
     const homocBranch: ContinuationObject = {
@@ -1155,11 +1198,13 @@ describe('ViewportPanel view state wiring', () => {
       data: {
         points: [
           {
-            state: [0, 0, 1, 0, 2, 0, 0.5, 0, 1.5, 0, 0, 0, 0.25, 8, 0.02, 0, 0],
+            state: [
+              0, 0, 1, 0, 2, 0, 0.5, 0, 1.5, 0, 0, 0, 0.25, 8, 0.02, 0, 0
+            ],
             param_value: 0.2,
             stability: 'None',
-            eigenvalues: [],
-          },
+            eigenvalues: []
+          }
         ],
         bifurcations: [],
         indices: [0],
@@ -1171,8 +1216,8 @@ describe('ViewportPanel view state wiring', () => {
           param2_name: 'nu',
           free_time: true,
           free_eps0: true,
-          free_eps1: false,
-        },
+          free_eps1: false
+        }
       },
       settings: {
         step_size: 0.01,
@@ -1181,17 +1226,25 @@ describe('ViewportPanel view state wiring', () => {
         max_steps: 5,
         corrector_steps: 4,
         corrector_tolerance: 1e-6,
-        step_tolerance: 1e-6,
+        step_tolerance: 1e-6
       } as ContinuationSettings,
       timestamp: nowIso(),
-      params: [0.2, 0.1],
+      params: [0.2, 0.1]
     }
-    const addedBranch = addBranch(addedObject.system, homocBranch, addedObject.nodeId)
-    system = updateLimitCycleRenderTarget(addedBranch.system, addedObject.nodeId, {
-      type: 'branch',
-      branchId: addedBranch.nodeId,
-      pointIndex: 0,
-    })
+    const addedBranch = addBranch(
+      addedObject.system,
+      homocBranch,
+      addedObject.nodeId
+    )
+    system = updateLimitCycleRenderTarget(
+      addedBranch.system,
+      addedObject.nodeId,
+      {
+        type: 'branch',
+        branchId: addedBranch.nodeId,
+        pointIndex: 0
+      }
+    )
 
     renderPanel(system)
 
@@ -1199,8 +1252,11 @@ describe('ViewportPanel view state wiring', () => {
     const props = plotlyCalls.find((entry) => entry.plotId === sceneId)
     expect(props).toBeTruthy()
     const trace = props?.data.find(
-      (entry) => 'uid' in entry && entry.uid === addedObject.nodeId && 'mode' in entry
-    ) as { mode?: string; x?: Array<number | null>; y?: Array<number | null> } | undefined
+      (entry) =>
+        'uid' in entry && entry.uid === addedObject.nodeId && 'mode' in entry
+    ) as
+      | { mode?: string; x?: Array<number | null>; y?: Array<number | null> }
+      | undefined
     expect(trace).toBeTruthy()
     expect(trace?.mode).toBe('lines')
     expect((trace?.x?.length ?? 0) > 2).toBe(true)
@@ -1234,8 +1290,8 @@ describe('ViewportPanel view state wiring', () => {
         paramNames: ['mu'],
         varNames: ['x', 'y'],
         solver: 'rk4',
-        type: 'flow',
-      },
+        type: 'flow'
+      }
     })
     const sceneResult = addScene(system, 'Scene LC Floquet')
     system = sceneResult.system
@@ -1251,28 +1307,28 @@ describe('ViewportPanel view state wiring', () => {
       state: cycleState,
       floquetMultipliers: [
         { re: 1, im: 0 },
-        { re: 0.8, im: 0 },
+        { re: 0.8, im: 0 }
       ],
       floquetModes: {
         ntst: 2,
         ncol: 1,
         multipliers: [
           { re: 1, im: 0 },
-          { re: 0.8, im: 0 },
+          { re: 0.8, im: 0 }
         ],
         vectors: Array.from({ length: 5 }, () => [
           [
             { re: 1, im: 0 },
-            { re: 0, im: 0 },
+            { re: 0, im: 0 }
           ],
           [
             { re: 0, im: 0 },
-            { re: 1, im: 0 },
-          ],
+            { re: 1, im: 0 }
+          ]
         ]),
-        computedAt: nowIso(),
+        computedAt: nowIso()
       },
-      createdAt: nowIso(),
+      createdAt: nowIso()
     }
     const addedObject = addObject(system, lcObject)
     const lcBranch: ContinuationObject = {
@@ -1291,13 +1347,13 @@ describe('ViewportPanel view state wiring', () => {
             stability: 'Stable',
             eigenvalues: [
               { re: 1, im: 0 },
-              { re: 0.8, im: 0 },
-            ],
-          },
+              { re: 0.8, im: 0 }
+            ]
+          }
         ],
         bifurcations: [],
         indices: [0],
-        branch_type: { type: 'LimitCycle', ntst: 2, ncol: 1 },
+        branch_type: { type: 'LimitCycle', ntst: 2, ncol: 1 }
       },
       settings: {
         step_size: 0.01,
@@ -1306,17 +1362,25 @@ describe('ViewportPanel view state wiring', () => {
         max_steps: 5,
         corrector_steps: 4,
         corrector_tolerance: 1e-6,
-        step_tolerance: 1e-6,
+        step_tolerance: 1e-6
       } as ContinuationSettings,
       timestamp: nowIso(),
-      params: [0.2],
+      params: [0.2]
     }
-    const addedBranch = addBranch(addedObject.system, lcBranch, addedObject.nodeId)
-    system = updateLimitCycleRenderTarget(addedBranch.system, addedObject.nodeId, {
-      type: 'branch',
-      branchId: addedBranch.nodeId,
-      pointIndex: 0,
-    })
+    const addedBranch = addBranch(
+      addedObject.system,
+      lcBranch,
+      addedObject.nodeId
+    )
+    system = updateLimitCycleRenderTarget(
+      addedBranch.system,
+      addedObject.nodeId,
+      {
+        type: 'branch',
+        branchId: addedBranch.nodeId,
+        pointIndex: 0
+      }
+    )
     system.nodes[addedObject.nodeId].render.equilibriumEigenvectors = {
       enabled: true,
       stride: 1,
@@ -1325,12 +1389,14 @@ describe('ViewportPanel view state wiring', () => {
       lineLengthScale: 0.2,
       lineThickness: 2,
       discRadiusScale: 0,
-      discThickness: 2,
+      discThickness: 2
     }
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const hasFloquetLine = props?.data.some(
       (trace) =>
@@ -1355,7 +1421,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene Eigenline 3D')
@@ -1368,11 +1434,11 @@ describe('ViewportPanel view state wiring', () => {
       data: [
         [0, 0, 0, 0],
         [0.5, 500, 0.5, 0.5],
-        [1, 1000, 1, 1],
+        [1, 1000, 1, 1]
       ],
       t_start: 0,
       t_end: 1,
-      dt: 0.5,
+      dt: 0.5
     }
     const orbitResult = addObject(system, orbit)
     system = orbitResult.system
@@ -1392,19 +1458,19 @@ describe('ViewportPanel view state wiring', () => {
             vector: [
               { re: 1, im: 0 },
               { re: 0, im: 0 },
-              { re: 0, im: 0 },
-            ],
+              { re: 0, im: 0 }
+            ]
           },
           {
             value: { re: 0.8, im: 0 },
             vector: [
               { re: 0, im: 0 },
               { re: 1, im: 0 },
-              { re: 0, im: 0 },
-            ],
-          },
-        ],
-      },
+              { re: 0, im: 0 }
+            ]
+          }
+        ]
+      }
     }
     const equilibriumResult = addObject(system, equilibrium)
     system = equilibriumResult.system
@@ -1416,12 +1482,14 @@ describe('ViewportPanel view state wiring', () => {
       lineLengthScale: 0.2,
       lineThickness: 2,
       discRadiusScale: 0,
-      discThickness: 2,
+      discThickness: 2
     }
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const xLine = props?.data.find(
       (trace) =>
@@ -1467,7 +1535,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene Eigendisk 3D')
@@ -1479,11 +1547,11 @@ describe('ViewportPanel view state wiring', () => {
       systemName: config.name,
       data: [
         [0, 0, 0, 0],
-        [1, 1000, 1, 1],
+        [1, 1000, 1, 1]
       ],
       t_start: 0,
       t_end: 1,
-      dt: 1,
+      dt: 1
     }
     const orbitResult = addObject(system, orbit)
     system = orbitResult.system
@@ -1503,11 +1571,11 @@ describe('ViewportPanel view state wiring', () => {
             vector: [
               { re: 1, im: 0 },
               { re: 0, im: 1 },
-              { re: 0, im: 0 },
-            ],
-          },
-        ],
-      },
+              { re: 0, im: 0 }
+            ]
+          }
+        ]
+      }
     }
     const equilibriumResult = addObject(system, equilibrium)
     system = equilibriumResult.system
@@ -1519,12 +1587,14 @@ describe('ViewportPanel view state wiring', () => {
       lineLengthScale: 0.2,
       lineThickness: 2,
       discRadiusScale: 0.2,
-      discThickness: 2,
+      discThickness: 2
     }
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const discOutline = props?.data.find(
       (trace) =>
@@ -1541,8 +1611,12 @@ describe('ViewportPanel view state wiring', () => {
         trace.line.color === '#ffaa00'
     ) as { x?: number[]; y?: number[] } | undefined
     expect(discOutline).toBeTruthy()
-    const xValues = (discOutline?.x ?? []).filter((value) => Number.isFinite(value))
-    const yValues = (discOutline?.y ?? []).filter((value) => Number.isFinite(value))
+    const xValues = (discOutline?.x ?? []).filter((value) =>
+      Number.isFinite(value)
+    )
+    const yValues = (discOutline?.y ?? []).filter((value) =>
+      Number.isFinite(value)
+    )
     expect(xValues.length).toBeGreaterThan(2)
     expect(yValues.length).toBeGreaterThan(2)
     const xSpan = Math.max(...xValues) - Math.min(...xValues)
@@ -1558,7 +1632,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['r'],
       varNames: ['x'],
       solver: 'discrete',
-      type: 'map',
+      type: 'map'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene Iso 1D')
@@ -1579,8 +1653,8 @@ describe('ViewportPanel view state wiring', () => {
         axes: [{ variableName: 'x', min: 0, max: 1, samples: 32 }],
         frozenState: [0],
         parameters: [...config.params],
-        computedAt: nowIso(),
-      },
+        computedAt: nowIso()
+      }
     }
     const added = addObject(system, isocline)
     const signature = buildIsoclineSignature(isocline)
@@ -1592,13 +1666,15 @@ describe('ViewportPanel view state wiring', () => {
           geometry: {
             geometry: 'points',
             dim: 1,
-            points: [0.25, 0.75],
-          },
-        },
-      },
+            points: [0.25, 0.75]
+          }
+        }
+      }
     })
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const trace = props?.data.find(
       (entry) =>
@@ -1620,12 +1696,12 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene Iso Flow 1D')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['y'],
+      axisVariables: ['y']
     })
     const orbit: OrbitObject = {
       type: 'orbit',
@@ -1634,11 +1710,11 @@ describe('ViewportPanel view state wiring', () => {
       data: [
         [0, 0, -0.2],
         [0.5, 0.1, 0.1],
-        [1, 0.2, 0.3],
+        [1, 0.2, 0.3]
       ],
       t_start: 0,
       t_end: 1,
-      dt: 0.5,
+      dt: 0.5
     }
     system = addObject(system, orbit).system
     const subsystemSnapshot = buildSubsystemSnapshot(
@@ -1663,9 +1739,9 @@ describe('ViewportPanel view state wiring', () => {
         frozenState: [0, 0],
         parameters: [],
         computedAt: nowIso(),
-        subsystemSnapshot,
+        subsystemSnapshot
       },
-      subsystemSnapshot,
+      subsystemSnapshot
     }
     const added = addObject(system, isocline)
     const signature = buildIsoclineSignature(isocline)
@@ -1677,13 +1753,15 @@ describe('ViewportPanel view state wiring', () => {
           geometry: {
             geometry: 'points',
             dim: 1,
-            points: [0.25],
-          },
-        },
-      },
+            points: [0.25]
+          }
+        }
+      }
     })
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const lineTrace = props?.data.find(
       (entry) =>
@@ -1691,7 +1769,13 @@ describe('ViewportPanel view state wiring', () => {
         entry.uid === added.nodeId &&
         'mode' in entry &&
         entry.mode === 'lines'
-    ) as { x?: Array<number | null>; y?: Array<number | null>; line?: { dash?: string } } | undefined
+    ) as
+      | {
+          x?: Array<number | null>
+          y?: Array<number | null>
+          line?: { dash?: string }
+        }
+      | undefined
     expect(lineTrace).toBeTruthy()
     expect(lineTrace?.x).toEqual([0, 1, null])
     expect(lineTrace?.y).toEqual([0.25, 0.25, null])
@@ -1714,12 +1798,12 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene Iso Flow 1D Mismatch')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['x'],
+      axisVariables: ['x']
     })
     const orbit: OrbitObject = {
       type: 'orbit',
@@ -1727,11 +1811,11 @@ describe('ViewportPanel view state wiring', () => {
       systemName: config.name,
       data: [
         [0, -0.2, 0],
-        [1, 0.3, 0.1],
+        [1, 0.3, 0.1]
       ],
       t_start: 0,
       t_end: 1,
-      dt: 1,
+      dt: 1
     }
     system = addObject(system, orbit).system
     const subsystemSnapshot = buildSubsystemSnapshot(
@@ -1756,9 +1840,9 @@ describe('ViewportPanel view state wiring', () => {
         frozenState: [0, 0],
         parameters: [],
         computedAt: nowIso(),
-        subsystemSnapshot,
+        subsystemSnapshot
       },
-      subsystemSnapshot,
+      subsystemSnapshot
     }
     const added = addObject(system, isocline)
     const signature = buildIsoclineSignature(isocline)
@@ -1770,13 +1854,15 @@ describe('ViewportPanel view state wiring', () => {
           geometry: {
             geometry: 'points',
             dim: 1,
-            points: [0.25],
-          },
-        },
-      },
+            points: [0.25]
+          }
+        }
+      }
     })
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const markerTrace = props?.data.find(
       (entry) =>
@@ -1806,7 +1892,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene Iso 3D')
@@ -1820,7 +1906,7 @@ describe('ViewportPanel view state wiring', () => {
       axes: [
         { variableName: 'x', min: -1, max: 1, samples: 8 },
         { variableName: 'y', min: -1, max: 1, samples: 8 },
-        { variableName: 'z', min: -1, max: 1, samples: 8 },
+        { variableName: 'z', min: -1, max: 1, samples: 8 }
       ],
       frozenState: [0, 0, 0],
       parameters: [],
@@ -1831,12 +1917,12 @@ describe('ViewportPanel view state wiring', () => {
         axes: [
           { variableName: 'x', min: -1, max: 1, samples: 8 },
           { variableName: 'y', min: -1, max: 1, samples: 8 },
-          { variableName: 'z', min: -1, max: 1, samples: 8 },
+          { variableName: 'z', min: -1, max: 1, samples: 8 }
         ],
         frozenState: [0, 0, 0],
         parameters: [],
-        computedAt: nowIso(),
-      },
+        computedAt: nowIso()
+      }
     }
     const added = addObject(system, isocline)
     const signature = buildIsoclineSignature(isocline)
@@ -1849,16 +1935,19 @@ describe('ViewportPanel view state wiring', () => {
             geometry: 'triangles',
             dim: 3,
             points: [0, 0, 0, 1, 0, 0, 0, 1, 0],
-            triangles: [0, 1, 2],
-          },
-        },
-      },
+            triangles: [0, 1, 2]
+          }
+        }
+      }
     })
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const meshTrace = props?.data.find(
-      (entry) => 'uid' in entry && entry.uid === added.nodeId && entry.type === 'mesh3d'
+      (entry) =>
+        'uid' in entry && entry.uid === added.nodeId && entry.type === 'mesh3d'
     ) as { x?: number[]; i?: Uint32Array | number[] } | undefined
     expect(meshTrace).toBeTruthy()
     expect(meshTrace?.x).toEqual([0, 1, 0])
@@ -1868,14 +1957,20 @@ describe('ViewportPanel view state wiring', () => {
   it('omits diagram ranges from layout but seeds initialView', () => {
     let system = createSystem({ name: 'Diagram_System' })
     const diagramResult = addBifurcationDiagram(system, 'Diagram 1')
-    system = updateBifurcationDiagram(diagramResult.system, diagramResult.nodeId, {
-      axisRanges: { x: [-3, 3], y: [2, 4] },
-      viewRevision: 7,
-    })
+    system = updateBifurcationDiagram(
+      diagramResult.system,
+      diagramResult.nodeId,
+      {
+        axisRanges: { x: [-3, 3], y: [2, 4] },
+        viewRevision: 7
+      }
+    )
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === diagramResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === diagramResult.nodeId
+    )
     expect(props).toBeTruthy()
     const tile = document.querySelector(
       `[data-testid="viewport-tile-${diagramResult.nodeId}"]`
@@ -1887,11 +1982,11 @@ describe('ViewportPanel view state wiring', () => {
     expect(props?.viewRevision).toBe(7)
     expect(props?.initialView).toMatchObject({
       'xaxis.range': [-3, 3],
-      'yaxis.range': [2, 4],
+      'yaxis.range': [2, 4]
     })
     expect(props?.layout?.legend).toMatchObject({
       itemclick: false,
-      itemdoubleclick: false,
+      itemdoubleclick: false
     })
   })
 
@@ -1903,7 +1998,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu'],
       varNames: ['x'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     const defaultSettings: ContinuationSettings = {
       step_size: 0.01,
@@ -1912,7 +2007,7 @@ describe('ViewportPanel view state wiring', () => {
       max_steps: 100,
       corrector_steps: 4,
       corrector_tolerance: 1e-6,
-      step_tolerance: 1e-6,
+      step_tolerance: 1e-6
     }
     let system = createSystem({ name: 'Selection_System', config })
     const orbit: OrbitObject = {
@@ -1921,12 +2016,12 @@ describe('ViewportPanel view state wiring', () => {
       systemName: config.name,
       data: [
         [0, 0.1],
-        [0.1, 0.2],
+        [0.1, 0.2]
       ],
       t_start: 0,
       t_end: 0.1,
       dt: 0.1,
-      parameters: [...config.params],
+      parameters: [...config.params]
     }
     const orbitResult = addObject(system, orbit)
     system = orbitResult.system
@@ -1940,30 +2035,46 @@ describe('ViewportPanel view state wiring', () => {
       branchType: 'equilibrium',
       data: {
         points: [
-          { state: [0.4], param_value: 1.1, stability: 'None', eigenvalues: [] },
-          { state: [0.8], param_value: 1.3, stability: 'None', eigenvalues: [] },
+          {
+            state: [0.4],
+            param_value: 1.1,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [0.8],
+            param_value: 1.3,
+            stability: 'None',
+            eigenvalues: []
+          }
         ],
         bifurcations: [],
         indices: [0, 1],
-        branch_type: { type: 'Equilibrium' },
+        branch_type: { type: 'Equilibrium' }
       },
       settings: defaultSettings,
       timestamp: nowIso(),
-      params: [...config.params],
+      params: [...config.params]
     }
     const branchResult = addBranch(system, branch, orbitResult.nodeId)
     system = branchResult.system
     const diagramResult = addBifurcationDiagram(system, 'Diagram 1')
-    system = updateBifurcationDiagram(diagramResult.system, diagramResult.nodeId, {
-      xAxis: { kind: 'parameter', name: 'mu' },
-      yAxis: { kind: 'state', name: 'x' },
-    })
+    system = updateBifurcationDiagram(
+      diagramResult.system,
+      diagramResult.nodeId,
+      {
+        xAxis: { kind: 'parameter', name: 'mu' },
+        yAxis: { kind: 'state', name: 'x' }
+      }
+    )
 
     renderPanel(system, {
-      branchPointSelection: { branchId: branchResult.nodeId, pointIndex: 1 },
+      branchPointSelection: { branchId: branchResult.nodeId, pointIndex: 1 }
     })
 
-    const props = plotlyCalls.find((entry) => entry.plotId === diagramResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === diagramResult.nodeId
+    )
     expect(props).toBeTruthy()
     const selectedTrace = props?.data.find(
       (trace) => trace.name === 'eq_branch selected point'
@@ -1982,7 +2093,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu'],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const equilibrium: EquilibriumObject = {
@@ -1994,12 +2105,12 @@ describe('ViewportPanel view state wiring', () => {
         residual_norm: 0,
         iterations: 0,
         jacobian: [],
-        eigenpairs: [],
+        eigenpairs: []
       },
       frozenVariables: { frozenValuesByVarName: { x: 0.2, z: -1.5 } },
       subsystemSnapshot: buildSubsystemSnapshot(config, {
-        frozenValuesByVarName: { x: 0.2, z: -1.5 },
-      }),
+        frozenValuesByVarName: { x: 0.2, z: -1.5 }
+      })
     }
     const equilibriumResult = addObject(system, equilibrium)
     system = equilibriumResult.system
@@ -2014,12 +2125,22 @@ describe('ViewportPanel view state wiring', () => {
       branchType: 'equilibrium',
       data: {
         points: [
-          { state: [0.1], param_value: 0.25, stability: 'None', eigenvalues: [] },
-          { state: [0.3], param_value: 0.55, stability: 'None', eigenvalues: [] },
+          {
+            state: [0.1],
+            param_value: 0.25,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [0.3],
+            param_value: 0.55,
+            stability: 'None',
+            eigenvalues: []
+          }
         ],
         bifurcations: [],
         indices: [0, 1],
-        branch_type: { type: 'Equilibrium' },
+        branch_type: { type: 'Equilibrium' }
       },
       settings: {
         step_size: 0.01,
@@ -2028,26 +2149,36 @@ describe('ViewportPanel view state wiring', () => {
         max_steps: 10,
         corrector_steps: 4,
         corrector_tolerance: 1e-6,
-        step_tolerance: 1e-6,
+        step_tolerance: 1e-6
       },
       timestamp: nowIso(),
       params: [...config.params],
-      subsystemSnapshot: equilibrium.subsystemSnapshot,
+      subsystemSnapshot: equilibrium.subsystemSnapshot
     }
     const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
     system = branchResult.system
     const diagramResult = addBifurcationDiagram(system, 'Diagram 1')
-    system = updateBifurcationDiagram(diagramResult.system, diagramResult.nodeId, {
-      xAxis: { kind: 'state', name: 'x' },
-      yAxis: { kind: 'state', name: 'y' },
-    })
+    system = updateBifurcationDiagram(
+      diagramResult.system,
+      diagramResult.nodeId,
+      {
+        xAxis: { kind: 'state', name: 'x' },
+        yAxis: { kind: 'state', name: 'y' }
+      }
+    )
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === diagramResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === diagramResult.nodeId
+    )
     expect(props).toBeTruthy()
     const mainTrace = props?.data.find(
-      (trace) => 'name' in trace && trace.name === branch.name && 'mode' in trace && trace.mode === 'lines'
+      (trace) =>
+        'name' in trace &&
+        trace.name === branch.name &&
+        'mode' in trace &&
+        trace.mode === 'lines'
     ) as { x?: number[]; y?: number[] } | undefined
     expect(mainTrace?.x).toEqual([0.25, 0.55])
     expect(mainTrace?.y).toEqual([0.1, 0.3])
@@ -2061,12 +2192,12 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu'],
       varNames: ['x', 'y'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene 1')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['x', 'y'],
+      axisVariables: ['x', 'y']
     })
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
@@ -2077,8 +2208,8 @@ describe('ViewportPanel view state wiring', () => {
         residual_norm: 0,
         iterations: 0,
         jacobian: [0, 1, -1, 0],
-        eigenpairs: [],
-      },
+        eigenpairs: []
+      }
     }
     const equilibriumResult = addObject(system, equilibrium)
     system = equilibriumResult.system
@@ -2089,7 +2220,7 @@ describe('ViewportPanel view state wiring', () => {
       max_steps: 10,
       corrector_steps: 4,
       corrector_tolerance: 1e-6,
-      step_tolerance: 1e-6,
+      step_tolerance: 1e-6
     }
     const branch: ContinuationObject = {
       type: 'continuation',
@@ -2101,26 +2232,43 @@ describe('ViewportPanel view state wiring', () => {
       branchType: 'equilibrium',
       data: {
         points: [
-          { state: [0.1, 0], param_value: 0.3, stability: 'Stable', eigenvalues: [] },
-          { state: [0.4, 0], param_value: 0.6, stability: 'Hopf', eigenvalues: [] },
-          { state: [0.7, 0], param_value: 0.9, stability: 'None', eigenvalues: [] },
+          {
+            state: [0.1, 0],
+            param_value: 0.3,
+            stability: 'Stable',
+            eigenvalues: []
+          },
+          {
+            state: [0.4, 0],
+            param_value: 0.6,
+            stability: 'Hopf',
+            eigenvalues: []
+          },
+          {
+            state: [0.7, 0],
+            param_value: 0.9,
+            stability: 'None',
+            eigenvalues: []
+          }
         ],
         bifurcations: [1],
         indices: [0, 1, 2],
-        branch_type: { type: 'Equilibrium' },
+        branch_type: { type: 'Equilibrium' }
       },
       settings: continuationSettings,
       timestamp: nowIso(),
-      params: [...config.params],
+      params: [...config.params]
     }
     const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
     system = branchResult.system
 
     renderPanel(system, {
-      branchPointSelection: { branchId: branchResult.nodeId, pointIndex: 1 },
+      branchPointSelection: { branchId: branchResult.nodeId, pointIndex: 1 }
     })
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const branchLineTrace = props?.data.find(
       (trace) =>
@@ -2130,7 +2278,9 @@ describe('ViewportPanel view state wiring', () => {
         trace.uid === branchResult.nodeId &&
         'mode' in trace &&
         trace.mode === 'lines'
-    ) as { x?: number[]; y?: number[]; text?: string[]; hovertemplate?: string } | undefined
+    ) as
+      | { x?: number[]; y?: number[]; text?: string[]; hovertemplate?: string }
+      | undefined
     expect(branchLineTrace).toBeTruthy()
     expect(branchLineTrace?.x).toEqual([0.1, 0.4, 0.7])
     expect(branchLineTrace?.y).toEqual([0, 0, 0])
@@ -2191,12 +2341,12 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu', 'nu'],
       varNames: ['x', 'y'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene 1')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['x', 'y'],
+      axisVariables: ['x', 'y']
     })
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
@@ -2207,8 +2357,8 @@ describe('ViewportPanel view state wiring', () => {
         residual_norm: 0,
         iterations: 0,
         jacobian: [0, 1, -1, 0],
-        eigenpairs: [],
-      },
+        eigenpairs: []
+      }
     }
     const equilibriumResult = addObject(system, equilibrium)
     system = equilibriumResult.system
@@ -2219,7 +2369,7 @@ describe('ViewportPanel view state wiring', () => {
       max_steps: 10,
       corrector_steps: 4,
       corrector_tolerance: 1e-6,
-      step_tolerance: 1e-6,
+      step_tolerance: 1e-6
     }
     const branch: ContinuationObject = {
       type: 'continuation',
@@ -2236,41 +2386,43 @@ describe('ViewportPanel view state wiring', () => {
             param_value: 0.3,
             param2_value: 0.2,
             stability: 'Fold',
-            eigenvalues: [],
+            eigenvalues: []
           },
           {
             state: [0.4, 0.2],
             param_value: 0.5,
             param2_value: 0.3,
             stability: 'None',
-            eigenvalues: [],
+            eigenvalues: []
           },
           {
             state: [0.8, 0.4],
             param_value: 0.7,
             param2_value: 0.4,
             stability: 'None',
-            eigenvalues: [],
-          },
+            eigenvalues: []
+          }
         ],
         bifurcations: [1],
         indices: [0, 1, 2],
         branch_type: {
           type: 'FoldCurve',
           param1_name: 'mu',
-          param2_name: 'nu',
-        },
+          param2_name: 'nu'
+        }
       },
       settings: continuationSettings,
       timestamp: nowIso(),
-      params: [...config.params],
+      params: [...config.params]
     }
     const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
     system = branchResult.system
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const lineTrace = props?.data.find(
       (trace) =>
@@ -2280,10 +2432,16 @@ describe('ViewportPanel view state wiring', () => {
         trace.uid === branchResult.nodeId &&
         'mode' in trace &&
         trace.mode === 'lines'
-    ) as { x?: number[]; y?: number[]; text?: string[]; hovertemplate?: string } | undefined
+    ) as
+      | { x?: number[]; y?: number[]; text?: string[]; hovertemplate?: string }
+      | undefined
     expect(lineTrace?.x).toEqual([0.1, 0.4, 0.8])
     expect(lineTrace?.y).toEqual([0, 0.2, 0.4])
-    expect(lineTrace?.text).toEqual(['mu: 0.3<br>nu: 0.2', 'mu: 0.5<br>nu: 0.3', 'mu: 0.7<br>nu: 0.4'])
+    expect(lineTrace?.text).toEqual([
+      'mu: 0.3<br>nu: 0.2',
+      'mu: 0.5<br>nu: 0.3',
+      'mu: 0.7<br>nu: 0.4'
+    ])
     expect(lineTrace?.hovertemplate).toContain('%{text}')
 
     const pointTrace = props?.data.find(
@@ -2330,12 +2488,12 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['r'],
       varNames: ['x'],
       solver: 'discrete',
-      type: 'map',
+      type: 'map'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene 1')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['x'],
+      axisVariables: ['x']
     })
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
@@ -2346,8 +2504,8 @@ describe('ViewportPanel view state wiring', () => {
         residual_norm: 0,
         iterations: 0,
         jacobian: [0],
-        eigenpairs: [],
-      },
+        eigenpairs: []
+      }
     }
     const equilibriumResult = addObject(system, equilibrium)
     system = equilibriumResult.system
@@ -2358,7 +2516,7 @@ describe('ViewportPanel view state wiring', () => {
       max_steps: 10,
       corrector_steps: 4,
       corrector_tolerance: 1e-6,
-      step_tolerance: 1e-6,
+      step_tolerance: 1e-6
     }
     const branch: ContinuationObject = {
       type: 'continuation',
@@ -2370,23 +2528,35 @@ describe('ViewportPanel view state wiring', () => {
       branchType: 'equilibrium',
       data: {
         points: [
-          { state: [0.2], param_value: 2.5, stability: 'Stable', eigenvalues: [] },
-          { state: [0.4], param_value: 2.8, stability: 'None', eigenvalues: [] },
+          {
+            state: [0.2],
+            param_value: 2.5,
+            stability: 'Stable',
+            eigenvalues: []
+          },
+          {
+            state: [0.4],
+            param_value: 2.8,
+            stability: 'None',
+            eigenvalues: []
+          }
         ],
         bifurcations: [],
         indices: [0, 1],
-        branch_type: { type: 'Equilibrium' },
+        branch_type: { type: 'Equilibrium' }
       },
       settings: continuationSettings,
       timestamp: nowIso(),
-      params: [...config.params],
+      params: [...config.params]
     }
     const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
     system = branchResult.system
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const lineTrace = props?.data.find(
       (trace) =>
@@ -2409,12 +2579,12 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu'],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene 1')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['x', 'y', 'z'],
+      axisVariables: ['x', 'y', 'z']
     })
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
@@ -2425,8 +2595,8 @@ describe('ViewportPanel view state wiring', () => {
         residual_norm: 0,
         iterations: 0,
         jacobian: [0, 1, 0, -1, 0, 0, 0, 0, -1],
-        eigenpairs: [],
-      },
+        eigenpairs: []
+      }
     }
     const equilibriumResult = addObject(system, equilibrium)
     system = equilibriumResult.system
@@ -2437,7 +2607,7 @@ describe('ViewportPanel view state wiring', () => {
       max_steps: 10,
       corrector_steps: 4,
       corrector_tolerance: 1e-6,
-      step_tolerance: 1e-6,
+      step_tolerance: 1e-6
     }
     const branch: ContinuationObject = {
       type: 'continuation',
@@ -2449,9 +2619,24 @@ describe('ViewportPanel view state wiring', () => {
       branchType: 'eq_manifold_1d',
       data: {
         points: [
-          { state: [0.1, 0, 0], param_value: 0, stability: 'None', eigenvalues: [] },
-          { state: [0.3, 0.2, 0.1], param_value: 0.5, stability: 'None', eigenvalues: [] },
-          { state: [0.7, 0.5, 0.2], param_value: 1.2, stability: 'None', eigenvalues: [] },
+          {
+            state: [0.1, 0, 0],
+            param_value: 0,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [0.3, 0.2, 0.1],
+            param_value: 0.5,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [0.7, 0.5, 0.2],
+            param_value: 1.2,
+            stability: 'None',
+            eigenvalues: []
+          }
         ],
         bifurcations: [],
         indices: [0, 1, 2],
@@ -2466,22 +2651,24 @@ describe('ViewportPanel view state wiring', () => {
             max_points: 2048,
             max_rings: 64,
             max_vertices: 4096,
-            max_time: 25,
-          },
-        },
+            max_time: 25
+          }
+        }
       },
       settings: continuationSettings,
       timestamp: nowIso(),
-      params: [...config.params],
+      params: [...config.params]
     }
     const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
     system = updateNodeRender(branchResult.system, branchResult.nodeId, {
-      lineStyle: 'dotted',
+      lineStyle: 'dotted'
     })
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const manifoldTrace = props?.data.find(
       (trace) =>
@@ -2504,12 +2691,12 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu'],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene 1')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['x', 'y', 'z'],
+      axisVariables: ['x', 'y', 'z']
     })
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
@@ -2520,8 +2707,8 @@ describe('ViewportPanel view state wiring', () => {
         residual_norm: 0,
         iterations: 0,
         jacobian: [0, 1, 0, -1, 0, 0, 0, 0, -1],
-        eigenpairs: [],
-      },
+        eigenpairs: []
+      }
     }
     const equilibriumResult = addObject(system, equilibrium)
     system = equilibriumResult.system
@@ -2532,7 +2719,7 @@ describe('ViewportPanel view state wiring', () => {
       max_steps: 10,
       corrector_steps: 4,
       corrector_tolerance: 1e-6,
-      step_tolerance: 1e-6,
+      step_tolerance: 1e-6
     }
     const branch: ContinuationObject = {
       type: 'continuation',
@@ -2544,12 +2731,42 @@ describe('ViewportPanel view state wiring', () => {
       branchType: 'eq_manifold_2d',
       data: {
         points: [
-          { state: [1, 0, 0], param_value: 0, stability: 'None', eigenvalues: [] },
-          { state: [0, 1, 0], param_value: 1, stability: 'None', eigenvalues: [] },
-          { state: [-1, 0, 0], param_value: 2, stability: 'None', eigenvalues: [] },
-          { state: [2, 0, 0], param_value: 3, stability: 'None', eigenvalues: [] },
-          { state: [0, 2, 0], param_value: 4, stability: 'None', eigenvalues: [] },
-          { state: [-2, 0, 0], param_value: 5, stability: 'None', eigenvalues: [] },
+          {
+            state: [1, 0, 0],
+            param_value: 0,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [0, 1, 0],
+            param_value: 1,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [-1, 0, 0],
+            param_value: 2,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [2, 0, 0],
+            param_value: 3,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [0, 2, 0],
+            param_value: 4,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [-2, 0, 0],
+            param_value: 5,
+            stability: 'None',
+            eigenvalues: []
+          }
         ],
         bifurcations: [],
         indices: [0, 1, 2, 3, 4, 5],
@@ -2564,33 +2781,34 @@ describe('ViewportPanel view state wiring', () => {
             max_points: 4096,
             max_rings: 128,
             max_vertices: 65536,
-            max_time: 100,
-          },
+            max_time: 100
+          }
         },
         manifold_geometry: {
           type: 'Surface',
           dim: 3,
           vertices_flat: [
-            1, 0, 0, 0, 1, 0, -1, 0, 0,
-            2, 0, 0, 0, 2, 0, -2, 0, 0,
+            1, 0, 0, 0, 1, 0, -1, 0, 0, 2, 0, 0, 0, 2, 0, -2, 0, 0
           ],
           triangles: [0, 1, 3, 1, 4, 3],
           ring_offsets: [0, 3, 6],
-          ring_diagnostics: [],
-        },
+          ring_diagnostics: []
+        }
       },
       settings: continuationSettings,
       timestamp: nowIso(),
-      params: [...config.params],
+      params: [...config.params]
     }
     const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
     system = updateNodeRender(branchResult.system, branchResult.nodeId, {
-      lineStyle: 'dashed',
+      lineStyle: 'dashed'
     })
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const manifoldTrace = props?.data.find(
       (trace) =>
@@ -2606,7 +2824,10 @@ describe('ViewportPanel view state wiring', () => {
     expect(manifoldTrace?.line?.dash).toBe('dash')
     expect(manifoldTrace?.x?.slice(0, 5)).toEqual([1, 0, -1, 1, null])
     const meshTrace = props?.data.find(
-      (trace) => 'uid' in trace && trace.uid === branchResult.nodeId && trace.type === 'mesh3d'
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        trace.type === 'mesh3d'
     )
     expect(meshTrace).toBeUndefined()
   })
@@ -2619,16 +2840,16 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu'],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     const frozenZ = 2.5
     const subsystemSnapshot = buildSubsystemSnapshot(config, {
-      frozenValuesByVarName: { z: frozenZ },
+      frozenValuesByVarName: { z: frozenZ }
     })
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene 1')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['x', 'y', 'z'],
+      axisVariables: ['x', 'y', 'z']
     })
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
@@ -2639,8 +2860,8 @@ describe('ViewportPanel view state wiring', () => {
         residual_norm: 0,
         iterations: 0,
         jacobian: [0, 1, 0, -1, 0, 0, 0, 0, -1],
-        eigenpairs: [],
-      },
+        eigenpairs: []
+      }
     }
     const equilibriumResult = addObject(system, equilibrium)
     system = equilibriumResult.system
@@ -2651,7 +2872,7 @@ describe('ViewportPanel view state wiring', () => {
       max_steps: 10,
       corrector_steps: 4,
       corrector_tolerance: 1e-6,
-      step_tolerance: 1e-6,
+      step_tolerance: 1e-6
     }
     const branch: ContinuationObject = {
       type: 'continuation',
@@ -2663,9 +2884,24 @@ describe('ViewportPanel view state wiring', () => {
       branchType: 'eq_manifold_1d',
       data: {
         points: [
-          { state: [0.1, 0.4], param_value: 0, stability: 'None', eigenvalues: [] },
-          { state: [0.2, 0.5], param_value: 1, stability: 'None', eigenvalues: [] },
-          { state: [0.35, 0.7], param_value: 2, stability: 'None', eigenvalues: [] },
+          {
+            state: [0.1, 0.4],
+            param_value: 0,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [0.2, 0.5],
+            param_value: 1,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [0.35, 0.7],
+            param_value: 2,
+            stability: 'None',
+            eigenvalues: []
+          }
         ],
         bifurcations: [],
         indices: [0, 1, 2],
@@ -2680,28 +2916,30 @@ describe('ViewportPanel view state wiring', () => {
             max_points: 2048,
             max_rings: 64,
             max_vertices: 4096,
-            max_time: 25,
-          },
+            max_time: 25
+          }
         },
         manifold_geometry: {
           type: 'Curve',
           dim: 2,
           points_flat: [0.1, 0.4, 0.2, 0.5, 0.35, 0.7],
           arclength: [0, 1, 2],
-          direction: 'Plus',
-        },
+          direction: 'Plus'
+        }
       },
       settings: continuationSettings,
       timestamp: nowIso(),
       params: [...config.params],
-      subsystemSnapshot,
+      subsystemSnapshot
     }
     const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
     system = branchResult.system
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const manifoldTraces = (props?.data ?? []).filter(
       (trace) =>
@@ -2710,21 +2948,22 @@ describe('ViewportPanel view state wiring', () => {
         'mode' in trace &&
         trace.mode === 'lines'
     )
-    expect(
-      manifoldTraces.some((trace) => trace.type === 'scatter3d')
-    ).toBe(true)
-    expect(
-      manifoldTraces.some((trace) => trace.type === 'scatter')
-    ).toBe(false)
-    const manifoldTrace = manifoldTraces.find((trace) => trace.type === 'scatter3d') as
-      | { z?: Array<number | null> }
-      | undefined
+    expect(manifoldTraces.some((trace) => trace.type === 'scatter3d')).toBe(
+      true
+    )
+    expect(manifoldTraces.some((trace) => trace.type === 'scatter')).toBe(false)
+    const manifoldTrace = manifoldTraces.find(
+      (trace) => trace.type === 'scatter3d'
+    ) as { z?: Array<number | null> } | undefined
     expect(manifoldTrace).toBeTruthy()
     const zValues = (manifoldTrace?.z ?? []).filter(
-      (value): value is number => typeof value === 'number' && Number.isFinite(value)
+      (value): value is number =>
+        typeof value === 'number' && Number.isFinite(value)
     )
     expect(zValues.length).toBeGreaterThan(0)
-    expect(zValues.every((value) => Math.abs(value - frozenZ) <= 1e-12)).toBe(true)
+    expect(zValues.every((value) => Math.abs(value - frozenZ) <= 1e-12)).toBe(
+      true
+    )
   })
 
   it('renders frozen 2D manifold surface rings as 3D traces in 3D scenes', () => {
@@ -2735,16 +2974,16 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu'],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     const frozenZ = -1.75
     const subsystemSnapshot = buildSubsystemSnapshot(config, {
-      frozenValuesByVarName: { z: frozenZ },
+      frozenValuesByVarName: { z: frozenZ }
     })
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene 1')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['x', 'y', 'z'],
+      axisVariables: ['x', 'y', 'z']
     })
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
@@ -2755,8 +2994,8 @@ describe('ViewportPanel view state wiring', () => {
         residual_norm: 0,
         iterations: 0,
         jacobian: [0, 1, 0, -1, 0, 0, 0, 0, -1],
-        eigenpairs: [],
-      },
+        eigenpairs: []
+      }
     }
     const equilibriumResult = addObject(system, equilibrium)
     system = equilibriumResult.system
@@ -2767,7 +3006,7 @@ describe('ViewportPanel view state wiring', () => {
       max_steps: 10,
       corrector_steps: 4,
       corrector_tolerance: 1e-6,
-      step_tolerance: 1e-6,
+      step_tolerance: 1e-6
     }
     const branch: ContinuationObject = {
       type: 'continuation',
@@ -2781,10 +3020,20 @@ describe('ViewportPanel view state wiring', () => {
         points: [
           { state: [1, 0], param_value: 0, stability: 'None', eigenvalues: [] },
           { state: [0, 1], param_value: 1, stability: 'None', eigenvalues: [] },
-          { state: [-1, 0], param_value: 2, stability: 'None', eigenvalues: [] },
+          {
+            state: [-1, 0],
+            param_value: 2,
+            stability: 'None',
+            eigenvalues: []
+          },
           { state: [2, 0], param_value: 3, stability: 'None', eigenvalues: [] },
           { state: [0, 2], param_value: 4, stability: 'None', eigenvalues: [] },
-          { state: [-2, 0], param_value: 5, stability: 'None', eigenvalues: [] },
+          {
+            state: [-2, 0],
+            param_value: 5,
+            stability: 'None',
+            eigenvalues: []
+          }
         ],
         bifurcations: [],
         indices: [0, 1, 2, 3, 4, 5],
@@ -2799,32 +3048,31 @@ describe('ViewportPanel view state wiring', () => {
             max_points: 4096,
             max_rings: 128,
             max_vertices: 65536,
-            max_time: 100,
-          },
+            max_time: 100
+          }
         },
         manifold_geometry: {
           type: 'Surface',
           dim: 2,
-          vertices_flat: [
-            1, 0, 0, 1, -1, 0,
-            2, 0, 0, 2, -2, 0,
-          ],
+          vertices_flat: [1, 0, 0, 1, -1, 0, 2, 0, 0, 2, -2, 0],
           triangles: [0, 1, 3, 1, 4, 3],
           ring_offsets: [0, 3, 6],
-          ring_diagnostics: [],
-        },
+          ring_diagnostics: []
+        }
       },
       settings: continuationSettings,
       timestamp: nowIso(),
       params: [...config.params],
-      subsystemSnapshot,
+      subsystemSnapshot
     }
     const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
     system = branchResult.system
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const manifoldTraces = (props?.data ?? []).filter(
       (trace) =>
@@ -2833,21 +3081,22 @@ describe('ViewportPanel view state wiring', () => {
         'mode' in trace &&
         trace.mode === 'lines'
     )
-    expect(
-      manifoldTraces.some((trace) => trace.type === 'scatter3d')
-    ).toBe(true)
-    expect(
-      manifoldTraces.some((trace) => trace.type === 'scatter')
-    ).toBe(false)
-    const manifoldTrace = manifoldTraces.find((trace) => trace.type === 'scatter3d') as
-      | { z?: Array<number | null> }
-      | undefined
+    expect(manifoldTraces.some((trace) => trace.type === 'scatter3d')).toBe(
+      true
+    )
+    expect(manifoldTraces.some((trace) => trace.type === 'scatter')).toBe(false)
+    const manifoldTrace = manifoldTraces.find(
+      (trace) => trace.type === 'scatter3d'
+    ) as { z?: Array<number | null> } | undefined
     expect(manifoldTrace).toBeTruthy()
     const zValues = (manifoldTrace?.z ?? []).filter(
-      (value): value is number => typeof value === 'number' && Number.isFinite(value)
+      (value): value is number =>
+        typeof value === 'number' && Number.isFinite(value)
     )
     expect(zValues.length).toBeGreaterThan(0)
-    expect(zValues.every((value) => Math.abs(value - frozenZ) <= 1e-12)).toBe(true)
+    expect(zValues.every((value) => Math.abs(value - frozenZ) <= 1e-12)).toBe(
+      true
+    )
   })
 
   it('maps frozen manifold coordinates correctly when scene includes a frozen axis', () => {
@@ -2858,16 +3107,16 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu'],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     const frozenZ = 3.4
     const subsystemSnapshot = buildSubsystemSnapshot(config, {
-      frozenValuesByVarName: { z: frozenZ },
+      frozenValuesByVarName: { z: frozenZ }
     })
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene 1')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['x', 'z'],
+      axisVariables: ['x', 'z']
     })
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
@@ -2878,8 +3127,8 @@ describe('ViewportPanel view state wiring', () => {
         residual_norm: 0,
         iterations: 0,
         jacobian: [0, 1, 0, -1, 0, 0, 0, 0, -1],
-        eigenpairs: [],
-      },
+        eigenpairs: []
+      }
     }
     const equilibriumResult = addObject(system, equilibrium)
     system = equilibriumResult.system
@@ -2890,7 +3139,7 @@ describe('ViewportPanel view state wiring', () => {
       max_steps: 10,
       corrector_steps: 4,
       corrector_tolerance: 1e-6,
-      step_tolerance: 1e-6,
+      step_tolerance: 1e-6
     }
     const branch: ContinuationObject = {
       type: 'continuation',
@@ -2902,9 +3151,24 @@ describe('ViewportPanel view state wiring', () => {
       branchType: 'eq_manifold_1d',
       data: {
         points: [
-          { state: [1, 10], param_value: 0, stability: 'None', eigenvalues: [] },
-          { state: [2, 20], param_value: 1, stability: 'None', eigenvalues: [] },
-          { state: [3, 30], param_value: 2, stability: 'None', eigenvalues: [] },
+          {
+            state: [1, 10],
+            param_value: 0,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [2, 20],
+            param_value: 1,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [3, 30],
+            param_value: 2,
+            stability: 'None',
+            eigenvalues: []
+          }
         ],
         bifurcations: [],
         indices: [0, 1, 2],
@@ -2919,28 +3183,30 @@ describe('ViewportPanel view state wiring', () => {
             max_points: 2048,
             max_rings: 64,
             max_vertices: 4096,
-            max_time: 25,
-          },
+            max_time: 25
+          }
         },
         manifold_geometry: {
           type: 'Curve',
           dim: 2,
           points_flat: [1, 10, 2, 20, 3, 30],
           arclength: [0, 1, 2],
-          direction: 'Plus',
-        },
+          direction: 'Plus'
+        }
       },
       settings: continuationSettings,
       timestamp: nowIso(),
       params: [...config.params],
-      subsystemSnapshot,
+      subsystemSnapshot
     }
     const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
     system = branchResult.system
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const manifoldTrace = props?.data.find(
       (trace) =>
@@ -2963,12 +3229,12 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu'],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene 1')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['y', 'z'],
+      axisVariables: ['y', 'z']
     })
     const seedOrbit: OrbitObject = {
       type: 'orbit',
@@ -2976,7 +3242,7 @@ describe('ViewportPanel view state wiring', () => {
       systemName: config.name,
       data: [
         [0, 0, 0, 0],
-        [0.1, 0, 0, 0],
+        [0.1, 0, 0, 0]
       ],
       t_start: 0,
       t_end: 0.1,
@@ -2984,8 +3250,8 @@ describe('ViewportPanel view state wiring', () => {
       parameters: [...config.params],
       frozenVariables: { frozenValuesByVarName: { x: 0, z: 2.2 } },
       subsystemSnapshot: buildSubsystemSnapshot(config, {
-        frozenValuesByVarName: { x: 0, z: 2.2 },
-      }),
+        frozenValuesByVarName: { x: 0, z: 2.2 }
+      })
     }
     const orbitResult = addObject(system, seedOrbit)
     system = orbitResult.system
@@ -3000,12 +3266,22 @@ describe('ViewportPanel view state wiring', () => {
       branchType: 'limit_cycle',
       data: {
         points: [
-          { state: [1.5, 1.8, 9], param_value: 0.3, stability: 'None', eigenvalues: [] },
-          { state: [2.5, 2.9, 9], param_value: 0.5, stability: 'None', eigenvalues: [] },
+          {
+            state: [1.5, 1.8, 9],
+            param_value: 0.3,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [2.5, 2.9, 9],
+            param_value: 0.5,
+            stability: 'None',
+            eigenvalues: []
+          }
         ],
         bifurcations: [],
         indices: [0, 1],
-        branch_type: { type: 'LimitCycle', ntst: 1, ncol: 1 },
+        branch_type: { type: 'LimitCycle', ntst: 1, ncol: 1 }
       },
       settings: {
         step_size: 0.01,
@@ -3014,20 +3290,22 @@ describe('ViewportPanel view state wiring', () => {
         max_steps: 10,
         corrector_steps: 4,
         corrector_tolerance: 1e-6,
-        step_tolerance: 1e-6,
+        step_tolerance: 1e-6
       },
       timestamp: nowIso(),
       params: [...config.params],
-      subsystemSnapshot: seedOrbit.subsystemSnapshot,
+      subsystemSnapshot: seedOrbit.subsystemSnapshot
     }
     const branchResult = addBranch(system, branch, orbitResult.nodeId)
     system = branchResult.system
 
     renderPanel(system, {
-      branchPointSelection: { branchId: branchResult.nodeId, pointIndex: 1 },
+      branchPointSelection: { branchId: branchResult.nodeId, pointIndex: 1 }
     })
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const lcLines = (props?.data ?? []).filter(
       (trace) =>
@@ -3044,7 +3322,10 @@ describe('ViewportPanel view state wiring', () => {
     expect(lcLines.length).toBeGreaterThan(0)
     const lineWithParamText = lcLines.find(
       (line) =>
-        Array.isArray(line.text) && line.text.some((entry) => typeof entry === 'string' && entry.includes('x:'))
+        Array.isArray(line.text) &&
+        line.text.some(
+          (entry) => typeof entry === 'string' && entry.includes('x:')
+        )
     )
     expect(lineWithParamText).toBeTruthy()
     expect(lineWithParamText?.hovertemplate).toContain('%{text}')
@@ -3067,12 +3348,12 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu'],
       varNames: ['x', 'y', 'z'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene 1')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['x', 'y', 'z'],
+      axisVariables: ['x', 'y', 'z']
     })
     const seedOrbit: OrbitObject = {
       type: 'orbit',
@@ -3080,7 +3361,7 @@ describe('ViewportPanel view state wiring', () => {
       systemName: config.name,
       data: [
         [0, 0, 0, 0],
-        [0.1, 0, 0, 0],
+        [0.1, 0, 0, 0]
       ],
       t_start: 0,
       t_end: 0.1,
@@ -3088,8 +3369,8 @@ describe('ViewportPanel view state wiring', () => {
       parameters: [...config.params],
       frozenVariables: { frozenValuesByVarName: { x: 1.5, y: 0.2 } },
       subsystemSnapshot: buildSubsystemSnapshot(config, {
-        frozenValuesByVarName: { x: 1.5, y: 0.2 },
-      }),
+        frozenValuesByVarName: { x: 1.5, y: 0.2 }
+      })
     }
     const orbitResult = addObject(system, seedOrbit)
     system = orbitResult.system
@@ -3104,12 +3385,22 @@ describe('ViewportPanel view state wiring', () => {
       branchType: 'limit_cycle',
       data: {
         points: [
-          { state: [2, 4, 9], param_value: 0.2, stability: 'None', eigenvalues: [] },
-          { state: [3, 5, 9], param_value: 0.6, stability: 'None', eigenvalues: [] },
+          {
+            state: [2, 4, 9],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [3, 5, 9],
+            param_value: 0.6,
+            stability: 'None',
+            eigenvalues: []
+          }
         ],
         bifurcations: [],
         indices: [0, 1],
-        branch_type: { type: 'LimitCycle', ntst: 1, ncol: 1 },
+        branch_type: { type: 'LimitCycle', ntst: 1, ncol: 1 }
       },
       settings: {
         step_size: 0.01,
@@ -3118,20 +3409,22 @@ describe('ViewportPanel view state wiring', () => {
         max_steps: 10,
         corrector_steps: 4,
         corrector_tolerance: 1e-6,
-        step_tolerance: 1e-6,
+        step_tolerance: 1e-6
       },
       timestamp: nowIso(),
       params: [...config.params],
-      subsystemSnapshot: seedOrbit.subsystemSnapshot,
+      subsystemSnapshot: seedOrbit.subsystemSnapshot
     }
     const branchResult = addBranch(system, branch, orbitResult.nodeId)
     system = branchResult.system
 
     renderPanel(system, {
-      branchPointSelection: { branchId: branchResult.nodeId, pointIndex: 1 },
+      branchPointSelection: { branchId: branchResult.nodeId, pointIndex: 1 }
     })
 
-    const props = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(props).toBeTruthy()
     const maxTrace = props?.data.find(
       (trace) =>
@@ -3197,7 +3490,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu'],
       varNames: ['x', 'y'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const seedOrbit: OrbitObject = {
@@ -3206,7 +3499,7 @@ describe('ViewportPanel view state wiring', () => {
       systemName: config.name,
       data: [
         [0, 0, 0],
-        [0.1, 0, 0],
+        [0.1, 0, 0]
       ],
       t_start: 0,
       t_end: 0.1,
@@ -3214,8 +3507,8 @@ describe('ViewportPanel view state wiring', () => {
       parameters: [...config.params],
       frozenVariables: { frozenValuesByVarName: { x: 0.2 } },
       subsystemSnapshot: buildSubsystemSnapshot(config, {
-        frozenValuesByVarName: { x: 0.2 },
-      }),
+        frozenValuesByVarName: { x: 0.2 }
+      })
     }
     const orbitResult = addObject(system, seedOrbit)
     system = orbitResult.system
@@ -3230,12 +3523,22 @@ describe('ViewportPanel view state wiring', () => {
       branchType: 'limit_cycle',
       data: {
         points: [
-          { state: [1, 3, 9], param_value: 0.2, stability: 'None', eigenvalues: [] },
-          { state: [2, 5, 9], param_value: 0.6, stability: 'None', eigenvalues: [] },
+          {
+            state: [1, 3, 9],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: []
+          },
+          {
+            state: [2, 5, 9],
+            param_value: 0.6,
+            stability: 'None',
+            eigenvalues: []
+          }
         ],
         bifurcations: [],
         indices: [0, 1],
-        branch_type: { type: 'LimitCycle', ntst: 1, ncol: 1 },
+        branch_type: { type: 'LimitCycle', ntst: 1, ncol: 1 }
       },
       settings: {
         step_size: 0.01,
@@ -3244,23 +3547,29 @@ describe('ViewportPanel view state wiring', () => {
         max_steps: 10,
         corrector_steps: 4,
         corrector_tolerance: 1e-6,
-        step_tolerance: 1e-6,
+        step_tolerance: 1e-6
       },
       timestamp: nowIso(),
       params: [...config.params],
-      subsystemSnapshot: seedOrbit.subsystemSnapshot,
+      subsystemSnapshot: seedOrbit.subsystemSnapshot
     }
     const branchResult = addBranch(system, branch, orbitResult.nodeId)
     system = branchResult.system
     const diagramResult = addBifurcationDiagram(system, 'Diagram 1')
-    system = updateBifurcationDiagram(diagramResult.system, diagramResult.nodeId, {
-      xAxis: { kind: 'state', name: 'x' },
-      yAxis: { kind: 'state', name: 'y' },
-    })
+    system = updateBifurcationDiagram(
+      diagramResult.system,
+      diagramResult.nodeId,
+      {
+        xAxis: { kind: 'state', name: 'x' },
+        yAxis: { kind: 'state', name: 'y' }
+      }
+    )
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === diagramResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === diagramResult.nodeId
+    )
     expect(props).toBeTruthy()
     const maxTrace = props?.data.find(
       (trace) =>
@@ -3289,11 +3598,13 @@ describe('ViewportPanel view state wiring', () => {
     plotlyCalls.length = 0
     system = updateBifurcationDiagram(system, diagramResult.nodeId, {
       xAxis: { kind: 'state', name: 'y' },
-      yAxis: { kind: 'state', name: 'x' },
+      yAxis: { kind: 'state', name: 'x' }
     })
     renderPanel(system)
 
-    const flippedProps = plotlyCalls.find((entry) => entry.plotId === diagramResult.nodeId)
+    const flippedProps = plotlyCalls.find(
+      (entry) => entry.plotId === diagramResult.nodeId
+    )
     expect(flippedProps).toBeTruthy()
     const flippedMaxTrace = flippedProps?.data.find(
       (trace) =>
@@ -3328,12 +3639,12 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu'],
       varNames: ['a', 'b', 'c', 'd'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const sceneResult = addScene(system, 'Scene 1')
     system = updateScene(sceneResult.system, sceneResult.nodeId, {
-      axisVariables: ['a', 'b', 'c'],
+      axisVariables: ['a', 'b', 'c']
     })
     const seedOrbit: OrbitObject = {
       type: 'orbit',
@@ -3341,7 +3652,7 @@ describe('ViewportPanel view state wiring', () => {
       systemName: config.name,
       data: [
         [0, 0, 0, 0, 0],
-        [0.1, 0, 0, 0, 0],
+        [0.1, 0, 0, 0, 0]
       ],
       t_start: 0,
       t_end: 0.1,
@@ -3349,8 +3660,8 @@ describe('ViewportPanel view state wiring', () => {
       parameters: [...config.params],
       frozenVariables: { frozenValuesByVarName: { a: 1.5, b: 0.2 } },
       subsystemSnapshot: buildSubsystemSnapshot(config, {
-        frozenValuesByVarName: { a: 1.5, b: 0.2 },
-      }),
+        frozenValuesByVarName: { a: 1.5, b: 0.2 }
+      })
     }
     const orbitResult = addObject(system, seedOrbit)
     system = orbitResult.system
@@ -3369,18 +3680,18 @@ describe('ViewportPanel view state wiring', () => {
             state: [10, 100, 20, 200, 15, 150, 9],
             param_value: 0.2,
             stability: 'None',
-            eigenvalues: [],
+            eigenvalues: []
           },
           {
             state: [30, 300, 40, 400, 35, 350, 9],
             param_value: 0.6,
             stability: 'None',
-            eigenvalues: [],
-          },
+            eigenvalues: []
+          }
         ],
         bifurcations: [],
         indices: [0, 1],
-        branch_type: { type: 'LimitCycle', ntst: 1, ncol: 1 },
+        branch_type: { type: 'LimitCycle', ntst: 1, ncol: 1 }
       },
       settings: {
         step_size: 0.01,
@@ -3389,18 +3700,20 @@ describe('ViewportPanel view state wiring', () => {
         max_steps: 10,
         corrector_steps: 4,
         corrector_tolerance: 1e-6,
-        step_tolerance: 1e-6,
+        step_tolerance: 1e-6
       },
       timestamp: nowIso(),
       params: [...config.params],
-      subsystemSnapshot: seedOrbit.subsystemSnapshot,
+      subsystemSnapshot: seedOrbit.subsystemSnapshot
     }
     const branchResult = addBranch(system, branch, orbitResult.nodeId)
     system = branchResult.system
 
     renderPanel(system)
 
-    const sceneProps = plotlyCalls.find((entry) => entry.plotId === sceneResult.nodeId)
+    const sceneProps = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
     expect(sceneProps).toBeTruthy()
     const sceneMaxTrace = sceneProps?.data.find(
       (trace) =>
@@ -3434,13 +3747,19 @@ describe('ViewportPanel view state wiring', () => {
 
     plotlyCalls.length = 0
     const diagramResult = addBifurcationDiagram(system, 'Diagram 1')
-    system = updateBifurcationDiagram(diagramResult.system, diagramResult.nodeId, {
-      xAxis: { kind: 'state', name: 'b' },
-      yAxis: { kind: 'state', name: 'c' },
-    })
+    system = updateBifurcationDiagram(
+      diagramResult.system,
+      diagramResult.nodeId,
+      {
+        xAxis: { kind: 'state', name: 'b' },
+        yAxis: { kind: 'state', name: 'c' }
+      }
+    )
     renderPanel(system)
 
-    const diagramProps = plotlyCalls.find((entry) => entry.plotId === diagramResult.nodeId)
+    const diagramProps = plotlyCalls.find(
+      (entry) => entry.plotId === diagramResult.nodeId
+    )
     expect(diagramProps).toBeTruthy()
     const diagramMaxTrace = diagramProps?.data.find(
       (trace) =>
@@ -3475,7 +3794,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu'],
       varNames: ['x', 'y'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     const defaultSettings: ContinuationSettings = {
       step_size: 0.01,
@@ -3484,7 +3803,7 @@ describe('ViewportPanel view state wiring', () => {
       max_steps: 100,
       corrector_steps: 4,
       corrector_tolerance: 1e-6,
-      step_tolerance: 1e-6,
+      step_tolerance: 1e-6
     }
     let system = createSystem({ name: 'LimitCycle_Diagram', config })
     const orbit: OrbitObject = {
@@ -3493,12 +3812,12 @@ describe('ViewportPanel view state wiring', () => {
       systemName: config.name,
       data: [
         [0, 0.1, 0.2],
-        [0.1, 0.2, 0.3],
+        [0.1, 0.2, 0.3]
       ],
       t_start: 0,
       t_end: 0.1,
       dt: 0.1,
-      parameters: [...config.params],
+      parameters: [...config.params]
     }
     const orbitResult = addObject(system, orbit)
     system = orbitResult.system
@@ -3516,34 +3835,40 @@ describe('ViewportPanel view state wiring', () => {
             state: [0, 0, 1, 0, 0, 1, 2],
             param_value: 0.4,
             stability: 'None',
-            eigenvalues: [],
+            eigenvalues: []
           },
           {
             state: [0, 0, 1, 1, 0, 1, 2],
             param_value: 0.6,
             stability: 'PeriodDoubling',
-            eigenvalues: [],
-          },
+            eigenvalues: []
+          }
         ],
         bifurcations: [1],
         indices: [0, 1],
-        branch_type: { type: 'LimitCycle', ntst: 2, ncol: 1 },
+        branch_type: { type: 'LimitCycle', ntst: 2, ncol: 1 }
       },
       settings: defaultSettings,
       timestamp: nowIso(),
-      params: [...config.params],
+      params: [...config.params]
     }
     const branchResult = addBranch(system, branch, orbitResult.nodeId)
     system = branchResult.system
     const diagramResult = addBifurcationDiagram(system, 'Diagram 1')
-    system = updateBifurcationDiagram(diagramResult.system, diagramResult.nodeId, {
-      xAxis: { kind: 'state', name: 'x' },
-      yAxis: { kind: 'state', name: 'y' },
-    })
+    system = updateBifurcationDiagram(
+      diagramResult.system,
+      diagramResult.nodeId,
+      {
+        xAxis: { kind: 'state', name: 'x' },
+        yAxis: { kind: 'state', name: 'y' }
+      }
+    )
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === diagramResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === diagramResult.nodeId
+    )
     expect(props).toBeTruthy()
     const mainTrace = props?.data.find(
       (trace) =>
@@ -3569,8 +3894,7 @@ describe('ViewportPanel view state wiring', () => {
     expect(numericCustomdata.filter((value) => value === 1).length).toBe(3)
 
     const bifTrace = props?.data.find(
-      (trace) =>
-        'name' in trace && trace.name === `${branch.name} bifurcations`
+      (trace) => 'name' in trace && trace.name === `${branch.name} bifurcations`
     ) as
       | {
           x?: number[]
@@ -3596,7 +3920,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['mu', 'nu'],
       varNames: ['x', 'y'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: config.name, config })
     const equilibrium: EquilibriumObject = {
@@ -3608,8 +3932,8 @@ describe('ViewportPanel view state wiring', () => {
         residual_norm: 0,
         iterations: 0,
         jacobian: [0, 0, 0, 0],
-        eigenpairs: [],
-      },
+        eigenpairs: []
+      }
     }
     const equilibriumResult = addObject(system, equilibrium)
     system = equilibriumResult.system
@@ -3620,7 +3944,7 @@ describe('ViewportPanel view state wiring', () => {
       max_steps: 10,
       corrector_steps: 4,
       corrector_tolerance: 1e-6,
-      step_tolerance: 1e-6,
+      step_tolerance: 1e-6
     }
     const branch: ContinuationObject = {
       type: 'continuation',
@@ -3637,23 +3961,23 @@ describe('ViewportPanel view state wiring', () => {
               // mesh + stage
               0, 0, 1, 0, 2, 0, 0.5, 0, 1.5, 0,
               // x0 + p2 + extras/tail
-              0.1, 0.2, 0.1, 8, 0.02, 0, 0,
+              0.1, 0.2, 0.1, 8, 0.02, 0, 0
             ],
             param_value: 0.2,
             stability: 'None',
-            eigenvalues: [],
+            eigenvalues: []
           },
           {
             state: [
               // mesh + stage
               1, 1, 2, 1, 3, 1, 1.5, 1, 2.5, 1,
               // x0 + p2 + extras/tail
-              0.4, 0.5, 0.12, 9, 0.02, 0, 0,
+              0.4, 0.5, 0.12, 9, 0.02, 0, 0
             ],
             param_value: 0.3,
             stability: 'None',
-            eigenvalues: [],
-          },
+            eigenvalues: []
+          }
         ],
         bifurcations: [1],
         indices: [0, 1],
@@ -3665,24 +3989,30 @@ describe('ViewportPanel view state wiring', () => {
           param2_name: 'nu',
           free_time: true,
           free_eps0: true,
-          free_eps1: false,
-        },
+          free_eps1: false
+        }
       },
       settings: continuationSettings,
       timestamp: nowIso(),
-      params: [...config.params],
+      params: [...config.params]
     }
     const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
     system = branchResult.system
     const diagramResult = addBifurcationDiagram(system, 'Diagram 1')
-    system = updateBifurcationDiagram(diagramResult.system, diagramResult.nodeId, {
-      xAxis: { kind: 'state', name: 'x' },
-      yAxis: { kind: 'state', name: 'y' },
-    })
+    system = updateBifurcationDiagram(
+      diagramResult.system,
+      diagramResult.nodeId,
+      {
+        xAxis: { kind: 'state', name: 'x' },
+        yAxis: { kind: 'state', name: 'y' }
+      }
+    )
 
     renderPanel(system)
 
-    const props = plotlyCalls.find((entry) => entry.plotId === diagramResult.nodeId)
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === diagramResult.nodeId
+    )
     expect(props).toBeTruthy()
     const mainTrace = props?.data.find(
       (trace) =>
@@ -3715,7 +4045,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['r'],
       varNames: ['x'],
       solver: 'discrete',
-      type: 'map',
+      type: 'map'
     }
     let system = createSystem({ name: 'Map_System', config })
     system = addScene(system, 'Scene 1').system
@@ -3729,11 +4059,8 @@ describe('ViewportPanel view state wiring', () => {
         iterations: 0,
         jacobian: [1],
         eigenpairs: [],
-        cycle_points: [
-          [0.3],
-          [0.9],
-        ],
-      },
+        cycle_points: [[0.3], [0.9]]
+      }
     }
     system = addObject(system, equilibrium).system
     const onSampleMap1DFunction = vi.fn().mockResolvedValue({ x: [], y: [] })
@@ -3770,7 +4097,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['r'],
       varNames: ['x'],
       solver: 'discrete',
-      type: 'map',
+      type: 'map'
     }
     let system = createSystem({ name: 'Map_System', config })
     system = addScene(system, 'Scene 1').system
@@ -3784,8 +4111,8 @@ describe('ViewportPanel view state wiring', () => {
         iterations: 0,
         jacobian: [1],
         eigenpairs: [],
-        cycle_points: [[0.3]],
-      },
+        cycle_points: [[0.3]]
+      }
     }
     system = addObject(system, equilibrium).system
     const onSampleMap1DFunction = vi
@@ -3846,7 +4173,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['r'],
       varNames: ['x'],
       solver: 'discrete',
-      type: 'map',
+      type: 'map'
     }
     let system = createSystem({ name: 'Map_System', config })
     const sceneResult = addScene(system, 'Scene 1')
@@ -3861,11 +4188,8 @@ describe('ViewportPanel view state wiring', () => {
         iterations: 0,
         jacobian: [1],
         eigenpairs: [],
-        cycle_points: [
-          [0.3],
-          [0.9],
-        ],
-      },
+        cycle_points: [[0.3], [0.9]]
+      }
     }
     const equilibriumResult = addObject(system, equilibrium)
     system = equilibriumResult.system
@@ -3908,7 +4232,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: ['r'],
       varNames: ['x'],
       solver: 'discrete',
-      type: 'map',
+      type: 'map'
     }
     let system = createSystem({ name: 'Map_System', config })
     const sceneResult = addScene(system, 'Scene 1')
@@ -3923,8 +4247,8 @@ describe('ViewportPanel view state wiring', () => {
         iterations: 0,
         jacobian: [1],
         eigenpairs: [],
-        cycle_points: [[0.3]],
-      },
+        cycle_points: [[0.3]]
+      }
     }
     const equilibriumResult = addObject(system, equilibrium)
     system = equilibriumResult.system
@@ -3956,7 +4280,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: 'Analysis_Render_System', config })
     const analysisResult = addAnalysisViewport(system, 'Event_Map_1')
@@ -3967,11 +4291,11 @@ describe('ViewportPanel view state wiring', () => {
       systemName: config.name,
       data: [
         [0, 0, 1],
-        [0.1, 1, 0],
+        [0.1, 1, 0]
       ],
       t_start: 0,
       t_end: 0.1,
-      dt: 0.1,
+      dt: 0.1
     }
     const orbitResult = addObject(system, orbit)
     system = orbitResult.system
@@ -3980,15 +4304,18 @@ describe('ViewportPanel view state wiring', () => {
       event: {
         mode: 'cross_up',
         source: { kind: 'custom', expression: 'x' },
-        level: 0,
+        level: 0
       },
       axes: {
         x: { kind: 'observable', expression: 'x', hitOffset: 0, label: 'x@n' },
         y: { kind: 'hit_index', label: 'n' },
-        z: null,
-      },
+        z: null
+      }
     })
-    system = updateNodeRender(system, orbitResult.nodeId, { pointSize: 5, lineWidth: 2 })
+    system = updateNodeRender(system, orbitResult.nodeId, {
+      pointSize: 5,
+      lineWidth: 2
+    })
     const onComputeEventSeriesFromSamples = vi.fn().mockResolvedValue({
       hits: [
         {
@@ -3996,9 +4323,9 @@ describe('ViewportPanel view state wiring', () => {
           sample_index: 1,
           time: 0.1,
           state: [1, 0],
-          observable_values: [1],
-        },
-      ],
+          observable_values: [1]
+        }
+      ]
     })
 
     function Wrapper() {
@@ -4025,7 +4352,10 @@ describe('ViewportPanel view state wiring', () => {
             data-testid="update-analysis-render"
             onClick={() => {
               setState((prev) =>
-                updateNodeRender(prev, orbitResult.nodeId, { pointSize: 11, lineWidth: 7 })
+                updateNodeRender(prev, orbitResult.nodeId, {
+                  pointSize: 11,
+                  lineWidth: 7
+                })
               )
             }}
           >
@@ -4039,7 +4369,8 @@ describe('ViewportPanel view state wiring', () => {
 
     const latestCallFor = () => {
       const calls = plotlyCalls.filter(
-        (entry) => entry.plotId === analysisResult.nodeId && entry.data.length > 0
+        (entry) =>
+          entry.plotId === analysisResult.nodeId && entry.data.length > 0
       )
       return calls[calls.length - 1]
     }
@@ -4066,6 +4397,297 @@ describe('ViewportPanel view state wiring', () => {
     })
   })
 
+  it('renders identity lines for same-observable event maps even when cobwebs are off', async () => {
+    const config: SystemConfig = {
+      name: 'Analysis_Identity_Line_System',
+      equations: ['x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x'],
+      solver: 'rk4',
+      type: 'flow'
+    }
+    let system = createSystem({
+      name: 'Analysis_Identity_Line_System',
+      config
+    })
+    const analysisResult = addAnalysisViewport(system, 'Event_Map_1')
+    system = analysisResult.system
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Identity_Line_Target',
+      systemName: config.name,
+      data: [
+        [0, -1],
+        [0.1, 0.5],
+        [0.2, 1.5]
+      ],
+      t_start: 0,
+      t_end: 0.2,
+      dt: 0.1
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+    system = updateAnalysisViewport(system, analysisResult.nodeId, {
+      sourceNodeIds: [orbitResult.nodeId],
+      event: {
+        mode: 'cross_up',
+        source: { kind: 'custom', expression: 'x' },
+        level: 0,
+        positivityConstraints: []
+      },
+      axes: {
+        x: { kind: 'observable', expression: 'x', hitOffset: 0, label: 'x@n' },
+        y: {
+          kind: 'observable',
+          expression: 'x',
+          hitOffset: 1,
+          label: 'x@n+1'
+        },
+        z: null
+      },
+      advanced: {
+        skipHits: 0,
+        hitStride: 1,
+        maxHits: 2000,
+        connectPoints: false,
+        showIdentityLine: true,
+        identityLineColor: '#112233',
+        identityLineStyle: 'dashed'
+      }
+    })
+    const onComputeEventSeriesFromSamples = vi.fn().mockResolvedValue({
+      hits: [
+        {
+          order: 0,
+          sample_index: 0,
+          time: 0,
+          state: [1],
+          observable_values: [1]
+        },
+        {
+          order: 1,
+          sample_index: 1,
+          time: 0.1,
+          state: [2],
+          observable_values: [2]
+        },
+        {
+          order: 2,
+          sample_index: 2,
+          time: 0.2,
+          state: [4],
+          observable_values: [4]
+        }
+      ]
+    })
+
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        theme="light"
+        onSelectViewport={vi.fn()}
+        onSelectObject={vi.fn()}
+        onReorderViewport={vi.fn()}
+        onResizeViewport={vi.fn()}
+        onToggleViewport={vi.fn()}
+        onCreateScene={vi.fn()}
+        onCreateAnalysis={vi.fn()}
+        onCreateBifurcation={vi.fn()}
+        onRenameViewport={vi.fn()}
+        onDeleteViewport={vi.fn()}
+        onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
+      />
+    )
+
+    await waitFor(() => {
+      const props = plotlyCalls
+        .filter(
+          (entry) =>
+            entry.plotId === analysisResult.nodeId && entry.data.length > 0
+        )
+        .at(-1)
+      expect(props).toBeTruthy()
+
+      const identityTrace = props?.data.find(
+        (trace) =>
+          'name' in trace &&
+          trace.name === 'Identity line' &&
+          'line' in trace &&
+          typeof trace.line === 'object'
+      ) as
+        | {
+            x?: number[]
+            y?: number[]
+            line?: { color?: string; dash?: string }
+          }
+        | undefined
+      const markerTrace = props?.data.find(
+        (trace) =>
+          'uid' in trace &&
+          trace.uid === orbitResult.nodeId &&
+          'mode' in trace &&
+          trace.mode === 'markers'
+      ) as { x?: number[]; y?: number[] } | undefined
+
+      expect(identityTrace?.x).toEqual([1, 4])
+      expect(identityTrace?.y).toEqual([1, 4])
+      expect(identityTrace?.line?.color).toBe('#112233')
+      expect(identityTrace?.line?.dash).toBe('dash')
+      expect(markerTrace?.x).toEqual([1, 2])
+      expect(markerTrace?.y).toEqual([2, 4])
+      expect(
+        props?.data.some(
+          (trace) =>
+            'name' in trace &&
+            typeof trace.name === 'string' &&
+            trace.name.includes('cobweb')
+        )
+      ).toBe(false)
+    })
+  })
+
+  it('draws cobweb legs in hit-offset order for reversed same-observable event maps', async () => {
+    const config: SystemConfig = {
+      name: 'Analysis_Reversed_Cobweb_System',
+      equations: ['x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x'],
+      solver: 'rk4',
+      type: 'flow'
+    }
+    let system = createSystem({
+      name: 'Analysis_Reversed_Cobweb_System',
+      config
+    })
+    const analysisResult = addAnalysisViewport(system, 'Event_Map_1')
+    system = analysisResult.system
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Reversed_Cobweb_Target',
+      systemName: config.name,
+      data: [
+        [0, -1],
+        [0.1, 0.5],
+        [0.2, 1.5]
+      ],
+      t_start: 0,
+      t_end: 0.2,
+      dt: 0.1
+    }
+    const orbitResult = addObject(system, orbit)
+    system = orbitResult.system
+    system = updateAnalysisViewport(system, analysisResult.nodeId, {
+      sourceNodeIds: [orbitResult.nodeId],
+      event: {
+        mode: 'cross_up',
+        source: { kind: 'custom', expression: 'x' },
+        level: 0,
+        positivityConstraints: []
+      },
+      axes: {
+        x: {
+          kind: 'observable',
+          expression: 'x',
+          hitOffset: 1,
+          label: 'x@n+1'
+        },
+        y: { kind: 'observable', expression: 'x', hitOffset: 0, label: 'x@n' },
+        z: null
+      },
+      advanced: {
+        skipHits: 0,
+        hitStride: 1,
+        maxHits: 2000,
+        connectPoints: true,
+        showIdentityLine: false,
+        identityLineColor: '#787878',
+        identityLineStyle: 'dotted'
+      }
+    })
+    const onComputeEventSeriesFromSamples = vi.fn().mockResolvedValue({
+      hits: [
+        {
+          order: 0,
+          sample_index: 0,
+          time: 0,
+          state: [2],
+          observable_values: [2]
+        },
+        {
+          order: 1,
+          sample_index: 1,
+          time: 0.1,
+          state: [3],
+          observable_values: [3]
+        },
+        {
+          order: 2,
+          sample_index: 2,
+          time: 0.2,
+          state: [5],
+          observable_values: [5]
+        }
+      ]
+    })
+
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        theme="light"
+        onSelectViewport={vi.fn()}
+        onSelectObject={vi.fn()}
+        onReorderViewport={vi.fn()}
+        onResizeViewport={vi.fn()}
+        onToggleViewport={vi.fn()}
+        onCreateScene={vi.fn()}
+        onCreateAnalysis={vi.fn()}
+        onCreateBifurcation={vi.fn()}
+        onRenameViewport={vi.fn()}
+        onDeleteViewport={vi.fn()}
+        onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
+      />
+    )
+
+    await waitFor(() => {
+      const props = plotlyCalls
+        .filter(
+          (entry) =>
+            entry.plotId === analysisResult.nodeId && entry.data.length > 0
+        )
+        .at(-1)
+      expect(props).toBeTruthy()
+
+      const cobwebTrace = props?.data.find(
+        (trace) =>
+          'name' in trace &&
+          trace.name === 'Orbit_Reversed_Cobweb_Target cobweb' &&
+          'mode' in trace &&
+          trace.mode === 'lines'
+      ) as { x?: Array<number | null>; y?: Array<number | null> } | undefined
+      const markerTrace = props?.data.find(
+        (trace) =>
+          'uid' in trace &&
+          trace.uid === orbitResult.nodeId &&
+          'mode' in trace &&
+          trace.mode === 'markers'
+      ) as { x?: number[]; y?: number[] } | undefined
+
+      expect(cobwebTrace?.x).toEqual([2, 3, 3, null, 3, 5, 5, null])
+      expect(cobwebTrace?.y).toEqual([2, 2, 3, null, 3, 3, 5, null])
+      expect(markerTrace?.x).toEqual([3, 5])
+      expect(markerTrace?.y).toEqual([2, 3])
+      expect(
+        props?.data.some(
+          (trace) => 'name' in trace && trace.name === 'Identity line'
+        )
+      ).toBe(false)
+    })
+  })
+
   it('selects orbit hits from event map clicks using hit-offset-0 metadata', async () => {
     const config: SystemConfig = {
       name: 'Analysis_Click_System',
@@ -4074,7 +4696,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: 'Analysis_Click_System', config })
     const analysisResult = addAnalysisViewport(system, 'Event_Map_1')
@@ -4086,11 +4708,11 @@ describe('ViewportPanel view state wiring', () => {
       data: [
         [0, 0, 1],
         [0.1, 1, 0],
-        [0.2, 2, -1],
+        [0.2, 2, -1]
       ],
       t_start: 0,
       t_end: 0.2,
-      dt: 0.1,
+      dt: 0.1
     }
     const orbitResult = addObject(system, orbit)
     system = orbitResult.system
@@ -4100,13 +4722,18 @@ describe('ViewportPanel view state wiring', () => {
         mode: 'cross_up',
         source: { kind: 'custom', expression: 'x' },
         level: 0,
-        positivityConstraints: [],
+        positivityConstraints: []
       },
       axes: {
-        x: { kind: 'observable', expression: 'x', hitOffset: 1, label: 'x@n+1' },
+        x: {
+          kind: 'observable',
+          expression: 'x',
+          hitOffset: 1,
+          label: 'x@n+1'
+        },
         y: { kind: 'observable', expression: 'x', hitOffset: 0, label: 'x@n' },
-        z: null,
-      },
+        z: null
+      }
     })
     const onSelectObject = vi.fn()
     const onSelectOrbitPoint = vi.fn()
@@ -4117,16 +4744,16 @@ describe('ViewportPanel view state wiring', () => {
           sample_index: 1,
           time: 0.125,
           state: [0.5, 0.25],
-          observable_values: [1.5],
+          observable_values: [1.5]
         },
         {
           order: 3,
           sample_index: 2,
           time: 0.2,
           state: [2, -1],
-          observable_values: [2],
-        },
-      ],
+          observable_values: [2]
+        }
+      ]
     })
 
     render(
@@ -4151,16 +4778,23 @@ describe('ViewportPanel view state wiring', () => {
 
     await waitFor(() => {
       const props = plotlyCalls.find(
-        (entry) => entry.plotId === analysisResult.nodeId && entry.data.length > 0
+        (entry) =>
+          entry.plotId === analysisResult.nodeId && entry.data.length > 0
       )
       expect(props?.onPointClick).toBeDefined()
-      const trace = props?.data[0] as { customdata?: unknown[] } | undefined
+      const trace = props?.data.find(
+        (entry) =>
+          'uid' in entry &&
+          entry.uid === orbitResult.nodeId &&
+          'mode' in entry &&
+          entry.mode === 'markers'
+      ) as { customdata?: unknown[] } | undefined
       const customdata = trace?.customdata?.[0]
       expect(customdata).toBeTruthy()
 
       props?.onPointClick?.({
         uid: orbitResult.nodeId,
-        customdata,
+        customdata
       })
     })
 
@@ -4170,7 +4804,7 @@ describe('ViewportPanel view state wiring', () => {
       pointIndex: 1,
       hitIndex: 2,
       time: 0.125,
-      state: [0.5, 0.25],
+      state: [0.5, 0.25]
     })
   })
 
@@ -4182,7 +4816,7 @@ describe('ViewportPanel view state wiring', () => {
       paramNames: [],
       varNames: ['x', 'y'],
       solver: 'rk4',
-      type: 'flow',
+      type: 'flow'
     }
     let system = createSystem({ name: 'Analysis_Constraint_System', config })
     const analysisResult = addAnalysisViewport(system, 'Event_Map_1')
@@ -4194,11 +4828,11 @@ describe('ViewportPanel view state wiring', () => {
       data: [
         [0, 0, 1],
         [0.1, 1, 0],
-        [0.2, 2, -1],
+        [0.2, 2, -1]
       ],
       t_start: 0,
       t_end: 0.2,
-      dt: 0.1,
+      dt: 0.1
     }
     const orbitResult = addObject(system, orbit)
     system = orbitResult.system
@@ -4208,13 +4842,13 @@ describe('ViewportPanel view state wiring', () => {
         mode: 'cross_up',
         source: { kind: 'custom', expression: 'x' },
         level: 0,
-        positivityConstraints: ['y'],
+        positivityConstraints: ['y']
       },
       axes: {
         x: { kind: 'observable', expression: 'x', hitOffset: 0, label: 'x@n' },
         y: { kind: 'hit_index', label: 'n' },
-        z: null,
-      },
+        z: null
+      }
     })
     const onComputeEventSeriesFromSamples = vi.fn().mockResolvedValue({
       hits: [
@@ -4223,16 +4857,16 @@ describe('ViewportPanel view state wiring', () => {
           sample_index: 1,
           time: 0.1,
           state: [1, 0],
-          observable_values: [1, 2],
+          observable_values: [1, 2]
         },
         {
           order: 1,
           sample_index: 2,
           time: 0.2,
           state: [2, -1],
-          observable_values: [2, -3],
-        },
-      ],
+          observable_values: [2, -3]
+        }
+      ]
     })
 
     render(
@@ -4256,7 +4890,8 @@ describe('ViewportPanel view state wiring', () => {
 
     await waitFor(() => {
       const calls = plotlyCalls.filter(
-        (entry) => entry.plotId === analysisResult.nodeId && entry.data.length > 0
+        (entry) =>
+          entry.plotId === analysisResult.nodeId && entry.data.length > 0
       )
       const props = calls[calls.length - 1]
       const trace = props?.data[0] as { x?: number[]; y?: number[] } | undefined
@@ -4266,10 +4901,9 @@ describe('ViewportPanel view state wiring', () => {
 
     expect(onComputeEventSeriesFromSamples).toHaveBeenCalledWith(
       expect.objectContaining({
-        observableExpressions: ['x', 'y'],
+        observableExpressions: ['x', 'y']
       }),
       expect.anything()
     )
   })
-
 })

@@ -4,7 +4,7 @@ import type {
   AnalysisViewport,
   IsoclineSource,
   System,
-  SystemConfig,
+  SystemConfig
 } from '../system/types'
 
 export type AnalysisSourceEntry = {
@@ -12,6 +12,11 @@ export type AnalysisSourceEntry = {
   name: string
   typeLabel: string
   visible: boolean
+}
+
+export type AnalysisCobwebAxes = {
+  earlierAxis: 'x' | 'y'
+  laterAxis: 'x' | 'y'
 }
 
 export function formatAnalysisHitOffset(hitOffset: number): string {
@@ -43,11 +48,17 @@ export function resolveAnalysisEventExpression(
 }
 
 export function normalizeAnalysisExpressionError(message: string): string {
-  return message.replace(/^(Event|Observable|Constraint) expression error:\s*/i, '').trim()
+  return message
+    .replace(/^(Event|Observable|Constraint) expression error:\s*/i, '')
+    .trim()
 }
 
-export function resolveAnalysisConstraintExpressions(event: AnalysisEventSpec): string[] {
-  return Array.isArray(event.positivityConstraints) ? event.positivityConstraints : []
+export function resolveAnalysisConstraintExpressions(
+  event: AnalysisEventSpec
+): string[] {
+  return Array.isArray(event.positivityConstraints)
+    ? event.positivityConstraints
+    : []
 }
 
 function formatSourceTypeLabel(system: System, nodeId: string): string {
@@ -72,7 +83,9 @@ export function isAnalysisSourceNode(system: System, nodeId: string): boolean {
   return false
 }
 
-export function collectAnalysisSourceEntries(system: System): AnalysisSourceEntry[] {
+export function collectAnalysisSourceEntries(
+  system: System
+): AnalysisSourceEntry[] {
   const entries: AnalysisSourceEntry[] = []
   const stack = [...system.rootIds]
   const visited = new Set<string>()
@@ -90,7 +103,7 @@ export function collectAnalysisSourceEntries(system: System): AnalysisSourceEntr
       id: nodeId,
       name: node.name,
       typeLabel: formatSourceTypeLabel(system, nodeId),
-      visible: node.visibility,
+      visible: node.visibility
     })
   }
   return entries.sort((left, right) => left.name.localeCompare(right.name))
@@ -102,7 +115,9 @@ export function resolveAnalysisSourceIds(
   selectedNodeId: string | null
 ): string[] {
   if (viewport.sourceNodeIds.length > 0) {
-    return viewport.sourceNodeIds.filter((nodeId) => isAnalysisSourceNode(system, nodeId))
+    return viewport.sourceNodeIds.filter((nodeId) =>
+      isAnalysisSourceNode(system, nodeId)
+    )
   }
   if (
     viewport.display === 'selection' &&
@@ -114,6 +129,19 @@ export function resolveAnalysisSourceIds(
   return collectAnalysisSourceEntries(system)
     .filter((entry) => entry.visible)
     .map((entry) => entry.id)
+}
+
+export function resolveAnalysisCobwebAxes(
+  viewport: AnalysisViewport
+): AnalysisCobwebAxes | null {
+  if (viewport.axes.z) return null
+  const { x, y } = viewport.axes
+  if (x.kind !== 'observable' || y.kind !== 'observable') return null
+  if (x.hitOffset === y.hitOffset) return null
+  if (x.expression.trim() !== y.expression.trim()) return null
+  return x.hitOffset < y.hitOffset
+    ? { earlierAxis: 'x', laterAxis: 'y' }
+    : { earlierAxis: 'y', laterAxis: 'x' }
 }
 
 export function resolveAnalysisAxisLabel(axis: AnalysisAxisSpec): string {

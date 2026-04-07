@@ -740,6 +740,9 @@ describe('system model', () => {
         hitStride: 3,
         maxHits: 120,
         connectPoints: true,
+        showIdentityLine: true,
+        identityLineColor: '#787878',
+        identityLineStyle: 'dotted',
       },
     })
     system.ui.viewportHeights[analysisAdded.nodeId] = 260
@@ -777,6 +780,9 @@ describe('system model', () => {
         hitStride: 3,
         maxHits: 120,
         connectPoints: true,
+        showIdentityLine: true,
+        identityLineColor: '#787878',
+        identityLineStyle: 'dotted',
       },
     })
   })

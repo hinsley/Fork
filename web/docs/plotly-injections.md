@@ -8,6 +8,7 @@ behavior.
 ## Runtime touchpoints
 
 ### Plotly lifecycle and render config
+
 - `web/src/viewports/plotly/plotlyAdapter.ts`: `renderPlot()` uses
   `Plotly.react()` on every `data`/`layout` change (forced rerender). It passes
   a config that changes defaults: `displaylogo: false`, `displayModeBar: true`,
@@ -47,6 +48,7 @@ behavior.
   assigned to `window.Plotly` so browser tests can invoke `Plotly.relayout`.
 
 ### Plotly event listeners
+
 - `web/src/viewports/plotly/PlotlyViewport.tsx`: `plotly_click` handler is
   registered on the plot container (via `node.on`) and removed on cleanup. It
   maps Plotly click payloads into `PlotlyPointClick` objects for selection.
@@ -56,6 +58,7 @@ behavior.
   `usePlotViewport` for snapshot capture (no model updates).
 
 ### Viewport controller hook (`usePlotViewport`)
+
 - `web/src/viewports/plotly/usePlotViewport.ts`: computes a stable
   `uirevision` key (`plotId:viewRevision`) for each plot and hands it to
   `PlotlyViewport`, which injects `layout.uirevision` (and `layout.scene.uirevision`)
@@ -69,6 +72,7 @@ behavior.
   `relayoutPlot()` using a stored snapshot or `initialView` payload.
 
 ### Layout/state overrides that influence view state
+
 - `web/src/ui/ViewportPanel.tsx`: `buildSceneBaseLayout()` and
   `buildDiagramBaseLayout()` only include declarative layout (axis titles,
   grids, styling). Scene layout mode is resolved from per-scene axis selection:
@@ -92,8 +96,9 @@ behavior.
 - `web/src/analysis/AnalysisViewportPlot.tsx`: analysis return/event maps use
   `PlotlyViewport` with declarative 2D/3D scatter layouts and one-time
   `initialView` range restoration derived from persisted analysis
-  `axisRanges`; no direct Plotly mutation is added beyond the shared viewport
-  wrapper.
+  `axisRanges`; same-observable 2D event maps can add declarative cobweb and
+  identity-line overlay traces, with viewport-owned identity-line color/style
+  state; no direct Plotly mutation is added beyond the shared viewport wrapper.
 - `web/src/ui/ViewportPanel.tsx`: map function sampling requests are limited to
   true 1D map systems (`varNames.length === 1`) and only when at least one
   visible scene is currently in `map_cobweb_1d` mode.
@@ -137,6 +142,7 @@ behavior.
   these mini plots).
 
 ### Plot styling driven by app theme
+
 - `web/src/viewports/plotly/plotlyTheme.ts`: `resolvePlotlyThemeTokens()` is
   used to set `paper_bgcolor`, `plot_bgcolor`, and text/annotation/legend font
   colors in Plotly layouts.
