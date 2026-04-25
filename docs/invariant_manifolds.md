@@ -339,7 +339,7 @@ Note:
 
 `geodesic rings` is the original Fork backend. It seeds a ring around the limit cycle and advances the whole ring with the same leaf-shooting/ring-quality machinery used for equilibrium surfaces. It is useful as a quick legacy baseline, but it is not the Krauskopf-Osinga limit-cycle method.
 
-`isochron fibers (HKO)` follows the Hinke-Krauskopf-Osinga construction more closely. Fork samples phases on the limit cycle, transports the selected real Floquet bundle, offsets each phase by `Initial radius`, and grows fixed-phase fibers using open orbit-segment BVP solves. The open-orbit residual uses collocation equations and autodiff Jacobians from the core equation engine. The resulting fibers are resampled by arclength into rings so the existing surface renderer can draw a clean translucent mesh.
+`isochron fibers (HKO)` follows the Hinke-Krauskopf-Osinga construction more closely. Fork samples phases on the limit cycle, transports the selected real Floquet bundle, offsets each phase by `Initial radius`, and grows the phase foliation using open orbit-segment BVP solves. The open-orbit residual uses collocation equations and autodiff Jacobians from the core equation engine. For strongly expanding or contracting Floquet multipliers, Fork subdivides the return map into shorter phase-shifted BVP segments instead of integrating a full period in the unstable direction. The resulting fibers are resampled by arclength into rings so the existing surface renderer can draw a clean translucent mesh.
 
 Important topology rules:
 
@@ -360,9 +360,10 @@ For `isochron fibers (HKO)`, the settings have slightly different practical mean
 
 If `geodesic rings` fails but `isochron fibers (HKO)` works, the failure is usually geometric: the old backend is trying to advance a full ring through a region where the correct surface is better described as fixed-phase fibers. Prefer the HKO backend for LC manifolds unless you are comparing against old results.
 
-For HKO runs, first read `Termination detail`. It reports the phase count, ring count, return time, BVP mesh, BVP solve count, nonconverged solve count, and maximum residual.
+For HKO runs, first read `Termination detail`. It reports the phase count, ring count, return time, number of return segments, per-segment time, BVP mesh, BVP solve count, nonconverged solve count, and maximum residual.
 
 - `nonconverged > 0`: reduce `Target arclength`, reduce `Initial radius`, lower `Integration dt`, or increase `NTST`/`NCOL`. If only a few solves miss tolerance and the surface is smooth, the run may still be usable.
+- Very large `return_segments`: the selected multiplier is strongly expanding/contracting, so Fork is protecting the BVP initial guesses by using shorter phase-shifted segments. This is expected for Lorenz-like unstable periodic orbits, but it raises the BVP solve count; lower `Ring points` or `Target arclength` for quick previews.
 - `termination = max_rings`: raise `Max rings` or increase `Leaf delta`.
 - `termination = max_vertices`: raise `Max vertices`, reduce `Ring points`, or increase `Leaf delta`.
 - Very slow HKO runs: lower `Ring points`, raise `Leaf delta`, lower `Target arclength`, or raise `Initial radius` modestly to skip an expensive near-cycle layer.

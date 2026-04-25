@@ -80,6 +80,8 @@ const MAP_DOMAIN_MAX_INSERTIONS_PER_PASS: usize = 256;
 const ISOCHRON_BVP_NEWTON_TOL: f64 = 1e-8;
 const ISOCHRON_BVP_NEWTON_MAX_ITERS: usize = 8;
 const ISOCHRON_BVP_LINE_SEARCH_STEPS: usize = 8;
+const ISOCHRON_MAX_SEGMENT_EXPANSION: f64 = 1.25;
+const ISOCHRON_MAX_RETURN_SEGMENTS: usize = 256;
 
 #[derive(Clone)]
 struct RealEigenMode {
@@ -1140,39 +1142,35 @@ fn continue_limit_cycle_manifold_2d_isochron(
     let bvp_intervals = effective_isochron_bvp_intervals(settings, ntst);
     let bvp_degree = effective_isochron_bvp_degree(settings, ncol);
     let dt = settings.integration_dt.abs().max(1e-9);
-    let max_steps_per_return = settings.caps.max_steps.max(phase_cycle.len()).max(2);
-    let max_time = settings.caps.max_time.max(return_time).max(1e-9);
-    let per_phase_return_cap = (settings.caps.max_steps.max(phase_cycle.len())
-        / phase_cycle.len().max(1))
-    .max(2)
-    .min(max_rings.max(2));
+    let return_segments =
+        effective_isochron_return_segments(multiplier.re, phase_cycle.len().max(1));
+    let segment_duration = return_time / (return_segments as f64);
+    let phase_shift_per_segment = sigma / (return_segments as f64);
+    let max_steps_per_segment = settings
+        .caps
+        .max_steps
+        .max((segment_duration / dt).ceil() as usize + 2)
+        .max(2);
+    let max_time = settings.caps.max_time.max(segment_duration).max(1e-9);
+    let per_phase_segment_cap = settings.caps.max_steps.max(max_rings).max(2);
 
     let mut stats = IsochronBvpStats::default();
-    let mut bounds_exit = false;
-    let mut fibers = Vec::with_capacity(phase_cycle.len());
-    for (phase_point, direction) in phase_cycle.iter().zip(phase_dirs.iter()) {
-        let fiber = build_isochron_fiber(
-            system,
-            phase_point,
-            direction,
-            settings,
-            sigma,
-            return_time,
-            bvp_intervals,
-            bvp_degree,
-            dt,
-            max_steps_per_return,
-            max_time,
-            per_phase_return_cap,
-            &mut stats,
-        )?;
-        if let (Some(bounds), Some(last)) = (settings.bounds.as_ref(), fiber.last()) {
-            if !inside_bounds(last, bounds) {
-                bounds_exit = true;
-            }
-        }
-        fibers.push(fiber);
-    }
+    let (fibers, bounds_exit) = build_isochron_segmented_fibers(
+        system,
+        &phase_cycle,
+        &phase_dirs,
+        settings,
+        sigma,
+        segment_duration,
+        phase_shift_per_segment,
+        bvp_intervals,
+        bvp_degree,
+        dt,
+        max_steps_per_segment,
+        max_time,
+        per_phase_segment_cap,
+        &mut stats,
+    )?;
 
     let min_fiber_arclength = fibers
         .iter()
@@ -1236,10 +1234,12 @@ fn continue_limit_cycle_manifold_2d_isochron(
     let mut solver_diagnostics = ManifoldSurfaceSolverDiagnostics {
         termination_reason: termination_reason.as_str().to_string(),
         termination_detail: Some(format!(
-            "hko isochron fibers: phases={}, rings={}, return_time={:.6e}, bvp_intervals={}, ncol={}, bvp_solves={}, nonconverged={}, max_residual={:.3e}, max_iterations={}",
+            "hko isochron fibers: phases={}, rings={}, return_time={:.6e}, return_segments={}, segment_time={:.6e}, bvp_intervals={}, ncol={}, bvp_solves={}, nonconverged={}, max_residual={:.3e}, max_iterations={}",
             phase_cycle.len(),
             ring_count,
             return_time,
+            return_segments,
+            segment_duration,
             bvp_intervals,
             bvp_degree,
             stats.solves,
@@ -1293,6 +1293,19 @@ fn effective_isochron_bvp_degree(settings: &ManifoldCycle2DSettings, ncol: usize
         ncol
     };
     requested.max(1).clamp(1, 4)
+}
+
+fn effective_isochron_return_segments(multiplier: f64, phase_count: usize) -> usize {
+    let mu = multiplier.abs().max(1e-300);
+    let by_growth = if mu.is_finite() {
+        (mu.ln().abs() / ISOCHRON_MAX_SEGMENT_EXPANSION.ln()).ceil() as usize
+    } else {
+        ISOCHRON_MAX_RETURN_SEGMENTS
+    };
+    by_growth
+        .max(1)
+        .max(phase_count / 2)
+        .min(ISOCHRON_MAX_RETURN_SEGMENTS)
 }
 
 fn build_isochron_phase_cover(
@@ -1350,77 +1363,101 @@ struct IsochronBvpStats {
     last_nonconverged_phase: Option<usize>,
 }
 
-fn build_isochron_fiber(
+fn build_isochron_segmented_fibers(
     system: &EquationSystem,
-    phase_point: &[f64],
-    direction: &[f64],
+    phase_cycle: &[Vec<f64>],
+    phase_dirs: &[Vec<f64>],
     settings: &ManifoldCycle2DSettings,
     sigma: f64,
-    return_time: f64,
+    segment_duration: f64,
+    phase_shift_per_segment: f64,
     bvp_intervals: usize,
     bvp_degree: usize,
     dt: f64,
-    max_steps_per_return: usize,
+    max_steps_per_segment: usize,
     max_time: f64,
-    per_phase_return_cap: usize,
+    per_phase_segment_cap: usize,
     stats: &mut IsochronBvpStats,
-) -> Result<Vec<Vec<f64>>> {
-    let dim = phase_point.len();
-    if direction.len() != dim {
-        bail!("Isochron fiber seed direction dimension mismatch.");
+) -> Result<(Vec<Vec<Vec<f64>>>, bool)> {
+    if phase_cycle.len() != phase_dirs.len() || phase_cycle.is_empty() {
+        bail!("Isochron phase cycle and direction samples must match.");
     }
-    let mut seed = phase_point.to_vec();
+    let dim = phase_cycle[0].len();
     let radius = settings.initial_radius.max(1e-9);
-    for i in 0..dim {
-        seed[i] += radius * direction[i];
+    let mut fibers = Vec::with_capacity(phase_cycle.len());
+    let mut current_ring = Vec::with_capacity(phase_cycle.len());
+    for (phase_point, direction) in phase_cycle.iter().zip(phase_dirs.iter()) {
+        if phase_point.len() != dim || direction.len() != dim {
+            bail!("Isochron fiber seed dimension mismatch.");
+        }
+        let mut seed = phase_point.clone();
+        for i in 0..dim {
+            seed[i] += radius * direction[i];
+        }
+        fibers.push(vec![phase_point.clone(), seed.clone()]);
+        current_ring.push(seed);
     }
 
-    let mut fiber = vec![phase_point.to_vec(), seed.clone()];
-    let mut endpoint = seed;
     let target_arclength = settings.target_arclength.max(radius);
-    let mut arclength = open_curve_arclength(&fiber);
-    let return_cap = per_phase_return_cap.max(2);
-    for phase_return in 0..return_cap {
-        if arclength >= target_arclength {
+    let mut arclengths = fibers
+        .iter()
+        .map(|fiber| open_curve_arclength(fiber))
+        .collect::<Vec<_>>();
+    let mut bounds_exit = false;
+    let segment_cap = per_phase_segment_cap.max(2);
+    for _segment_index in 0..segment_cap {
+        let min_arclength = arclengths.iter().copied().fold(f64::INFINITY, f64::min);
+        if min_arclength.is_finite() && min_arclength >= target_arclength {
             break;
         }
-        let solve = solve_isochron_return_preimage_bvp(
-            system,
-            &endpoint,
-            sigma,
-            return_time,
-            bvp_intervals,
-            bvp_degree,
-            dt,
-            max_steps_per_return,
-            max_time,
-        )?;
-        stats.solves += 1;
-        stats.max_residual = stats.max_residual.max(solve.residual_norm);
-        stats.max_iterations = stats.max_iterations.max(solve.iterations);
-        if !solve.converged {
-            stats.nonconverged += 1;
-            stats.last_nonconverged_phase = Some(phase_return);
-        }
-        let next = solve.start;
-        if next.iter().any(|value| !value.is_finite()) {
-            break;
-        }
-        if let Some(bounds) = settings.bounds.as_ref() {
-            if !inside_bounds(&next, bounds) {
-                fiber.push(next);
-                break;
+        let mut next_ring = Vec::with_capacity(current_ring.len());
+        for phase_index in 0..current_ring.len() {
+            let phase = (phase_index as f64) / (current_ring.len() as f64);
+            let endpoint = sample_ring_uniform(&current_ring, phase + phase_shift_per_segment);
+            let solve = solve_isochron_return_preimage_bvp(
+                system,
+                &endpoint,
+                sigma,
+                segment_duration,
+                bvp_intervals,
+                bvp_degree,
+                dt,
+                max_steps_per_segment,
+                max_time,
+            )?;
+            stats.solves += 1;
+            stats.max_residual = stats.max_residual.max(solve.residual_norm);
+            stats.max_iterations = stats.max_iterations.max(solve.iterations);
+            if !solve.converged {
+                stats.nonconverged += 1;
+                stats.last_nonconverged_phase = Some(phase_index);
             }
+            let next = solve.start;
+            if next.iter().any(|value| !value.is_finite()) {
+                bail!("Isochron BVP produced a non-finite fiber point.");
+            }
+            if let Some(bounds) = settings.bounds.as_ref() {
+                if !inside_bounds(&next, bounds) {
+                    bounds_exit = true;
+                }
+            }
+            next_ring.push(next);
         }
-        let step = l2_distance(fiber.last().unwrap(), &next);
-        if step <= NORM_EPS {
+        let mut made_progress = false;
+        for phase_index in 0..next_ring.len() {
+            let step = l2_distance(&current_ring[phase_index], &next_ring[phase_index]);
+            if step > NORM_EPS && step.is_finite() {
+                arclengths[phase_index] += step;
+                made_progress = true;
+            }
+            fibers[phase_index].push(next_ring[phase_index].clone());
+        }
+        current_ring = next_ring;
+        if bounds_exit || !made_progress {
             break;
         }
-        arclength += step;
-        endpoint = next.clone();
-        fiber.push(next);
     }
-    Ok(fiber)
+    Ok((fibers, bounds_exit))
 }
 
 struct IsochronBvpSolution {
@@ -8247,6 +8284,14 @@ mod tests {
                 .contains("hko isochron fibers"),
             "expected HKO diagnostics detail"
         );
+        assert!(
+            diagnostics
+                .termination_detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("return_segments="),
+            "expected segmented-return diagnostics detail"
+        );
     }
 
     #[test]
@@ -8337,6 +8382,25 @@ mod tests {
             assert!(cover_dirs[idx][2] > 0.0);
             assert!(cover_dirs[idx + cycle.len()][2] < 0.0);
         }
+    }
+
+    #[test]
+    fn manifold_cycle_2d_isochron_return_segments_limit_step_expansion() {
+        let mild = effective_isochron_return_segments(1.25, 8);
+        let strong_unstable = effective_isochron_return_segments(1.0e8, 8);
+        let strong_stable = effective_isochron_return_segments(1.0e-8, 8);
+        assert!(mild >= 4, "phase resolution should set a modest floor");
+        assert!(
+            strong_unstable > mild,
+            "large unstable multipliers should split the return map"
+        );
+        assert_eq!(
+            strong_unstable, strong_stable,
+            "stable and unstable growth rates should use symmetric splitting"
+        );
+        assert!(
+            effective_isochron_return_segments(f64::INFINITY, 8) <= ISOCHRON_MAX_RETURN_SEGMENTS
+        );
     }
 
     #[test]
