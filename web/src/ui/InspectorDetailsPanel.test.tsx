@@ -165,6 +165,19 @@ function renderInspectorForStateSpaceStride(
 }
 
 describe('InspectorDetailsPanel', () => {
+  it('shows selected two-parameter continuation values in the branch navigator', async () => {
+    const user = userEvent.setup()
+    const branchResult = createStateSpaceStrideBranchFixture('homoclinic_curve')
+
+    renderInspectorForStateSpaceStride(branchResult.system, branchResult.nodeId, vi.fn())
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+
+    expect(
+      screen.getByText('Continuation parameters: mu=0.200000, nu=0.100000')
+    ).toBeVisible()
+  })
+
   it('maps 2D manifold profile draft values explicitly', () => {
     expect(toManifold2DProfile('adaptive_global')).toBe('AdaptiveGlobal')
     expect(toManifold2DProfile('local_preview')).toBe('LocalPreview')

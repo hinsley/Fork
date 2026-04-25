@@ -1415,6 +1415,84 @@ function resolveCodim1ParamNames(
   return null
 }
 
+function parseContinuationParameterNameParts(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+}
+
+function resolveContinuationParameterReadout(
+  systemConfig: Pick<SystemConfig, 'paramNames'>,
+  branchParams: number[],
+  branch: ContinuationObject,
+  point: ContinuationPoint,
+  stateDimension: number
+): { label: string; value: string } | null {
+  const branchType = branch.data.branch_type
+  const codim1ParamNames = resolveCodim1ParamNames(branch)
+  const parameterNameParts = parseContinuationParameterNameParts(branch.parameterName)
+  const branchTypeParam1Ref =
+    branchType && typeof branchType === 'object' && 'param1_ref' in branchType
+      ? branchType.param1_ref
+      : undefined
+  const branchTypeParam2Ref =
+    branchType && typeof branchType === 'object' && 'param2_ref' in branchType
+      ? branchType.param2_ref
+      : undefined
+
+  const primaryLabel =
+    codim1ParamNames?.param1.trim() ||
+    (branchTypeParam1Ref ? formatParameterRefLabel(branchTypeParam1Ref) : null) ||
+    (branch.parameterRef ? formatParameterRefLabel(branch.parameterRef) : null) ||
+    parameterNameParts[0] ||
+    branch.parameterName.trim() ||
+    'parameter'
+  const secondaryLabel =
+    codim1ParamNames?.param2.trim() ||
+    (branchTypeParam2Ref ? formatParameterRefLabel(branchTypeParam2Ref) : null) ||
+    (branch.parameter2Ref ? formatParameterRefLabel(branch.parameter2Ref) : null) ||
+    parameterNameParts[1] ||
+    null
+
+  const resolveNativeParamFallback = (label: string | null): number | undefined => {
+    if (!label) return undefined
+    const index = systemConfig.paramNames.indexOf(label)
+    if (index < 0) return undefined
+    const value = branchParams[index]
+    return Number.isFinite(value) ? value : undefined
+  }
+
+  const entries: string[] = []
+  const primaryValue = Number.isFinite(point.param_value)
+    ? point.param_value
+    : resolveNativeParamFallback(primaryLabel)
+  if (Number.isFinite(primaryValue)) {
+    entries.push(`${primaryLabel}=${formatNumber(primaryValue as number, 6)}`)
+  }
+
+  const inferredSecondaryValue =
+    typeof point.param2_value === 'number' && Number.isFinite(point.param2_value)
+      ? point.param2_value
+      : resolveContinuationPointParam2Value(point, branchType, stateDimension)
+  const secondaryValue = Number.isFinite(inferredSecondaryValue)
+    ? inferredSecondaryValue
+    : resolveNativeParamFallback(secondaryLabel)
+  if (
+    secondaryLabel &&
+    secondaryLabel !== primaryLabel &&
+    Number.isFinite(secondaryValue)
+  ) {
+    entries.push(`${secondaryLabel}=${formatNumber(secondaryValue as number, 6)}`)
+  }
+
+  if (entries.length === 0) return null
+  return {
+    label: entries.length === 1 ? 'Continuation parameter' : 'Continuation parameters',
+    value: entries.join(', '),
+  }
+}
+
 function resolveBranchPointParams(
   paramNames: string[],
   baseParams: number[],
@@ -4047,6 +4125,16 @@ export function InspectorDetailsPanel({
     selectedBranchPoint,
     systemDraft.paramNames,
   ])
+  const selectedBranchPointParameterReadout = useMemo(() => {
+    if (!branch || !selectedBranchPoint) return null
+    return resolveContinuationParameterReadout(
+      systemDraft,
+      branchParams,
+      branch,
+      selectedBranchPoint,
+      branchStateDimension
+    )
+  }, [branch, branchParams, branchStateDimension, selectedBranchPoint, systemDraft])
   const selectedBranchPointState = useMemo(() => {
     if (!branch || !selectedBranchPoint) return []
     if (branch.branchType === 'limit_cycle' || branch.branchType === 'isochrone_curve') {
@@ -10804,6 +10892,12 @@ export function InspectorDetailsPanel({
                                 </div>
                                 {selectedBranchPoint ? (
                                   <>
+                                    {selectedBranchPointParameterReadout ? (
+                                      <div>
+                                        {selectedBranchPointParameterReadout.label}:{' '}
+                                        {selectedBranchPointParameterReadout.value}
+                                      </div>
+                                    ) : null}
                                     <div>
                                       Stability:{' '}
                                       {limitCyclePointMetrics?.stability ??
@@ -11463,6 +11557,12 @@ export function InspectorDetailsPanel({
                                 </div>
                                 {selectedBranchPoint ? (
                                   <>
+                                    {selectedBranchPointParameterReadout ? (
+                                      <div>
+                                        {selectedBranchPointParameterReadout.label}:{' '}
+                                        {selectedBranchPointParameterReadout.value}
+                                      </div>
+                                    ) : null}
                                     <div>Stability: {selectedBranchPoint.stability}</div>
                                     <div>
                                       {summarizeEigenvalues(
