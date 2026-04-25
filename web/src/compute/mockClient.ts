@@ -815,10 +815,15 @@ export class MockForkCoreClient implements ForkCoreClient {
           branch_type: {
             type: 'ManifoldCycle2D',
             stability: request.settings.stability,
+            direction: request.settings.direction ?? 'Plus',
+            algorithm: request.settings.algorithm ?? 'GeodesicRings',
             floquet_index: 0,
             ntst: request.ntst,
             ncol: request.ncol,
-            method: 'mock',
+            method:
+              request.settings.algorithm === 'IsochronFibers'
+                ? 'hko_isochron_bvp'
+                : 'mock',
             caps: request.settings.caps,
           },
           manifold_geometry: {

@@ -127,6 +127,7 @@ export type ManifoldStability = 'Stable' | 'Unstable'
 export type ManifoldDirection = 'Plus' | 'Minus' | 'Both'
 export type ManifoldEigenKind = 'RealPair' | 'ComplexPair'
 export type Manifold2DProfile = 'LocalPreview' | 'AdaptiveGlobal' | 'LorenzGlobalKo'
+export type ManifoldCycle2DAlgorithm = 'GeodesicRings' | 'IsochronFibers'
 
 export interface ManifoldTerminationCaps {
   max_steps: number
@@ -337,6 +338,7 @@ export type BranchType =
       type: 'ManifoldCycle2D'
       stability: ManifoldStability
       direction?: ManifoldDirection
+      algorithm?: ManifoldCycle2DAlgorithm
       floquet_index: number
       ntst: number
       ncol: number

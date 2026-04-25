@@ -8,6 +8,7 @@ import {
   createAxisPickerMapSystem,
   createAxisPickerSystem,
   createDemoSystem,
+  createLimitCycleManifoldSystem,
   createPeriodDoublingSystem,
 } from './system/fixtures'
 import { createBrowserSystemStore } from './system/storeFactory'
@@ -66,6 +67,11 @@ async function bootstrap() {
   } else if (fixture === 'pd') {
     const memory = new MemorySystemStore()
     const { system } = createPeriodDoublingSystem()
+    await memory.save(system)
+    store = memory
+  } else if (fixture === 'lc-manifold') {
+    const memory = new MemorySystemStore()
+    const { system } = createLimitCycleManifoldSystem()
     await memory.save(system)
     store = memory
   } else if (fixture === 'axis-picker') {

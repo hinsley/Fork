@@ -14,6 +14,7 @@ import {
   ContinuationPoint,
   LimitCycleManifold2DSettings,
   LimitCycleObject,
+  ManifoldCycle2DAlgorithm,
   ManifoldDirection,
   ManifoldTerminationCaps
 } from '../types';
@@ -1065,6 +1066,7 @@ export async function initiateLimitCycleManifold2DFromPoint(
   let branchName = `lcm2d_${sourceBranch.name}_idx${pointIdx}`;
   let stability: 'Stable' | 'Unstable' = 'Unstable';
   let manifoldDirection: ManifoldDirection = 'Plus';
+  let manifoldAlgorithm: ManifoldCycle2DAlgorithm = 'GeodesicRings';
   let floquetIndexInput = '';
   let initialRadiusInput = '1e-4';
   let leafDeltaInput = '2e-2';
@@ -1142,6 +1144,26 @@ export async function initiateLimitCycleManifold2DFromPoint(
           default: manifoldDirection
         });
         manifoldDirection = value;
+      }
+    },
+    {
+      id: 'algorithm',
+      label: 'Algorithm',
+      section: 'Manifold Selection',
+      getDisplay: () =>
+        manifoldAlgorithm === 'IsochronFibers' ? 'Isochron fibers (HKO)' : 'Geodesic rings',
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          type: 'rawlist',
+          name: 'value',
+          message: 'Select limit-cycle manifold algorithm:',
+          choices: [
+            { name: 'Geodesic rings', value: 'GeodesicRings' },
+            { name: 'Isochron fibers (HKO)', value: 'IsochronFibers' }
+          ],
+          default: manifoldAlgorithm
+        });
+        manifoldAlgorithm = value;
       }
     },
     {
@@ -1331,6 +1353,7 @@ export async function initiateLimitCycleManifold2DFromPoint(
     const settings: LimitCycleManifold2DSettings = {
       stability,
       direction: manifoldDirection,
+      algorithm: manifoldAlgorithm,
       floquet_index: floquetIndex,
       parameter_index: parameterIndex >= 0 ? parameterIndex : undefined,
       profile: 'LocalPreview',

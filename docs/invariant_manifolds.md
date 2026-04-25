@@ -316,6 +316,7 @@ On the Lorenz origin stable manifold, long runs can expose this clearly. `adapti
 | `Kind` | Stable or unstable cycle manifold side. | Requires an eligible nontrivial real Floquet multiplier. |
 | `Floquet index` | Floquet mode used to seed the cycle tube. | Wrong index produces a different manifold direction. |
 | `Direction` | `plus` or `minus` side of the selected Floquet eigenvector. | Start with one side; compute the other separately if needed. |
+| `Algorithm` | `geodesic rings` or `isochron fibers (HKO)`. | Use geodesic rings for legacy runs; use isochron fibers for phase-foliated LC surfaces. |
 | `Initial radius` | Offset from the cycle profile in the selected normal direction. | Smaller is safer locally; larger may skip a difficult near-cycle region. |
 | `Leaf delta` | Distance between successive rings. | Same accuracy/speed tradeoff as equilibrium 2D. |
 | `Ring points` | Number of cycle/profile samples used for each ring. | More points resolve cycle variation better and cost more leaf solves. |
@@ -333,6 +334,40 @@ Note:
 
 - The cycle manifold panel currently does not expose `Delta min`, spacing, or alpha thresholds in the Web form even though the core supports them.
 - `cycle_manifold_2d` is experimental; see `docs/limit_cycle_manifold_2d_experimental.md` for troubleshooting and tuning guidance.
+
+### Limit-Cycle Algorithms
+
+`geodesic rings` is the original Fork backend. It seeds a ring around the limit cycle and advances the whole ring with the same leaf-shooting/ring-quality machinery used for equilibrium surfaces. It is useful as a quick legacy baseline, but it is not the Krauskopf-Osinga limit-cycle method.
+
+`isochron fibers (HKO)` follows the Hinke-Krauskopf-Osinga construction more closely. Fork samples phases on the limit cycle, transports the selected real Floquet bundle, offsets each phase by `Initial radius`, and grows fixed-phase fibers using open orbit-segment BVP solves. The open-orbit residual uses collocation equations and autodiff Jacobians from the core equation engine. The resulting fibers are resampled by arclength into rings so the existing surface renderer can draw a clean translucent mesh.
+
+Important topology rules:
+
+- A positive real Floquet multiplier gives two orientable sheets. Use `Direction = plus` and `Direction = minus` as separate runs.
+- A negative real Floquet multiplier is anti-periodic. Fork uses a double cover of the cycle phases and a return time of `2T` so the direction field is continuous.
+- Complex Floquet pairs are not supported by the 2D LC manifold workflow yet.
+
+For `isochron fibers (HKO)`, the settings have slightly different practical meanings:
+
+- `Ring points` is the number of phase fibers. Negative multipliers double this internally.
+- `Leaf delta` is the target arclength spacing after fiber resampling, not a geodesic leaf step.
+- `Target arclength` is the requested length along each fixed-phase fiber.
+- `Max steps` limits the total return-preimage BVP budget; raise it when a long target with many phase fibers stops early.
+- `NTST` and `NCOL` set the open-orbit collocation resolution. Fork caps the internal HKO BVP mesh to keep browser runs tractable, but larger source meshes still improve Floquet/profile data.
+- `Integration dt` is used for initial BVP guesses and the variational Floquet fallback; reduce it if the diagnostics report non-finite integration or visibly rough fibers.
+
+### Limit-Cycle Troubleshooting
+
+If `geodesic rings` fails but `isochron fibers (HKO)` works, the failure is usually geometric: the old backend is trying to advance a full ring through a region where the correct surface is better described as fixed-phase fibers. Prefer the HKO backend for LC manifolds unless you are comparing against old results.
+
+For HKO runs, first read `Termination detail`. It reports the phase count, ring count, return time, BVP mesh, BVP solve count, nonconverged solve count, and maximum residual.
+
+- `nonconverged > 0`: reduce `Target arclength`, reduce `Initial radius`, lower `Integration dt`, or increase `NTST`/`NCOL`. If only a few solves miss tolerance and the surface is smooth, the run may still be usable.
+- `termination = max_rings`: raise `Max rings` or increase `Leaf delta`.
+- `termination = max_vertices`: raise `Max vertices`, reduce `Ring points`, or increase `Leaf delta`.
+- Very slow HKO runs: lower `Ring points`, raise `Leaf delta`, lower `Target arclength`, or raise `Initial radius` modestly to skip an expensive near-cycle layer.
+- Rough or twisted surfaces: verify the Floquet index, raise `Ring points`, reduce `Leaf delta`, and check whether the selected multiplier is negative, which intentionally doubles the phase cover.
+- No visible growth away from the cycle: verify `Kind`, `Floquet index`, and `Direction`; then raise `Max steps` because the HKO return budget is shared across all phase fibers.
 
 ## CLI Notes
 

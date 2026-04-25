@@ -171,6 +171,61 @@ export function createPeriodDoublingSystem(): { system: System } {
   return { system }
 }
 
+export function createLimitCycleManifoldSystem(): { system: System } {
+  let system = createSystem({
+    name: 'Limit_Cycle_Manifold_Fixture',
+    config: {
+      name: 'Limit_Cycle_Manifold_Fixture',
+      equations: ['-y', 'x', 'lambda*z'],
+      params: [0.2],
+      paramNames: ['lambda'],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    },
+  })
+
+  const ntst = 4
+  const ncol = 2
+  const period = Math.PI * 2
+  const state: number[] = []
+  for (let i = 0; i < ntst; i += 1) {
+    const theta = (i / ntst) * Math.PI * 2
+    state.push(Math.cos(theta), Math.sin(theta), 0)
+  }
+  for (let interval = 0; interval < ntst; interval += 1) {
+    for (let stage = 0; stage < ncol; stage += 1) {
+      const frac = (stage + 1) / (ncol + 1)
+      const theta = ((interval + frac) / ntst) * Math.PI * 2
+      state.push(Math.cos(theta), Math.sin(theta), 0)
+    }
+  }
+  state.push(period)
+
+  const limitCycle: LimitCycleObject = {
+    type: 'limit_cycle',
+    name: 'LC_3D',
+    systemName: system.config.name,
+    origin: { type: 'orbit', orbitName: 'Orbit LC' },
+    ntst,
+    ncol,
+    period,
+    state,
+    parameters: [...system.config.params],
+    parameterName: 'lambda',
+    paramValue: 0.2,
+    floquetMultipliers: [
+      { re: Math.exp(0.2 * period), im: 0 },
+      { re: 1, im: 0 },
+    ],
+    createdAt: nowIso(),
+  }
+
+  const added = addObject(system, limitCycle)
+  system = added.system
+  return { system }
+}
+
 export function createAxisPickerSystem(): { system: System } {
   let system = createSystem({
     name: 'Axis_Picker_Fixture',

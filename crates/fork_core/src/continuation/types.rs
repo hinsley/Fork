@@ -82,6 +82,10 @@ fn default_cycle_manifold_direction() -> ManifoldDirection {
     ManifoldDirection::Plus
 }
 
+fn default_cycle_manifold_algorithm() -> ManifoldCycle2DAlgorithm {
+    ManifoldCycle2DAlgorithm::GeodesicRings
+}
+
 /// Stable/unstable selector for invariant manifold computations.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ManifoldStability {
@@ -110,6 +114,15 @@ pub enum Manifold2DProfile {
     LocalPreview,
     AdaptiveGlobal,
     LorenzGlobalKo,
+}
+
+/// Algorithm selector for two-dimensional limit-cycle manifolds.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ManifoldCycle2DAlgorithm {
+    /// Existing geodesic ring-growth solver.
+    GeodesicRings,
+    /// Hinke-Krauskopf-Osinga style isochron-fiber continuation.
+    IsochronFibers,
 }
 
 /// Global stop criteria shared by manifold workflows.
@@ -258,6 +271,8 @@ pub struct ManifoldCycle2DSettings {
     pub stability: ManifoldStability,
     #[serde(default = "default_cycle_manifold_direction")]
     pub direction: ManifoldDirection,
+    #[serde(default = "default_cycle_manifold_algorithm")]
+    pub algorithm: ManifoldCycle2DAlgorithm,
     #[serde(default)]
     pub floquet_index: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -303,6 +318,7 @@ impl Default for ManifoldCycle2DSettings {
         Self {
             stability: ManifoldStability::Unstable,
             direction: default_cycle_manifold_direction(),
+            algorithm: default_cycle_manifold_algorithm(),
             floquet_index: None,
             parameter_index: None,
             profile: None,

@@ -3,15 +3,15 @@ use nalgebra::linalg::SVD;
 use nalgebra::DMatrix;
 use num_complex::Complex;
 
-use crate::continuation::periodic::compute_cycle_monodromy_data;
+use crate::continuation::periodic::{compute_cycle_monodromy_data, CollocationCoefficients};
 use crate::continuation::types::{
     default_manifold_alpha_max, default_manifold_alpha_min, default_manifold_delta_alpha_max,
     default_manifold_delta_alpha_min, default_manifold_delta_min, default_manifold_dt,
     default_manifold_eps, default_manifold_leaf_delta, default_manifold_ring_points,
     BifurcationType, BranchType, ContinuationBranch, ContinuationPoint, Manifold1DSettings,
     Manifold2DProfile, Manifold2DSettings, ManifoldBounds, ManifoldCurveGeometry,
-    ManifoldCycle2DSettings, ManifoldDirection, ManifoldEigenKind, ManifoldGeometry,
-    ManifoldRingDiagnostic, ManifoldStability, ManifoldSurfaceGeometry,
+    ManifoldCycle2DAlgorithm, ManifoldCycle2DSettings, ManifoldDirection, ManifoldEigenKind,
+    ManifoldGeometry, ManifoldRingDiagnostic, ManifoldStability, ManifoldSurfaceGeometry,
     ManifoldSurfaceSolverDiagnostics, ManifoldTerminationCaps,
 };
 use crate::equation_engine::EquationSystem;
@@ -77,6 +77,9 @@ const MAP_DOMAIN_ALPHA_MAX: f64 = 0.3;
 const MAP_DOMAIN_DELTA_MAX_FACTOR: f64 = 1.5;
 const MAP_DOMAIN_MAX_REFINEMENT_PASSES: usize = 12;
 const MAP_DOMAIN_MAX_INSERTIONS_PER_PASS: usize = 256;
+const ISOCHRON_BVP_NEWTON_TOL: f64 = 1e-8;
+const ISOCHRON_BVP_NEWTON_MAX_ITERS: usize = 8;
+const ISOCHRON_BVP_LINE_SEARCH_STEPS: usize = 8;
 
 #[derive(Clone)]
 struct RealEigenMode {
@@ -928,6 +931,20 @@ pub fn continue_limit_cycle_manifold_2d_with_progress(
         settings.stability,
         settings.floquet_index,
     )?;
+    if settings.algorithm == ManifoldCycle2DAlgorithm::IsochronFibers {
+        return continue_limit_cycle_manifold_2d_isochron(
+            system,
+            cycle_state,
+            ntst,
+            ncol,
+            &cycle_profile,
+            floquet_index,
+            multiplier,
+            &settings,
+            on_ring_progress,
+        );
+    }
+
     let (cycle, floquet_dirs) = build_cycle_floquet_seed(
         system,
         cycle_state,
@@ -1005,6 +1022,26 @@ pub fn continue_limit_cycle_manifold_2d_with_progress(
         settings.bounds.as_ref(),
         on_ring_progress,
     );
+    build_cycle_manifold_branch(
+        dim,
+        surface,
+        &settings,
+        floquet_index,
+        ntst,
+        ncol,
+        "leaf_shooting_bvp",
+    )
+}
+
+fn build_cycle_manifold_branch(
+    dim: usize,
+    surface: SurfaceGrowthResult,
+    settings: &ManifoldCycle2DSettings,
+    floquet_index: usize,
+    ntst: usize,
+    ncol: usize,
+    method: &str,
+) -> Result<ContinuationBranch> {
     let points = surface_points_to_branch_points(&surface.vertices, &surface.ring_offsets);
     let indices: Vec<i32> = (0..points.len() as i32).collect();
     Ok(ContinuationBranch {
@@ -1025,7 +1062,7 @@ pub fn continue_limit_cycle_manifold_2d_with_progress(
             } else {
                 ncol
             },
-            method: "leaf_shooting_bvp".to_string(),
+            method: method.to_string(),
             caps: settings.caps,
         },
         upoldp: None,
@@ -1040,6 +1077,649 @@ pub fn continue_limit_cycle_manifold_2d_with_progress(
             solver_diagnostics: Some(surface.solver_diagnostics),
         })),
     })
+}
+
+fn continue_limit_cycle_manifold_2d_isochron(
+    system: &mut EquationSystem,
+    cycle_state: &[f64],
+    ntst: usize,
+    ncol: usize,
+    cycle_profile: &DecodedCycleProfile,
+    floquet_index: usize,
+    multiplier: Complex<f64>,
+    settings: &ManifoldCycle2DSettings,
+    mut on_ring_progress: Option<&mut dyn FnMut(usize, usize, f64, f64)>,
+) -> Result<ContinuationBranch> {
+    if settings.direction == ManifoldDirection::Both {
+        bail!(
+            "Isochron-fiber cycle manifolds require Plus or Minus direction; compute the two sheets separately."
+        );
+    }
+    if !multiplier.im.abs().is_finite() || multiplier.im.abs() > EIG_IM_TOL {
+        bail!("Isochron-fiber cycle manifolds require a real Floquet multiplier.");
+    }
+    let period = cycle_profile.period;
+    if !period.is_finite() || period <= 0.0 {
+        bail!("Isochron-fiber cycle manifolds require a positive limit-cycle period.");
+    }
+
+    let dim = system.equations.len();
+    let phase_points = settings.ring_points.max(8);
+    let (cycle, floquet_dirs) = build_cycle_floquet_seed(
+        system,
+        cycle_state,
+        cycle_profile,
+        ntst,
+        ncol,
+        settings.parameter_index,
+        multiplier,
+        phase_points,
+        settings.integration_dt.abs().max(1e-9),
+        settings.caps.max_steps.max(2),
+        settings.caps.max_time.max(period).max(1e-9),
+    )?;
+    if cycle.len() != floquet_dirs.len() || cycle.len() < 4 {
+        bail!("Cycle manifold initialization failed to build a valid Floquet seed ring.");
+    }
+
+    let (phase_cycle, phase_dirs, return_time) = build_isochron_phase_cover(
+        &cycle,
+        &floquet_dirs,
+        multiplier.re,
+        settings.direction,
+        period,
+    )?;
+    let sigma = -stability_sigma(settings.stability);
+    let leaf_delta = settings.leaf_delta.max(1e-9);
+    let target_arclength = settings
+        .target_arclength
+        .max(settings.initial_radius.max(1e-9));
+    let max_rings = settings.caps.max_rings.max(2);
+    let max_vertices = settings.caps.max_vertices.max(phase_cycle.len() * 2);
+    let max_rings_by_vertices = (max_vertices / phase_cycle.len().max(1)).max(2);
+    let bvp_intervals = effective_isochron_bvp_intervals(settings, ntst);
+    let bvp_degree = effective_isochron_bvp_degree(settings, ncol);
+    let dt = settings.integration_dt.abs().max(1e-9);
+    let max_steps_per_return = settings.caps.max_steps.max(phase_cycle.len()).max(2);
+    let max_time = settings.caps.max_time.max(return_time).max(1e-9);
+    let per_phase_return_cap = (settings.caps.max_steps.max(phase_cycle.len())
+        / phase_cycle.len().max(1))
+    .max(2)
+    .min(max_rings.max(2));
+
+    let mut stats = IsochronBvpStats::default();
+    let mut bounds_exit = false;
+    let mut fibers = Vec::with_capacity(phase_cycle.len());
+    for (phase_point, direction) in phase_cycle.iter().zip(phase_dirs.iter()) {
+        let fiber = build_isochron_fiber(
+            system,
+            phase_point,
+            direction,
+            settings,
+            sigma,
+            return_time,
+            bvp_intervals,
+            bvp_degree,
+            dt,
+            max_steps_per_return,
+            max_time,
+            per_phase_return_cap,
+            &mut stats,
+        )?;
+        if let (Some(bounds), Some(last)) = (settings.bounds.as_ref(), fiber.last()) {
+            if !inside_bounds(last, bounds) {
+                bounds_exit = true;
+            }
+        }
+        fibers.push(fiber);
+    }
+
+    let min_fiber_arclength = fibers
+        .iter()
+        .map(|fiber| open_curve_arclength(fiber))
+        .fold(f64::INFINITY, f64::min);
+    if !min_fiber_arclength.is_finite() || min_fiber_arclength <= NORM_EPS {
+        bail!("Isochron-fiber cycle manifold did not produce a valid fiber length.");
+    }
+    let usable_arclength = target_arclength.min(min_fiber_arclength);
+    let requested_rings = ((usable_arclength / leaf_delta).ceil() as usize)
+        .saturating_add(1)
+        .max(2);
+    let ring_count = requested_rings
+        .min(max_rings)
+        .min(max_rings_by_vertices)
+        .max(2);
+    let mut rings: Vec<Vec<Vec<f64>>> = Vec::with_capacity(ring_count);
+    let mut ring_diagnostics = Vec::with_capacity(ring_count);
+    for ring_index in 0..ring_count {
+        let s = if ring_count <= 1 {
+            0.0
+        } else {
+            usable_arclength * (ring_index as f64) / ((ring_count - 1) as f64)
+        };
+        let ring = fibers
+            .iter()
+            .map(|fiber| sample_open_curve_at_arclength(fiber, s))
+            .collect::<Vec<_>>();
+        ring_diagnostics.push(ManifoldRingDiagnostic {
+            ring_index,
+            radius_estimate: s,
+            point_count: ring.len(),
+        });
+        if let Some(callback) = on_ring_progress.as_deref_mut() {
+            callback(ring_index + 1, ring_count, s, leaf_delta);
+        }
+        rings.push(ring);
+    }
+
+    let mut vertices = Vec::new();
+    let mut ring_offsets = Vec::with_capacity(rings.len());
+    for ring in &rings {
+        ring_offsets.push(vertices.len());
+        for point in ring {
+            vertices.push(point.clone());
+        }
+    }
+    let triangles = triangulate_ring_bands(&rings, &ring_offsets);
+
+    let termination_reason = if bounds_exit {
+        SurfaceTerminationReason::BoundsExit
+    } else if ring_count >= max_rings_by_vertices && max_rings_by_vertices <= max_rings {
+        SurfaceTerminationReason::MaxVertices
+    } else if ring_count >= max_rings {
+        SurfaceTerminationReason::MaxRings
+    } else if min_fiber_arclength + 1e-8 < target_arclength {
+        SurfaceTerminationReason::MaxRings
+    } else {
+        SurfaceTerminationReason::TargetArclength
+    };
+    let mut solver_diagnostics = ManifoldSurfaceSolverDiagnostics {
+        termination_reason: termination_reason.as_str().to_string(),
+        termination_detail: Some(format!(
+            "hko isochron fibers: phases={}, rings={}, return_time={:.6e}, bvp_intervals={}, ncol={}, bvp_solves={}, nonconverged={}, max_residual={:.3e}, max_iterations={}",
+            phase_cycle.len(),
+            ring_count,
+            return_time,
+            bvp_intervals,
+            bvp_degree,
+            stats.solves,
+            stats.nonconverged,
+            stats.max_residual,
+            stats.max_iterations
+        )),
+        final_leaf_delta: leaf_delta,
+        ring_attempts: stats.solves,
+        build_failures: stats.nonconverged,
+        leaf_delta_floor: settings.delta_min.max(1e-12),
+        min_leaf_delta_reached: leaf_delta <= settings.delta_min.max(1e-12) + 1e-15,
+        ..ManifoldSurfaceSolverDiagnostics::default()
+    };
+    if stats.last_nonconverged_phase.is_some() {
+        solver_diagnostics.last_leaf_failure_reason =
+            Some("isochron_bvp_nonconvergence".to_string());
+        solver_diagnostics.last_leaf_failure_point = stats.last_nonconverged_phase;
+    }
+
+    build_cycle_manifold_branch(
+        dim,
+        SurfaceGrowthResult {
+            vertices,
+            triangles,
+            ring_offsets,
+            ring_diagnostics,
+            solver_diagnostics,
+        },
+        settings,
+        floquet_index,
+        ntst,
+        ncol,
+        "hko_isochron_bvp",
+    )
+}
+
+fn effective_isochron_bvp_intervals(settings: &ManifoldCycle2DSettings, ntst: usize) -> usize {
+    let requested = if settings.ntst > 0 {
+        settings.ntst
+    } else {
+        ntst
+    };
+    requested.max(2).clamp(2, 16)
+}
+
+fn effective_isochron_bvp_degree(settings: &ManifoldCycle2DSettings, ncol: usize) -> usize {
+    let requested = if settings.ncol > 0 {
+        settings.ncol
+    } else {
+        ncol
+    };
+    requested.max(1).clamp(1, 4)
+}
+
+fn build_isochron_phase_cover(
+    cycle: &[Vec<f64>],
+    floquet_dirs: &[Vec<f64>],
+    multiplier: f64,
+    direction: ManifoldDirection,
+    period: f64,
+) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>, f64)> {
+    if cycle.len() != floquet_dirs.len() || cycle.is_empty() {
+        bail!("Cycle and Floquet direction samples must have matching nonzero length.");
+    }
+    let first_sign = match direction {
+        ManifoldDirection::Plus => 1.0,
+        ManifoldDirection::Minus => -1.0,
+        ManifoldDirection::Both => {
+            bail!("Isochron-fiber cycle manifolds require Plus or Minus direction.")
+        }
+    };
+    let mut out_cycle = Vec::with_capacity(if multiplier < 0.0 {
+        cycle.len() * 2
+    } else {
+        cycle.len()
+    });
+    let mut out_dirs = Vec::with_capacity(out_cycle.capacity());
+    for (point, direction) in cycle.iter().zip(floquet_dirs.iter()) {
+        out_cycle.push(point.clone());
+        out_dirs.push(scaled_unit_direction(direction, first_sign)?);
+    }
+    if multiplier < 0.0 {
+        for (point, direction) in cycle.iter().zip(floquet_dirs.iter()) {
+            out_cycle.push(point.clone());
+            out_dirs.push(scaled_unit_direction(direction, -first_sign)?);
+        }
+        Ok((out_cycle, out_dirs, 2.0 * period))
+    } else {
+        Ok((out_cycle, out_dirs, period))
+    }
+}
+
+fn scaled_unit_direction(direction: &[f64], sign: f64) -> Result<Vec<f64>> {
+    let mut unit = normalize(direction.to_vec())?;
+    for value in &mut unit {
+        *value *= sign;
+    }
+    Ok(unit)
+}
+
+#[derive(Default)]
+struct IsochronBvpStats {
+    solves: usize,
+    nonconverged: usize,
+    max_residual: f64,
+    max_iterations: usize,
+    last_nonconverged_phase: Option<usize>,
+}
+
+fn build_isochron_fiber(
+    system: &EquationSystem,
+    phase_point: &[f64],
+    direction: &[f64],
+    settings: &ManifoldCycle2DSettings,
+    sigma: f64,
+    return_time: f64,
+    bvp_intervals: usize,
+    bvp_degree: usize,
+    dt: f64,
+    max_steps_per_return: usize,
+    max_time: f64,
+    per_phase_return_cap: usize,
+    stats: &mut IsochronBvpStats,
+) -> Result<Vec<Vec<f64>>> {
+    let dim = phase_point.len();
+    if direction.len() != dim {
+        bail!("Isochron fiber seed direction dimension mismatch.");
+    }
+    let mut seed = phase_point.to_vec();
+    let radius = settings.initial_radius.max(1e-9);
+    for i in 0..dim {
+        seed[i] += radius * direction[i];
+    }
+
+    let mut fiber = vec![phase_point.to_vec(), seed.clone()];
+    let mut endpoint = seed;
+    let target_arclength = settings.target_arclength.max(radius);
+    let mut arclength = open_curve_arclength(&fiber);
+    let return_cap = per_phase_return_cap.max(2);
+    for phase_return in 0..return_cap {
+        if arclength >= target_arclength {
+            break;
+        }
+        let solve = solve_isochron_return_preimage_bvp(
+            system,
+            &endpoint,
+            sigma,
+            return_time,
+            bvp_intervals,
+            bvp_degree,
+            dt,
+            max_steps_per_return,
+            max_time,
+        )?;
+        stats.solves += 1;
+        stats.max_residual = stats.max_residual.max(solve.residual_norm);
+        stats.max_iterations = stats.max_iterations.max(solve.iterations);
+        if !solve.converged {
+            stats.nonconverged += 1;
+            stats.last_nonconverged_phase = Some(phase_return);
+        }
+        let next = solve.start;
+        if next.iter().any(|value| !value.is_finite()) {
+            break;
+        }
+        if let Some(bounds) = settings.bounds.as_ref() {
+            if !inside_bounds(&next, bounds) {
+                fiber.push(next);
+                break;
+            }
+        }
+        let step = l2_distance(fiber.last().unwrap(), &next);
+        if step <= NORM_EPS {
+            break;
+        }
+        arclength += step;
+        endpoint = next.clone();
+        fiber.push(next);
+    }
+    Ok(fiber)
+}
+
+struct IsochronBvpSolution {
+    start: Vec<f64>,
+    residual_norm: f64,
+    iterations: usize,
+    converged: bool,
+}
+
+fn solve_isochron_return_preimage_bvp(
+    system: &EquationSystem,
+    endpoint: &[f64],
+    sigma: f64,
+    duration: f64,
+    intervals: usize,
+    degree: usize,
+    dt: f64,
+    max_steps: usize,
+    max_time: f64,
+) -> Result<IsochronBvpSolution> {
+    let intervals = intervals.max(1);
+    let degree = degree.max(1);
+    let coeffs = CollocationCoefficients::new(degree)?;
+    let mut unknown = build_isochron_open_orbit_initial_guess(
+        system, endpoint, sigma, duration, intervals, &coeffs, dt, max_steps, max_time,
+    )?;
+    let unknowns = unknown.len();
+    let mut residual = vec![0.0; unknowns];
+    evaluate_isochron_open_orbit_residual(
+        system,
+        &unknown,
+        endpoint,
+        sigma,
+        duration,
+        intervals,
+        &coeffs,
+        &mut residual,
+    )?;
+    let mut residual_norm = l2_norm(&residual);
+    if residual_norm <= ISOCHRON_BVP_NEWTON_TOL {
+        return Ok(IsochronBvpSolution {
+            start: unknown[..endpoint.len()].to_vec(),
+            residual_norm,
+            iterations: 0,
+            converged: true,
+        });
+    }
+
+    let mut converged = false;
+    let mut iterations = 0usize;
+    for iter in 0..ISOCHRON_BVP_NEWTON_MAX_ITERS {
+        iterations = iter + 1;
+        let jac = build_isochron_open_orbit_jacobian(
+            system,
+            &unknown,
+            sigma,
+            duration,
+            intervals,
+            &coeffs,
+            endpoint.len(),
+        )?;
+        let rhs = residual.iter().map(|value| -value).collect::<Vec<_>>();
+        let Some(delta) = solve_dense_linear_system(unknowns, &jac, &rhs) else {
+            break;
+        };
+        let mut accepted = false;
+        let mut damping = 1.0;
+        for _ in 0..ISOCHRON_BVP_LINE_SEARCH_STEPS {
+            let candidate = unknown
+                .iter()
+                .zip(delta.iter())
+                .map(|(value, step)| value + damping * step)
+                .collect::<Vec<_>>();
+            if candidate.iter().any(|value| !value.is_finite()) {
+                damping *= 0.5;
+                continue;
+            }
+            let mut candidate_residual = vec![0.0; unknowns];
+            evaluate_isochron_open_orbit_residual(
+                system,
+                &candidate,
+                endpoint,
+                sigma,
+                duration,
+                intervals,
+                &coeffs,
+                &mut candidate_residual,
+            )?;
+            let candidate_norm = l2_norm(&candidate_residual);
+            if candidate_norm.is_finite() && candidate_norm < residual_norm {
+                unknown = candidate;
+                residual = candidate_residual;
+                residual_norm = candidate_norm;
+                accepted = true;
+                break;
+            }
+            damping *= 0.5;
+        }
+        if residual_norm <= ISOCHRON_BVP_NEWTON_TOL {
+            converged = true;
+            break;
+        }
+        if !accepted {
+            break;
+        }
+    }
+
+    Ok(IsochronBvpSolution {
+        start: unknown[..endpoint.len()].to_vec(),
+        residual_norm,
+        iterations,
+        converged,
+    })
+}
+
+fn build_isochron_open_orbit_initial_guess(
+    system: &EquationSystem,
+    endpoint: &[f64],
+    sigma: f64,
+    duration: f64,
+    intervals: usize,
+    coeffs: &CollocationCoefficients,
+    dt: f64,
+    max_steps: usize,
+    max_time: f64,
+) -> Result<Vec<f64>> {
+    let dim = endpoint.len();
+    let start = integrate_state_only(system, endpoint, duration, -sigma, dt, max_steps, max_time)
+        .ok_or_else(|| {
+        anyhow!("Isochron BVP preimage integration produced a non-finite state.")
+    })?;
+    let total_points = intervals + 1 + intervals * coeffs.nodes.len();
+    let mut unknown = vec![0.0; total_points * dim];
+    for mesh in 0..=intervals {
+        let tau = duration * (mesh as f64) / (intervals as f64);
+        let point = integrate_state_only(system, &start, tau, sigma, dt, max_steps, max_time)
+            .ok_or_else(|| anyhow!("Isochron BVP mesh initialization failed."))?;
+        let offset = isochron_mesh_offset(mesh, dim);
+        unknown[offset..offset + dim].copy_from_slice(&point);
+    }
+    for interval in 0..intervals {
+        for (stage, node) in coeffs.nodes.iter().enumerate() {
+            let tau = duration * ((interval as f64) + *node) / (intervals as f64);
+            let point = integrate_state_only(system, &start, tau, sigma, dt, max_steps, max_time)
+                .ok_or_else(|| anyhow!("Isochron BVP stage initialization failed."))?;
+            let offset = isochron_stage_offset(interval, stage, intervals, coeffs.nodes.len(), dim);
+            unknown[offset..offset + dim].copy_from_slice(&point);
+        }
+    }
+    Ok(unknown)
+}
+
+fn evaluate_isochron_open_orbit_residual(
+    system: &EquationSystem,
+    unknown: &[f64],
+    endpoint: &[f64],
+    sigma: f64,
+    duration: f64,
+    intervals: usize,
+    coeffs: &CollocationCoefficients,
+    out: &mut [f64],
+) -> Result<()> {
+    let dim = endpoint.len();
+    let degree = coeffs.nodes.len();
+    let expected = isochron_unknown_count(intervals, degree, dim);
+    if unknown.len() != expected || out.len() != expected {
+        bail!("Isochron BVP residual dimension mismatch.");
+    }
+    let h = duration / (intervals as f64);
+    let mut stage_f = vec![vec![0.0; dim]; degree];
+    for interval in 0..intervals {
+        for stage in 0..degree {
+            let stage_offset = isochron_stage_offset(interval, stage, intervals, degree, dim);
+            system.apply(
+                0.0,
+                &unknown[stage_offset..stage_offset + dim],
+                &mut stage_f[stage],
+            );
+            for value in &mut stage_f[stage] {
+                *value *= sigma;
+            }
+        }
+        let base_offset = isochron_mesh_offset(interval, dim);
+        for stage in 0..degree {
+            let row_offset = (interval * degree + stage) * dim;
+            let stage_offset = isochron_stage_offset(interval, stage, intervals, degree, dim);
+            for r in 0..dim {
+                let mut sum = 0.0;
+                for k in 0..degree {
+                    sum += coeffs.a[stage][k] * stage_f[k][r];
+                }
+                out[row_offset + r] =
+                    unknown[stage_offset + r] - unknown[base_offset + r] - h * sum;
+            }
+        }
+        let continuity_offset = intervals * degree * dim + interval * dim;
+        let next_offset = isochron_mesh_offset(interval + 1, dim);
+        for r in 0..dim {
+            let mut sum = 0.0;
+            for k in 0..degree {
+                sum += coeffs.b[k] * stage_f[k][r];
+            }
+            out[continuity_offset + r] =
+                unknown[next_offset + r] - unknown[base_offset + r] - h * sum;
+        }
+    }
+    let terminal_offset = intervals * degree * dim + intervals * dim;
+    let final_mesh_offset = isochron_mesh_offset(intervals, dim);
+    for r in 0..dim {
+        out[terminal_offset + r] = unknown[final_mesh_offset + r] - endpoint[r];
+    }
+    Ok(())
+}
+
+fn build_isochron_open_orbit_jacobian(
+    system: &EquationSystem,
+    unknown: &[f64],
+    sigma: f64,
+    duration: f64,
+    intervals: usize,
+    coeffs: &CollocationCoefficients,
+    dim: usize,
+) -> Result<Vec<f64>> {
+    let degree = coeffs.nodes.len();
+    let unknowns = isochron_unknown_count(intervals, degree, dim);
+    if unknown.len() != unknowns {
+        bail!("Isochron BVP Jacobian dimension mismatch.");
+    }
+    let h = duration / (intervals as f64);
+    let mut matrix = vec![0.0; unknowns * unknowns];
+    for interval in 0..intervals {
+        let mut stage_jacs = Vec::with_capacity(degree);
+        for stage in 0..degree {
+            let offset = isochron_stage_offset(interval, stage, intervals, degree, dim);
+            let mut jac =
+                compute_jacobian(system, SystemKind::Flow, &unknown[offset..offset + dim])?;
+            for value in &mut jac {
+                *value *= sigma;
+            }
+            stage_jacs.push(jac);
+        }
+
+        let mesh_col = isochron_mesh_offset(interval, dim);
+        let next_mesh_col = isochron_mesh_offset(interval + 1, dim);
+        for stage in 0..degree {
+            let row = (interval * degree + stage) * dim;
+            let stage_col = isochron_stage_offset(interval, stage, intervals, degree, dim);
+            for r in 0..dim {
+                matrix[(row + r) * unknowns + mesh_col + r] -= 1.0;
+                matrix[(row + r) * unknowns + stage_col + r] += 1.0;
+                for col_stage in 0..degree {
+                    let col = isochron_stage_offset(interval, col_stage, intervals, degree, dim);
+                    let jac = &stage_jacs[col_stage];
+                    for c in 0..dim {
+                        matrix[(row + r) * unknowns + col + c] -=
+                            h * coeffs.a[stage][col_stage] * jac[r * dim + c];
+                    }
+                }
+            }
+        }
+
+        let row = intervals * degree * dim + interval * dim;
+        for r in 0..dim {
+            matrix[(row + r) * unknowns + mesh_col + r] -= 1.0;
+            matrix[(row + r) * unknowns + next_mesh_col + r] += 1.0;
+            for stage in 0..degree {
+                let col = isochron_stage_offset(interval, stage, intervals, degree, dim);
+                let jac = &stage_jacs[stage];
+                for c in 0..dim {
+                    matrix[(row + r) * unknowns + col + c] -=
+                        h * coeffs.b[stage] * jac[r * dim + c];
+                }
+            }
+        }
+    }
+    let terminal_row = intervals * degree * dim + intervals * dim;
+    let final_mesh_col = isochron_mesh_offset(intervals, dim);
+    for r in 0..dim {
+        matrix[(terminal_row + r) * unknowns + final_mesh_col + r] = 1.0;
+    }
+    Ok(matrix)
+}
+
+fn isochron_unknown_count(intervals: usize, degree: usize, dim: usize) -> usize {
+    (intervals + 1 + intervals * degree) * dim
+}
+
+fn isochron_mesh_offset(mesh: usize, dim: usize) -> usize {
+    mesh * dim
+}
+
+fn isochron_stage_offset(
+    interval: usize,
+    stage: usize,
+    intervals: usize,
+    degree: usize,
+    dim: usize,
+) -> usize {
+    (intervals + 1 + interval * degree + stage) * dim
 }
 
 struct SurfaceGrowthResult {
@@ -5355,6 +6035,34 @@ fn l2_distance(a: &[f64], b: &[f64]) -> f64 {
         .sqrt()
 }
 
+fn open_curve_arclength(curve: &[Vec<f64>]) -> f64 {
+    curve
+        .windows(2)
+        .map(|pair| l2_distance(&pair[0], &pair[1]))
+        .sum()
+}
+
+fn sample_open_curve_at_arclength(curve: &[Vec<f64>], target: f64) -> Vec<f64> {
+    if curve.is_empty() {
+        return Vec::new();
+    }
+    if curve.len() == 1 || target <= 0.0 {
+        return curve[0].clone();
+    }
+    let mut remaining = target.max(0.0);
+    for pair in curve.windows(2) {
+        let segment = l2_distance(&pair[0], &pair[1]);
+        if segment <= NORM_EPS {
+            continue;
+        }
+        if remaining <= segment {
+            return lerp(&pair[0], &pair[1], (remaining / segment).clamp(0.0, 1.0));
+        }
+        remaining -= segment;
+    }
+    curve.last().cloned().unwrap_or_default()
+}
+
 fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
@@ -5442,6 +6150,27 @@ mod tests {
         let mut system = EquationSystem::new(bytecodes, param_values);
         system.set_maps(compiler.param_map, compiler.var_map);
         system
+    }
+
+    fn circular_cycle_state(ntst: usize, ncol: usize, radius: f64) -> Vec<f64> {
+        let mut state = Vec::new();
+        for i in 0..ntst {
+            let theta = (i as f64) * std::f64::consts::TAU / (ntst as f64);
+            state.push(radius * theta.cos());
+            state.push(radius * theta.sin());
+            state.push(0.0);
+        }
+        for interval in 0..ntst {
+            for stage in 0..ncol {
+                let frac = (stage as f64 + 1.0) / ((ncol + 1) as f64);
+                let theta = (interval as f64 + frac) * std::f64::consts::TAU / (ntst as f64);
+                state.push(radius * theta.cos());
+                state.push(radius * theta.sin());
+                state.push(0.0);
+            }
+        }
+        state.push(std::f64::consts::TAU);
+        state
     }
 
     #[test]
@@ -7435,6 +8164,178 @@ mod tests {
                 "unexpected stable ring-build failure detail={:?}",
                 diag.termination_detail
             );
+        }
+    }
+
+    #[test]
+    fn manifold_cycle_2d_isochron_fibers_builds_unstable_linear_cylinder() {
+        let ntst = 8usize;
+        let ncol = 2usize;
+        let lambda = 0.2_f64;
+        let mut system = build_system(
+            &["-y", "x", "lambda*z"],
+            &["x", "y", "z"],
+            &[("lambda", lambda)],
+        );
+        let state = circular_cycle_state(ntst, ncol, 1.0);
+        let multipliers = [
+            Complex::new((lambda * std::f64::consts::TAU).exp(), 0.0),
+            Complex::new(1.0, 0.0),
+        ];
+        let branch = continue_limit_cycle_manifold_2d(
+            &mut system,
+            &state,
+            ntst,
+            ncol,
+            &multipliers,
+            ManifoldCycle2DSettings {
+                stability: ManifoldStability::Unstable,
+                algorithm: ManifoldCycle2DAlgorithm::IsochronFibers,
+                floquet_index: Some(0),
+                initial_radius: 1e-3,
+                leaf_delta: 5e-3,
+                ring_points: 12,
+                integration_dt: 2e-2,
+                target_arclength: 2e-2,
+                ntst,
+                ncol,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 120,
+                    max_rings: 8,
+                    max_vertices: 512,
+                    max_time: 20.0,
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..ManifoldCycle2DSettings::default()
+            },
+        )
+        .expect("unstable HKO isochron manifold");
+
+        let BranchType::ManifoldCycle2D { method, .. } = &branch.branch_type else {
+            panic!("expected cycle manifold branch");
+        };
+        assert_eq!(method, "hko_isochron_bvp");
+        let ManifoldGeometry::Surface(surface) = branch.manifold_geometry.expect("geometry") else {
+            panic!("expected surface geometry");
+        };
+        assert!(
+            surface.ring_offsets.len() >= 4,
+            "expected arclength-resampled HKO surface rings"
+        );
+        assert!(!surface.triangles.is_empty(), "expected surface triangles");
+        let vertices = surface.vertices_flat.chunks_exact(3).collect::<Vec<_>>();
+        let max_radial_error = vertices
+            .iter()
+            .map(|point| ((point[0] * point[0] + point[1] * point[1]).sqrt() - 1.0).abs())
+            .fold(0.0, f64::max);
+        assert!(
+            max_radial_error < 5e-3,
+            "unstable linear cylinder should stay near LC radius; max error={max_radial_error}"
+        );
+        let max_abs_z = vertices
+            .iter()
+            .map(|point| point[2].abs())
+            .fold(0.0, f64::max);
+        assert!(max_abs_z > 1e-3, "expected the unstable sheet to grow in z");
+        let diagnostics = surface.solver_diagnostics.expect("diagnostics");
+        assert_eq!(diagnostics.termination_reason, "target_arclength");
+        assert!(
+            diagnostics
+                .termination_detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("hko isochron fibers"),
+            "expected HKO diagnostics detail"
+        );
+    }
+
+    #[test]
+    fn manifold_cycle_2d_isochron_fibers_builds_stable_linear_cylinder() {
+        let ntst = 8usize;
+        let ncol = 2usize;
+        let lambda = 0.2_f64;
+        let mut system = build_system(
+            &["-y", "x", "-lambda*z"],
+            &["x", "y", "z"],
+            &[("lambda", lambda)],
+        );
+        let state = circular_cycle_state(ntst, ncol, 1.0);
+        let multipliers = [
+            Complex::new((-lambda * std::f64::consts::TAU).exp(), 0.0),
+            Complex::new(1.0, 0.0),
+        ];
+        let branch = continue_limit_cycle_manifold_2d(
+            &mut system,
+            &state,
+            ntst,
+            ncol,
+            &multipliers,
+            ManifoldCycle2DSettings {
+                stability: ManifoldStability::Stable,
+                algorithm: ManifoldCycle2DAlgorithm::IsochronFibers,
+                floquet_index: Some(0),
+                initial_radius: 1e-3,
+                leaf_delta: 5e-3,
+                ring_points: 12,
+                integration_dt: 2e-2,
+                target_arclength: 2e-2,
+                ntst,
+                ncol,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 120,
+                    max_rings: 8,
+                    max_vertices: 512,
+                    max_time: 20.0,
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..ManifoldCycle2DSettings::default()
+            },
+        )
+        .expect("stable HKO isochron manifold");
+
+        let ManifoldGeometry::Surface(surface) = branch.manifold_geometry.expect("geometry") else {
+            panic!("expected surface geometry");
+        };
+        assert!(surface.ring_offsets.len() >= 4);
+        let vertices = surface.vertices_flat.chunks_exact(3).collect::<Vec<_>>();
+        let max_radial_error = vertices
+            .iter()
+            .map(|point| ((point[0] * point[0] + point[1] * point[1]).sqrt() - 1.0).abs())
+            .fold(0.0, f64::max);
+        assert!(
+            max_radial_error < 5e-3,
+            "stable linear cylinder should stay near LC radius; max error={max_radial_error}"
+        );
+        let max_abs_z = surface
+            .vertices_flat
+            .chunks_exact(3)
+            .map(|point| point[2].abs())
+            .fold(0.0, f64::max);
+        assert!(
+            max_abs_z > 1e-3,
+            "expected the stable sheet to grow outward in the reversed-time z direction"
+        );
+    }
+
+    #[test]
+    fn manifold_cycle_2d_isochron_phase_cover_preserves_negative_multiplier_double_cover() {
+        let cycle = vec![
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0],
+            vec![-1.0, 0.0, 0.0],
+            vec![0.0, -1.0, 0.0],
+        ];
+        let dirs = vec![vec![0.0, 0.0, 1.0]; cycle.len()];
+        let (cover, cover_dirs, return_time) =
+            build_isochron_phase_cover(&cycle, &dirs, -0.5, ManifoldDirection::Plus, 3.0)
+                .expect("phase cover");
+        assert_eq!(cover.len(), cycle.len() * 2);
+        assert_eq!(cover_dirs.len(), cycle.len() * 2);
+        assert!((return_time - 6.0).abs() <= 1e-12);
+        for idx in 0..cycle.len() {
+            assert_eq!(cover[idx], cover[idx + cycle.len()]);
+            assert!(cover_dirs[idx][2] > 0.0);
+            assert!(cover_dirs[idx + cycle.len()][2] < 0.0);
         }
     }
 

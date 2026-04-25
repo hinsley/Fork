@@ -33,6 +33,7 @@ import type {
   IsoclineSource,
   LimitCycleRenderTarget,
   LimitCycleObject,
+  ManifoldCycle2DAlgorithm,
   Manifold2DProfile,
   ManifoldDirection,
   ManifoldStability,
@@ -1241,6 +1242,7 @@ export type LimitCycleManifold2DRequest = {
   settings: {
     stability: ManifoldStability
     direction?: ManifoldDirection
+    algorithm?: ManifoldCycle2DAlgorithm
     floquet_index?: number
     profile?: Manifold2DProfile
     initial_radius: number
@@ -3875,6 +3877,13 @@ export function AppProvider({
           throw new Error('Cycle manifold direction must be Plus, Minus, or Both.')
         }
         if (
+          settings.algorithm !== undefined &&
+          settings.algorithm !== 'GeodesicRings' &&
+          settings.algorithm !== 'IsochronFibers'
+        ) {
+          throw new Error('Cycle manifold algorithm must be GeodesicRings or IsochronFibers.')
+        }
+        if (
           settings.ntst !== undefined &&
           (!Number.isFinite(settings.ntst) || settings.ntst <= 0 || !Number.isInteger(settings.ntst))
         ) {
@@ -3962,6 +3971,7 @@ export function AppProvider({
             settings: {
               ...settings,
               direction: settings.direction ?? 'Plus',
+              algorithm: settings.algorithm ?? 'GeodesicRings',
               parameter_index: parameterIndex >= 0 ? parameterIndex : undefined,
               ntst: settings.ntst ?? seedNtst,
               ncol: settings.ncol ?? seedNcol,

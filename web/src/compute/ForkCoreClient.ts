@@ -3,6 +3,7 @@ import type {
   ContinuationSettings,
   ContinuationPoint,
   Manifold2DProfile,
+  ManifoldCycle2DAlgorithm,
   ManifoldStability,
   EquilibriumSolution,
   EventSeriesMode,
@@ -224,6 +225,7 @@ export type EquilibriumManifold2DSettingsRequest = {
 export type LimitCycleManifold2DSettingsRequest = {
   stability: ManifoldStability
   direction?: 'Plus' | 'Minus' | 'Both'
+  algorithm?: ManifoldCycle2DAlgorithm
   floquet_index?: number
   parameter_index?: number
   profile?: Manifold2DProfile

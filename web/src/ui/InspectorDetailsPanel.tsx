@@ -15,6 +15,7 @@ import type {
   LimitCycleObject,
   LimitCycleOrigin,
   LimitCycleRenderTarget,
+  ManifoldCycle2DAlgorithm,
   ManifoldDirection,
   ManifoldStability,
   ManifoldTerminationCaps,
@@ -406,6 +407,7 @@ type LimitCycleManifoldDraft = {
   name: string
   stability: ManifoldStability
   direction: ManifoldDirection
+  algorithm: ManifoldCycle2DAlgorithm
   profile: EquilibriumManifoldProfileDraft
   floquetIndex: string
   initialRadius: string
@@ -1270,6 +1272,7 @@ function makeLimitCycleManifoldDraft(
     name: `manifold_${baseName}_2d`,
     stability: 'Unstable',
     direction: 'Plus',
+    algorithm: 'GeodesicRings',
     profile: 'local_preview',
     floquetIndex: '0',
     initialRadius: '1e-3',
@@ -5214,6 +5217,7 @@ export function InspectorDetailsPanel({
       settings: {
         stability: limitCycleManifoldDraft.stability,
         direction: limitCycleManifoldDraft.direction,
+        algorithm: limitCycleManifoldDraft.algorithm,
         floquet_index: floquetIndex,
         profile: toManifold2DProfile(limitCycleManifoldDraft.profile),
         initial_radius: initialRadius,
@@ -9739,6 +9743,22 @@ export function InspectorDetailsPanel({
                       >
                         <option value="Plus">plus</option>
                         <option value="Minus">minus</option>
+                      </select>
+                    </label>
+                    <label>
+                      Algorithm
+                      <select
+                        value={limitCycleManifoldDraft.algorithm}
+                        onChange={(event) =>
+                          setLimitCycleManifoldDraft((prev) => ({
+                            ...prev,
+                            algorithm: event.target.value as ManifoldCycle2DAlgorithm,
+                          }))
+                        }
+                        data-testid="limit-cycle-manifold-algorithm"
+                      >
+                        <option value="GeodesicRings">geodesic rings</option>
+                        <option value="IsochronFibers">isochron fibers (HKO)</option>
                       </select>
                     </label>
                     <label>
