@@ -2683,7 +2683,7 @@ describe('ViewportPanel view state wiring', () => {
     expect(manifoldTrace?.line?.dash).toBe('dot')
   })
 
-  it('renders 2D manifold surfaces as closed ring curves without mesh fill', () => {
+  it('renders 2D manifold surfaces as translucent mesh fill without ring curves', () => {
     const config: SystemConfig = {
       name: 'Scene_Manifold_2D_Rings',
       equations: ['y', '-x + mu', '-z'],
@@ -2810,7 +2810,7 @@ describe('ViewportPanel view state wiring', () => {
       (entry) => entry.plotId === sceneResult.nodeId
     )
     expect(props).toBeTruthy()
-    const manifoldTrace = props?.data.find(
+    const manifoldLineTrace = props?.data.find(
       (trace) =>
         'uid' in trace &&
         trace.uid === branchResult.nodeId &&
@@ -2820,16 +2820,276 @@ describe('ViewportPanel view state wiring', () => {
         'mode' in trace &&
         trace.mode === 'lines'
     ) as { x?: Array<number | null>; line?: { dash?: string } } | undefined
-    expect(manifoldTrace).toBeTruthy()
-    expect(manifoldTrace?.line?.dash).toBe('dash')
-    expect(manifoldTrace?.x?.slice(0, 5)).toEqual([1, 0, -1, 1, null])
+    expect(manifoldLineTrace).toBeUndefined()
     const meshTrace = props?.data.find(
       (trace) =>
         'uid' in trace &&
         trace.uid === branchResult.nodeId &&
         trace.type === 'mesh3d'
+    ) as
+      | {
+          opacity?: number
+          i?: Uint32Array
+          j?: Uint32Array
+          k?: Uint32Array
+          showlegend?: boolean
+        }
+      | undefined
+    expect(meshTrace).toBeTruthy()
+    expect(meshTrace?.opacity).toBeCloseTo(0.35)
+    expect(meshTrace?.i?.length).toBe(2)
+    expect(meshTrace?.j?.length).toBe(2)
+    expect(meshTrace?.k?.length).toBe(2)
+    expect(meshTrace?.showlegend).toBe(false)
+  })
+
+  it('phase-aligns fallback 2D manifold triangulation when stored triangles are absent', () => {
+    const config: SystemConfig = {
+      name: 'Scene_Manifold_2D_Fallback_Triangles',
+      equations: ['y', '-x + mu', '-z'],
+      params: [0.3],
+      paramNames: ['mu'],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow'
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['x', 'y', 'z']
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_Fallback_Triangles',
+      systemName: config.name,
+      solution: {
+        state: [0, 0, 0],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [0, 1, 0, -1, 0, 0, 0, 0, -1],
+        eigenpairs: []
+      }
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+    const continuationSettings: ContinuationSettings = {
+      step_size: 0.01,
+      min_step_size: 1e-6,
+      max_step_size: 0.1,
+      max_steps: 10,
+      corrector_steps: 4,
+      corrector_tolerance: 1e-6,
+      step_tolerance: 1e-6
+    }
+    const denseCount = 8
+    const sparsePhases = [0.5, 0.75, 0, 0.25]
+    const vertices = [
+      ...Array.from({ length: denseCount }, (_, index) => {
+        const theta = (index / denseCount) * Math.PI * 2
+        return [Math.cos(theta), Math.sin(theta), 0]
+      }),
+      ...sparsePhases.map((phase) => {
+        const theta = phase * Math.PI * 2
+        return [2 * Math.cos(theta), 2 * Math.sin(theta), 0]
+      })
+    ]
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_manifold_surface_fallback_triangles',
+      systemName: config.name,
+      parameterName: 'manifold',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'eq_manifold_2d',
+      data: {
+        points: vertices.map((state, index) => ({
+          state,
+          param_value: index,
+          stability: 'None',
+          eigenvalues: []
+        })),
+        bifurcations: [],
+        indices: vertices.map((_, index) => index),
+        branch_type: {
+          type: 'ManifoldEq2D',
+          stability: 'Stable',
+          eig_kind: 'RealPair',
+          eig_indices: [0, 1],
+          method: 'leaf_shooting_bvp',
+          caps: {
+            max_steps: 1024,
+            max_points: 4096,
+            max_rings: 128,
+            max_vertices: 65536,
+            max_time: 100
+          }
+        },
+        manifold_geometry: {
+          type: 'Surface',
+          dim: 3,
+          vertices_flat: vertices.flat(),
+          triangles: [],
+          ring_offsets: [0, denseCount],
+          ring_diagnostics: []
+        }
+      },
+      settings: continuationSettings,
+      timestamp: nowIso(),
+      params: [...config.params]
+    }
+    const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
+
+    renderPanel(branchResult.system)
+
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
     )
-    expect(meshTrace).toBeUndefined()
+    const meshTrace = props?.data.find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        trace.type === 'mesh3d'
+    ) as { i?: Uint32Array; j?: Uint32Array; k?: Uint32Array } | undefined
+    expect(meshTrace).toBeTruthy()
+    expect(meshTrace?.i?.length).toBe(denseCount + sparsePhases.length)
+
+    const phaseForIndex = (index: number) =>
+      index < denseCount ? index / denseCount : (sparsePhases[index - denseCount] ?? 0)
+    const circularDistance = (a: number, b: number) => {
+      const distance = Math.abs(a - b)
+      return Math.min(distance, 1 - distance)
+    }
+    const maxCrossRingPhaseGap = Array.from({ length: meshTrace?.i?.length ?? 0 }, (_, face) => [
+      meshTrace?.i?.[face] ?? 0,
+      meshTrace?.j?.[face] ?? 0,
+      meshTrace?.k?.[face] ?? 0
+    ])
+      .flatMap((triangle) => [
+        [triangle[0], triangle[1]],
+        [triangle[1], triangle[2]],
+        [triangle[2], triangle[0]]
+      ])
+      .filter(([a, b]) => (a < denseCount) !== (b < denseCount))
+      .reduce(
+        (maxGap, [a, b]) => Math.max(maxGap, circularDistance(phaseForIndex(a), phaseForIndex(b))),
+        0
+      )
+    expect(maxCrossRingPhaseGap).toBeLessThanOrEqual(0.25 + 1e-12)
+  })
+
+  it('keeps 2D manifold ring curves but hides mesh fill when surface rendering is disabled', () => {
+    const config: SystemConfig = {
+      name: 'Scene_Manifold_2D_Surface_Hidden',
+      equations: ['y', '-x + mu', '-z'],
+      params: [0.3],
+      paramNames: ['mu'],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow'
+    }
+    let system = createSystem({ name: config.name, config })
+    const sceneResult = addScene(system, 'Scene 1')
+    system = updateScene(sceneResult.system, sceneResult.nodeId, {
+      axisVariables: ['x', 'y', 'z']
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'EQ_Seed_2D_Hidden',
+      systemName: config.name,
+      solution: {
+        state: [0, 0, 0],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [0, 1, 0, -1, 0, 0, 0, 0, -1],
+        eigenpairs: []
+      }
+    }
+    const equilibriumResult = addObject(system, equilibrium)
+    system = equilibriumResult.system
+    const continuationSettings: ContinuationSettings = {
+      step_size: 0.01,
+      min_step_size: 1e-6,
+      max_step_size: 0.1,
+      max_steps: 10,
+      corrector_steps: 4,
+      corrector_tolerance: 1e-6,
+      step_tolerance: 1e-6
+    }
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_manifold_surface_hidden',
+      systemName: config.name,
+      parameterName: 'manifold',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'eq_manifold_2d',
+      data: {
+        points: [
+          { state: [1, 0, 0], param_value: 0, stability: 'None', eigenvalues: [] },
+          { state: [0, 1, 0], param_value: 1, stability: 'None', eigenvalues: [] },
+          { state: [-1, 0, 0], param_value: 2, stability: 'None', eigenvalues: [] },
+          { state: [2, 0, 0], param_value: 3, stability: 'None', eigenvalues: [] },
+          { state: [0, 2, 0], param_value: 4, stability: 'None', eigenvalues: [] },
+          { state: [-2, 0, 0], param_value: 5, stability: 'None', eigenvalues: [] }
+        ],
+        bifurcations: [],
+        indices: [0, 1, 2, 3, 4, 5],
+        branch_type: {
+          type: 'ManifoldEq2D',
+          stability: 'Stable',
+          eig_kind: 'RealPair',
+          eig_indices: [0, 1],
+          method: 'leaf_shooting_bvp',
+          caps: {
+            max_steps: 1024,
+            max_points: 4096,
+            max_rings: 128,
+            max_vertices: 65536,
+            max_time: 100
+          }
+        },
+        manifold_geometry: {
+          type: 'Surface',
+          dim: 3,
+          vertices_flat: [1, 0, 0, 0, 1, 0, -1, 0, 0, 2, 0, 0, 0, 2, 0, -2, 0, 0],
+          triangles: [0, 1, 3, 1, 4, 3],
+          ring_offsets: [0, 3, 6],
+          ring_diagnostics: []
+        }
+      },
+      settings: continuationSettings,
+      timestamp: nowIso(),
+      params: [...config.params]
+    }
+    const branchResult = addBranch(system, branch, equilibriumResult.nodeId)
+    system = updateNodeRender(branchResult.system, branchResult.nodeId, {
+      manifoldSurfaceVisible: false
+    })
+
+    renderPanel(system)
+
+    const props = plotlyCalls.find(
+      (entry) => entry.plotId === sceneResult.nodeId
+    )
+    expect(props).toBeTruthy()
+    expect(
+      props?.data.some(
+        (trace) =>
+          'uid' in trace &&
+          trace.uid === branchResult.nodeId &&
+          trace.type === 'mesh3d'
+      )
+    ).toBe(false)
+    expect(
+      props?.data.some(
+        (trace) =>
+          'uid' in trace &&
+          trace.uid === branchResult.nodeId &&
+          trace.type === 'scatter3d' &&
+          'mode' in trace &&
+          trace.mode === 'lines'
+      )
+    ).toBe(true)
   })
 
   it('renders frozen 1D manifold curves as 3D traces in 3D scenes', () => {
@@ -2966,7 +3226,7 @@ describe('ViewportPanel view state wiring', () => {
     )
   })
 
-  it('renders frozen 2D manifold surface rings as 3D traces in 3D scenes', () => {
+  it('renders frozen 2D manifold surfaces as 3D mesh traces in 3D scenes', () => {
     const config: SystemConfig = {
       name: 'Frozen_Manifold_2D_3D',
       equations: ['y', '-x + mu', '-z'],
@@ -3074,22 +3334,22 @@ describe('ViewportPanel view state wiring', () => {
       (entry) => entry.plotId === sceneResult.nodeId
     )
     expect(props).toBeTruthy()
-    const manifoldTraces = (props?.data ?? []).filter(
+    const manifoldLineTraces = (props?.data ?? []).filter(
       (trace) =>
         'uid' in trace &&
         trace.uid === branchResult.nodeId &&
         'mode' in trace &&
         trace.mode === 'lines'
     )
-    expect(manifoldTraces.some((trace) => trace.type === 'scatter3d')).toBe(
-      true
-    )
-    expect(manifoldTraces.some((trace) => trace.type === 'scatter')).toBe(false)
-    const manifoldTrace = manifoldTraces.find(
-      (trace) => trace.type === 'scatter3d'
+    expect(manifoldLineTraces).toHaveLength(0)
+    const meshTrace = (props?.data ?? []).find(
+      (trace) =>
+        'uid' in trace &&
+        trace.uid === branchResult.nodeId &&
+        trace.type === 'mesh3d'
     ) as { z?: Array<number | null> } | undefined
-    expect(manifoldTrace).toBeTruthy()
-    const zValues = (manifoldTrace?.z ?? []).filter(
+    expect(meshTrace).toBeTruthy()
+    const zValues = (meshTrace?.z ?? []).filter(
       (value): value is number =>
         typeof value === 'number' && Number.isFinite(value)
     )

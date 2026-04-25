@@ -21,6 +21,30 @@ References:
 
 ---
 
+### 2026-04-25: 2D manifold growth keeps solved adaptive rings
+Context:
+The 2D equilibrium manifold solver had Krauskopf-Osinga-style controls, but robustness suffered
+because adaptive rings were resampled back to the previous point count and failed leaves could be
+filled by synthetic points.
+Decision:
+Keep inserted/removed ring vertices after spacing adaptation, evaluate geodesic quality through each
+point's stored source parameter, solve inserted points as true leaf hits, and report unsolved leaves
+instead of synthesizing geometry. The leaf solve controls the Euclidean distance from the base point
+inside the outward half-leaf, matching the Krauskopf-Osinga construction, rather than a signed
+projection that can hide large tangential jumps. Mesh adaptation removes neighbors below
+`min_spacing`, as in the K-O leaf-add/drop rule, while finite edge-ratio variation is left to the
+turn and distance-angle quality checks. Make `AdaptiveGlobal` the web/CLI default and keep
+Lorenz-specific values as a named reference profile.
+Why:
+This preserves the adaptive mesh the algorithm asks for and avoids off-manifold geometry that can hide
+solver failures while making the default usable beyond Lorenz.
+Impact:
+2D surface meshes can have varying ring sizes; downstream consumers must rely on `ring_offsets`
+rather than assuming equal point counts.
+References:
+`crates/fork_core/src/continuation/manifold.rs`, `web/src/ui/InspectorDetailsPanel.tsx`,
+`docs/invariant_manifolds.md`
+
 ### 2026-02-16: Web persistence V3 hard cutover with sharded entities and ZIP-only transfer
 Context:
 The web app previously rewrote large JSON payloads on many updates and used name-coupled references

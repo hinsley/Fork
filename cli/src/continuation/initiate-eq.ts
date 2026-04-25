@@ -907,28 +907,30 @@ export async function initiateEquilibriumManifold2DFromPoint(
 
   let branchName = `eqm2d_${sourceBranch.name}_idx${pointIdx}`;
   let stability: 'Stable' | 'Unstable' = 'Stable';
-  let profile: 'LocalPreview' | 'LorenzGlobalKo' = 'LorenzGlobalKo';
+  let profile: 'LocalPreview' | 'AdaptiveGlobal' | 'LorenzGlobalKo' = 'AdaptiveGlobal';
   let eigIndicesInput = '';
-  let initialRadiusInput = '1.0';
-  let leafDeltaInput = '1.0';
-  let deltaMinInput = '0.01';
-  let ringPointsInput = '20';
-  let minSpacingInput = '0.25';
-  let maxSpacingInput = '2.0';
+  let initialRadiusInput = '0.2';
+  let leafDeltaInput = '0.2';
+  let deltaMinInput = '0.001';
+  let ringPointsInput = '32';
+  let minSpacingInput = '0.05';
+  let maxSpacingInput = '0.5';
   let alphaMinInput = '0.3';
   let alphaMaxInput = '0.4';
   let deltaAlphaMinInput = '0.01';
   let deltaAlphaMaxInput = '1.0';
-  let integrationDtInput = '1e-3';
-  let targetRadiusInput = '40';
-  let targetArclengthInput = '100';
-  let maxStepsInput = '2000';
+  let integrationDtInput = '0.005';
+  let targetRadiusInput = '20';
+  let targetArclengthInput = '60';
+  let maxStepsInput = '1500';
   let maxPointsInput = '8000';
-  let maxRingsInput = '200';
+  let maxRingsInput = '240';
   let maxVerticesInput = '200000';
   let maxTimeInput = '200';
 
-  const applyProfileDefaults = (nextProfile: 'LocalPreview' | 'LorenzGlobalKo') => {
+  const applyProfileDefaults = (
+    nextProfile: 'LocalPreview' | 'AdaptiveGlobal' | 'LorenzGlobalKo'
+  ) => {
     profile = nextProfile;
     if (nextProfile === 'LocalPreview') {
       initialRadiusInput = '1e-3';
@@ -948,6 +950,27 @@ export async function initiateEquilibriumManifold2DFromPoint(
       maxPointsInput = '8000';
       maxRingsInput = '240';
       maxVerticesInput = '50000';
+      maxTimeInput = '200';
+      return;
+    }
+    if (nextProfile === 'AdaptiveGlobal') {
+      initialRadiusInput = '0.2';
+      leafDeltaInput = '0.2';
+      deltaMinInput = '0.001';
+      ringPointsInput = '32';
+      minSpacingInput = '0.05';
+      maxSpacingInput = '0.5';
+      alphaMinInput = '0.3';
+      alphaMaxInput = '0.4';
+      deltaAlphaMinInput = '0.01';
+      deltaAlphaMaxInput = '1.0';
+      integrationDtInput = '0.005';
+      targetRadiusInput = '20';
+      targetArclengthInput = '60';
+      maxStepsInput = '1500';
+      maxPointsInput = '8000';
+      maxRingsInput = '240';
+      maxVerticesInput = '200000';
       maxTimeInput = '200';
       return;
     }
@@ -1023,14 +1046,19 @@ export async function initiateEquilibriumManifold2DFromPoint(
       id: 'profile',
       label: 'Profile',
       section: 'Numerics',
-      getDisplay: () => profile === 'LorenzGlobalKo' ? 'Lorenz (global K-O)' : 'Local preview',
+      getDisplay: () => {
+        if (profile === 'AdaptiveGlobal') return 'Adaptive global';
+        if (profile === 'LorenzGlobalKo') return 'Lorenz reference';
+        return 'Local preview';
+      },
       edit: async () => {
         const { value } = await inquirer.prompt({
           type: 'rawlist',
           name: 'value',
           message: 'Choose numeric profile:',
           choices: [
-            { name: 'Lorenz (global K-O)', value: 'LorenzGlobalKo' },
+            { name: 'Adaptive global', value: 'AdaptiveGlobal' },
+            { name: 'Lorenz reference', value: 'LorenzGlobalKo' },
             { name: 'Local preview', value: 'LocalPreview' }
           ],
           default: profile

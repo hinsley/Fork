@@ -519,6 +519,12 @@
   background: var(--button-bg-hover);
 }
 
+.inspector-toggle-button[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--panel-border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
 .state-table {
   display: grid;
   gap: 6px;

@@ -113,8 +113,10 @@ behavior.
     markers);
   - invariant manifold branches render from persisted `manifold_geometry`:
     `eq_manifold_1d` as line traces, and `eq_manifold_2d` /
-    `cycle_manifold_2d` as per-ring closed line traces (no mesh fill) in both
-    3-axis and 2-axis scene projections;
+    `cycle_manifold_2d` as per-ring closed line traces in both 3-axis and
+    2-axis scene projections; 3-axis manifold scenes emit a translucent
+    `mesh3d` fill instead of ring line traces when the selected branch render
+    setting `manifoldSurfaceVisible` is enabled and a valid mesh can be built;
   - codim-2 points from `branch.data.bifurcations` render as dedicated diamond
     marker traces;
   - selected branch-point markers in scenes use the same dedicated selected

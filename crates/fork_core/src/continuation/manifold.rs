@@ -5,6 +5,9 @@ use num_complex::Complex;
 
 use crate::continuation::periodic::compute_cycle_monodromy_data;
 use crate::continuation::types::{
+    default_manifold_alpha_max, default_manifold_alpha_min, default_manifold_delta_alpha_max,
+    default_manifold_delta_alpha_min, default_manifold_delta_min, default_manifold_dt,
+    default_manifold_eps, default_manifold_leaf_delta, default_manifold_ring_points,
     BifurcationType, BranchType, ContinuationBranch, ContinuationPoint, Manifold1DSettings,
     Manifold2DProfile, Manifold2DSettings, ManifoldBounds, ManifoldCurveGeometry,
     ManifoldCycle2DSettings, ManifoldDirection, ManifoldEigenKind, ManifoldGeometry,
@@ -26,8 +29,6 @@ const DEFAULT_GEODESIC_ALPHA_MIN: f64 = 0.3;
 const DEFAULT_GEODESIC_ALPHA_MAX: f64 = 0.4;
 const DEFAULT_GEODESIC_DELTA_ALPHA_MIN: f64 = 0.1;
 const DEFAULT_GEODESIC_DELTA_ALPHA_MAX: f64 = 1.0;
-const LOW_TURN_ANGLE_RAD: f64 = 0.15;
-const LOW_DISTANCE_ANGLE: f64 = 0.02;
 const LEAF_DELTA_SHRINK: f64 = 0.5;
 const LEAF_DELTA_GROW: f64 = 2.0;
 const LEAF_REFINE_ATTEMPTS: usize = 12;
@@ -48,16 +49,18 @@ const LEAF_MAX_TIME_RETRIES: usize = 2;
 const LEAF_DT_SHRINK: f64 = 0.5;
 const LEAF_DT_RETRIES: usize = 3;
 const LEAF_DT_MIN_FACTOR: f64 = 1e-3;
-const LEAF_SYNTH_MAX_FAILURES: usize = 4;
+const LEAF_RETRY_MAX_FAILURES: usize = 4;
 const LEAF_SEGMENT_SWITCH_EPS: f64 = 1e-4;
 const LEAF_SEGMENT_SWITCH_MAX: usize = 64;
 const RING_ADAPT_POINT_FACTOR: usize = 4;
-const RING_SPACING_DIRECT_INSERT_FACTOR: f64 = 3.0;
-const RING_EDGE_RATIO_MAX: f64 = 10.0;
 const RING_TURN_REPARAM_TRIGGER_RAD: f64 = 170.0_f64.to_radians();
+#[cfg(test)]
 const RING_OUTLIER_DISPLACEMENT_FACTOR: f64 = 4.0;
+#[cfg(test)]
 const RING_OUTLIER_MIN_SCALE: f64 = 8.0;
+#[cfg(test)]
 const RING_OUTLIER_MAX_SCALE: f64 = 64.0;
+#[cfg(test)]
 const RING_OUTLIER_PASSES: usize = 2;
 const STRIP_ARCLENGTH_TRIM_FRAC: f64 = 0.1;
 const TAU_SWITCH_EPS: f64 = 1e-6;
@@ -387,59 +390,186 @@ fn build_eq_1d_branch(
     }
 }
 
+fn profile_f64_matches(value: f64, baseline_default: f64) -> bool {
+    let baseline_tol = baseline_default.abs().max(1.0) * 1e-12;
+    value.is_finite() && (value - baseline_default).abs() <= baseline_tol
+}
+
+fn eq_2d_settings_use_baseline_profile_defaults(settings: &Manifold2DSettings) -> bool {
+    profile_f64_matches(settings.initial_radius, default_manifold_eps())
+        && profile_f64_matches(settings.leaf_delta, default_manifold_leaf_delta())
+        && profile_f64_matches(settings.delta_min, default_manifold_delta_min())
+        && settings.ring_points == default_manifold_ring_points()
+        && settings.min_spacing <= 0.0
+        && settings.max_spacing <= 0.0
+        && profile_f64_matches(settings.alpha_min, default_manifold_alpha_min())
+        && profile_f64_matches(settings.alpha_max, default_manifold_alpha_max())
+        && profile_f64_matches(settings.delta_alpha_min, default_manifold_delta_alpha_min())
+        && profile_f64_matches(settings.delta_alpha_max, default_manifold_delta_alpha_max())
+        && profile_f64_matches(settings.integration_dt, default_manifold_dt())
+}
+
+fn cycle_2d_settings_use_baseline_profile_defaults(settings: &ManifoldCycle2DSettings) -> bool {
+    profile_f64_matches(settings.initial_radius, default_manifold_eps())
+        && profile_f64_matches(settings.leaf_delta, default_manifold_leaf_delta())
+        && profile_f64_matches(settings.delta_min, default_manifold_delta_min())
+        && settings.ring_points == default_manifold_ring_points()
+        && settings.min_spacing <= 0.0
+        && settings.max_spacing <= 0.0
+        && profile_f64_matches(settings.alpha_min, default_manifold_alpha_min())
+        && profile_f64_matches(settings.alpha_max, default_manifold_alpha_max())
+        && profile_f64_matches(settings.delta_alpha_min, default_manifold_delta_alpha_min())
+        && profile_f64_matches(settings.delta_alpha_max, default_manifold_delta_alpha_max())
+        && profile_f64_matches(settings.integration_dt, default_manifold_dt())
+}
+
+fn apply_profile_f64(
+    slot: &mut f64,
+    baseline_default: f64,
+    profile_value: f64,
+    replace_baseline_defaults: bool,
+) {
+    if !slot.is_finite()
+        || *slot <= 0.0
+        || (replace_baseline_defaults && profile_f64_matches(*slot, baseline_default))
+    {
+        *slot = profile_value;
+    }
+}
+
+fn apply_profile_usize(
+    slot: &mut usize,
+    baseline_default: usize,
+    profile_value: usize,
+    replace_baseline_defaults: bool,
+) {
+    if *slot == 0 || (replace_baseline_defaults && *slot == baseline_default) {
+        *slot = profile_value;
+    }
+}
+
 fn apply_eq_2d_profile(settings: &mut Manifold2DSettings) {
     let Some(profile) = settings.profile else {
         return;
     };
-    let apply = |slot: &mut f64, value: f64| {
-        if !slot.is_finite() || *slot <= 0.0 {
-            *slot = value;
-        }
+    let replace_baseline_defaults = eq_2d_settings_use_baseline_profile_defaults(settings);
+    let apply = |slot: &mut f64, baseline_default: f64, profile_value: f64| {
+        apply_profile_f64(
+            slot,
+            baseline_default,
+            profile_value,
+            replace_baseline_defaults,
+        );
+    };
+    let apply_usize = |slot: &mut usize, baseline_default: usize, profile_value: usize| {
+        apply_profile_usize(
+            slot,
+            baseline_default,
+            profile_value,
+            replace_baseline_defaults,
+        );
     };
     match profile {
         Manifold2DProfile::LocalPreview => {
-            apply(&mut settings.initial_radius, 1e-3);
-            apply(&mut settings.leaf_delta, 2e-3);
-            apply(&mut settings.delta_min, 1e-3);
-            if settings.ring_points == 0 {
-                settings.ring_points = 48;
-            }
-            apply(&mut settings.integration_dt, 1e-2);
+            apply(&mut settings.initial_radius, default_manifold_eps(), 1e-3);
+            apply(
+                &mut settings.leaf_delta,
+                default_manifold_leaf_delta(),
+                2e-3,
+            );
+            apply(&mut settings.delta_min, default_manifold_delta_min(), 1e-3);
+            apply_usize(
+                &mut settings.ring_points,
+                default_manifold_ring_points(),
+                48,
+            );
+            apply(&mut settings.integration_dt, default_manifold_dt(), 1e-2);
             if settings.min_spacing <= 0.0 {
                 settings.min_spacing = 0.00134;
             }
             if settings.max_spacing <= 0.0 {
                 settings.max_spacing = 0.004;
             }
-            apply(&mut settings.alpha_min, DEFAULT_GEODESIC_ALPHA_MIN);
-            apply(&mut settings.alpha_max, DEFAULT_GEODESIC_ALPHA_MAX);
+            apply(
+                &mut settings.alpha_min,
+                default_manifold_alpha_min(),
+                DEFAULT_GEODESIC_ALPHA_MIN,
+            );
+            apply(
+                &mut settings.alpha_max,
+                default_manifold_alpha_max(),
+                DEFAULT_GEODESIC_ALPHA_MAX,
+            );
             apply(
                 &mut settings.delta_alpha_min,
+                default_manifold_delta_alpha_min(),
                 DEFAULT_GEODESIC_DELTA_ALPHA_MIN,
             );
             apply(
                 &mut settings.delta_alpha_max,
+                default_manifold_delta_alpha_max(),
                 DEFAULT_GEODESIC_DELTA_ALPHA_MAX,
             );
         }
-        Manifold2DProfile::LorenzGlobalKo => {
-            apply(&mut settings.initial_radius, 1.0);
-            apply(&mut settings.leaf_delta, 1.0);
-            apply(&mut settings.delta_min, 0.01);
-            if settings.ring_points == 0 {
-                settings.ring_points = 20;
+        Manifold2DProfile::AdaptiveGlobal => {
+            apply(&mut settings.initial_radius, default_manifold_eps(), 0.2);
+            apply(&mut settings.leaf_delta, default_manifold_leaf_delta(), 0.2);
+            apply(&mut settings.delta_min, default_manifold_delta_min(), 0.001);
+            apply_usize(
+                &mut settings.ring_points,
+                default_manifold_ring_points(),
+                32,
+            );
+            apply(&mut settings.integration_dt, default_manifold_dt(), 5e-3);
+            if settings.min_spacing <= 0.0 {
+                settings.min_spacing = 0.05;
             }
-            apply(&mut settings.integration_dt, 1e-3);
+            if settings.max_spacing <= 0.0 {
+                settings.max_spacing = 0.5;
+            }
+            apply(&mut settings.alpha_min, default_manifold_alpha_min(), 0.3);
+            apply(&mut settings.alpha_max, default_manifold_alpha_max(), 0.4);
+            apply(
+                &mut settings.delta_alpha_min,
+                default_manifold_delta_alpha_min(),
+                0.01,
+            );
+            apply(
+                &mut settings.delta_alpha_max,
+                default_manifold_delta_alpha_max(),
+                1.0,
+            );
+            settings.caps.max_steps = settings.caps.max_steps.max(1500);
+            settings.caps.max_time = settings.caps.max_time.max(100.0);
+        }
+        Manifold2DProfile::LorenzGlobalKo => {
+            apply(&mut settings.initial_radius, default_manifold_eps(), 1.0);
+            apply(&mut settings.leaf_delta, default_manifold_leaf_delta(), 1.0);
+            apply(&mut settings.delta_min, default_manifold_delta_min(), 0.01);
+            apply_usize(
+                &mut settings.ring_points,
+                default_manifold_ring_points(),
+                20,
+            );
+            apply(&mut settings.integration_dt, default_manifold_dt(), 1e-3);
             if settings.min_spacing <= 0.0 {
                 settings.min_spacing = 0.25;
             }
             if settings.max_spacing <= 0.0 {
                 settings.max_spacing = 2.0;
             }
-            apply(&mut settings.alpha_min, 0.3);
-            apply(&mut settings.alpha_max, 0.4);
-            apply(&mut settings.delta_alpha_min, 0.01);
-            apply(&mut settings.delta_alpha_max, 1.0);
+            apply(&mut settings.alpha_min, default_manifold_alpha_min(), 0.3);
+            apply(&mut settings.alpha_max, default_manifold_alpha_max(), 0.4);
+            apply(
+                &mut settings.delta_alpha_min,
+                default_manifold_delta_alpha_min(),
+                0.01,
+            );
+            apply(
+                &mut settings.delta_alpha_max,
+                default_manifold_delta_alpha_max(),
+                1.0,
+            );
             settings.caps.max_steps = settings.caps.max_steps.max(150);
             settings.caps.max_time = settings.caps.max_time.max(50.0);
         }
@@ -450,55 +580,124 @@ fn apply_cycle_2d_profile(settings: &mut ManifoldCycle2DSettings) {
     let Some(profile) = settings.profile else {
         return;
     };
-    let apply = |slot: &mut f64, value: f64| {
-        if !slot.is_finite() || *slot <= 0.0 {
-            *slot = value;
-        }
+    let replace_baseline_defaults = cycle_2d_settings_use_baseline_profile_defaults(settings);
+    let apply = |slot: &mut f64, baseline_default: f64, profile_value: f64| {
+        apply_profile_f64(
+            slot,
+            baseline_default,
+            profile_value,
+            replace_baseline_defaults,
+        );
+    };
+    let apply_usize = |slot: &mut usize, baseline_default: usize, profile_value: usize| {
+        apply_profile_usize(
+            slot,
+            baseline_default,
+            profile_value,
+            replace_baseline_defaults,
+        );
     };
     match profile {
         Manifold2DProfile::LocalPreview => {
-            apply(&mut settings.initial_radius, 1e-3);
-            apply(&mut settings.leaf_delta, 2e-3);
-            apply(&mut settings.delta_min, 1e-3);
-            if settings.ring_points == 0 {
-                settings.ring_points = 48;
-            }
-            apply(&mut settings.integration_dt, 1e-2);
+            apply(&mut settings.initial_radius, default_manifold_eps(), 1e-3);
+            apply(
+                &mut settings.leaf_delta,
+                default_manifold_leaf_delta(),
+                2e-3,
+            );
+            apply(&mut settings.delta_min, default_manifold_delta_min(), 1e-3);
+            apply_usize(
+                &mut settings.ring_points,
+                default_manifold_ring_points(),
+                48,
+            );
+            apply(&mut settings.integration_dt, default_manifold_dt(), 1e-2);
             if settings.min_spacing <= 0.0 {
                 settings.min_spacing = 0.00134;
             }
             if settings.max_spacing <= 0.0 {
                 settings.max_spacing = 0.004;
             }
-            apply(&mut settings.alpha_min, DEFAULT_GEODESIC_ALPHA_MIN);
-            apply(&mut settings.alpha_max, DEFAULT_GEODESIC_ALPHA_MAX);
+            apply(
+                &mut settings.alpha_min,
+                default_manifold_alpha_min(),
+                DEFAULT_GEODESIC_ALPHA_MIN,
+            );
+            apply(
+                &mut settings.alpha_max,
+                default_manifold_alpha_max(),
+                DEFAULT_GEODESIC_ALPHA_MAX,
+            );
             apply(
                 &mut settings.delta_alpha_min,
+                default_manifold_delta_alpha_min(),
                 DEFAULT_GEODESIC_DELTA_ALPHA_MIN,
             );
             apply(
                 &mut settings.delta_alpha_max,
+                default_manifold_delta_alpha_max(),
                 DEFAULT_GEODESIC_DELTA_ALPHA_MAX,
             );
         }
-        Manifold2DProfile::LorenzGlobalKo => {
-            apply(&mut settings.initial_radius, 1.0);
-            apply(&mut settings.leaf_delta, 1.0);
-            apply(&mut settings.delta_min, 0.01);
-            if settings.ring_points == 0 {
-                settings.ring_points = 20;
+        Manifold2DProfile::AdaptiveGlobal => {
+            apply(&mut settings.initial_radius, default_manifold_eps(), 0.2);
+            apply(&mut settings.leaf_delta, default_manifold_leaf_delta(), 0.2);
+            apply(&mut settings.delta_min, default_manifold_delta_min(), 0.001);
+            apply_usize(
+                &mut settings.ring_points,
+                default_manifold_ring_points(),
+                32,
+            );
+            apply(&mut settings.integration_dt, default_manifold_dt(), 5e-3);
+            if settings.min_spacing <= 0.0 {
+                settings.min_spacing = 0.05;
             }
-            apply(&mut settings.integration_dt, 1e-3);
+            if settings.max_spacing <= 0.0 {
+                settings.max_spacing = 0.5;
+            }
+            apply(&mut settings.alpha_min, default_manifold_alpha_min(), 0.3);
+            apply(&mut settings.alpha_max, default_manifold_alpha_max(), 0.4);
+            apply(
+                &mut settings.delta_alpha_min,
+                default_manifold_delta_alpha_min(),
+                0.01,
+            );
+            apply(
+                &mut settings.delta_alpha_max,
+                default_manifold_delta_alpha_max(),
+                1.0,
+            );
+            settings.caps.max_steps = settings.caps.max_steps.max(1500);
+            settings.caps.max_time = settings.caps.max_time.max(100.0);
+        }
+        Manifold2DProfile::LorenzGlobalKo => {
+            apply(&mut settings.initial_radius, default_manifold_eps(), 1.0);
+            apply(&mut settings.leaf_delta, default_manifold_leaf_delta(), 1.0);
+            apply(&mut settings.delta_min, default_manifold_delta_min(), 0.01);
+            apply_usize(
+                &mut settings.ring_points,
+                default_manifold_ring_points(),
+                20,
+            );
+            apply(&mut settings.integration_dt, default_manifold_dt(), 1e-3);
             if settings.min_spacing <= 0.0 {
                 settings.min_spacing = 0.25;
             }
             if settings.max_spacing <= 0.0 {
                 settings.max_spacing = 2.0;
             }
-            apply(&mut settings.alpha_min, 0.3);
-            apply(&mut settings.alpha_max, 0.4);
-            apply(&mut settings.delta_alpha_min, 0.01);
-            apply(&mut settings.delta_alpha_max, 1.0);
+            apply(&mut settings.alpha_min, default_manifold_alpha_min(), 0.3);
+            apply(&mut settings.alpha_max, default_manifold_alpha_max(), 0.4);
+            apply(
+                &mut settings.delta_alpha_min,
+                default_manifold_delta_alpha_min(),
+                0.01,
+            );
+            apply(
+                &mut settings.delta_alpha_max,
+                default_manifold_delta_alpha_max(),
+                1.0,
+            );
             settings.caps.max_steps = settings.caps.max_steps.max(150);
             settings.caps.max_time = settings.caps.max_time.max(50.0);
         }
@@ -899,7 +1098,7 @@ struct RingQuality {
     max_distance_angle: f64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct RingSolve {
     points: Vec<Vec<f64>>,
     base_anchors: Vec<f64>,
@@ -926,7 +1125,6 @@ struct RingBuildFailure {
 enum RingSpacingFailure {
     InvalidCandidate,
     InsertionLeafFailed(LeafFailureKind),
-    NoConvergence,
 }
 
 impl RingSpacingFailure {
@@ -934,7 +1132,6 @@ impl RingSpacingFailure {
         match self {
             RingSpacingFailure::InvalidCandidate => "invalid_candidate",
             RingSpacingFailure::InsertionLeafFailed(_) => "insertion_leaf_failed",
-            RingSpacingFailure::NoConvergence => "no_convergence",
         }
     }
 }
@@ -952,12 +1149,14 @@ struct LeafSample {
     point: Vec<f64>,
     seg_index: usize,
     seg_tau: f64,
-    signed_distance: f64,
+    radial_distance: f64,
+    outward_distance: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LeafFailureKind {
     PlaneSolveNoConvergence,
+    PlaneRootNotBracketed,
     #[allow(dead_code)]
     SegmentSwitchLimitExceeded,
     IntegratorNonFinite,
@@ -968,6 +1167,7 @@ impl LeafFailureKind {
     fn as_str(self) -> &'static str {
         match self {
             LeafFailureKind::PlaneSolveNoConvergence => "PlaneSolveNoConvergence",
+            LeafFailureKind::PlaneRootNotBracketed => "PlaneRootNotBracketed",
             LeafFailureKind::SegmentSwitchLimitExceeded => "SegmentSwitchLimitExceeded",
             LeafFailureKind::IntegratorNonFinite => "IntegratorNonFinite",
             LeafFailureKind::NoFirstHitWithinMaxTime => "NoFirstHitWithinMaxTime",
@@ -995,6 +1195,9 @@ fn record_leaf_failure_diagnostics(
 ) {
     match reason {
         LeafFailureKind::PlaneSolveNoConvergence => diagnostics.leaf_fail_plane_no_convergence += 1,
+        LeafFailureKind::PlaneRootNotBracketed => {
+            diagnostics.leaf_fail_plane_root_not_bracketed += 1
+        }
         LeafFailureKind::SegmentSwitchLimitExceeded => {
             diagnostics.leaf_fail_segment_switch_limit += 1
         }
@@ -1413,7 +1616,8 @@ fn grow_surface_from_ring(
                 }
             };
             let raw_quality = evaluate_ring_quality(&raw_next.points);
-            let geodesic_raw = evaluate_geodesic_quality(prev, prev_in_anchors, &raw_next.points);
+            let geodesic_raw =
+                evaluate_geodesic_quality_for_solve(prev, prev_in_anchors, &raw_next);
             solver_diagnostics.last_ring_max_turn_angle = raw_quality.max_turn_angle;
             solver_diagnostics.last_ring_max_distance_angle = raw_quality.max_distance_angle;
             solver_diagnostics.last_geodesic_max_angle = geodesic_raw.max_angle;
@@ -1451,7 +1655,7 @@ fn grow_surface_from_ring(
                 }
             }
 
-            let mut next = match adapt_ring_spacing(
+            let next = match adapt_ring_spacing(
                 system,
                 prev,
                 prev_in_anchors,
@@ -1500,26 +1704,11 @@ fn grow_surface_from_ring(
                     break;
                 }
             };
-            let target_points = prev.len().clamp(4, max_ring_points.max(4));
-            let (reparam_points, reparam_anchors) = resample_closed_ring_with_anchors_arclength(
-                &next.points,
-                &next.in_anchors,
-                target_points,
-            );
-            let base_anchors: Vec<f64> = (0..reparam_points.len())
-                .map(|idx| (idx as f64) / (reparam_points.len().max(1) as f64))
-                .collect();
-            next = RingSolve {
-                points: reparam_points,
-                in_anchors: reparam_anchors,
-                base_anchors,
-            };
-            regularize_ring_correspondence_outliers(prev, &mut next.points, used_delta);
             let adapted_quality = evaluate_ring_quality(&next.points);
             solver_diagnostics.last_ring_max_turn_angle = adapted_quality.max_turn_angle;
             solver_diagnostics.last_ring_max_distance_angle = adapted_quality.max_distance_angle;
             let edge_ratio = ring_edge_ratio(&next.points);
-            if edge_ratio > RING_EDGE_RATIO_MAX
+            if !edge_ratio.is_finite()
                 || adapted_quality.max_turn_angle > RING_TURN_REPARAM_TRIGGER_RAD
             {
                 solver_diagnostics.reject_ring_quality += 1;
@@ -1549,45 +1738,35 @@ fn grow_surface_from_ring(
                 }
                 break;
             }
-            let mut geodesic_adapt = evaluate_geodesic_quality(prev, prev_in_anchors, &next.points);
+            let geodesic_adapt = evaluate_geodesic_quality_for_solve(prev, prev_in_anchors, &next);
             solver_diagnostics.last_geodesic_max_angle = geodesic_adapt.max_angle;
             solver_diagnostics.last_geodesic_max_distance_angle = geodesic_adapt.max_delta_angle;
             if geodesic_adapt.max_delta_angle > controls.delta_alpha_max {
-                regularize_ring_correspondence_outliers(prev, &mut next.points, used_delta * 0.5);
-                geodesic_adapt = evaluate_geodesic_quality(prev, prev_in_anchors, &next.points);
-                solver_diagnostics.last_geodesic_max_angle = geodesic_adapt.max_angle;
-                solver_diagnostics.last_geodesic_max_distance_angle =
-                    geodesic_adapt.max_delta_angle;
-                if geodesic_adapt.max_delta_angle > controls.delta_alpha_max {
-                    solver_diagnostics.reject_geodesic_quality += 1;
-                    solver_diagnostics.failed_ring = Some(ring_index + 1);
-                    solver_diagnostics.failed_attempt = Some(attempt + 1);
-                    last_failure = Some((
-                        SurfaceTerminationReason::GeodesicQualityRejected,
-                        format!(
-                            "ring={} attempt={} delta={:.6e}: post-spacing geodesic reject distance_angle={:.4e}",
-                            ring_index,
-                            attempt,
-                            used_delta,
-                            geodesic_adapt.max_delta_angle
-                        ),
-                    ));
-                    if used_delta > delta_min + 1e-12 && attempt + 1 < LEAF_REFINE_ATTEMPTS {
-                        used_delta = (used_delta * LEAF_DELTA_SHRINK).max(delta_min);
-                        reported_leaf_delta = used_delta;
-                        if used_delta <= delta_min + 1e-12 {
-                            solver_diagnostics.min_leaf_delta_reached = true;
-                        }
-                        continue;
-                    }
+                solver_diagnostics.reject_geodesic_quality += 1;
+                solver_diagnostics.failed_ring = Some(ring_index + 1);
+                solver_diagnostics.failed_attempt = Some(attempt + 1);
+                last_failure = Some((
+                    SurfaceTerminationReason::GeodesicQualityRejected,
+                    format!(
+                        "ring={} attempt={} delta={:.6e}: post-spacing geodesic reject distance_angle={:.4e}",
+                        ring_index,
+                        attempt,
+                        used_delta,
+                        geodesic_adapt.max_delta_angle
+                    ),
+                ));
+                if used_delta > delta_min + 1e-12 && attempt + 1 < LEAF_REFINE_ATTEMPTS {
+                    used_delta = (used_delta * LEAF_DELTA_SHRINK).max(delta_min);
+                    reported_leaf_delta = used_delta;
                     if used_delta <= delta_min + 1e-12 {
                         solver_diagnostics.min_leaf_delta_reached = true;
-                        // At the delta floor, keep the clamped best-effort ring so a single
-                        // stubborn correspondence defect cannot terminate growth immediately.
-                    } else {
-                        break;
                     }
+                    continue;
                 }
+                if used_delta <= delta_min + 1e-12 {
+                    solver_diagnostics.min_leaf_delta_reached = true;
+                }
+                break;
             }
 
             if next.points.len() < 4 {
@@ -1813,11 +1992,11 @@ fn build_next_ring(
 
     if !failures.is_empty() {
         let mut unresolved: Vec<(usize, LeafFailure)> = Vec::new();
-        let synth_failure_budget = LEAF_SYNTH_MAX_FAILURES
+        let retry_failure_budget = LEAF_RETRY_MAX_FAILURES
             .max((m / 3).max(1))
             .min(m.saturating_sub(4).max(1));
-        if failures.len() <= synth_failure_budget {
-            for (i, failure) in failures {
+        if failures.len() <= retry_failure_budget {
+            for (i, _failure) in failures {
                 let s = (i as f64) / (m as f64);
                 let base_point = &prev_ring[i];
                 let base_in_anchor = prev_in_anchors.get(i).unwrap_or(base_point);
@@ -1851,77 +2030,12 @@ fn build_next_ring(
                         hits[i] = Some(hit);
                     }
                     Err(retry_failure) => {
-                        if matches!(
-                            retry_failure.kind,
-                            LeafFailureKind::IntegratorNonFinite
-                                | LeafFailureKind::NoFirstHitWithinMaxTime
-                                | LeafFailureKind::PlaneSolveNoConvergence
-                        ) {
-                            if let Some(synthetic) = synthesize_leaf_hit_from_neighbors(
-                                &hits,
-                                prev_ring,
-                                prev_in_anchors,
-                                i,
-                                &tangent,
-                                &outward_default,
-                                leaf_delta,
-                            ) {
-                                if std::env::var("FORK_MANIFOLD_DEBUG").is_ok() {
-                                    eprintln!(
-                                        "leaf synthesized: i={} original={} retry={}",
-                                        i,
-                                        failure.kind.as_str(),
-                                        retry_failure.kind.as_str()
-                                    );
-                                }
-                                hits[i] = Some(synthetic);
-                                continue;
-                            }
-                        }
                         unresolved.push((i, retry_failure));
                     }
                 }
             }
         } else {
             unresolved = failures;
-        }
-        if hits.iter().any(|hit| hit.is_none()) {
-            for _ in 0..m {
-                let mut progress = false;
-                for i in 0..m {
-                    if hits[i].is_some() {
-                        continue;
-                    }
-                    let base_point = &prev_ring[i];
-                    let base_in_anchor = prev_in_anchors.get(i).unwrap_or(base_point);
-                    let tangent = ring_tangent_neighbor_average(prev_ring, i);
-                    let outward_default =
-                        outward_from_in_anchor(base_point, base_in_anchor, &tangent)
-                            .or_else(|_| canonical_orthogonal_unit(&tangent))
-                            .unwrap_or_else(|_| {
-                                let mut fallback = vec![0.0; base_point.len()];
-                                if let Some(first) = fallback.first_mut() {
-                                    *first = 1.0;
-                                }
-                                fallback
-                            });
-                    if let Some(synthetic) = synthesize_leaf_hit_from_neighbors(
-                        &hits,
-                        prev_ring,
-                        prev_in_anchors,
-                        i,
-                        &tangent,
-                        &outward_default,
-                        leaf_delta,
-                    ) {
-                        hits[i] = Some(synthetic);
-                        progress = true;
-                    }
-                }
-                if !progress {
-                    break;
-                }
-            }
         }
         unresolved.retain(|(idx, _)| match hits.get(*idx) {
             Some(Some(_)) => false,
@@ -2081,85 +2195,6 @@ fn leaf_outward_hint_from_neighbors(
     normalize(hint).ok()
 }
 
-fn synthesize_leaf_hit_from_neighbors(
-    hits: &[Option<LeafHit>],
-    prev_ring: &[Vec<f64>],
-    prev_in_anchors: &[Vec<f64>],
-    index: usize,
-    tangent: &[f64],
-    outward: &[f64],
-    leaf_delta: f64,
-) -> Option<LeafHit> {
-    let base_point = prev_ring.get(index)?;
-    let dim = base_point.len();
-    if dim == 0 || outward.len() != dim {
-        return None;
-    }
-    let mut displacement =
-        averaged_neighbor_displacement(hits, prev_ring, index).unwrap_or_else(|| outward.to_vec());
-    if displacement.len() != dim {
-        displacement = outward.to_vec();
-    }
-    if tangent.len() == dim {
-        if let Ok(tangent_unit) = normalize(tangent.to_vec()) {
-            let projection = dot(&displacement, &tangent_unit);
-            for d in 0..dim {
-                displacement[d] -= projection * tangent_unit[d];
-            }
-        }
-    }
-
-    let target_distance = {
-        let prev_idx = nearest_successful_leaf_index(hits, index, false);
-        let next_idx = nearest_successful_leaf_index(hits, index, true);
-        let mut sum = 0.0_f64;
-        let mut count = 0usize;
-        for idx in [prev_idx, next_idx].into_iter().flatten() {
-            let hit = hits.get(idx)?.as_ref()?;
-            let local = subtract(&hit.point, prev_ring.get(idx)?);
-            let norm = l2_norm(&local);
-            if norm.is_finite() && norm > NORM_EPS {
-                sum += norm;
-                count += 1;
-            }
-        }
-        let base = if count > 0 {
-            sum / (count as f64)
-        } else {
-            leaf_delta.max(1e-9)
-        };
-        base.clamp(0.25 * leaf_delta.max(1e-9), 4.0 * leaf_delta.max(1e-9))
-    };
-
-    let direction = if let Ok(unit) = normalize(displacement) {
-        unit
-    } else {
-        normalize(outward.to_vec()).ok()?
-    };
-    if !direction.iter().all(|value| value.is_finite()) {
-        return None;
-    }
-    let mut point = base_point.clone();
-    for d in 0..dim {
-        point[d] += target_distance * direction[d];
-    }
-    if !point.iter().all(|value| value.is_finite()) {
-        return None;
-    }
-
-    let m = prev_ring.len().max(1);
-    let in_anchor = prev_in_anchors
-        .get(index)
-        .cloned()
-        .unwrap_or_else(|| base_point.clone());
-    Some(LeafHit {
-        point,
-        tau_hit: 0.0,
-        base_anchor: (index as f64) / (m as f64),
-        in_anchor,
-    })
-}
-
 fn adapt_ring_spacing(
     system: &EquationSystem,
     prev_ring: &[Vec<f64>],
@@ -2183,11 +2218,6 @@ fn adapt_ring_spacing(
         )
         .max(4);
 
-    let build_uniform_base_anchors = |len: usize| -> Vec<f64> {
-        (0..len)
-            .map(|idx| (idx as f64) / (len.max(1) as f64))
-            .collect()
-    };
     if raw_next.points.len() < 4
         || raw_next.base_anchors.len() != raw_next.points.len()
         || raw_next.in_anchors.len() != raw_next.points.len()
@@ -2195,16 +2225,7 @@ fn adapt_ring_spacing(
         return Err(RingSpacingFailure::InvalidCandidate);
     }
     if raw_next.points.len() > adaptive_point_cap {
-        let (points, in_anchors) = resample_closed_ring_with_anchors_arclength(
-            &raw_next.points,
-            &raw_next.in_anchors,
-            adaptive_point_cap,
-        );
-        return Ok(RingSolve {
-            points,
-            base_anchors: build_uniform_base_anchors(in_anchors.len()),
-            in_anchors,
-        });
+        return Ok(raw_next);
     }
 
     let mut ring = raw_next;
@@ -2219,11 +2240,7 @@ fn adapt_ring_spacing(
             let m = ring.points.len();
             let j = (i + 1) % m;
             let spacing = l2_distance(&ring.points[i], &ring.points[j]);
-            let angle_j = ring_vertex_angle(&ring.points, j);
-            if spacing < min_spacing
-                && angle_j < LOW_TURN_ANGLE_RAD
-                && spacing * angle_j < LOW_DISTANCE_ANGLE
-            {
+            if spacing < min_spacing {
                 ring.points.remove(j);
                 ring.base_anchors.remove(j);
                 ring.in_anchors.remove(j);
@@ -2252,28 +2269,14 @@ fn adapt_ring_spacing(
             if !needs_insert {
                 continue;
             }
-            if points.len() >= adaptive_point_cap {
+            let remaining_originals = m.saturating_sub(i + 1);
+            if points.len() + 1 + remaining_originals > adaptive_point_cap {
                 insertion_budget_exhausted = true;
-                break;
+                continue;
             }
             let base_s_mid = circular_midpoint(ring.base_anchors[i], ring.base_anchors[j]);
             let base_point = sample_ring_uniform(prev_ring, base_s_mid);
             let base_in_anchor = sample_ring_uniform(prev_in_anchors, base_s_mid);
-            if spacing > max_spacing * RING_SPACING_DIRECT_INSERT_FACTOR {
-                if let Some((point, in_anchor)) = synthesize_spacing_insertion_point(
-                    &ring.points[i],
-                    &ring.points[j],
-                    &ring.in_anchors[i],
-                    &ring.in_anchors[j],
-                    &base_in_anchor,
-                ) {
-                    points.push(point);
-                    base_anchors.push(base_s_mid);
-                    in_anchors.push(in_anchor);
-                    changed = true;
-                    continue;
-                }
-            }
             let tangent = ring_tangent_uniform(prev_ring, base_s_mid);
             let outward = outward_from_in_anchor(&base_point, &base_in_anchor, &tangent)
                 .or_else(|_| canonical_orthogonal_unit(&tangent))
@@ -2305,35 +2308,6 @@ fn adapt_ring_spacing(
                     in_anchors.push(hit.in_anchor);
                 }
                 Err(failure) => {
-                    if matches!(
-                        failure.kind,
-                        LeafFailureKind::IntegratorNonFinite
-                            | LeafFailureKind::NoFirstHitWithinMaxTime
-                            | LeafFailureKind::PlaneSolveNoConvergence
-                    ) {
-                        if let Some((point, in_anchor)) = synthesize_spacing_insertion_point(
-                            &ring.points[i],
-                            &ring.points[j],
-                            &ring.in_anchors[i],
-                            &ring.in_anchors[j],
-                            &base_in_anchor,
-                        ) {
-                            if std::env::var("FORK_MANIFOLD_DEBUG").is_ok() {
-                                eprintln!(
-                                    "spacing insertion synthesized: edge=({},{}) base_s={:.6} reason={}",
-                                    i,
-                                    j,
-                                    base_s_mid,
-                                    failure.kind.as_str()
-                                );
-                            }
-                            points.push(point);
-                            base_anchors.push(base_s_mid);
-                            in_anchors.push(in_anchor);
-                            changed = true;
-                            continue;
-                        }
-                    }
                     return Err(RingSpacingFailure::InsertionLeafFailed(failure.kind));
                 }
             }
@@ -2353,56 +2327,13 @@ fn adapt_ring_spacing(
         }
     }
 
-    if ring.points.len() > adaptive_point_cap {
-        let (points, in_anchors) = resample_closed_ring_with_anchors_arclength(
-            &ring.points,
-            &ring.in_anchors,
-            adaptive_point_cap,
-        );
-        ring = RingSolve {
-            points,
-            base_anchors: build_uniform_base_anchors(in_anchors.len()),
-            in_anchors,
-        };
-    }
     if ring.points.len() < 4 {
         return Err(RingSpacingFailure::InvalidCandidate);
     }
-    Err(RingSpacingFailure::NoConvergence)
+    Ok(ring)
 }
 
-fn synthesize_spacing_insertion_point(
-    left_point: &[f64],
-    right_point: &[f64],
-    left_in_anchor: &[f64],
-    right_in_anchor: &[f64],
-    fallback_in_anchor: &[f64],
-) -> Option<(Vec<f64>, Vec<f64>)> {
-    if left_point.len() != right_point.len() || left_point.is_empty() {
-        return None;
-    }
-    let point = lerp(left_point, right_point, 0.5);
-    if !point.iter().all(|value| value.is_finite()) {
-        return None;
-    }
-
-    let in_anchor =
-        if left_in_anchor.len() == right_in_anchor.len() && left_in_anchor.len() == point.len() {
-            let candidate = lerp(left_in_anchor, right_in_anchor, 0.5);
-            if candidate.iter().all(|value| value.is_finite()) {
-                candidate
-            } else {
-                fallback_in_anchor.to_vec()
-            }
-        } else {
-            fallback_in_anchor.to_vec()
-        };
-    if in_anchor.len() != point.len() || !in_anchor.iter().all(|value| value.is_finite()) {
-        return None;
-    }
-    Some((point, in_anchor))
-}
-
+#[cfg(test)]
 fn median_finite(values: &[f64]) -> Option<f64> {
     let mut finite: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
     if finite.is_empty() {
@@ -2417,6 +2348,7 @@ fn median_finite(values: &[f64]) -> Option<f64> {
     }
 }
 
+#[cfg(test)]
 fn regularize_ring_correspondence_outliers(
     prev_ring: &[Vec<f64>],
     next_ring: &mut [Vec<f64>],
@@ -2492,22 +2424,57 @@ fn evaluate_ring_quality(ring: &[Vec<f64>]) -> RingQuality {
     quality
 }
 
+#[cfg(test)]
 fn evaluate_geodesic_quality(
     prev_ring: &[Vec<f64>],
     prev_in_anchors: &[Vec<f64>],
     next_ring: &[Vec<f64>],
 ) -> GeodesicQuality {
+    if next_ring.len() != prev_ring.len() {
+        return GeodesicQuality::default();
+    }
+    let base_anchors: Vec<f64> = (0..next_ring.len())
+        .map(|idx| (idx as f64) / (next_ring.len().max(1) as f64))
+        .collect();
+    evaluate_geodesic_quality_with_anchors(prev_ring, prev_in_anchors, next_ring, &base_anchors)
+}
+
+fn evaluate_geodesic_quality_for_solve(
+    prev_ring: &[Vec<f64>],
+    prev_in_anchors: &[Vec<f64>],
+    next: &RingSolve,
+) -> GeodesicQuality {
+    if next.points.len() != next.base_anchors.len() {
+        return GeodesicQuality::default();
+    }
+    evaluate_geodesic_quality_with_anchors(
+        prev_ring,
+        prev_in_anchors,
+        &next.points,
+        &next.base_anchors,
+    )
+}
+
+fn evaluate_geodesic_quality_with_anchors(
+    prev_ring: &[Vec<f64>],
+    prev_in_anchors: &[Vec<f64>],
+    next_ring: &[Vec<f64>],
+    base_anchors: &[f64],
+) -> GeodesicQuality {
     if prev_ring.is_empty()
         || prev_in_anchors.len() != prev_ring.len()
-        || next_ring.len() != prev_ring.len()
+        || next_ring.len() != base_anchors.len()
     {
         return GeodesicQuality::default();
     }
-
     let mut quality = GeodesicQuality::default();
-    for idx in 0..prev_ring.len() {
-        let p = &prev_in_anchors[idx];
-        let r = &prev_ring[idx];
+    for idx in 0..next_ring.len() {
+        let s = base_anchors[idx];
+        if !s.is_finite() {
+            continue;
+        }
+        let p = sample_ring_uniform(prev_in_anchors, s);
+        let r = sample_ring_uniform(prev_ring, s);
         let b = &next_ring[idx];
         if p.len() != r.len() || r.len() != b.len() || r.is_empty() {
             continue;
@@ -2823,20 +2790,7 @@ fn eval_plane_residual_and_derivative_on_segment(
         return Err(LeafFailureKind::PlaneSolveNoConvergence);
     }
     let (start, dldt) = segment_point_with_derivative(ring, segment_index, tau_segment);
-    let residual_at = |tau_seg: f64| -> Option<f64> {
-        let (seed, _dseed) = segment_point_with_derivative(ring, segment_index, tau_seg);
-        let point = integrate_state_only(
-            system,
-            &seed,
-            tau_time,
-            sigma,
-            dt,
-            max_steps_per_leaf,
-            max_time,
-        )?;
-        Some(dot(leaf_normal, &subtract(&point, base_point)))
-    };
-    let point = integrate_state_only(
+    let (point, mut deriv) = if let Some((point_var, phi)) = integrate_state_and_variational(
         system,
         &start,
         tau_time,
@@ -2844,15 +2798,44 @@ fn eval_plane_residual_and_derivative_on_segment(
         dt,
         max_steps_per_leaf,
         max_time,
-    )
-    .ok_or(LeafFailureKind::IntegratorNonFinite)?;
+    ) {
+        let deriv_var = mat_vec_mul_row_major(&phi, &dldt)
+            .map(|transported| dot(leaf_normal, &transported))
+            .unwrap_or(0.0);
+        (point_var, deriv_var)
+    } else {
+        let point = integrate_state_only(
+            system,
+            &start,
+            tau_time,
+            sigma,
+            dt,
+            max_steps_per_leaf,
+            max_time,
+        )
+        .ok_or(LeafFailureKind::IntegratorNonFinite)?;
+        (point, 0.0)
+    };
     let residual = dot(leaf_normal, &subtract(&point, base_point));
 
-    let fd_eps = LEAF_TAU_DERIV_FD_EPS.max(1e-6);
-    let mut deriv = {
+    if !deriv.is_finite() || deriv.abs() <= LEAF_PLANE_DERIV_EPS {
+        let residual_at = |tau_seg: f64| -> Option<f64> {
+            let (seed, _dseed) = segment_point_with_derivative(ring, segment_index, tau_seg);
+            let point = integrate_state_only(
+                system,
+                &seed,
+                tau_time,
+                sigma,
+                dt,
+                max_steps_per_leaf,
+                max_time,
+            )?;
+            Some(dot(leaf_normal, &subtract(&point, base_point)))
+        };
+        let fd_eps = LEAF_TAU_DERIV_FD_EPS.max(1e-6);
         let forward_tau = (tau_segment + fd_eps).min(1.0);
         let backward_tau = (tau_segment - fd_eps).max(0.0);
-        if forward_tau - tau_segment > 1e-12 {
+        deriv = if forward_tau - tau_segment > 1e-12 {
             if let Some(h_forward) = residual_at(forward_tau) {
                 (h_forward - residual) / (forward_tau - tau_segment)
             } else {
@@ -2866,25 +2849,7 @@ fn eval_plane_residual_and_derivative_on_segment(
             }
         } else {
             0.0
-        }
-    };
-    if !deriv.is_finite() || deriv.abs() <= LEAF_PLANE_DERIV_EPS {
-        if let Some((_point_var, phi)) = integrate_state_and_variational(
-            system,
-            &start,
-            tau_time,
-            sigma,
-            dt,
-            max_steps_per_leaf,
-            max_time,
-        ) {
-            if let Some(transported) = mat_vec_mul_row_major(&phi, &dldt) {
-                let deriv_var = dot(leaf_normal, &transported);
-                if deriv_var.is_finite() {
-                    deriv = deriv_var;
-                }
-            }
-        }
+        };
     }
     if !deriv.is_finite() {
         deriv = 0.0;
@@ -3081,52 +3046,6 @@ fn try_solve_plane_root_on_segment(
     Ok(None)
 }
 
-fn relaxed_plane_projection_on_ring(
-    system: &EquationSystem,
-    ring: &[Vec<f64>],
-    base_point: &[f64],
-    leaf_normal: &[f64],
-    tau_time: f64,
-    sigma: f64,
-    dt: f64,
-    max_steps_per_leaf: usize,
-    max_time: f64,
-) -> Result<Option<(usize, f64, Vec<f64>, Vec<f64>)>, LeafFailureKind> {
-    if ring.is_empty() {
-        return Ok(None);
-    }
-    let mut best_abs_h = f64::INFINITY;
-    let mut best_candidate: Option<(usize, f64, Vec<f64>, Vec<f64>)> = None;
-    let sample_taus = [0.0_f64, 0.25, 0.5, 0.75, 1.0];
-    for seg in 0..ring.len() {
-        for tau in sample_taus {
-            let (h, _dh, start, end) = eval_plane_residual_and_derivative_on_segment(
-                system,
-                ring,
-                base_point,
-                leaf_normal,
-                seg,
-                tau_time,
-                tau,
-                sigma,
-                dt,
-                max_steps_per_leaf,
-                max_time,
-            )?;
-            let abs_h = h.abs();
-            if abs_h < best_abs_h {
-                best_abs_h = abs_h;
-                best_candidate = Some((seg, canonicalize_segment_tau(tau), start, end));
-            }
-        }
-    }
-
-    if best_abs_h.is_finite() {
-        return Ok(best_candidate);
-    }
-    Ok(None)
-}
-
 fn solve_plane_root_polygon(
     system: &EquationSystem,
     ring: &[Vec<f64>],
@@ -3281,20 +3200,6 @@ fn solve_plane_root_polygon_with_switch_cap(
         }
     }
 
-    if let Some((segment, tau, start, end)) = relaxed_plane_projection_on_ring(
-        system,
-        ring,
-        base_point,
-        leaf_normal,
-        tau_time,
-        sigma,
-        dt,
-        max_steps_per_leaf,
-        max_time,
-    )? {
-        return Ok((segment, tau, start, end));
-    }
-
     Err(LeafFailureKind::PlaneSolveNoConvergence)
 }
 
@@ -3352,13 +3257,23 @@ fn evaluate_leaf_sample_at_time(
         Err(reason) => return Err(reason),
     };
     let offset = subtract(&point, base_point);
-    let uz = signed_distance_with_direction(signed_direction, &offset);
+    let radial_distance = l2_norm(&offset);
+    let outward_distance = signed_distance_with_direction(signed_direction, &offset);
     Ok(LeafSample {
         point,
         seg_index,
         seg_tau,
-        signed_distance: uz,
+        radial_distance,
+        outward_distance,
     })
+}
+
+fn leaf_sample_reaches_delta(sample: &LeafSample, leaf_delta: f64, outward_tol: f64) -> bool {
+    sample.radial_distance >= leaf_delta && sample.outward_distance >= -outward_tol
+}
+
+fn leaf_delta_error(sample: &LeafSample, leaf_delta: f64) -> f64 {
+    (sample.radial_distance - leaf_delta).abs()
 }
 
 fn solve_leaf_point_with_retries(
@@ -3467,15 +3382,14 @@ fn shoot_leaf_point(
     let (mut seg_idx, mut seg_tau) = uniform_s_to_segment_tau(ring.len(), base_s);
     let plane_tol = (leaf_delta * LEAF_PLANE_TOL_FACTOR).max(1e-8);
     let dist_tol = (leaf_delta * LEAF_DISTANCE_TOL_FACTOR).max(1e-8);
+    let outward_tol = (leaf_delta * 1e-6).max(1e-10);
     let mut prev_time = 0.0;
     let mut prev_sample = LeafSample {
         point: base_point.to_vec(),
         seg_index: seg_idx,
         seg_tau,
-        signed_distance: signed_distance_with_direction(
-            &signed_direction,
-            &vec![0.0; base_point.len()],
-        ),
+        radial_distance: 0.0,
+        outward_distance: 0.0,
     };
 
     while prev_time < max_time {
@@ -3510,7 +3424,9 @@ fn shoot_leaf_point(
             }
         };
 
-        if prev_sample.signed_distance < leaf_delta && curr_sample.signed_distance >= leaf_delta {
+        if !leaf_sample_reaches_delta(&prev_sample, leaf_delta, outward_tol)
+            && leaf_sample_reaches_delta(&curr_sample, leaf_delta, outward_tol)
+        {
             let mut left_time = prev_time;
             let mut right_time = tau_time;
             let mut left_sample = prev_sample.clone();
@@ -3550,7 +3466,7 @@ fn shoot_leaf_point(
                     }
                 };
 
-                if mid_sample.signed_distance >= leaf_delta {
+                if leaf_sample_reaches_delta(&mid_sample, leaf_delta, outward_tol) {
                     right_time = mid_time;
                     right_sample = mid_sample.clone();
                 } else {
@@ -3558,7 +3474,9 @@ fn shoot_leaf_point(
                     left_sample = mid_sample.clone();
                 }
 
-                if (mid_sample.signed_distance - leaf_delta).abs() <= dist_tol {
+                if leaf_sample_reaches_delta(&mid_sample, leaf_delta, outward_tol)
+                    && leaf_delta_error(&mid_sample, leaf_delta) <= dist_tol
+                {
                     return Ok(LeafHit {
                         point: mid_sample.point,
                         tau_hit: mid_time,
@@ -3568,8 +3486,8 @@ fn shoot_leaf_point(
                 }
             }
 
-            if right_sample.signed_distance >= leaf_delta
-                && (right_sample.signed_distance - leaf_delta).abs() <= 10.0 * dist_tol
+            if leaf_sample_reaches_delta(&right_sample, leaf_delta, outward_tol)
+                && leaf_delta_error(&right_sample, leaf_delta) <= 10.0 * dist_tol
             {
                 return Ok(LeafHit {
                     point: right_sample.point,
@@ -3578,11 +3496,10 @@ fn shoot_leaf_point(
                     in_anchor: base_point.to_vec(),
                 });
             }
-            // Robust fallback: if we bracketed the first hit but refinement could not
-            // satisfy a tight distance tolerance, keep the closer bracket endpoint.
-            let right_err = (right_sample.signed_distance - leaf_delta).abs();
-            let left_err = (left_sample.signed_distance - leaf_delta).abs();
-            if right_err <= left_err {
+            // Robust fallback: if we bracketed the first outward Euclidean hit but
+            // refinement could not satisfy a tight distance tolerance, keep the
+            // reached endpoint rather than accepting a below-delta point.
+            if leaf_sample_reaches_delta(&right_sample, leaf_delta, outward_tol) {
                 return Ok(LeafHit {
                     point: right_sample.point,
                     tau_hit: right_time,
@@ -3590,11 +3507,11 @@ fn shoot_leaf_point(
                     in_anchor: base_point.to_vec(),
                 });
             }
-            return Ok(LeafHit {
-                point: left_sample.point,
-                tau_hit: left_time,
-                base_anchor: base_s.rem_euclid(1.0),
-                in_anchor: base_point.to_vec(),
+            return Err(LeafFailure {
+                kind: LeafFailureKind::PlaneRootNotBracketed,
+                last_time: left_time,
+                last_segment: left_sample.seg_index,
+                last_tau: left_sample.seg_tau,
             });
         }
 
@@ -3801,6 +3718,7 @@ fn circular_lerp(a: f64, b: f64, alpha: f64) -> f64 {
     (a + alpha.clamp(0.0, 1.0) * (rhs - a)).rem_euclid(1.0)
 }
 
+#[cfg(test)]
 fn circular_delta(from: f64, to: f64) -> f64 {
     let mut delta = to - from;
     if delta > 0.5 {
@@ -3860,39 +3778,57 @@ fn triangulate_ring_bands(rings: &[Vec<Vec<f64>>], ring_offsets: &[usize]) -> Ve
             }
         }
 
-        let a_alpha = normalized_ring_arclength_params(a_ring);
-        let b_beta = normalized_ring_arclength_params(b_ring);
+        let a_order: Vec<usize> = (0..m).map(|step| (best_i + step) % m).collect();
+        let b_order: Vec<usize> = (0..n).map(|step| (best_j + step) % n).collect();
+        let a_alpha = ring_progress_from_start(&normalized_ring_arclength_params(a_ring), best_i);
+        let b_beta = ring_progress_from_start(&normalized_ring_arclength_params(b_ring), best_j);
 
-        let mut i = best_i;
-        let mut j = best_j;
         let mut advanced_a = 0usize;
         let mut advanced_b = 0usize;
         while advanced_a < m || advanced_b < n {
-            let a_i = a0 + i;
-            let b_j = b0 + j;
+            let a_i = a0 + a_order[advanced_a % m];
+            let b_j = b0 + b_order[advanced_b % n];
             let advance_a = if advanced_a >= m {
                 false
             } else if advanced_b >= n {
                 true
             } else {
-                let a_step = circular_delta(a_alpha[i], a_alpha[(i + 1) % m]).abs();
-                let b_step = circular_delta(b_beta[j], b_beta[(j + 1) % n]).abs();
-                a_step <= b_step
+                a_alpha[advanced_a + 1] <= b_beta[advanced_b + 1]
             };
             if advance_a {
-                let i_next = (i + 1) % m;
+                let i_next = a_order[(advanced_a + 1) % m];
                 triangles.extend_from_slice(&[a_i, b_j, a0 + i_next]);
-                i = i_next;
                 advanced_a += 1;
             } else {
-                let j_next = (j + 1) % n;
+                let j_next = b_order[(advanced_b + 1) % n];
                 triangles.extend_from_slice(&[a_i, b_j, b0 + j_next]);
-                j = j_next;
                 advanced_b += 1;
             }
         }
     }
     triangles
+}
+
+fn ring_progress_from_start(params: &[f64], start: usize) -> Vec<f64> {
+    if params.is_empty() {
+        return Vec::new();
+    }
+    let len = params.len();
+    let base = params[start % len];
+    let mut progress = Vec::with_capacity(len + 1);
+    for step in 0..=len {
+        if step == len {
+            progress.push(1.0);
+            continue;
+        }
+        let index = (start + step) % len;
+        let mut value = params[index] - base;
+        if value < -NORM_EPS {
+            value += 1.0;
+        }
+        progress.push(value.clamp(0.0, 1.0));
+    }
+    progress
 }
 
 fn normalized_ring_arclength_params(ring: &[Vec<f64>]) -> Vec<f64> {
@@ -6384,6 +6320,7 @@ mod tests {
             select_2d_equilibrium_basis(&system, &equilibrium, ManifoldStability::Stable, None)
                 .expect("basis");
         let ring = build_equilibrium_initial_ring(&equilibrium, &basis.e1, &basis.e2, 1e-3, 48);
+        let leaf_delta = 0.002;
         let point = (0..ring.len()).find_map(|i| {
             let s = (i as f64) / (ring.len() as f64);
             let base = &ring[i];
@@ -6396,7 +6333,7 @@ mod tests {
                 s,
                 &tangent,
                 &outward,
-                0.002,
+                leaf_delta,
                 -1.0,
                 0.01,
                 150,
@@ -6404,10 +6341,22 @@ mod tests {
                 Some(&equilibrium),
             )
             .ok()
+            .map(|hit| (base.clone(), outward, hit))
         });
         assert!(
             point.is_some(),
             "expected a valid leaf intersection for Lorenz stable manifold"
+        );
+        let (base, outward, hit) = point.expect("leaf hit");
+        let offset = subtract(&hit.point, &base);
+        let distance = l2_norm(&offset);
+        assert!(
+            (distance - leaf_delta).abs() <= leaf_delta * 1e-2,
+            "leaf hit should control Euclidean distance: got {distance}, target {leaf_delta}"
+        );
+        assert!(
+            signed_distance_with_direction(&outward, &offset) >= -1e-9,
+            "leaf hit should remain in the outward half-leaf"
         );
     }
 
@@ -6544,22 +6493,22 @@ mod tests {
     }
 
     #[test]
-    fn manifold_eq_2d_plane_root_polygon_relaxed_projection_recovers_far_segment_root() {
-        let system = build_system(&["0", "-1", "0"], &["x", "y", "z"], &[]);
+    fn manifold_eq_2d_plane_root_polygon_reports_failure_without_relaxed_projection() {
+        let system = build_system(&["0", "0", "0"], &["x", "y", "z"], &[]);
         let ring = vec![
             vec![1.0, 0.0, 0.0],  // r0
             vec![0.0, 1.0, 0.0],  // r1
             vec![-1.0, 0.0, 0.0], // r2
             vec![0.0, -1.0, 0.0], // r3
         ];
-        let base_point = &ring[2];
+        let base_point = vec![10.0, 0.0, 0.0];
         let plane_normal = vec![1.0, 0.0, 0.0];
         let plane_tol = 1e-12;
 
-        let (seg, tau, start, end) = solve_plane_root_polygon_with_switch_cap(
+        let failure = solve_plane_root_polygon_with_switch_cap(
             &system,
             &ring,
-            base_point,
+            &base_point,
             &plane_normal,
             0.5,
             0,
@@ -6571,31 +6520,8 @@ mod tests {
             plane_tol,
             Some(1),
         )
-        .expect("relaxed projection fallback should recover nearest plane-consistent segment");
-        assert!(
-            seg == 2 || seg == 3,
-            "expected relaxed fallback to find segment touching base point, got segment {seg}"
-        );
-        if seg == 2 {
-            assert!(
-                tau.abs() <= 1e-12,
-                "expected tau near 0 on segment 2, got {tau}"
-            );
-        } else {
-            assert!(
-                (tau - 1.0).abs() <= 1e-12,
-                "expected tau near 1 on segment 3, got {tau}"
-            );
-        }
-        assert!(
-            l2_distance(&start, base_point) <= 1e-12,
-            "expected startpoint to match base point"
-        );
-        let residual = dot(&plane_normal, &subtract(&end, base_point));
-        assert!(
-            residual.abs() <= plane_tol,
-            "plane residual should satisfy tolerance after relaxed fallback, got {residual}"
-        );
+        .expect_err("strict plane solver should not accept an unscanned far segment");
+        assert_eq!(failure, LeafFailureKind::PlaneSolveNoConvergence);
     }
 
     #[test]
@@ -6682,84 +6608,80 @@ mod tests {
     }
 
     #[test]
-    fn manifold_eq_2d_synthesizes_missing_leaf_from_neighbors() {
+    fn manifold_eq_2d_reports_missing_leaf_without_synthesis() {
+        let system = build_system(&["0", "0", "0"], &["x", "y", "z"], &[]);
         let prev_ring = vec![
             vec![1.0, 0.0, 0.0],
             vec![0.0, 1.0, 0.0],
             vec![-1.0, 0.0, 0.0],
             vec![0.0, -1.0, 0.0],
         ];
-        let prev_in_anchors = prev_ring.clone();
-        let mut hits = vec![None, None, None, None];
-        hits[0] = Some(LeafHit {
-            point: vec![1.0, 0.0, 0.12],
-            tau_hit: 0.2,
-            base_anchor: 0.0,
-            in_anchor: prev_ring[0].clone(),
-        });
-        hits[2] = Some(LeafHit {
-            point: vec![-1.0, 0.0, 0.10],
-            tau_hit: 0.2,
-            base_anchor: 0.5,
-            in_anchor: prev_ring[2].clone(),
-        });
-        hits[3] = Some(LeafHit {
-            point: vec![0.0, -1.0, 0.11],
-            tau_hit: 0.2,
-            base_anchor: 0.75,
-            in_anchor: prev_ring[3].clone(),
-        });
-
-        let tangent = ring_tangent_neighbor_average(&prev_ring, 1);
-        let outward = vec![0.0, 0.0, 1.0];
-        let synthetic = synthesize_leaf_hit_from_neighbors(
-            &hits,
+        let prev_in_anchors = vec![vec![0.0, 0.0, 0.0]; prev_ring.len()];
+        let failure = build_next_ring(
+            &system,
             &prev_ring,
             &prev_in_anchors,
-            1,
-            &tangent,
-            &outward,
-            1e-3,
+            1.0,
+            0.1,
+            1e-2,
+            8,
+            0.2,
         )
-        .expect("synthetic hit should be produced");
-
-        let base = &prev_ring[1];
-        let disp = subtract(&synthetic.point, base);
-        assert!(
-            synthetic.point.iter().all(|value| value.is_finite()),
-            "synthetic point must stay finite"
-        );
-        assert!(
-            l2_norm(&disp) > 1e-6,
-            "synthetic displacement should remain nontrivial"
-        );
-        assert!(
-            dot(&disp, &outward) > 0.0,
-            "synthetic point should preserve outward orientation"
-        );
+        .expect_err("stationary flow should report unsolved leaves");
+        assert_eq!(failure.solved_points, 0);
+        assert_eq!(failure.reason, LeafFailureKind::NoFirstHitWithinMaxTime);
     }
 
     #[test]
-    fn manifold_eq_2d_synthesizes_spacing_insertion_midpoint() {
-        let left = vec![1.0, 0.0, 0.2];
-        let right = vec![0.0, 1.0, 0.4];
-        let left_anchor = vec![1.0, 0.0, 0.0];
-        let right_anchor = vec![0.0, 1.0, 0.0];
-        let fallback_anchor = vec![0.5, 0.5, 0.0];
-        let (point, anchor) = synthesize_spacing_insertion_point(
-            &left,
-            &right,
-            &left_anchor,
-            &right_anchor,
-            &fallback_anchor,
+    fn manifold_eq_2d_spacing_adaptation_keeps_inserted_solved_leaves() {
+        let system = build_system(&["x", "y", "0"], &["x", "y", "z"], &[]);
+        let prev_ring = vec![
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0],
+            vec![-1.0, 0.0, 0.0],
+            vec![0.0, -1.0, 0.0],
+        ];
+        let prev_in_anchors = vec![vec![0.0, 0.0, 0.0]; prev_ring.len()];
+        let raw_next = RingSolve {
+            points: vec![
+                vec![1.1, 0.0, 0.0],
+                vec![0.0, 1.1, 0.0],
+                vec![-1.1, 0.0, 0.0],
+                vec![0.0, -1.1, 0.0],
+            ],
+            base_anchors: vec![0.0, 0.25, 0.5, 0.75],
+            in_anchors: prev_ring.clone(),
+        };
+        let adapted = adapt_ring_spacing(
+            &system,
+            &prev_ring,
+            &prev_in_anchors,
+            raw_next,
+            1.0,
+            0.1,
+            0.01,
+            1.0,
+            1e-2,
+            64,
+            2.0,
+            16,
         )
-        .expect("spacing insertion midpoint should synthesize");
-        assert!((point[0] - 0.5).abs() <= 1e-12);
-        assert!((point[1] - 0.5).abs() <= 1e-12);
-        assert!((point[2] - 0.3).abs() <= 1e-12);
-        assert!((anchor[0] - 0.5).abs() <= 1e-12);
-        assert!((anchor[1] - 0.5).abs() <= 1e-12);
-        assert!(anchor[2].abs() <= 1e-12);
+        .expect("spacing insertion should solve exact leaves");
+        assert!(
+            adapted.points.len() > prev_ring.len(),
+            "expected spacing adaptation to keep inserted points, got {}",
+            adapted.points.len()
+        );
+        assert_eq!(adapted.points.len(), adapted.base_anchors.len());
+        assert_eq!(adapted.points.len(), adapted.in_anchors.len());
+        assert!(
+            adapted
+                .base_anchors
+                .iter()
+                .any(|anchor| (*anchor - 0.125).abs() < 1e-8),
+            "expected inserted midpoint source anchor to be retained: {:?}",
+            adapted.base_anchors
+        );
     }
 
     #[test]
@@ -6824,6 +6746,35 @@ mod tests {
         assert!(
             (ratio - 3.0).abs() < 1e-8,
             "expected distance-angle metric to scale with geometric strip distance, got ratio={ratio}"
+        );
+    }
+
+    #[test]
+    fn manifold_eq_2d_adaptive_global_profile_replaces_baseline_defaults() {
+        let mut settings = Manifold2DSettings {
+            profile: Some(Manifold2DProfile::AdaptiveGlobal),
+            ..Manifold2DSettings::default()
+        };
+        apply_eq_2d_profile(&mut settings);
+        assert!((settings.initial_radius - 0.2).abs() <= 1e-12);
+        assert!((settings.leaf_delta - 0.2).abs() <= 1e-12);
+        assert_eq!(settings.ring_points, 32);
+        assert!((settings.integration_dt - 5e-3).abs() <= 1e-12);
+        assert!((settings.min_spacing - 0.05).abs() <= 1e-12);
+        assert!((settings.max_spacing - 0.5).abs() <= 1e-12);
+        assert!((settings.delta_alpha_min - 0.01).abs() <= 1e-12);
+
+        settings.ring_points = 48;
+        settings.initial_radius = 0.2;
+        settings.leaf_delta = 0.2;
+        settings.delta_min = 0.001;
+        settings.min_spacing = 0.05;
+        settings.max_spacing = 0.5;
+        settings.delta_alpha_min = 0.01;
+        apply_eq_2d_profile(&mut settings);
+        assert_eq!(
+            settings.ring_points, 48,
+            "profile application should preserve explicit nonbaseline overrides"
         );
     }
 
@@ -7022,6 +6973,60 @@ mod tests {
         assert!(!triangles.is_empty());
         assert!(triangles.len() % 3 == 0);
         assert!(triangles.iter().all(|index| *index < 13));
+    }
+
+    #[test]
+    fn triangulate_ring_bands_interleaves_by_circular_phase_not_ring_density() {
+        fn circle_ring(radius: f64, count: usize) -> Vec<Vec<f64>> {
+            (0..count)
+                .map(|index| {
+                    let theta = (index as f64) * std::f64::consts::TAU / (count as f64);
+                    vec![radius * theta.cos(), radius * theta.sin(), 0.0]
+                })
+                .collect()
+        }
+
+        fn phase_distance(a: f64, b: f64) -> f64 {
+            circular_delta(a, b).abs()
+        }
+
+        let dense_count = 8usize;
+        let sparse_count = 4usize;
+        let rings = vec![
+            circle_ring(1.0, dense_count),
+            circle_ring(2.0, sparse_count),
+        ];
+        let offsets = vec![0usize, dense_count];
+        let triangles = triangulate_ring_bands(&rings, &offsets);
+        assert_eq!(triangles.len() / 3, dense_count + sparse_count);
+
+        let max_cross_ring_phase_gap = triangles
+            .chunks_exact(3)
+            .flat_map(|tri| [(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])])
+            .filter_map(|(a, b)| {
+                let a_ring = if a < dense_count { 0 } else { 1 };
+                let b_ring = if b < dense_count { 0 } else { 1 };
+                if a_ring == b_ring {
+                    return None;
+                }
+                let a_phase = if a_ring == 0 {
+                    (a as f64) / (dense_count as f64)
+                } else {
+                    ((a - dense_count) as f64) / (sparse_count as f64)
+                };
+                let b_phase = if b_ring == 0 {
+                    (b as f64) / (dense_count as f64)
+                } else {
+                    ((b - dense_count) as f64) / (sparse_count as f64)
+                };
+                Some(phase_distance(a_phase, b_phase))
+            })
+            .fold(0.0, f64::max);
+
+        assert!(
+            max_cross_ring_phase_gap <= 0.25 + 1e-12,
+            "triangulation made long cross-ring chords: max phase gap {max_cross_ring_phase_gap}"
+        );
     }
 
     #[test]
@@ -7560,6 +7565,51 @@ mod tests {
         assert!(
             max_z >= 2.0,
             "Lorenz global profile should leave the tiny local patch (max |z|={max_z})"
+        );
+    }
+
+    #[test]
+    fn manifold_eq_2d_adaptive_global_grows_shimizu_morioka_stable_surface() {
+        let mut system = build_system(
+            &["y", "x*(1-z)-lambda*y", "-alpha*z+x*x"],
+            &["x", "y", "z"],
+            &[("lambda", 0.75), ("alpha", 0.375)],
+        );
+        let branch = continue_manifold_eq_2d(
+            &mut system,
+            &[0.0, 0.0, 0.0],
+            Manifold2DSettings {
+                stability: ManifoldStability::Stable,
+                profile: Some(Manifold2DProfile::AdaptiveGlobal),
+                target_radius: 0.7,
+                target_arclength: 2.0,
+                caps: ManifoldTerminationCaps {
+                    max_rings: 16,
+                    max_vertices: 20_000,
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..Manifold2DSettings::default()
+            },
+        )
+        .expect("Shimizu-Morioka stable manifold");
+        let ManifoldGeometry::Surface(surface) = branch.manifold_geometry.expect("geometry") else {
+            panic!("expected surface geometry");
+        };
+        let diagnostics = surface
+            .solver_diagnostics
+            .expect("expected solver diagnostics on 2D manifold geometry");
+        assert!(
+            diagnostics.termination_reason != "ring_build_failed"
+                && diagnostics.termination_reason != "ring_spacing_failed"
+                && diagnostics.termination_reason != "geodesic_quality_rejected",
+            "adaptive profile terminated by solver failure: reason={} detail={:?}",
+            diagnostics.termination_reason,
+            diagnostics.termination_detail
+        );
+        assert!(
+            surface.ring_offsets.len() >= 3,
+            "expected a nontrivial Shimizu-Morioka ring stack, got {} rings",
+            surface.ring_offsets.len()
         );
     }
 

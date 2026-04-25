@@ -170,7 +170,8 @@ export const DEFAULT_RENDER: RenderStyle = {
   lineWidth: 2,
   lineStyle: 'solid',
   pointSize: 4,
-  stateSpaceStride: 1
+  stateSpaceStride: 1,
+  manifoldSurfaceVisible: true
 }
 
 function fnv1a32(value: string): number {

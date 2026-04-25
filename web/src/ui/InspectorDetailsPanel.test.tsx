@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createDemoSystem, createPeriodDoublingSystem } from '../system/fixtures'
 import { InspectorDetailsPanel } from './InspectorDetailsPanel'
+import { makeSurfaceProfileDefaults, toManifold2DProfile } from './manifoldProfileDrafts'
 import { useState } from 'react'
 import {
   DEFAULT_SCENE_CAMERA,
@@ -164,6 +165,17 @@ function renderInspectorForStateSpaceStride(
 }
 
 describe('InspectorDetailsPanel', () => {
+  it('maps 2D manifold profile draft values explicitly', () => {
+    expect(toManifold2DProfile('adaptive_global')).toBe('AdaptiveGlobal')
+    expect(toManifold2DProfile('local_preview')).toBe('LocalPreview')
+    expect(toManifold2DProfile('lorenz_global')).toBe('LorenzGlobalKo')
+
+    const adaptive = makeSurfaceProfileDefaults('adaptive_global')
+    const lorenz = makeSurfaceProfileDefaults('lorenz_global')
+    expect(adaptive.maxSpacing).toBe('0.5')
+    expect(lorenz.maxSpacing).toBe('2.0')
+  })
+
   it('binds name and render fields', async () => {
     const user = userEvent.setup()
     const { system, objectNodeId } = createDemoSystem()
@@ -284,6 +296,123 @@ describe('InspectorDetailsPanel', () => {
     const lineStyle = screen.getByTestId('inspector-line-style')
     await user.selectOptions(lineStyle, 'dashed')
     expect(onUpdateRender).toHaveBeenLastCalledWith(branchNodeId, { lineStyle: 'dashed' })
+  })
+
+  it('toggles 2D manifold surface rendering from the branch inspector', async () => {
+    const user = userEvent.setup()
+    const config: SystemConfig = {
+      name: 'Inspector_Surface_Toggle',
+      equations: ['y', '-x', '-z'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const baseSystem = createSystem({ name: config.name, config })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq_Surface_Toggle',
+      systemName: config.name,
+    }
+    const withEquilibrium = addObject(baseSystem, equilibrium)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'eq_surface_toggle',
+      systemName: config.name,
+      parameterName: 'manifold',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'eq_manifold_2d',
+      data: {
+        points: [],
+        bifurcations: [],
+        indices: [],
+        branch_type: {
+          type: 'ManifoldEq2D',
+          stability: 'Stable',
+          eig_kind: 'RealPair',
+          eig_indices: [0, 1],
+          method: 'leaf_shooting_bvp',
+          caps: {
+            max_steps: 64,
+            max_points: 128,
+            max_rings: 8,
+            max_vertices: 512,
+            max_time: 10,
+          },
+        },
+        manifold_geometry: {
+          type: 'Surface',
+          dim: 3,
+          vertices_flat: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+          triangles: [0, 1, 2],
+          ring_offsets: [0],
+          ring_diagnostics: [],
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [],
+    }
+    const withBranch = addBranch(withEquilibrium.system, branch, withEquilibrium.nodeId)
+    const onUpdateRender = vi.fn()
+
+    function Wrapper() {
+      const [state, setState] = useState(withBranch.system)
+      return (
+        <InspectorDetailsPanel
+          system={state}
+          selectedNodeId={withBranch.nodeId}
+          view="selection"
+          theme="light"
+          onRename={vi.fn()}
+          onToggleVisibility={vi.fn()}
+          onUpdateRender={(id, render) => {
+            onUpdateRender(id, render)
+            setState((prev) => updateNodeRender(prev, id, render))
+          }}
+          onUpdateScene={vi.fn()}
+          onUpdateBifurcationDiagram={vi.fn()}
+          onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+          onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+          onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+          onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+          onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+          onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+          onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+          onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+          onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+          onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+          onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        />
+      )
+    }
+
+    render(<Wrapper />)
+
+    const toggle = screen.getByTestId('inspector-manifold-surface-toggle')
+    expect(toggle).toHaveTextContent('Hide surface')
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+
+    await user.click(toggle)
+    expect(onUpdateRender).toHaveBeenLastCalledWith(withBranch.nodeId, {
+      manifoldSurfaceVisible: false,
+    })
+    expect(toggle).toHaveTextContent('Show surface')
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+
+    await user.click(toggle)
+    expect(onUpdateRender).toHaveBeenLastCalledWith(withBranch.nodeId, {
+      manifoldSurfaceVisible: true,
+    })
+    expect(toggle).toHaveTextContent('Hide surface')
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('updates state space stride for limit cycle branches', async () => {
@@ -4819,6 +4948,21 @@ describe('InspectorDetailsPanel', () => {
     )
 
     await user.click(screen.getByTestId('equilibrium-manifold-toggle'))
+
+    const profile = screen.getByTestId('equilibrium-manifold2d-profile') as HTMLSelectElement
+    expect(profile.value).toBe('adaptive_global')
+    expect((screen.getByTestId('equilibrium-manifold2d-leaf-delta') as HTMLInputElement).value).toBe(
+      '0.2'
+    )
+    expect((screen.getByTestId('equilibrium-manifold2d-ring-points') as HTMLInputElement).value).toBe(
+      '32'
+    )
+    expect((screen.getByTestId('equilibrium-manifold2d-min-spacing') as HTMLInputElement).value).toBe(
+      '0.05'
+    )
+    expect((screen.getByTestId('equilibrium-manifold2d-max-spacing') as HTMLInputElement).value).toBe(
+      '0.5'
+    )
 
     const eigA = screen.getByTestId('equilibrium-manifold-eig-index-a') as HTMLSelectElement
     expect(Array.from(eigA.options).map((option) => option.textContent)).toEqual([

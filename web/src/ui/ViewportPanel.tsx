@@ -417,6 +417,9 @@ type SceneBounds = {
 const EIGENVECTOR_DISC_SEGMENTS = 48
 const EIGENVECTOR_DISC_OPACITY = 0.18
 const EIGENVECTOR_ORTHO_EPS = 1e-9
+const MANIFOLD_SURFACE_OPACITY = 0.35
+const MANIFOLD_SURFACE_HIGHLIGHT_OPACITY = 0.5
+const MANIFOLD_SURFACE_TRIANGLE_AREA_EPS = 1e-14
 
 function buildClvTraces(
   nodeId: string,
@@ -2039,6 +2042,197 @@ function resolveManifoldSurfaceGeometry(
   return null
 }
 
+function resolveManifoldSurfaceRingBounds(
+  geometry: ManifoldSurfaceGeometry,
+  vertexCount: number
+): Array<{ start: number; end: number }> {
+  const ringStarts =
+    Array.isArray(geometry.ring_offsets) && geometry.ring_offsets.length > 0
+      ? geometry.ring_offsets.filter(
+          (value) => Number.isInteger(value) && value >= 0 && value < vertexCount
+        )
+      : [0]
+  const ringBounds: Array<{ start: number; end: number }> = []
+  for (let idx = 0; idx < ringStarts.length; idx += 1) {
+    const start = ringStarts[idx] ?? 0
+    const next = ringStarts[idx + 1]
+    const end = typeof next === 'number' ? next : vertexCount
+    if (end - start >= 2) {
+      ringBounds.push({ start, end: Math.min(end, vertexCount) })
+    }
+  }
+  if (ringBounds.length === 0 && vertexCount >= 2) {
+    ringBounds.push({ start: 0, end: vertexCount })
+  }
+  return ringBounds
+}
+
+type ProjectedSurfaceVertex = [number, number, number] | null
+
+function uniformRingParams(count: number): number[] {
+  return Array.from({ length: count }, (_, index) => index / count)
+}
+
+function surfaceVertexDistance(a: ProjectedSurfaceVertex, b: ProjectedSurfaceVertex): number {
+  if (!a || !b) return Number.POSITIVE_INFINITY
+  const dx = a[0] - b[0]
+  const dy = a[1] - b[1]
+  const dz = a[2] - b[2]
+  return Math.sqrt(dx * dx + dy * dy + dz * dz)
+}
+
+function normalizedRingParams(
+  ring: { start: number; end: number },
+  vertices?: ProjectedSurfaceVertex[]
+): number[] {
+  const count = ring.end - ring.start
+  if (count <= 0) return []
+  if (count === 1 || !vertices) return uniformRingParams(count)
+
+  const cumulative = Array.from({ length: count }, () => 0)
+  for (let index = 1; index < count; index += 1) {
+    const distance = surfaceVertexDistance(
+      vertices[ring.start + index - 1] ?? null,
+      vertices[ring.start + index] ?? null
+    )
+    if (!Number.isFinite(distance)) return uniformRingParams(count)
+    cumulative[index] = cumulative[index - 1] + distance
+  }
+  const closingDistance = surfaceVertexDistance(
+    vertices[ring.end - 1] ?? null,
+    vertices[ring.start] ?? null
+  )
+  if (!Number.isFinite(closingDistance)) return uniformRingParams(count)
+  const total = cumulative[count - 1] + closingDistance
+  if (total <= Number.EPSILON) return uniformRingParams(count)
+  return cumulative.map((value) => value / total)
+}
+
+function ringProgressFromStart(params: number[], start: number): number[] {
+  if (params.length === 0) return []
+  const base = params[start % params.length] ?? 0
+  const progress: number[] = []
+  for (let step = 0; step <= params.length; step += 1) {
+    if (step === params.length) {
+      progress.push(1)
+      continue
+    }
+    const index = (start + step) % params.length
+    let value = (params[index] ?? 0) - base
+    if (value < -Number.EPSILON) value += 1
+    progress.push(Math.max(0, Math.min(1, value)))
+  }
+  return progress
+}
+
+function triangulateManifoldRingBounds(
+  ringBounds: Array<{ start: number; end: number }>,
+  vertices?: ProjectedSurfaceVertex[]
+): number[] {
+  const triangles: number[] = []
+  for (let band = 0; band + 1 < ringBounds.length; band += 1) {
+    const a = ringBounds[band]
+    const b = ringBounds[band + 1]
+    if (!a || !b) continue
+    const m = a.end - a.start
+    const n = b.end - b.start
+    if (m < 2 || n < 2) continue
+
+    let bestI = 0
+    let bestJ = 0
+    let bestDistance = Number.POSITIVE_INFINITY
+    if (vertices) {
+      for (let i = 0; i < m; i += 1) {
+        for (let j = 0; j < n; j += 1) {
+          const distance = surfaceVertexDistance(
+            vertices[a.start + i] ?? null,
+            vertices[b.start + j] ?? null
+          )
+          if (distance < bestDistance) {
+            bestDistance = distance
+            bestI = i
+            bestJ = j
+          }
+        }
+      }
+    }
+    const aProgress = ringProgressFromStart(normalizedRingParams(a, vertices), bestI)
+    const bProgress = ringProgressFromStart(normalizedRingParams(b, vertices), bestJ)
+    let advancedA = 0
+    let advancedB = 0
+    while (advancedA < m || advancedB < n) {
+      const aIndex = a.start + ((bestI + advancedA) % m)
+      const bIndex = b.start + ((bestJ + advancedB) % n)
+      const advanceA =
+        advancedA >= m
+          ? false
+          : advancedB >= n
+            ? true
+            : (aProgress[advancedA + 1] ?? 1) <= (bProgress[advancedB + 1] ?? 1)
+
+      if (advanceA) {
+        const nextI = (bestI + advancedA + 1) % m
+        triangles.push(aIndex, bIndex, a.start + nextI)
+        advancedA += 1
+      } else {
+        const nextJ = (bestJ + advancedB + 1) % n
+        triangles.push(aIndex, bIndex, b.start + nextJ)
+        advancedB += 1
+      }
+    }
+  }
+  return triangles
+}
+
+function resolveManifoldSurfaceTriangles(
+  geometry: ManifoldSurfaceGeometry,
+  ringBounds: Array<{ start: number; end: number }>,
+  vertexCount: number,
+  vertices?: ProjectedSurfaceVertex[]
+): number[] {
+  const source = Array.isArray(geometry.triangles) ? geometry.triangles : []
+  const triangles: number[] = []
+  for (let face = 0; face + 2 < source.length; face += 3) {
+    const a = source[face]
+    const b = source[face + 1]
+    const c = source[face + 2]
+    if (
+      Number.isInteger(a) &&
+      Number.isInteger(b) &&
+      Number.isInteger(c) &&
+      (a as number) >= 0 &&
+      (b as number) >= 0 &&
+      (c as number) >= 0 &&
+      (a as number) < vertexCount &&
+      (b as number) < vertexCount &&
+      (c as number) < vertexCount &&
+      a !== b &&
+      b !== c &&
+      a !== c
+    ) {
+      triangles.push(a as number, b as number, c as number)
+    }
+  }
+  return triangles.length > 0 ? triangles : triangulateManifoldRingBounds(ringBounds, vertices)
+}
+
+function triangleArea3d(
+  a: [number, number, number],
+  b: [number, number, number],
+  c: [number, number, number]
+): number {
+  const ux = b[0] - a[0]
+  const uy = b[1] - a[1]
+  const uz = b[2] - a[2]
+  const vx = c[0] - a[0]
+  const vy = c[1] - a[1]
+  const vz = c[2] - a[2]
+  const cx = uy * vz - uz * vy
+  const cy = uz * vx - ux * vz
+  const cz = ux * vy - uy * vx
+  return Math.sqrt(cx * cx + cy * cy + cz * cz) * 0.5
+}
+
 function buildManifoldCurveTraces(config: {
   nodeId: string
   name: string
@@ -2254,6 +2448,7 @@ function buildManifoldSurfaceTraces(config: {
   lineWidth: number
   pointSize: number
   highlight: boolean
+  showSurface: boolean
   geometry: ManifoldSurfaceGeometry
   subsystemSnapshot?: SubsystemSnapshot | null
   axisIndices: number[] | null
@@ -2268,6 +2463,7 @@ function buildManifoldSurfaceTraces(config: {
     lineWidth,
     pointSize,
     highlight,
+    showSurface,
     geometry,
     subsystemSnapshot,
     axisIndices,
@@ -2303,72 +2499,130 @@ function buildManifoldSurfaceTraces(config: {
   const axes = resolveAxisOrder(displayDim, plotDim, axisIndices)
   const width = highlight ? lineWidth + 1 : lineWidth
   const markerSize = highlight ? pointSize + 4 : pointSize + 2
-
-  const ringStarts =
-    Array.isArray(geometry.ring_offsets) && geometry.ring_offsets.length > 0
-      ? geometry.ring_offsets.filter(
-          (value) => Number.isInteger(value) && value >= 0 && value < vertexCount
-        )
-      : [0]
-  const ringBounds: Array<{ start: number; end: number }> = []
-  for (let idx = 0; idx < ringStarts.length; idx += 1) {
-    const start = ringStarts[idx] ?? 0
-    const next = ringStarts[idx + 1]
-    const end = typeof next === 'number' ? next : vertexCount
-    if (end - start >= 2) {
-      ringBounds.push({ start, end: Math.min(end, vertexCount) })
-    }
-  }
-  if (ringBounds.length === 0) {
-    ringBounds.push({ start: 0, end: vertexCount })
-  }
+  const ringBounds = resolveManifoldSurfaceRingBounds(geometry, vertexCount)
 
   if (plotDim >= 3) {
-    const x: Array<number | null> = []
-    const y: Array<number | null> = []
-    const z: Array<number | null> = []
-    for (const ring of ringBounds) {
-      const ringIndices: number[] = []
-      for (let index = ring.start; index < ring.end; index += 1) {
+    let surfaceRendered = false
+    if (showSurface) {
+      const projectedVertices: Array<[number, number, number] | null> = Array.from(
+        { length: vertexCount },
+        () => null
+      )
+      const meshIndexByVertex = new Map<number, number>()
+      const meshX: number[] = []
+      const meshY: number[] = []
+      const meshZ: number[] = []
+      for (let index = 0; index < vertexCount; index += 1) {
         const point = displayVertices[index]
         if (!point) continue
         const px = point[axes[0] ?? 0]
         const py = point[axes[1] ?? 1]
         const pz = point[axes[2] ?? 2]
-        if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue
-        x.push(px)
-        y.push(py)
-        z.push(pz)
-        ringIndices.push(index)
+        if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) {
+          continue
+        }
+        projectedVertices[index] = [px, py, pz]
+        meshIndexByVertex.set(index, meshX.length)
+        meshX.push(px)
+        meshY.push(py)
+        meshZ.push(pz)
       }
-      if (ringIndices.length > 1) {
-        const first = displayVertices[ringIndices[0] ?? -1]
-        if (first) {
-          const fx = first[axes[0] ?? 0]
-          const fy = first[axes[1] ?? 1]
-          const fz = first[axes[2] ?? 2]
-          if (Number.isFinite(fx) && Number.isFinite(fy) && Number.isFinite(fz)) {
-            x.push(fx)
-            y.push(fy)
-            z.push(fz)
+
+      const triangleSource = resolveManifoldSurfaceTriangles(
+        geometry,
+        ringBounds,
+        vertexCount,
+        projectedVertices
+      )
+      const i: number[] = []
+      const j: number[] = []
+      const k: number[] = []
+      for (let face = 0; face + 2 < triangleSource.length; face += 3) {
+        const a = triangleSource[face] ?? -1
+        const b = triangleSource[face + 1] ?? -1
+        const c = triangleSource[face + 2] ?? -1
+        const pa = projectedVertices[a]
+        const pb = projectedVertices[b]
+        const pc = projectedVertices[c]
+        if (!pa || !pb || !pc) continue
+        if (triangleArea3d(pa, pb, pc) <= MANIFOLD_SURFACE_TRIANGLE_AREA_EPS) continue
+        const meshA = meshIndexByVertex.get(a)
+        const meshB = meshIndexByVertex.get(b)
+        const meshC = meshIndexByVertex.get(c)
+        if (meshA === undefined || meshB === undefined || meshC === undefined) continue
+        i.push(meshA)
+        j.push(meshB)
+        k.push(meshC)
+      }
+      if (i.length > 0) {
+        traces.push({
+          type: 'mesh3d',
+          name: `${name} surface`,
+          uid: nodeId,
+          x: meshX,
+          y: meshY,
+          z: meshZ,
+          i: Uint32Array.from(i),
+          j: Uint32Array.from(j),
+          k: Uint32Array.from(k),
+          color,
+          opacity: highlight ? MANIFOLD_SURFACE_HIGHLIGHT_OPACITY : MANIFOLD_SURFACE_OPACITY,
+          flatshading: true,
+          showscale: false,
+          hoverinfo: 'skip',
+          showlegend: false,
+        } as Data)
+        surfaceRendered = true
+      }
+    }
+
+    if (!surfaceRendered) {
+      const x: Array<number | null> = []
+      const y: Array<number | null> = []
+      const z: Array<number | null> = []
+      for (const ring of ringBounds) {
+        const ringIndices: number[] = []
+        for (let index = ring.start; index < ring.end; index += 1) {
+          const point = displayVertices[index]
+          if (!point) continue
+          const px = point[axes[0] ?? 0]
+          const py = point[axes[1] ?? 1]
+          const pz = point[axes[2] ?? 2]
+          if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue
+          x.push(px)
+          y.push(py)
+          z.push(pz)
+          ringIndices.push(index)
+        }
+        if (ringIndices.length > 1) {
+          const first = displayVertices[ringIndices[0] ?? -1]
+          if (first) {
+            const fx = first[axes[0] ?? 0]
+            const fy = first[axes[1] ?? 1]
+            const fz = first[axes[2] ?? 2]
+            if (Number.isFinite(fx) && Number.isFinite(fy) && Number.isFinite(fz)) {
+              x.push(fx)
+              y.push(fy)
+              z.push(fz)
+            }
           }
         }
+        x.push(null)
+        y.push(null)
+        z.push(null)
       }
-      x.push(null)
-      y.push(null)
-      z.push(null)
-    }
-    if (x.length > 0) {
-      traces.push({
-        type: 'scatter3d',
-        mode: 'lines',
-        name,
-        uid: nodeId,
-        x,
-        y,
-        z,
-        line: { color, width, dash: lineDash },
-      })
+      if (x.length > 0) {
+        traces.push({
+          type: 'scatter3d',
+          mode: 'lines',
+          name,
+          uid: nodeId,
+          x,
+          y,
+          z,
+          line: { color, width, dash: lineDash },
+        })
+      }
     }
     if (
       selectedPointIndex !== null &&
@@ -3710,6 +3964,8 @@ function buildSceneTraces(
             lineWidth,
             pointSize: node.render.pointSize,
             highlight,
+            showSurface:
+              node.render.manifoldSurfaceVisible ?? DEFAULT_RENDER.manifoldSurfaceVisible ?? true,
             geometry: manifoldSurface,
             subsystemSnapshot: branchSnapshot,
             axisIndices: projectionAxisIndices,

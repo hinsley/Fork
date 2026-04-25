@@ -84,7 +84,7 @@ export interface ContinuationPoint {
 export type ManifoldStability = 'Stable' | 'Unstable';
 export type ManifoldDirection = 'Plus' | 'Minus' | 'Both';
 export type ManifoldEigenKind = 'RealPair' | 'ComplexPair';
-export type Manifold2DProfile = 'LocalPreview' | 'LorenzGlobalKo';
+export type Manifold2DProfile = 'LocalPreview' | 'AdaptiveGlobal' | 'LorenzGlobalKo';
 
 export interface ManifoldTerminationCaps {
   max_steps: number;

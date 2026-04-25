@@ -18,7 +18,7 @@ function parseNumericMetric(raw: string): number {
   return parsed
 }
 
-test('lorenz 2D stable manifold defaults produce nontrivial growth', async ({ page }) => {
+test('lorenz 2D stable manifold adaptive defaults produce nontrivial growth', async ({ page }) => {
   test.setTimeout(180_000)
 
   const harness = createHarness(page)
@@ -37,10 +37,10 @@ test('lorenz 2D stable manifold defaults produce nontrivial growth', async ({ pa
   await harness.openDisclosure('equilibrium-manifold-toggle')
   await page.getByTestId('equilibrium-manifold-name').fill('lorenz_eqm2d_e2e')
   await page.getByTestId('equilibrium-manifold-mode').selectOption('surface_2d')
-  await page.getByTestId('equilibrium-manifold2d-profile').selectOption('lorenz_global')
+  await expect(page.getByTestId('equilibrium-manifold2d-profile')).toHaveValue('adaptive_global')
   await page.getByTestId('equilibrium-manifold2d-target-radius').fill('8')
   await page.getByTestId('equilibrium-manifold2d-target-arclength').fill('20')
-  await page.getByTestId('equilibrium-manifold-caps-max-steps').fill('500')
+  await page.getByTestId('equilibrium-manifold-caps-max-steps').fill('1500')
   await page.getByTestId('equilibrium-manifold-caps-max-rings').fill('60')
   await page.getByTestId('equilibrium-manifold-caps-max-vertices').fill('100000')
   await page.getByTestId('equilibrium-manifold-caps-max-time').fill('50')
@@ -64,6 +64,6 @@ test('lorenz 2D stable manifold defaults produce nontrivial growth', async ({ pa
   const minLeafDeltaReached = await readMetricValue(page, 'Min leaf delta reached')
 
   expect(rings).toBeGreaterThanOrEqual(6)
-  expect(vertices).toBeGreaterThanOrEqual(120)
+  expect(vertices).toBeGreaterThan(32 * rings + 8)
   expect(minLeafDeltaReached.toLowerCase()).toBe('no')
 })

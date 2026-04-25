@@ -72,6 +72,11 @@ import type {
 import { validateSystemConfig } from '../state/systemValidation'
 import { hasCustomObjectParams } from '../system/parameters'
 import {
+  makeSurfaceProfileDefaults,
+  toManifold2DProfile,
+  type EquilibriumManifoldProfileDraft,
+} from './manifoldProfileDrafts'
+import {
   buildSortedArrayOrder,
   computeLimitCycleMetrics,
   extractHopfOmega,
@@ -205,6 +210,11 @@ const STATE_SPACE_STRIDE_BRANCH_TYPES: ReadonlySet<ContinuationObject['branchTyp
   'pd_curve',
   'lpc_curve',
   'ns_curve',
+])
+
+const MANIFOLD_SURFACE_BRANCH_TYPES: ReadonlySet<ContinuationObject['branchType']> = new Set([
+  'eq_manifold_2d',
+  'cycle_manifold_2d',
 ])
 
 type SystemDraft = {
@@ -365,7 +375,6 @@ type ManifoldCapsDraft = {
 }
 
 type EquilibriumManifoldMode = 'curve_1d' | 'surface_2d'
-type EquilibriumManifoldProfileDraft = 'local_preview' | 'lorenz_global'
 
 type EquilibriumManifoldDraft = {
   name: string
@@ -1183,67 +1192,6 @@ function makeHomotopySaddleFromEquilibriumDraft(
 
 type ManifoldCapsPreset = 'curve_1d' | 'surface_2d' | 'cycle_2d'
 
-function makeSurfaceProfileDefaults(
-  profile: EquilibriumManifoldProfileDraft
-): {
-  initialRadius: string
-  targetRadius: string
-  leafDelta: string
-  deltaMin: string
-  ringPoints: string
-  minSpacing: string
-  maxSpacing: string
-  alphaMin: string
-  alphaMax: string
-  deltaAlphaMin: string
-  deltaAlphaMax: string
-  integrationDt: string
-  targetArclength: string
-  caps: ManifoldCapsDraft
-} {
-  if (profile === 'lorenz_global') {
-    return {
-      initialRadius: '1.0',
-      targetRadius: '40',
-      leafDelta: '1.0',
-      deltaMin: '0.01',
-      ringPoints: '20',
-      minSpacing: '0.25',
-      maxSpacing: '2.0',
-      alphaMin: '0.3',
-      alphaMax: '0.4',
-      deltaAlphaMin: '0.01',
-      deltaAlphaMax: '1.0',
-      integrationDt: '0.001',
-      targetArclength: '100',
-      caps: {
-        maxSteps: '2000',
-        maxPoints: '8000',
-        maxRings: '200',
-        maxVertices: '200000',
-        maxTime: '200',
-        maxIterations: '',
-      },
-    }
-  }
-  return {
-    initialRadius: '1e-3',
-    targetRadius: '5',
-    leafDelta: '0.002',
-    deltaMin: '0.001',
-    ringPoints: '48',
-    minSpacing: '0.00134',
-    maxSpacing: '0.004',
-    alphaMin: '0.3',
-    alphaMax: '0.4',
-    deltaAlphaMin: '0.1',
-    deltaAlphaMax: '1.0',
-    integrationDt: '0.01',
-    targetArclength: '10',
-    caps: makeDefaultManifoldCapsDraft('surface_2d'),
-  }
-}
-
 function makeDefaultManifoldCapsDraft(preset: ManifoldCapsPreset = 'curve_1d'): ManifoldCapsDraft {
   if (preset === 'surface_2d') {
     return {
@@ -1282,7 +1230,9 @@ function makeEquilibriumManifoldDraft(
   const mode: EquilibriumManifoldMode =
     system.type === 'map' ? 'curve_1d' : system.varNames.length >= 3 ? 'surface_2d' : 'curve_1d'
   const surfaceDefaults = mode === 'surface_2d'
-  const profile: EquilibriumManifoldProfileDraft = surfaceDefaults ? 'lorenz_global' : 'local_preview'
+  const profile: EquilibriumManifoldProfileDraft = surfaceDefaults
+    ? 'adaptive_global'
+    : 'local_preview'
   const profileDefaults = makeSurfaceProfileDefaults(profile)
   const baseName = equilibrium ? toCliSafeName(equilibrium.name) : 'equilibrium'
   return {
@@ -2000,9 +1950,16 @@ export function InspectorDetailsPanel({
   const supportsStateSpaceStride = branch
     ? STATE_SPACE_STRIDE_BRANCH_TYPES.has(branch.branchType)
     : false
+  const supportsManifoldSurfaceToggle = Boolean(
+    branch &&
+      MANIFOLD_SURFACE_BRANCH_TYPES.has(branch.branchType) &&
+      manifoldSurfaceGeometry
+  )
   const nodeRender = selectionNode
     ? { ...DEFAULT_RENDER, ...(selectionNode.render ?? {}) }
     : DEFAULT_RENDER
+  const manifoldSurfaceVisible =
+    nodeRender.manifoldSurfaceVisible ?? DEFAULT_RENDER.manifoldSurfaceVisible ?? true
   const clvDim = orbit?.covariantVectors?.dim
   const clvPlotDim =
     clvDim ??
@@ -5115,10 +5072,7 @@ export function InspectorDetailsPanel({
       name,
       settings: {
         stability: equilibriumManifoldDraft.stability,
-        profile:
-          equilibriumManifoldDraft.profile === 'lorenz_global'
-            ? 'LorenzGlobalKo'
-            : 'LocalPreview',
+        profile: toManifold2DProfile(equilibriumManifoldDraft.profile),
         eig_indices: eigIndices,
         initial_radius: initialRadius,
         leaf_delta: leafDelta,
@@ -5261,10 +5215,7 @@ export function InspectorDetailsPanel({
         stability: limitCycleManifoldDraft.stability,
         direction: limitCycleManifoldDraft.direction,
         floquet_index: floquetIndex,
-        profile:
-          limitCycleManifoldDraft.profile === 'lorenz_global'
-            ? 'LorenzGlobalKo'
-            : 'LocalPreview',
+        profile: toManifold2DProfile(limitCycleManifoldDraft.profile),
         initial_radius: initialRadius,
         leaf_delta: leafDelta,
         delta_min: deltaMin,
@@ -7104,6 +7055,21 @@ export function InspectorDetailsPanel({
                   data-testid="inspector-point-size"
                 />
               </label>
+              {supportsManifoldSurfaceToggle ? (
+                <button
+                  type="button"
+                  className="inspector-inline-button inspector-toggle-button"
+                  aria-pressed={manifoldSurfaceVisible}
+                  onClick={() =>
+                    onUpdateRender(selectionNode.id, {
+                      manifoldSurfaceVisible: !manifoldSurfaceVisible,
+                    })
+                  }
+                  data-testid="inspector-manifold-surface-toggle"
+                >
+                  {manifoldSurfaceVisible ? 'Hide surface' : 'Show surface'}
+                </button>
+              ) : null}
               {selectionNode.kind === 'branch' &&
               supportsStateSpaceStride &&
               systemDraft.type === 'flow' ? (
@@ -8841,10 +8807,13 @@ export function InspectorDetailsPanel({
                               if (nextMode !== 'surface_2d') {
                                 return { ...prev, mode: nextMode }
                               }
-                              const defaults = makeSurfaceProfileDefaults(prev.profile)
+                              const profile =
+                                prev.mode === 'surface_2d' ? prev.profile : 'adaptive_global'
+                              const defaults = makeSurfaceProfileDefaults(profile)
                               return {
                                 ...prev,
                                 mode: nextMode,
+                                profile,
                                 ...defaults,
                               }
                             })
@@ -8965,8 +8934,9 @@ export function InspectorDetailsPanel({
                               }
                               data-testid="equilibrium-manifold2d-profile"
                             >
+                              <option value="adaptive_global">adaptive global</option>
                               <option value="local_preview">local preview</option>
-                              <option value="lorenz_global">Default</option>
+                              <option value="lorenz_global">Lorenz reference</option>
                             </select>
                           </label>
                           <label>

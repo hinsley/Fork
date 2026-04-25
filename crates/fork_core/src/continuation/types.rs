@@ -38,19 +38,19 @@ fn default_manifold_radius() -> f64 {
     5.0
 }
 
-fn default_manifold_eps() -> f64 {
+pub(crate) fn default_manifold_eps() -> f64 {
     1e-3
 }
 
-fn default_manifold_dt() -> f64 {
+pub(crate) fn default_manifold_dt() -> f64 {
     1e-2
 }
 
-fn default_manifold_ring_points() -> usize {
+pub(crate) fn default_manifold_ring_points() -> usize {
     48
 }
 
-fn default_manifold_leaf_delta() -> f64 {
+pub(crate) fn default_manifold_leaf_delta() -> f64 {
     2e-3
 }
 
@@ -58,23 +58,23 @@ fn default_manifold_target_arclength() -> f64 {
     10.0
 }
 
-fn default_manifold_delta_min() -> f64 {
+pub(crate) fn default_manifold_delta_min() -> f64 {
     1e-3
 }
 
-fn default_manifold_alpha_min() -> f64 {
+pub(crate) fn default_manifold_alpha_min() -> f64 {
     0.3
 }
 
-fn default_manifold_alpha_max() -> f64 {
+pub(crate) fn default_manifold_alpha_max() -> f64 {
     0.4
 }
 
-fn default_manifold_delta_alpha_min() -> f64 {
+pub(crate) fn default_manifold_delta_alpha_min() -> f64 {
     0.1
 }
 
-fn default_manifold_delta_alpha_max() -> f64 {
+pub(crate) fn default_manifold_delta_alpha_max() -> f64 {
     1.0
 }
 
@@ -108,6 +108,7 @@ pub enum ManifoldEigenKind {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Manifold2DProfile {
     LocalPreview,
+    AdaptiveGlobal,
     LorenzGlobalKo,
 }
 
