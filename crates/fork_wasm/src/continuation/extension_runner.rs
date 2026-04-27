@@ -1,5 +1,6 @@
 //! Continuation branch extension runner.
 
+use super::runner_boundary::static_system_ref;
 use super::shared::{compute_tangent_from_problem, OwnedEquilibriumContinuationProblem};
 use crate::system::build_system;
 use fork_core::continuation::homoclinic::HomoclinicProblem;
@@ -735,9 +736,8 @@ impl WasmContinuationExtensionRunner {
                 let phase_anchor: Vec<f64> = endpoint.state.iter().take(dim).cloned().collect();
 
                 let mut boxed_system = Box::new(system);
-                let system_ptr: *mut EquationSystem = &mut *boxed_system;
                 let problem = PeriodicOrbitCollocationProblem::new(
-                    unsafe { &mut *system_ptr },
+                    static_system_ref(&mut boxed_system),
                     param_index,
                     *ntst,
                     *ncol,
@@ -782,10 +782,7 @@ impl WasmContinuationExtensionRunner {
 
                 let mut settings = settings;
                 cap_extension_step_size(&mut settings, secant_norm);
-                // SAFETY: The problem borrows the boxed system allocation, which lives
-                // for the lifetime of the runner.
-                let mut problem: PeriodicOrbitCollocationProblem<'static> =
-                    unsafe { std::mem::transmute(problem) };
+                let mut problem: PeriodicOrbitCollocationProblem<'static> = problem;
                 let mut runner = if let Some(seed) = resume_seed {
                     let (resume_aug, resume_tangent) = prepare_resume_seed_for_extension(
                         seed,
@@ -920,14 +917,13 @@ impl WasmContinuationExtensionRunner {
                 let secant_template = setup.clone();
 
                 let mut boxed_system = Box::new(system);
-                let system_ptr: *mut EquationSystem = &mut *boxed_system;
-                let problem =
-                    HomoclinicProblem::new(unsafe { &mut *system_ptr }, setup).map_err(|e| {
-                        JsValue::from_str(&format!(
-                            "Failed to create homoclinic extension problem: {}",
-                            e
-                        ))
-                    })?;
+                let problem = HomoclinicProblem::new(static_system_ref(&mut boxed_system), setup)
+                    .map_err(|e| {
+                    JsValue::from_str(&format!(
+                        "Failed to create homoclinic extension problem: {}",
+                        e
+                    ))
+                })?;
 
                 let dim = problem.dimension();
                 if packed_initial_state.len() != dim {
@@ -1018,8 +1014,7 @@ impl WasmContinuationExtensionRunner {
 
                 let mut settings = settings;
                 cap_extension_step_size(&mut settings, secant_norm);
-                let mut problem: HomoclinicProblem<'static> =
-                    unsafe { std::mem::transmute(problem) };
+                let mut problem: HomoclinicProblem<'static> = problem;
                 let phase_reference_aug = resume_seed
                     .as_ref()
                     .and_then(|seed| {

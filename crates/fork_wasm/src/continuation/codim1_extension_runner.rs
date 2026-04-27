@@ -1,5 +1,6 @@
 //! Codimension-1 curve branch extension runner.
 
+use super::runner_boundary::static_system_ref;
 use super::shared::compute_tangent_from_problem;
 use crate::system::build_system;
 use fork_core::continuation::codim1_curves::estimate_hopf_kappa_from_jacobian;
@@ -300,9 +301,8 @@ impl WasmCodim1CurveExtensionRunner {
                 )?;
 
                 let mut boxed_system = Box::new(system);
-                let system_ptr: *mut EquationSystem = &mut *boxed_system;
                 let problem = FoldCurveProblem::new(
-                    unsafe { &mut *system_ptr },
+                    static_system_ref(&mut boxed_system),
                     kind,
                     &endpoint_state,
                     param1_index,
@@ -310,8 +310,7 @@ impl WasmCodim1CurveExtensionRunner {
                 )
                 .map_err(|e| JsValue::from_str(&format!("Failed to create fold problem: {}", e)))?;
 
-                let mut problem: FoldCurveProblem<'static> =
-                    unsafe { std::mem::transmute(problem) };
+                let mut problem: FoldCurveProblem<'static> = problem;
                 let tangent = initial_tangent_from_secant_or_problem(
                     &mut problem,
                     &end_aug,
@@ -387,9 +386,8 @@ impl WasmCodim1CurveExtensionRunner {
                 )?;
 
                 let mut boxed_system = Box::new(system);
-                let system_ptr: *mut EquationSystem = &mut *boxed_system;
                 let problem = HopfCurveProblem::new(
-                    unsafe { &mut *system_ptr },
+                    static_system_ref(&mut boxed_system),
                     kind,
                     &endpoint.state,
                     hopf_omega,
@@ -398,8 +396,7 @@ impl WasmCodim1CurveExtensionRunner {
                 )
                 .map_err(|e| JsValue::from_str(&format!("Failed to create hopf problem: {}", e)))?;
 
-                let mut problem: HopfCurveProblem<'static> =
-                    unsafe { std::mem::transmute(problem) };
+                let mut problem: HopfCurveProblem<'static> = problem;
                 let tangent = initial_tangent_from_secant_or_problem(
                     &mut problem,
                     &end_aug,
@@ -463,9 +460,8 @@ impl WasmCodim1CurveExtensionRunner {
                 )?;
 
                 let mut boxed_system = Box::new(system);
-                let system_ptr: *mut EquationSystem = &mut *boxed_system;
                 let problem = LPCCurveProblem::new(
-                    unsafe { &mut *system_ptr },
+                    static_system_ref(&mut boxed_system),
                     full_lc_state.clone(),
                     period,
                     param1_index,
@@ -477,7 +473,7 @@ impl WasmCodim1CurveExtensionRunner {
                 )
                 .map_err(|e| JsValue::from_str(&format!("Failed to create LPC problem: {}", e)))?;
 
-                let mut problem: LPCCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
+                let mut problem: LPCCurveProblem<'static> = problem;
                 let tangent = initial_tangent_from_secant_or_problem(
                     &mut problem,
                     &end_aug,
@@ -539,9 +535,8 @@ impl WasmCodim1CurveExtensionRunner {
                 )?;
 
                 let mut boxed_system = Box::new(system);
-                let system_ptr: *mut EquationSystem = &mut *boxed_system;
                 let problem = IsochroneCurveProblem::new(
-                    unsafe { &mut *system_ptr },
+                    static_system_ref(&mut boxed_system),
                     full_lc_state.clone(),
                     period,
                     param1_index,
@@ -555,8 +550,7 @@ impl WasmCodim1CurveExtensionRunner {
                     JsValue::from_str(&format!("Failed to create isochrone problem: {}", e))
                 })?;
 
-                let mut problem: IsochroneCurveProblem<'static> =
-                    unsafe { std::mem::transmute(problem) };
+                let mut problem: IsochroneCurveProblem<'static> = problem;
                 let tangent = initial_tangent_from_secant_or_problem(
                     &mut problem,
                     &end_aug,
@@ -618,9 +612,8 @@ impl WasmCodim1CurveExtensionRunner {
                 )?;
 
                 let mut boxed_system = Box::new(system);
-                let system_ptr: *mut EquationSystem = &mut *boxed_system;
                 let problem = PDCurveProblem::new(
-                    unsafe { &mut *system_ptr },
+                    static_system_ref(&mut boxed_system),
                     full_lc_state.clone(),
                     period,
                     param1_index,
@@ -632,7 +625,7 @@ impl WasmCodim1CurveExtensionRunner {
                 )
                 .map_err(|e| JsValue::from_str(&format!("Failed to create PD problem: {}", e)))?;
 
-                let mut problem: PDCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
+                let mut problem: PDCurveProblem<'static> = problem;
                 let tangent = initial_tangent_from_secant_or_problem(
                     &mut problem,
                     &end_aug,
@@ -698,9 +691,8 @@ impl WasmCodim1CurveExtensionRunner {
                 )?;
 
                 let mut boxed_system = Box::new(system);
-                let system_ptr: *mut EquationSystem = &mut *boxed_system;
                 let problem = NSCurveProblem::new(
-                    unsafe { &mut *system_ptr },
+                    static_system_ref(&mut boxed_system),
                     full_lc_state.clone(),
                     period,
                     param1_index,
@@ -713,7 +705,7 @@ impl WasmCodim1CurveExtensionRunner {
                 )
                 .map_err(|e| JsValue::from_str(&format!("Failed to create NS problem: {}", e)))?;
 
-                let mut problem: NSCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
+                let mut problem: NSCurveProblem<'static> = problem;
                 let tangent = initial_tangent_from_secant_or_problem(
                     &mut problem,
                     &end_aug,

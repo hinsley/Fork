@@ -85,7 +85,7 @@ pub(crate) fn serialize_js<T: Serialize + ?Sized>(value: &T) -> Result<JsValue, 
     to_value(value).map_err(|err| JsValue::from_str(&format!("Serialization error: {err}")))
 }
 
-fn static_system_ref(system: &mut Box<EquationSystem>) -> &'static mut EquationSystem {
+pub(crate) fn static_system_ref(system: &mut Box<EquationSystem>) -> &'static mut EquationSystem {
     let system_ptr: *mut EquationSystem = system.as_mut();
     // SAFETY: OwnedContinuationRunner owns the boxed system allocation and the
     // ContinuationRunner that stores this borrow. The runner is dropped before
