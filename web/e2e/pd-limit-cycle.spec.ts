@@ -17,7 +17,6 @@ test('branch to a period-doubled limit cycle', async ({ page }) => {
   await page.getByTestId('limit-cycle-from-pd-name').fill('lc_pd_branch_obj')
   await page.getByTestId('limit-cycle-from-pd-branch-name').fill('lc_pd_branch')
   await page.getByTestId('limit-cycle-from-pd-amplitude').fill('0.01')
-  await page.getByTestId('limit-cycle-from-pd-ncol').fill('4')
   await page.getByTestId('limit-cycle-from-pd-step-size').fill('0.01')
   await page.getByTestId('limit-cycle-from-pd-max-steps').fill('20')
   await page.getByTestId('limit-cycle-from-pd-min-step-size').fill('1e-5')
