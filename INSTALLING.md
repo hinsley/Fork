@@ -53,3 +53,15 @@ To start the interactive command-line interface:
 ```bash
 npm start
 ```
+
+## Local validation
+
+After changing the CLI, run:
+
+```bash
+npm run build
+npm test
+```
+
+`npm test` rebuilds `crates/fork_wasm` with `wasm-pack build --target nodejs`,
+smoke-tests the generated Node bindings, and then runs the CLI unit test runner.

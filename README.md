@@ -116,4 +116,16 @@ cd web
 npm run build
 ```
 
+Run local landing gates with:
+```bash
+cd cli
+npm run build
+npm test
+
+cd ../web
+npm run lint
+npm run build
+npm test
+```
+
 Deploy builds (including Vercel) need the Rust toolchain and `wasm-pack` to generate `pkg-web`. See `web/vercel.json` for the hosted build configuration.

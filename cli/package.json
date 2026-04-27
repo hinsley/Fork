@@ -5,7 +5,12 @@
   "main": "index.js",
   "scripts": {
     "start": "ts-node src/index.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "npm run test:wasm && npm run test:unit",
+    "test:unit": "node -r ts-node/register tests/run.ts",
+    "test:coverage": "npx c8@10.1.3 --reporter=lcov --reporter=text --report-dir coverage -- npm run test:unit",
+    "wasm:node": "cd ../crates/fork_wasm && wasm-pack build --target nodejs",
+    "test:wasm": "npm run wasm:node && node -r ts-node/register tests/wasm-smoke.ts"
   },
   "keywords": [],
   "author": "",

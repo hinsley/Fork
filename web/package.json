@@ -9,6 +9,7 @@
     "dev": "vite",
     "prebuild": "npm run wasm:web",
     "build": "tsc -b && vite build",
+    "ci": "npm run lint && npm run build && npm test",
     "vercel:install": "sh ./scripts/vercel-install.sh",
     "vercel:build": "sh ./scripts/vercel-build.sh",
     "lint": "eslint .",
@@ -17,7 +18,8 @@
     "test:unit": "vitest run",
     "test:unit:coverage": "vitest run --coverage --coverage.provider=v8 --coverage.reporter=lcov --coverage.reporter=text",
     "test:e2e": "node ./scripts/playwright-runner.mjs",
-    "test:e2e:headed": "node ./scripts/playwright-runner.mjs --headed"
+    "test:e2e:headed": "node ./scripts/playwright-runner.mjs --headed",
+    "test:real-wasm": "npm run wasm:web && node ./scripts/playwright-runner.mjs e2e/hopf-curve-limit-cycle.spec.ts"
   },
   "dependencies": {
     "fflate": "^0.8.2",

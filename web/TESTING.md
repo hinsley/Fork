@@ -2,6 +2,7 @@
 
 ## One-command run
 - `npm test` (runs unit + component + E2E)
+- `npm run ci` (runs lint, production build, then `npm test`)
 
 ## Install Playwright browsers (first time)
 - `npx playwright install`
@@ -12,9 +13,12 @@
 - E2E smoke: `web/e2e/*.spec.ts` (Playwright)
 
 ## Commands
+- Lint: `npm run lint`
+- Production build: `npm run build` (rebuilds `crates/fork_wasm/pkg-web`)
 - Unit + component only: `npm run test:unit`
 - E2E only: `npm run test:e2e`
 - E2E headed: `npm run test:e2e:headed`
+- Real-WASM boundary smoke: `npm run test:real-wasm`
 - If port 4173 is busy, Playwright will auto-pick a free port. Set `PLAYWRIGHT_PORT=####` to force a specific port.
 
 ## WASM mocking strategy
@@ -23,6 +27,8 @@
 - E2E tests use `?mock=1` to force mock compute in the browser.
 - The Hopf curve E2E test uses real WASM (no `mock=1`) and requires an up-to-date
   `crates/fork_wasm/pkg-web` build.
+- `npm run test:real-wasm` rebuilds `pkg-web` and runs the Hopf curve limit-cycle E2E
+  path without `?mock=1`.
 - Deterministic test mode: `?test=1` (or `?deterministic=1`, or `VITE_DETERMINISTIC_TEST=1`) disables
   persistence, clears `localStorage`, freezes IDs/time, and disables animations for stable UI assertions.
 - Optional deterministic fixture: `?fixture=demo` loads a canned system for external agents.
