@@ -47,6 +47,20 @@ const readSceneUirevision = (page: Page) =>
     }
   })
 
+const waitForCameraKey = async (page: Page, label: string) => {
+  let latest = ''
+  await expect
+    .poll(
+      async () => {
+        latest = (await readCameraKey(page)) ?? ''
+        return latest
+      },
+      { message: `${label} camera state not found`, timeout: 10_000 }
+    )
+    .not.toBe('')
+  return latest
+}
+
 const setCamera = (
   page: Page,
   camera: {
@@ -84,10 +98,7 @@ test('plotly view state persists after drag ends outside the plot', async ({ pag
   const viewport = page.locator('[data-testid^="plotly-viewport-"]').first()
   await expect(viewport).toHaveAttribute('data-trace-count', /[1-9]/)
 
-  const initialCameraKey = await readCameraKey(page)
-  if (!initialCameraKey) {
-    throw new Error('Initial camera state not found.')
-  }
+  const initialCameraKey = await waitForCameraKey(page, 'Initial')
 
   const box = await viewport.boundingBox()
   if (!box) {
@@ -162,10 +173,7 @@ test('plotly 3d camera persists across style-only updates', async ({ page }) => 
     ;(window as unknown as { __plotlyNode?: Element }).__plotlyNode = node ?? undefined
   })
 
-  const initialCameraKey = await readCameraKey(page)
-  if (!initialCameraKey) {
-    throw new Error('Initial camera state not found.')
-  }
+  const initialCameraKey = await waitForCameraKey(page, 'Initial')
 
   const cameraOverride = {
     eye: { x: 2.1, y: 1.4, z: 1.2 },
