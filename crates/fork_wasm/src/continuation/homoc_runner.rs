@@ -1,20 +1,18 @@
 //! Homoclinic continuation runner.
 
+use super::runner_boundary::{serialize_js, OwnedContinuationRunner};
 use crate::system::build_system;
 use fork_core::continuation::homoclinic::HomoclinicProblem;
 use fork_core::continuation::{
-    pack_homoclinic_state, BranchType, ContinuationPoint, ContinuationRunner, ContinuationSettings,
+    pack_homoclinic_state, BranchType, ContinuationPoint, ContinuationSettings,
     HomoclinicBasisSnapshot, HomoclinicResumeContext, HomoclinicSetup,
 };
-use fork_core::equation_engine::EquationSystem;
-use serde_wasm_bindgen::{from_value, to_value};
+use serde_wasm_bindgen::from_value;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub struct WasmHomoclinicRunner {
-    #[allow(dead_code)]
-    system: Box<EquationSystem>,
-    runner: Option<ContinuationRunner<HomoclinicProblem<'static>>>,
+    runner: OwnedContinuationRunner<HomoclinicProblem<'static>>,
 }
 
 #[wasm_bindgen]
@@ -37,14 +35,6 @@ impl WasmHomoclinicRunner {
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
         let system = build_system(equations, params, &param_names, &var_names)?;
-        let mut boxed_system = Box::new(system);
-        let system_ptr: *mut EquationSystem = &mut *boxed_system;
-
-        let problem =
-            HomoclinicProblem::new(unsafe { &mut *system_ptr }, setup.clone()).map_err(|e| {
-                JsValue::from_str(&format!("Failed to create homoclinic problem: {}", e))
-            })?;
-        let problem: HomoclinicProblem<'static> = unsafe { std::mem::transmute(problem) };
 
         let initial_point = ContinuationPoint {
             state: pack_homoclinic_state(&setup),
@@ -54,69 +44,60 @@ impl WasmHomoclinicRunner {
             cycle_points: None,
         };
 
-        let mut runner = ContinuationRunner::new(problem, initial_point, settings, forward)
-            .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
-        runner.set_branch_type(BranchType::HomoclinicCurve {
-            ntst: setup.ntst,
-            ncol: setup.ncol,
-            param1_name: setup.param1_name.clone(),
-            param2_name: setup.param2_name.clone(),
-            free_time: setup.extras.free_time,
-            free_eps0: setup.extras.free_eps0,
-            free_eps1: setup.extras.free_eps1,
-        });
-        runner.set_homoc_context(Some(HomoclinicResumeContext {
-            base_params: setup.base_params.clone(),
-            param1_index: setup.param1_index,
-            param2_index: setup.param2_index,
-            basis: HomoclinicBasisSnapshot {
-                stable_q: setup.basis.stable_q.clone(),
-                unstable_q: setup.basis.unstable_q.clone(),
-                dim: setup.basis.dim,
-                nneg: setup.basis.nneg,
-                npos: setup.basis.npos,
-            },
-            fixed_time: setup.guess.time,
-            fixed_eps0: setup.guess.eps0,
-            fixed_eps1: setup.guess.eps1,
-        }));
+        let mut runner = OwnedContinuationRunner::new(
+            system,
+            |system| HomoclinicProblem::new(system, setup.clone()),
+            initial_point,
+            settings,
+            forward,
+            "homoclinic",
+        )?;
+        runner
+            .runner_mut()?
+            .set_branch_type(BranchType::HomoclinicCurve {
+                ntst: setup.ntst,
+                ncol: setup.ncol,
+                param1_name: setup.param1_name.clone(),
+                param2_name: setup.param2_name.clone(),
+                free_time: setup.extras.free_time,
+                free_eps0: setup.extras.free_eps0,
+                free_eps1: setup.extras.free_eps1,
+            });
+        runner
+            .runner_mut()?
+            .set_homoc_context(Some(HomoclinicResumeContext {
+                base_params: setup.base_params.clone(),
+                param1_index: setup.param1_index,
+                param2_index: setup.param2_index,
+                basis: HomoclinicBasisSnapshot {
+                    stable_q: setup.basis.stable_q.clone(),
+                    unstable_q: setup.basis.unstable_q.clone(),
+                    dim: setup.basis.dim,
+                    nneg: setup.basis.nneg,
+                    npos: setup.basis.npos,
+                },
+                fixed_time: setup.guess.time,
+                fixed_eps0: setup.guess.eps0,
+                fixed_eps1: setup.guess.eps1,
+            }));
 
-        Ok(WasmHomoclinicRunner {
-            system: boxed_system,
-            runner: Some(runner),
-        })
+        Ok(WasmHomoclinicRunner { runner })
     }
 
     pub fn is_done(&self) -> bool {
-        self.runner.as_ref().map_or(true, |runner| runner.is_done())
+        self.runner.is_done()
     }
 
     pub fn run_steps(&mut self, batch_size: u32) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-        let result = runner
-            .run_steps(batch_size as usize)
-            .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?;
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.run_steps(batch_size)
     }
 
     pub fn get_progress(&self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_ref()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-        to_value(&runner.step_result())
-            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.get_progress()
     }
 
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .take()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-        let branch = runner.take_result();
-        to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        let branch = self.runner.take_result()?;
+        serialize_js(&branch)
     }
 }

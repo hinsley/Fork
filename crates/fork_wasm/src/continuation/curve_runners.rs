@@ -1,16 +1,16 @@
 //! Codimension-1 curve continuation runners.
 
+use super::runner_boundary::{serialize_js, OwnedContinuationRunner};
 use crate::system::build_system;
 use fork_core::continuation::codim1_curves::estimate_hopf_kappa_from_jacobian;
 use fork_core::continuation::{
     Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType, Codim2BifurcationType, ContinuationPoint,
-    ContinuationRunner, ContinuationSettings, FoldCurveProblem, HopfCurveProblem,
-    IsochroneCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
+    ContinuationSettings, FoldCurveProblem, HopfCurveProblem, IsochroneCurveProblem,
+    LPCCurveProblem, NSCurveProblem, PDCurveProblem,
 };
-use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::{compute_jacobian, SystemKind};
 use nalgebra::DMatrix;
-use serde_wasm_bindgen::{from_value, to_value};
+use serde_wasm_bindgen::from_value;
 use wasm_bindgen::prelude::*;
 
 fn normalize_lc_seed_for_stage_first_explicit(
@@ -82,9 +82,7 @@ mod layout_tests {
 
 #[wasm_bindgen]
 pub struct WasmFoldCurveRunner {
-    #[allow(dead_code)]
-    system: Box<EquationSystem>,
-    runner: Option<ContinuationRunner<FoldCurveProblem<'static>>>,
+    runner: OwnedContinuationRunner<FoldCurveProblem<'static>>,
     param1_index: usize,
     param2_index: usize,
     fold_state: Vec<f64>,
@@ -134,21 +132,6 @@ impl WasmFoldCurveRunner {
         system.params[param1_index] = param1_value;
         system.params[param2_index] = param2_value;
 
-        let mut boxed_system = Box::new(system);
-        let system_ptr: *mut EquationSystem = &mut *boxed_system;
-        let problem = FoldCurveProblem::new(
-            unsafe { &mut *system_ptr },
-            kind,
-            &fold_state,
-            param1_index,
-            param2_index,
-        )
-        .map_err(|e| JsValue::from_str(&format!("Failed to create fold problem: {}", e)))?;
-
-        // SAFETY: The problem borrows the boxed system allocation, which lives
-        // for the lifetime of the runner.
-        let problem: FoldCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
-
         let mut augmented_state = Vec::with_capacity(fold_state.len() + 1);
         augmented_state.push(param2_value);
         augmented_state.extend_from_slice(&fold_state);
@@ -161,12 +144,17 @@ impl WasmFoldCurveRunner {
             cycle_points: None,
         };
 
-        let runner = ContinuationRunner::new(problem, initial_point, settings, forward)
-            .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+        let runner = OwnedContinuationRunner::new(
+            system,
+            |system| FoldCurveProblem::new(system, kind, &fold_state, param1_index, param2_index),
+            initial_point,
+            settings,
+            forward,
+            "fold",
+        )?;
 
         Ok(WasmFoldCurveRunner {
-            system: boxed_system,
-            runner: Some(runner),
+            runner,
             param1_index,
             param2_index,
             fold_state,
@@ -175,40 +163,19 @@ impl WasmFoldCurveRunner {
     }
 
     pub fn is_done(&self) -> bool {
-        self.runner.as_ref().map_or(true, |runner| runner.is_done())
+        self.runner.is_done()
     }
 
     pub fn run_steps(&mut self, batch_size: u32) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner
-            .run_steps(batch_size as usize)
-            .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?;
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.run_steps(batch_size)
     }
 
     pub fn get_progress(&self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_ref()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner.step_result();
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.get_progress()
     }
 
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .take()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let branch = runner.take_result();
+        let branch = self.runner.take_result()?;
         let n = self.fold_state.len();
 
         let codim1_points: Vec<Codim1CurvePoint> = branch
@@ -246,8 +213,7 @@ impl WasmFoldCurveRunner {
             indices: branch.indices.clone(),
         };
 
-        to_value(&codim1_branch)
-            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        serialize_js(&codim1_branch)
     }
 }
 
@@ -507,9 +473,7 @@ mod tests {
 
 #[wasm_bindgen]
 pub struct WasmHopfCurveRunner {
-    #[allow(dead_code)]
-    system: Box<EquationSystem>,
-    runner: Option<ContinuationRunner<HopfCurveProblem<'static>>>,
+    runner: OwnedContinuationRunner<HopfCurveProblem<'static>>,
     param1_index: usize,
     param2_index: usize,
     hopf_state: Vec<f64>,
@@ -573,22 +537,6 @@ impl WasmHopfCurveRunner {
             hopf_omega * hopf_omega
         };
 
-        let mut boxed_system = Box::new(system);
-        let system_ptr: *mut EquationSystem = &mut *boxed_system;
-        let problem = HopfCurveProblem::new(
-            unsafe { &mut *system_ptr },
-            kind,
-            &hopf_state,
-            hopf_omega,
-            param1_index,
-            param2_index,
-        )
-        .map_err(|e| JsValue::from_str(&format!("Failed to create Hopf problem: {}", e)))?;
-
-        // SAFETY: The problem borrows the boxed system allocation, which lives
-        // for the lifetime of the runner.
-        let problem: HopfCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
-
         let mut augmented_state = Vec::with_capacity(n + 2);
         augmented_state.push(param2_value);
         augmented_state.extend_from_slice(&hopf_state);
@@ -602,12 +550,26 @@ impl WasmHopfCurveRunner {
             cycle_points: None,
         };
 
-        let runner = ContinuationRunner::new(problem, initial_point, settings, forward)
-            .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+        let runner = OwnedContinuationRunner::new(
+            system,
+            |system| {
+                HopfCurveProblem::new(
+                    system,
+                    kind,
+                    &hopf_state,
+                    hopf_omega,
+                    param1_index,
+                    param2_index,
+                )
+            },
+            initial_point,
+            settings,
+            forward,
+            "Hopf",
+        )?;
 
         Ok(WasmHopfCurveRunner {
-            system: boxed_system,
-            runner: Some(runner),
+            runner,
             param1_index,
             param2_index,
             hopf_state,
@@ -617,40 +579,19 @@ impl WasmHopfCurveRunner {
     }
 
     pub fn is_done(&self) -> bool {
-        self.runner.as_ref().map_or(true, |runner| runner.is_done())
+        self.runner.is_done()
     }
 
     pub fn run_steps(&mut self, batch_size: u32) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner
-            .run_steps(batch_size as usize)
-            .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?;
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.run_steps(batch_size)
     }
 
     pub fn get_progress(&self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_ref()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner.step_result();
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.get_progress()
     }
 
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .take()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let branch = runner.take_result();
+        let branch = self.runner.take_result()?;
         let n = self.hopf_state.len();
         let kappa_default = self.hopf_kappa;
 
@@ -694,16 +635,13 @@ impl WasmHopfCurveRunner {
             indices: branch.indices.clone(),
         };
 
-        to_value(&codim1_branch)
-            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        serialize_js(&codim1_branch)
     }
 }
 
 #[wasm_bindgen]
 pub struct WasmLPCCurveRunner {
-    #[allow(dead_code)]
-    system: Box<EquationSystem>,
-    runner: Option<ContinuationRunner<LPCCurveProblem<'static>>>,
+    runner: OwnedContinuationRunner<LPCCurveProblem<'static>>,
     param1_index: usize,
     param2_index: usize,
     lc_state: Vec<f64>,
@@ -779,25 +717,6 @@ impl WasmLPCCurveRunner {
             )));
         };
 
-        let mut boxed_system = Box::new(system);
-        let system_ptr: *mut EquationSystem = &mut *boxed_system;
-        let problem = LPCCurveProblem::new(
-            unsafe { &mut *system_ptr },
-            full_lc_state.clone(),
-            period,
-            param1_index,
-            param2_index,
-            param1_value,
-            param2_value,
-            ntst,
-            ncol,
-        )
-        .map_err(|e| JsValue::from_str(&format!("Failed to create LPC problem: {}", e)))?;
-
-        // SAFETY: The problem borrows the boxed system allocation, which lives
-        // for the lifetime of the runner.
-        let problem: LPCCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
-
         let mut augmented_state = Vec::with_capacity(full_lc_state.len() + 2);
         augmented_state.extend_from_slice(&full_lc_state);
         augmented_state.push(period);
@@ -811,12 +730,29 @@ impl WasmLPCCurveRunner {
             cycle_points: None,
         };
 
-        let runner = ContinuationRunner::new(problem, initial_point, settings, forward)
-            .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+        let runner = OwnedContinuationRunner::new(
+            system,
+            |system| {
+                LPCCurveProblem::new(
+                    system,
+                    full_lc_state.clone(),
+                    period,
+                    param1_index,
+                    param2_index,
+                    param1_value,
+                    param2_value,
+                    ntst,
+                    ncol,
+                )
+            },
+            initial_point,
+            settings,
+            forward,
+            "LPC",
+        )?;
 
         Ok(WasmLPCCurveRunner {
-            system: boxed_system,
-            runner: Some(runner),
+            runner,
             param1_index,
             param2_index,
             lc_state,
@@ -826,40 +762,19 @@ impl WasmLPCCurveRunner {
     }
 
     pub fn is_done(&self) -> bool {
-        self.runner.as_ref().map_or(true, |runner| runner.is_done())
+        self.runner.is_done()
     }
 
     pub fn run_steps(&mut self, batch_size: u32) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner
-            .run_steps(batch_size as usize)
-            .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?;
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.run_steps(batch_size)
     }
 
     pub fn get_progress(&self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_ref()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner.step_result();
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.get_progress()
     }
 
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .take()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let branch = runner.take_result();
+        let branch = self.runner.take_result()?;
         let n_lc = self.full_lc_state.len();
 
         let codim1_points: Vec<Codim1CurvePoint> = branch
@@ -897,16 +812,13 @@ impl WasmLPCCurveRunner {
             indices: branch.indices.clone(),
         };
 
-        to_value(&codim1_branch)
-            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        serialize_js(&codim1_branch)
     }
 }
 
 #[wasm_bindgen]
 pub struct WasmIsochroneCurveRunner {
-    #[allow(dead_code)]
-    system: Box<EquationSystem>,
-    runner: Option<ContinuationRunner<IsochroneCurveProblem<'static>>>,
+    runner: OwnedContinuationRunner<IsochroneCurveProblem<'static>>,
     param1_index: usize,
     param2_index: usize,
     lc_state: Vec<f64>,
@@ -955,25 +867,6 @@ impl WasmIsochroneCurveRunner {
         let full_lc_state = normalize_lc_seed_for_stage_first_explicit(&lc_state, ntst, ncol, dim)
             .map_err(|message| JsValue::from_str(&message))?;
 
-        let mut boxed_system = Box::new(system);
-        let system_ptr: *mut EquationSystem = &mut *boxed_system;
-        let problem = IsochroneCurveProblem::new(
-            unsafe { &mut *system_ptr },
-            full_lc_state.clone(),
-            period,
-            param1_index,
-            param2_index,
-            param1_value,
-            param2_value,
-            ntst,
-            ncol,
-        )
-        .map_err(|e| JsValue::from_str(&format!("Failed to create isochrone problem: {}", e)))?;
-
-        // SAFETY: The problem borrows the boxed system allocation, which lives
-        // for the lifetime of the runner.
-        let problem: IsochroneCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
-
         let mut augmented_state = Vec::with_capacity(full_lc_state.len() + 2);
         augmented_state.extend_from_slice(&full_lc_state);
         augmented_state.push(period);
@@ -987,12 +880,29 @@ impl WasmIsochroneCurveRunner {
             cycle_points: None,
         };
 
-        let runner = ContinuationRunner::new(problem, initial_point, settings, forward)
-            .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+        let runner = OwnedContinuationRunner::new(
+            system,
+            |system| {
+                IsochroneCurveProblem::new(
+                    system,
+                    full_lc_state.clone(),
+                    period,
+                    param1_index,
+                    param2_index,
+                    param1_value,
+                    param2_value,
+                    ntst,
+                    ncol,
+                )
+            },
+            initial_point,
+            settings,
+            forward,
+            "isochrone",
+        )?;
 
         Ok(WasmIsochroneCurveRunner {
-            system: boxed_system,
-            runner: Some(runner),
+            runner,
             param1_index,
             param2_index,
             lc_state,
@@ -1002,40 +912,19 @@ impl WasmIsochroneCurveRunner {
     }
 
     pub fn is_done(&self) -> bool {
-        self.runner.as_ref().map_or(true, |runner| runner.is_done())
+        self.runner.is_done()
     }
 
     pub fn run_steps(&mut self, batch_size: u32) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner
-            .run_steps(batch_size as usize)
-            .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?;
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.run_steps(batch_size)
     }
 
     pub fn get_progress(&self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_ref()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner.step_result();
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.get_progress()
     }
 
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .take()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let branch = runner.take_result();
+        let branch = self.runner.take_result()?;
         let n_lc = self.full_lc_state.len();
 
         let codim1_points: Vec<Codim1CurvePoint> = branch
@@ -1073,16 +962,13 @@ impl WasmIsochroneCurveRunner {
             indices: branch.indices.clone(),
         };
 
-        to_value(&codim1_branch)
-            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        serialize_js(&codim1_branch)
     }
 }
 
 #[wasm_bindgen]
 pub struct WasmPDCurveRunner {
-    #[allow(dead_code)]
-    system: Box<EquationSystem>,
-    runner: Option<ContinuationRunner<PDCurveProblem<'static>>>,
+    runner: OwnedContinuationRunner<PDCurveProblem<'static>>,
     param1_index: usize,
     param2_index: usize,
     full_lc_state: Vec<f64>,
@@ -1152,25 +1038,6 @@ impl WasmPDCurveRunner {
             )));
         };
 
-        let mut boxed_system = Box::new(system);
-        let system_ptr: *mut EquationSystem = &mut *boxed_system;
-        let problem = PDCurveProblem::new(
-            unsafe { &mut *system_ptr },
-            full_lc_state.clone(),
-            period,
-            param1_index,
-            param2_index,
-            param1_value,
-            param2_value,
-            ntst,
-            ncol,
-        )
-        .map_err(|e| JsValue::from_str(&format!("Failed to create PD problem: {}", e)))?;
-
-        // SAFETY: The problem borrows the boxed system allocation, which lives
-        // for the lifetime of the runner.
-        let problem: PDCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
-
         let mut augmented_state = Vec::with_capacity(full_lc_state.len() + 2);
         augmented_state.extend_from_slice(&full_lc_state);
         augmented_state.push(period);
@@ -1184,12 +1051,29 @@ impl WasmPDCurveRunner {
             cycle_points: None,
         };
 
-        let runner = ContinuationRunner::new(problem, initial_point, settings, forward)
-            .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+        let runner = OwnedContinuationRunner::new(
+            system,
+            |system| {
+                PDCurveProblem::new(
+                    system,
+                    full_lc_state.clone(),
+                    period,
+                    param1_index,
+                    param2_index,
+                    param1_value,
+                    param2_value,
+                    ntst,
+                    ncol,
+                )
+            },
+            initial_point,
+            settings,
+            forward,
+            "PD",
+        )?;
 
         Ok(WasmPDCurveRunner {
-            system: boxed_system,
-            runner: Some(runner),
+            runner,
             param1_index,
             param2_index,
             full_lc_state,
@@ -1198,40 +1082,19 @@ impl WasmPDCurveRunner {
     }
 
     pub fn is_done(&self) -> bool {
-        self.runner.as_ref().map_or(true, |runner| runner.is_done())
+        self.runner.is_done()
     }
 
     pub fn run_steps(&mut self, batch_size: u32) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner
-            .run_steps(batch_size as usize)
-            .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?;
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.run_steps(batch_size)
     }
 
     pub fn get_progress(&self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_ref()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner.step_result();
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.get_progress()
     }
 
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .take()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let branch = runner.take_result();
+        let branch = self.runner.take_result()?;
         let n_lc = self.full_lc_state.len();
 
         let codim1_points: Vec<Codim1CurvePoint> = branch
@@ -1269,16 +1132,13 @@ impl WasmPDCurveRunner {
             indices: branch.indices.clone(),
         };
 
-        to_value(&codim1_branch)
-            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        serialize_js(&codim1_branch)
     }
 }
 
 #[wasm_bindgen]
 pub struct WasmNSCurveRunner {
-    #[allow(dead_code)]
-    system: Box<EquationSystem>,
-    runner: Option<ContinuationRunner<NSCurveProblem<'static>>>,
+    runner: OwnedContinuationRunner<NSCurveProblem<'static>>,
     param1_index: usize,
     param2_index: usize,
     lc_state: Vec<f64>,
@@ -1349,26 +1209,6 @@ impl WasmNSCurveRunner {
             )));
         };
 
-        let mut boxed_system = Box::new(system);
-        let system_ptr: *mut EquationSystem = &mut *boxed_system;
-        let problem = NSCurveProblem::new(
-            unsafe { &mut *system_ptr },
-            full_lc_state.clone(),
-            period,
-            param1_index,
-            param2_index,
-            param1_value,
-            param2_value,
-            initial_k,
-            ntst,
-            ncol,
-        )
-        .map_err(|e| JsValue::from_str(&format!("Failed to create NS problem: {}", e)))?;
-
-        // SAFETY: The problem borrows the boxed system allocation, which lives
-        // for the lifetime of the runner.
-        let problem: NSCurveProblem<'static> = unsafe { std::mem::transmute(problem) };
-
         let mut augmented_state = Vec::with_capacity(full_lc_state.len() + 3);
         augmented_state.extend_from_slice(&full_lc_state);
         augmented_state.push(period);
@@ -1383,12 +1223,30 @@ impl WasmNSCurveRunner {
             cycle_points: None,
         };
 
-        let runner = ContinuationRunner::new(problem, initial_point, settings, forward)
-            .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
+        let runner = OwnedContinuationRunner::new(
+            system,
+            |system| {
+                NSCurveProblem::new(
+                    system,
+                    full_lc_state.clone(),
+                    period,
+                    param1_index,
+                    param2_index,
+                    param1_value,
+                    param2_value,
+                    initial_k,
+                    ntst,
+                    ncol,
+                )
+            },
+            initial_point,
+            settings,
+            forward,
+            "NS",
+        )?;
 
         Ok(WasmNSCurveRunner {
-            system: boxed_system,
-            runner: Some(runner),
+            runner,
             param1_index,
             param2_index,
             lc_state,
@@ -1399,40 +1257,19 @@ impl WasmNSCurveRunner {
     }
 
     pub fn is_done(&self) -> bool {
-        self.runner.as_ref().map_or(true, |runner| runner.is_done())
+        self.runner.is_done()
     }
 
     pub fn run_steps(&mut self, batch_size: u32) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner
-            .run_steps(batch_size as usize)
-            .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?;
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.run_steps(batch_size)
     }
 
     pub fn get_progress(&self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_ref()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner.step_result();
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.get_progress()
     }
 
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .take()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let branch = runner.take_result();
+        let branch = self.runner.take_result()?;
         let n_lc = self.full_lc_state.len();
 
         let codim1_points: Vec<Codim1CurvePoint> = branch
@@ -1475,7 +1312,6 @@ impl WasmNSCurveRunner {
             indices: branch.indices.clone(),
         };
 
-        to_value(&codim1_branch)
-            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        serialize_js(&codim1_branch)
     }
 }

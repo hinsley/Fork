@@ -1,12 +1,12 @@
 //! Limit cycle continuation runner and mesh helpers.
 
+use super::runner_boundary::{serialize_js, OwnedContinuationRunner};
 use crate::system::build_system;
 use fork_core::continuation::periodic::{CollocationCoefficients, PeriodicOrbitCollocationProblem};
 use fork_core::continuation::{
-    BranchType, ContinuationPoint, ContinuationRunner, ContinuationSettings, LimitCycleSetup,
+    BranchType, ContinuationPoint, ContinuationSettings, LimitCycleSetup,
 };
-use fork_core::equation_engine::EquationSystem;
-use serde_wasm_bindgen::{from_value, to_value};
+use serde_wasm_bindgen::from_value;
 use wasm_bindgen::prelude::*;
 
 fn validate_mesh_states(
@@ -77,9 +77,7 @@ fn flatten_collocation_state(
 
 #[wasm_bindgen]
 pub struct WasmLimitCycleRunner {
-    #[allow(dead_code)]
-    system: Box<EquationSystem>,
-    runner: Option<ContinuationRunner<PeriodicOrbitCollocationProblem<'static>>>,
+    runner: OwnedContinuationRunner<PeriodicOrbitCollocationProblem<'static>>,
 }
 
 #[wasm_bindgen]
@@ -111,17 +109,21 @@ impl WasmLimitCycleRunner {
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
 
         let config = setup.collocation_config();
+        let mesh_points = config.mesh_points;
+        let degree = config.degree;
+        let phase_anchor = config.phase_anchor.clone();
+        let phase_direction = config.phase_direction.clone();
         let dim = system.equations.len();
-        validate_mesh_states(dim, config.mesh_points, &setup.guess.mesh_states)
+        validate_mesh_states(dim, mesh_points, &setup.guess.mesh_states)
             .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
 
         let stage_states = if setup.guess.stage_states.is_empty() {
-            let coeffs = CollocationCoefficients::new(config.degree)
+            let coeffs = CollocationCoefficients::new(degree)
                 .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
             build_stage_states_from_mesh(
                 dim,
-                config.mesh_points,
-                config.degree,
+                mesh_points,
+                degree,
                 &coeffs.nodes,
                 &setup.guess.mesh_states,
             )
@@ -140,73 +142,48 @@ impl WasmLimitCycleRunner {
             cycle_points: None,
         };
 
-        let mut boxed_system = Box::new(system);
-        let system_ptr: *mut EquationSystem = &mut *boxed_system;
-        let problem = PeriodicOrbitCollocationProblem::new(
-            unsafe { &mut *system_ptr },
-            param_index,
-            config.mesh_points,
-            config.degree,
-            config.phase_anchor,
-            config.phase_direction,
-        )
-        .map_err(|e| JsValue::from_str(&format!("Failed to create LC problem: {}", e)))?;
+        let mut runner = OwnedContinuationRunner::new(
+            system,
+            |system| {
+                PeriodicOrbitCollocationProblem::new(
+                    system,
+                    param_index,
+                    mesh_points,
+                    degree,
+                    phase_anchor,
+                    phase_direction,
+                )
+            },
+            initial_point,
+            settings,
+            forward,
+            "LC",
+        )?;
+        runner
+            .runner_mut()?
+            .set_branch_type(BranchType::LimitCycle {
+                ntst: mesh_points,
+                ncol: degree,
+            });
 
-        // SAFETY: The problem borrows the boxed system allocation, which lives
-        // for the lifetime of the runner.
-        let problem: PeriodicOrbitCollocationProblem<'static> =
-            unsafe { std::mem::transmute(problem) };
-
-        let mut runner = ContinuationRunner::new(problem, initial_point, settings, forward)
-            .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
-        runner.set_branch_type(BranchType::LimitCycle {
-            ntst: config.mesh_points,
-            ncol: config.degree,
-        });
-
-        Ok(WasmLimitCycleRunner {
-            system: boxed_system,
-            runner: Some(runner),
-        })
+        Ok(WasmLimitCycleRunner { runner })
     }
 
     pub fn is_done(&self) -> bool {
-        self.runner.as_ref().map_or(true, |runner| runner.is_done())
+        self.runner.is_done()
     }
 
     pub fn run_steps(&mut self, batch_size: u32) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner
-            .run_steps(batch_size as usize)
-            .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?;
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.run_steps(batch_size)
     }
 
     pub fn get_progress(&self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_ref()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner.step_result();
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.get_progress()
     }
 
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .take()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let branch = runner.take_result();
-
-        to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        let branch = self.runner.take_result()?;
+        serialize_js(&branch)
     }
 }
 

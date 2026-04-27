@@ -13,6 +13,7 @@ mod extension_runner;
 mod homoc_runner;
 mod homotopy_saddle_runner;
 mod lc_runner;
+mod runner_boundary;
 mod shared;
 mod system_methods;
 
