@@ -96,11 +96,11 @@ behavior.
 - `web/src/analysis/AnalysisViewportPlot.tsx`: analysis return/event maps use
   `PlotlyViewport` with declarative 2D/3D scatter layouts and one-time
   `initialView` range restoration derived from persisted analysis
-  `axisRanges`; 2D event maps that plot the same quantity at different hit
-  offsets (same observable or `Delta t` / `Delta n`) can add declarative
-  cobweb and identity-line overlay traces, with viewport-owned identity-line
-  color/style state; no direct Plotly mutation is added beyond the shared
-  viewport wrapper.
+  `axisRanges`; `web/src/analysis/analysisTraceBuilders.ts` builds the
+  declarative source, cobweb, and identity-line traces for 2D event maps that
+  plot the same quantity at different hit offsets (same observable or `Delta t`
+  / `Delta n`), with viewport-owned identity-line color/style state; no direct
+  Plotly mutation is added beyond the shared viewport wrapper.
 - `web/src/ui/ViewportPanel.tsx`: map function sampling requests are limited to
   true 1D map systems (`varNames.length === 1`) and only when at least one
   visible scene is currently in `map_cobweb_1d` mode.
