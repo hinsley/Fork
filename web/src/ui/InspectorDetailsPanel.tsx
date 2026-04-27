@@ -7,7 +7,6 @@ import type {
   ClvRenderStyle,
   ComplexValue,
   ContinuationObject,
-  ContinuationPoint,
   EquilibriumEigenvectorRenderStyle,
   EquilibriumObject,
   IsoclineObject,
@@ -83,7 +82,6 @@ import {
   extractHopfOmega,
   extractLimitCycleProfile,
   ensureBranchIndices,
-  formatBifurcationLabel,
   getBranchParams,
   interpretLimitCycleStability,
   normalizeEigenvalueArray,
@@ -105,6 +103,12 @@ import {
   normalizeFloquetMultipliersForRendering,
 } from '../system/floquetModes'
 import { AnalysisViewportInspector } from './AnalysisViewportInspector'
+import { BranchNavigatorContent } from './BranchNavigator'
+import {
+  resolveBranchPointParams,
+  resolveCodim1ParamNames,
+  resolveContinuationParameterReadout,
+} from './branchPointDisplay'
 
 type InspectorDetailsPanelProps = {
   system: System
@@ -781,24 +785,6 @@ function formatTerminationReasonLabel(reason: string | undefined): string {
     .replace(/\b\w/g, (match) => match.toUpperCase())
 }
 
-function summarizeEigenvalues(point: ContinuationPoint, branchType?: string): string {
-  const eigenvalues = normalizeEigenvalueArray(point.eigenvalues)
-  const label =
-    branchType === 'limit_cycle' ||
-    branchType === 'isochrone_curve' ||
-    branchType === 'lpc_curve' ||
-    branchType === 'pd_curve' ||
-    branchType === 'ns_curve'
-      ? 'Multipliers'
-      : 'Eigenvalues'
-  if (eigenvalues.length === 0) return `${label}: []`
-  const formatted = eigenvalues
-    .slice(0, 3)
-    .map((ev) => `${formatNumberSafe(ev.re)}+${formatNumberSafe(ev.im)}i`)
-  const suffix = eigenvalues.length > 3 ? ' …' : ''
-  return `${label}: ${formatted.join(', ')}${suffix}`
-}
-
 function buildEigenvaluePlot(
   eigenvalues: ComplexValue[] | null | undefined,
   plotlyTheme: PlotlyThemeTokens,
@@ -1402,125 +1388,6 @@ function makeBranchExtensionDraft(
     stepTolerance: defaults?.step_tolerance?.toString() ?? base.stepTolerance,
     forward: true,
   }
-}
-
-function resolveCodim1ParamNames(
-  branch?: ContinuationObject | null
-): { param1: string; param2: string } | null {
-  const branchType = branch?.data.branch_type
-  if (!branchType || typeof branchType !== 'object') return null
-  if ('param1_name' in branchType && 'param2_name' in branchType) {
-    return { param1: branchType.param1_name, param2: branchType.param2_name }
-  }
-  return null
-}
-
-function parseContinuationParameterNameParts(value: string | undefined): string[] {
-  return (value ?? '')
-    .split(',')
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0)
-}
-
-function resolveContinuationParameterReadout(
-  systemConfig: Pick<SystemConfig, 'paramNames'>,
-  branchParams: number[],
-  branch: ContinuationObject,
-  point: ContinuationPoint,
-  stateDimension: number
-): { label: string; value: string } | null {
-  const branchType = branch.data.branch_type
-  const codim1ParamNames = resolveCodim1ParamNames(branch)
-  const parameterNameParts = parseContinuationParameterNameParts(branch.parameterName)
-  const branchTypeParam1Ref =
-    branchType && typeof branchType === 'object' && 'param1_ref' in branchType
-      ? branchType.param1_ref
-      : undefined
-  const branchTypeParam2Ref =
-    branchType && typeof branchType === 'object' && 'param2_ref' in branchType
-      ? branchType.param2_ref
-      : undefined
-
-  const primaryLabel =
-    codim1ParamNames?.param1.trim() ||
-    (branchTypeParam1Ref ? formatParameterRefLabel(branchTypeParam1Ref) : null) ||
-    (branch.parameterRef ? formatParameterRefLabel(branch.parameterRef) : null) ||
-    parameterNameParts[0] ||
-    branch.parameterName.trim() ||
-    'parameter'
-  const secondaryLabel =
-    codim1ParamNames?.param2.trim() ||
-    (branchTypeParam2Ref ? formatParameterRefLabel(branchTypeParam2Ref) : null) ||
-    (branch.parameter2Ref ? formatParameterRefLabel(branch.parameter2Ref) : null) ||
-    parameterNameParts[1] ||
-    null
-
-  const resolveNativeParamFallback = (label: string | null): number | undefined => {
-    if (!label) return undefined
-    const index = systemConfig.paramNames.indexOf(label)
-    if (index < 0) return undefined
-    const value = branchParams[index]
-    return Number.isFinite(value) ? value : undefined
-  }
-
-  const entries: string[] = []
-  const primaryValue = Number.isFinite(point.param_value)
-    ? point.param_value
-    : resolveNativeParamFallback(primaryLabel)
-  if (Number.isFinite(primaryValue)) {
-    entries.push(`${primaryLabel}=${formatNumber(primaryValue as number, 6)}`)
-  }
-
-  const inferredSecondaryValue =
-    typeof point.param2_value === 'number' && Number.isFinite(point.param2_value)
-      ? point.param2_value
-      : resolveContinuationPointParam2Value(point, branchType, stateDimension)
-  const secondaryValue = Number.isFinite(inferredSecondaryValue)
-    ? inferredSecondaryValue
-    : resolveNativeParamFallback(secondaryLabel)
-  if (
-    secondaryLabel &&
-    secondaryLabel !== primaryLabel &&
-    Number.isFinite(secondaryValue)
-  ) {
-    entries.push(`${secondaryLabel}=${formatNumber(secondaryValue as number, 6)}`)
-  }
-
-  if (entries.length === 0) return null
-  return {
-    label: entries.length === 1 ? 'Continuation parameter' : 'Continuation parameters',
-    value: entries.join(', '),
-  }
-}
-
-function resolveBranchPointParams(
-  paramNames: string[],
-  baseParams: number[],
-  branch: ContinuationObject,
-  point: ContinuationPoint,
-  stateDimension: number
-): number[] {
-  if (paramNames.length === 0) return []
-  const codim1ParamNames = resolveCodim1ParamNames(branch)
-  const continuationParamIndex = paramNames.indexOf(branch.parameterName)
-  return paramNames.map((name, index) => {
-    let value = baseParams[index]
-    if (codim1ParamNames) {
-      if (name === codim1ParamNames.param1) {
-        value = point.param_value
-      } else if (name === codim1ParamNames.param2) {
-        value =
-          resolveContinuationPointParam2Value(
-            point,
-            branch.data.branch_type,
-            stateDimension
-          ) ?? baseParams[index]
-      }
-    } else if (index === continuationParamIndex) {
-      value = point.param_value
-    }
-    return value ?? Number.NaN
-  })
 }
 
 function makeCodim1CurveDraft(system: SystemConfig): Codim1CurveDraft {
@@ -3994,9 +3861,6 @@ export function InspectorDetailsPanel({
     if (!branch) return []
     return getBranchParams(system, branch)
   }, [branch, system])
-  const continuationParamIndex = branch
-    ? systemDraft.paramNames.indexOf(branch.parameterName)
-    : -1
   const codim1ParamNames = useMemo(() => resolveCodim1ParamNames(branch), [branch])
   const branchBifurcations = useMemo(
     () => (branch ? branch.data.bifurcations ?? [] : []),
@@ -10794,193 +10658,49 @@ export function InspectorDetailsPanel({
                       onOpenChange={setBranchNavigatorOpen}
                     >
                       <div className="inspector-section">
-                        {branch.data.points.length === 0 ? (
-                          <p className="empty-state">No branch points stored yet.</p>
-                        ) : (
-                          <>
-                            <div className="inspector-row inspector-row--nav">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (branchSortedOrder.length === 0) return
-                                  setBranchPoint(branchSortedOrder[0])
-                                }}
-                                disabled={
-                                  branchPointIndex === null ||
-                                  branchSortedOrder.length === 0 ||
-                                  branchSortedIndex <= 0
-                                }
-                                data-testid="branch-point-least"
-                              >
-                                Start
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (branchSortedIndex <= 0) return
-                                  setBranchPoint(branchSortedOrder[branchSortedIndex - 1])
-                                }}
-                                disabled={branchPointIndex === null || branchSortedIndex <= 0}
-                                data-testid="branch-point-prev"
-                              >
-                                Previous
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (
-                                    branchSortedIndex < 0 ||
-                                    branchSortedIndex >= branchSortedOrder.length - 1
-                                  )
-                                    return
-                                  setBranchPoint(branchSortedOrder[branchSortedIndex + 1])
-                                }}
-                                disabled={
-                                  branchPointIndex === null ||
-                                  branchSortedIndex < 0 ||
-                                  branchSortedIndex >= branchSortedOrder.length - 1
-                                }
-                                data-testid="branch-point-next"
-                              >
-                                Next
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (branchSortedOrder.length === 0) return
-                                  setBranchPoint(
-                                    branchSortedOrder[branchSortedOrder.length - 1]
-                                  )
-                                }}
-                                disabled={
-                                  branchPointIndex === null ||
-                                  branchSortedOrder.length === 0 ||
-                                  branchSortedIndex >= branchSortedOrder.length - 1
-                                }
-                                data-testid="branch-point-greatest"
-                              >
-                                End
-                              </button>
-                            </div>
-
-                            <label>
-                              Point index
-                              <div className="inspector-row">
-                                <input
-                                  type="number"
-                                  value={branchPointInput}
-                                  onChange={(event) => setBranchPointInput(event.target.value)}
-                                  data-testid="branch-point-input"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={handleJumpToBranchPoint}
-                                  data-testid="branch-point-jump"
-                                >
-                                  Jump
-                                </button>
-                              </div>
-                            </label>
-                            {branchPointError ? (
-                              <div className="field-error">{branchPointError}</div>
-                            ) : null}
-
-                            {branchPointIndex !== null ? (
-                              <div className="inspector-data">
-                                <div>
-                                  {`Selected point: ${branchIndices[branchPointIndex]} ([${branchPointIndex}] memaddr)`}
-                                </div>
-                                {selectedBranchPoint ? (
-                                  <>
-                                    {selectedBranchPointParameterReadout ? (
-                                      <div>
-                                        {selectedBranchPointParameterReadout.label}:{' '}
-                                        {selectedBranchPointParameterReadout.value}
-                                      </div>
-                                    ) : null}
-                                    <div>
-                                      Stability:{' '}
-                                      {limitCyclePointMetrics?.stability ??
-                                        selectedBranchPoint.stability}
-                                    </div>
-                                    {Number.isFinite(
-                                      limitCyclePointMetrics?.metrics.period ??
-                                        selectedBranchPoint.state[
-                                          selectedBranchPoint.state.length - 1
-                                        ]
-                                    ) ? (
-                                      <div>
-                                        Period:{' '}
-                                        {formatNumber(
-                                          limitCyclePointMetrics?.metrics.period ??
-                                            selectedBranchPoint.state[
-                                              selectedBranchPoint.state.length - 1
-                                            ],
-                                          6
-                                        )}
-                                      </div>
-                                    ) : null}
-                                    <div>
-                                      {summarizeEigenvalues(
-                                        selectedBranchPoint,
-                                        branch.branchType
-                                      )}
-                                    </div>
-                                  </>
-                                ) : null}
-                              </div>
-                            ) : null}
-
-                            {branchPointIndex !== null &&
+                        <BranchNavigatorContent
+                          branch={branch}
+                          branchIndices={branchIndices}
+                          branchSortedOrder={branchSortedOrder}
+                          branchSortedIndex={branchSortedIndex}
+                          branchPointIndex={branchPointIndex}
+                          branchPointInput={branchPointInput}
+                          branchPointError={branchPointError}
+                          selectedBranchPoint={selectedBranchPoint}
+                          selectedBranchPointParameterReadout={
+                            selectedBranchPointParameterReadout
+                          }
+                          selectedPointStability={
+                            limitCyclePointMetrics?.stability ??
+                            selectedBranchPoint?.stability
+                          }
+                          selectedPointPeriod={
+                            limitCyclePointMetrics?.metrics.period ??
+                            (selectedBranchPoint
+                              ? selectedBranchPoint.state[
+                                  selectedBranchPoint.state.length - 1
+                                ]
+                              : undefined)
+                          }
+                          branchBifurcations={branchBifurcations}
+                          onPointSelect={setBranchPoint}
+                          onPointInputChange={setBranchPointInput}
+                          onJumpToPoint={handleJumpToBranchPoint}
+                          onRenderLimitCycleHere={
+                            branchPointIndex !== null &&
                             selectedNodeId &&
                             limitCycleParentId &&
                             onSetLimitCycleRenderTarget &&
-                            !isBranchRenderTarget ? (
-                              <div className="inspector-row">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    onSetLimitCycleRenderTarget(limitCycleParentId, {
-                                      type: 'branch',
-                                      branchId: selectedNodeId,
-                                      pointIndex: branchPointIndex,
-                                    })
-                                  }
-                                  data-testid="branch-point-render-lc"
-                                >
-                                  Render LC Here
-                                </button>
-                              </div>
-                            ) : null}
-
-                            {branchBifurcations.length > 0 ? (
-                              <div className="inspector-section">
-                                <h4 className="inspector-subheading">Bifurcations</h4>
-                                <div className="inspector-list">
-                                  {branchBifurcations.map((idx) => {
-                                    const logical = branchIndices[idx]
-                                    const point = branch?.data.points[idx]
-                                    const displayIndex = Number.isFinite(logical) ? logical : idx
-                                    const label = formatBifurcationLabel(
-                                      displayIndex,
-                                      point?.stability
-                                    )
-                                    return (
-                                      <button
-                                        type="button"
-                                        key={`bif-${idx}`}
-                                        onClick={() => setBranchPoint(idx)}
-                                        data-testid={`branch-bifurcation-${idx}`}
-                                      >
-                                        {label}
-                                      </button>
-                                    )
-                                  })}
-                                </div>
-                              </div>
-                            ) : null}
-                          </>
-                        )}
+                            !isBranchRenderTarget
+                              ? () =>
+                                  onSetLimitCycleRenderTarget(limitCycleParentId, {
+                                    type: 'branch',
+                                    branchId: selectedNodeId,
+                                    pointIndex: branchPointIndex,
+                                  })
+                              : undefined
+                          }
+                        />
                       </div>
                     </InspectorDisclosure>
 
@@ -11030,27 +10750,13 @@ export function InspectorDetailsPanel({
                               ) : null}
                             </div>
                             <InspectorMetrics
-                              rows={systemDraft.paramNames.map((name, index) => {
-                                let value = branchParams[index]
-                                if (codim1ParamNames) {
-                                  if (name === codim1ParamNames.param1) {
-                                    value = selectedBranchPoint.param_value
-                                  } else if (name === codim1ParamNames.param2) {
-                                    value =
-                                      resolveContinuationPointParam2Value(
-                                        selectedBranchPoint,
-                                        branch.data.branch_type,
-                                        branchStateDimension
-                                      ) ?? branchParams[index]
-                                  }
-                                } else if (index === continuationParamIndex) {
-                                  value = selectedBranchPoint.param_value
-                                }
-                                return {
-                                  label: name || `p${index + 1}`,
-                                  value: formatNumber(value ?? Number.NaN, 6),
-                                }
-                              })}
+                              rows={systemDraft.paramNames.map((name, index) => ({
+                                label: name || `p${index + 1}`,
+                                value: formatNumber(
+                                  selectedBranchPointParams[index] ?? Number.NaN,
+                                  6
+                                ),
+                              }))}
                             />
                             <h4 className="inspector-subheading">
                               Amplitude (min to max)
@@ -11459,172 +11165,38 @@ export function InspectorDetailsPanel({
                       onOpenChange={setBranchNavigatorOpen}
                     >
                       <div className="inspector-section">
-                        {branch.data.points.length === 0 ? (
-                          <p className="empty-state">No branch points stored yet.</p>
-                        ) : (
-                          <>
-                            <div className="inspector-row inspector-row--nav">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (branchSortedOrder.length === 0) return
-                                  setBranchPoint(branchSortedOrder[0])
-                                }}
-                                disabled={
-                                  branchPointIndex === null ||
-                                  branchSortedOrder.length === 0 ||
-                                  branchSortedIndex <= 0
-                                }
-                                data-testid="branch-point-least"
-                              >
-                                Start
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (branchSortedIndex <= 0) return
-                                  setBranchPoint(branchSortedOrder[branchSortedIndex - 1])
-                                }}
-                                disabled={branchPointIndex === null || branchSortedIndex <= 0}
-                                data-testid="branch-point-prev"
-                              >
-                                Previous
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (
-                                    branchSortedIndex < 0 ||
-                                    branchSortedIndex >= branchSortedOrder.length - 1
-                                  )
-                                    return
-                                  setBranchPoint(branchSortedOrder[branchSortedIndex + 1])
-                                }}
-                                disabled={
-                                  branchPointIndex === null ||
-                                  branchSortedIndex < 0 ||
-                                  branchSortedIndex >= branchSortedOrder.length - 1
-                                }
-                                data-testid="branch-point-next"
-                              >
-                                Next
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (branchSortedOrder.length === 0) return
-                                  setBranchPoint(
-                                    branchSortedOrder[branchSortedOrder.length - 1]
-                                  )
-                                }}
-                                disabled={
-                                  branchPointIndex === null ||
-                                  branchSortedOrder.length === 0 ||
-                                  branchSortedIndex >= branchSortedOrder.length - 1
-                                }
-                                data-testid="branch-point-greatest"
-                              >
-                                End
-                              </button>
-                            </div>
-
-                            <label>
-                              Point index
-                              <div className="inspector-row">
-                                <input
-                                  type="number"
-                                  value={branchPointInput}
-                                  onChange={(event) => setBranchPointInput(event.target.value)}
-                                  data-testid="branch-point-input"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={handleJumpToBranchPoint}
-                                  data-testid="branch-point-jump"
-                                >
-                                  Jump
-                                </button>
-                              </div>
-                            </label>
-                            {branchPointError ? (
-                              <div className="field-error">{branchPointError}</div>
-                            ) : null}
-
-                            {branchPointIndex !== null ? (
-                              <div className="inspector-data">
-                                <div>
-                                  {`Selected point: ${branchIndices[branchPointIndex]} ([${branchPointIndex}] memaddr)`}
-                                </div>
-                                {selectedBranchPoint ? (
-                                  <>
-                                    {selectedBranchPointParameterReadout ? (
-                                      <div>
-                                        {selectedBranchPointParameterReadout.label}:{' '}
-                                        {selectedBranchPointParameterReadout.value}
-                                      </div>
-                                    ) : null}
-                                    <div>Stability: {selectedBranchPoint.stability}</div>
-                                    <div>
-                                      {summarizeEigenvalues(
-                                        selectedBranchPoint,
-                                        branch.branchType
-                                      )}
-                                    </div>
-                                  </>
-                                ) : null}
-                              </div>
-                            ) : null}
-
-                            {branchPointIndex !== null &&
+                        <BranchNavigatorContent
+                          branch={branch}
+                          branchIndices={branchIndices}
+                          branchSortedOrder={branchSortedOrder}
+                          branchSortedIndex={branchSortedIndex}
+                          branchPointIndex={branchPointIndex}
+                          branchPointInput={branchPointInput}
+                          branchPointError={branchPointError}
+                          selectedBranchPoint={selectedBranchPoint}
+                          selectedBranchPointParameterReadout={
+                            selectedBranchPointParameterReadout
+                          }
+                          selectedPointStability={selectedBranchPoint?.stability}
+                          branchBifurcations={branchBifurcations}
+                          onPointSelect={setBranchPoint}
+                          onPointInputChange={setBranchPointInput}
+                          onJumpToPoint={handleJumpToBranchPoint}
+                          onRenderLimitCycleHere={
+                            branchPointIndex !== null &&
                             selectedNodeId &&
                             limitCycleParentId &&
                             onSetLimitCycleRenderTarget &&
-                            !isBranchRenderTarget ? (
-                              <div className="inspector-row">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    onSetLimitCycleRenderTarget(limitCycleParentId, {
-                                      type: 'branch',
-                                      branchId: selectedNodeId,
-                                      pointIndex: branchPointIndex,
-                                    })
-                                  }
-                                  data-testid="branch-point-render-lc"
-                                >
-                                  Render LC Here
-                                </button>
-                              </div>
-                            ) : null}
-
-                            {branchBifurcations.length > 0 ? (
-                              <div className="inspector-section">
-                                <h4 className="inspector-subheading">Bifurcations</h4>
-                                <div className="inspector-list">
-                                  {branchBifurcations.map((idx) => {
-                                    const logical = branchIndices[idx]
-                                    const point = branch?.data.points[idx]
-                                    const displayIndex = Number.isFinite(logical) ? logical : idx
-                                    const label = formatBifurcationLabel(
-                                      displayIndex,
-                                      point?.stability
-                                    )
-                                    return (
-                                      <button
-                                        type="button"
-                                        key={`bif-${idx}`}
-                                        onClick={() => setBranchPoint(idx)}
-                                        data-testid={`branch-bifurcation-${idx}`}
-                                      >
-                                        {label}
-                                      </button>
-                                    )
-                                  })}
-                                </div>
-                              </div>
-                            ) : null}
-                          </>
-                        )}
+                            !isBranchRenderTarget
+                              ? () =>
+                                  onSetLimitCycleRenderTarget(limitCycleParentId, {
+                                    type: 'branch',
+                                    branchId: selectedNodeId,
+                                    pointIndex: branchPointIndex,
+                                  })
+                              : undefined
+                          }
+                        />
                       </div>
                     </InspectorDisclosure>
 
@@ -11658,27 +11230,13 @@ export function InspectorDetailsPanel({
                               ) : null}
                             </div>
                             <InspectorMetrics
-                              rows={systemDraft.paramNames.map((name, index) => {
-                                let value = branchParams[index]
-                                if (codim1ParamNames) {
-                                  if (name === codim1ParamNames.param1) {
-                                    value = selectedBranchPoint.param_value
-                                  } else if (name === codim1ParamNames.param2) {
-                                    value =
-                                      resolveContinuationPointParam2Value(
-                                        selectedBranchPoint,
-                                        branch.data.branch_type,
-                                        branchStateDimension
-                                      ) ?? branchParams[index]
-                                  }
-                                } else if (index === continuationParamIndex) {
-                                  value = selectedBranchPoint.param_value
-                                }
-                                return {
-                                  label: name || `p${index + 1}`,
-                                  value: formatNumber(value ?? Number.NaN, 6),
-                                }
-                              })}
+                              rows={systemDraft.paramNames.map((name, index) => ({
+                                label: name || `p${index + 1}`,
+                                value: formatNumber(
+                                  selectedBranchPointParams[index] ?? Number.NaN,
+                                  6
+                                ),
+                              }))}
                             />
                             <div className="inspector-subheading-row">
                               <h4 className="inspector-subheading">State</h4>
