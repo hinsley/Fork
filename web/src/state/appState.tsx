@@ -16,7 +16,6 @@ import type {
   ValidateSystemResult,
 } from '../compute/ForkCoreClient'
 import type { JobTiming } from '../compute/jobQueue'
-import { createSystem } from '../system/model'
 import type {
   AnalysisObject,
   AnalysisViewport,
@@ -100,7 +99,8 @@ import {
 } from '../system/subsystemGateway'
 import { formatEquilibriumLabel } from '../system/labels'
 import { AppContext } from './appContext'
-import { validateSystemConfig, validateSystemName } from './systemValidation'
+import { createSystemStorageCommands } from './systemStorageCommands'
+import { validateSystemConfig } from './systemValidation'
 import { isCliSafeName } from '../utils/naming'
 
 function findObjectIdByName(system: System, name: string): string | null {
@@ -1701,123 +1701,30 @@ export function AppProvider({
     void ensureEntitiesLoaded({ objectIds, branchIds })
   }, [ensureEntitiesLoaded, state.system])
 
-  const refreshSystems = useCallback(async () => {
-    try {
-      const systems = await store.list()
-      dispatch({ type: 'SET_SYSTEMS', systems })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      dispatch({ type: 'SET_ERROR', error: message })
-    }
-  }, [store])
-
-  const createSystemAction = useCallback(
-    async (name: string) => {
-      const nameError = validateSystemName(name)
-      if (nameError) {
-        dispatch({ type: 'SET_ERROR', error: nameError })
-        return
-      }
-      dispatch({ type: 'SET_BUSY', busy: true })
-      try {
-        const system = createSystem({ name })
-        dispatch({ type: 'SET_SYSTEM', system })
-        await store.save(system)
-        await refreshSystems()
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        dispatch({ type: 'SET_ERROR', error: message })
-      } finally {
-        dispatch({ type: 'SET_BUSY', busy: false })
-      }
-    },
-    [refreshSystems, store]
+  const storageCommands = useMemo(
+    () =>
+      createSystemStorageCommands({
+        store,
+        dispatch,
+        getCurrentSystem: () => state.system,
+        setLatestSystem: (system) => {
+          latestSystemRef.current = system
+        },
+        ensureEntitiesLoaded,
+      }),
+    [ensureEntitiesLoaded, state.system, store]
   )
 
-  const openSystem = useCallback(
-    async (id: string) => {
-      dispatch({ type: 'SET_BUSY', busy: true })
-      try {
-        const system = await store.load(id)
-        latestSystemRef.current = system
-        dispatch({ type: 'SET_SYSTEM', system })
-        const selectedNodeId = system.ui.selectedNodeId
-        if (selectedNodeId) {
-          await ensureEntitiesLoaded({
-            objectIds: [selectedNodeId],
-            branchIds: [selectedNodeId],
-          })
-        }
-      } finally {
-        dispatch({ type: 'SET_BUSY', busy: false })
-      }
-    },
-    [ensureEntitiesLoaded, store]
-  )
-
-  const saveSystem = useCallback(async () => {
-    if (!state.system) return
-    dispatch({ type: 'SET_BUSY', busy: true })
-    await store.save(state.system)
-    await refreshSystems()
-    dispatch({ type: 'SET_BUSY', busy: false })
-  }, [refreshSystems, state.system, store])
-
-  const exportSystem = useCallback(
-    async (id: string) => {
-      dispatch({ type: 'SET_BUSY', busy: true })
-      try {
-        const result = await store.exportSystemArchive(id)
-        const url = URL.createObjectURL(result.blob)
-        const anchor = document.createElement('a')
-        anchor.href = url
-        anchor.download = result.filename
-        document.body.appendChild(anchor)
-        anchor.click()
-        anchor.remove()
-        URL.revokeObjectURL(url)
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        dispatch({ type: 'SET_ERROR', error: message })
-      } finally {
-        dispatch({ type: 'SET_BUSY', busy: false })
-      }
-    },
-    [store]
-  )
-
-  const deleteSystem = useCallback(
-    async (id: string) => {
-      dispatch({ type: 'SET_BUSY', busy: true })
-      await store.remove(id)
-      await refreshSystems()
-      dispatch({ type: 'SET_BUSY', busy: false })
-    },
-    [refreshSystems, store]
-  )
-
-  const resetFork = useCallback(async () => {
-    dispatch({ type: 'SET_BUSY', busy: true })
-    try {
-      await store.clear()
-      if (
-        typeof window !== 'undefined' &&
-        'localStorage' in window &&
-        typeof window.localStorage.clear === 'function'
-      ) {
-        window.localStorage.clear()
-      }
-      dispatch({ type: 'SET_SYSTEM', system: null })
-      dispatch({ type: 'SET_SYSTEMS', systems: [] })
-      if (typeof window !== 'undefined') {
-        window.location.reload()
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      dispatch({ type: 'SET_ERROR', error: message })
-      dispatch({ type: 'SET_BUSY', busy: false })
-    }
-  }, [store])
+  const {
+    refreshSystems,
+    createSystem: createSystemAction,
+    openSystem,
+    saveSystem,
+    exportSystem,
+    deleteSystem,
+    resetFork,
+    importSystem,
+  } = storageCommands
 
   const updateSystemAction = useCallback(
     async (config: SystemConfig) => {
@@ -6921,20 +6828,6 @@ export function AppProvider({
       }
     },
     [state.system, store]
-  )
-
-  const importSystem = useCallback(
-    async (file: File) => {
-      dispatch({ type: 'SET_BUSY', busy: true })
-      try {
-        const system = await store.importSystemArchive(file)
-        dispatch({ type: 'SET_SYSTEM', system })
-        await refreshSystems()
-      } finally {
-        dispatch({ type: 'SET_BUSY', busy: false })
-      }
-    },
-    [refreshSystems, store]
   )
 
   const actions: AppActions = useMemo(
