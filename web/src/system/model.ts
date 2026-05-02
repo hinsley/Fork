@@ -715,7 +715,10 @@ export function canMoveNodeIntoParent(
   if (parentId && getAncestorIds(nodes, parentId).includes(nodeId)) return false
 
   if (!parentId) {
-    return node.kind === 'object' || node.kind === 'folder'
+    return (
+      node.kind === 'object' ||
+      (node.kind === 'folder' && !getOwningObjectId(nodes, node.id))
+    )
   }
 
   if (parent?.kind === 'folder') {
@@ -728,7 +731,10 @@ export function canMoveNodeIntoParent(
   }
 
   if (parent?.kind === 'object') {
-    return node.kind === 'branch' || node.kind === 'folder'
+    const sourceOwner = getOwningObjectId(nodes, node.id)
+    if (node.kind === 'branch') return sourceOwner === parent.id
+    if (node.kind === 'folder') return sourceOwner === parent.id
+    return false
   }
 
   return false

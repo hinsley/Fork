@@ -213,6 +213,44 @@ describe('system model', () => {
     expect(movedBranch.branches[withBranch.nodeId]?.parentObjectId).toBe(withOrbit.nodeId)
   })
 
+  it('does not move folders across root and object-child folder scopes', () => {
+    const system = createSystem({ name: 'Folder_Scopes' })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit',
+      systemName: system.config.name,
+      data: [[0, 0, 1]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+    }
+    const withOrbit = addObject(system, orbit)
+    const rootFolder = addFolder(withOrbit.system, 'Root_Folder')
+    const childFolder = addFolder(rootFolder.system, 'Child_Folder', withOrbit.nodeId)
+
+    const rootIntoObject = moveNodeIntoParent(
+      childFolder.system,
+      rootFolder.nodeId,
+      withOrbit.nodeId
+    )
+    expect(rootIntoObject.nodes[rootFolder.nodeId]?.parentId).toBeNull()
+    expect(rootIntoObject.nodes[withOrbit.nodeId]?.children).not.toContain(rootFolder.nodeId)
+
+    const childToRoot = moveNodeIntoParent(childFolder.system, childFolder.nodeId, null)
+    expect(childToRoot.nodes[childFolder.nodeId]?.parentId).toBe(withOrbit.nodeId)
+    expect(childToRoot.rootIds).not.toContain(childFolder.nodeId)
+
+    const childIntoRootFolder = moveNodeIntoParent(
+      childFolder.system,
+      childFolder.nodeId,
+      rootFolder.nodeId
+    )
+    expect(childIntoRootFolder.nodes[childFolder.nodeId]?.parentId).toBe(withOrbit.nodeId)
+    expect(childIntoRootFolder.nodes[rootFolder.nodeId]?.children).not.toContain(
+      childFolder.nodeId
+    )
+  })
+
   it('updates system name across objects', () => {
     const system = createSystem({ name: 'Demo' })
     const orbit: OrbitObject = {

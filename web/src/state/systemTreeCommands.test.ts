@@ -158,4 +158,20 @@ describe('system tree commands', () => {
     expect(harness.getState().currentSystem?.nodes[first.nodeId]?.render.color).toBe('#ff0000')
     expect(harness.scheduleUiSave).toHaveBeenCalledTimes(9)
   })
+
+  it('creates sibling folders with incremented names', () => {
+    const base = createSystem({ name: 'Folder_Names' })
+    const first = addObject(base, makeOrbit('Orbit_A', base.config))
+    const harness = setupTreeCommands(first.system)
+
+    const rootFolderA = harness.commands.createFolder()
+    const rootFolderB = harness.commands.createFolder()
+    expect(harness.getState().currentSystem?.nodes[rootFolderA ?? '']?.name).toBe('Folder_1')
+    expect(harness.getState().currentSystem?.nodes[rootFolderB ?? '']?.name).toBe('Folder_2')
+
+    const childFolderA = harness.commands.createFolder(first.nodeId)
+    const childFolderB = harness.commands.createFolder(first.nodeId)
+    expect(harness.getState().currentSystem?.nodes[childFolderA ?? '']?.name).toBe('Folder_1')
+    expect(harness.getState().currentSystem?.nodes[childFolderB ?? '']?.name).toBe('Folder_2')
+  })
 })
