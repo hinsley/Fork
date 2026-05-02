@@ -508,6 +508,7 @@ export interface CovariantLyapunovData {
 export type NodeKind =
   | 'object'
   | 'branch'
+  | 'folder'
   | 'scene'
   | 'diagram'
   | 'analysis'
@@ -560,6 +561,7 @@ export interface TreeNode {
     | 'bifurcation'
     | 'analysis'
     | 'camera'
+    | 'folder'
   parentId: string | null
   children: string[]
   visibility: boolean

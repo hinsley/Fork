@@ -135,6 +135,16 @@ describe('system tree commands', () => {
     harness.commands.reorderNode(first.nodeId, second.nodeId)
     expect(harness.getState().currentSystem?.rootIds).toEqual([first.nodeId, second.nodeId])
 
+    const folderId = harness.commands.createFolder()
+    expect(folderId).toBeTruthy()
+    expect(harness.getState().currentSystem?.nodes[folderId ?? '']?.kind).toBe('folder')
+    expect(harness.getState().currentSystem?.ui.selectedNodeId).toBe(folderId)
+
+    if (!folderId) throw new Error('Folder was not created')
+    harness.commands.moveNodeIntoParent(first.nodeId, folderId)
+    expect(harness.getState().currentSystem?.nodes[first.nodeId]?.parentId).toBe(folderId)
+    expect(harness.getState().currentSystem?.nodes[folderId]?.children).toContain(first.nodeId)
+
     harness.commands.updateLayout({ objectsOpen: false })
     expect(harness.getState().currentSystem?.ui.layout.objectsOpen).toBe(false)
 
@@ -146,6 +156,6 @@ describe('system tree commands', () => {
 
     harness.commands.updateRender(first.nodeId, { color: '#ff0000' })
     expect(harness.getState().currentSystem?.nodes[first.nodeId]?.render.color).toBe('#ff0000')
-    expect(harness.scheduleUiSave).toHaveBeenCalledTimes(7)
+    expect(harness.scheduleUiSave).toHaveBeenCalledTimes(9)
   })
 })

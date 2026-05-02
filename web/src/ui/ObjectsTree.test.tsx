@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ObjectsTree, type ObjectsTreeHandle } from './ObjectsTree'
 import { createDemoSystem, createPeriodDoublingSystem } from '../system/fixtures'
 import { useRef, useState } from 'react'
-import { addBranch, addObject, createSystem, toggleNodeExpanded } from '../system/model'
+import { addBranch, addFolder, addObject, createSystem, toggleNodeExpanded } from '../system/model'
 import type { ContinuationObject, OrbitObject } from '../system/types'
 
 describe('ObjectsTree', () => {
@@ -264,6 +264,38 @@ describe('ObjectsTree', () => {
     expect(screen.getByTestId(`node-drag-${branchNodeId}`)).toBeInTheDocument()
   })
 
+  it('renders root folders and creates a child folder from an object context menu', async () => {
+    const user = userEvent.setup()
+    const { system, objectNodeId } = createDemoSystem()
+    const withFolder = addFolder(system, 'Folder_1')
+    const onCreateFolder = vi.fn()
+
+    render(
+      <ObjectsTree
+        system={withFolder.system}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={vi.fn()}
+        onCreateFolder={onCreateFolder}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    expect(screen.getByTestId(`node-folder-icon-${withFolder.nodeId}`)).toBeInTheDocument()
+    expect(screen.getByTestId(`object-tree-node-${withFolder.nodeId}`)).toHaveTextContent(
+      'Folder_1'
+    )
+
+    fireEvent.contextMenu(screen.getByTestId(`object-tree-row-${objectNodeId}`))
+    await user.click(screen.getByTestId('object-context-create-folder'))
+    expect(onCreateFolder).toHaveBeenCalledWith(objectNodeId)
+  })
+
   it('reorders child nodes before a sibling drop boundary', () => {
     const { system, objectNodeId, branchNodeId } = createDemoSystem()
     const sourceBranch = system.branches[branchNodeId]
@@ -495,6 +527,98 @@ describe('ObjectsTree', () => {
 
     expect(onReorderNode).toHaveBeenCalledWith(secondBranchNodeId, branchNodeId, 'before')
     rectSpy.mockRestore()
+  })
+
+  it('moves a root object into a compatible folder when dropped over the folder', () => {
+    const { system, objectNodeId } = createDemoSystem()
+    const folder = addFolder(system, 'Folder_1')
+    const onMoveNodeIntoParent = vi.fn()
+
+    render(
+      <ObjectsTree
+        system={folder.system}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={vi.fn()}
+        onMoveNodeIntoParent={onMoveNodeIntoParent}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    const dataTransfer = {
+      effectAllowed: '',
+      data: new Map<string, string>(),
+      getData(type: string) {
+        return this.data.get(type) ?? ''
+      },
+      setData(type: string, value: string) {
+        this.data.set(type, value)
+      },
+    }
+
+    fireEvent.dragStart(screen.getByTestId(`node-drag-${objectNodeId}`), {
+      dataTransfer,
+    })
+    const dragOver = new Event('dragover', { bubbles: true, cancelable: true })
+    Object.defineProperty(dragOver, 'clientY', { value: 100 })
+    Object.defineProperty(dragOver, 'dataTransfer', { value: dataTransfer })
+    fireEvent(screen.getByTestId(`object-tree-row-${folder.nodeId}`), dragOver)
+    const drop = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer })
+    fireEvent(screen.getByTestId('objects-tree'), drop)
+
+    expect(onMoveNodeIntoParent).toHaveBeenCalledWith(objectNodeId, folder.nodeId)
+  })
+
+  it('moves an object child branch into a child folder under the same object', () => {
+    const { system, objectNodeId, branchNodeId } = createDemoSystem()
+    const folder = addFolder(system, 'Folder_1', objectNodeId)
+    const onMoveNodeIntoParent = vi.fn()
+
+    render(
+      <ObjectsTree
+        system={folder.system}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={vi.fn()}
+        onMoveNodeIntoParent={onMoveNodeIntoParent}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    const dataTransfer = {
+      effectAllowed: '',
+      data: new Map<string, string>(),
+      getData(type: string) {
+        return this.data.get(type) ?? ''
+      },
+      setData(type: string, value: string) {
+        this.data.set(type, value)
+      },
+    }
+
+    fireEvent.dragStart(screen.getByTestId(`node-drag-${branchNodeId}`), {
+      dataTransfer,
+    })
+    const dragOver = new Event('dragover', { bubbles: true, cancelable: true })
+    Object.defineProperty(dragOver, 'clientY', { value: 100 })
+    Object.defineProperty(dragOver, 'dataTransfer', { value: dataTransfer })
+    fireEvent(screen.getByTestId(`object-tree-row-${folder.nodeId}`), dragOver)
+    const drop = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer })
+    fireEvent(screen.getByTestId('objects-tree'), drop)
+
+    expect(onMoveNodeIntoParent).toHaveBeenCalledWith(branchNodeId, folder.nodeId)
   })
 
   it('indents limit cycle continuation branches under their parent object', () => {

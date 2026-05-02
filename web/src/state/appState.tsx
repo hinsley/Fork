@@ -1408,6 +1408,8 @@ type AppActions = {
   toggleExpanded: (nodeId: string) => void
   moveNode: (nodeId: string, direction: 'up' | 'down') => void
   reorderNode: (nodeId: string, targetId: string, placement?: ReorderPlacement) => void
+  moveNodeIntoParent: (nodeId: string, parentId: string | null) => void
+  createFolder: (parentId?: string | null) => string | null
   updateLayout: (layout: Partial<System['ui']['layout']>) => void
   updateViewportHeight: (nodeId: string, height: number) => void
   updateRender: (nodeId: string, render: Partial<TreeNode['render']>) => void
@@ -1752,6 +1754,8 @@ export function AppProvider({
     toggleExpanded: toggleExpandedAction,
     moveNode: moveNodeAction,
     reorderNode: reorderNodeAction,
+    moveNodeIntoParent: moveNodeIntoParentAction,
+    createFolder: createFolderAction,
     updateLayout: updateLayoutAction,
     updateViewportHeight: updateViewportHeightAction,
     updateRender: updateRenderAction,
@@ -6736,6 +6740,8 @@ export function AppProvider({
       toggleExpanded: toggleExpandedAction,
       moveNode: moveNodeAction,
       reorderNode: reorderNodeAction,
+      moveNodeIntoParent: moveNodeIntoParentAction,
+      createFolder: createFolderAction,
       updateLayout: updateLayoutAction,
       updateViewportHeight: updateViewportHeightAction,
       updateRender: updateRenderAction,
@@ -6835,7 +6841,9 @@ export function AppProvider({
       toggleExpandedAction,
       toggleVisibilityAction,
       moveNodeAction,
+      moveNodeIntoParentAction,
       reorderNodeAction,
+      createFolderAction,
       updateLayoutAction,
       updateViewportHeightAction,
       updateRenderAction,

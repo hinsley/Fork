@@ -293,6 +293,31 @@ export function addObject(
   return { system: next, nodeId: node.id }
 }
 
+export function addFolder(
+  system: System,
+  name: string,
+  parentId: string | null = null
+): { system: System; nodeId: string } {
+  const next = structuredClone(system)
+  const parent = parentId ? next.nodes[parentId] : null
+  if (parentId && !parent) return { system, nodeId: '' }
+  const node = createTreeNode({
+    name,
+    kind: 'folder',
+    objectType: 'folder',
+    parentId
+  })
+  next.nodes[node.id] = node
+  if (parent) {
+    parent.children.push(node.id)
+    parent.expanded = true
+  } else {
+    next.rootIds.push(node.id)
+  }
+  next.updatedAt = nowIso()
+  return { system: next, nodeId: node.id }
+}
+
 /**
  * Update an existing analysis object without touching tree structure.
  */
@@ -648,6 +673,93 @@ export function reorderNode(
   if (fromIndex === insertionIndex) return system
 
   siblings.splice(insertionIndex, 0, nodeId)
+  next.updatedAt = nowIso()
+  return next
+}
+
+function getAncestorIds(nodes: Record<string, TreeNode>, nodeId: string): string[] {
+  const ancestors: string[] = []
+  let cursor = nodes[nodeId]
+  const visited = new Set<string>([nodeId])
+  while (cursor?.parentId) {
+    if (visited.has(cursor.parentId)) break
+    ancestors.push(cursor.parentId)
+    visited.add(cursor.parentId)
+    cursor = nodes[cursor.parentId]
+  }
+  return ancestors
+}
+
+function getOwningObjectId(nodes: Record<string, TreeNode>, nodeId: string): string | null {
+  const node = nodes[nodeId]
+  if (!node) return null
+  if (node.kind === 'object') return node.id
+  for (const ancestorId of getAncestorIds(nodes, nodeId)) {
+    if (nodes[ancestorId]?.kind === 'object') return ancestorId
+  }
+  return null
+}
+
+export function canMoveNodeIntoParent(
+  nodes: Record<string, TreeNode>,
+  nodeId: string,
+  parentId: string | null
+): boolean {
+  const node = nodes[nodeId]
+  const parent = parentId ? nodes[parentId] : null
+  if (!node || (parentId && !parent)) return false
+  if (node.kind !== 'object' && node.kind !== 'branch' && node.kind !== 'folder') {
+    return false
+  }
+  if (parentId === nodeId) return false
+  if (parentId && getAncestorIds(nodes, parentId).includes(nodeId)) return false
+
+  if (!parentId) {
+    return node.kind === 'object' || node.kind === 'folder'
+  }
+
+  if (parent?.kind === 'folder') {
+    const folderOwner = getOwningObjectId(nodes, parent.id)
+    if (!folderOwner) {
+      return node.kind === 'object' || (node.kind === 'folder' && !getOwningObjectId(nodes, node.id))
+    }
+    if (node.kind === 'object') return false
+    return getOwningObjectId(nodes, node.id) === folderOwner
+  }
+
+  if (parent?.kind === 'object') {
+    return node.kind === 'branch' || node.kind === 'folder'
+  }
+
+  return false
+}
+
+export function moveNodeIntoParent(
+  system: System,
+  nodeId: string,
+  parentId: string | null
+): System {
+  const next = structuredClone(system)
+  const node = next.nodes[nodeId]
+  if (!node) return system
+  if (!canMoveNodeIntoParent(next.nodes, nodeId, parentId)) return system
+  if (node.parentId === parentId) return system
+
+  const oldSiblings = node.parentId
+    ? next.nodes[node.parentId]?.children
+    : next.rootIds
+  if (!oldSiblings) return system
+  const oldIndex = oldSiblings.indexOf(nodeId)
+  if (oldIndex === -1) return system
+  oldSiblings.splice(oldIndex, 1)
+
+  node.parentId = parentId
+  const newSiblings = parentId ? next.nodes[parentId]?.children : next.rootIds
+  if (!newSiblings) return system
+  newSiblings.push(nodeId)
+  if (parentId) {
+    next.nodes[parentId].expanded = true
+  }
   next.updatedAt = nowIso()
   return next
 }
@@ -1625,7 +1737,7 @@ export function normalizeSystem(system: System): System {
     node.kind = 'object'
     node.objectType = normalizedObject.type
     node.parentId = node.parentId ?? null
-    if (!next.rootIds.includes(id)) {
+    if (!node.parentId && !next.rootIds.includes(id)) {
       next.rootIds.push(id)
     }
     objectNameToNodeId.set(normalizedObject.name, id)
@@ -1679,6 +1791,33 @@ export function normalizeSystem(system: System): System {
     node.visibility = node.visibility ?? true
     node.expanded = node.expanded ?? true
     node.render = { ...DEFAULT_RENDER, ...(node.render ?? {}) }
+  })
+
+  Object.values(next.nodes).forEach((node) => {
+    node.children = node.children.filter(
+      (childId, index, children) =>
+        Boolean(next.nodes[childId]) &&
+        next.nodes[childId].parentId === node.id &&
+        children.indexOf(childId) === index
+    )
+  })
+  Object.values(next.nodes).forEach((node) => {
+    if (!node.parentId || !next.nodes[node.parentId]) return
+    const parent = next.nodes[node.parentId]
+    if (!parent.children.includes(node.id)) {
+      parent.children.push(node.id)
+    }
+  })
+  next.rootIds = next.rootIds.filter(
+    (id, index, rootIds) =>
+      Boolean(next.nodes[id]) &&
+      next.nodes[id].parentId === null &&
+      rootIds.indexOf(id) === index
+  )
+  Object.values(next.nodes).forEach((node) => {
+    if (node.parentId === null && !next.rootIds.includes(node.id)) {
+      next.rootIds.push(node.id)
+    }
   })
 
   const nextUi = next.ui ?? structuredClone(DEFAULT_UI)

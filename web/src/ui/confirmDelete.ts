@@ -15,6 +15,7 @@ export function confirmDelete({ name, kind }: ConfirmDeleteTarget): boolean {
 
 export function getDeleteKindLabel(node: TreeNode, system: System): string {
   if (node.kind === 'branch') return 'Branch'
+  if (node.kind === 'folder') return 'Folder'
   if (node.kind === 'scene') return 'Scene'
   if (node.kind === 'analysis') return 'Analysis viewport'
   if (node.kind === 'diagram') return 'Bifurcation diagram'

@@ -2,11 +2,13 @@ import { describe, it, expect } from 'vitest'
 import {
   addAnalysisViewport,
   addBranch,
+  addFolder,
   addObject,
   addBifurcationDiagram,
   addScene,
   createSystem,
   duplicateNode,
+  moveNodeIntoParent,
   moveNode,
   normalizeSystem,
   removeNode,
@@ -136,6 +138,79 @@ describe('system model', () => {
     expect(objectOrder[0]).toBe(second.nodeId)
     expect(objectOrder[1]).toBe(first.nodeId)
     expect(objectOrder[2]).toBe(third.nodeId)
+  })
+
+  it('creates folders and moves objects into root-level folders', () => {
+    const system = createSystem({ name: 'Folders' })
+    const base: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit',
+      systemName: system.config.name,
+      data: [[0, 0, 1]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+    }
+    const folder = addFolder(system, 'Folder_1')
+    const orbit = addObject(folder.system, base)
+
+    const moved = moveNodeIntoParent(orbit.system, orbit.nodeId, folder.nodeId)
+
+    expect(moved.nodes[orbit.nodeId]?.parentId).toBe(folder.nodeId)
+    expect(moved.nodes[folder.nodeId]?.children).toContain(orbit.nodeId)
+    expect(moved.rootIds).not.toContain(orbit.nodeId)
+
+    const normalized = normalizeSystem(moved)
+    expect(normalized.nodes[orbit.nodeId]?.parentId).toBe(folder.nodeId)
+    expect(normalized.rootIds).not.toContain(orbit.nodeId)
+  })
+
+  it('nests child folders and branch children under the same object', () => {
+    const system = createSystem({ name: 'Child_Folders' })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit',
+      systemName: system.config.name,
+      data: [[0, 0, 1]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+    }
+    const withOrbit = addObject(system, orbit)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'Orbit_branch',
+      systemName: system.config.name,
+      parameterName: system.config.paramNames[0] ?? 'p',
+      parentObject: orbit.name,
+      parentObjectId: withOrbit.nodeId,
+      startObject: orbit.name,
+      branchType: 'equilibrium',
+      settings: {
+        step_size: 0.1,
+        min_step_size: 0.01,
+        max_step_size: 1,
+        max_steps: 10,
+        corrector_steps: 4,
+        corrector_tolerance: 1e-6,
+        step_tolerance: 1e-6,
+      },
+      data: { points: [], bifurcations: [], indices: [] },
+      timestamp: '2026-05-02T00:00:00.000Z',
+    }
+    const withBranch = addBranch(withOrbit.system, branch, withOrbit.nodeId)
+    const childFolder = addFolder(withBranch.system, 'Folder_1', withOrbit.nodeId)
+    const nestedFolder = addFolder(childFolder.system, 'Folder_2', childFolder.nodeId)
+    const movedBranch = moveNodeIntoParent(
+      nestedFolder.system,
+      withBranch.nodeId,
+      nestedFolder.nodeId
+    )
+
+    expect(movedBranch.nodes[nestedFolder.nodeId]?.parentId).toBe(childFolder.nodeId)
+    expect(movedBranch.nodes[withBranch.nodeId]?.parentId).toBe(nestedFolder.nodeId)
+    expect(movedBranch.nodes[nestedFolder.nodeId]?.children).toContain(withBranch.nodeId)
+    expect(movedBranch.branches[withBranch.nodeId]?.parentObjectId).toBe(withOrbit.nodeId)
   })
 
   it('updates system name across objects', () => {

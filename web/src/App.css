@@ -290,6 +290,12 @@
   gap: 6px;
 }
 
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .panel__body {
   padding: 6px;
   overflow: auto;
@@ -450,6 +456,15 @@
   border-color: #000;
 }
 
+.tree-node__folder-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 0.86rem;
+  line-height: 1;
+}
 
 .tree-node__spacer {
   display: inline-block;

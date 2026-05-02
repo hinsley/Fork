@@ -143,6 +143,10 @@ function App() {
     objectsTreeRef.current?.openCreateMenu({ x: event.clientX, y: event.clientY })
   }
 
+  const createRootFolder = () => {
+    actions.createFolder(null)
+  }
+
   const createScene = async (targetId?: string | null) => {
     if (!system) return
     const names = system.scenes.map((scene) => scene.name)
@@ -355,9 +359,19 @@ function App() {
               testId="objects-panel"
               showToggle={false}
               actions={
-                <button onClick={openCreateObjectMenu} data-testid="create-object-button">
-                  Create Object
-                </button>
+                <div className="panel-actions">
+                  <button
+                    onClick={createRootFolder}
+                    title="Create Folder"
+                    aria-label="Create Folder"
+                    data-testid="create-folder-button"
+                  >
+                    📁
+                  </button>
+                  <button onClick={openCreateObjectMenu} data-testid="create-object-button">
+                    Create Object
+                  </button>
+                </div>
               }
             >
               <ObjectsTree
@@ -369,6 +383,8 @@ function App() {
                 onRename={actions.renameNode}
                 onToggleExpanded={actions.toggleExpanded}
                 onReorderNode={actions.reorderNode}
+                onMoveNodeIntoParent={actions.moveNodeIntoParent}
+                onCreateFolder={actions.createFolder}
                 onCreateOrbit={createOrbit}
                 onCreateEquilibrium={createEquilibrium}
                 onCreateIsocline={createIsocline}

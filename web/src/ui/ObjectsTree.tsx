@@ -10,7 +10,7 @@ import {
 } from 'react'
 import type { CSSProperties, DragEvent } from 'react'
 import type { ContinuationObject, System, TreeNode } from '../system/types'
-import { DEFAULT_RENDER } from '../system/model'
+import { canMoveNodeIntoParent, DEFAULT_RENDER } from '../system/model'
 import type { ReorderPlacement } from '../system/model'
 import { hasCustomObjectParams } from '../system/parameters'
 import { formatEquilibriumLabel } from '../system/labels'
@@ -29,6 +29,8 @@ type ObjectsTreeProps = {
   onRename: (id: string, name: string) => void
   onToggleExpanded: (id: string) => void
   onReorderNode: (nodeId: string, targetId: string, placement?: ReorderPlacement) => void
+  onMoveNodeIntoParent?: (nodeId: string, parentId: string | null) => void
+  onCreateFolder?: (parentId?: string | null) => void
   onCreateOrbit: () => void
   onCreateEquilibrium: () => void
   onCreateIsocline?: () => void
@@ -79,6 +81,7 @@ function getNodeLabel(node: TreeNode, system: System) {
     const branch = system.branches[node.id]
     return `Branch: ${node.name} (${branch ? getBranchTypeLabel(branch, system) : 'branch'})`
   }
+  if (node.kind === 'folder') return node.name
   if (node.objectType === 'equilibrium') {
     const object = system.objects[node.id]
     const mapIterations =
@@ -117,6 +120,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       onRename,
       onToggleExpanded,
       onReorderNode,
+      onMoveNodeIntoParent = () => {},
+      onCreateFolder = () => {},
       onCreateOrbit,
       onCreateEquilibrium,
       onCreateIsocline = () => {},
@@ -128,10 +133,11 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const [editingId, setEditingId] = useState<string | null>(null)
     const [draftName, setDraftName] = useState('')
     const [draggingId, setDraggingId] = useState<string | null>(null)
-    const [dropPreview, setDropPreview] = useState<{
-      targetId: string
-      placement: ReorderPlacement
-    } | null>(null)
+    const [dropPreview, setDropPreview] = useState<
+      | { mode: 'reorder'; targetId: string; placement: ReorderPlacement }
+      | { mode: 'inside'; targetId: string }
+      | null
+    >(null)
     const dropPreviewRef = useRef<typeof dropPreview>(null)
     const [nodeContextMenu, setNodeContextMenu] = useState<{
       id: string
@@ -151,7 +157,11 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       system.config.type === 'map' ? 'Fixed point / Cycle' : equilibriumLabel
 
     const rootNodes = useMemo(
-      () => system.rootIds.filter((id) => system.nodes[id]?.kind === 'object'),
+      () =>
+        system.rootIds.filter((id) => {
+          const node = system.nodes[id]
+          return node?.kind === 'object' || node?.kind === 'folder'
+        }),
       [system.nodes, system.rootIds]
     )
     const childrenByParent = useMemo(() => {
@@ -256,13 +266,23 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       return event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
     }
 
-    const getPreviewOrder = (nodeIds: string[]) => {
+    const getPreviewOrder = (nodeIds: string[], parentId: string | null) => {
       if (!draggingId || !dropPreview) return nodeIds
-      if (!nodeIds.includes(draggingId) || !nodeIds.includes(dropPreview.targetId)) {
-        return nodeIds
+      const sourceNode = system.nodes[draggingId]
+      if (!sourceNode) return nodeIds
+      const next = nodeIds.filter((id) => id !== draggingId)
+
+      if (dropPreview.mode === 'inside') {
+        if (parentId === dropPreview.targetId) {
+          return [...next, draggingId]
+        }
+        return next
+      }
+
+      if (parentId !== sourceNode.parentId || !next.includes(dropPreview.targetId)) {
+        return next
       }
       if (draggingId === dropPreview.targetId) return nodeIds
-      const next = nodeIds.filter((id) => id !== draggingId)
       const targetIndex = next.indexOf(dropPreview.targetId)
       if (targetIndex === -1) return nodeIds
       const insertionIndex =
@@ -281,9 +301,14 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       if (!sourceId || !preview || sourceId === preview.targetId) return false
       const sourceNode = system.nodes[sourceId]
       const targetNode = system.nodes[preview.targetId]
-      if (!sourceNode || !targetNode || sourceNode.parentId !== targetNode.parentId) {
+      if (!sourceNode || !targetNode) {
         return false
       }
+      if (preview.mode === 'inside') {
+        onMoveNodeIntoParent(sourceId, preview.targetId)
+        return true
+      }
+      if (sourceNode.parentId !== targetNode.parentId) return false
       onReorderNode(sourceId, preview.targetId, preview.placement)
       return true
     }
@@ -348,22 +373,34 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
           onDragOver={(event) => {
             const sourceId = draggingId || event.dataTransfer.getData('text/plain')
             const sourceNode = sourceId ? system.nodes[sourceId] : null
-            if (
-              !sourceId ||
-              !sourceNode ||
-              sourceId === nodeId ||
-              sourceNode.parentId !== node.parentId
-            ) {
+            if (!sourceId || !sourceNode || sourceId === nodeId) {
               return
             }
             event.preventDefault()
             event.dataTransfer.dropEffect = 'move'
+            if (
+              (node.kind === 'folder' || node.kind === 'object') &&
+              canMoveNodeIntoParent(system.nodes, sourceId, nodeId)
+            ) {
+              if (
+                dropPreviewRef.current?.mode !== 'inside' ||
+                dropPreviewRef.current.targetId !== nodeId
+              ) {
+                updateDropPreview({ mode: 'inside', targetId: nodeId })
+              }
+              return
+            }
+            if (sourceNode.parentId !== node.parentId) {
+              return
+            }
             const placement = getDropPlacement(event)
             if (
+              dropPreviewRef.current?.mode !== 'reorder' ||
               dropPreviewRef.current?.targetId !== nodeId ||
-              dropPreviewRef.current.placement !== placement
+              (dropPreviewRef.current.mode === 'reorder' &&
+                dropPreviewRef.current.placement !== placement)
             ) {
-              updateDropPreview({ targetId: nodeId, placement })
+              updateDropPreview({ mode: 'reorder', targetId: nodeId, placement })
             }
           }}
           data-testid={`object-tree-row-${nodeId}`}
@@ -384,17 +421,27 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
           ) : (
             <span className="tree-node__spacer" />
           )}
-          <button
-            className="tree-node__visibility"
-            onClick={(event) => {
-              event.stopPropagation()
-              onToggleVisibility(nodeId)
-            }}
-            style={visibilityStyle}
-            data-visible={node.visibility ? 'true' : 'false'}
-            aria-label={node.visibility ? 'Hide node' : 'Show node'}
-            data-testid={`node-visibility-${nodeId}`}
-          />
+          {node.kind === 'folder' ? (
+            <span
+              className="tree-node__folder-icon"
+              aria-hidden="true"
+              data-testid={`node-folder-icon-${nodeId}`}
+            >
+              📁
+            </span>
+          ) : (
+            <button
+              className="tree-node__visibility"
+              onClick={(event) => {
+                event.stopPropagation()
+                onToggleVisibility(nodeId)
+              }}
+              style={visibilityStyle}
+              data-visible={node.visibility ? 'true' : 'false'}
+              aria-label={node.visibility ? 'Hide node' : 'Show node'}
+              data-testid={`node-visibility-${nodeId}`}
+            />
+          )}
           <button
             className="tree-node__label"
             onClick={(event) => {
@@ -459,9 +506,12 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
             ::
           </button>
         </div>
-        {hasChildren && node.expanded ? (
+        {(hasChildren || dropPreview?.targetId === nodeId) &&
+        (node.expanded || dropPreview?.targetId === nodeId) ? (
           <div className="tree-node__children">
-            {getPreviewOrder(childIds).map((childId) => renderNode(childId, depth + 1))}
+            {getPreviewOrder(childIds, nodeId).map((childId) =>
+              renderNode(childId, depth + 1)
+            )}
           </div>
         ) : null}
       </div>
@@ -486,7 +536,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       >
         <div className="objects-tree__list">
           {rootNodes.length === 0 ? <p className="empty-state">No objects yet.</p> : null}
-          {getPreviewOrder(rootNodes).map((nodeId) => renderNode(nodeId, 0))}
+          {getPreviewOrder(rootNodes, null).map((nodeId) => renderNode(nodeId, 0))}
         </div>
         {createMenu ? (
           <div
@@ -561,6 +611,23 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
                   data-testid="object-context-duplicate"
                 >
                   Duplicate
+                </button>
+              )
+            })()}
+            {(() => {
+              const node = system.nodes[nodeContextMenu.id]
+              if (!node || (node.kind !== 'object' && node.kind !== 'folder')) return null
+              return (
+                <button
+                  className="context-menu__item"
+                  onClick={() => {
+                    const parentId = nodeContextMenu.id
+                    setNodeContextMenu(null)
+                    onCreateFolder(parentId)
+                  }}
+                  data-testid="object-context-create-folder"
+                >
+                  Create Folder
                 </button>
               )
             })()}

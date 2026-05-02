@@ -1,5 +1,7 @@
 import {
+  addFolder as addSystemFolder,
   moveNode as moveSystemNode,
+  moveNodeIntoParent as moveSystemNodeIntoParent,
   renameNode as renameSystemNode,
   reorderNode as reorderSystemNode,
   selectNode as selectSystemNode,
@@ -28,6 +30,8 @@ export type SystemTreeCommands = {
   toggleExpanded: (nodeId: string) => void
   moveNode: (nodeId: string, direction: 'up' | 'down') => void
   reorderNode: (nodeId: string, targetId: string, placement?: ReorderPlacement) => void
+  moveNodeIntoParent: (nodeId: string, parentId: string | null) => void
+  createFolder: (parentId?: string | null) => string | null
   updateLayout: (layout: Partial<System['ui']['layout']>) => void
   updateViewportHeight: (nodeId: string, height: number) => void
   updateRender: (nodeId: string, render: Partial<TreeNode['render']>) => void
@@ -53,6 +57,7 @@ export function validateObjectName(name: string, label: string): string | null {
 function getNodeLabel(node: TreeNode | undefined, systemType: SystemConfig['type']): string {
   if (!node) return 'Item'
   if (node.kind === 'branch') return 'Branch'
+  if (node.kind === 'folder') return 'Folder'
   if (node.kind === 'scene') return 'Scene'
   if (node.kind === 'diagram') return 'Bifurcation diagram'
   if (node.kind === 'object') {
@@ -151,6 +156,40 @@ export function createSystemTreeCommands({
     scheduleUiSave(system)
   }
 
+  const moveNodeIntoParent = (nodeId: string, parentId: string | null) => {
+    const current = getCurrentSystem()
+    if (!current) return
+    const system = moveSystemNodeIntoParent(current, nodeId, parentId)
+    dispatch({ type: 'SET_SYSTEM', system })
+    scheduleUiSave(system)
+  }
+
+  const createFolder = (parentId: string | null = null) => {
+    const current = getCurrentSystem()
+    if (!current) return null
+    const parent = parentId ? current.nodes[parentId] : null
+    if (parentId && !parent) return null
+    const siblingIds = parent ? parent.children : current.rootIds
+    const siblingNames = new Set(
+      siblingIds
+        .map((id) => current.nodes[id])
+        .filter((node): node is TreeNode => Boolean(node))
+        .map((node) => node.name)
+    )
+    let index = 1
+    let name = 'Folder_1'
+    while (siblingNames.has(name)) {
+      index += 1
+      name = `Folder_${index}`
+    }
+    const created = addSystemFolder(current, name, parentId)
+    if (!created.nodeId) return null
+    const selected = selectSystemNode(created.system, created.nodeId)
+    dispatch({ type: 'SET_SYSTEM', system: selected })
+    scheduleUiSave(selected)
+    return created.nodeId
+  }
+
   const updateLayout = (layout: Partial<System['ui']['layout']>) => {
     const current = getCurrentSystem()
     if (!current) return
@@ -182,6 +221,8 @@ export function createSystemTreeCommands({
     toggleExpanded,
     moveNode,
     reorderNode,
+    moveNodeIntoParent,
+    createFolder,
     updateLayout,
     updateViewportHeight,
     updateRender,
