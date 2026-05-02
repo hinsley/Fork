@@ -316,7 +316,6 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const nodeColor = node.render?.color ?? DEFAULT_RENDER.color
     const visibilityStyle = { '--node-color': nodeColor } as CSSProperties
     const isDragging = draggingId === nodeId
-    const isDropTarget = dropPreview?.targetId === nodeId && draggingId !== node.id
     const object = system.objects[nodeId]
     const customParameters =
       object && object.type !== 'continuation' ? object.customParameters : null
@@ -330,10 +329,6 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         <div
           className={`tree-node__row${isSelected ? ' tree-node__row--selected' : ''}${
             isDragging ? ' tree-node__row--dragging' : ''
-          }${
-            isDropTarget && dropPreview
-              ? ` tree-node__row--drop-${dropPreview.placement}`
-              : ''
           }`}
           ref={(row) => {
             if (row) {

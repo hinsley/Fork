@@ -410,32 +410,6 @@
   opacity: 0.6;
 }
 
-.tree-node__row--drop-before,
-.tree-node__row--drop-after {
-  background: rgba(77, 163, 255, 0.08);
-}
-
-.tree-node__row--drop-before::before,
-.tree-node__row--drop-after::after {
-  content: '';
-  position: absolute;
-  left: calc(4px + var(--tree-node-depth, 0) * 14px);
-  right: 4px;
-  height: 2px;
-  border-radius: 999px;
-  background: var(--accent);
-  box-shadow: 0 0 0 1px rgba(77, 163, 255, 0.18);
-  pointer-events: none;
-}
-
-.tree-node__row--drop-before::before {
-  top: -2px;
-}
-
-.tree-node__row--drop-after::after {
-  bottom: -2px;
-}
-
 .tree-node__expand,
 .tree-node__visibility {
   background: none;
