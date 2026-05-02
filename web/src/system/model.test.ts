@@ -94,7 +94,29 @@ describe('system model', () => {
     expect(objectOrder[1]).toBe(first.nodeId)
   })
 
-  it('reorders nodes downward to the target position', () => {
+  it('reorders nodes after a target', () => {
+    const system = createSystem({ name: 'Order' })
+    const base: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit',
+      systemName: system.config.name,
+      data: [[0, 0, 1]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+    }
+    const first = addObject(system, { ...base, name: 'First' })
+    const second = addObject(first.system, { ...base, name: 'Second' })
+    const third = addObject(second.system, { ...base, name: 'Third' })
+
+    const reordered = reorderNode(third.system, first.nodeId, third.nodeId, 'after')
+    const objectOrder = reordered.rootIds.filter((id) => reordered.nodes[id]?.kind === 'object')
+    expect(objectOrder[0]).toBe(second.nodeId)
+    expect(objectOrder[1]).toBe(third.nodeId)
+    expect(objectOrder[2]).toBe(first.nodeId)
+  })
+
+  it('reorders nodes downward before the target', () => {
     const system = createSystem({ name: 'Order' })
     const base: OrbitObject = {
       type: 'orbit',
@@ -112,8 +134,8 @@ describe('system model', () => {
     const reordered = reorderNode(third.system, first.nodeId, third.nodeId)
     const objectOrder = reordered.rootIds.filter((id) => reordered.nodes[id]?.kind === 'object')
     expect(objectOrder[0]).toBe(second.nodeId)
-    expect(objectOrder[1]).toBe(third.nodeId)
-    expect(objectOrder[2]).toBe(first.nodeId)
+    expect(objectOrder[1]).toBe(first.nodeId)
+    expect(objectOrder[2]).toBe(third.nodeId)
   })
 
   it('updates system name across objects', () => {

@@ -264,7 +264,7 @@ describe('ObjectsTree', () => {
     expect(screen.getByTestId(`node-drag-${branchNodeId}`)).toBeInTheDocument()
   })
 
-  it('reorders child nodes under the same parent', () => {
+  it('reorders child nodes before a sibling drop boundary', () => {
     const { system, objectNodeId, branchNodeId } = createDemoSystem()
     const sourceBranch = system.branches[branchNodeId]
     if (!sourceBranch) {
@@ -316,14 +316,108 @@ describe('ObjectsTree', () => {
     fireEvent.dragStart(screen.getByTestId(`node-drag-${secondBranchNodeId}`), {
       dataTransfer,
     })
-    fireEvent.dragOver(screen.getByTestId(`object-tree-row-${branchNodeId}`), {
-      dataTransfer,
-    })
-    fireEvent.drop(screen.getByTestId(`object-tree-row-${branchNodeId}`), {
-      dataTransfer,
+    const targetRow = screen.getByTestId(`object-tree-row-${branchNodeId}`)
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      bottom: 120,
+      height: 20,
+      left: 0,
+      right: 200,
+      top: 100,
+      width: 200,
+      x: 0,
+      y: 100,
+      toJSON: () => ({}),
     })
 
-    expect(onReorderNode).toHaveBeenCalledWith(secondBranchNodeId, branchNodeId)
+    const dragOver = new Event('dragover', { bubbles: true, cancelable: true })
+    Object.defineProperty(dragOver, 'clientY', { value: 104 })
+    Object.defineProperty(dragOver, 'dataTransfer', { value: dataTransfer })
+    fireEvent(targetRow, dragOver)
+    const drop = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, 'clientY', { value: 104 })
+    Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer })
+    fireEvent(targetRow, drop)
+
+    expect(onReorderNode).toHaveBeenCalledWith(secondBranchNodeId, branchNodeId, 'before')
+    rectSpy.mockRestore()
+  })
+
+  it('reorders child nodes after a sibling drop boundary', () => {
+    const { system, objectNodeId, branchNodeId } = createDemoSystem()
+    const sourceBranch = system.branches[branchNodeId]
+    if (!sourceBranch) {
+      throw new Error('Missing demo branch fixture data.')
+    }
+    const secondBranch: ContinuationObject = {
+      ...sourceBranch,
+      name: 'eq_branch_second',
+      data: {
+        ...sourceBranch.data,
+        points: [...sourceBranch.data.points],
+        bifurcations: [...sourceBranch.data.bifurcations],
+        indices: [...sourceBranch.data.indices],
+      },
+    }
+    const { system: next, nodeId: secondBranchNodeId } = addBranch(
+      system,
+      secondBranch,
+      objectNodeId
+    )
+    const onReorderNode = vi.fn()
+
+    render(
+      <ObjectsTree
+        system={next}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={onReorderNode}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    const dataTransfer = {
+      effectAllowed: '',
+      data: new Map<string, string>(),
+      getData(type: string) {
+        return this.data.get(type) ?? ''
+      },
+      setData(type: string, value: string) {
+        this.data.set(type, value)
+      },
+    }
+
+    const targetRow = screen.getByTestId(`object-tree-row-${branchNodeId}`)
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      bottom: 0,
+      height: 20,
+      left: 0,
+      right: 200,
+      top: -20,
+      width: 200,
+      x: 0,
+      y: -20,
+      toJSON: () => ({}),
+    })
+
+    fireEvent.dragStart(screen.getByTestId(`node-drag-${secondBranchNodeId}`), {
+      dataTransfer,
+    })
+    const dragOver = new Event('dragover', { bubbles: true, cancelable: true })
+    Object.defineProperty(dragOver, 'clientY', { value: 116 })
+    Object.defineProperty(dragOver, 'dataTransfer', { value: dataTransfer })
+    fireEvent(targetRow, dragOver)
+    const drop = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, 'clientY', { value: 116 })
+    Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer })
+    fireEvent(targetRow, drop)
+
+    expect(onReorderNode).toHaveBeenCalledWith(secondBranchNodeId, branchNodeId, 'after')
+    rectSpy.mockRestore()
   })
 
   it('indents limit cycle continuation branches under their parent object', () => {

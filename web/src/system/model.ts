@@ -616,10 +616,13 @@ export function moveNode(
   return next
 }
 
+export type ReorderPlacement = 'before' | 'after'
+
 export function reorderNode(
   system: System,
   nodeId: string,
-  targetId: string
+  targetId: string,
+  placement: ReorderPlacement = 'before'
 ): System {
   const next = structuredClone(system)
   const node = next.nodes[nodeId]
@@ -637,7 +640,14 @@ export function reorderNode(
     return system
 
   siblings.splice(fromIndex, 1)
-  siblings.splice(targetIndex, 0, nodeId)
+  const targetIndexAfterRemoval = siblings.indexOf(targetId)
+  if (targetIndexAfterRemoval === -1) return system
+  const insertionIndex = placement === 'after'
+    ? targetIndexAfterRemoval + 1
+    : targetIndexAfterRemoval
+  if (fromIndex === insertionIndex) return system
+
+  siblings.splice(insertionIndex, 0, nodeId)
   next.updatedAt = nowIso()
   return next
 }

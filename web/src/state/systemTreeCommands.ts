@@ -11,6 +11,7 @@ import {
 } from '../system/model'
 import { formatEquilibriumLabel } from '../system/labels'
 import type { System, SystemConfig, TreeNode } from '../system/types'
+import type { ReorderPlacement } from '../system/model'
 import { isCliSafeName } from '../utils/naming'
 
 type SystemTreeAction =
@@ -26,7 +27,7 @@ export type SystemTreeCommands = {
   toggleVisibility: (nodeId: string) => void
   toggleExpanded: (nodeId: string) => void
   moveNode: (nodeId: string, direction: 'up' | 'down') => void
-  reorderNode: (nodeId: string, targetId: string) => void
+  reorderNode: (nodeId: string, targetId: string, placement?: ReorderPlacement) => void
   updateLayout: (layout: Partial<System['ui']['layout']>) => void
   updateViewportHeight: (nodeId: string, height: number) => void
   updateRender: (nodeId: string, render: Partial<TreeNode['render']>) => void
@@ -138,10 +139,14 @@ export function createSystemTreeCommands({
     scheduleUiSave(system)
   }
 
-  const reorderNode = (nodeId: string, targetId: string) => {
+  const reorderNode = (
+    nodeId: string,
+    targetId: string,
+    placement: ReorderPlacement = 'before'
+  ) => {
     const current = getCurrentSystem()
     if (!current) return
-    const system = reorderSystemNode(current, nodeId, targetId)
+    const system = reorderSystemNode(current, nodeId, targetId, placement)
     dispatch({ type: 'SET_SYSTEM', system })
     scheduleUiSave(system)
   }

@@ -8,9 +8,10 @@ import {
   useRef,
   useState,
 } from 'react'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, DragEvent } from 'react'
 import type { ContinuationObject, System, TreeNode } from '../system/types'
 import { DEFAULT_RENDER } from '../system/model'
+import type { ReorderPlacement } from '../system/model'
 import { hasCustomObjectParams } from '../system/parameters'
 import { formatEquilibriumLabel } from '../system/labels'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
@@ -27,7 +28,7 @@ type ObjectsTreeProps = {
   onToggleVisibility: (id: string) => void
   onRename: (id: string, name: string) => void
   onToggleExpanded: (id: string) => void
-  onReorderNode: (nodeId: string, targetId: string) => void
+  onReorderNode: (nodeId: string, targetId: string, placement?: ReorderPlacement) => void
   onCreateOrbit: () => void
   onCreateEquilibrium: () => void
   onCreateIsocline?: () => void
@@ -127,7 +128,11 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const [editingId, setEditingId] = useState<string | null>(null)
     const [draftName, setDraftName] = useState('')
     const [draggingId, setDraggingId] = useState<string | null>(null)
-    const [dragOverId, setDragOverId] = useState<string | null>(null)
+    const [dropPreview, setDropPreview] = useState<{
+      targetId: string
+      placement: ReorderPlacement
+    } | null>(null)
+    const dropPreviewRef = useRef<typeof dropPreview>(null)
     const [nodeContextMenu, setNodeContextMenu] = useState<{
       id: string
       x: number
@@ -139,6 +144,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     } | null>(null)
     const createMenuRef = useRef<HTMLDivElement | null>(null)
     const nodeContextMenuRef = useRef<HTMLDivElement | null>(null)
+    const rowRefs = useRef(new Map<string, HTMLDivElement>())
+    const previousRowRects = useRef(new Map<string, DOMRect>())
     const equilibriumLabel = formatEquilibriumLabel(system.config.type)
     const createEquilibriumLabel =
       system.config.type === 'map' ? 'Fixed point / Cycle' : equilibriumLabel
@@ -207,6 +214,26 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       setNodeContextMenu((prev) => (prev ? { ...prev, x: clampedX } : prev))
     }, [nodeContextMenu])
 
+    useLayoutEffect(() => {
+      const nextRects = new Map<string, DOMRect>()
+      rowRefs.current.forEach((row, nodeId) => {
+        const rect = row.getBoundingClientRect()
+        nextRects.set(nodeId, rect)
+        const previous = previousRowRects.current.get(nodeId)
+        if (!draggingId || !previous) return
+        const deltaY = previous.top - rect.top
+        if (Math.abs(deltaY) < 1 || typeof row.animate !== 'function') return
+        row.animate(
+          [
+            { transform: `translateY(${deltaY}px)` },
+            { transform: 'translateY(0)' },
+          ],
+          { duration: 150, easing: 'cubic-bezier(0.2, 0, 0, 1)' }
+        )
+      })
+      previousRowRects.current = nextRects
+    })
+
     const commitRename = (node: TreeNode) => {
       const trimmed = draftName.trim()
       if (trimmed && trimmed !== node.name) {
@@ -218,9 +245,36 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const openCreateMenu = useCallback((position: { x: number; y: number }) => {
       setNodeContextMenu(null)
       setCreateMenu(position)
-    }, [])
+    }, [setCreateMenu, setNodeContextMenu])
 
     useImperativeHandle(ref, () => ({ openCreateMenu }), [openCreateMenu])
+
+    const getDropPlacement = (
+      event: DragEvent<HTMLDivElement>
+    ): ReorderPlacement => {
+      const rect = event.currentTarget.getBoundingClientRect()
+      return event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    }
+
+    const getPreviewOrder = (nodeIds: string[]) => {
+      if (!draggingId || !dropPreview) return nodeIds
+      if (!nodeIds.includes(draggingId) || !nodeIds.includes(dropPreview.targetId)) {
+        return nodeIds
+      }
+      if (draggingId === dropPreview.targetId) return nodeIds
+      const next = nodeIds.filter((id) => id !== draggingId)
+      const targetIndex = next.indexOf(dropPreview.targetId)
+      if (targetIndex === -1) return nodeIds
+      const insertionIndex =
+        dropPreview.placement === 'after' ? targetIndex + 1 : targetIndex
+      next.splice(insertionIndex, 0, draggingId)
+      return next
+    }
+
+    const updateDropPreview = (preview: typeof dropPreview) => {
+      dropPreviewRef.current = preview
+      setDropPreview(preview)
+    }
 
     const renderNode = (nodeId: string, depth: number) => {
     const node = system.nodes[nodeId]
@@ -250,11 +304,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const nodeColor = node.render?.color ?? DEFAULT_RENDER.color
     const visibilityStyle = { '--node-color': nodeColor } as CSSProperties
     const isDragging = draggingId === nodeId
-    const draggingNode = draggingId ? system.nodes[draggingId] : null
-    const isDropTarget =
-      dragOverId === nodeId &&
-      draggingId !== node.id &&
-      draggingNode?.parentId === node.parentId
+    const isDropTarget = dropPreview?.targetId === nodeId && draggingId !== node.id
     const object = system.objects[nodeId]
     const customParameters =
       object && object.type !== 'continuation' ? object.customParameters : null
@@ -268,7 +318,18 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         <div
           className={`tree-node__row${isSelected ? ' tree-node__row--selected' : ''}${
             isDragging ? ' tree-node__row--dragging' : ''
-          }${isDropTarget ? ' tree-node__row--drop' : ''}`}
+          }${
+            isDropTarget && dropPreview
+              ? ` tree-node__row--drop-${dropPreview.placement}`
+              : ''
+          }`}
+          ref={(row) => {
+            if (row) {
+              rowRefs.current.set(nodeId, row)
+            } else {
+              rowRefs.current.delete(nodeId)
+            }
+          }}
           style={indentStyle}
           onClick={() => onSelect(nodeId)}
           onContextMenu={(event) => {
@@ -280,18 +341,36 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
           onDragOver={(event) => {
             const sourceId = draggingId || event.dataTransfer.getData('text/plain')
             const sourceNode = sourceId ? system.nodes[sourceId] : null
-            if (!sourceId || !sourceNode || sourceNode.parentId !== node.parentId) return
+            if (
+              !sourceId ||
+              !sourceNode ||
+              sourceId === nodeId ||
+              sourceNode.parentId !== node.parentId
+            ) {
+              return
+            }
             event.preventDefault()
-            setDragOverId(nodeId)
+            event.dataTransfer.dropEffect = 'move'
+            const placement = getDropPlacement(event)
+            if (
+              dropPreviewRef.current?.targetId !== nodeId ||
+              dropPreviewRef.current.placement !== placement
+            ) {
+              updateDropPreview({ targetId: nodeId, placement })
+            }
           }}
           onDrop={(event) => {
             event.preventDefault()
             const sourceId = event.dataTransfer.getData('text/plain') || draggingId
             const sourceNode = sourceId ? system.nodes[sourceId] : null
             if (sourceId && sourceNode?.parentId === node.parentId && sourceId !== nodeId) {
-              onReorderNode(sourceId, nodeId)
+              const placement =
+                dropPreviewRef.current?.targetId === nodeId
+                  ? dropPreviewRef.current.placement
+                  : getDropPlacement(event)
+              onReorderNode(sourceId, nodeId, placement)
             }
-            setDragOverId(null)
+            updateDropPreview(null)
             setDraggingId(null)
           }}
           data-testid={`object-tree-row-${nodeId}`}
@@ -379,7 +458,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
             }}
             onDragEnd={() => {
               setDraggingId(null)
-              setDragOverId(null)
+              updateDropPreview(null)
             }}
             aria-label={`Drag ${node.name}`}
             data-testid={`node-drag-${nodeId}`}
@@ -389,7 +468,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         </div>
         {hasChildren && node.expanded ? (
           <div className="tree-node__children">
-            {childIds.map((childId) => renderNode(childId, depth + 1))}
+            {getPreviewOrder(childIds).map((childId) => renderNode(childId, depth + 1))}
           </div>
         ) : null}
       </div>
@@ -400,7 +479,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       <div className="objects-tree" data-testid="objects-tree">
         <div className="objects-tree__list">
           {rootNodes.length === 0 ? <p className="empty-state">No objects yet.</p> : null}
-          {rootNodes.map((nodeId) => renderNode(nodeId, 0))}
+          {getPreviewOrder(rootNodes).map((nodeId) => renderNode(nodeId, 0))}
         </div>
         {createMenu ? (
           <div

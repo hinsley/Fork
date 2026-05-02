@@ -66,6 +66,7 @@ import {
   updateScene,
   updateSystem,
 } from '../system/model'
+import type { ReorderPlacement } from '../system/model'
 import {
   ensureHomoclinicEndpointResumeSeeds,
   ensureBranchIndices,
@@ -1406,7 +1407,7 @@ type AppActions = {
   toggleVisibility: (nodeId: string) => void
   toggleExpanded: (nodeId: string) => void
   moveNode: (nodeId: string, direction: 'up' | 'down') => void
-  reorderNode: (nodeId: string, targetId: string) => void
+  reorderNode: (nodeId: string, targetId: string, placement?: ReorderPlacement) => void
   updateLayout: (layout: Partial<System['ui']['layout']>) => void
   updateViewportHeight: (nodeId: string, height: number) => void
   updateRender: (nodeId: string, render: Partial<TreeNode['render']>) => void
