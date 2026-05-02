@@ -84,6 +84,24 @@ describe('plotlyAdapter camera guard', () => {
     expect(relayoutSpy).not.toHaveBeenCalled()
   })
 
+  it('does not let Plotly mutations leak back into caller layouts', async () => {
+    const { reactSpy } = mockPlotly()
+    reactSpy.mockImplementationOnce((_, __, layoutArg) => {
+      const layout = layoutArg as { scene?: { camera?: unknown } }
+      if (layout.scene) {
+        layout.scene.camera = { eye: { x: 9, y: 8, z: 7 } }
+      }
+      return Promise.resolve()
+    })
+    const { renderPlot } = await loadAdapter()
+    const container = makeContainer('plot-1')
+    const layout = { uirevision: 'plot-1', scene: { aspectmode: 'data' as const } }
+
+    await renderPlot(container, [], layout)
+
+    expect(layout.scene).not.toHaveProperty('camera')
+  })
+
   it('does not reapply camera when uirevision changes', async () => {
     const { reactSpy, relayoutSpy } = mockPlotly()
     const { renderPlot } = await loadAdapter()

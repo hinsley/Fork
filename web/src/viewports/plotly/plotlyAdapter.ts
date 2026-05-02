@@ -354,6 +354,18 @@ function normalizePlotlyTitleText(value: unknown, path: string[] = []): unknown 
   return next ?? value
 }
 
+function clonePlotlyValue<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((entry) => clonePlotlyValue(entry)) as T
+  }
+  if (!value || typeof value !== 'object') return value
+  const next: Record<string, unknown> = {}
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    next[key] = clonePlotlyValue(entry)
+  }
+  return next as T
+}
+
 async function loadPlotly(): Promise<PlotlyModule> {
   if (plotlyModule) return plotlyModule
   if (!plotlyPromise) {
@@ -385,7 +397,8 @@ export async function renderPlot(
 ) {
   const [Plotly] = await Promise.all([loadPlotly(), ensureMathJaxReady()])
   if (opts?.signal?.aborted) return
-  const normalizedLayout = normalizePlotlyTitleText(layout) as Partial<Layout>
+  const layoutInput = clonePlotlyValue(layout)
+  const normalizedLayout = normalizePlotlyTitleText(layoutInput) as Partial<Layout>
   const managedSceneKeys = sceneMathTitleKeys.get(container) ?? new Set<string>()
   const mathTitleFallback =
     Plotly.relayout

@@ -194,10 +194,11 @@ test('3D camera persists across style updates', async ({ page }) => {
     resizeCalls: after.resizeCalls - before.resizeCalls,
   })
 
-  const startAfterplotCapture = async () => {
-    await page.evaluate((id) => {
+  const startAfterplotCapture = async (expectedLineWidth: number) => {
+    await page.evaluate(({ id, expectedLineWidth }) => {
       const node = document.querySelector(`[data-testid="plotly-viewport-${id}"]`) as
         | (HTMLElement & {
+            data?: Array<{ line?: { width?: unknown } }>
             layout?: { scene?: { camera?: { eye?: unknown } } }
             _fullLayout?: {
               scene?: {
@@ -238,6 +239,8 @@ test('3D camera persists across style updates', async ({ page }) => {
       ;(window as { __camsAfterStyle?: Array<{ x: number; y: number; z: number } | null> })
         .__camsAfterStyle = []
       const handler = () => {
+        const lineWidth = node.data?.[0]?.line?.width
+        if (Number(lineWidth) !== expectedLineWidth) return
         const eye = readEye()
         ;(window as { __camsAfterStyle?: Array<{ x: number; y: number; z: number } | null> })
           .__camsAfterStyle?.push(eye ?? null)
@@ -256,7 +259,7 @@ test('3D camera persists across style updates', async ({ page }) => {
           node.removeEventListener('plotly_afterplot', handler)
         }
       }
-    }, plotId)
+    }, { id: plotId, expectedLineWidth })
   }
 
   const stopAfterplotCapture = async () => {
@@ -283,6 +286,10 @@ test('3D camera persists across style updates', async ({ page }) => {
     await expect(viewport).not.toContainText(/reading '0'/)
   }
 
+  await waitForPlotlyEvent('plotly_afterplot')
+  // The viewport applies its initial camera through a follow-up Plotly relayout. Let that
+  // settle before simulating a user camera drag so the style-update assertions isolate the
+  // render path they are meant to cover.
   await waitForPlotlyEvent('plotly_afterplot')
   const plotIdentityBefore = await gdHandle.evaluate((node) => {
     const typed = node as HTMLElement & {
@@ -328,8 +335,8 @@ test('3D camera persists across style updates', async ({ page }) => {
   await assertNoPlotlyErrors('camera rotate')
 
   const lineWidthInput = page.getByTestId('inspector-line-width')
-  await startAfterplotCapture()
   const perfBeforeFirst = await readPerf()
+  await startAfterplotCapture(6)
   const stateBeforeFirst = await readPlotState()
   const lineWidthAfterFirst = waitForPlotlyEvent('plotly_afterplot')
   await lineWidthInput.fill('6')
@@ -355,8 +362,8 @@ test('3D camera persists across style updates', async ({ page }) => {
   expect(distance(firstAfterplotCam, rotatedCam)).toBeLessThan(0.25)
   expect(distance(firstAfterplotCam, defaultCam)).toBeGreaterThan(0.2)
 
-  await startAfterplotCapture()
   const perfBeforeSecond = await readPerf()
+  await startAfterplotCapture(7)
   const stateBeforeSecond = await readPlotState()
   const lineWidthAfterSecond = waitForPlotlyEvent('plotly_afterplot')
   await lineWidthInput.fill('7')

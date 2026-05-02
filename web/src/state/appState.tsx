@@ -55,19 +55,12 @@ import {
   addScene,
   duplicateNode as duplicateSystemNode,
   mergeLoadedEntities,
-  moveNode,
   reorderNode,
   removeNode,
-  renameNode,
   selectNode,
-  toggleNodeExpanded,
-  toggleNodeVisibility,
   updateAnalysisViewport,
   updateBifurcationDiagram,
   updateLimitCycleRenderTarget,
-  updateLayout,
-  updateViewportHeights,
-  updateNodeRender,
   updateObject,
   updateBranch,
   updateScene,
@@ -100,6 +93,10 @@ import {
 import { formatEquilibriumLabel } from '../system/labels'
 import { AppContext } from './appContext'
 import { createSystemStorageCommands } from './systemStorageCommands'
+import {
+  createSystemTreeCommands,
+  validateObjectName,
+} from './systemTreeCommands'
 import { validateSystemConfig } from './systemValidation'
 import { isCliSafeName } from '../utils/naming'
 
@@ -227,14 +224,6 @@ function validateBranchName(name: string): string | null {
   if (!name.trim()) return 'Branch name is required.'
   if (!isCliSafeName(name)) {
     return 'Branch names must be alphanumeric with underscores only.'
-  }
-  return null
-}
-
-function validateObjectName(name: string, label: string): string | null {
-  if (!name.trim()) return `${label} name is required.`
-  if (!isCliSafeName(name)) {
-    return `${label} names must be alphanumeric with underscores only.`
   }
   return null
 }
@@ -391,21 +380,6 @@ function inferHomoclinicFixedEpsFromPoint(
     eps0: Math.max(1e-8, dist(first, x0)),
     eps1: Math.max(1e-8, dist(last, x0)),
   }
-}
-
-function getNodeLabel(node: TreeNode | undefined, systemType: SystemConfig['type']): string {
-  if (!node) return 'Item'
-  if (node.kind === 'branch') return 'Branch'
-  if (node.kind === 'scene') return 'Scene'
-  if (node.kind === 'diagram') return 'Bifurcation diagram'
-  if (node.kind === 'object') {
-    if (node.objectType === 'orbit') return 'Orbit'
-    if (node.objectType === 'equilibrium') return formatEquilibriumLabel(systemType)
-    if (node.objectType === 'limit_cycle') return 'Limit cycle'
-    if (node.objectType === 'isocline') return 'Isocline'
-    return 'Object'
-  }
-  return 'Item'
 }
 
 function reshapeCovariantVectors(
@@ -1757,116 +1731,30 @@ export function AppProvider({
     [client]
   )
 
-  const selectNodeAction = useCallback(
-    (nodeId: string | null) => {
-      if (!state.system) return
-      if (state.system.ui.selectedNodeId === nodeId) return
-      const system = selectNode(state.system, nodeId)
-      dispatch({ type: 'SET_SYSTEM', system })
-      if (nodeId) {
-        if (system.index.objects[nodeId]) {
-          void ensureObjectLoaded(nodeId)
-        } else if (system.index.branches[nodeId]) {
-          void ensureBranchLoaded(nodeId)
-        }
-      }
-    },
-    [ensureBranchLoaded, ensureObjectLoaded, state.system]
+  const treeCommands = useMemo(
+    () =>
+      createSystemTreeCommands({
+        dispatch,
+        getCurrentSystem: () => state.system,
+        scheduleSystemSave,
+        scheduleUiSave,
+        ensureObjectLoaded,
+        ensureBranchLoaded,
+      }),
+    [ensureBranchLoaded, ensureObjectLoaded, scheduleSystemSave, scheduleUiSave, state.system]
   )
 
-  const renameNodeAction = useCallback(
-    (nodeId: string, name: string) => {
-      if (!state.system) return
-      const trimmedName = name.trim()
-      const node = state.system.nodes[nodeId]
-      const nameError = validateObjectName(
-        trimmedName,
-        getNodeLabel(node, state.system.config.type)
-      )
-      if (nameError) {
-        dispatch({ type: 'SET_ERROR', error: nameError })
-        return
-      }
-      const system = renameNode(state.system, nodeId, trimmedName)
-      dispatch({ type: 'SET_SYSTEM', system })
-      if (node.kind === 'scene' || node.kind === 'diagram' || node.kind === 'analysis') {
-        scheduleUiSave(system)
-      } else {
-        scheduleSystemSave(system)
-      }
-    },
-    [scheduleSystemSave, scheduleUiSave, state.system]
-  )
-
-  const toggleVisibilityAction = useCallback(
-    (nodeId: string) => {
-      if (!state.system) return
-      const system = toggleNodeVisibility(state.system, nodeId)
-      dispatch({ type: 'SET_SYSTEM', system })
-      scheduleUiSave(system)
-    },
-    [scheduleUiSave, state.system]
-  )
-
-  const toggleExpandedAction = useCallback(
-    (nodeId: string) => {
-      if (!state.system) return
-      const system = toggleNodeExpanded(state.system, nodeId)
-      dispatch({ type: 'SET_SYSTEM', system })
-      scheduleUiSave(system)
-    },
-    [scheduleUiSave, state.system]
-  )
-
-  const moveNodeAction = useCallback(
-    (nodeId: string, direction: 'up' | 'down') => {
-      if (!state.system) return
-      const system = moveNode(state.system, nodeId, direction)
-      dispatch({ type: 'SET_SYSTEM', system })
-      scheduleUiSave(system)
-    },
-    [scheduleUiSave, state.system]
-  )
-
-  const reorderNodeAction = useCallback(
-    (nodeId: string, targetId: string) => {
-      if (!state.system) return
-      const system = reorderNode(state.system, nodeId, targetId)
-      dispatch({ type: 'SET_SYSTEM', system })
-      scheduleUiSave(system)
-    },
-    [scheduleUiSave, state.system]
-  )
-
-  const updateLayoutAction = useCallback(
-    (layout: Partial<System['ui']['layout']>) => {
-      if (!state.system) return
-      const system = updateLayout(state.system, layout)
-      dispatch({ type: 'SET_SYSTEM', system })
-      scheduleUiSave(system)
-    },
-    [scheduleUiSave, state.system]
-  )
-
-  const updateViewportHeightAction = useCallback(
-    (nodeId: string, height: number) => {
-      if (!state.system || !Number.isFinite(height)) return
-      const system = updateViewportHeights(state.system, { [nodeId]: height })
-      dispatch({ type: 'SET_SYSTEM', system })
-      scheduleUiSave(system)
-    },
-    [scheduleUiSave, state.system]
-  )
-
-  const updateRenderAction = useCallback(
-    (nodeId: string, render: Partial<TreeNode['render']>) => {
-      if (!state.system) return
-      const system = updateNodeRender(state.system, nodeId, render)
-      dispatch({ type: 'SET_SYSTEM', system })
-      scheduleUiSave(system)
-    },
-    [scheduleUiSave, state.system]
-  )
+  const {
+    selectNode: selectNodeAction,
+    renameNode: renameNodeAction,
+    toggleVisibility: toggleVisibilityAction,
+    toggleExpanded: toggleExpandedAction,
+    moveNode: moveNodeAction,
+    reorderNode: reorderNodeAction,
+    updateLayout: updateLayoutAction,
+    updateViewportHeight: updateViewportHeightAction,
+    updateRender: updateRenderAction,
+  } = treeCommands
 
   const updateObjectParamsAction = useCallback(
     (nodeId: string, params: number[] | null) => {
