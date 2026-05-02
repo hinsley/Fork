@@ -249,9 +249,12 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const isEditing = editingId === nodeId
     const nodeColor = node.render?.color ?? DEFAULT_RENDER.color
     const visibilityStyle = { '--node-color': nodeColor } as CSSProperties
-    const isRoot = node.parentId === null
     const isDragging = draggingId === nodeId
-    const isDropTarget = isRoot && dragOverId === nodeId && draggingId !== node.id
+    const draggingNode = draggingId ? system.nodes[draggingId] : null
+    const isDropTarget =
+      dragOverId === nodeId &&
+      draggingId !== node.id &&
+      draggingNode?.parentId === node.parentId
     const object = system.objects[nodeId]
     const customParameters =
       object && object.type !== 'continuation' ? object.customParameters : null
@@ -275,19 +278,17 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
             setNodeContextMenu({ id: nodeId, x: event.clientX, y: event.clientY })
           }}
           onDragOver={(event) => {
-            if (!isRoot) return
             const sourceId = draggingId || event.dataTransfer.getData('text/plain')
             const sourceNode = sourceId ? system.nodes[sourceId] : null
-            if (!sourceId || !sourceNode || sourceNode.parentId !== null) return
+            if (!sourceId || !sourceNode || sourceNode.parentId !== node.parentId) return
             event.preventDefault()
             setDragOverId(nodeId)
           }}
           onDrop={(event) => {
-            if (!isRoot) return
             event.preventDefault()
             const sourceId = event.dataTransfer.getData('text/plain') || draggingId
             const sourceNode = sourceId ? system.nodes[sourceId] : null
-            if (sourceId && sourceNode?.parentId === null && sourceId !== nodeId) {
+            if (sourceId && sourceNode?.parentId === node.parentId && sourceId !== nodeId) {
               onReorderNode(sourceId, nodeId)
             }
             setDragOverId(null)
@@ -367,26 +368,24 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
               </span>
             )}
           </button>
-          {isRoot ? (
-            <button
-              className="tree-node__handle"
-              draggable
-              onClick={(event) => event.stopPropagation()}
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = 'move'
-                event.dataTransfer.setData('text/plain', nodeId)
-                setDraggingId(nodeId)
-              }}
-              onDragEnd={() => {
-                setDraggingId(null)
-                setDragOverId(null)
-              }}
-              aria-label={`Drag ${node.name}`}
-              data-testid={`node-drag-${nodeId}`}
-            >
-              ::
-            </button>
-          ) : null}
+          <button
+            className="tree-node__handle"
+            draggable
+            onClick={(event) => event.stopPropagation()}
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = 'move'
+              event.dataTransfer.setData('text/plain', nodeId)
+              setDraggingId(nodeId)
+            }}
+            onDragEnd={() => {
+              setDraggingId(null)
+              setDragOverId(null)
+            }}
+            aria-label={`Drag ${node.name}`}
+            data-testid={`node-drag-${nodeId}`}
+          >
+            ::
+          </button>
         </div>
         {hasChildren && node.expanded ? (
           <div className="tree-node__children">

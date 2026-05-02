@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { ObjectsTree, type ObjectsTreeHandle } from './ObjectsTree'
 import { createDemoSystem, createPeriodDoublingSystem } from '../system/fixtures'
 import { useRef, useState } from 'react'
-import { addObject, createSystem, toggleNodeExpanded } from '../system/model'
-import type { OrbitObject } from '../system/types'
+import { addBranch, addObject, createSystem, toggleNodeExpanded } from '../system/model'
+import type { ContinuationObject, OrbitObject } from '../system/types'
 
 describe('ObjectsTree', () => {
   it('selects, renames, and toggles visibility', async () => {
@@ -242,7 +242,7 @@ describe('ObjectsTree', () => {
     expect(onCreateOrbit).toHaveBeenCalled()
   })
 
-  it('shows drag handles for root nodes only', () => {
+  it('shows drag handles for root and child nodes', () => {
     const { system, objectNodeId, branchNodeId } = createDemoSystem()
 
     render(
@@ -261,7 +261,69 @@ describe('ObjectsTree', () => {
     )
 
     expect(screen.getByTestId(`node-drag-${objectNodeId}`)).toBeInTheDocument()
-    expect(screen.queryByTestId(`node-drag-${branchNodeId}`)).toBeNull()
+    expect(screen.getByTestId(`node-drag-${branchNodeId}`)).toBeInTheDocument()
+  })
+
+  it('reorders child nodes under the same parent', () => {
+    const { system, objectNodeId, branchNodeId } = createDemoSystem()
+    const sourceBranch = system.branches[branchNodeId]
+    if (!sourceBranch) {
+      throw new Error('Missing demo branch fixture data.')
+    }
+    const secondBranch: ContinuationObject = {
+      ...sourceBranch,
+      name: 'eq_branch_second',
+      data: {
+        ...sourceBranch.data,
+        points: [...sourceBranch.data.points],
+        bifurcations: [...sourceBranch.data.bifurcations],
+        indices: [...sourceBranch.data.indices],
+      },
+    }
+    const { system: next, nodeId: secondBranchNodeId } = addBranch(
+      system,
+      secondBranch,
+      objectNodeId
+    )
+    const onReorderNode = vi.fn()
+
+    render(
+      <ObjectsTree
+        system={next}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={onReorderNode}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    const dataTransfer = {
+      effectAllowed: '',
+      data: new Map<string, string>(),
+      getData(type: string) {
+        return this.data.get(type) ?? ''
+      },
+      setData(type: string, value: string) {
+        this.data.set(type, value)
+      },
+    }
+
+    fireEvent.dragStart(screen.getByTestId(`node-drag-${secondBranchNodeId}`), {
+      dataTransfer,
+    })
+    fireEvent.dragOver(screen.getByTestId(`object-tree-row-${branchNodeId}`), {
+      dataTransfer,
+    })
+    fireEvent.drop(screen.getByTestId(`object-tree-row-${branchNodeId}`), {
+      dataTransfer,
+    })
+
+    expect(onReorderNode).toHaveBeenCalledWith(secondBranchNodeId, branchNodeId)
   })
 
   it('indents limit cycle continuation branches under their parent object', () => {
