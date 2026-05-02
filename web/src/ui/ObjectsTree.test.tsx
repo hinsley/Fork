@@ -4,7 +4,14 @@ import { describe, expect, it, vi } from 'vitest'
 import { ObjectsTree, type ObjectsTreeHandle } from './ObjectsTree'
 import { createDemoSystem, createPeriodDoublingSystem } from '../system/fixtures'
 import { useRef, useState } from 'react'
-import { addBranch, addFolder, addObject, createSystem, toggleNodeExpanded } from '../system/model'
+import {
+  addBranch,
+  addFolder,
+  addObject,
+  createSystem,
+  moveNodeIntoParent,
+  toggleNodeExpanded,
+} from '../system/model'
 import type { ContinuationObject, OrbitObject } from '../system/types'
 
 describe('ObjectsTree', () => {
@@ -242,7 +249,7 @@ describe('ObjectsTree', () => {
     expect(onCreateOrbit).toHaveBeenCalled()
   })
 
-  it('shows drag handles for root and child nodes', () => {
+  it('makes root and child rows draggable without drag handles', () => {
     const { system, objectNodeId, branchNodeId } = createDemoSystem()
 
     render(
@@ -260,8 +267,16 @@ describe('ObjectsTree', () => {
       />
     )
 
-    expect(screen.getByTestId(`node-drag-${objectNodeId}`)).toBeInTheDocument()
-    expect(screen.getByTestId(`node-drag-${branchNodeId}`)).toBeInTheDocument()
+    expect(screen.getByTestId(`object-tree-row-${objectNodeId}`)).toHaveAttribute(
+      'draggable',
+      'true'
+    )
+    expect(screen.getByTestId(`object-tree-row-${branchNodeId}`)).toHaveAttribute(
+      'draggable',
+      'true'
+    )
+    expect(screen.queryByTestId(`node-drag-${objectNodeId}`)).toBeNull()
+    expect(screen.queryByTestId(`node-drag-${branchNodeId}`)).toBeNull()
   })
 
   it('renders root folders and creates a child folder from an object context menu', async () => {
@@ -350,7 +365,7 @@ describe('ObjectsTree', () => {
       },
     }
 
-    fireEvent.dragStart(screen.getByTestId(`node-drag-${secondBranchNodeId}`), {
+    fireEvent.dragStart(screen.getByTestId(`object-tree-row-${secondBranchNodeId}`), {
       dataTransfer,
     })
     const targetRow = screen.getByTestId(`object-tree-row-${branchNodeId}`)
@@ -441,7 +456,7 @@ describe('ObjectsTree', () => {
       toJSON: () => ({}),
     })
 
-    fireEvent.dragStart(screen.getByTestId(`node-drag-${secondBranchNodeId}`), {
+    fireEvent.dragStart(screen.getByTestId(`object-tree-row-${secondBranchNodeId}`), {
       dataTransfer,
     })
     const dragOver = new Event('dragover', { bubbles: true, cancelable: true })
@@ -517,7 +532,7 @@ describe('ObjectsTree', () => {
       toJSON: () => ({}),
     })
 
-    fireEvent.dragStart(screen.getByTestId(`node-drag-${secondBranchNodeId}`), {
+    fireEvent.dragStart(screen.getByTestId(`object-tree-row-${secondBranchNodeId}`), {
       dataTransfer,
     })
     const dragOver = new Event('dragover', { bubbles: true, cancelable: true })
@@ -566,7 +581,7 @@ describe('ObjectsTree', () => {
       },
     }
 
-    fireEvent.dragStart(screen.getByTestId(`node-drag-${objectNodeId}`), {
+    fireEvent.dragStart(screen.getByTestId(`object-tree-row-${objectNodeId}`), {
       dataTransfer,
     })
     const dragOver = new Event('dragover', { bubbles: true, cancelable: true })
@@ -578,6 +593,75 @@ describe('ObjectsTree', () => {
     fireEvent(screen.getByTestId('objects-tree'), drop)
 
     expect(onMoveNodeIntoParent).toHaveBeenCalledWith(objectNodeId, folder.nodeId)
+  })
+
+  it('reorders a root object out of a folder into a root sibling position', () => {
+    const { system, objectNodeId } = createDemoSystem()
+    const targetObject: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Target',
+      systemName: system.config.name,
+      data: [[0, 0, 0, 0]],
+      t_start: 0,
+      t_end: 1,
+      dt: 0.1,
+    }
+    const withTarget = addObject(system, targetObject)
+    const targetRootId = withTarget.nodeId
+    const folder = addFolder(withTarget.system, 'Folder_1')
+    const nested = moveNodeIntoParent(folder.system, objectNodeId, folder.nodeId)
+    const onReorderNode = vi.fn()
+
+    render(
+      <ObjectsTree
+        system={nested}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={onReorderNode}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    const dataTransfer = {
+      effectAllowed: '',
+      data: new Map<string, string>(),
+      getData(type: string) {
+        return this.data.get(type) ?? ''
+      },
+      setData(type: string, value: string) {
+        this.data.set(type, value)
+      },
+    }
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      bottom: 120,
+      height: 20,
+      left: 0,
+      right: 200,
+      top: 100,
+      width: 200,
+      x: 0,
+      y: 100,
+      toJSON: () => ({}),
+    })
+
+    fireEvent.dragStart(screen.getByTestId(`object-tree-row-${objectNodeId}`), {
+      dataTransfer,
+    })
+    const dragOver = new Event('dragover', { bubbles: true, cancelable: true })
+    Object.defineProperty(dragOver, 'clientY', { value: 104 })
+    Object.defineProperty(dragOver, 'dataTransfer', { value: dataTransfer })
+    fireEvent(screen.getByTestId(`object-tree-row-${targetRootId}`), dragOver)
+    const drop = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer })
+    fireEvent(screen.getByTestId('objects-tree'), drop)
+
+    expect(onReorderNode).toHaveBeenCalledWith(objectNodeId, targetRootId, 'before')
+    rectSpy.mockRestore()
   })
 
   it('moves an object child branch into a child folder under the same object', () => {
@@ -612,7 +696,7 @@ describe('ObjectsTree', () => {
       },
     }
 
-    fireEvent.dragStart(screen.getByTestId(`node-drag-${branchNodeId}`), {
+    fireEvent.dragStart(screen.getByTestId(`object-tree-row-${branchNodeId}`), {
       dataTransfer,
     })
     const dragOver = new Event('dragover', { bubbles: true, cancelable: true })

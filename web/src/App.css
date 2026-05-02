@@ -354,14 +354,15 @@
     calc(var(--tree-node-depth, 0) * 14px)
     14px
     16px
-    minmax(0, 1fr)
-    auto;
+    minmax(0, 1fr);
   align-items: center;
   column-gap: 4px;
   padding: 4px;
   border-radius: 4px;
   border: 1px solid transparent;
   min-width: 0;
+  cursor: grab;
+  user-select: none;
   transition:
     border-color 120ms ease,
     background 120ms ease,
@@ -376,7 +377,7 @@
 .tree-node__label {
   background: none;
   border: none;
-  cursor: pointer;
+  cursor: inherit;
   text-align: left;
   min-width: 0;
   padding: 0;
@@ -384,6 +385,7 @@
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: normal;
+  user-select: none;
 }
 
 .tree-node__label-content {
@@ -410,10 +412,16 @@
 .tree-node__label input {
   width: 100%;
   min-width: 0;
+  cursor: text;
+  user-select: text;
 }
 
 .tree-node__row--dragging {
   opacity: 0.6;
+}
+
+.tree-node__row:active {
+  cursor: grabbing;
 }
 
 .tree-node__expand,
@@ -469,19 +477,6 @@
 .tree-node__spacer {
   display: inline-block;
   width: 14px;
-}
-
-.tree-node__handle {
-  border: none;
-  background: none;
-  padding: 0 2px;
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  cursor: grab;
-}
-
-.tree-node__handle:active {
-  cursor: grabbing;
 }
 
 .inspector-section {

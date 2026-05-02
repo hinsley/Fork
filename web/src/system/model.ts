@@ -653,26 +653,38 @@ export function reorderNode(
   const node = next.nodes[nodeId]
   const target = next.nodes[targetId]
   if (!node || !target) return system
-  if (node.parentId !== target.parentId) return system
+  if (nodeId === targetId) return system
+  const targetParentId = target.parentId ?? null
+  const sameParent = node.parentId === targetParentId
+  if (!sameParent && !canMoveNodeIntoParent(next.nodes, nodeId, targetParentId)) {
+    return system
+  }
 
-  const siblings = node.parentId
+  const oldSiblings = node.parentId
     ? next.nodes[node.parentId]?.children
     : next.rootIds
-  if (!siblings) return system
-  const fromIndex = siblings.indexOf(nodeId)
-  const targetIndex = siblings.indexOf(targetId)
-  if (fromIndex === -1 || targetIndex === -1 || fromIndex === targetIndex)
+  const newSiblings = targetParentId
+    ? next.nodes[targetParentId]?.children
+    : next.rootIds
+  if (!oldSiblings || !newSiblings) return system
+  const fromIndex = oldSiblings.indexOf(nodeId)
+  const targetIndex = newSiblings.indexOf(targetId)
+  if (fromIndex === -1 || targetIndex === -1 || (sameParent && fromIndex === targetIndex))
     return system
 
-  siblings.splice(fromIndex, 1)
-  const targetIndexAfterRemoval = siblings.indexOf(targetId)
+  oldSiblings.splice(fromIndex, 1)
+  node.parentId = targetParentId
+  if (targetParentId) {
+    next.nodes[targetParentId].expanded = true
+  }
+  const targetIndexAfterRemoval = newSiblings.indexOf(targetId)
   if (targetIndexAfterRemoval === -1) return system
   const insertionIndex = placement === 'after'
     ? targetIndexAfterRemoval + 1
     : targetIndexAfterRemoval
-  if (fromIndex === insertionIndex) return system
+  if (sameParent && fromIndex === insertionIndex) return system
 
-  siblings.splice(insertionIndex, 0, nodeId)
+  newSiblings.splice(insertionIndex, 0, nodeId)
   next.updatedAt = nowIso()
   return next
 }

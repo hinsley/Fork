@@ -134,7 +134,12 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const [draftName, setDraftName] = useState('')
     const [draggingId, setDraggingId] = useState<string | null>(null)
     const [dropPreview, setDropPreview] = useState<
-      | { mode: 'reorder'; targetId: string; placement: ReorderPlacement }
+      | {
+          mode: 'reorder'
+          targetId: string
+          parentId: string | null
+          placement: ReorderPlacement
+        }
       | { mode: 'inside'; targetId: string }
       | null
     >(null)
@@ -279,7 +284,11 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         return next
       }
 
-      if (parentId !== sourceNode.parentId || !next.includes(dropPreview.targetId)) {
+      if (
+        dropPreview.mode !== 'reorder' ||
+        parentId !== dropPreview.parentId ||
+        !next.includes(dropPreview.targetId)
+      ) {
         return next
       }
       if (draggingId === dropPreview.targetId) return nodeIds
@@ -308,7 +317,6 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         onMoveNodeIntoParent(sourceId, preview.targetId)
         return true
       }
-      if (sourceNode.parentId !== targetNode.parentId) return false
       onReorderNode(sourceId, preview.targetId, preview.placement)
       return true
     }
@@ -355,6 +363,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
           className={`tree-node__row${isSelected ? ' tree-node__row--selected' : ''}${
             isDragging ? ' tree-node__row--dragging' : ''
           }`}
+          draggable={!isEditing}
           ref={(row) => {
             if (row) {
               rowRefs.current.set(nodeId, row)
@@ -364,6 +373,19 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
           }}
           style={indentStyle}
           onClick={() => onSelect(nodeId)}
+          onDragStart={(event) => {
+            if (isEditing) {
+              event.preventDefault()
+              return
+            }
+            event.dataTransfer.effectAllowed = 'move'
+            event.dataTransfer.setData('text/plain', nodeId)
+            setDraggingId(nodeId)
+          }}
+          onDragEnd={() => {
+            setDraggingId(null)
+            updateDropPreview(null)
+          }}
           onContextMenu={(event) => {
             event.preventDefault()
             onSelect(nodeId)
@@ -391,16 +413,28 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
               return
             }
             if (sourceNode.parentId !== node.parentId) {
-              return
+              const targetParentId = node.parentId ?? null
+              if (!canMoveNodeIntoParent(system.nodes, sourceId, targetParentId)) {
+                updateDropPreview(null)
+                event.dataTransfer.dropEffect = 'none'
+                return
+              }
             }
             const placement = getDropPlacement(event)
+            const targetParentId = node.parentId ?? null
             if (
               dropPreviewRef.current?.mode !== 'reorder' ||
               dropPreviewRef.current?.targetId !== nodeId ||
+              dropPreviewRef.current.parentId !== targetParentId ||
               (dropPreviewRef.current.mode === 'reorder' &&
                 dropPreviewRef.current.placement !== placement)
             ) {
-              updateDropPreview({ mode: 'reorder', targetId: nodeId, placement })
+              updateDropPreview({
+                mode: 'reorder',
+                targetId: nodeId,
+                parentId: targetParentId,
+                placement,
+              })
             }
           }}
           data-testid={`object-tree-row-${nodeId}`}
@@ -486,24 +520,6 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
                 ) : null}
               </span>
             )}
-          </button>
-          <button
-            className="tree-node__handle"
-            draggable
-            onClick={(event) => event.stopPropagation()}
-            onDragStart={(event) => {
-              event.dataTransfer.effectAllowed = 'move'
-              event.dataTransfer.setData('text/plain', nodeId)
-              setDraggingId(nodeId)
-            }}
-            onDragEnd={() => {
-              setDraggingId(null)
-              updateDropPreview(null)
-            }}
-            aria-label={`Drag ${node.name}`}
-            data-testid={`node-drag-${nodeId}`}
-          >
-            ::
           </button>
         </div>
         {(hasChildren || dropPreview?.targetId === nodeId) &&

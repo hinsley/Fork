@@ -165,6 +165,29 @@ describe('system model', () => {
     expect(normalized.rootIds).not.toContain(orbit.nodeId)
   })
 
+  it('reorders an object out of a folder into a root sibling position', () => {
+    const system = createSystem({ name: 'Folder_Reorder_Out' })
+    const base: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit',
+      systemName: system.config.name,
+      data: [[0, 0, 1]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+    }
+    const folder = addFolder(system, 'Folder_1')
+    const first = addObject(folder.system, { ...base, name: 'First' })
+    const second = addObject(first.system, { ...base, name: 'Second' })
+    const inFolder = moveNodeIntoParent(second.system, first.nodeId, folder.nodeId)
+
+    const movedOut = reorderNode(inFolder, first.nodeId, second.nodeId, 'before')
+
+    expect(movedOut.nodes[first.nodeId]?.parentId).toBeNull()
+    expect(movedOut.nodes[folder.nodeId]?.children).not.toContain(first.nodeId)
+    expect(movedOut.rootIds).toEqual([folder.nodeId, first.nodeId, second.nodeId])
+  })
+
   it('nests child folders and branch children under the same object', () => {
     const system = createSystem({ name: 'Child_Folders' })
     const orbit: OrbitObject = {
