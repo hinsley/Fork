@@ -712,6 +712,21 @@ function getOwningObjectId(nodes: Record<string, TreeNode>, nodeId: string): str
   return null
 }
 
+export function isNodeEffectivelyVisible(
+  nodes: Record<string, TreeNode>,
+  nodeId: string
+): boolean {
+  let cursor: TreeNode | undefined = nodes[nodeId]
+  const visited = new Set<string>()
+  while (cursor) {
+    if (visited.has(cursor.id)) return false
+    if (!cursor.visibility) return false
+    visited.add(cursor.id)
+    cursor = cursor.parentId ? nodes[cursor.parentId] : undefined
+  }
+  return true
+}
+
 export function canMoveNodeIntoParent(
   nodes: Record<string, TreeNode>,
   nodeId: string,

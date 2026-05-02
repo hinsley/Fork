@@ -8,6 +8,7 @@ import {
   addScene,
   createSystem,
   duplicateNode,
+  isNodeEffectivelyVisible,
   moveNodeIntoParent,
   moveNode,
   normalizeSystem,
@@ -163,6 +164,27 @@ describe('system model', () => {
     const normalized = normalizeSystem(moved)
     expect(normalized.nodes[orbit.nodeId]?.parentId).toBe(folder.nodeId)
     expect(normalized.rootIds).not.toContain(orbit.nodeId)
+  })
+
+  it('treats descendants of hidden folders as hidden', () => {
+    const system = createSystem({ name: 'Folder_Visibility' })
+    const base: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit',
+      systemName: system.config.name,
+      data: [[0, 0, 1]],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+    }
+    const folder = addFolder(system, 'Folder_1')
+    const orbit = addObject(folder.system, base)
+    const nested = moveNodeIntoParent(orbit.system, orbit.nodeId, folder.nodeId)
+    const hiddenFolder = toggleNodeVisibility(nested, folder.nodeId)
+
+    expect(hiddenFolder.nodes[orbit.nodeId]?.visibility).toBe(true)
+    expect(isNodeEffectivelyVisible(hiddenFolder.nodes, folder.nodeId)).toBe(false)
+    expect(isNodeEffectivelyVisible(hiddenFolder.nodes, orbit.nodeId)).toBe(false)
   })
 
   it('reorders an object out of a folder into a root sibling position', () => {

@@ -349,6 +349,12 @@
 
 .tree-node__row {
   position: relative;
+  min-width: 0;
+  cursor: grab;
+  user-select: none;
+}
+
+.tree-node__row-motion {
   display: grid;
   grid-template-columns:
     calc(var(--tree-node-depth, 0) * 14px)
@@ -361,15 +367,17 @@
   border-radius: 4px;
   border: 1px solid transparent;
   min-width: 0;
-  cursor: grab;
-  user-select: none;
   transition:
     border-color 120ms ease,
     background 120ms ease,
     opacity 120ms ease;
 }
 
-.tree-node__row--selected {
+.objects-tree--dragging .tree-node__row-motion {
+  pointer-events: none;
+}
+
+.tree-node__row--selected .tree-node__row-motion {
   border-color: var(--accent);
   background: rgba(77, 163, 255, 0.15);
 }
@@ -416,7 +424,7 @@
   user-select: text;
 }
 
-.tree-node__row--dragging {
+.tree-node__row--dragging .tree-node__row-motion {
   opacity: 0.6;
 }
 
@@ -464,6 +472,10 @@
   border-color: #000;
 }
 
+.tree-node__visibility--folder::before {
+  content: none;
+}
+
 .tree-node__folder-icon {
   display: inline-flex;
   align-items: center;
@@ -472,6 +484,14 @@
   height: 16px;
   font-size: 0.86rem;
   line-height: 1;
+  transition:
+    filter 120ms ease,
+    opacity 120ms ease;
+}
+
+.tree-node__visibility--folder[data-visible='false'] .tree-node__folder-icon {
+  filter: grayscale(1);
+  opacity: 0.36;
 }
 
 .tree-node__spacer {

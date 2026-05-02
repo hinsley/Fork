@@ -48,7 +48,7 @@ import {
   type LimitCycleProfileLayout,
 } from '../system/continuation'
 import { resolveClvRender } from '../system/clv'
-import { DEFAULT_RENDER } from '../system/model'
+import { DEFAULT_RENDER, isNodeEffectivelyVisible } from '../system/model'
 import {
   EIGENVECTOR_COLOR_PALETTE,
   isRealEigenvalue,
@@ -987,7 +987,7 @@ function collectVisibleObjectIds(system: VisibleObjectSource): string[] {
     if (node.children.length > 0) {
       stack.push(...node.children)
     }
-    if (node.kind !== 'object' || !node.visibility) continue
+    if (node.kind !== 'object' || !isNodeEffectivelyVisible(system.nodes, nodeId)) continue
     const object = system.objects[nodeId]
     if (!object) continue
     ids.push(nodeId)
@@ -1006,7 +1006,7 @@ function collectVisibleBranchIds(system: VisibleBranchSource): string[] {
     if (node.children.length > 0) {
       stack.push(...node.children)
     }
-    if (node.kind !== 'branch' || !node.visibility) continue
+    if (node.kind !== 'branch' || !isNodeEffectivelyVisible(system.nodes, nodeId)) continue
     if (!system.branches[nodeId]) continue
     ids.push(nodeId)
   }
@@ -1024,7 +1024,7 @@ function collectVisibleSceneNodeIds(system: VisibleSceneSource): string[] {
     if (node.children.length > 0) {
       stack.push(...node.children)
     }
-    if (!node.visibility) continue
+    if (!isNodeEffectivelyVisible(system.nodes, nodeId)) continue
     if (node.kind === 'object' && system.objects[nodeId]) {
       ids.push(nodeId)
       continue
@@ -2807,7 +2807,7 @@ function buildSceneTraces(
     let maxT = Number.NEGATIVE_INFINITY
     for (const nodeId of candidateIds) {
       const node = system.nodes[nodeId]
-      if (!node || node.kind !== 'object' || !node.visibility) continue
+      if (!node || node.kind !== 'object' || !isNodeEffectivelyVisible(system.nodes, nodeId)) continue
       const object = system.objects[nodeId]
       if (!object || object.type !== 'orbit' || object.data.length === 0) continue
       const start = Math.min(object.t_start, object.t_end)
@@ -2822,7 +2822,7 @@ function buildSceneTraces(
 
   for (const nodeId of candidateIds) {
     const node = system.nodes[nodeId]
-    if (!node || node.kind !== 'object' || !node.visibility) continue
+    if (!node || node.kind !== 'object' || !isNodeEffectivelyVisible(system.nodes, nodeId)) continue
     const object = system.objects[nodeId]
     if (!object) continue
 
@@ -3785,7 +3785,7 @@ function buildSceneTraces(
 
   for (const nodeId of candidateIds) {
     const node = system.nodes[nodeId]
-    if (!node || node.kind !== 'branch' || !node.visibility) continue
+    if (!node || node.kind !== 'branch' || !isNodeEffectivelyVisible(system.nodes, nodeId)) continue
     const branch = system.branches[nodeId]
     if (!branch || branch.data.points.length === 0) continue
 
@@ -4859,7 +4859,9 @@ function buildDiagramTraces(
       : collectVisibleBranchIds(system)
   const branchIds = candidateBranchIds.filter((branchId) => {
     const node = system.nodes[branchId]
-    return Boolean(node?.visibility && system.branches[branchId])
+    return Boolean(
+      node && isNodeEffectivelyVisible(system.nodes, branchId) && system.branches[branchId]
+    )
   })
   const hasBranches = branchIds.length > 0
   const xTitle = axisTitle(xAxis)
@@ -5093,7 +5095,7 @@ function buildDiagramTraces(
   for (const branchId of branchIds) {
     const branch = system.branches[branchId]
     const node = system.nodes[branchId]
-    if (!branch || !node || !node.visibility) continue
+    if (!branch || !node || !isNodeEffectivelyVisible(system.nodes, branchId)) continue
     if (!branch.data.points || branch.data.points.length === 0) continue
 
     const indices = ensureBranchIndices(branch.data)

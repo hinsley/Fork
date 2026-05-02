@@ -110,6 +110,16 @@ function getNodeLabel(node: TreeNode, system: System) {
   return node.name
 }
 
+function getLayoutTop(element: HTMLElement): number {
+  let top = 0
+  let cursor: HTMLElement | null = element
+  while (cursor) {
+    top += cursor.offsetTop
+    cursor = cursor.offsetParent as HTMLElement | null
+  }
+  return top
+}
+
 export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
   function ObjectsTree(
     {
@@ -156,7 +166,9 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const createMenuRef = useRef<HTMLDivElement | null>(null)
     const nodeContextMenuRef = useRef<HTMLDivElement | null>(null)
     const rowRefs = useRef(new Map<string, HTMLDivElement>())
-    const previousRowRects = useRef(new Map<string, DOMRect>())
+    const rowMotionRefs = useRef(new Map<string, HTMLDivElement>())
+    const activeRowAnimations = useRef(new Map<string, Animation>())
+    const previousRowTops = useRef(new Map<string, number>())
     const equilibriumLabel = formatEquilibriumLabel(system.config.type)
     const createEquilibriumLabel =
       system.config.type === 'map' ? 'Fixed point / Cycle' : equilibriumLabel
@@ -230,24 +242,44 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     }, [nodeContextMenu])
 
     useLayoutEffect(() => {
-      const nextRects = new Map<string, DOMRect>()
+      const nextTops = new Map<string, number>()
       rowRefs.current.forEach((row, nodeId) => {
-        const rect = row.getBoundingClientRect()
-        nextRects.set(nodeId, rect)
-        const previous = previousRowRects.current.get(nodeId)
-        if (!draggingId || !previous) return
-        const deltaY = previous.top - rect.top
-        if (Math.abs(deltaY) < 1 || typeof row.animate !== 'function') return
-        row.animate(
+        const top = getLayoutTop(row)
+        nextTops.set(nodeId, top)
+        const previousTop = previousRowTops.current.get(nodeId)
+        const motion = rowMotionRefs.current.get(nodeId)
+        if (!draggingId || previousTop === undefined) return
+        const deltaY = previousTop - top
+        if (!motion || Math.abs(deltaY) < 1 || typeof motion.animate !== 'function') {
+          return
+        }
+        activeRowAnimations.current.get(nodeId)?.cancel()
+        const animation = motion.animate(
           [
             { transform: `translateY(${deltaY}px)` },
             { transform: 'translateY(0)' },
           ],
           { duration: 260, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }
         )
+        activeRowAnimations.current.set(nodeId, animation)
+        const clearAnimation = () => {
+          if (activeRowAnimations.current.get(nodeId) === animation) {
+            activeRowAnimations.current.delete(nodeId)
+          }
+        }
+        animation.onfinish = clearAnimation
+        animation.oncancel = clearAnimation
       })
-      previousRowRects.current = nextRects
+      previousRowTops.current = nextTops
     })
+
+    useEffect(() => {
+      const animations = activeRowAnimations.current
+      return () => {
+        animations.forEach((animation) => animation.cancel())
+        animations.clear()
+      }
+    }, [])
 
     const commitRename = (node: TreeNode) => {
       const trimmed = draftName.trim()
@@ -439,31 +471,53 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
           }}
           data-testid={`object-tree-row-${nodeId}`}
         >
-          <span className="tree-node__indent" aria-hidden="true" />
-          {hasChildren ? (
-            <button
-              className="tree-node__expand"
-              onClick={(event) => {
-                event.stopPropagation()
-                onToggleExpanded(nodeId)
-              }}
-              aria-label={node.expanded ? 'Collapse node' : 'Expand node'}
-              data-testid={`node-expand-${nodeId}`}
-            >
-              {node.expanded ? '▾' : '▸'}
-            </button>
-          ) : (
-            <span className="tree-node__spacer" />
-          )}
-          {node.kind === 'folder' ? (
-            <span
-              className="tree-node__folder-icon"
-              aria-hidden="true"
-              data-testid={`node-folder-icon-${nodeId}`}
-            >
-              📁
-            </span>
-          ) : (
+          <div
+            className="tree-node__row-motion"
+            ref={(row) => {
+              if (row) {
+                rowMotionRefs.current.set(nodeId, row)
+              } else {
+                rowMotionRefs.current.delete(nodeId)
+              }
+            }}
+          >
+            <span className="tree-node__indent" aria-hidden="true" />
+            {hasChildren ? (
+              <button
+                className="tree-node__expand"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onToggleExpanded(nodeId)
+                }}
+                aria-label={node.expanded ? 'Collapse node' : 'Expand node'}
+                data-testid={`node-expand-${nodeId}`}
+              >
+                {node.expanded ? '▾' : '▸'}
+              </button>
+            ) : (
+              <span className="tree-node__spacer" />
+            )}
+            {node.kind === 'folder' ? (
+              <button
+                className="tree-node__visibility tree-node__visibility--folder"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onToggleVisibility(nodeId)
+                }}
+                data-visible={node.visibility ? 'true' : 'false'}
+                aria-label={node.visibility ? 'Hide folder' : 'Show folder'}
+                title={node.visibility ? 'Hide folder' : 'Show folder'}
+                data-testid={`node-visibility-${nodeId}`}
+              >
+                <span
+                  className="tree-node__folder-icon"
+                  aria-hidden="true"
+                  data-testid={`node-folder-icon-${nodeId}`}
+                >
+                  📁
+                </span>
+              </button>
+            ) : (
             <button
               className="tree-node__visibility"
               onClick={(event) => {
@@ -475,52 +529,53 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
               aria-label={node.visibility ? 'Hide node' : 'Show node'}
               data-testid={`node-visibility-${nodeId}`}
             />
-          )}
-          <button
-            className="tree-node__label"
-            onClick={(event) => {
-              event.stopPropagation()
-              onSelect(nodeId)
-            }}
-            data-testid={`object-tree-node-${nodeId}`}
-          >
-            {isEditing ? (
-              <input
-                value={draftName}
-                onChange={(event) => setDraftName(event.target.value)}
-                onBlur={() => commitRename(node)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') commitRename(node)
-                  if (event.key === 'Escape') setEditingId(null)
-                }}
-                data-testid={`node-rename-input-${nodeId}`}
-              />
-            ) : (
-              <span className="tree-node__label-content">
-                <span className="tree-node__label-text">
-                  {getNodeLabel(node, system)}
-                </span>
-                {hasCustomObjectParams(system.config, customParameters) ? (
-                  <span
-                    className="tree-node__tag"
-                    data-testid={`object-tree-custom-${nodeId}`}
-                  >
-                    custom
-                  </span>
-                ) : null}
-                {hasFrozenVariables ? (
-                  <span
-                    className="tree-node__tag"
-                    data-testid={`object-tree-frozen-${nodeId}`}
-                    title="Frozen variables configured"
-                    aria-label="Frozen variables configured"
-                  >
-                    ❄️
-                  </span>
-                ) : null}
-              </span>
             )}
-          </button>
+            <button
+              className="tree-node__label"
+              onClick={(event) => {
+                event.stopPropagation()
+                onSelect(nodeId)
+              }}
+              data-testid={`object-tree-node-${nodeId}`}
+            >
+              {isEditing ? (
+                <input
+                  value={draftName}
+                  onChange={(event) => setDraftName(event.target.value)}
+                  onBlur={() => commitRename(node)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') commitRename(node)
+                    if (event.key === 'Escape') setEditingId(null)
+                  }}
+                  data-testid={`node-rename-input-${nodeId}`}
+                />
+              ) : (
+                <span className="tree-node__label-content">
+                  <span className="tree-node__label-text">
+                    {getNodeLabel(node, system)}
+                  </span>
+                  {hasCustomObjectParams(system.config, customParameters) ? (
+                    <span
+                      className="tree-node__tag"
+                      data-testid={`object-tree-custom-${nodeId}`}
+                    >
+                      custom
+                    </span>
+                  ) : null}
+                  {hasFrozenVariables ? (
+                    <span
+                      className="tree-node__tag"
+                      data-testid={`object-tree-frozen-${nodeId}`}
+                      title="Frozen variables configured"
+                      aria-label="Frozen variables configured"
+                    >
+                      ❄️
+                    </span>
+                  ) : null}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
         {(hasChildren || dropPreview?.targetId === nodeId) &&
         (node.expanded || dropPreview?.targetId === nodeId) ? (
@@ -536,7 +591,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
 
     return (
       <div
-        className="objects-tree"
+        className={`objects-tree${draggingId ? ' objects-tree--dragging' : ''}`}
         onDragOver={(event) => {
           if (!dropPreviewRef.current) return
           event.preventDefault()

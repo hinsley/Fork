@@ -284,13 +284,14 @@ describe('ObjectsTree', () => {
     const { system, objectNodeId } = createDemoSystem()
     const withFolder = addFolder(system, 'Folder_1')
     const onCreateFolder = vi.fn()
+    const onToggleVisibility = vi.fn()
 
     render(
       <ObjectsTree
         system={withFolder.system}
         selectedNodeId={null}
         onSelect={vi.fn()}
-        onToggleVisibility={vi.fn()}
+        onToggleVisibility={onToggleVisibility}
         onRename={vi.fn()}
         onToggleExpanded={vi.fn()}
         onReorderNode={vi.fn()}
@@ -305,6 +306,8 @@ describe('ObjectsTree', () => {
     expect(screen.getByTestId(`object-tree-node-${withFolder.nodeId}`)).toHaveTextContent(
       'Folder_1'
     )
+    await user.click(screen.getByTestId(`node-visibility-${withFolder.nodeId}`))
+    expect(onToggleVisibility).toHaveBeenCalledWith(withFolder.nodeId)
 
     fireEvent.contextMenu(screen.getByTestId(`object-tree-row-${objectNodeId}`))
     await user.click(screen.getByTestId('object-context-create-folder'))
