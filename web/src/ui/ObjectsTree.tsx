@@ -228,7 +228,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
             { transform: `translateY(${deltaY}px)` },
             { transform: 'translateY(0)' },
           ],
-          { duration: 150, easing: 'cubic-bezier(0.2, 0, 0, 1)' }
+          { duration: 260, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }
         )
       })
       previousRowRects.current = nextRects
@@ -274,6 +274,18 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const updateDropPreview = (preview: typeof dropPreview) => {
       dropPreviewRef.current = preview
       setDropPreview(preview)
+    }
+
+    const commitDropPreview = (sourceId: string | null) => {
+      const preview = dropPreviewRef.current
+      if (!sourceId || !preview || sourceId === preview.targetId) return false
+      const sourceNode = system.nodes[sourceId]
+      const targetNode = system.nodes[preview.targetId]
+      if (!sourceNode || !targetNode || sourceNode.parentId !== targetNode.parentId) {
+        return false
+      }
+      onReorderNode(sourceId, preview.targetId, preview.placement)
+      return true
     }
 
     const renderNode = (nodeId: string, depth: number) => {
@@ -358,20 +370,6 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
             ) {
               updateDropPreview({ targetId: nodeId, placement })
             }
-          }}
-          onDrop={(event) => {
-            event.preventDefault()
-            const sourceId = event.dataTransfer.getData('text/plain') || draggingId
-            const sourceNode = sourceId ? system.nodes[sourceId] : null
-            if (sourceId && sourceNode?.parentId === node.parentId && sourceId !== nodeId) {
-              const placement =
-                dropPreviewRef.current?.targetId === nodeId
-                  ? dropPreviewRef.current.placement
-                  : getDropPlacement(event)
-              onReorderNode(sourceId, nodeId, placement)
-            }
-            updateDropPreview(null)
-            setDraggingId(null)
           }}
           data-testid={`object-tree-row-${nodeId}`}
         >
@@ -476,7 +474,21 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     }
 
     return (
-      <div className="objects-tree" data-testid="objects-tree">
+      <div
+        className="objects-tree"
+        onDragOver={(event) => {
+          if (!dropPreviewRef.current) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+        }}
+        onDrop={(event) => {
+          event.preventDefault()
+          commitDropPreview(event.dataTransfer.getData('text/plain') || draggingId)
+          updateDropPreview(null)
+          setDraggingId(null)
+        }}
+        data-testid="objects-tree"
+      >
         <div className="objects-tree__list">
           {rootNodes.length === 0 ? <p className="empty-state">No objects yet.</p> : null}
           {getPreviewOrder(rootNodes).map((nodeId) => renderNode(nodeId, 0))}
