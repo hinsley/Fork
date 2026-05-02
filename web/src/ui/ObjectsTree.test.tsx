@@ -292,10 +292,14 @@ describe('ObjectsTree', () => {
 
     const parentRow = screen.getByTestId(`object-tree-row-${limitCycleId}`)
     const branchRow = screen.getByTestId(`object-tree-row-${branchId}`)
-    const parentPadding = Number.parseFloat(parentRow.style.paddingLeft || '0')
-    const branchPadding = Number.parseFloat(branchRow.style.paddingLeft || '0')
+    const parentDepth = Number.parseFloat(
+      parentRow.style.getPropertyValue('--tree-node-depth') || '0'
+    )
+    const branchDepth = Number.parseFloat(
+      branchRow.style.getPropertyValue('--tree-node-depth') || '0'
+    )
 
-    expect(branchPadding).toBeGreaterThan(parentPadding)
+    expect(branchDepth).toBeGreaterThan(parentDepth)
   })
 
   it('shows parenthetical labels for continuation branches', () => {

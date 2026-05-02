@@ -237,6 +237,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       cursor = parent
     }
     const paddingDepth = Math.max(depth, inferredDepth)
+    const indentStyle = { '--tree-node-depth': paddingDepth } as CSSProperties
     const isSelected = nodeId === selectedNodeId
     const directChildren = node.children.filter((id) => Boolean(system.nodes[id]))
     const derivedChildren = childrenByParent.get(nodeId) ?? []
@@ -265,7 +266,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
           className={`tree-node__row${isSelected ? ' tree-node__row--selected' : ''}${
             isDragging ? ' tree-node__row--dragging' : ''
           }${isDropTarget ? ' tree-node__row--drop' : ''}`}
-          style={{ paddingLeft: `${paddingDepth * 14}px` }}
+          style={indentStyle}
           onClick={() => onSelect(nodeId)}
           onContextMenu={(event) => {
             event.preventDefault()
@@ -294,6 +295,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
           }}
           data-testid={`object-tree-row-${nodeId}`}
         >
+          <span className="tree-node__indent" aria-hidden="true" />
           {hasChildren ? (
             <button
               className="tree-node__expand"
