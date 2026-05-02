@@ -360,6 +360,9 @@ function App() {
               showToggle={false}
               actions={
                 <div className="panel-actions">
+                  <button onClick={openCreateObjectMenu} data-testid="create-object-button">
+                    Create Object
+                  </button>
                   <button
                     onClick={createRootFolder}
                     title="Create Folder"
@@ -367,9 +370,6 @@ function App() {
                     data-testid="create-folder-button"
                   >
                     📁
-                  </button>
-                  <button onClick={openCreateObjectMenu} data-testid="create-object-button">
-                    Create Object
                   </button>
                 </div>
               }

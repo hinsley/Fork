@@ -627,7 +627,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
                   }}
                   data-testid="object-context-create-folder"
                 >
-                  Create Folder
+                  {node.kind === 'folder' ? 'Create Subfolder' : 'Create Folder'}
                 </button>
               )
             })()}
