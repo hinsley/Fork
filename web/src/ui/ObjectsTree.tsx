@@ -385,6 +385,42 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       setDropPreview(preview)
     }
 
+    useEffect(() => {
+      if (!draggingId) return
+
+      const clearDragInteraction = () => {
+        const interaction = touchInteractionRef.current
+        if (interaction?.contextMenuTimer) {
+          window.clearTimeout(interaction.contextMenuTimer)
+        }
+        if (interaction?.dragArmTimer) {
+          window.clearTimeout(interaction.dragArmTimer)
+        }
+        touchInteractionRef.current = null
+        dropPreviewRef.current = null
+        setDropPreview(null)
+        setDraggingId(null)
+      }
+      const clearIfHidden = () => {
+        if (document.visibilityState === 'hidden') {
+          clearDragInteraction()
+        }
+      }
+
+      window.addEventListener('dragend', clearDragInteraction)
+      window.addEventListener('drop', clearDragInteraction)
+      window.addEventListener('blur', clearDragInteraction)
+      window.addEventListener('pointercancel', clearDragInteraction)
+      document.addEventListener('visibilitychange', clearIfHidden)
+      return () => {
+        window.removeEventListener('dragend', clearDragInteraction)
+        window.removeEventListener('drop', clearDragInteraction)
+        window.removeEventListener('blur', clearDragInteraction)
+        window.removeEventListener('pointercancel', clearDragInteraction)
+        document.removeEventListener('visibilitychange', clearIfHidden)
+      }
+    }, [draggingId])
+
     const updateDropPreviewForTarget = (
       sourceId: string,
       targetId: string,
@@ -591,7 +627,6 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const isEditing = editingId === nodeId
     const nodeColor = node.render?.color ?? DEFAULT_RENDER.color
     const visibilityStyle = { '--node-color': nodeColor } as CSSProperties
-    const isDragging = draggingId === nodeId
     const object = system.objects[nodeId]
     const customParameters =
       object && object.type !== 'continuation' ? object.customParameters : null
@@ -603,9 +638,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     return (
       <div key={nodeId} className="tree-node">
         <div
-          className={`tree-node__row${isSelected ? ' tree-node__row--selected' : ''}${
-            isDragging ? ' tree-node__row--dragging' : ''
-          }`}
+          className={`tree-node__row${isSelected ? ' tree-node__row--selected' : ''}`}
           draggable={!isEditing}
           ref={(row) => {
             if (row) {

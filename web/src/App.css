@@ -371,8 +371,7 @@
   min-width: 0;
   transition:
     border-color 120ms ease,
-    background 120ms ease,
-    opacity 120ms ease;
+    background 120ms ease;
 }
 
 .objects-tree--dragging .tree-node__row-motion {
@@ -424,10 +423,6 @@
   min-width: 0;
   cursor: text;
   user-select: text;
-}
-
-.tree-node__row--dragging .tree-node__row-motion {
-  opacity: 0.6;
 }
 
 .tree-node__row:active {

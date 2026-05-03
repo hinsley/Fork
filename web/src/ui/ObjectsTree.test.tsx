@@ -344,6 +344,47 @@ describe('ObjectsTree', () => {
     expect(screen.queryByTestId(`node-drag-${branchNodeId}`)).toBeNull()
   })
 
+  it('does not dim rows while dragging and clears missed drag endings globally', () => {
+    const { system, objectNodeId } = createDemoSystem()
+
+    render(
+      <ObjectsTree
+        system={system}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={vi.fn()}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    const dataTransfer = {
+      effectAllowed: '',
+      data: new Map<string, string>(),
+      getData(type: string) {
+        return this.data.get(type) ?? ''
+      },
+      setData(type: string, value: string) {
+        this.data.set(type, value)
+      },
+    }
+    const row = screen.getByTestId(`object-tree-row-${objectNodeId}`)
+    const tree = screen.getByTestId('objects-tree')
+
+    fireEvent.dragStart(row, { dataTransfer })
+
+    expect(row).not.toHaveClass('tree-node__row--dragging')
+    expect(tree).toHaveClass('objects-tree--dragging')
+
+    fireEvent(window, new Event('dragend'))
+
+    expect(tree).not.toHaveClass('objects-tree--dragging')
+  })
+
   it('renders root folders and creates a child folder from an object context menu', async () => {
     const user = userEvent.setup()
     const { system, objectNodeId } = createDemoSystem()
