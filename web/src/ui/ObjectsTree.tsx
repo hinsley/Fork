@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import type { CSSProperties, DragEvent } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import type { ContinuationObject, System, TreeNode } from '../system/types'
 import { canMoveNodeIntoParent, DEFAULT_RENDER } from '../system/model'
 import type { ReorderPlacement } from '../system/model'
@@ -36,6 +36,22 @@ type ObjectsTreeProps = {
   onCreateIsocline?: () => void
   onDuplicateNode?: (id: string) => void | Promise<void>
   onDeleteNode: (id: string) => void
+}
+
+const TOUCH_DRAG_THRESHOLD_PX = 8
+const TOUCH_DRAG_ARM_DELAY_MS = 220
+const TOUCH_CONTEXT_MENU_DELAY_MS = 600
+
+type TouchTreeInteraction = {
+  contextMenuTimer: number | null
+  contextMenuOpened: boolean
+  dragArmed: boolean
+  dragArmTimer: number | null
+  dragging: boolean
+  nodeId: string
+  pointerId: number
+  startX: number
+  startY: number
 }
 
 function getBranchTypeLabel(branch: ContinuationObject, system: System): string {
@@ -169,6 +185,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const rowMotionRefs = useRef(new Map<string, HTMLDivElement>())
     const activeRowAnimations = useRef(new Map<string, Animation>())
     const previousRowTops = useRef(new Map<string, number>())
+    const touchInteractionRef = useRef<TouchTreeInteraction | null>(null)
+    const suppressNextClickRef = useRef(false)
     const equilibriumLabel = formatEquilibriumLabel(system.config.type)
     const createEquilibriumLabel =
       system.config.type === 'map' ? 'Fixed point / Cycle' : equilibriumLabel
@@ -281,12 +299,31 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       }
     }, [])
 
+    useEffect(() => {
+      const interactionRef = touchInteractionRef
+      return () => {
+        const interaction = interactionRef.current
+        if (interaction?.contextMenuTimer) {
+          window.clearTimeout(interaction.contextMenuTimer)
+        }
+        if (interaction?.dragArmTimer) {
+          window.clearTimeout(interaction.dragArmTimer)
+        }
+      }
+    }, [])
+
     const commitRename = (node: TreeNode) => {
       const trimmed = draftName.trim()
       if (trimmed && trimmed !== node.name) {
         onRename(node.id, trimmed)
       }
       setEditingId(null)
+    }
+
+    const openNodeContextMenu = (nodeId: string, x: number, y: number) => {
+      onSelect(nodeId)
+      setCreateMenu(null)
+      setNodeContextMenu({ id: nodeId, x, y })
     }
 
     const openCreateMenu = useCallback((position: { x: number; y: number }) => {
@@ -296,11 +333,22 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
 
     useImperativeHandle(ref, () => ({ openCreateMenu }), [openCreateMenu])
 
-    const getDropPlacement = (
-      event: DragEvent<HTMLDivElement>
-    ): ReorderPlacement => {
-      const rect = event.currentTarget.getBoundingClientRect()
-      return event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    const clearTouchInteractionTimer = () => {
+      const interaction = touchInteractionRef.current
+      if (!interaction) return
+      if (interaction.contextMenuTimer) {
+        window.clearTimeout(interaction.contextMenuTimer)
+        interaction.contextMenuTimer = null
+      }
+      if (interaction.dragArmTimer) {
+        window.clearTimeout(interaction.dragArmTimer)
+        interaction.dragArmTimer = null
+      }
+    }
+
+    const getDropPlacement = (row: HTMLElement, clientY: number): ReorderPlacement => {
+      const rect = row.getBoundingClientRect()
+      return clientY < rect.top + rect.height / 2 ? 'before' : 'after'
     }
 
     const getPreviewOrder = (nodeIds: string[], parentId: string | null) => {
@@ -337,6 +385,68 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       setDropPreview(preview)
     }
 
+    const updateDropPreviewForTarget = (
+      sourceId: string,
+      targetId: string,
+      clientY: number
+    ): boolean => {
+      const sourceNode = system.nodes[sourceId]
+      const targetNode = system.nodes[targetId]
+      const targetRow = rowRefs.current.get(targetId)
+      if (!sourceNode || !targetNode || !targetRow || sourceId === targetId) {
+        return false
+      }
+
+      if (
+        (targetNode.kind === 'folder' || targetNode.kind === 'object') &&
+        canMoveNodeIntoParent(system.nodes, sourceId, targetId)
+      ) {
+        if (
+          dropPreviewRef.current?.mode !== 'inside' ||
+          dropPreviewRef.current.targetId !== targetId
+        ) {
+          updateDropPreview({ mode: 'inside', targetId })
+        }
+        return true
+      }
+
+      const targetParentId = targetNode.parentId ?? null
+      if (
+        sourceNode.parentId !== targetNode.parentId &&
+        !canMoveNodeIntoParent(system.nodes, sourceId, targetParentId)
+      ) {
+        updateDropPreview(null)
+        return false
+      }
+
+      const placement = getDropPlacement(targetRow, clientY)
+      if (
+        dropPreviewRef.current?.mode !== 'reorder' ||
+        dropPreviewRef.current?.targetId !== targetId ||
+        dropPreviewRef.current.parentId !== targetParentId ||
+        (dropPreviewRef.current.mode === 'reorder' &&
+          dropPreviewRef.current.placement !== placement)
+      ) {
+        updateDropPreview({
+          mode: 'reorder',
+          targetId,
+          parentId: targetParentId,
+          placement,
+        })
+      }
+      return true
+    }
+
+    const updateTouchDropPreview = (sourceId: string, clientX: number, clientY: number) => {
+      const element = document.elementFromPoint(clientX, clientY)
+      const targetRow = element?.closest<HTMLElement>('[data-tree-node-id]')
+      const targetId = targetRow?.dataset.treeNodeId
+      if (!targetId || targetId === sourceId) {
+        return Boolean(dropPreviewRef.current)
+      }
+      return updateDropPreviewForTarget(sourceId, targetId, clientY)
+    }
+
     const commitDropPreview = (sourceId: string | null) => {
       const preview = dropPreviewRef.current
       if (!sourceId || !preview || sourceId === preview.targetId) return false
@@ -351,6 +461,107 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       }
       onReorderNode(sourceId, preview.targetId, preview.placement)
       return true
+    }
+
+    const startTouchInteraction = (
+      event: ReactPointerEvent<HTMLDivElement>,
+      nodeId: string,
+      isEditing: boolean
+    ) => {
+      if (isEditing || (event.pointerType !== 'touch' && event.pointerType !== 'pen')) {
+        return
+      }
+      if (event.button !== 0 && event.button !== -1) return
+      clearTouchInteractionTimer()
+      const pointerId = event.pointerId
+      const dragArmTimer = window.setTimeout(() => {
+        const interaction = touchInteractionRef.current
+        if (!interaction || interaction.pointerId !== pointerId || interaction.contextMenuOpened) {
+          return
+        }
+        interaction.dragArmed = true
+        interaction.dragArmTimer = null
+      }, TOUCH_DRAG_ARM_DELAY_MS)
+      const contextMenuTimer = window.setTimeout(() => {
+        const interaction = touchInteractionRef.current
+        if (!interaction || interaction.pointerId !== pointerId || interaction.dragging) {
+          return
+        }
+        interaction.contextMenuOpened = true
+        interaction.contextMenuTimer = null
+        suppressNextClickRef.current = true
+        updateDropPreview(null)
+        setDraggingId(null)
+        openNodeContextMenu(interaction.nodeId, interaction.startX, interaction.startY)
+      }, TOUCH_CONTEXT_MENU_DELAY_MS)
+      touchInteractionRef.current = {
+        contextMenuTimer,
+        contextMenuOpened: false,
+        dragArmed: false,
+        dragArmTimer,
+        dragging: false,
+        nodeId,
+        pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+      }
+      event.currentTarget.setPointerCapture?.(event.pointerId)
+    }
+
+    const updateTouchInteraction = (event: ReactPointerEvent<HTMLDivElement>) => {
+      const interaction = touchInteractionRef.current
+      if (!interaction || interaction.pointerId !== event.pointerId) return
+      if (interaction.contextMenuOpened) return
+
+      const deltaX = event.clientX - interaction.startX
+      const deltaY = event.clientY - interaction.startY
+      if (!interaction.dragging) {
+        const distance = Math.hypot(deltaX, deltaY)
+        if (distance < TOUCH_DRAG_THRESHOLD_PX) return
+        if (!interaction.dragArmed) {
+          if (interaction.contextMenuTimer) {
+            window.clearTimeout(interaction.contextMenuTimer)
+            interaction.contextMenuTimer = null
+          }
+          return
+        }
+        clearTouchInteractionTimer()
+        interaction.dragging = true
+        setCreateMenu(null)
+        setNodeContextMenu(null)
+        setDraggingId(interaction.nodeId)
+      }
+
+      event.preventDefault()
+      updateTouchDropPreview(interaction.nodeId, event.clientX, event.clientY)
+    }
+
+    const endTouchInteraction = (event: ReactPointerEvent<HTMLDivElement>) => {
+      const interaction = touchInteractionRef.current
+      if (!interaction || interaction.pointerId !== event.pointerId) return
+
+      clearTouchInteractionTimer()
+      if (interaction.dragging) {
+        event.preventDefault()
+        suppressNextClickRef.current = true
+        commitDropPreview(interaction.nodeId)
+        updateDropPreview(null)
+        setDraggingId(null)
+      }
+      touchInteractionRef.current = null
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
+    }
+
+    const cancelTouchInteraction = (event: ReactPointerEvent<HTMLDivElement>) => {
+      const interaction = touchInteractionRef.current
+      if (!interaction || interaction.pointerId !== event.pointerId) return
+      clearTouchInteractionTimer()
+      if (interaction.dragging) {
+        updateDropPreview(null)
+        setDraggingId(null)
+      }
+      touchInteractionRef.current = null
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
     }
 
     const renderNode = (nodeId: string, depth: number) => {
@@ -404,6 +615,12 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
             }
           }}
           style={indentStyle}
+          onClickCapture={(event) => {
+            if (!suppressNextClickRef.current) return
+            suppressNextClickRef.current = false
+            event.preventDefault()
+            event.stopPropagation()
+          }}
           onClick={() => onSelect(nodeId)}
           onDragStart={(event) => {
             if (isEditing) {
@@ -420,55 +637,35 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
           }}
           onContextMenu={(event) => {
             event.preventDefault()
-            onSelect(nodeId)
-            setCreateMenu(null)
-            setNodeContextMenu({ id: nodeId, x: event.clientX, y: event.clientY })
+            openNodeContextMenu(nodeId, event.clientX, event.clientY)
+          }}
+          onPointerDown={(event) => {
+            startTouchInteraction(event, nodeId, isEditing)
+          }}
+          onPointerMove={(event) => {
+            updateTouchInteraction(event)
+          }}
+          onPointerUp={(event) => {
+            endTouchInteraction(event)
+          }}
+          onPointerCancel={(event) => {
+            cancelTouchInteraction(event)
           }}
           onDragOver={(event) => {
             const sourceId = draggingId || event.dataTransfer.getData('text/plain')
-            const sourceNode = sourceId ? system.nodes[sourceId] : null
-            if (!sourceId || !sourceNode || sourceId === nodeId) {
+            if (!sourceId || sourceId === nodeId) {
               return
             }
             event.preventDefault()
-            event.dataTransfer.dropEffect = 'move'
-            if (
-              (node.kind === 'folder' || node.kind === 'object') &&
-              canMoveNodeIntoParent(system.nodes, sourceId, nodeId)
-            ) {
-              if (
-                dropPreviewRef.current?.mode !== 'inside' ||
-                dropPreviewRef.current.targetId !== nodeId
-              ) {
-                updateDropPreview({ mode: 'inside', targetId: nodeId })
-              }
-              return
-            }
-            if (sourceNode.parentId !== node.parentId) {
-              const targetParentId = node.parentId ?? null
-              if (!canMoveNodeIntoParent(system.nodes, sourceId, targetParentId)) {
-                updateDropPreview(null)
-                event.dataTransfer.dropEffect = 'none'
-                return
-              }
-            }
-            const placement = getDropPlacement(event)
-            const targetParentId = node.parentId ?? null
-            if (
-              dropPreviewRef.current?.mode !== 'reorder' ||
-              dropPreviewRef.current?.targetId !== nodeId ||
-              dropPreviewRef.current.parentId !== targetParentId ||
-              (dropPreviewRef.current.mode === 'reorder' &&
-                dropPreviewRef.current.placement !== placement)
-            ) {
-              updateDropPreview({
-                mode: 'reorder',
-                targetId: nodeId,
-                parentId: targetParentId,
-                placement,
-              })
-            }
+            event.dataTransfer.dropEffect = updateDropPreviewForTarget(
+              sourceId,
+              nodeId,
+              event.clientY
+            )
+              ? 'move'
+              : 'none'
           }}
+          data-tree-node-id={nodeId}
           data-testid={`object-tree-row-${nodeId}`}
         >
           <div

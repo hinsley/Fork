@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ObjectsTree, type ObjectsTreeHandle } from './ObjectsTree'
@@ -13,6 +13,29 @@ import {
   toggleNodeExpanded,
 } from '../system/model'
 import type { ContinuationObject, OrbitObject } from '../system/types'
+
+function createPointerEvent(
+  type: string,
+  init: {
+    button?: number
+    clientX: number
+    clientY: number
+    isPrimary?: boolean
+    pointerId: number
+    pointerType: string
+  }
+) {
+  const event = new Event(type, { bubbles: true, cancelable: true })
+  Object.defineProperties(event, {
+    button: { value: init.button ?? 0 },
+    clientX: { value: init.clientX },
+    clientY: { value: init.clientY },
+    isPrimary: { value: init.isPrimary ?? true },
+    pointerId: { value: init.pointerId },
+    pointerType: { value: init.pointerType },
+  })
+  return event
+}
 
 describe('ObjectsTree', () => {
   it('selects, renames, and toggles visibility', async () => {
@@ -51,6 +74,48 @@ describe('ObjectsTree', () => {
     await user.clear(input)
     await user.type(input, 'Orbit Z{enter}')
     expect(onRename).toHaveBeenCalledWith(objectNodeId, 'Orbit Z')
+  })
+
+  it('opens the node context menu from a touch long press', () => {
+    vi.useFakeTimers()
+    try {
+      const { system, objectNodeId } = createDemoSystem()
+      const onSelect = vi.fn()
+
+      render(
+        <ObjectsTree
+          system={system}
+          selectedNodeId={null}
+          onSelect={onSelect}
+          onToggleVisibility={vi.fn()}
+          onRename={vi.fn()}
+          onToggleExpanded={vi.fn()}
+          onReorderNode={vi.fn()}
+          onCreateOrbit={vi.fn()}
+          onCreateEquilibrium={vi.fn()}
+          onDeleteNode={vi.fn()}
+        />
+      )
+
+      fireEvent(
+        screen.getByTestId(`object-tree-row-${objectNodeId}`),
+        createPointerEvent('pointerdown', {
+          button: 0,
+          clientX: 24,
+          clientY: 32,
+          pointerId: 7,
+          pointerType: 'touch',
+        })
+      )
+      act(() => {
+        vi.advanceTimersByTime(650)
+      })
+
+      expect(onSelect).toHaveBeenCalledWith(objectNodeId)
+      expect(screen.getByTestId('object-context-menu')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('shows a custom parameters tag for overridden objects', () => {
@@ -395,6 +460,112 @@ describe('ObjectsTree', () => {
 
     expect(onReorderNode).toHaveBeenCalledWith(secondBranchNodeId, branchNodeId, 'before')
     rectSpy.mockRestore()
+  })
+
+  it('reorders child nodes from a touch drag', () => {
+    vi.useFakeTimers()
+    const { system, objectNodeId, branchNodeId } = createDemoSystem()
+    const sourceBranch = system.branches[branchNodeId]
+    if (!sourceBranch) {
+      throw new Error('Missing demo branch fixture data.')
+    }
+    const secondBranch: ContinuationObject = {
+      ...sourceBranch,
+      name: 'eq_branch_second',
+      data: {
+        ...sourceBranch.data,
+        points: [...sourceBranch.data.points],
+        bifurcations: [...sourceBranch.data.bifurcations],
+        indices: [...sourceBranch.data.indices],
+      },
+    }
+    const { system: next, nodeId: secondBranchNodeId } = addBranch(
+      system,
+      secondBranch,
+      objectNodeId
+    )
+    const onReorderNode = vi.fn()
+
+    render(
+      <ObjectsTree
+        system={next}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={onReorderNode}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    const sourceRow = screen.getByTestId(`object-tree-row-${secondBranchNodeId}`)
+    const targetRow = screen.getByTestId(`object-tree-row-${branchNodeId}`)
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      bottom: 120,
+      height: 20,
+      left: 0,
+      right: 200,
+      top: 100,
+      width: 200,
+      x: 0,
+      y: 100,
+      toJSON: () => ({}),
+    })
+    const originalElementFromPoint = document.elementFromPoint
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => targetRow),
+    })
+
+    try {
+      fireEvent(
+        sourceRow,
+        createPointerEvent('pointerdown', {
+          button: 0,
+          clientX: 16,
+          clientY: 16,
+          pointerId: 9,
+          pointerType: 'touch',
+        })
+      )
+      act(() => {
+        vi.advanceTimersByTime(250)
+      })
+      fireEvent(
+        sourceRow,
+        createPointerEvent('pointermove', {
+          clientX: 20,
+          clientY: 104,
+          pointerId: 9,
+          pointerType: 'touch',
+        })
+      )
+      fireEvent(
+        sourceRow,
+        createPointerEvent('pointerup', {
+          clientX: 20,
+          clientY: 104,
+          pointerId: 9,
+          pointerType: 'touch',
+        })
+      )
+
+      expect(onReorderNode).toHaveBeenCalledWith(secondBranchNodeId, branchNodeId, 'before')
+    } finally {
+      if (originalElementFromPoint) {
+        Object.defineProperty(document, 'elementFromPoint', {
+          configurable: true,
+          value: originalElementFromPoint,
+        })
+      } else {
+        Reflect.deleteProperty(document, 'elementFromPoint')
+      }
+      rectSpy.mockRestore()
+      vi.useRealTimers()
+    }
   })
 
   it('reorders child nodes after a sibling drop boundary', () => {
