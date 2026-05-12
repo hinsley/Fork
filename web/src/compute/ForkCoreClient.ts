@@ -145,6 +145,39 @@ export type CovariantLyapunovResponse = {
   vectors: number[]
 }
 
+export type PowerSpectrumResult = {
+  frequencies: number[]
+  power: number[]
+  sample_count: number
+  segment_count: number
+  sample_interval: number
+  window_size: number
+}
+
+export type PowerSpectrumSamplesRequest = {
+  samples: number[]
+  sampleInterval: number
+  windowSize: number
+}
+
+export type PowerSpectrumOrbitRequest = {
+  system: SystemConfig
+  initialState: number[]
+  steps: number
+  dt: number
+  observableIndex: number
+  windowSize: number
+}
+
+export type PowerSpectrumCsvFileRequest = {
+  file: File
+  columnIndex: number
+  sampleInterval: number
+  windowSize: number
+  hasHeader?: boolean
+  delimiter?: ',' | '\t' | ';'
+}
+
 export type ValidateSystemRequest = {
   system: SystemConfig
 }
@@ -524,6 +557,18 @@ export interface ForkCoreClient {
     request: CovariantLyapunovRequest,
     opts?: { signal?: AbortSignal }
   ): Promise<CovariantLyapunovResponse>
+  computePowerSpectrumFromSamples(
+    request: PowerSpectrumSamplesRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<PowerSpectrumResult>
+  computePowerSpectrumFromOrbit(
+    request: PowerSpectrumOrbitRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<PowerSpectrumResult>
+  computePowerSpectrumFromCsvFile(
+    request: PowerSpectrumCsvFileRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<PowerSpectrumResult>
   solveEquilibrium(
     request: SolveEquilibriumRequest,
     opts?: { signal?: AbortSignal }

@@ -36,6 +36,10 @@ import type {
   LimitCycleManifold2DResult,
   MapCycleContinuationFromPDRequest,
   LyapunovExponentsRequest,
+  PowerSpectrumCsvFileRequest,
+  PowerSpectrumOrbitRequest,
+  PowerSpectrumResult,
+  PowerSpectrumSamplesRequest,
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
   SolveEquilibriumRequest,
@@ -60,6 +64,9 @@ type WorkerRequest =
   | { id: string; kind: 'computeIsocline'; payload: ComputeIsoclineRequest }
   | { id: string; kind: 'computeLyapunovExponents'; payload: LyapunovExponentsRequest }
   | { id: string; kind: 'computeCovariantLyapunovVectors'; payload: CovariantLyapunovRequest }
+  | { id: string; kind: 'computePowerSpectrumFromSamples'; payload: PowerSpectrumSamplesRequest }
+  | { id: string; kind: 'computePowerSpectrumFromOrbit'; payload: PowerSpectrumOrbitRequest }
+  | { id: string; kind: 'computePowerSpectrumFromCsvFile'; payload: PowerSpectrumCsvFileRequest }
   | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
   | { id: string; kind: 'runEquilibriumContinuation'; payload: EquilibriumContinuationRequest }
   | { id: string; kind: 'runContinuationExtension'; payload: ContinuationExtensionRequest }
@@ -130,6 +137,7 @@ type WorkerResponse =
         | ComputeIsoclineResult
         | number[]
         | CovariantLyapunovResponse
+        | PowerSpectrumResult
         | SolveEquilibriumResult
         | ValidateSystemResult
         | EquilibriumContinuationResult
@@ -160,6 +168,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
           | ComputeIsoclineResult
           | number[]
           | CovariantLyapunovResponse
+          | PowerSpectrumResult
           | SolveEquilibriumResult
           | ValidateSystemResult
           | EquilibriumContinuationResult
@@ -283,6 +292,42 @@ export class WasmForkCoreClient implements ForkCoreClient {
     const job = this.queue.enqueue(
       'computeCovariantLyapunovVectors',
       (signal) => this.runWorker('computeCovariantLyapunovVectors', request, signal),
+      opts
+    )
+    return await job.promise
+  }
+
+  async computePowerSpectrumFromSamples(
+    request: PowerSpectrumSamplesRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<PowerSpectrumResult> {
+    const job = this.queue.enqueue(
+      'computePowerSpectrumFromSamples',
+      (signal) => this.runWorker('computePowerSpectrumFromSamples', request, signal),
+      opts
+    )
+    return await job.promise
+  }
+
+  async computePowerSpectrumFromOrbit(
+    request: PowerSpectrumOrbitRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<PowerSpectrumResult> {
+    const job = this.queue.enqueue(
+      'computePowerSpectrumFromOrbit',
+      (signal) => this.runWorker('computePowerSpectrumFromOrbit', request, signal),
+      opts
+    )
+    return await job.promise
+  }
+
+  async computePowerSpectrumFromCsvFile(
+    request: PowerSpectrumCsvFileRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<PowerSpectrumResult> {
+    const job = this.queue.enqueue(
+      'computePowerSpectrumFromCsvFile',
+      (signal) => this.runWorker('computePowerSpectrumFromCsvFile', request, signal),
       opts
     )
     return await job.promise
@@ -605,6 +650,21 @@ export class WasmForkCoreClient implements ForkCoreClient {
     signal: AbortSignal
   ): Promise<CovariantLyapunovResponse>
   private runWorker(
+    kind: 'computePowerSpectrumFromSamples',
+    payload: PowerSpectrumSamplesRequest,
+    signal: AbortSignal
+  ): Promise<PowerSpectrumResult>
+  private runWorker(
+    kind: 'computePowerSpectrumFromOrbit',
+    payload: PowerSpectrumOrbitRequest,
+    signal: AbortSignal
+  ): Promise<PowerSpectrumResult>
+  private runWorker(
+    kind: 'computePowerSpectrumFromCsvFile',
+    payload: PowerSpectrumCsvFileRequest,
+    signal: AbortSignal
+  ): Promise<PowerSpectrumResult>
+  private runWorker(
     kind: 'solveEquilibrium',
     payload: SolveEquilibriumRequest,
     signal: AbortSignal
@@ -724,6 +784,9 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | 'computeIsocline'
       | 'computeLyapunovExponents'
       | 'computeCovariantLyapunovVectors'
+      | 'computePowerSpectrumFromSamples'
+      | 'computePowerSpectrumFromOrbit'
+      | 'computePowerSpectrumFromCsvFile'
       | 'solveEquilibrium'
       | 'runEquilibriumContinuation'
       | 'runContinuationExtension'
@@ -751,6 +814,9 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | ComputeIsoclineRequest
       | LyapunovExponentsRequest
       | CovariantLyapunovRequest
+      | PowerSpectrumSamplesRequest
+      | PowerSpectrumOrbitRequest
+      | PowerSpectrumCsvFileRequest
       | SolveEquilibriumRequest
       | EquilibriumContinuationRequest
       | ContinuationExtensionRequest
@@ -779,6 +845,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
     | ComputeIsoclineResult
     | number[]
     | CovariantLyapunovResponse
+    | PowerSpectrumResult
     | SolveEquilibriumResult
     | ValidateSystemResult
     | EquilibriumContinuationResult
@@ -808,6 +875,12 @@ export class WasmForkCoreClient implements ForkCoreClient {
           ? { id, kind, payload: payload as LyapunovExponentsRequest }
           : kind === 'computeCovariantLyapunovVectors'
             ? { id, kind, payload: payload as CovariantLyapunovRequest }
+            : kind === 'computePowerSpectrumFromSamples'
+              ? { id, kind, payload: payload as PowerSpectrumSamplesRequest }
+              : kind === 'computePowerSpectrumFromOrbit'
+                ? { id, kind, payload: payload as PowerSpectrumOrbitRequest }
+                : kind === 'computePowerSpectrumFromCsvFile'
+                  ? { id, kind, payload: payload as PowerSpectrumCsvFileRequest }
         : kind === 'solveEquilibrium'
           ? { id, kind, payload: payload as SolveEquilibriumRequest }
           : kind === 'runEquilibriumContinuation'
@@ -861,6 +934,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | ComputeIsoclineResult
       | number[]
       | CovariantLyapunovResponse
+      | PowerSpectrumResult
       | SolveEquilibriumResult
       | ValidateSystemResult
       | EquilibriumContinuationResult

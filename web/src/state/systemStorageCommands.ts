@@ -1,6 +1,6 @@
 import { createSystem } from '../system/model'
 import type { SystemStore } from '../system/store'
-import type { System, SystemSummary } from '../system/types'
+import type { System, SystemConfig, SystemSummary } from '../system/types'
 import { validateSystemName } from './systemValidation'
 
 type SystemStorageAction =
@@ -21,7 +21,7 @@ type SystemArchive = {
 
 export type SystemStorageCommands = {
   refreshSystems: () => Promise<void>
-  createSystem: (name: string) => Promise<void>
+  createSystem: (name: string, type?: SystemConfig['type']) => Promise<void>
   openSystem: (id: string) => Promise<void>
   saveSystem: () => Promise<void>
   exportSystem: (id: string) => Promise<void>
@@ -88,7 +88,7 @@ export function createSystemStorageCommands({
     }
   }
 
-  const createSystemAction = async (name: string) => {
+  const createSystemAction = async (name: string, type: SystemConfig['type'] = 'flow') => {
     const nameError = validateSystemName(name)
     if (nameError) {
       dispatch({ type: 'SET_ERROR', error: nameError })
@@ -96,7 +96,33 @@ export function createSystemStorageCommands({
     }
     dispatch({ type: 'SET_BUSY', busy: true })
     try {
-      const system = createSystem({ name })
+      const config: SystemConfig | undefined =
+        type === 'data'
+          ? {
+              name,
+              equations: [],
+              params: [],
+              paramNames: [],
+              varNames: ['signal'],
+              solver: 'data',
+              type: 'data',
+              data: {
+                sampleInterval: 1,
+                columns: ['signal'],
+              },
+            }
+          : type === 'map'
+            ? {
+                name,
+                equations: ['r * x * (1 - x)'],
+                params: [3.7],
+                paramNames: ['r'],
+                varNames: ['x'],
+                solver: 'discrete',
+                type: 'map',
+              }
+            : undefined
+      const system = createSystem(config ? { name, config } : { name })
       dispatch({ type: 'SET_SYSTEM', system })
       await store.save(system)
       await refreshSystems()

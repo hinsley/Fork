@@ -2826,6 +2826,25 @@ function buildSceneTraces(
     const object = system.objects[nodeId]
     if (!object) continue
 
+    if (object.type === 'dataset') {
+      const spectrum = object.lastPowerSpectrum
+      if (!spectrum || spectrum.frequencies.length === 0) continue
+      traces.push({
+        type: 'scattergl',
+        mode: 'lines',
+        name: `${object.name} PSD`,
+        uid: nodeId,
+        x: spectrum.frequencies,
+        y: spectrum.power,
+        line: {
+          color: node.render.color,
+          width: nodeId === selectedNodeId ? node.render.lineWidth + 1 : node.render.lineWidth,
+        },
+        hovertemplate: `f: %{x:.6g}<br>PSD: %{y:.6g}<extra>${object.name}</extra>`,
+      })
+      continue
+    }
+
     if (object.type === 'isocline') {
       if (!object.lastComputed) continue
       const signature = buildIsoclineSnapshotSignature(object.lastComputed)

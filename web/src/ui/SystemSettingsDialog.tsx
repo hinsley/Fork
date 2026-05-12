@@ -31,7 +31,9 @@ import type {
   MapCyclePDContinuationRequest,
   OrbitCovariantLyapunovRequest,
   OrbitLyapunovRequest,
+  OrbitPowerSpectrumRequest,
   OrbitRunRequest,
+  AttachDataCsvFileRequest,
 } from '../state/appState'
 import type {
   BranchPointSelection,
@@ -89,6 +91,8 @@ type SystemSettingsDialogProps = {
   onRunOrbit: (request: OrbitRunRequest) => Promise<void>
   onComputeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
   onComputeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
+  onComputeOrbitPowerSpectrum?: (request: OrbitPowerSpectrumRequest) => Promise<void>
+  onAttachDataCsvFile?: (request: AttachDataCsvFileRequest) => Promise<void>
   onSolveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   onCreateEquilibriumManifold1D?: (
@@ -156,6 +160,8 @@ export function SystemSettingsDialog({
   onRunOrbit,
   onComputeLyapunovExponents,
   onComputeCovariantLyapunovVectors,
+  onComputeOrbitPowerSpectrum,
+  onAttachDataCsvFile,
   onSolveEquilibrium,
   onCreateEquilibriumBranch,
   onCreateEquilibriumManifold1D,
@@ -225,6 +231,8 @@ export function SystemSettingsDialog({
             onRunOrbit={onRunOrbit}
             onComputeLyapunovExponents={onComputeLyapunovExponents}
             onComputeCovariantLyapunovVectors={onComputeCovariantLyapunovVectors}
+            onComputeOrbitPowerSpectrum={onComputeOrbitPowerSpectrum}
+            onAttachDataCsvFile={onAttachDataCsvFile}
             onSolveEquilibrium={onSolveEquilibrium}
             onCreateEquilibriumBranch={onCreateEquilibriumBranch}
             onCreateEquilibriumManifold1D={onCreateEquilibriumManifold1D}

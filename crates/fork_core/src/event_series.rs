@@ -1,7 +1,7 @@
 use crate::{
     equation_engine::{Bytecode, VM},
     isocline::compile_scalar_expression,
-    solvers::{DiscreteMap, RK4, Tsit5},
+    solvers::{DiscreteMap, Tsit5, RK4},
     traits::{DynamicalSystem, Steppable},
 };
 use anyhow::{bail, Result};
@@ -93,7 +93,11 @@ pub fn compile_event_series_expressions(
     let event = compile_scalar_expression(event_expression, var_names, param_names)?;
     let mut observables = Vec::with_capacity(observable_expressions.len());
     for expression in observable_expressions {
-        observables.push(compile_scalar_expression(expression, var_names, param_names)?);
+        observables.push(compile_scalar_expression(
+            expression,
+            var_names,
+            param_names,
+        )?);
     }
     Ok(CompiledEventSeriesExpressions { event, observables })
 }
@@ -151,8 +155,8 @@ pub fn extract_event_series_from_samples(
         evaluate_scalar(&compiled.event, &samples[0].state, params, &mut event_stack) - level;
     for sample_index in 1..samples.len() {
         let next = &samples[sample_index];
-        let next_value = evaluate_scalar(&compiled.event, &next.state, params, &mut event_stack)
-            - level;
+        let next_value =
+            evaluate_scalar(&compiled.event, &next.state, params, &mut event_stack) - level;
         if matches_crossing(prev_value, next_value, mode) {
             let prev = &samples[sample_index - 1];
             let tau = interpolate_factor(prev_value, next_value);
@@ -377,8 +381,13 @@ where
     let mut lo_time = 0.0;
     let mut hi_time = segment_dt;
     let mut lo_value = start_value;
-    let mut hi_state =
-        advance_state(system, stepper, segment_start_time, segment_start_state, segment_dt);
+    let mut hi_state = advance_state(
+        system,
+        stepper,
+        segment_start_time,
+        segment_start_state,
+        segment_dt,
+    );
     let mut hit_time = segment_start_time + segment_dt;
     let mut hit_state = hi_state.clone();
 
@@ -388,8 +397,13 @@ where
             break;
         }
 
-        let mid_state =
-            advance_state(system, stepper, segment_start_time, segment_start_state, mid_time);
+        let mid_state = advance_state(
+            system,
+            stepper,
+            segment_start_time,
+            segment_start_state,
+            mid_time,
+        );
         if mid_state.len() != dim {
             bail!("Refined state dimension changed during event extraction.");
         }

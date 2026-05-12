@@ -44,7 +44,7 @@ describe('SystemDialog', () => {
     await user.clear(nameInput)
     await user.type(nameInput, 'My_System')
     await user.click(screen.getByTestId('create-system'))
-    expect(onCreateSystem).toHaveBeenCalledWith('My_System')
+    expect(onCreateSystem).toHaveBeenCalledWith('My_System', 'flow')
 
     await user.click(screen.getByRole('button', { name: 'System A' }))
     expect(onOpenSystem).toHaveBeenCalledWith('sys-1')
@@ -82,7 +82,29 @@ describe('SystemDialog', () => {
     expect(screen.getByText('No saved systems yet.')).toBeInTheDocument()
 
     await user.click(screen.getByTestId('create-system'))
-    expect(onCreateSystem).toHaveBeenCalledWith('NewSystem')
+    expect(onCreateSystem).toHaveBeenCalledWith('NewSystem', 'flow')
+  })
+
+  it('creates data systems from the type selector', async () => {
+    const user = userEvent.setup()
+    const onCreateSystem = vi.fn()
+
+    render(
+      <SystemDialog
+        open
+        systems={[]}
+        onOpenSystem={vi.fn()}
+        onExportSystem={vi.fn()}
+        onCreateSystem={onCreateSystem}
+        onDeleteSystem={vi.fn()}
+        onImportSystem={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+
+    await user.selectOptions(screen.getByTestId('system-type-input'), 'data')
+    await user.click(screen.getByTestId('create-system'))
+    expect(onCreateSystem).toHaveBeenCalledWith('NewSystem', 'data')
   })
 
   it('rejects invalid system names', async () => {
@@ -116,7 +138,7 @@ describe('SystemDialog', () => {
     await user.type(nameInput, 'Good_Name')
     await user.click(screen.getByTestId('create-system'))
 
-    expect(onCreateSystem).toHaveBeenCalledWith('Good_Name')
+    expect(onCreateSystem).toHaveBeenCalledWith('Good_Name', 'flow')
   })
 
   it('does not delete when confirmation is canceled', async () => {
@@ -169,6 +191,12 @@ describe('SystemDialog', () => {
             updatedAt: '2024-01-02T00:00:00Z',
             type: 'map',
           },
+          {
+            id: 'sys-3',
+            name: 'Data Sys',
+            updatedAt: '2024-01-03T00:00:00Z',
+            type: 'data',
+          },
         ]}
         onOpenSystem={vi.fn()}
         onExportSystem={vi.fn()}
@@ -181,6 +209,7 @@ describe('SystemDialog', () => {
 
     expect(screen.getByText('Flow')).toBeInTheDocument()
     expect(screen.getByText('Map')).toBeInTheDocument()
+    expect(screen.getByText('Data')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Close dialog' }))
     expect(onClose).toHaveBeenCalledTimes(1)

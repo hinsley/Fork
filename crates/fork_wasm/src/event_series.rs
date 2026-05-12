@@ -49,7 +49,10 @@ fn serialize_result(result: EventSeriesResult) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen]
 impl WasmSystem {
-    pub fn compute_event_series_from_orbit(&self, request_val: JsValue) -> Result<JsValue, JsValue> {
+    pub fn compute_event_series_from_orbit(
+        &self,
+        request_val: JsValue,
+    ) -> Result<JsValue, JsValue> {
         let request: OrbitEventSeriesRequest = from_value(request_val)
             .map_err(|err| JsValue::from_str(&format!("Invalid event series request: {err}")))?;
         let compiled = compile_event_series_expressions(

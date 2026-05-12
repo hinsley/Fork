@@ -37,6 +37,10 @@ import type {
   LimitCycleManifold2DResult,
   LyapunovExponentsRequest,
   MapCycleContinuationFromPDRequest,
+  PowerSpectrumCsvFileRequest,
+  PowerSpectrumOrbitRequest,
+  PowerSpectrumResult,
+  PowerSpectrumSamplesRequest,
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
   SimulateOrbitRequest,
@@ -60,6 +64,9 @@ type WorkerRequest =
   | { id: string; kind: 'computeIsocline'; payload: ComputeIsoclineRequest }
   | { id: string; kind: 'computeLyapunovExponents'; payload: LyapunovExponentsRequest }
   | { id: string; kind: 'computeCovariantLyapunovVectors'; payload: CovariantLyapunovRequest }
+  | { id: string; kind: 'computePowerSpectrumFromSamples'; payload: PowerSpectrumSamplesRequest }
+  | { id: string; kind: 'computePowerSpectrumFromOrbit'; payload: PowerSpectrumOrbitRequest }
+  | { id: string; kind: 'computePowerSpectrumFromCsvFile'; payload: PowerSpectrumCsvFileRequest }
   | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
   | { id: string; kind: 'runEquilibriumContinuation'; payload: EquilibriumContinuationRequest }
   | { id: string; kind: 'runContinuationExtension'; payload: ContinuationExtensionRequest }
@@ -130,6 +137,7 @@ type WorkerResponse =
         | ComputeIsoclineResult
         | number[]
         | CovariantLyapunovResponse
+        | PowerSpectrumResult
         | SolveEquilibriumResult
         | ValidateSystemResult
         | EquilibriumContinuationResult
@@ -311,6 +319,13 @@ type WasmModule = {
       mapIterations: number,
       amplitude: number
     ) => unknown
+  }
+  WasmPowerSpectrumAccumulator: new (
+    sampleInterval: number,
+    windowSize: number
+  ) => {
+    push_samples: (samples: number[]) => void
+    finish: () => PowerSpectrumResult
   }
   WasmEquilibriumRunner: new (
     equations: string[],
@@ -777,6 +792,157 @@ async function runCovariantLyapunovVectors(
     request.forwardTransient,
     request.backwardTransient
   )
+}
+
+function createPowerSpectrumAccumulator(
+  wasm: WasmModule,
+  sampleInterval: number,
+  windowSize: number
+) {
+  if (!Number.isFinite(sampleInterval) || sampleInterval <= 0) {
+    throw new Error('Power spectrum sample interval must be positive.')
+  }
+  if (!Number.isFinite(windowSize) || windowSize < 2) {
+    throw new Error('Power spectrum window size must be at least 2.')
+  }
+  if (!wasm.WasmPowerSpectrumAccumulator) {
+    throw new Error(
+      'Power spectrum computation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  return new wasm.WasmPowerSpectrumAccumulator(sampleInterval, Math.trunc(windowSize))
+}
+
+async function runPowerSpectrumFromSamples(
+  request: PowerSpectrumSamplesRequest,
+  signal: AbortSignal
+): Promise<PowerSpectrumResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const accumulator = createPowerSpectrumAccumulator(
+    wasm,
+    request.sampleInterval,
+    request.windowSize
+  )
+  abortIfNeeded(signal)
+  accumulator.push_samples(request.samples)
+  abortIfNeeded(signal)
+  return accumulator.finish()
+}
+
+async function runPowerSpectrumFromOrbit(
+  request: PowerSpectrumOrbitRequest,
+  signal: AbortSignal
+): Promise<PowerSpectrumResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const { system: config } = request
+  if (config.type === 'data') {
+    throw new Error('Use the CSV data path for Data systems.')
+  }
+  const observableIndex = Math.trunc(request.observableIndex)
+  if (observableIndex < 0 || observableIndex >= config.varNames.length) {
+    throw new Error('Power spectrum observable is not part of the system state.')
+  }
+
+  const system = new wasm.WasmSystem(
+    config.equations,
+    new Float64Array(config.params),
+    config.paramNames,
+    config.varNames,
+    config.solver,
+    config.type
+  )
+  const accumulator = createPowerSpectrumAccumulator(wasm, request.dt, request.windowSize)
+  system.set_t(0)
+  system.set_state(new Float64Array(request.initialState))
+  accumulator.push_samples([system.get_state()[observableIndex] ?? Number.NaN])
+  for (let step = 0; step < request.steps; step += 1) {
+    abortIfNeeded(signal)
+    system.step(request.dt)
+    accumulator.push_samples([system.get_state()[observableIndex] ?? Number.NaN])
+  }
+  abortIfNeeded(signal)
+  return accumulator.finish()
+}
+
+function pushCsvValue(
+  line: string,
+  delimiter: string,
+  columnIndex: number,
+  samples: number[],
+  lineNumber: number
+) {
+  const trimmed = line.trim()
+  if (!trimmed) return
+  const columns = trimmed.split(delimiter)
+  const raw = columns[columnIndex]
+  if (raw === undefined) {
+    throw new Error(`CSV row ${lineNumber} has no column ${columnIndex + 1}.`)
+  }
+  const value = Number(raw.trim())
+  if (!Number.isFinite(value)) {
+    throw new Error(`CSV row ${lineNumber} column ${columnIndex + 1} is not numeric.`)
+  }
+  samples.push(value)
+}
+
+async function runPowerSpectrumFromCsvFile(
+  request: PowerSpectrumCsvFileRequest,
+  signal: AbortSignal
+): Promise<PowerSpectrumResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const accumulator = createPowerSpectrumAccumulator(
+    wasm,
+    request.sampleInterval,
+    request.windowSize
+  )
+  const columnIndex = Math.max(0, Math.trunc(request.columnIndex))
+  const delimiter = request.delimiter ?? ','
+  const reader = request.file.stream().getReader()
+  const decoder = new TextDecoder()
+  const batch: number[] = []
+  let pending = ''
+  let lineNumber = 0
+  let headerSkipped = !request.hasHeader
+
+  const flushBatch = () => {
+    if (batch.length === 0) return
+    accumulator.push_samples(batch.splice(0))
+  }
+
+  const processLine = (line: string) => {
+    lineNumber += 1
+    if (!headerSkipped) {
+      headerSkipped = true
+      return
+    }
+    pushCsvValue(line, delimiter, columnIndex, batch, lineNumber)
+    if (batch.length >= 4096) {
+      flushBatch()
+    }
+  }
+
+  while (true) {
+    abortIfNeeded(signal)
+    const { value, done } = await reader.read()
+    if (done) break
+    pending += decoder.decode(value, { stream: true })
+    const lines = pending.split(/\r?\n/)
+    pending = lines.pop() ?? ''
+    for (const line of lines) {
+      processLine(line)
+    }
+  }
+
+  pending += decoder.decode()
+  if (pending.trim().length > 0) {
+    processLine(pending)
+  }
+  flushBatch()
+  abortIfNeeded(signal)
+  return accumulator.finish()
 }
 
 async function runSolveEquilibrium(
@@ -1754,6 +1920,9 @@ async function runValidateSystem(
   const wasm = await loadWasm()
   const { system } = request
   const equationErrors = system.equations.map(() => null as string | null)
+  if (system.type === 'data') {
+    return { ok: true, equationErrors }
+  }
 
   try {
     abortIfNeeded(signal)
@@ -1857,6 +2026,27 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     if (message.kind === 'computeCovariantLyapunovVectors') {
       const result = await runCovariantLyapunovVectors(message.payload, controller.signal)
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'computePowerSpectrumFromSamples') {
+      const result = await runPowerSpectrumFromSamples(message.payload, controller.signal)
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'computePowerSpectrumFromOrbit') {
+      const result = await runPowerSpectrumFromOrbit(message.payload, controller.signal)
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'computePowerSpectrumFromCsvFile') {
+      const result = await runPowerSpectrumFromCsvFile(message.payload, controller.signal)
       const response: WorkerResponse = { id: message.id, ok: true, result }
       ctx.postMessage(response)
       return

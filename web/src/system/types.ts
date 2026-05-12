@@ -5,7 +5,16 @@ export interface SystemConfig {
   paramNames: string[]
   varNames: string[]
   solver: string
-  type: 'flow' | 'map'
+  type: 'flow' | 'map' | 'data'
+  data?: DataSystemConfig
+}
+
+export interface DataSystemConfig {
+  sourceName?: string
+  sampleInterval: number
+  columns: string[]
+  rowCount?: number
+  fileSize?: number
 }
 
 export interface FrozenVariablesConfig {
@@ -37,6 +46,7 @@ export interface OrbitObject {
   dt: number
   lyapunovExponents?: number[]
   covariantVectors?: CovariantLyapunovData
+  powerSpectrum?: PowerSpectrumSnapshot
   parameters?: number[]
   customParameters?: number[]
   frozenVariables?: FrozenVariablesConfig
@@ -488,6 +498,30 @@ export interface IsoclineObject {
   subsystemSnapshot?: SubsystemSnapshot
 }
 
+export interface PowerSpectrumSnapshot {
+  frequencies: number[]
+  power: number[]
+  sampleCount: number
+  segmentCount: number
+  sampleInterval: number
+  windowSize: number
+  columnName: string
+  computedAt: string
+}
+
+export interface DatasetObject {
+  type: 'dataset'
+  id?: string
+  name: string
+  systemName: string
+  sourceName: string
+  fileSize: number
+  columns: string[]
+  sampleInterval: number
+  rowCount?: number
+  lastPowerSpectrum?: PowerSpectrumSnapshot
+}
+
 export type LimitCycleRenderTarget =
   | { type: 'object' }
   | { type: 'branch'; branchId: string; pointIndex: number }
@@ -497,6 +531,7 @@ export type AnalysisObject =
   | EquilibriumObject
   | LimitCycleObject
   | IsoclineObject
+  | DatasetObject
   | ContinuationObject
 
 export interface CovariantLyapunovData {

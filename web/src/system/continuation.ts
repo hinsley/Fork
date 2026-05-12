@@ -656,7 +656,7 @@ export function getBranchParams(
   const parent =
     (branch.parentObjectId ? system.objects[branch.parentObjectId] : undefined) ??
     Object.values(system.objects).find((obj) => obj.name === branch.parentObject)
-  if (parent && parent.type !== 'continuation') {
+  if (parent && parent.type !== 'continuation' && parent.type !== 'dataset') {
     if (isValidParameterSet(system.config.params, parent.customParameters)) {
       return [...parent.customParameters]
     }

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { SystemSummary } from '../system/types'
+import type { SystemConfig, SystemSummary } from '../system/types'
 import { validateSystemName } from '../state/systemValidation'
 import { confirmDelete } from './confirmDelete'
 
@@ -8,7 +8,7 @@ type SystemDialogProps = {
   systems: SystemSummary[]
   onOpenSystem: (id: string) => void
   onExportSystem: (id: string) => void
-  onCreateSystem: (name: string) => void
+  onCreateSystem: (name: string, type: SystemConfig['type']) => void
   onDeleteSystem: (id: string) => void
   onImportSystem: (file: File) => void
   onClose: () => void
@@ -25,13 +25,14 @@ export function SystemDialog({
   onClose,
 }: SystemDialogProps) {
   const [name, setName] = useState('NewSystem')
+  const [systemType, setSystemType] = useState<SystemConfig['type']>('flow')
   const [nameError, setNameError] = useState<string | null>(null)
 
   const handleCreate = () => {
     const error = validateSystemName(name)
     setNameError(error)
     if (error) return
-    onCreateSystem(name)
+    onCreateSystem(name, systemType)
   }
 
   if (!open) return null
@@ -64,6 +65,18 @@ export function SystemDialog({
               Create
             </button>
           </div>
+          <label>
+            Type
+            <select
+              value={systemType}
+              onChange={(event) => setSystemType(event.target.value as SystemConfig['type'])}
+              data-testid="system-type-input"
+            >
+              <option value="flow">Flow (ODE)</option>
+              <option value="map">Map (Iterated)</option>
+              <option value="data">Data (Disk-backed)</option>
+            </select>
+          </label>
           {nameError ? <div className="field-error">{nameError}</div> : null}
         </section>
         <section className="dialog__section">
@@ -77,7 +90,7 @@ export function SystemDialog({
                   <div className="dialog__list-title">
                     <button onClick={() => onOpenSystem(system.id)}>{system.name}</button>
                     <span className="dialog__list-type">
-                      {system.type === 'map' ? 'Map' : 'Flow'}
+                      {system.type === 'map' ? 'Map' : system.type === 'data' ? 'Data' : 'Flow'}
                     </span>
                   </div>
                   <div className="dialog__list-actions">

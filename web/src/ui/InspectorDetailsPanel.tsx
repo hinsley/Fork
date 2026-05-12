@@ -59,10 +59,12 @@ import type {
   LimitCycleHopfContinuationRequest,
   OrbitCovariantLyapunovRequest,
   OrbitLyapunovRequest,
+  OrbitPowerSpectrumRequest,
   OrbitRunRequest,
   LimitCycleOrbitContinuationRequest,
   LimitCyclePDContinuationRequest,
   MapCyclePDContinuationRequest,
+  AttachDataCsvFileRequest,
 } from '../state/appState'
 import type {
   BranchPointSelection,
@@ -167,6 +169,8 @@ type InspectorDetailsPanelProps = {
   onRunOrbit: (request: OrbitRunRequest) => Promise<void>
   onComputeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
   onComputeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
+  onComputeOrbitPowerSpectrum?: (request: OrbitPowerSpectrumRequest) => Promise<void>
+  onAttachDataCsvFile?: (request: AttachDataCsvFileRequest) => Promise<void>
   onSolveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   onCreateEquilibriumManifold1D?: (
@@ -224,12 +228,13 @@ const MANIFOLD_SURFACE_BRANCH_TYPES: ReadonlySet<ContinuationObject['branchType'
 
 type SystemDraft = {
   name: string
-  type: 'flow' | 'map'
+  type: SystemConfig['type']
   solver: string
   varNames: string[]
   paramNames: string[]
   params: string[]
   equations: string[]
+  dataSampleInterval: string
 }
 
 type OrbitRunDraft = {
@@ -487,6 +492,7 @@ type IsoclineAxisDraft = {
 
 const FLOW_SOLVERS = ['rk4', 'tsit5']
 const MAP_SOLVERS = ['discrete']
+const DATA_SOLVERS = ['data']
 const ORBIT_PREVIEW_PAGE_SIZE = 10
 
 function adjustArray<T>(values: T[], targetLength: number, fill: () => T): T[] {
@@ -1433,6 +1439,7 @@ function makeSystemDraft(system: SystemConfig): SystemDraft {
     paramNames: [...system.paramNames],
     params: system.params.map((value) => value.toString()),
     equations: [...system.equations],
+    dataSampleInterval: (system.data?.sampleInterval ?? 1).toString(),
   }
 }
 
@@ -1549,14 +1556,23 @@ function buildCodim1ContinuationSettings(draft: Codim1CurveDraft) {
 }
 
 function buildSystemConfig(draft: SystemDraft): SystemConfig {
+  const varNames = draft.varNames.map((name) => name.trim())
+  const dataSampleInterval = parseNumber(draft.dataSampleInterval) ?? Number.NaN
   return {
     name: draft.name.trim(),
-    equations: draft.equations.map((eq) => eq.trim()),
-    params: draft.params.map((value) => parseNumber(value) ?? Number.NaN),
-    paramNames: draft.paramNames.map((name) => name.trim()),
-    varNames: draft.varNames.map((name) => name.trim()),
+    equations: draft.type === 'data' ? [] : draft.equations.map((eq) => eq.trim()),
+    params: draft.type === 'data' ? [] : draft.params.map((value) => parseNumber(value) ?? Number.NaN),
+    paramNames: draft.type === 'data' ? [] : draft.paramNames.map((name) => name.trim()),
+    varNames,
     solver: draft.solver,
     type: draft.type,
+    data:
+      draft.type === 'data'
+        ? {
+            sampleInterval: dataSampleInterval,
+            columns: varNames,
+          }
+        : undefined,
   }
 }
 
@@ -1568,7 +1584,8 @@ function isSystemEqual(a: SystemConfig, b: SystemConfig): boolean {
     a.equations.join('|') === b.equations.join('|') &&
     a.params.join('|') === b.params.join('|') &&
     a.paramNames.join('|') === b.paramNames.join('|') &&
-    a.varNames.join('|') === b.varNames.join('|')
+    a.varNames.join('|') === b.varNames.join('|') &&
+    (a.data?.sampleInterval ?? null) === (b.data?.sampleInterval ?? null)
   )
 }
 
@@ -1773,6 +1790,8 @@ export function InspectorDetailsPanel({
   onRunOrbit,
   onComputeLyapunovExponents,
   onComputeCovariantLyapunovVectors,
+  onComputeOrbitPowerSpectrum = async () => {},
+  onAttachDataCsvFile = async () => {},
   onSolveEquilibrium,
   onCreateEquilibriumBranch,
   onCreateEquilibriumManifold1D = async () => {},
@@ -1801,6 +1820,7 @@ export function InspectorDetailsPanel({
   const equilibrium = object?.type === 'equilibrium' ? object : null
   const limitCycle = object?.type === 'limit_cycle' ? object : null
   const isocline = object?.type === 'isocline' ? object : null
+  const dataset = object?.type === 'dataset' ? object : null
   const paramOverrideTarget = orbit || equilibrium || limitCycle || isocline
   const selectedOrbitPointIndex =
     orbitPointSelection && orbitPointSelection.orbitId === selectedNodeId
@@ -2159,6 +2179,14 @@ export function InspectorDetailsPanel({
     makeCovariantLyapunovDraft()
   )
   const [covariantError, setCovariantError] = useState<string | null>(null)
+  const [orbitPsdObservableIndex, setOrbitPsdObservableIndex] = useState('0')
+  const [orbitPsdWindowSize, setOrbitPsdWindowSize] = useState('1024')
+  const [orbitPsdError, setOrbitPsdError] = useState<string | null>(null)
+  const [dataCsvFile, setDataCsvFile] = useState<File | null>(null)
+  const [dataCsvColumnIndex, setDataCsvColumnIndex] = useState('0')
+  const [dataCsvWindowSize, setDataCsvWindowSize] = useState('1024')
+  const [dataCsvHasHeader, setDataCsvHasHeader] = useState(true)
+  const [dataCsvError, setDataCsvError] = useState<string | null>(null)
 
   const [equilibriumDraft, setEquilibriumDraft] = useState<EquilibriumSolveDraft>(() =>
     makeEquilibriumSolveDraft(system.config)
@@ -2755,7 +2783,9 @@ export function InspectorDetailsPanel({
   }, [systemDraft.paramNames.length, systemDraft.varNames.length])
 
   useEffect(() => {
-    if (systemDraft.type === 'map') {
+    if (systemDraft.type === 'data') {
+      setSystemDraft((prev) => ({ ...prev, solver: 'data', paramNames: [], params: [], equations: [] }))
+    } else if (systemDraft.type === 'map') {
       setSystemDraft((prev) => ({ ...prev, solver: 'discrete' }))
     } else if (!FLOW_SOLVERS.includes(systemDraft.solver)) {
       setSystemDraft((prev) => ({ ...prev, solver: 'rk4' }))
@@ -4183,6 +4213,59 @@ export function InspectorDetailsPanel({
       setIsValidating(false)
     }
     await onUpdateSystem(systemConfig)
+  }
+
+  const handleAttachDataCsv = async () => {
+    if (!dataCsvFile) {
+      setDataCsvError('Choose a CSV file first.')
+      return
+    }
+    const columnIndex = parseInteger(dataCsvColumnIndex)
+    const windowSize = parseInteger(dataCsvWindowSize)
+    const sampleInterval = parseNumber(systemDraft.dataSampleInterval)
+    if (columnIndex === null || columnIndex < 0) {
+      setDataCsvError('Column index must be a non-negative integer.')
+      return
+    }
+    if (windowSize === null || windowSize < 2 || (windowSize & (windowSize - 1)) !== 0) {
+      setDataCsvError('Window size must be a power of two.')
+      return
+    }
+    if (sampleInterval === null || sampleInterval <= 0) {
+      setDataCsvError('Sample interval must be positive.')
+      return
+    }
+    setDataCsvError(null)
+    await onAttachDataCsvFile({
+      file: dataCsvFile,
+      columnIndex,
+      sampleInterval,
+      windowSize,
+      hasHeader: dataCsvHasHeader,
+    })
+  }
+
+  const handleComputeOrbitPsd = async () => {
+    if (!orbit || !selectedNodeId) {
+      setOrbitPsdError('Select an orbit first.')
+      return
+    }
+    const observableIndex = parseInteger(orbitPsdObservableIndex)
+    const windowSize = parseInteger(orbitPsdWindowSize)
+    if (observableIndex === null || observableIndex < 0) {
+      setOrbitPsdError('Observable index must be a non-negative integer.')
+      return
+    }
+    if (windowSize === null || windowSize < 2 || (windowSize & (windowSize - 1)) !== 0) {
+      setOrbitPsdError('Window size must be a power of two.')
+      return
+    }
+    setOrbitPsdError(null)
+    await onComputeOrbitPowerSpectrum({
+      orbitId: selectedNodeId,
+      observableIndex,
+      windowSize,
+    })
   }
 
   const handleRunOrbit = async () => {
@@ -6521,13 +6604,14 @@ export function InspectorDetailsPanel({
               onChange={(event) =>
                 setSystemDraft((prev) => ({
                   ...prev,
-                  type: event.target.value === 'map' ? 'map' : 'flow',
+                  type: event.target.value as SystemConfig['type'],
                 }))
               }
               data-testid="system-type"
             >
               <option value="flow">Flow (ODE)</option>
               <option value="map">Map (Iterated)</option>
+              <option value="data">Data (Disk-backed)</option>
             </select>
           </label>
           <label>
@@ -6539,11 +6623,16 @@ export function InspectorDetailsPanel({
               }
               data-testid="system-solver"
             >
-              {(systemDraft.type === 'map' ? MAP_SOLVERS : FLOW_SOLVERS).map((solver) => (
-                <option key={solver} value={solver}>
-                  {solver}
-                </option>
-              ))}
+              {(systemDraft.type === 'map'
+                ? MAP_SOLVERS
+                : systemDraft.type === 'data'
+                  ? DATA_SOLVERS
+                  : FLOW_SOLVERS
+              ).map((solver) => (
+                  <option key={solver} value={solver}>
+                    {solver}
+                  </option>
+                ))}
             </select>
             {showSystemErrors && systemValidation.errors.solver ? (
               <span className="field-error">{systemValidation.errors.solver}</span>
@@ -6553,18 +6642,18 @@ export function InspectorDetailsPanel({
 
         <div className="inspector-section">
           <div className="inspector-group__header">
-            <h3>Variables + Equations</h3>
+            <h3>{systemDraft.type === 'data' ? 'Dataset Columns' : 'Variables + Equations'}</h3>
             <button
               onClick={() =>
                 setSystemDraft((prev) => ({
                   ...prev,
                   varNames: [...prev.varNames, `x${prev.varNames.length + 1}`],
-                  equations: [...prev.equations, ''],
+                  equations: prev.type === 'data' ? prev.equations : [...prev.equations, ''],
                 }))
               }
               data-testid="system-add-variable"
             >
-              Add Variable
+              {systemDraft.type === 'data' ? 'Add Column' : 'Add Variable'}
             </button>
           </div>
           {showSystemErrors && systemValidation.errors.varNames ? (
@@ -6585,27 +6674,33 @@ export function InspectorDetailsPanel({
                   data-testid={`system-var-${index}`}
                 />
                 <div className="inspector-row__stack">
-                  <textarea
-                    value={systemDraft.equations[index] ?? ''}
-                    onChange={(event) =>
-                      setSystemDraft((prev) => {
-                        const nextEquations = adjustArray(
-                          prev.equations,
-                          prev.varNames.length,
-                          () => ''
-                        )
-                        nextEquations[index] = event.target.value
-                        return { ...prev, equations: nextEquations }
-                      })
-                    }
-                    placeholder={`${mapEquationLabel(varName)} = ...`}
-                    data-testid={`system-eq-${index}`}
-                  />
-                  {wasmEquationErrors[index] ? (
-                    <span className="field-error" data-testid={`system-eq-error-${index}`}>
-                      {wasmEquationErrors[index]}
-                    </span>
-                  ) : null}
+                  {systemDraft.type === 'data' ? (
+                    <div className="inspector-data">CSV column {index + 1}</div>
+                  ) : (
+                    <>
+                      <textarea
+                        value={systemDraft.equations[index] ?? ''}
+                        onChange={(event) =>
+                          setSystemDraft((prev) => {
+                            const nextEquations = adjustArray(
+                              prev.equations,
+                              prev.varNames.length,
+                              () => ''
+                            )
+                            nextEquations[index] = event.target.value
+                            return { ...prev, equations: nextEquations }
+                          })
+                        }
+                        placeholder={`${mapEquationLabel(varName)} = ...`}
+                        data-testid={`system-eq-${index}`}
+                      />
+                      {wasmEquationErrors[index] ? (
+                        <span className="field-error" data-testid={`system-eq-error-${index}`}>
+                          {wasmEquationErrors[index]}
+                        </span>
+                      ) : null}
+                    </>
+                  )}
                 </div>
                 <button
                   onClick={() =>
@@ -6633,6 +6728,78 @@ export function InspectorDetailsPanel({
           ) : null}
         </div>
 
+        {systemDraft.type === 'data' ? (
+          <div className="inspector-section">
+            <label>
+              Sample Interval
+              <input
+                type="number"
+                min={Number.EPSILON}
+                step="any"
+                value={systemDraft.dataSampleInterval}
+                onChange={(event) =>
+                  setSystemDraft((prev) => ({
+                    ...prev,
+                    dataSampleInterval: event.target.value,
+                  }))
+                }
+                data-testid="system-data-sample-interval"
+              />
+            </label>
+            <label>
+              CSV File
+              <input
+                type="file"
+                accept=".csv,text/csv,text/plain"
+                onChange={(event) => {
+                  setDataCsvFile(event.target.files?.[0] ?? null)
+                }}
+                data-testid="data-csv-file"
+              />
+            </label>
+            <label>
+              PSD Column Index
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={dataCsvColumnIndex}
+                onChange={(event) => setDataCsvColumnIndex(event.target.value)}
+                data-testid="data-csv-column-index"
+              />
+            </label>
+            <label>
+              PSD Window Size
+              <input
+                type="number"
+                min={2}
+                step={1}
+                value={dataCsvWindowSize}
+                onChange={(event) => setDataCsvWindowSize(event.target.value)}
+                data-testid="data-csv-window-size"
+              />
+            </label>
+            <label className="inspector-checkbox">
+              <input
+                type="checkbox"
+                checked={dataCsvHasHeader}
+                onChange={(event) => setDataCsvHasHeader(event.target.checked)}
+                data-testid="data-csv-has-header"
+              />
+              Header row
+            </label>
+            {dataCsvError ? <div className="field-error">{dataCsvError}</div> : null}
+            <button
+              type="button"
+              onClick={() => void handleAttachDataCsv()}
+              data-testid="data-csv-attach"
+            >
+              Attach + Compute PSD
+            </button>
+          </div>
+        ) : null}
+
+        {systemDraft.type !== 'data' ? (
         <div className="inspector-section">
           <div className="inspector-group__header">
             <h3>Parameters</h3>
@@ -6721,6 +6888,7 @@ export function InspectorDetailsPanel({
             </div>
           ) : null}
         </div>
+        ) : null}
 
         {renderSystemErrors()}
         {wasmMessage ? <div className="field-error">{wasmMessage}</div> : null}
@@ -6926,6 +7094,29 @@ export function InspectorDetailsPanel({
               >
                 {nodeVisibility ? 'Visible' : 'Hidden'}
               </button>
+            </div>
+          ) : null}
+
+          {dataset ? (
+            <div className="inspector-section" data-testid="dataset-summary">
+              <h4 className="inspector-subheading">Dataset</h4>
+              <div className="inspector-data">Source: {dataset.sourceName}</div>
+              <div className="inspector-data">Rows: {dataset.rowCount ?? 'n/a'}</div>
+              <div className="inspector-data">Columns: {dataset.columns.join(', ')}</div>
+              {dataset.lastPowerSpectrum ? (
+                <>
+                  <h4 className="inspector-subheading">Power Spectrum</h4>
+                  <div className="inspector-data">
+                    Column: {dataset.lastPowerSpectrum.columnName}
+                  </div>
+                  <div className="inspector-data">
+                    Segments: {dataset.lastPowerSpectrum.segmentCount}
+                  </div>
+                  <div className="inspector-data">
+                    Window: {dataset.lastPowerSpectrum.windowSize}
+                  </div>
+                </>
+              ) : null}
             </div>
           ) : null}
 
@@ -7374,6 +7565,61 @@ export function InspectorDetailsPanel({
                   ) : (
                     <p className="empty-state">No orbit samples stored yet.</p>
                   )}
+                </div>
+              </InspectorDisclosure>
+
+              <InspectorDisclosure
+                key={`${selectionKey}-orbit-spectrum`}
+                title="Spectral Analysis"
+                testId="orbit-spectrum-toggle"
+                defaultOpen={false}
+              >
+                <div className="inspector-section">
+                  {!orbit.data || orbit.data.length < 2 ? (
+                    <p className="empty-state">Run an orbit to enable spectral analysis.</p>
+                  ) : null}
+                  {orbit.powerSpectrum ? (
+                    <InspectorMetrics
+                      rows={[
+                        { label: 'Column', value: orbit.powerSpectrum.columnName },
+                        { label: 'Samples', value: orbit.powerSpectrum.sampleCount.toLocaleString() },
+                        { label: 'Segments', value: orbit.powerSpectrum.segmentCount },
+                        { label: 'Window', value: orbit.powerSpectrum.windowSize },
+                      ]}
+                    />
+                  ) : (
+                    <p className="empty-state">Power spectrum not computed yet.</p>
+                  )}
+                  <label>
+                    Observable Index
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={orbitPsdObservableIndex}
+                      onChange={(event) => setOrbitPsdObservableIndex(event.target.value)}
+                      data-testid="orbit-psd-observable-index"
+                    />
+                  </label>
+                  <label>
+                    Window Size
+                    <input
+                      type="number"
+                      min={2}
+                      step={1}
+                      value={orbitPsdWindowSize}
+                      onChange={(event) => setOrbitPsdWindowSize(event.target.value)}
+                      data-testid="orbit-psd-window-size"
+                    />
+                  </label>
+                  {orbitPsdError ? <div className="field-error">{orbitPsdError}</div> : null}
+                  <button
+                    onClick={handleComputeOrbitPsd}
+                    disabled={runDisabled}
+                    data-testid="orbit-psd-submit"
+                  >
+                    Compute Power Spectrum
+                  </button>
                 </div>
               </InspectorDisclosure>
 

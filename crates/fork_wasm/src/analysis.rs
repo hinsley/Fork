@@ -3,6 +3,7 @@
 use crate::system::{build_system, SolverType, WasmSystem};
 use fork_core::analysis::{
     covariant_lyapunov_vectors as core_clv, lyapunov_exponents as core_lyapunov, LyapunovStepper,
+    PowerSpectrumAccumulator,
 };
 use fork_core::autodiff::TangentSystem;
 use fork_core::equation_engine::EquationSystem;
@@ -14,6 +15,41 @@ use nalgebra::DMatrix;
 use serde::Serialize;
 use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+pub struct WasmPowerSpectrumAccumulator {
+    inner: Option<PowerSpectrumAccumulator>,
+}
+
+#[wasm_bindgen]
+impl WasmPowerSpectrumAccumulator {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        sample_interval: f64,
+        window_size: u32,
+    ) -> Result<WasmPowerSpectrumAccumulator, JsValue> {
+        let inner = PowerSpectrumAccumulator::new(sample_interval, window_size as usize)
+            .map_err(|err| JsValue::from_str(&format!("Power spectrum setup failed: {err}")))?;
+        Ok(WasmPowerSpectrumAccumulator { inner: Some(inner) })
+    }
+
+    pub fn push_samples(&mut self, samples: Vec<f64>) -> Result<(), JsValue> {
+        let inner = self.inner.as_mut().ok_or_else(|| {
+            JsValue::from_str("Power spectrum accumulator has already been finished.")
+        })?;
+        inner
+            .push_samples(&samples)
+            .map_err(|err| JsValue::from_str(&format!("Power spectrum chunk failed: {err}")))
+    }
+
+    pub fn finish(&mut self) -> Result<JsValue, JsValue> {
+        let inner = self.inner.take().ok_or_else(|| {
+            JsValue::from_str("Power spectrum accumulator has already been finished.")
+        })?;
+        let result = inner.finish();
+        to_value(&result).map_err(|err| JsValue::from_str(&format!("Serialization error: {err}")))
+    }
+}
 
 #[wasm_bindgen]
 impl WasmSystem {

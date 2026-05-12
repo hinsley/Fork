@@ -83,10 +83,12 @@ export const validateSystemConfig = (system: SystemConfig): SystemValidation => 
   }
 
   const equationErrors: string[] = []
-  for (let i = 0; i < system.varNames.length; i += 1) {
-    const eq = system.equations[i]
-    if (!eq || !eq.trim()) {
-      equationErrors[i] = 'Equation required.'
+  if (system.type !== 'data') {
+    for (let i = 0; i < system.varNames.length; i += 1) {
+      const eq = system.equations[i]
+      if (!eq || !eq.trim()) {
+        equationErrors[i] = 'Equation required.'
+      }
     }
   }
   if (equationErrors.some(Boolean)) {
@@ -106,6 +108,17 @@ export const validateSystemConfig = (system: SystemConfig): SystemValidation => 
   }
   if (system.type === 'flow' && !['rk4', 'tsit5'].includes(system.solver)) {
     errors.solver = 'Flow systems must use rk4 or tsit5.'
+  }
+  if (system.type === 'data' && system.solver !== 'data') {
+    errors.solver = 'Data systems must use the data solver.'
+  }
+  if (
+    system.type === 'data' &&
+    (!system.data ||
+      !Number.isFinite(system.data.sampleInterval) ||
+      system.data.sampleInterval <= 0)
+  ) {
+    errors.solver = 'Data systems require a positive sample interval.'
   }
 
   return {

@@ -11,6 +11,10 @@ import type {
   ForkCoreClient,
   LimitCycleFloquetModesRequest as CoreLimitCycleFloquetModesRequest,
   LyapunovExponentsRequest as CoreLyapunovExponentsRequest,
+  PowerSpectrumCsvFileRequest,
+  PowerSpectrumOrbitRequest,
+  PowerSpectrumResult,
+  PowerSpectrumSamplesRequest,
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
   ValidateSystemResult,
@@ -24,6 +28,7 @@ import type {
   ContinuationPoint,
   ContinuationSettings,
   CovariantLyapunovData,
+  DatasetObject,
   EquilibriumObject,
   EquilibriumSolverParams,
   FrozenVariablesConfig,
@@ -989,6 +994,20 @@ export type OrbitCovariantLyapunovRequest = {
   qrStride: number
 }
 
+export type OrbitPowerSpectrumRequest = {
+  orbitId: string
+  observableIndex: number
+  windowSize: number
+}
+
+export type AttachDataCsvFileRequest = {
+  file: File
+  columnIndex: number
+  sampleInterval: number
+  windowSize: number
+  hasHeader?: boolean
+}
+
 export type EquilibriumSolveRequest = {
   equilibriumId: string
   initialGuess: number[]
@@ -1391,7 +1410,7 @@ function reducer(state: AppState, action: AppAction): AppState {
 
 type AppActions = {
   refreshSystems: () => Promise<void>
-  createSystem: (name: string) => Promise<void>
+  createSystem: (name: string, type?: SystemConfig['type']) => Promise<void>
   openSystem: (id: string) => Promise<void>
   saveSystem: () => Promise<void>
   exportSystem: (id: string) => Promise<void>
@@ -1467,6 +1486,20 @@ type AppActions = {
   ) => Promise<void>
   computeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
   computeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
+  computeOrbitPowerSpectrum: (request: OrbitPowerSpectrumRequest) => Promise<void>
+  computePowerSpectrumFromSamples: (
+    request: PowerSpectrumSamplesRequest,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<PowerSpectrumResult>
+  computePowerSpectrumFromOrbit: (
+    request: PowerSpectrumOrbitRequest,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<PowerSpectrumResult>
+  computePowerSpectrumFromCsvFile: (
+    request: PowerSpectrumCsvFileRequest,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<PowerSpectrumResult>
+  attachDataCsvFile: (request: AttachDataCsvFileRequest) => Promise<void>
   computeLimitCycleFloquetModes: (request: LimitCycleFloquetModesRequest) => Promise<void>
   solveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   createEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
@@ -2254,6 +2287,79 @@ export function AppProvider({
     [client]
   )
 
+  const computePowerSpectrumFromSamples = useCallback(
+    async (request: PowerSpectrumSamplesRequest, opts?: { signal?: AbortSignal }) =>
+      await client.computePowerSpectrumFromSamples(request, opts),
+    [client]
+  )
+
+  const computePowerSpectrumFromOrbit = useCallback(
+    async (request: PowerSpectrumOrbitRequest, opts?: { signal?: AbortSignal }) =>
+      await client.computePowerSpectrumFromOrbit(request, opts),
+    [client]
+  )
+
+  const computePowerSpectrumFromCsvFile = useCallback(
+    async (request: PowerSpectrumCsvFileRequest, opts?: { signal?: AbortSignal }) =>
+      await client.computePowerSpectrumFromCsvFile(request, opts),
+    [client]
+  )
+
+  const attachDataCsvFileAction = useCallback(
+    async (request: AttachDataCsvFileRequest) => {
+      if (!state.system) return
+      if (state.system.config.type !== 'data') {
+        dispatch({ type: 'SET_ERROR', error: 'CSV datasets can only be attached to Data systems.' })
+        return
+      }
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        const columnIndex = Math.max(0, Math.trunc(request.columnIndex))
+        const columnName =
+          state.system.config.varNames[columnIndex] ?? `column_${columnIndex + 1}`
+        const result = await client.computePowerSpectrumFromCsvFile({
+          file: request.file,
+          columnIndex,
+          sampleInterval: request.sampleInterval,
+          windowSize: request.windowSize,
+          hasHeader: request.hasHeader,
+        })
+        const dataset: DatasetObject = {
+          type: 'dataset',
+          name: request.file.name.replace(/\.[^.]+$/, '') || 'Dataset',
+          systemName: state.system.name,
+          sourceName: request.file.name,
+          fileSize: request.file.size,
+          columns: [...state.system.config.varNames],
+          sampleInterval: request.sampleInterval,
+          rowCount: result.sample_count,
+          lastPowerSpectrum: {
+            frequencies: result.frequencies,
+            power: result.power,
+            sampleCount: result.sample_count,
+            segmentCount: result.segment_count,
+            sampleInterval: result.sample_interval,
+            windowSize: result.window_size,
+            columnName,
+            computedAt: new Date().toISOString(),
+          },
+        }
+        const added = addObject(state.system, dataset)
+        const withScene =
+          added.system.scenes.length === 0 ? addScene(added.system, 'PSD_View').system : added.system
+        const selected = selectNode(withScene, added.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
   const validateAnalysisExpression = useCallback(
     async (
       request: {
@@ -2602,6 +2708,56 @@ export function AppProvider({
         const covariantVectors = reshapeCovariantVectors(response)
         const updated = updateObject(state.system, request.orbitId, {
           covariantVectors,
+        })
+        dispatch({ type: 'SET_SYSTEM', system: updated })
+        await store.save(updated)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const computeOrbitPowerSpectrumAction = useCallback(
+    async (request: OrbitPowerSpectrumRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        const orbit = state.system.objects[request.orbitId]
+        if (!orbit || orbit.type !== 'orbit') {
+          throw new Error('Select a valid orbit to analyze.')
+        }
+        if (!orbit.data || orbit.data.length < 2) {
+          throw new Error('Run an orbit before computing a power spectrum.')
+        }
+        const observableIndex = Math.max(0, Math.trunc(request.observableIndex))
+        const columnName = state.system.config.varNames[observableIndex] ?? `x${observableIndex + 1}`
+        const samples = orbit.data
+          .map((row) => row[observableIndex + 1])
+          .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+        if (samples.length < 2) {
+          throw new Error('The selected orbit coordinate has no finite samples.')
+        }
+        const sampleInterval = orbit.dt || (state.system.config.type === 'map' ? 1 : 0.01)
+        const result = await client.computePowerSpectrumFromSamples({
+          samples,
+          sampleInterval,
+          windowSize: request.windowSize,
+        })
+        const updated = updateObject(state.system, request.orbitId, {
+          powerSpectrum: {
+            frequencies: result.frequencies,
+            power: result.power,
+            sampleCount: result.sample_count,
+            segmentCount: result.segment_count,
+            sampleInterval: result.sample_interval,
+            windowSize: result.window_size,
+            columnName,
+            computedAt: new Date().toISOString(),
+          },
         })
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.save(updated)
@@ -6765,6 +6921,11 @@ export function AppProvider({
       validateAnalysisExpression,
       computeLyapunovExponents,
       computeCovariantLyapunovVectors,
+      computeOrbitPowerSpectrum: computeOrbitPowerSpectrumAction,
+      computePowerSpectrumFromSamples,
+      computePowerSpectrumFromOrbit,
+      computePowerSpectrumFromCsvFile,
+      attachDataCsvFile: attachDataCsvFileAction,
       computeLimitCycleFloquetModes,
       solveEquilibrium,
       createEquilibriumBranch,
@@ -6803,9 +6964,14 @@ export function AppProvider({
       sampleMap1DFunction,
       computeEventSeriesFromOrbit,
       computeEventSeriesFromSamples,
+      computePowerSpectrumFromSamples,
+      computePowerSpectrumFromOrbit,
+      computePowerSpectrumFromCsvFile,
+      attachDataCsvFileAction,
       validateAnalysisExpression,
       computeLyapunovExponents,
       computeCovariantLyapunovVectors,
+      computeOrbitPowerSpectrumAction,
       computeLimitCycleFloquetModes,
       solveEquilibrium,
       createEquilibriumBranch,

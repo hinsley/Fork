@@ -119,21 +119,21 @@ function App() {
   }
 
   const createOrbit = async () => {
-    if (!system) return
+    if (!system || system.config.type === 'data') return
     const names = Object.values(system.objects).map((obj) => obj.name)
     const name = nextObjectName('Orbit', names)
     await actions.createOrbitObject(name)
   }
 
   const createEquilibrium = async () => {
-    if (!system) return
+    if (!system || system.config.type === 'data') return
     const names = Object.values(system.objects).map((obj) => obj.name)
     const name = nextObjectName(formatEquilibriumLabel(system.config.type), names)
     await actions.createEquilibriumObject(name)
   }
 
   const createIsocline = async () => {
-    if (!system) return
+    if (!system || system.config.type === 'data') return
     const names = Object.values(system.objects).map((obj) => obj.name)
     const name = nextObjectName('Isocline', names)
     await actions.createIsoclineObject(name)
@@ -263,8 +263,8 @@ function App() {
         open={isSystemDialogOpen}
         systems={systems}
         onClose={closeSystemsDialog}
-        onCreateSystem={async (name) => {
-          await actions.createSystem(name)
+        onCreateSystem={async (name, type) => {
+          await actions.createSystem(name, type)
           finishSystemsDialog()
         }}
         onOpenSystem={async (id) => {
@@ -305,6 +305,8 @@ function App() {
         onRunOrbit={actions.runOrbit}
         onComputeLyapunovExponents={actions.computeLyapunovExponents}
         onComputeCovariantLyapunovVectors={actions.computeCovariantLyapunovVectors}
+        onComputeOrbitPowerSpectrum={actions.computeOrbitPowerSpectrum}
+        onAttachDataCsvFile={actions.attachDataCsvFile}
         onSolveEquilibrium={actions.solveEquilibrium}
         onCreateEquilibriumBranch={actions.createEquilibriumBranch}
         onCreateEquilibriumManifold1D={actions.createEquilibriumManifold1D}
@@ -486,6 +488,8 @@ function App() {
                 onRunOrbit={actions.runOrbit}
                 onComputeLyapunovExponents={actions.computeLyapunovExponents}
                 onComputeCovariantLyapunovVectors={actions.computeCovariantLyapunovVectors}
+                onComputeOrbitPowerSpectrum={actions.computeOrbitPowerSpectrum}
+                onAttachDataCsvFile={actions.attachDataCsvFile}
                 onSolveEquilibrium={actions.solveEquilibrium}
                 onCreateEquilibriumBranch={actions.createEquilibriumBranch}
                 onCreateEquilibriumManifold1D={actions.createEquilibriumManifold1D}

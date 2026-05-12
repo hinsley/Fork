@@ -38,6 +38,10 @@ import type {
   LimitCycleManifold2DResult,
   MapCycleContinuationFromPDRequest,
   LyapunovExponentsRequest,
+  PowerSpectrumCsvFileRequest,
+  PowerSpectrumOrbitRequest,
+  PowerSpectrumResult,
+  PowerSpectrumSamplesRequest,
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
   SolveEquilibriumRequest,
@@ -141,6 +145,38 @@ function buildMockEventSeries(request: ComputeEventSeriesFromSamplesRequest): Ev
     })
   }
   return { hits }
+}
+
+function buildMockPowerSpectrum(
+  samples: number[],
+  sampleInterval: number,
+  windowSize: number
+): PowerSpectrumResult {
+  const safeWindowSize = Math.max(2, Math.trunc(windowSize))
+  const binCount = Math.floor(safeWindowSize / 2) + 1
+  const frequencyStep =
+    sampleInterval > 0 ? 1 / (sampleInterval * safeWindowSize) : 1
+  const frequencies = Array.from(
+    { length: binCount },
+    (_, index) => index * frequencyStep
+  )
+  const mean =
+    samples.length > 0
+      ? samples.reduce((sum, value) => sum + value, 0) / samples.length
+      : 0
+  const variance =
+    samples.length > 0
+      ? samples.reduce((sum, value) => sum + (value - mean) ** 2, 0) /
+        samples.length
+      : 0
+  return {
+    frequencies,
+    power: frequencies.map((_, index) => (index === 1 ? variance : 0)),
+    sample_count: samples.length,
+    segment_count: samples.length >= 2 ? Math.max(1, Math.floor(samples.length / safeWindowSize)) : 0,
+    sample_interval: sampleInterval,
+    window_size: safeWindowSize,
+  }
 }
 
 export class MockForkCoreClient implements ForkCoreClient {
@@ -463,6 +499,74 @@ export class MockForkCoreClient implements ForkCoreClient {
           }
         }
         return { dimension, checkpoints, times, vectors }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async computePowerSpectrumFromSamples(
+    request: PowerSpectrumSamplesRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<PowerSpectrumResult> {
+    const job = this.queue.enqueue(
+      'computePowerSpectrumFromSamples',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+        return buildMockPowerSpectrum(
+          request.samples,
+          request.sampleInterval,
+          request.windowSize
+        )
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async computePowerSpectrumFromOrbit(
+    request: PowerSpectrumOrbitRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<PowerSpectrumResult> {
+    const orbit = await this.simulateOrbit(
+      {
+        system: request.system,
+        initialState: request.initialState,
+        steps: request.steps,
+        dt: request.dt,
+      },
+      opts
+    )
+    const samples = orbit.data.map((row) => row[request.observableIndex + 1] ?? 0)
+    return buildMockPowerSpectrum(samples, request.dt, request.windowSize)
+  }
+
+  async computePowerSpectrumFromCsvFile(
+    request: PowerSpectrumCsvFileRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<PowerSpectrumResult> {
+    const job = this.queue.enqueue(
+      'computePowerSpectrumFromCsvFile',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+        const text = await request.file.text()
+        const delimiter = request.delimiter ?? ','
+        const rows = text.split(/\r?\n/).filter((line) => line.trim().length > 0)
+        const body = request.hasHeader ? rows.slice(1) : rows
+        const samples = body
+          .map((line) => Number(line.split(delimiter)[request.columnIndex]?.trim()))
+          .filter(Number.isFinite)
+        return buildMockPowerSpectrum(samples, request.sampleInterval, request.windowSize)
       },
       opts
     )

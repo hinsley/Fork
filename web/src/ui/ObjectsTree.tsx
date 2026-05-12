@@ -629,10 +629,13 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const visibilityStyle = { '--node-color': nodeColor } as CSSProperties
     const object = system.objects[nodeId]
     const customParameters =
-      object && object.type !== 'continuation' ? object.customParameters : null
+      object && object.type !== 'continuation' && object.type !== 'dataset'
+        ? object.customParameters
+        : null
     const hasFrozenVariables =
       object &&
       object.type !== 'continuation' &&
+      object.type !== 'dataset' &&
       Object.keys(object.frozenVariables?.frozenValuesByVarName ?? {}).length > 0
 
     return (
