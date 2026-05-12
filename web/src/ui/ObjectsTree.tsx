@@ -839,7 +839,11 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         data-testid="objects-tree"
       >
         <div className="objects-tree__list">
-          {rootNodes.length === 0 ? <p className="empty-state">No objects yet.</p> : null}
+          {rootNodes.length === 0 ? (
+            <p className="empty-state">
+              {system.config.type === 'data' ? 'No datasets yet.' : 'No objects yet.'}
+            </p>
+          ) : null}
           {getPreviewOrder(rootNodes, null).map((nodeId) => renderNode(nodeId, 0))}
         </div>
         {createMenu ? (

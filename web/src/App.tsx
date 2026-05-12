@@ -111,6 +111,14 @@ function App() {
     setSystemSettingsOpen(false)
   }
 
+  const createDataSystem = async () => {
+    const names = systems.map((summary) => summary.name)
+    const name = nextObjectName('DataSystem', names)
+    await actions.createSystem(name, 'data')
+    setDialogOpen(false)
+    setSystemSettingsOpen(true)
+  }
+
   const selectNode = (nodeId: string) => {
     actions.selectNode(nodeId)
     if (system && !system.ui.layout.inspectorOpen) {
@@ -340,10 +348,14 @@ function App() {
         <main className="empty-workspace">
           <div className="empty-card">
             <h1>Fork</h1>
-            <p>Create or open a system to start exploring.</p>
-            <button onClick={() => setDialogOpen(true)} data-testid="open-systems-empty">
-              Open Systems
-            </button>
+            <div className="empty-card__actions">
+              <button onClick={() => void createDataSystem()} data-testid="new-data-system-empty">
+                New Data System
+              </button>
+              <button onClick={() => setDialogOpen(true)} data-testid="open-systems-empty">
+                Open Systems
+              </button>
+            </div>
           </div>
         </main>
       ) : (
@@ -361,19 +373,25 @@ function App() {
               testId="objects-panel"
               showToggle={false}
               actions={
-                <div className="panel-actions">
-                  <button onClick={openCreateObjectMenu} data-testid="create-object-button">
-                    Create Object
+                system.config.type === 'data' ? (
+                  <button onClick={openSystemSettings} data-testid="attach-data-button">
+                    Attach CSV Dataset
                   </button>
-                  <button
-                    onClick={createRootFolder}
-                    title="Create Folder"
-                    aria-label="Create Folder"
-                    data-testid="create-folder-button"
-                  >
-                    📁
-                  </button>
-                </div>
+                ) : (
+                  <div className="panel-actions">
+                    <button onClick={openCreateObjectMenu} data-testid="create-object-button">
+                      Create Object
+                    </button>
+                    <button
+                      onClick={createRootFolder}
+                      title="Create Folder"
+                      aria-label="Create Folder"
+                      data-testid="create-folder-button"
+                    >
+                      📁
+                    </button>
+                  </div>
+                )
               }
             >
               <ObjectsTree
@@ -457,7 +475,7 @@ function App() {
               showToggle={false}
               actions={
                 <button onClick={openSystemSettings} data-testid="open-system-settings">
-                  System Settings
+                  {system.config.type === 'data' ? 'Attach CSV Dataset' : 'System Settings'}
                 </button>
               }
             >

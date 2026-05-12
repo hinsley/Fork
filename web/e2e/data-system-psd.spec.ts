@@ -20,15 +20,15 @@ test('data systems attach local CSV files and render streamed PSD results', asyn
   const harness = createHarness(page)
   await harness.goto({ deterministic: true, mock: false })
 
-  await page.getByTestId('open-systems-empty').click()
-  await page.getByTestId('system-name-input').fill('Data_PSD_System')
-  await page.getByTestId('system-type-input').selectOption('data')
-  await page.getByTestId('create-system').click()
+  await page.getByTestId('new-data-system-empty').click()
   await page.getByTestId('workspace').waitFor()
-
-  await page.getByTestId('open-system-settings').click()
   await expect(page.getByTestId('system-settings-dialog')).toBeVisible()
   await expect(page.getByTestId('system-type')).toHaveValue('data')
+  await page.getByTestId('close-system-settings').click()
+  await expect(page.getByTestId('attach-data-button')).toBeVisible()
+  await expect(page.getByText('No datasets yet.')).toBeVisible()
+
+  await page.getByTestId('attach-data-button').click()
   await page.getByTestId('data-csv-window-size').fill('64')
   await page.getByTestId('data-csv-file').setInputFiles(csvPath)
   await page.getByTestId('data-csv-attach').click()

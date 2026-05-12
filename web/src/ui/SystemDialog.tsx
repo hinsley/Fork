@@ -35,6 +35,13 @@ export function SystemDialog({
     onCreateSystem(name, systemType)
   }
 
+  const createLabel =
+    systemType === 'data'
+      ? 'Create Data System'
+      : systemType === 'map'
+        ? 'Create Map System'
+        : 'Create Flow System'
+
   if (!open) return null
 
   return (
@@ -48,6 +55,18 @@ export function SystemDialog({
         </header>
         <section className="dialog__section">
           <h3>Create New</h3>
+          <label>
+            Type
+            <select
+              value={systemType}
+              onChange={(event) => setSystemType(event.target.value as SystemConfig['type'])}
+              data-testid="system-type-input"
+            >
+              <option value="data">Data (Disk-backed)</option>
+              <option value="flow">Flow (ODE)</option>
+              <option value="map">Map (Iterated)</option>
+            </select>
+          </label>
           <div className="dialog__row">
             <input
               value={name}
@@ -62,21 +81,9 @@ export function SystemDialog({
               aria-invalid={Boolean(nameError)}
             />
             <button onClick={handleCreate} data-testid="create-system">
-              Create
+              {createLabel}
             </button>
           </div>
-          <label>
-            Type
-            <select
-              value={systemType}
-              onChange={(event) => setSystemType(event.target.value as SystemConfig['type'])}
-              data-testid="system-type-input"
-            >
-              <option value="flow">Flow (ODE)</option>
-              <option value="map">Map (Iterated)</option>
-              <option value="data">Data (Disk-backed)</option>
-            </select>
-          </label>
           {nameError ? <div className="field-error">{nameError}</div> : null}
         </section>
         <section className="dialog__section">

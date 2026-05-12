@@ -1368,6 +1368,12 @@
   text-align: left;
 }
 
+.empty-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;
