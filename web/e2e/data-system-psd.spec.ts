@@ -24,9 +24,18 @@ test('data systems attach local CSV files and render streamed PSD results', asyn
   await page.getByTestId('workspace').waitFor()
   await expect(page.getByTestId('system-settings-dialog')).toBeVisible()
   await expect(page.getByTestId('system-type')).toHaveValue('data')
+  await expect(
+    page.locator('[data-testid^="object-tree-node-"]').filter({ hasText: 'starter-signal' })
+  ).toBeVisible()
+  await expect(page.getByText('No datasets yet.')).toBeHidden()
   await page.getByTestId('close-system-settings').click()
   await expect(page.getByTestId('attach-data-button')).toBeVisible()
-  await expect(page.getByText('No datasets yet.')).toBeVisible()
+
+  await harness.selectTreeNode('starter-signal')
+  const starterSummary = page.getByTestId('dataset-summary')
+  await expect(starterSummary).toContainText('Source: starter-signal.csv')
+  await expect(starterSummary).toContainText('Rows: 512')
+  await expect(starterSummary).toContainText('Power Spectrum')
 
   await page.getByTestId('attach-data-button').click()
   await page.getByTestId('data-csv-window-size').fill('64')

@@ -3,6 +3,12 @@ import { addScene, createSystem } from '../system/model'
 import { MemorySystemStore } from '../system/store'
 import type { System, SystemSummary } from '../system/types'
 import {
+  STARTER_DATASET_NAME,
+  STARTER_DATASET_WINDOW_SIZE,
+  createDataSystemConfig,
+  seedStarterDataset,
+} from '../system/dataDefaults'
+import {
   createSystemStorageCommands,
   type SystemStorageCommandDeps,
 } from './systemStorageCommands'
@@ -12,6 +18,7 @@ type CapturedAction = Parameters<SystemStorageCommandDeps['dispatch']>[0]
 function setupStorageCommands(options: {
   store?: MemorySystemStore
   initialSystem?: System | null
+  prepareSystemForStorage?: SystemStorageCommandDeps['prepareSystemForStorage']
 } = {}) {
   const store = options.store ?? new MemorySystemStore()
   let currentSystem = options.initialSystem ?? null
@@ -47,6 +54,7 @@ function setupStorageCommands(options: {
     downloadArchive,
     clearBrowserStorage,
     reloadBrowser,
+    prepareSystemForStorage: options.prepareSystemForStorage,
   })
 
   return {
@@ -59,6 +67,19 @@ function setupStorageCommands(options: {
     reloadBrowser,
     store,
   }
+}
+
+const testStarterSpectrum = {
+  frequencies: [0, 0.125],
+  power: [0, 1],
+  sample_count: 512,
+  segment_count: 4,
+  sample_interval: 1,
+  window_size: STARTER_DATASET_WINDOW_SIZE,
+}
+
+function seedStarterDatasetForTest(system: System) {
+  return seedStarterDataset(system, testStarterSpectrum, '2026-05-12T00:00:00.000Z')
 }
 
 describe('system storage commands', () => {
@@ -92,6 +113,26 @@ describe('system storage commands', () => {
     expect(await harness.store.list()).toEqual([])
   })
 
+  it('prepares starter datasets before saving data systems', async () => {
+    const harness = setupStorageCommands({
+      prepareSystemForStorage: seedStarterDatasetForTest,
+    })
+
+    await harness.commands.createSystem('Data_Command', 'data')
+
+    const state = harness.getState()
+    const objectId = state.currentSystem?.rootIds.find((id) => {
+      return state.currentSystem?.objects[id]?.type === 'dataset'
+    })
+    expect(objectId).toBeTruthy()
+    expect(state.currentSystem?.objects[objectId!]?.name).toBe(STARTER_DATASET_NAME)
+    expect(state.currentSystem?.ui.selectedNodeId).toBe(objectId)
+    expect(state.currentSystem?.config.data?.starterDatasetSeeded).toBe(true)
+    expect(await harness.store.load(state.currentSystem!.id)).toMatchObject({
+      config: { data: { starterDatasetSeeded: true } },
+    })
+  })
+
   it('opens systems and delegates selected entity hydration', async () => {
     const base = createSystem({ name: 'Open_Command' })
     const withScene = addScene(base, 'Scene_A')
@@ -115,6 +156,31 @@ describe('system storage commands', () => {
       objectIds: [withScene.nodeId],
       branchIds: [withScene.nodeId],
     })
+  })
+
+  it('migrates legacy empty data systems when opened', async () => {
+    const legacy = createSystem({
+      name: 'Legacy_Data',
+      config: createDataSystemConfig('Legacy_Data'),
+    })
+    const store = new MemorySystemStore()
+    await store.save(legacy)
+    const harness = setupStorageCommands({
+      store,
+      prepareSystemForStorage: seedStarterDatasetForTest,
+    })
+
+    await harness.commands.openSystem(legacy.id)
+
+    const state = harness.getState()
+    const objectId = state.currentSystem?.ui.selectedNodeId
+    expect(objectId).toBeTruthy()
+    expect(state.currentSystem?.objects[objectId!]?.name).toBe(STARTER_DATASET_NAME)
+    expect(harness.ensureEntitiesLoaded).toHaveBeenCalledWith({
+      objectIds: [objectId],
+      branchIds: [objectId],
+    })
+    expect((await store.load(legacy.id)).config.data?.starterDatasetSeeded).toBe(true)
   })
 
   it('exports archives through the injected browser download effect', async () => {

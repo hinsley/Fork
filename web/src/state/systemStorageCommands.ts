@@ -1,4 +1,5 @@
 import { createSystem } from '../system/model'
+import { createDataSystemConfig } from '../system/dataDefaults'
 import type { SystemStore } from '../system/store'
 import type { System, SystemConfig, SystemSummary } from '../system/types'
 import { validateSystemName } from './systemValidation'
@@ -18,6 +19,13 @@ type SystemArchive = {
   filename: string
   blob: Blob
 }
+
+type PreparedSystem = {
+  system: System
+  changed: boolean
+}
+
+type PrepareSystemForStorage = (system: System) => Promise<PreparedSystem> | PreparedSystem
 
 export type SystemStorageCommands = {
   refreshSystems: () => Promise<void>
@@ -39,6 +47,7 @@ export type SystemStorageCommandDeps = {
   downloadArchive?: (archive: SystemArchive) => void
   clearBrowserStorage?: () => void
   reloadBrowser?: () => void
+  prepareSystemForStorage?: PrepareSystemForStorage
 }
 
 function downloadArchive({ filename, blob }: SystemArchive): void {
@@ -77,6 +86,7 @@ export function createSystemStorageCommands({
   downloadArchive: download = downloadArchive,
   clearBrowserStorage: clearStorage = clearBrowserStorage,
   reloadBrowser: reload = reloadBrowser,
+  prepareSystemForStorage,
 }: SystemStorageCommandDeps): SystemStorageCommands {
   const refreshSystems = async () => {
     try {
@@ -98,19 +108,7 @@ export function createSystemStorageCommands({
     try {
       const config: SystemConfig | undefined =
         type === 'data'
-          ? {
-              name,
-              equations: [],
-              params: [],
-              paramNames: [],
-              varNames: ['signal'],
-              solver: 'data',
-              type: 'data',
-              data: {
-                sampleInterval: 1,
-                columns: ['signal'],
-              },
-            }
+          ? createDataSystemConfig(name)
           : type === 'map'
             ? {
                 name,
@@ -122,7 +120,11 @@ export function createSystemStorageCommands({
                 type: 'map',
               }
             : undefined
-      const system = createSystem(config ? { name, config } : { name })
+      const created = createSystem(config ? { name, config } : { name })
+      const prepared = prepareSystemForStorage
+        ? await prepareSystemForStorage(created)
+        : { system: created, changed: false }
+      const system = prepared.system
       dispatch({ type: 'SET_SYSTEM', system })
       await store.save(system)
       await refreshSystems()
@@ -137,9 +139,19 @@ export function createSystemStorageCommands({
   const openSystem = async (id: string) => {
     dispatch({ type: 'SET_BUSY', busy: true })
     try {
-      const system = await store.load(id)
+      const loaded = await store.load(id)
+      const prepared = prepareSystemForStorage
+        ? await prepareSystemForStorage(loaded)
+        : { system: loaded, changed: false }
+      const system = prepared.system
+      if (prepared.changed) {
+        await store.save(system)
+      }
       setLatestSystem(system)
       dispatch({ type: 'SET_SYSTEM', system })
+      if (prepared.changed) {
+        await refreshSystems()
+      }
       const selectedNodeId = system.ui.selectedNodeId
       if (selectedNodeId) {
         await ensureEntitiesLoaded({
@@ -147,6 +159,9 @@ export function createSystemStorageCommands({
           branchIds: [selectedNodeId],
         })
       }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      dispatch({ type: 'SET_ERROR', error: message })
     } finally {
       dispatch({ type: 'SET_BUSY', busy: false })
     }

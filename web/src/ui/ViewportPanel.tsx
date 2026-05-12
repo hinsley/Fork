@@ -6033,6 +6033,22 @@ function buildSceneBaseLayout(
     font: { color: plotlyTheme.text },
   } satisfies Partial<Layout>
 
+  if (config.type === 'data') {
+    return {
+      ...base,
+      xaxis: {
+        title: { text: 'frequency', font: { color: plotlyTheme.text } },
+        tickfont: { color: plotlyTheme.text },
+        zerolinecolor: 'rgba(120,120,120,0.3)',
+      },
+      yaxis: {
+        title: { text: 'PSD', font: { color: plotlyTheme.text } },
+        tickfont: { color: plotlyTheme.text },
+        zerolinecolor: 'rgba(120,120,120,0.3)',
+      },
+    }
+  }
+
   const projection = resolveSceneProjection(config, axisVariables)
   const resolvedAxisVariables =
     projection?.axisVariables ??

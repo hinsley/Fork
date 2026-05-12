@@ -15,6 +15,7 @@ export interface DataSystemConfig {
   columns: string[]
   rowCount?: number
   fileSize?: number
+  starterDatasetSeeded?: boolean
 }
 
 export interface FrozenVariablesConfig {

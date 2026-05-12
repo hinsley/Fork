@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import { createSystem, addObject } from './model'
 import { validateSystemConfig } from '../state/systemValidation'
+import {
+  STARTER_DATASET_NAME,
+  STARTER_DATASET_WINDOW_SIZE,
+  createDataSystemConfig,
+  needsStarterDataset,
+  seedStarterDataset,
+} from './dataDefaults'
+
+const starterSpectrum = {
+  frequencies: [0, 0.125, 0.25],
+  power: [0, 4, 0.25],
+  sample_count: 512,
+  segment_count: 4,
+  sample_interval: 1,
+  window_size: STARTER_DATASET_WINDOW_SIZE,
+}
 
 describe('data systems', () => {
   it('accepts column metadata without equations or parameters', () => {
@@ -67,5 +83,33 @@ describe('data systems', () => {
     expect(object.type).toBe('dataset')
     expect(JSON.stringify(object)).not.toContain('0,1,2,3,4,5,6,7')
     expect(withDataset.index.objects[nodeId]?.objectType).toBe('dataset')
+  })
+
+  it('seeds a visible starter dataset for empty data systems', () => {
+    const system = createSystem({
+      name: 'Data_System',
+      config: createDataSystemConfig('Data_System'),
+    })
+
+    expect(needsStarterDataset(system)).toBe(true)
+
+    const seeded = seedStarterDataset(
+      system,
+      starterSpectrum,
+      '2026-05-12T00:00:00.000Z'
+    )
+
+    expect(seeded.changed).toBe(true)
+    expect(seeded.system.config.data?.starterDatasetSeeded).toBe(true)
+    expect(seeded.system.config.data?.sourceName).toBe('starter-signal.csv')
+    expect(seeded.system.scenes).toHaveLength(1)
+    expect(seeded.system.ui.selectedNodeId).toBeTruthy()
+
+    const object = seeded.system.objects[seeded.system.ui.selectedNodeId!]
+    expect(object?.type).toBe('dataset')
+    expect(object?.name).toBe(STARTER_DATASET_NAME)
+    expect(object?.type === 'dataset' ? object.lastPowerSpectrum?.windowSize : null).toBe(
+      STARTER_DATASET_WINDOW_SIZE
+    )
   })
 })

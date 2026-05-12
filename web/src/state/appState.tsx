@@ -97,6 +97,14 @@ import {
   resolveSubsystemSnapshot,
 } from '../system/subsystemGateway'
 import { formatEquilibriumLabel } from '../system/labels'
+import {
+  STARTER_DATASET_SAMPLE_INTERVAL,
+  STARTER_DATASET_WINDOW_SIZE,
+  createStarterDataSamples,
+  markStarterDatasetSeeded,
+  needsStarterDataset,
+  seedStarterDataset,
+} from '../system/dataDefaults'
 import { AppContext } from './appContext'
 import { createSystemStorageCommands } from './systemStorageCommands'
 import {
@@ -1711,6 +1719,25 @@ export function AppProvider({
     void ensureEntitiesLoaded({ objectIds, branchIds })
   }, [ensureEntitiesLoaded, state.system])
 
+  const prepareSystemForStorage = useCallback(
+    async (system: System) => {
+      if (system.config.type !== 'data') {
+        return { system, changed: false }
+      }
+      if (!needsStarterDataset(system)) {
+        return markStarterDatasetSeeded(system)
+      }
+      const result = await client.computePowerSpectrumFromSamples({
+        samples: createStarterDataSamples(),
+        sampleInterval:
+          system.config.data?.sampleInterval ?? STARTER_DATASET_SAMPLE_INTERVAL,
+        windowSize: STARTER_DATASET_WINDOW_SIZE,
+      })
+      return seedStarterDataset(system, result, new Date().toISOString())
+    },
+    [client]
+  )
+
   const storageCommands = useMemo(
     () =>
       createSystemStorageCommands({
@@ -1721,8 +1748,9 @@ export function AppProvider({
           latestSystemRef.current = system
         },
         ensureEntitiesLoaded,
+        prepareSystemForStorage,
       }),
-    [ensureEntitiesLoaded, state.system, store]
+    [ensureEntitiesLoaded, prepareSystemForStorage, state.system, store]
   )
 
   const {
