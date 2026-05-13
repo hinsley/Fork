@@ -153,11 +153,24 @@ export function createSystemStorageCommands({
         await refreshSystems()
       }
       const selectedNodeId = system.ui.selectedNodeId
-      if (selectedNodeId) {
-        await ensureEntitiesLoaded({
+      let hydratedSystem: System | null = null
+      if (
+        selectedNodeId &&
+        (system.index.objects[selectedNodeId] || system.index.branches[selectedNodeId])
+      ) {
+        hydratedSystem = await ensureEntitiesLoaded({
           objectIds: [selectedNodeId],
           branchIds: [selectedNodeId],
         })
+      }
+      if (prepareSystemForStorage && hydratedSystem) {
+        const hydratedPrepared = await prepareSystemForStorage(hydratedSystem)
+        if (hydratedPrepared.changed) {
+          await store.save(hydratedPrepared.system)
+          setLatestSystem(hydratedPrepared.system)
+          dispatch({ type: 'SET_SYSTEM', system: hydratedPrepared.system })
+          await refreshSystems()
+        }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

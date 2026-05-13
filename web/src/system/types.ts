@@ -510,6 +510,15 @@ export interface PowerSpectrumSnapshot {
   computedAt: string
 }
 
+export interface DatasetPreview {
+  columns: string[]
+  sampleInterval: number
+  rowCount: number
+  stride: number
+  rowIndices: number[]
+  rows: number[][]
+}
+
 export interface DatasetObject {
   type: 'dataset'
   id?: string
@@ -520,6 +529,7 @@ export interface DatasetObject {
   columns: string[]
   sampleInterval: number
   rowCount?: number
+  preview?: DatasetPreview
   lastPowerSpectrum?: PowerSpectrumSnapshot
 }
 

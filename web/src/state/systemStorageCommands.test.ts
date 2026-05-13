@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { addScene, createSystem } from '../system/model'
+import { addObject, createSystem } from '../system/model'
 import { MemorySystemStore } from '../system/store'
 import type { System, SystemSummary } from '../system/types'
 import {
@@ -135,12 +135,20 @@ describe('system storage commands', () => {
 
   it('opens systems and delegates selected entity hydration', async () => {
     const base = createSystem({ name: 'Open_Command' })
-    const withScene = addScene(base, 'Scene_A')
+    const withObject = addObject(base, {
+      type: 'orbit',
+      name: 'Orbit_A',
+      systemName: 'Open_Command',
+      data: [],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.1,
+    })
     const selectedSystem: System = {
-      ...withScene.system,
+      ...withObject.system,
       ui: {
-        ...withScene.system.ui,
-        selectedNodeId: withScene.nodeId,
+        ...withObject.system.ui,
+        selectedNodeId: withObject.nodeId,
       },
     }
     const store = new MemorySystemStore()
@@ -153,8 +161,8 @@ describe('system storage commands', () => {
     expect(state.currentSystem?.id).toBe(selectedSystem.id)
     expect(state.latestSystem?.id).toBe(selectedSystem.id)
     expect(harness.ensureEntitiesLoaded).toHaveBeenCalledWith({
-      objectIds: [withScene.nodeId],
-      branchIds: [withScene.nodeId],
+      objectIds: [withObject.nodeId],
+      branchIds: [withObject.nodeId],
     })
   })
 

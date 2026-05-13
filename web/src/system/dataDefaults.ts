@@ -8,6 +8,7 @@ export const STARTER_DATASET_COLUMN = 'signal'
 export const STARTER_DATASET_SAMPLE_INTERVAL = 1
 export const STARTER_DATASET_SAMPLE_COUNT = 512
 export const STARTER_DATASET_WINDOW_SIZE = 128
+export const STARTER_DATASET_SCENE_NAME = 'State_Space'
 
 type StarterSpectrumResult = {
   frequencies: number[]
@@ -44,6 +45,20 @@ export function createStarterDataSamples(): number[] {
   })
 }
 
+function createStarterDatasetPreview(columns: string[] = [STARTER_DATASET_COLUMN]) {
+  return {
+    columns,
+    sampleInterval: STARTER_DATASET_SAMPLE_INTERVAL,
+    rowCount: STARTER_DATASET_SAMPLE_COUNT,
+    stride: 1,
+    rowIndices: Array.from(
+      { length: STARTER_DATASET_SAMPLE_COUNT },
+      (_, index) => index
+    ),
+    rows: createStarterDataSamples().map((value) => [value]),
+  }
+}
+
 function starterCsvSize(): number {
   const rows = [
     STARTER_DATASET_COLUMN,
@@ -55,15 +70,45 @@ function starterCsvSize(): number {
 export function needsStarterDataset(system: System): boolean {
   if (system.config.type !== 'data') return false
   if (system.config.data?.starterDatasetSeeded) return false
-  return !Object.values(system.objects).some((object) => object.type === 'dataset')
+  const hasLoadedDataset = Object.values(system.objects).some(
+    (object) => object.type === 'dataset'
+  )
+  const hasIndexedDataset = Object.values(system.index.objects).some(
+    (entry) => entry.objectType === 'dataset'
+  )
+  return !hasLoadedDataset && !hasIndexedDataset
 }
 
 export function markStarterDatasetSeeded(system: System): { system: System; changed: boolean } {
   if (system.config.type !== 'data') return { system, changed: false }
-  if (system.config.data?.starterDatasetSeeded) return { system, changed: false }
+  let objects = system.objects
+  let objectsChanged = false
+  Object.entries(system.objects).forEach(([id, object]) => {
+    if (
+      object.type !== 'dataset' ||
+      object.preview ||
+      (object.name !== STARTER_DATASET_NAME &&
+        object.sourceName !== STARTER_DATASET_SOURCE_NAME)
+    ) {
+      return
+    }
+    if (!objectsChanged) {
+      objects = structuredClone(system.objects)
+      objectsChanged = true
+    }
+    const columns = object.columns.length > 0 ? object.columns : [STARTER_DATASET_COLUMN]
+    objects[id] = {
+      ...object,
+      preview: createStarterDatasetPreview(columns),
+    }
+  })
+  if (system.config.data?.starterDatasetSeeded && !objectsChanged) {
+    return { system, changed: false }
+  }
   return {
     system: {
       ...system,
+      objects,
       updatedAt: nowIso(),
       config: {
         ...system.config,
@@ -126,6 +171,10 @@ export function seedStarterDataset(
     columns,
     sampleInterval,
     rowCount: spectrum.sample_count,
+    preview: {
+      ...createStarterDatasetPreview(columns),
+      sampleInterval,
+    },
     lastPowerSpectrum: {
       frequencies: spectrum.frequencies,
       power: spectrum.power,
@@ -140,7 +189,7 @@ export function seedStarterDataset(
   const withDataset = addObject(base, dataset)
   const withScene =
     withDataset.system.scenes.length === 0
-      ? addScene(withDataset.system, 'PSD_View').system
+      ? addScene(withDataset.system, STARTER_DATASET_SCENE_NAME).system
       : withDataset.system
   return {
     system: selectNode(withScene, withDataset.nodeId),

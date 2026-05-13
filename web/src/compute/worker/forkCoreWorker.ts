@@ -52,6 +52,8 @@ import type {
 } from '../ForkCoreClient'
 import { discardHomoclinicInitialApproximationPoint } from '../../system/continuation'
 
+const MAX_DATASET_PREVIEW_ROWS = 4096
+
 type WorkerRequest =
   | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
   | { id: string; kind: 'sampleMap1DFunction'; payload: SampleMap1DFunctionRequest }
@@ -866,25 +868,85 @@ async function runPowerSpectrumFromOrbit(
   return accumulator.finish()
 }
 
-function pushCsvValue(
-  line: string,
-  delimiter: string,
-  columnIndex: number,
-  samples: number[],
-  lineNumber: number
-) {
+type CsvPreviewResult = NonNullable<PowerSpectrumResult['preview']>
+
+class CsvPreviewSampler {
+  private stride = 1
+  private rowIndices: number[] = []
+  private rows: number[][] = []
+  private lastRowIndex = -1
+  private lastValues: number[] = []
+
+  push(rowIndex: number, values: number[]) {
+    this.lastRowIndex = rowIndex
+    this.lastValues = [...values]
+    if (rowIndex % this.stride !== 0) return
+    if (this.rows.length >= MAX_DATASET_PREVIEW_ROWS) {
+      this.stride *= 2
+      const nextIndices: number[] = []
+      const nextRows: number[][] = []
+      for (let index = 0; index < this.rowIndices.length; index += 1) {
+        const sourceIndex = this.rowIndices[index]
+        if (sourceIndex === undefined || sourceIndex % this.stride !== 0) continue
+        nextIndices.push(sourceIndex)
+        nextRows.push(this.rows[index] ?? [])
+      }
+      this.rowIndices = nextIndices
+      this.rows = nextRows
+    }
+    if (rowIndex % this.stride !== 0) return
+    this.rowIndices.push(rowIndex)
+    this.rows.push([...values])
+  }
+
+  finish(columns: string[], sampleInterval: number, rowCount: number): CsvPreviewResult {
+    if (
+      this.lastRowIndex >= 0 &&
+      this.rowIndices[this.rowIndices.length - 1] !== this.lastRowIndex
+    ) {
+      if (this.rows.length >= MAX_DATASET_PREVIEW_ROWS) {
+        this.rowIndices.shift()
+        this.rows.shift()
+      }
+      this.rowIndices.push(this.lastRowIndex)
+      this.rows.push([...this.lastValues])
+    }
+    return {
+      columns,
+      sample_interval: sampleInterval,
+      row_count: rowCount,
+      stride: this.stride,
+      row_indices: [...this.rowIndices],
+      rows: this.rows.map((row) => [...row]),
+    }
+  }
+}
+
+function fallbackCsvColumnNames(count: number): string[] {
+  return Array.from({ length: count }, (_, index) => `column_${index + 1}`)
+}
+
+function normalizeCsvColumnNames(rawColumns: string[]): string[] {
+  const used = new Map<string, number>()
+  return rawColumns.map((raw, index) => {
+    const base = raw.trim() || `column_${index + 1}`
+    const seen = used.get(base) ?? 0
+    used.set(base, seen + 1)
+    return seen === 0 ? base : `${base}_${seen + 1}`
+  })
+}
+
+function parseCsvNumericRow(line: string, delimiter: string, lineNumber: number): number[] | null {
   const trimmed = line.trim()
-  if (!trimmed) return
+  if (!trimmed) return null
   const columns = trimmed.split(delimiter)
-  const raw = columns[columnIndex]
-  if (raw === undefined) {
-    throw new Error(`CSV row ${lineNumber} has no column ${columnIndex + 1}.`)
-  }
-  const value = Number(raw.trim())
-  if (!Number.isFinite(value)) {
-    throw new Error(`CSV row ${lineNumber} column ${columnIndex + 1} is not numeric.`)
-  }
-  samples.push(value)
+  return columns.map((raw, index) => {
+    const value = Number(raw.trim())
+    if (!Number.isFinite(value)) {
+      throw new Error(`CSV row ${lineNumber} column ${index + 1} is not numeric.`)
+    }
+    return value
+  })
 }
 
 async function runPowerSpectrumFromCsvFile(
@@ -903,9 +965,12 @@ async function runPowerSpectrumFromCsvFile(
   const reader = request.file.stream().getReader()
   const decoder = new TextDecoder()
   const batch: number[] = []
+  const previewSampler = new CsvPreviewSampler()
   let pending = ''
   let lineNumber = 0
   let headerSkipped = !request.hasHeader
+  let columnNames: string[] | null = null
+  let rowCount = 0
 
   const flushBatch = () => {
     if (batch.length === 0) return
@@ -915,10 +980,26 @@ async function runPowerSpectrumFromCsvFile(
   const processLine = (line: string) => {
     lineNumber += 1
     if (!headerSkipped) {
+      columnNames = normalizeCsvColumnNames(line.split(delimiter))
       headerSkipped = true
       return
     }
-    pushCsvValue(line, delimiter, columnIndex, batch, lineNumber)
+    const values = parseCsvNumericRow(line, delimiter, lineNumber)
+    if (!values) return
+    if (columnIndex >= values.length) {
+      throw new Error(`CSV row ${lineNumber} has no column ${columnIndex + 1}.`)
+    }
+    if (!columnNames) {
+      columnNames = fallbackCsvColumnNames(values.length)
+    }
+    if (values.length !== columnNames.length) {
+      throw new Error(
+        `CSV row ${lineNumber} has ${values.length} columns; expected ${columnNames.length}.`
+      )
+    }
+    batch.push(values[columnIndex] ?? Number.NaN)
+    previewSampler.push(rowCount, values)
+    rowCount += 1
     if (batch.length >= 4096) {
       flushBatch()
     }
@@ -942,7 +1023,13 @@ async function runPowerSpectrumFromCsvFile(
   }
   flushBatch()
   abortIfNeeded(signal)
-  return accumulator.finish()
+  const result = accumulator.finish()
+  const columns = columnNames ?? fallbackCsvColumnNames(columnIndex + 1)
+  return {
+    ...result,
+    column_names: columns,
+    preview: previewSampler.finish(columns, request.sampleInterval, rowCount),
+  }
 }
 
 async function runSolveEquilibrium(

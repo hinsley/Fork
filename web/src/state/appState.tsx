@@ -72,6 +72,7 @@ import {
   updateSystem,
 } from '../system/model'
 import type { ReorderPlacement } from '../system/model'
+import { defaultSceneAxisVariables } from '../system/sceneAxes'
 import {
   ensureHomoclinicEndpointResumeSeeds,
   ensureBranchIndices,
@@ -99,6 +100,7 @@ import {
 import { formatEquilibriumLabel } from '../system/labels'
 import {
   STARTER_DATASET_SAMPLE_INTERVAL,
+  STARTER_DATASET_SCENE_NAME,
   STARTER_DATASET_WINDOW_SIZE,
   createStarterDataSamples,
   markStarterDatasetSeeded,
@@ -117,6 +119,26 @@ import { isCliSafeName } from '../utils/naming'
 function findObjectIdByName(system: System, name: string): string | null {
   const match = Object.entries(system.objects).find(([, obj]) => obj.name === name)
   return match ? match[0] : null
+}
+
+function updateDataSceneAxes(system: System, columns: string[]): System {
+  const axisVariables = defaultSceneAxisVariables(columns)
+  if (system.config.type !== 'data' || !axisVariables) return system
+  let changed = false
+  const desiredAxisCount = axisVariables.length
+  const scenes = system.scenes.map((scene) => {
+    const current = scene.axisVariables
+    const currentInvalid = current ? current.some((name) => !columns.includes(name)) : true
+    const currentTooSmall = (current?.length ?? 0) < desiredAxisCount
+    if (!currentInvalid && !currentTooSmall) return scene
+    changed = true
+    return {
+      ...scene,
+      axisVariables,
+      viewRevision: scene.viewRevision + 1,
+    }
+  })
+  return changed ? { ...system, scenes } : system
 }
 
 function branchNameExists(system: System, parentObjectId: string, name: string): boolean {
@@ -2343,8 +2365,6 @@ export function AppProvider({
       dispatch({ type: 'SET_BUSY', busy: true })
       try {
         const columnIndex = Math.max(0, Math.trunc(request.columnIndex))
-        const columnName =
-          state.system.config.varNames[columnIndex] ?? `column_${columnIndex + 1}`
         const result = await client.computePowerSpectrumFromCsvFile({
           file: request.file,
           columnIndex,
@@ -2352,15 +2372,37 @@ export function AppProvider({
           windowSize: request.windowSize,
           hasHeader: request.hasHeader,
         })
+        const datasetColumns =
+          result.preview?.columns ??
+          result.column_names ??
+          (state.system.config.varNames.length > 0
+            ? [...state.system.config.varNames]
+            : [`column_${columnIndex + 1}`])
+        const columnName =
+          result.column_names?.[columnIndex] ??
+          datasetColumns[columnIndex] ??
+          state.system.config.varNames[columnIndex] ??
+          `column_${columnIndex + 1}`
+        const rowCount = result.preview?.row_count ?? result.sample_count
         const dataset: DatasetObject = {
           type: 'dataset',
           name: request.file.name.replace(/\.[^.]+$/, '') || 'Dataset',
           systemName: state.system.name,
           sourceName: request.file.name,
           fileSize: request.file.size,
-          columns: [...state.system.config.varNames],
+          columns: datasetColumns,
           sampleInterval: request.sampleInterval,
-          rowCount: result.sample_count,
+          rowCount,
+          preview: result.preview
+            ? {
+                columns: result.preview.columns,
+                sampleInterval: result.preview.sample_interval,
+                rowCount: result.preview.row_count,
+                stride: result.preview.stride,
+                rowIndices: result.preview.row_indices,
+                rows: result.preview.rows,
+              }
+            : undefined,
           lastPowerSpectrum: {
             frequencies: result.frequencies,
             power: result.power,
@@ -2372,10 +2414,28 @@ export function AppProvider({
             computedAt: new Date().toISOString(),
           },
         }
-        const added = addObject(state.system, dataset)
+        const systemWithColumns: System = {
+          ...state.system,
+          config: {
+            ...state.system.config,
+            varNames: datasetColumns,
+            data: {
+              ...state.system.config.data,
+              sampleInterval: request.sampleInterval,
+              columns: datasetColumns,
+              sourceName: request.file.name,
+              rowCount,
+              fileSize: request.file.size,
+            },
+          },
+        }
+        const added = addObject(systemWithColumns, dataset)
         const withScene =
-          added.system.scenes.length === 0 ? addScene(added.system, 'PSD_View').system : added.system
-        const selected = selectNode(withScene, added.nodeId)
+          added.system.scenes.length === 0
+            ? addScene(added.system, STARTER_DATASET_SCENE_NAME).system
+            : added.system
+        const withSceneAxes = updateDataSceneAxes(withScene, datasetColumns)
+        const selected = selectNode(withSceneAxes, added.nodeId)
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {

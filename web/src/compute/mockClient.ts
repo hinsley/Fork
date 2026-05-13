@@ -179,6 +179,20 @@ function buildMockPowerSpectrum(
   }
 }
 
+function normalizeMockCsvColumnNames(rawColumns: string[]): string[] {
+  const used = new Map<string, number>()
+  return rawColumns.map((raw, index) => {
+    const base = raw.trim() || `column_${index + 1}`
+    const seen = used.get(base) ?? 0
+    used.set(base, seen + 1)
+    return seen === 0 ? base : `${base}_${seen + 1}`
+  })
+}
+
+function fallbackMockCsvColumnNames(count: number): string[] {
+  return Array.from({ length: count }, (_, index) => `column_${index + 1}`)
+}
+
 export class MockForkCoreClient implements ForkCoreClient {
   private queue: JobQueue
   private delayMs: number
@@ -562,11 +576,42 @@ export class MockForkCoreClient implements ForkCoreClient {
         const text = await request.file.text()
         const delimiter = request.delimiter ?? ','
         const rows = text.split(/\r?\n/).filter((line) => line.trim().length > 0)
+        const header = request.hasHeader ? rows[0] : null
         const body = request.hasHeader ? rows.slice(1) : rows
-        const samples = body
-          .map((line) => Number(line.split(delimiter)[request.columnIndex]?.trim()))
-          .filter(Number.isFinite)
-        return buildMockPowerSpectrum(samples, request.sampleInterval, request.windowSize)
+        const parsedRows = body.map((line, rowIndex) =>
+          line.split(delimiter).map((raw, columnIndex) => {
+            const value = Number(raw.trim())
+            if (!Number.isFinite(value)) {
+              throw new Error(
+                `CSV row ${rowIndex + 1 + (request.hasHeader ? 1 : 0)} column ${columnIndex + 1} is not numeric.`
+              )
+            }
+            return value
+          })
+        )
+        const inferredColumnCount = parsedRows[0]?.length ?? request.columnIndex + 1
+        const columnNames = header
+          ? normalizeMockCsvColumnNames(header.split(delimiter))
+          : fallbackMockCsvColumnNames(inferredColumnCount)
+        const samples = parsedRows.map((row) => {
+          const value = row[request.columnIndex]
+          if (!Number.isFinite(value)) {
+            throw new Error(`CSV row has no column ${request.columnIndex + 1}.`)
+          }
+          return value
+        })
+        return {
+          ...buildMockPowerSpectrum(samples, request.sampleInterval, request.windowSize),
+          column_names: columnNames,
+          preview: {
+            columns: columnNames,
+            sample_interval: request.sampleInterval,
+            row_count: parsedRows.length,
+            stride: 1,
+            row_indices: parsedRows.map((_, index) => index),
+            rows: parsedRows,
+          },
+        }
       },
       opts
     )

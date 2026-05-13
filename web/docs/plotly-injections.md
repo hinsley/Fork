@@ -88,10 +88,12 @@ behavior.
   `hovertemplate` strings so hover labels use the active scene axis variable
   names (not Plotly defaults) and include trajectory position metadata:
   continuous systems show `t`, while discrete maps show integer `n`.
-- `web/src/ui/ViewportPanel.tsx`: dataset scene traces render stored power
-  spectra as declarative `scattergl` line traces (`frequency` vs `PSD`) with
-  explicit hover templates; the FFT/PSD computation is produced upstream by
-  the Rust/WASM sampled-analysis operator, not by Plotly or TypeScript.
+- `web/src/ui/ViewportPanel.tsx`: dataset scene traces render bounded sampled
+  previews as declarative `scattergl` / `scatter3d` line traces. One-column
+  data renders as `t` vs column time series; multi-column data renders as
+  state-space trajectories using the active scene axes. FFT/PSD output remains
+  derived analysis metadata produced upstream by the Rust/WASM sampled-analysis
+  operator, not by Plotly or TypeScript.
 - `web/src/ui/ViewportPanel.tsx`: `buildSceneInitialView()` and
   `buildDiagramInitialView()` translate stored `scene.camera` / `axisRanges`
   (if present) into a one-time `initialView` payload for `usePlotViewport`.

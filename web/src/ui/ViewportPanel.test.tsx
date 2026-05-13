@@ -21,6 +21,7 @@ import {
 import type {
   ContinuationObject,
   ContinuationSettings,
+  DatasetObject,
   EquilibriumObject,
   IsoclineObject,
   LimitCycleObject,
@@ -150,6 +151,110 @@ describe('ViewportPanel view state wiring', () => {
     await user.click(screen.getByTestId('viewport-context-duplicate'))
 
     expect(onDuplicateViewport).toHaveBeenCalledWith(sceneResult.nodeId)
+  })
+
+  it('renders data system dataset previews as time series', () => {
+    const config: SystemConfig = {
+      name: 'Data_Time_Series',
+      equations: [],
+      params: [],
+      paramNames: [],
+      varNames: ['signal'],
+      solver: 'data',
+      type: 'data',
+      data: {
+        sampleInterval: 0.5,
+        columns: ['signal'],
+      },
+    }
+    let system = createSystem({ name: config.name, config })
+    system = addScene(system, 'State_Space').system
+    const dataset: DatasetObject = {
+      type: 'dataset',
+      name: 'trace',
+      systemName: system.name,
+      sourceName: 'trace.csv',
+      fileSize: 32,
+      columns: ['signal'],
+      sampleInterval: 0.5,
+      rowCount: 3,
+      preview: {
+        columns: ['signal'],
+        sampleInterval: 0.5,
+        rowCount: 3,
+        stride: 1,
+        rowIndices: [0, 1, 2],
+        rows: [[1], [2], [3]],
+      },
+    }
+    system = addObject(system, dataset).system
+
+    renderPanel(system)
+
+    const call = plotlyCalls[plotlyCalls.length - 1]!
+    const trace = call.data[0] as { type: string; name: string; x: number[]; y: number[] }
+    expect(trace.type).toBe('scattergl')
+    expect(trace.name).toBe('trace')
+    expect(trace.x).toEqual([0, 0.5, 1])
+    expect(trace.y).toEqual([1, 2, 3])
+    const xTitle = call.layout.xaxis?.title
+    const yTitle = call.layout.yaxis?.title
+    expect(typeof xTitle === 'string' ? xTitle : xTitle?.text).toBe('t')
+    expect(typeof yTitle === 'string' ? yTitle : yTitle?.text).toBe('signal')
+  })
+
+  it('renders multi-column data previews as state-space trajectories', () => {
+    const config: SystemConfig = {
+      name: 'Data_Orbit',
+      equations: [],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y'],
+      solver: 'data',
+      type: 'data',
+      data: {
+        sampleInterval: 1,
+        columns: ['x', 'y'],
+      },
+    }
+    let system = createSystem({ name: config.name, config })
+    system = addScene(system, 'State_Space').system
+    const dataset: DatasetObject = {
+      type: 'dataset',
+      name: 'orbit_trace',
+      systemName: system.name,
+      sourceName: 'orbit.csv',
+      fileSize: 64,
+      columns: ['x', 'y'],
+      sampleInterval: 1,
+      rowCount: 3,
+      preview: {
+        columns: ['x', 'y'],
+        sampleInterval: 1,
+        rowCount: 3,
+        stride: 1,
+        rowIndices: [0, 1, 2],
+        rows: [
+          [0, 1],
+          [1, 0],
+          [0, -1],
+        ],
+      },
+    }
+    system = addObject(system, dataset).system
+
+    renderPanel(system)
+
+    const call = plotlyCalls[plotlyCalls.length - 1]!
+    const trace = call.data[0] as { type: string; name: string; x: number[]; y: number[] }
+    expect(trace.type).toBe('scattergl')
+    expect(trace.name).toBe('orbit_trace')
+    expect(trace.x).toEqual([0, 1, 0])
+    expect(trace.y).toEqual([1, 0, -1])
+    const xTitle = call.layout.xaxis?.title
+    const yTitle = call.layout.yaxis?.title
+    expect(typeof xTitle === 'string' ? xTitle : xTitle?.text).toBe('x')
+    expect(typeof yTitle === 'string' ? yTitle : yTitle?.text).toBe('y')
   })
 
   it('falls back to event point index when selecting orbit points from scene traces', () => {

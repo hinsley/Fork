@@ -16,6 +16,7 @@ import type {
   ClvRenderStyle,
   ContinuationObject,
   ContinuationPoint,
+  DatasetObject,
   EquilibriumEigenPair,
   IsoclineComputedSnapshot,
   LineStyle,
@@ -56,7 +57,7 @@ import {
   resolveEquilibriumEigenvectorRender,
 } from '../system/equilibriumEigenvectors'
 import { resolveSceneAxisIndices, resolveSceneAxisSelection } from '../system/sceneAxes'
-import { resolveSceneProjection } from '../system/sceneProjection'
+import { resolveSceneProjection, type SceneProjection } from '../system/sceneProjection'
 import {
   mapStateRowsToDisplay,
   stateVectorToDisplay,
@@ -675,6 +676,16 @@ function updateSceneBounds(bounds: SceneBounds, x: number, y: number, z?: number
   bounds.maxY = Math.max(bounds.maxY, y)
   bounds.minZ = Math.min(bounds.minZ, safeZ)
   bounds.maxZ = Math.max(bounds.maxZ, safeZ)
+}
+
+function mergeSceneBounds(target: SceneBounds, source: SceneBounds) {
+  if (!Number.isFinite(source.minX) || !Number.isFinite(source.minY)) return
+  target.minX = Math.min(target.minX, source.minX)
+  target.maxX = Math.max(target.maxX, source.maxX)
+  target.minY = Math.min(target.minY, source.minY)
+  target.maxY = Math.max(target.maxY, source.maxY)
+  target.minZ = Math.min(target.minZ, source.minZ)
+  target.maxZ = Math.max(target.maxZ, source.maxZ)
 }
 
 function buildEquilibriumEigenvectorTraces(
@@ -2731,6 +2742,182 @@ function buildManifoldSurfaceTraces(config: {
   return traces
 }
 
+type DatasetSceneTraceResult = {
+  trace: Data | null
+  timeRange: [number, number] | null
+  minY: number
+  maxY: number
+  bounds: SceneBounds
+}
+
+function buildDatasetSceneTrace(config: {
+  nodeId: string
+  object: DatasetObject
+  color: string
+  lineWidth: number
+  highlight: boolean
+  projection: SceneProjection | null
+}): DatasetSceneTraceResult {
+  const { nodeId, object, color, lineWidth, highlight, projection } = config
+  const emptyBounds: SceneBounds = {
+    minX: Number.POSITIVE_INFINITY,
+    maxX: Number.NEGATIVE_INFINITY,
+    minY: Number.POSITIVE_INFINITY,
+    maxY: Number.NEGATIVE_INFINITY,
+    minZ: Number.POSITIVE_INFINITY,
+    maxZ: Number.NEGATIVE_INFINITY,
+  }
+  const preview = object.preview
+  if (!preview || preview.rows.length === 0 || preview.columns.length === 0) {
+    return {
+      trace: null,
+      timeRange: null,
+      minY: Number.POSITIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY,
+      bounds: emptyBounds,
+    }
+  }
+
+  const width = highlight ? lineWidth + 1 : lineWidth
+  const axisCount = projection?.axisCount ?? Math.min(3, preview.columns.length)
+  const phaseAxisCount = Math.min(axisCount, preview.columns.length, 3)
+  const requestedIndices =
+    projection?.axisVariables
+      .slice(0, phaseAxisCount)
+      .map((name) => preview.columns.indexOf(name)) ?? []
+  const canUseRequested =
+    requestedIndices.length === phaseAxisCount &&
+    requestedIndices.every((index) => index >= 0)
+
+  if (axisCount >= 2 && phaseAxisCount < 2) {
+    return {
+      trace: null,
+      timeRange: null,
+      minY: Number.POSITIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY,
+      bounds: emptyBounds,
+    }
+  }
+
+  if (phaseAxisCount >= 2) {
+    const axes = canUseRequested
+      ? requestedIndices
+      : Array.from({ length: phaseAxisCount }, (_, index) => index)
+    const x: number[] = []
+    const y: number[] = []
+    const z: number[] = []
+    const customdata: number[] = []
+    const bounds: SceneBounds = { ...emptyBounds }
+    preview.rows.forEach((row, index) => {
+      const rowIndex = preview.rowIndices[index] ?? index
+      const xValue = row[axes[0] ?? 0]
+      const yValue = row[axes[1] ?? 1]
+      const zValue = phaseAxisCount >= 3 ? row[axes[2] ?? 2] : undefined
+      if (
+        !Number.isFinite(xValue) ||
+        !Number.isFinite(yValue) ||
+        (phaseAxisCount >= 3 && !Number.isFinite(zValue))
+      ) {
+        return
+      }
+      x.push(xValue as number)
+      y.push(yValue as number)
+      if (phaseAxisCount >= 3) z.push(zValue as number)
+      customdata.push(rowIndex)
+      updateSceneBounds(bounds, xValue as number, yValue as number, zValue)
+    })
+    if (x.length === 0) {
+      return {
+        trace: null,
+        timeRange: null,
+        minY: Number.POSITIVE_INFINITY,
+        maxY: Number.NEGATIVE_INFINITY,
+        bounds,
+      }
+    }
+    if (phaseAxisCount >= 3) {
+      return {
+        trace: {
+          type: 'scatter3d',
+          mode: 'lines',
+          name: object.name,
+          uid: nodeId,
+          x,
+          y,
+          z,
+          customdata,
+          line: { color, width },
+          hovertemplate: `row %{customdata}<br>${preview.columns[axes[0] ?? 0]}: %{x:.6g}<br>${preview.columns[axes[1] ?? 1]}: %{y:.6g}<br>${preview.columns[axes[2] ?? 2]}: %{z:.6g}<extra>${object.name}</extra>`,
+        },
+        timeRange: null,
+        minY: Math.min(...y),
+        maxY: Math.max(...y),
+        bounds,
+      }
+    }
+    return {
+      trace: {
+        type: 'scattergl',
+        mode: 'lines',
+        name: object.name,
+        uid: nodeId,
+        x,
+        y,
+        customdata,
+        line: { color, width },
+        hovertemplate: `row %{customdata}<br>${preview.columns[axes[0] ?? 0]}: %{x:.6g}<br>${preview.columns[axes[1] ?? 1]}: %{y:.6g}<extra>${object.name}</extra>`,
+      },
+      timeRange: null,
+      minY: Math.min(...y),
+      maxY: Math.max(...y),
+      bounds,
+    }
+  }
+
+  const columnIndex =
+    requestedIndices.length > 0 && requestedIndices[0] >= 0 ? requestedIndices[0] : 0
+  const x: number[] = []
+  const y: number[] = []
+  const customdata: number[] = []
+  const bounds: SceneBounds = { ...emptyBounds }
+  preview.rows.forEach((row, index) => {
+    const rowIndex = preview.rowIndices[index] ?? index
+    const value = row[columnIndex]
+    if (!Number.isFinite(value)) return
+    const time = rowIndex * preview.sampleInterval
+    x.push(time)
+    y.push(value as number)
+    customdata.push(rowIndex)
+    updateSceneBounds(bounds, time, value as number)
+  })
+  if (x.length === 0) {
+    return {
+      trace: null,
+      timeRange: null,
+      minY: Number.POSITIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY,
+      bounds,
+    }
+  }
+  return {
+    trace: {
+      type: 'scattergl',
+      mode: 'lines',
+      name: object.name,
+      uid: nodeId,
+      x,
+      y,
+      customdata,
+      line: { color, width },
+      hovertemplate: `t: %{x:.6g}<br>${preview.columns[columnIndex] ?? object.name}: %{y:.6g}<br>row %{customdata}<extra>${object.name}</extra>`,
+    },
+    timeRange: [x[0] ?? 0, x[x.length - 1] ?? 0],
+    minY: Math.min(...y),
+    maxY: Math.max(...y),
+    bounds,
+  }
+}
+
 function buildSceneTraces(
   system: TraceSystem,
   scene: Scene,
@@ -2809,11 +2996,19 @@ function buildSceneTraces(
       const node = system.nodes[nodeId]
       if (!node || node.kind !== 'object' || !isNodeEffectivelyVisible(system.nodes, nodeId)) continue
       const object = system.objects[nodeId]
-      if (!object || object.type !== 'orbit' || object.data.length === 0) continue
-      const start = Math.min(object.t_start, object.t_end)
-      const end = Math.max(object.t_start, object.t_end)
-      minT = Math.min(minT, start)
-      maxT = Math.max(maxT, end)
+      if (!object) continue
+      if (object.type === 'orbit' && object.data.length > 0) {
+        const start = Math.min(object.t_start, object.t_end)
+        const end = Math.max(object.t_start, object.t_end)
+        minT = Math.min(minT, start)
+        maxT = Math.max(maxT, end)
+      }
+      if (object.type === 'dataset' && object.preview && object.preview.rowIndices.length > 0) {
+        const first = object.preview.rowIndices[0] ?? 0
+        const last = object.preview.rowIndices[object.preview.rowIndices.length - 1] ?? first
+        minT = Math.min(minT, first * object.preview.sampleInterval)
+        maxT = Math.max(maxT, last * object.preview.sampleInterval)
+      }
     }
     if (Number.isFinite(minT) && Number.isFinite(maxT)) {
       timeRange = [minT, maxT]
@@ -2827,21 +3022,28 @@ function buildSceneTraces(
     if (!object) continue
 
     if (object.type === 'dataset') {
-      const spectrum = object.lastPowerSpectrum
-      if (!spectrum || spectrum.frequencies.length === 0) continue
-      traces.push({
-        type: 'scattergl',
-        mode: 'lines',
-        name: `${object.name} PSD`,
-        uid: nodeId,
-        x: spectrum.frequencies,
-        y: spectrum.power,
-        line: {
-          color: node.render.color,
-          width: nodeId === selectedNodeId ? node.render.lineWidth + 1 : node.render.lineWidth,
-        },
-        hovertemplate: `f: %{x:.6g}<br>PSD: %{y:.6g}<extra>${object.name}</extra>`,
+      const datasetTrace = buildDatasetSceneTrace({
+        nodeId,
+        object,
+        color: node.render.color,
+        lineWidth: node.render.lineWidth,
+        highlight: nodeId === selectedNodeId,
+        projection,
       })
+      if (datasetTrace.trace) traces.push(datasetTrace.trace)
+      if (datasetTrace.timeRange) {
+        timeRange = timeRange
+          ? [
+              Math.min(timeRange[0], datasetTrace.timeRange[0]),
+              Math.max(timeRange[1], datasetTrace.timeRange[1]),
+            ]
+          : datasetTrace.timeRange
+      }
+      if (Number.isFinite(datasetTrace.minY) && Number.isFinite(datasetTrace.maxY)) {
+        minY = Math.min(minY, datasetTrace.minY)
+        maxY = Math.max(maxY, datasetTrace.maxY)
+      }
+      mergeSceneBounds(sceneBounds, datasetTrace.bounds)
       continue
     }
 
@@ -6032,22 +6234,6 @@ function buildSceneBaseLayout(
     legend: { font: { color: plotlyTheme.text } },
     font: { color: plotlyTheme.text },
   } satisfies Partial<Layout>
-
-  if (config.type === 'data') {
-    return {
-      ...base,
-      xaxis: {
-        title: { text: 'frequency', font: { color: plotlyTheme.text } },
-        tickfont: { color: plotlyTheme.text },
-        zerolinecolor: 'rgba(120,120,120,0.3)',
-      },
-      yaxis: {
-        title: { text: 'PSD', font: { color: plotlyTheme.text } },
-        tickfont: { color: plotlyTheme.text },
-        zerolinecolor: 'rgba(120,120,120,0.3)',
-      },
-    }
-  }
 
   const projection = resolveSceneProjection(config, axisVariables)
   const resolvedAxisVariables =

@@ -152,6 +152,15 @@ export type PowerSpectrumResult = {
   segment_count: number
   sample_interval: number
   window_size: number
+  column_names?: string[]
+  preview?: {
+    columns: string[]
+    sample_interval: number
+    row_count: number
+    stride: number
+    row_indices: number[]
+    rows: number[][]
+  }
 }
 
 export type PowerSpectrumSamplesRequest = {

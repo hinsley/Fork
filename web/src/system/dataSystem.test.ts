@@ -3,8 +3,10 @@ import { createSystem, addObject } from './model'
 import { validateSystemConfig } from '../state/systemValidation'
 import {
   STARTER_DATASET_NAME,
+  STARTER_DATASET_SAMPLE_COUNT,
   STARTER_DATASET_WINDOW_SIZE,
   createDataSystemConfig,
+  markStarterDatasetSeeded,
   needsStarterDataset,
   seedStarterDataset,
 } from './dataDefaults'
@@ -108,8 +110,48 @@ describe('data systems', () => {
     const object = seeded.system.objects[seeded.system.ui.selectedNodeId!]
     expect(object?.type).toBe('dataset')
     expect(object?.name).toBe(STARTER_DATASET_NAME)
+    expect(object?.type === 'dataset' ? object.preview?.rows.length : null).toBe(
+      STARTER_DATASET_SAMPLE_COUNT
+    )
     expect(object?.type === 'dataset' ? object.lastPowerSpectrum?.windowSize : null).toBe(
       STARTER_DATASET_WINDOW_SIZE
+    )
+  })
+
+  it('backfills starter preview data for legacy starter datasets', () => {
+    const seeded = seedStarterDataset(
+      createSystem({
+        name: 'Data_System',
+        config: createDataSystemConfig('Data_System'),
+      }),
+      starterSpectrum,
+      '2026-05-12T00:00:00.000Z'
+    ).system
+    const starterId = seeded.ui.selectedNodeId!
+    const legacy = {
+      ...seeded,
+      config: {
+        ...seeded.config,
+        data: {
+          ...seeded.config.data!,
+          starterDatasetSeeded: true,
+        },
+      },
+      objects: {
+        ...seeded.objects,
+        [starterId]: {
+          ...seeded.objects[starterId]!,
+          preview: undefined,
+        },
+      },
+    }
+
+    const migrated = markStarterDatasetSeeded(legacy)
+
+    expect(migrated.changed).toBe(true)
+    const object = migrated.system.objects[starterId]
+    expect(object?.type === 'dataset' ? object.preview?.rows.length : null).toBe(
+      STARTER_DATASET_SAMPLE_COUNT
     )
   })
 })

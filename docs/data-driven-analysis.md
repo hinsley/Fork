@@ -14,7 +14,9 @@ The first shared operator is a streaming Welch-style power spectrum accumulator 
 
 ## Data Systems
 
-`SystemConfig.type` now includes `data`. A Data system stores column names and a sample interval, but it does not store equations or parameters. The current UI slice attaches a local CSV file from System Settings, streams the file in the worker, pushes parsed numeric chunks into the WASM accumulator, and stores only metadata plus the derived spectrum as a `dataset` object.
+`SystemConfig.type` now includes `data`. A Data system stores column names and a sample interval, but it does not store equations or parameters. The current UI slice attaches a local CSV file from System Settings, streams the file in the worker, pushes parsed numeric chunks into the WASM accumulator, and stores metadata plus the derived spectrum as a `dataset` object.
+
+State Space scenes render a bounded ordered preview of the dataset rather than the PSD: one-column data appears as a time series, and multi-column data appears as a phase/state-space trajectory using the scene axes. The preview is decimated while streaming, so it stays small even when the source CSV is too large to fit in memory.
 
 The raw local file is not serialized into Fork import/export or system snapshots. That keeps existing session archives small and avoids duplicating the existing import/export machinery. Re-attaching the file is the persistence boundary for this slice.
 
