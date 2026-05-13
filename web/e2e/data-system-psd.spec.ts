@@ -33,6 +33,11 @@ test('data systems attach local CSV files and render streamed paths and PSD resu
   await expect(starterSummary).toContainText('Source: starter-signal.csv')
   await expect(starterSummary).toContainText('Rows: 512')
   await expect(starterSummary).toContainText('Power Spectrum')
+  await expect(page.getByTestId('dataset-psd-plot')).toBeVisible()
+  await expect(page.locator('[data-testid="dataset-psd-plot"] polyline')).toHaveAttribute(
+    'points',
+    /,/
+  )
   await expect
     .poll(async () =>
       page.evaluate(() => {
@@ -67,6 +72,9 @@ test('data systems attach local CSV files and render streamed paths and PSD resu
 
   await page.getByTestId('attach-data-button').click()
   await page.getByTestId('data-csv-window-size').fill('64')
+  await expect(page.getByTestId('data-csv-state-column-count')).toHaveValue('1')
+  await expect(page.getByTestId('data-csv-state-column-count').locator('option')).toHaveCount(3)
+  await page.getByTestId('data-csv-state-column-count').selectOption('2')
   await page.getByTestId('data-csv-file').setInputFiles(csvPath)
   await page.getByTestId('data-csv-attach').click()
 
@@ -76,9 +84,15 @@ test('data systems attach local CSV files and render streamed paths and PSD resu
   const datasetSummary = page.getByTestId('dataset-summary')
   await expect(datasetSummary).toContainText('Source: fork-psd-signal.csv')
   await expect(datasetSummary).toContainText('Rows: 256')
+  await expect(datasetSummary).toContainText('Columns: x, y')
   await expect(datasetSummary).toContainText('Power Spectrum')
   await expect(datasetSummary).toContainText('Segments: 4')
   await expect(datasetSummary).toContainText('Window: 64')
+  await expect(page.getByTestId('dataset-psd-plot')).toBeVisible()
+  await expect(page.locator('[data-testid="dataset-psd-plot"] polyline')).toHaveAttribute(
+    'points',
+    /,/
+  )
 
   const viewport = page.locator('[data-testid^="plotly-viewport-"]').first()
   await expect(viewport).toHaveAttribute('data-trace-count', /[1-9]/)

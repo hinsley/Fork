@@ -19,6 +19,7 @@ import type {
   ManifoldStability,
   ManifoldTerminationCaps,
   OrbitObject,
+  PowerSpectrumSnapshot,
   Scene,
   System,
   SystemConfig,
@@ -751,6 +752,95 @@ function formatPolarValue(value: ComplexValue, digits = 6): string {
 function formatNumberSafe(value: number | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 'NaN'
   return formatNumber(value)
+}
+
+type SpectrumPlotPoint = {
+  x: number
+  y: number
+}
+
+type SpectrumPlotGeometry = {
+  points: string
+  xMin: number
+  xMax: number
+  peakFrequency: number
+  peakPower: number
+}
+
+const SPECTRUM_PLOT_WIDTH = 320
+const SPECTRUM_PLOT_HEIGHT = 150
+const SPECTRUM_PLOT_LEFT = 34
+const SPECTRUM_PLOT_RIGHT = 8
+const SPECTRUM_PLOT_TOP = 10
+const SPECTRUM_PLOT_BOTTOM = 24
+const MAX_SPECTRUM_PLOT_POINTS = 384
+
+function sampleSpectrumPlotPoints(
+  points: SpectrumPlotPoint[],
+  maxPoints = MAX_SPECTRUM_PLOT_POINTS
+): SpectrumPlotPoint[] {
+  if (points.length <= maxPoints) return points
+  const firstPoint = points[0]
+  const lastPoint = points[points.length - 1]
+  if (!firstPoint || !lastPoint) return points
+  const sampled: SpectrumPlotPoint[] = [firstPoint]
+  const bucketCount = Math.max(1, maxPoints - 2)
+  const sourceCount = points.length - 2
+  for (let bucket = 0; bucket < bucketCount; bucket += 1) {
+    const start = 1 + Math.floor((bucket * sourceCount) / bucketCount)
+    const end = 1 + Math.floor(((bucket + 1) * sourceCount) / bucketCount)
+    let strongest = points[start] ?? lastPoint
+    for (let index = start + 1; index < end; index += 1) {
+      const candidate = points[index]
+      if (candidate && candidate.y > strongest.y) {
+        strongest = candidate
+      }
+    }
+    sampled.push(strongest)
+  }
+  sampled.push(lastPoint)
+  return sampled
+}
+
+function buildSpectrumPlotGeometry(
+  spectrum: PowerSpectrumSnapshot
+): SpectrumPlotGeometry | null {
+  const finitePoints = spectrum.frequencies
+    .map((frequency, index) => ({
+      x: frequency,
+      y: spectrum.power[index] ?? Number.NaN,
+    }))
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+    .sort((a, b) => a.x - b.x)
+
+  if (finitePoints.length < 2) return null
+
+  const xMin = Math.min(...finitePoints.map((point) => point.x))
+  const xMax = Math.max(...finitePoints.map((point) => point.x))
+  const yMin = Math.min(0, ...finitePoints.map((point) => point.y))
+  const yMax = Math.max(...finitePoints.map((point) => point.y))
+  const xRange = xMax > xMin ? xMax - xMin : 1
+  const yRange = yMax > yMin ? yMax - yMin : 1
+  const plotWidth = SPECTRUM_PLOT_WIDTH - SPECTRUM_PLOT_LEFT - SPECTRUM_PLOT_RIGHT
+  const plotHeight = SPECTRUM_PLOT_HEIGHT - SPECTRUM_PLOT_TOP - SPECTRUM_PLOT_BOTTOM
+  const toX = (value: number) =>
+    SPECTRUM_PLOT_LEFT + ((value - xMin) / xRange) * plotWidth
+  const toY = (value: number) =>
+    SPECTRUM_PLOT_TOP + (1 - (value - yMin) / yRange) * plotHeight
+  const sampledPoints = sampleSpectrumPlotPoints(finitePoints)
+  const peak = finitePoints.reduce((strongest, point) =>
+    point.y > strongest.y ? point : strongest
+  )
+
+  return {
+    points: sampledPoints
+      .map((point) => `${toX(point.x).toFixed(2)},${toY(point.y).toFixed(2)}`)
+      .join(' '),
+    xMin,
+    xMax,
+    peakFrequency: peak.x,
+    peakPower: peak.y,
+  }
 }
 
 function formatBranchType(
@@ -1821,6 +1911,9 @@ export function InspectorDetailsPanel({
   const limitCycle = object?.type === 'limit_cycle' ? object : null
   const isocline = object?.type === 'isocline' ? object : null
   const dataset = object?.type === 'dataset' ? object : null
+  const datasetSpectrumPlot = dataset?.lastPowerSpectrum
+    ? buildSpectrumPlotGeometry(dataset.lastPowerSpectrum)
+    : null
   const paramOverrideTarget = orbit || equilibrium || limitCycle || isocline
   const selectedOrbitPointIndex =
     orbitPointSelection && orbitPointSelection.orbitId === selectedNodeId
@@ -2184,6 +2277,7 @@ export function InspectorDetailsPanel({
   const [orbitPsdError, setOrbitPsdError] = useState<string | null>(null)
   const [dataCsvFile, setDataCsvFile] = useState<File | null>(null)
   const [dataCsvColumnIndex, setDataCsvColumnIndex] = useState('0')
+  const [dataCsvStateColumnCount, setDataCsvStateColumnCount] = useState('1')
   const [dataCsvWindowSize, setDataCsvWindowSize] = useState('1024')
   const [dataCsvHasHeader, setDataCsvHasHeader] = useState(true)
   const [dataCsvError, setDataCsvError] = useState<string | null>(null)
@@ -4221,10 +4315,19 @@ export function InspectorDetailsPanel({
       return
     }
     const columnIndex = parseInteger(dataCsvColumnIndex)
+    const stateColumnCount = parseInteger(dataCsvStateColumnCount)
     const windowSize = parseInteger(dataCsvWindowSize)
     const sampleInterval = parseNumber(systemDraft.dataSampleInterval)
     if (columnIndex === null || columnIndex < 0) {
       setDataCsvError('Column index must be a non-negative integer.')
+      return
+    }
+    if (
+      stateColumnCount === null ||
+      stateColumnCount < 1 ||
+      stateColumnCount > 3
+    ) {
+      setDataCsvError('State variables must be 1, 2, or 3 columns.')
       return
     }
     if (windowSize === null || windowSize < 2 || (windowSize & (windowSize - 1)) !== 0) {
@@ -4239,6 +4342,7 @@ export function InspectorDetailsPanel({
     await onAttachDataCsvFile({
       file: dataCsvFile,
       columnIndex,
+      stateColumnCount,
       sampleInterval,
       windowSize,
       hasHeader: dataCsvHasHeader,
@@ -6769,6 +6873,18 @@ export function InspectorDetailsPanel({
               />
             </label>
             <label>
+              State Variables
+              <select
+                value={dataCsvStateColumnCount}
+                onChange={(event) => setDataCsvStateColumnCount(event.target.value)}
+                data-testid="data-csv-state-column-count"
+              >
+                <option value="1">1 column</option>
+                <option value="2">2 columns</option>
+                <option value="3">3 columns</option>
+              </select>
+            </label>
+            <label>
               PSD Window Size
               <input
                 type="number"
@@ -7115,6 +7231,48 @@ export function InspectorDetailsPanel({
                   <div className="inspector-data">
                     Window: {dataset.lastPowerSpectrum.windowSize}
                   </div>
+                  {datasetSpectrumPlot ? (
+                    <div className="dataset-spectrum" data-testid="dataset-psd-plot">
+                      <svg
+                        className="dataset-spectrum__plot"
+                        viewBox={`0 0 ${SPECTRUM_PLOT_WIDTH} ${SPECTRUM_PLOT_HEIGHT}`}
+                        preserveAspectRatio="none"
+                        role="img"
+                        aria-label="Power spectrum density plot"
+                      >
+                        <line
+                          className="dataset-spectrum__axis"
+                          x1={SPECTRUM_PLOT_LEFT}
+                          y1={SPECTRUM_PLOT_HEIGHT - SPECTRUM_PLOT_BOTTOM}
+                          x2={SPECTRUM_PLOT_WIDTH - SPECTRUM_PLOT_RIGHT}
+                          y2={SPECTRUM_PLOT_HEIGHT - SPECTRUM_PLOT_BOTTOM}
+                        />
+                        <line
+                          className="dataset-spectrum__axis"
+                          x1={SPECTRUM_PLOT_LEFT}
+                          y1={SPECTRUM_PLOT_TOP}
+                          x2={SPECTRUM_PLOT_LEFT}
+                          y2={SPECTRUM_PLOT_HEIGHT - SPECTRUM_PLOT_BOTTOM}
+                        />
+                        <polyline
+                          className="dataset-spectrum__line"
+                          points={datasetSpectrumPlot.points}
+                          fill="none"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      </svg>
+                      <div className="dataset-spectrum__readout">
+                        <span>
+                          f {formatNumber(datasetSpectrumPlot.xMin, 3)}-
+                          {formatNumber(datasetSpectrumPlot.xMax, 3)}
+                        </span>
+                        <span>
+                          peak {formatNumber(datasetSpectrumPlot.peakFrequency, 3)} /{' '}
+                          {formatNumber(datasetSpectrumPlot.peakPower, 3)}
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
                 </>
               ) : null}
             </div>

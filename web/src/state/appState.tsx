@@ -141,6 +141,17 @@ function updateDataSceneAxes(system: System, columns: string[]): System {
   return changed ? { ...system, scenes } : system
 }
 
+const MIN_DATA_STATE_COLUMNS = 1
+const MAX_DATA_STATE_COLUMNS = 3
+
+function normalizeDataStateColumnCount(value: number | undefined, fallback: number): number {
+  const raw = typeof value === 'number' && Number.isFinite(value) ? value : fallback
+  return Math.max(
+    MIN_DATA_STATE_COLUMNS,
+    Math.min(MAX_DATA_STATE_COLUMNS, Math.trunc(raw))
+  )
+}
+
 function branchNameExists(system: System, parentObjectId: string, name: string): boolean {
   return Object.values(system.branches).some(
     (branch) =>
@@ -1033,6 +1044,7 @@ export type OrbitPowerSpectrumRequest = {
 export type AttachDataCsvFileRequest = {
   file: File
   columnIndex: number
+  stateColumnCount?: number
   sampleInterval: number
   windowSize: number
   hasHeader?: boolean
@@ -2372,18 +2384,48 @@ export function AppProvider({
           windowSize: request.windowSize,
           hasHeader: request.hasHeader,
         })
-        const datasetColumns =
+        const rawDatasetColumns =
           result.preview?.columns ??
           result.column_names ??
           (state.system.config.varNames.length > 0
             ? [...state.system.config.varNames]
             : [`column_${columnIndex + 1}`])
+        const allDatasetColumns =
+          rawDatasetColumns.length > 0 ? rawDatasetColumns : [`column_${columnIndex + 1}`]
+        const fallbackColumnCount = Math.min(
+          MAX_DATA_STATE_COLUMNS,
+          allDatasetColumns.length || MIN_DATA_STATE_COLUMNS
+        )
+        const stateColumnCount = normalizeDataStateColumnCount(
+          request.stateColumnCount,
+          fallbackColumnCount
+        )
+        if (allDatasetColumns.length < stateColumnCount) {
+          throw new Error(
+            `CSV has only ${allDatasetColumns.length} numeric column${
+              allDatasetColumns.length === 1 ? '' : 's'
+            }; choose at most ${allDatasetColumns.length} state variable${
+              allDatasetColumns.length === 1 ? '' : 's'
+            }.`
+          )
+        }
+        const datasetColumns = allDatasetColumns.slice(0, stateColumnCount)
         const columnName =
           result.column_names?.[columnIndex] ??
-          datasetColumns[columnIndex] ??
+          allDatasetColumns[columnIndex] ??
           state.system.config.varNames[columnIndex] ??
           `column_${columnIndex + 1}`
         const rowCount = result.preview?.row_count ?? result.sample_count
+        const preview = result.preview
+          ? {
+              columns: result.preview.columns.slice(0, stateColumnCount),
+              sampleInterval: result.preview.sample_interval,
+              rowCount: result.preview.row_count,
+              stride: result.preview.stride,
+              rowIndices: result.preview.row_indices,
+              rows: result.preview.rows.map((row) => row.slice(0, stateColumnCount)),
+            }
+          : undefined
         const dataset: DatasetObject = {
           type: 'dataset',
           name: request.file.name.replace(/\.[^.]+$/, '') || 'Dataset',
@@ -2393,16 +2435,7 @@ export function AppProvider({
           columns: datasetColumns,
           sampleInterval: request.sampleInterval,
           rowCount,
-          preview: result.preview
-            ? {
-                columns: result.preview.columns,
-                sampleInterval: result.preview.sample_interval,
-                rowCount: result.preview.row_count,
-                stride: result.preview.stride,
-                rowIndices: result.preview.row_indices,
-                rows: result.preview.rows,
-              }
-            : undefined,
+          preview,
           lastPowerSpectrum: {
             frequencies: result.frequencies,
             power: result.power,

@@ -257,6 +257,76 @@ describe('ViewportPanel view state wiring', () => {
     expect(typeof yTitle === 'string' ? yTitle : yTitle?.text).toBe('y')
   })
 
+  it('renders three-column data previews as 3D state-space trajectories', () => {
+    const config: SystemConfig = {
+      name: 'Data_Orbit_3D',
+      equations: [],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z'],
+      solver: 'data',
+      type: 'data',
+      data: {
+        sampleInterval: 1,
+        columns: ['x', 'y', 'z'],
+      },
+    }
+    let system = createSystem({ name: config.name, config })
+    system = addScene(system, 'State_Space').system
+    const dataset: DatasetObject = {
+      type: 'dataset',
+      name: 'orbit_trace_3d',
+      systemName: system.name,
+      sourceName: 'orbit.csv',
+      fileSize: 96,
+      columns: ['x', 'y', 'z'],
+      sampleInterval: 1,
+      rowCount: 3,
+      preview: {
+        columns: ['x', 'y', 'z'],
+        sampleInterval: 1,
+        rowCount: 3,
+        stride: 1,
+        rowIndices: [0, 1, 2],
+        rows: [
+          [0, 1, 2],
+          [1, 0, 3],
+          [0, -1, 4],
+        ],
+      },
+    }
+    system = addObject(system, dataset).system
+
+    renderPanel(system)
+
+    const call = plotlyCalls[plotlyCalls.length - 1]!
+    const trace = call.data[0] as {
+      type: string
+      name: string
+      x: number[]
+      y: number[]
+      z: number[]
+    }
+    expect(trace.type).toBe('scatter3d')
+    expect(trace.name).toBe('orbit_trace_3d')
+    expect(trace.x).toEqual([0, 1, 0])
+    expect(trace.y).toEqual([1, 0, -1])
+    expect(trace.z).toEqual([2, 3, 4])
+    const sceneLayout = call.layout.scene as
+      | {
+          xaxis?: { title?: string | { text?: string } }
+          yaxis?: { title?: string | { text?: string } }
+          zaxis?: { title?: string | { text?: string } }
+        }
+      | undefined
+    const xTitle = sceneLayout?.xaxis?.title
+    const yTitle = sceneLayout?.yaxis?.title
+    const zTitle = sceneLayout?.zaxis?.title
+    expect(typeof xTitle === 'string' ? xTitle : xTitle?.text).toBe('x')
+    expect(typeof yTitle === 'string' ? yTitle : yTitle?.text).toBe('y')
+    expect(typeof zTitle === 'string' ? zTitle : zTitle?.text).toBe('z')
+  })
+
   it('falls back to event point index when selecting orbit points from scene traces', () => {
     let system = createSystem({ name: 'Orbit_Click_System' })
     const sceneResult = addScene(system, 'Scene 1')

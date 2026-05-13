@@ -855,6 +855,43 @@
   color: var(--text-muted);
 }
 
+.dataset-spectrum {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+}
+
+.dataset-spectrum__plot {
+  width: 100%;
+  height: 150px;
+  display: block;
+}
+
+.dataset-spectrum__axis {
+  stroke: var(--panel-border);
+  stroke-width: 1;
+}
+
+.dataset-spectrum__line {
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dataset-spectrum__readout {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+}
+
 .orbit-preview {
   display: grid;
   gap: 8px;
