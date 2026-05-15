@@ -159,6 +159,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const [editingId, setEditingId] = useState<string | null>(null)
     const [draftName, setDraftName] = useState('')
     const [draggingId, setDraggingId] = useState<string | null>(null)
+    const [touchDragging, setTouchDragging] = useState(false)
     const [dropPreview, setDropPreview] = useState<
       | {
           mode: 'reorder'
@@ -170,6 +171,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       | null
     >(null)
     const dropPreviewRef = useRef<typeof dropPreview>(null)
+    const draggingIdRef = useRef<string | null>(null)
     const [nodeContextMenu, setNodeContextMenu] = useState<{
       id: string
       x: number
@@ -397,8 +399,10 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
           window.clearTimeout(interaction.dragArmTimer)
         }
         touchInteractionRef.current = null
+        draggingIdRef.current = null
         dropPreviewRef.current = null
         setDropPreview(null)
+        setTouchDragging(false)
         setDraggingId(null)
       }
       const clearIfHidden = () => {
@@ -406,17 +410,21 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
           clearDragInteraction()
         }
       }
+      const clearTouchDragInteraction = () => {
+        if (!touchInteractionRef.current?.dragging) return
+        clearDragInteraction()
+      }
 
       window.addEventListener('dragend', clearDragInteraction)
       window.addEventListener('drop', clearDragInteraction)
       window.addEventListener('blur', clearDragInteraction)
-      window.addEventListener('pointercancel', clearDragInteraction)
+      window.addEventListener('pointercancel', clearTouchDragInteraction)
       document.addEventListener('visibilitychange', clearIfHidden)
       return () => {
         window.removeEventListener('dragend', clearDragInteraction)
         window.removeEventListener('drop', clearDragInteraction)
         window.removeEventListener('blur', clearDragInteraction)
-        window.removeEventListener('pointercancel', clearDragInteraction)
+        window.removeEventListener('pointercancel', clearTouchDragInteraction)
         document.removeEventListener('visibilitychange', clearIfHidden)
       }
     }, [draggingId])
@@ -527,6 +535,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         interaction.contextMenuTimer = null
         suppressNextClickRef.current = true
         updateDropPreview(null)
+        draggingIdRef.current = null
+        setTouchDragging(false)
         setDraggingId(null)
         openNodeContextMenu(interaction.nodeId, interaction.startX, interaction.startY)
       }, TOUCH_CONTEXT_MENU_DELAY_MS)
@@ -565,6 +575,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         interaction.dragging = true
         setCreateMenu(null)
         setNodeContextMenu(null)
+        draggingIdRef.current = interaction.nodeId
+        setTouchDragging(true)
         setDraggingId(interaction.nodeId)
       }
 
@@ -582,6 +594,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         suppressNextClickRef.current = true
         commitDropPreview(interaction.nodeId)
         updateDropPreview(null)
+        draggingIdRef.current = null
+        setTouchDragging(false)
         setDraggingId(null)
       }
       touchInteractionRef.current = null
@@ -594,6 +608,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       clearTouchInteractionTimer()
       if (interaction.dragging) {
         updateDropPreview(null)
+        draggingIdRef.current = null
+        setTouchDragging(false)
         setDraggingId(null)
       }
       touchInteractionRef.current = null
@@ -662,9 +678,13 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
             }
             event.dataTransfer.effectAllowed = 'move'
             event.dataTransfer.setData('text/plain', nodeId)
+            draggingIdRef.current = nodeId
+            setTouchDragging(false)
             setDraggingId(nodeId)
           }}
           onDragEnd={() => {
+            draggingIdRef.current = null
+            setTouchDragging(false)
             setDraggingId(null)
             updateDropPreview(null)
           }}
@@ -685,7 +705,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
             cancelTouchInteraction(event)
           }}
           onDragOver={(event) => {
-            const sourceId = draggingId || event.dataTransfer.getData('text/plain')
+            const sourceId =
+              draggingIdRef.current || draggingId || event.dataTransfer.getData('text/plain')
             if (!sourceId || sourceId === nodeId) {
               return
             }
@@ -821,7 +842,9 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
 
     return (
       <div
-        className={`objects-tree${draggingId ? ' objects-tree--dragging' : ''}`}
+        className={`objects-tree${draggingId ? ' objects-tree--dragging' : ''}${
+          touchDragging ? ' objects-tree--touch-dragging' : ''
+        }`}
         onDragOver={(event) => {
           if (!dropPreviewRef.current) return
           event.preventDefault()
@@ -829,8 +852,12 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         }}
         onDrop={(event) => {
           event.preventDefault()
-          commitDropPreview(event.dataTransfer.getData('text/plain') || draggingId)
+          commitDropPreview(
+            event.dataTransfer.getData('text/plain') || draggingIdRef.current || draggingId
+          )
           updateDropPreview(null)
+          draggingIdRef.current = null
+          setTouchDragging(false)
           setDraggingId(null)
         }}
         data-testid="objects-tree"

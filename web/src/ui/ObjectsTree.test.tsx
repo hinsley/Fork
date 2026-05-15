@@ -379,6 +379,19 @@ describe('ObjectsTree', () => {
 
     expect(row).not.toHaveClass('tree-node__row--dragging')
     expect(tree).toHaveClass('objects-tree--dragging')
+    expect(tree).not.toHaveClass('objects-tree--touch-dragging')
+
+    fireEvent(
+      window,
+      createPointerEvent('pointercancel', {
+        clientX: 0,
+        clientY: 0,
+        pointerId: 1,
+        pointerType: 'mouse',
+      })
+    )
+
+    expect(tree).toHaveClass('objects-tree--dragging')
 
     fireEvent(window, new Event('dragend'))
 
@@ -425,7 +438,7 @@ describe('ObjectsTree', () => {
     )
   })
 
-  it('reorders child nodes before a sibling drop boundary', () => {
+  it('reorders child nodes before a sibling drop boundary when drag data is protected', () => {
     const { system, objectNodeId, branchNodeId } = createDemoSystem()
     const sourceBranch = system.branches[branchNodeId]
     if (!sourceBranch) {
@@ -463,11 +476,12 @@ describe('ObjectsTree', () => {
       />
     )
 
+    let exposeDragData = true
     const dataTransfer = {
       effectAllowed: '',
       data: new Map<string, string>(),
       getData(type: string) {
-        return this.data.get(type) ?? ''
+        return exposeDragData ? (this.data.get(type) ?? '') : ''
       },
       setData(type: string, value: string) {
         this.data.set(type, value)
@@ -477,6 +491,7 @@ describe('ObjectsTree', () => {
     fireEvent.dragStart(screen.getByTestId(`object-tree-row-${secondBranchNodeId}`), {
       dataTransfer,
     })
+    exposeDragData = false
     const targetRow = screen.getByTestId(`object-tree-row-${branchNodeId}`)
     const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
       bottom: 120,
@@ -584,6 +599,7 @@ describe('ObjectsTree', () => {
           pointerType: 'touch',
         })
       )
+      expect(screen.getByTestId('objects-tree')).toHaveClass('objects-tree--touch-dragging')
       fireEvent(
         sourceRow,
         createPointerEvent('pointerup', {
@@ -595,6 +611,9 @@ describe('ObjectsTree', () => {
       )
 
       expect(onReorderNode).toHaveBeenCalledWith(secondBranchNodeId, branchNodeId, 'before')
+      expect(screen.getByTestId('objects-tree')).not.toHaveClass(
+        'objects-tree--touch-dragging'
+      )
     } finally {
       if (originalElementFromPoint) {
         Object.defineProperty(document, 'elementFromPoint', {

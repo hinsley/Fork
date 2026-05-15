@@ -374,7 +374,7 @@
     background 120ms ease;
 }
 
-.objects-tree--dragging .tree-node__row-motion {
+.objects-tree--touch-dragging .tree-node__row-motion {
   pointer-events: none;
 }
 
