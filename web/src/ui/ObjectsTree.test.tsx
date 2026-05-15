@@ -958,6 +958,278 @@ describe('ObjectsTree', () => {
     expect(onReorderNode).toHaveBeenCalledWith(objectNodeId, targetRootId, 'after')
   })
 
+  it('commits the current reorder preview on native drag end', () => {
+    const system = createSystem({
+      name: 'Drag_End_Commit_Test',
+    })
+    const firstObject: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_First',
+      systemName: system.config.name,
+      data: [[0, 0, 0, 0]],
+      t_start: 0,
+      t_end: 1,
+      dt: 0.1,
+    }
+    const secondObject: OrbitObject = {
+      ...firstObject,
+      name: 'Orbit_Second',
+    }
+    const withFirst = addObject(system, firstObject)
+    const withSecond = addObject(withFirst.system, secondObject)
+    const onReorderNode = vi.fn()
+
+    render(
+      <ObjectsTree
+        system={withSecond.system}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={onReorderNode}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    const dataTransfer = {
+      effectAllowed: '',
+      dropEffect: '',
+      data: new Map<string, string>(),
+      getData(type: string) {
+        return this.data.get(type) ?? ''
+      },
+      setData(type: string, value: string) {
+        this.data.set(type, value)
+      },
+    }
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    rectSpy.mockImplementation(function getMockRect(this: HTMLElement) {
+      if (this.dataset.treeNodeId === withFirst.nodeId) {
+        return {
+          bottom: 120,
+          height: 20,
+          left: 0,
+          right: 200,
+          top: 100,
+          width: 200,
+          x: 0,
+          y: 100,
+          toJSON: () => ({}),
+        }
+      }
+      return {
+        bottom: 150,
+        height: 20,
+        left: 0,
+        right: 200,
+        top: 130,
+        width: 200,
+        x: 0,
+        y: 130,
+        toJSON: () => ({}),
+      }
+    })
+
+    try {
+      const sourceRow = screen.getByTestId(`object-tree-row-${withSecond.nodeId}`)
+      fireEvent.dragStart(sourceRow, { dataTransfer })
+      const dragOver = new Event('dragover', { bubbles: true, cancelable: true })
+      Object.defineProperty(dragOver, 'clientY', { value: 104 })
+      Object.defineProperty(dragOver, 'dataTransfer', { value: dataTransfer })
+      fireEvent(screen.getByTestId(`object-tree-row-${withFirst.nodeId}`), dragOver)
+
+      fireEvent.dragEnd(sourceRow, { dataTransfer })
+
+      expect(onReorderNode).toHaveBeenCalledWith(
+        withSecond.nodeId,
+        withFirst.nodeId,
+        'before'
+      )
+    } finally {
+      rectSpy.mockRestore()
+    }
+  })
+
+  it('reorders a root object to the start when dragged above the tree', () => {
+    const system = createSystem({
+      name: 'Root_Start_Test',
+    })
+    const firstObject: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_First',
+      systemName: system.config.name,
+      data: [[0, 0, 0, 0]],
+      t_start: 0,
+      t_end: 1,
+      dt: 0.1,
+    }
+    const secondObject: OrbitObject = {
+      ...firstObject,
+      name: 'Orbit_Second',
+    }
+    const withFirst = addObject(system, firstObject)
+    const withSecond = addObject(withFirst.system, secondObject)
+    const onReorderNode = vi.fn()
+
+    render(
+      <ObjectsTree
+        system={withSecond.system}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={onReorderNode}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    const dataTransfer = {
+      effectAllowed: '',
+      dropEffect: '',
+      data: new Map<string, string>(),
+      getData(type: string) {
+        return this.data.get(type) ?? ''
+      },
+      setData(type: string, value: string) {
+        this.data.set(type, value)
+      },
+    }
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    rectSpy.mockImplementation(function getMockRect(this: HTMLElement) {
+      if (this.dataset.treeNodeId === withFirst.nodeId) {
+        return {
+          bottom: 120,
+          height: 20,
+          left: 0,
+          right: 200,
+          top: 100,
+          width: 200,
+          x: 0,
+          y: 100,
+          toJSON: () => ({}),
+        }
+      }
+      if (this.dataset.treeNodeId === withSecond.nodeId) {
+        return {
+          bottom: 150,
+          height: 20,
+          left: 0,
+          right: 200,
+          top: 130,
+          width: 200,
+          x: 0,
+          y: 130,
+          toJSON: () => ({}),
+        }
+      }
+      return {
+        bottom: 200,
+        height: 200,
+        left: 0,
+        right: 200,
+        top: 0,
+        width: 200,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }
+    })
+
+    try {
+      fireEvent.dragStart(screen.getByTestId(`object-tree-row-${withSecond.nodeId}`), {
+        dataTransfer,
+      })
+      const dragOver = new Event('dragover', { bubbles: true, cancelable: true })
+      Object.defineProperty(dragOver, 'clientY', { value: 80 })
+      Object.defineProperty(dragOver, 'dataTransfer', { value: dataTransfer })
+      fireEvent(window, dragOver)
+      expect(dragOver.defaultPrevented).toBe(true)
+      expect(dataTransfer.dropEffect).toBe('move')
+
+      const drop = new Event('drop', { bubbles: true, cancelable: true })
+      Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer })
+      fireEvent(window, drop)
+
+      expect(onReorderNode).toHaveBeenCalledWith(
+        withSecond.nodeId,
+        withFirst.nodeId,
+        'before'
+      )
+    } finally {
+      rectSpy.mockRestore()
+    }
+  })
+
+  it('commits the current reorder preview when dropped outside the tree', () => {
+    const { system, objectNodeId } = createDemoSystem()
+    const targetObject: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Target',
+      systemName: system.config.name,
+      data: [[0, 0, 0, 0]],
+      t_start: 0,
+      t_end: 1,
+      dt: 0.1,
+    }
+    const withTarget = addObject(system, targetObject)
+    const targetRootId = withTarget.nodeId
+    const onReorderNode = vi.fn()
+
+    render(
+      <ObjectsTree
+        system={withTarget.system}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={onReorderNode}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    const dataTransfer = {
+      effectAllowed: '',
+      dropEffect: '',
+      data: new Map<string, string>(),
+      getData(type: string) {
+        return this.data.get(type) ?? ''
+      },
+      setData(type: string, value: string) {
+        this.data.set(type, value)
+      },
+    }
+    const tree = screen.getByTestId('objects-tree')
+
+    fireEvent.dragStart(screen.getByTestId(`object-tree-row-${objectNodeId}`), {
+      dataTransfer,
+    })
+    const dragOver = new Event('dragover', { bubbles: true, cancelable: true })
+    Object.defineProperty(dragOver, 'clientY', { value: 500 })
+    Object.defineProperty(dragOver, 'dataTransfer', { value: dataTransfer })
+    fireEvent(tree, dragOver)
+
+    const windowDragOver = new Event('dragover', { bubbles: true, cancelable: true })
+    Object.defineProperty(windowDragOver, 'clientY', { value: 500 })
+    Object.defineProperty(windowDragOver, 'dataTransfer', { value: dataTransfer })
+    fireEvent(window, windowDragOver)
+    expect(windowDragOver.defaultPrevented).toBe(true)
+
+    const drop = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer })
+    fireEvent(window, drop)
+
+    expect(onReorderNode).toHaveBeenCalledWith(objectNodeId, targetRootId, 'after')
+  })
+
   it('touch drags a root object to the end when moved over tree whitespace', () => {
     vi.useFakeTimers()
     const { system, objectNodeId } = createDemoSystem()

@@ -173,6 +173,11 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     const dropPreviewRef = useRef<typeof dropPreview>(null)
     const draggingIdRef = useRef<string | null>(null)
     const treeRootRef = useRef<HTMLDivElement | null>(null)
+    const dragRuntimeRef = useRef<{
+      commitDropPreview: (sourceId: string | null) => boolean
+      getCurrentDragSourceId: (dataTransfer?: DataTransfer | null) => string | null
+      updateDropPreviewForRootBoundary: (sourceId: string, clientY: number) => boolean
+    } | null>(null)
     const [nodeContextMenu, setNodeContextMenu] = useState<{
       id: string
       x: number
@@ -388,47 +393,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       setDropPreview(preview)
     }
 
-    useEffect(() => {
-      if (!draggingId) return
-
-      const clearDragInteraction = () => {
-        const interaction = touchInteractionRef.current
-        if (interaction?.contextMenuTimer) {
-          window.clearTimeout(interaction.contextMenuTimer)
-        }
-        if (interaction?.dragArmTimer) {
-          window.clearTimeout(interaction.dragArmTimer)
-        }
-        touchInteractionRef.current = null
-        draggingIdRef.current = null
-        dropPreviewRef.current = null
-        setDropPreview(null)
-        setTouchDragging(false)
-        setDraggingId(null)
-      }
-      const clearIfHidden = () => {
-        if (document.visibilityState === 'hidden') {
-          clearDragInteraction()
-        }
-      }
-      const clearTouchDragInteraction = () => {
-        if (!touchInteractionRef.current?.dragging) return
-        clearDragInteraction()
-      }
-
-      window.addEventListener('dragend', clearDragInteraction)
-      window.addEventListener('drop', clearDragInteraction)
-      window.addEventListener('blur', clearDragInteraction)
-      window.addEventListener('pointercancel', clearTouchDragInteraction)
-      document.addEventListener('visibilitychange', clearIfHidden)
-      return () => {
-        window.removeEventListener('dragend', clearDragInteraction)
-        window.removeEventListener('drop', clearDragInteraction)
-        window.removeEventListener('blur', clearDragInteraction)
-        window.removeEventListener('pointercancel', clearTouchDragInteraction)
-        document.removeEventListener('visibilitychange', clearIfHidden)
-      }
-    }, [draggingId])
+    const getCurrentDragSourceId = (dataTransfer?: DataTransfer | null) =>
+      draggingIdRef.current || draggingId || dataTransfer?.getData('text/plain') || null
 
     const updateDropPreviewForTarget = (
       sourceId: string,
@@ -482,33 +448,58 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       return true
     }
 
-    const updateDropPreviewForRootEnd = (sourceId: string): boolean => {
+    const updateDropPreviewForRootEdge = (
+      sourceId: string,
+      edge: 'start' | 'end'
+    ): boolean => {
       const sourceNode = system.nodes[sourceId]
       if (!sourceNode || !canMoveNodeIntoParent(system.nodes, sourceId, null)) {
-        updateDropPreview(null)
-        return false
+        return Boolean(dropPreviewRef.current)
       }
 
-      const targetId = rootNodes.filter((id) => id !== sourceId).at(-1)
+      const targetIds = rootNodes.filter((id) => id !== sourceId)
+      const targetId = edge === 'start' ? targetIds[0] : targetIds.at(-1)
       if (!targetId) {
         updateDropPreview(null)
         return true
       }
+      const placement: ReorderPlacement = edge === 'start' ? 'before' : 'after'
 
       if (
         dropPreviewRef.current?.mode !== 'reorder' ||
         dropPreviewRef.current.targetId !== targetId ||
         dropPreviewRef.current.parentId !== null ||
-        dropPreviewRef.current.placement !== 'after'
+        dropPreviewRef.current.placement !== placement
       ) {
         updateDropPreview({
           mode: 'reorder',
           targetId,
           parentId: null,
-          placement: 'after',
+          placement,
         })
       }
       return true
+    }
+
+    const updateDropPreviewForRootBoundary = (sourceId: string, clientY: number): boolean => {
+      const targetRows = rootNodes
+        .filter((id) => id !== sourceId)
+        .map((id) => rowRefs.current.get(id))
+        .filter((row): row is HTMLDivElement => Boolean(row))
+
+      if (targetRows.length === 0) {
+        return updateDropPreviewForRootEdge(sourceId, 'end')
+      }
+
+      const firstRect = targetRows[0]!.getBoundingClientRect()
+      const lastRect = targetRows[targetRows.length - 1]!.getBoundingClientRect()
+      if (clientY < firstRect.top) {
+        return updateDropPreviewForRootEdge(sourceId, 'start')
+      }
+      if (clientY > lastRect.bottom) {
+        return updateDropPreviewForRootEdge(sourceId, 'end')
+      }
+      return Boolean(dropPreviewRef.current)
     }
 
     const updateTouchDropPreview = (sourceId: string, clientX: number, clientY: number) => {
@@ -516,8 +507,13 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       const targetRow = element?.closest<HTMLElement>('[data-tree-node-id]')
       const targetId = targetRow?.dataset.treeNodeId
       if (!targetId || targetId === sourceId) {
-        if (element && treeRootRef.current?.contains(element)) {
-          return updateDropPreviewForRootEnd(sourceId)
+        if (
+          (element && treeRootRef.current?.contains(element)) ||
+          !treeRootRef.current ||
+          clientY < treeRootRef.current.getBoundingClientRect().top ||
+          clientY > treeRootRef.current.getBoundingClientRect().bottom
+        ) {
+          return updateDropPreviewForRootBoundary(sourceId, clientY)
         }
         return Boolean(dropPreviewRef.current)
       }
@@ -539,6 +535,97 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       onReorderNode(sourceId, preview.targetId, preview.placement)
       return true
     }
+
+    useLayoutEffect(() => {
+      dragRuntimeRef.current = {
+        commitDropPreview,
+        getCurrentDragSourceId,
+        updateDropPreviewForRootBoundary,
+      }
+    })
+
+    useEffect(() => {
+      if (!draggingId) return
+
+      const clearDragInteraction = () => {
+        const interaction = touchInteractionRef.current
+        if (interaction?.contextMenuTimer) {
+          window.clearTimeout(interaction.contextMenuTimer)
+        }
+        if (interaction?.dragArmTimer) {
+          window.clearTimeout(interaction.dragArmTimer)
+        }
+        touchInteractionRef.current = null
+        draggingIdRef.current = null
+        dropPreviewRef.current = null
+        setDropPreview(null)
+        setTouchDragging(false)
+        setDraggingId(null)
+      }
+      const clearIfHidden = () => {
+        if (document.visibilityState === 'hidden') {
+          clearDragInteraction()
+        }
+      }
+      const clearTouchDragInteraction = () => {
+        if (!touchInteractionRef.current?.dragging) return
+        clearDragInteraction()
+      }
+      const updateWindowDragPreview = (event: DragEvent) => {
+        const runtime = dragRuntimeRef.current
+        if (!runtime) return
+        const sourceId = runtime.getCurrentDragSourceId(event.dataTransfer)
+        if (!sourceId) return
+
+        const target = event.target instanceof Element ? event.target : null
+        if (
+          target &&
+          treeRootRef.current?.contains(target) &&
+          target.closest('[data-tree-node-id]')
+        ) {
+          return
+        }
+
+        const hasValidPreview =
+          runtime.updateDropPreviewForRootBoundary(sourceId, event.clientY) ||
+          Boolean(dropPreviewRef.current)
+        if (!hasValidPreview) return
+        event.preventDefault()
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = 'move'
+        }
+      }
+      const commitWindowDragEnd = (event: DragEvent) => {
+        const runtime = dragRuntimeRef.current
+        const sourceId = runtime?.getCurrentDragSourceId(event.dataTransfer) ?? null
+        runtime?.commitDropPreview(sourceId)
+        clearDragInteraction()
+      }
+      const commitWindowDrop = (event: DragEvent) => {
+        const runtime = dragRuntimeRef.current
+        const sourceId = runtime?.getCurrentDragSourceId(event.dataTransfer) ?? null
+        if (dropPreviewRef.current) {
+          event.preventDefault()
+          runtime?.commitDropPreview(sourceId)
+        }
+        clearDragInteraction()
+      }
+
+      window.addEventListener('dragover', updateWindowDragPreview)
+      window.addEventListener('dragend', commitWindowDragEnd)
+      window.addEventListener('drop', commitWindowDrop)
+      window.addEventListener('blur', clearDragInteraction)
+      window.addEventListener('pointercancel', clearTouchDragInteraction)
+      document.addEventListener('visibilitychange', clearIfHidden)
+      return () => {
+        window.removeEventListener('dragover', updateWindowDragPreview)
+        window.removeEventListener('dragend', commitWindowDragEnd)
+        window.removeEventListener('drop', commitWindowDrop)
+        window.removeEventListener('blur', clearDragInteraction)
+        window.removeEventListener('pointercancel', clearTouchDragInteraction)
+        document.removeEventListener('visibilitychange', clearIfHidden)
+      }
+    }, [draggingId])
 
     const startTouchInteraction = (
       event: ReactPointerEvent<HTMLDivElement>,
@@ -715,7 +802,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
             setTouchDragging(false)
             setDraggingId(nodeId)
           }}
-          onDragEnd={() => {
+          onDragEnd={(event) => {
+            commitDropPreview(getCurrentDragSourceId(event.dataTransfer))
             draggingIdRef.current = null
             setTouchDragging(false)
             setDraggingId(null)
@@ -883,9 +971,8 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
           const target = event.target instanceof Element ? event.target : null
           const isOverRow = Boolean(target?.closest('[data-tree-node-id]'))
           if (!isOverRow) {
-            const sourceId =
-              draggingIdRef.current || draggingId || event.dataTransfer.getData('text/plain')
-            if (sourceId && updateDropPreviewForRootEnd(sourceId)) {
+            const sourceId = getCurrentDragSourceId(event.dataTransfer)
+            if (sourceId && updateDropPreviewForRootBoundary(sourceId, event.clientY)) {
               event.preventDefault()
               event.dataTransfer.dropEffect = 'move'
             }
@@ -897,9 +984,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         }}
         onDrop={(event) => {
           event.preventDefault()
-          commitDropPreview(
-            event.dataTransfer.getData('text/plain') || draggingIdRef.current || draggingId
-          )
+          commitDropPreview(getCurrentDragSourceId(event.dataTransfer))
           updateDropPreview(null)
           draggingIdRef.current = null
           setTouchDragging(false)
