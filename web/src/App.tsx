@@ -357,6 +357,7 @@ function App() {
               open
               onToggle={() => undefined}
               testId="objects-panel"
+              className="panel--objects"
               showToggle={false}
               actions={
                 <div className="panel-actions">

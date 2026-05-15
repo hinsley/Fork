@@ -54,3 +54,41 @@ test('object tree native drag reorders with a live preview', async ({ page }) =>
     'Branch: eq_branch (equilibrium)',
   ])
 })
+
+test('object tree native drag appends root objects from bottom whitespace', async ({ page }) => {
+  const harness = createHarness(page)
+  await harness.goto({ deterministic: true, mock: true })
+  await harness.createSystem('Object_Tree_Bottom_Drop')
+  await harness.createOrbit()
+  await harness.createOrbit()
+
+  const objectLabels = async () =>
+    await page.locator('[data-testid^="object-tree-row-"]').evaluateAll((rows) =>
+      rows
+        .map((row) => row.textContent?.trim() ?? '')
+        .filter((label) => label.startsWith('Orbit_'))
+    )
+
+  await expect.poll(objectLabels).toEqual(['Orbit_1 (orbit)', 'Orbit_2 (orbit)'])
+
+  const source = page
+    .locator('[data-testid^="object-tree-row-"]')
+    .filter({ hasText: 'Orbit_1 (orbit)' })
+  const sourceBox = await source.boundingBox()
+  const panelBox = await page.getByTestId('objects-panel').boundingBox()
+  if (!sourceBox || !panelBox) {
+    throw new Error('Expected source row and objects panel to be visible.')
+  }
+
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, panelBox.y + panelBox.height - 24, {
+    steps: 16,
+  })
+
+  await expect.poll(objectLabels).toEqual(['Orbit_2 (orbit)', 'Orbit_1 (orbit)'])
+
+  await page.mouse.up()
+
+  await expect.poll(objectLabels).toEqual(['Orbit_2 (orbit)', 'Orbit_1 (orbit)'])
+})

@@ -303,8 +303,16 @@
   background: var(--panel);
 }
 
+.panel--objects .panel__body {
+  flex: 1 1 auto;
+}
+
 .panel--viewport .panel__body {
   overflow: auto;
+}
+
+.objects-tree {
+  min-height: 100%;
 }
 
 .objects-tree__toolbar {

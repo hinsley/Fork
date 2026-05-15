@@ -172,6 +172,7 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
     >(null)
     const dropPreviewRef = useRef<typeof dropPreview>(null)
     const draggingIdRef = useRef<string | null>(null)
+    const treeRootRef = useRef<HTMLDivElement | null>(null)
     const [nodeContextMenu, setNodeContextMenu] = useState<{
       id: string
       x: number
@@ -481,11 +482,43 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
       return true
     }
 
+    const updateDropPreviewForRootEnd = (sourceId: string): boolean => {
+      const sourceNode = system.nodes[sourceId]
+      if (!sourceNode || !canMoveNodeIntoParent(system.nodes, sourceId, null)) {
+        updateDropPreview(null)
+        return false
+      }
+
+      const targetId = rootNodes.filter((id) => id !== sourceId).at(-1)
+      if (!targetId) {
+        updateDropPreview(null)
+        return true
+      }
+
+      if (
+        dropPreviewRef.current?.mode !== 'reorder' ||
+        dropPreviewRef.current.targetId !== targetId ||
+        dropPreviewRef.current.parentId !== null ||
+        dropPreviewRef.current.placement !== 'after'
+      ) {
+        updateDropPreview({
+          mode: 'reorder',
+          targetId,
+          parentId: null,
+          placement: 'after',
+        })
+      }
+      return true
+    }
+
     const updateTouchDropPreview = (sourceId: string, clientX: number, clientY: number) => {
       const element = document.elementFromPoint(clientX, clientY)
       const targetRow = element?.closest<HTMLElement>('[data-tree-node-id]')
       const targetId = targetRow?.dataset.treeNodeId
       if (!targetId || targetId === sourceId) {
+        if (element && treeRootRef.current?.contains(element)) {
+          return updateDropPreviewForRootEnd(sourceId)
+        }
         return Boolean(dropPreviewRef.current)
       }
       return updateDropPreviewForTarget(sourceId, targetId, clientY)
@@ -845,7 +878,19 @@ export const ObjectsTree = forwardRef<ObjectsTreeHandle, ObjectsTreeProps>(
         className={`objects-tree${draggingId ? ' objects-tree--dragging' : ''}${
           touchDragging ? ' objects-tree--touch-dragging' : ''
         }`}
+        ref={treeRootRef}
         onDragOver={(event) => {
+          const target = event.target instanceof Element ? event.target : null
+          const isOverRow = Boolean(target?.closest('[data-tree-node-id]'))
+          if (!isOverRow) {
+            const sourceId =
+              draggingIdRef.current || draggingId || event.dataTransfer.getData('text/plain')
+            if (sourceId && updateDropPreviewForRootEnd(sourceId)) {
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'move'
+            }
+            return
+          }
           if (!dropPreviewRef.current) return
           event.preventDefault()
           event.dataTransfer.dropEffect = 'move'

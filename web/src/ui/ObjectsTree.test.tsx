@@ -898,6 +898,152 @@ describe('ObjectsTree', () => {
     rectSpy.mockRestore()
   })
 
+  it('reorders a root object to the end when dropped on tree whitespace', () => {
+    const { system, objectNodeId } = createDemoSystem()
+    const targetObject: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Target',
+      systemName: system.config.name,
+      data: [[0, 0, 0, 0]],
+      t_start: 0,
+      t_end: 1,
+      dt: 0.1,
+    }
+    const withTarget = addObject(system, targetObject)
+    const targetRootId = withTarget.nodeId
+    const onReorderNode = vi.fn()
+
+    render(
+      <ObjectsTree
+        system={withTarget.system}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={onReorderNode}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    const dataTransfer = {
+      effectAllowed: '',
+      dropEffect: '',
+      data: new Map<string, string>(),
+      getData(type: string) {
+        return this.data.get(type) ?? ''
+      },
+      setData(type: string, value: string) {
+        this.data.set(type, value)
+      },
+    }
+    const tree = screen.getByTestId('objects-tree')
+
+    fireEvent.dragStart(screen.getByTestId(`object-tree-row-${objectNodeId}`), {
+      dataTransfer,
+    })
+    const dragOver = new Event('dragover', { bubbles: true, cancelable: true })
+    Object.defineProperty(dragOver, 'clientY', { value: 500 })
+    Object.defineProperty(dragOver, 'dataTransfer', { value: dataTransfer })
+    fireEvent(tree, dragOver)
+    expect(dragOver.defaultPrevented).toBe(true)
+    expect(dataTransfer.dropEffect).toBe('move')
+
+    const drop = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer })
+    fireEvent(tree, drop)
+
+    expect(onReorderNode).toHaveBeenCalledWith(objectNodeId, targetRootId, 'after')
+  })
+
+  it('touch drags a root object to the end when moved over tree whitespace', () => {
+    vi.useFakeTimers()
+    const { system, objectNodeId } = createDemoSystem()
+    const targetObject: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Target',
+      systemName: system.config.name,
+      data: [[0, 0, 0, 0]],
+      t_start: 0,
+      t_end: 1,
+      dt: 0.1,
+    }
+    const withTarget = addObject(system, targetObject)
+    const targetRootId = withTarget.nodeId
+    const onReorderNode = vi.fn()
+
+    render(
+      <ObjectsTree
+        system={withTarget.system}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onRename={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onReorderNode={onReorderNode}
+        onCreateOrbit={vi.fn()}
+        onCreateEquilibrium={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    )
+
+    const sourceRow = screen.getByTestId(`object-tree-row-${objectNodeId}`)
+    const tree = screen.getByTestId('objects-tree')
+    const originalElementFromPoint = document.elementFromPoint
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => tree),
+    })
+
+    try {
+      fireEvent(
+        sourceRow,
+        createPointerEvent('pointerdown', {
+          button: 0,
+          clientX: 16,
+          clientY: 16,
+          pointerId: 9,
+          pointerType: 'touch',
+        })
+      )
+      act(() => {
+        vi.advanceTimersByTime(250)
+      })
+      fireEvent(
+        sourceRow,
+        createPointerEvent('pointermove', {
+          clientX: 20,
+          clientY: 500,
+          pointerId: 9,
+          pointerType: 'touch',
+        })
+      )
+      fireEvent(
+        sourceRow,
+        createPointerEvent('pointerup', {
+          clientX: 20,
+          clientY: 500,
+          pointerId: 9,
+          pointerType: 'touch',
+        })
+      )
+
+      expect(onReorderNode).toHaveBeenCalledWith(objectNodeId, targetRootId, 'after')
+    } finally {
+      if (originalElementFromPoint) {
+        Object.defineProperty(document, 'elementFromPoint', {
+          configurable: true,
+          value: originalElementFromPoint,
+        })
+      } else {
+        Reflect.deleteProperty(document, 'elementFromPoint')
+      }
+      vi.useRealTimers()
+    }
+  })
+
   it('moves an object child branch into a child folder under the same object', () => {
     const { system, objectNodeId, branchNodeId } = createDemoSystem()
     const folder = addFolder(system, 'Folder_1', objectNodeId)
