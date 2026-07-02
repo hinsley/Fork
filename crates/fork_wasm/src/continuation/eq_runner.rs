@@ -1,9 +1,12 @@
 //! Stepped equilibrium continuation runner.
 
 use super::shared::OwnedEquilibriumContinuationProblem;
-use fork_core::continuation::{ContinuationPoint, ContinuationRunner, ContinuationSettings};
+use fork_core::continuation::{
+    ContinuationBranch, ContinuationPoint, ContinuationRunner, ContinuationSettings,
+};
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
 use fork_core::equilibrium::SystemKind;
+use fork_core::state_periodicity::StatePeriodicity;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 
@@ -12,6 +15,7 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 pub struct WasmEquilibriumRunner {
     runner: Option<ContinuationRunner<OwnedEquilibriumContinuationProblem>>,
+    periodicity: StatePeriodicity,
 }
 
 #[wasm_bindgen]
@@ -29,6 +33,7 @@ impl WasmEquilibriumRunner {
         parameter_name: &str,
         settings_val: JsValue,
         forward: bool,
+        periods: Vec<f64>,
     ) -> Result<WasmEquilibriumRunner, JsValue> {
         console_error_panic_hook::set_once();
 
@@ -59,6 +64,10 @@ impl WasmEquilibriumRunner {
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
+        let periodicity = StatePeriodicity::from_periods(&periods, var_names.len());
+        let mut equilibrium_state = equilibrium_state;
+        periodicity.wrap_state(&mut equilibrium_state);
+
         let initial_point = ContinuationPoint {
             state: equilibrium_state,
             param_value: system.params[param_index],
@@ -67,13 +76,19 @@ impl WasmEquilibriumRunner {
             cycle_points: None,
         };
 
-        let problem = OwnedEquilibriumContinuationProblem::new(system, kind, param_index);
+        let problem = OwnedEquilibriumContinuationProblem::new_with_periodicity(
+            system,
+            kind,
+            param_index,
+            periodicity.clone(),
+        );
 
         let runner = ContinuationRunner::new(problem, initial_point, settings, forward)
             .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
 
         Ok(WasmEquilibriumRunner {
             runner: Some(runner),
+            periodicity,
         })
     }
 
@@ -115,9 +130,21 @@ impl WasmEquilibriumRunner {
             .take()
             .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
 
-        let branch = runner.take_result();
+        let mut branch = runner.take_result();
+        wrap_equilibrium_branch(&mut branch, &self.periodicity);
 
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+}
+
+fn wrap_equilibrium_branch(branch: &mut ContinuationBranch, periodicity: &StatePeriodicity) {
+    for point in &mut branch.points {
+        periodicity.wrap_state(&mut point.state);
+        if let Some(cycle_points) = point.cycle_points.as_mut() {
+            for cycle_point in cycle_points {
+                periodicity.wrap_state(cycle_point);
+            }
+        }
     }
 }
 
@@ -153,6 +180,7 @@ mod tests {
             "a",
             settings_with_max_steps(max_steps),
             true,
+            Vec::new(),
         )
         .expect("runner")
     }
@@ -171,6 +199,7 @@ mod tests {
             "a",
             settings_val,
             true,
+            Vec::new(),
         )
         .expect("runner");
 
@@ -193,6 +222,7 @@ mod tests {
             "missing",
             settings_with_max_steps(3),
             true,
+            Vec::new(),
         );
 
         assert!(result.is_err(), "should reject unknown parameter");
@@ -216,6 +246,7 @@ mod tests {
             "a",
             JsValue::from_str("nope"),
             true,
+            Vec::new(),
         );
 
         assert!(result.is_err(), "should reject invalid settings");
@@ -239,6 +270,7 @@ mod tests {
             "a",
             settings_with_max_steps(1),
             true,
+            Vec::new(),
         );
 
         assert!(result.is_err(), "should reject invalid equation");

@@ -4,6 +4,7 @@ import type {
   SubsystemSnapshot,
   SystemConfig,
 } from './types'
+import { normalizePeriodicVariables } from './periodicity'
 
 export const FROZEN_VARIABLE_LABEL_PREFIX = 'var:'
 export const FROZEN_PARAMETER_PREFIX = 'fv__'
@@ -225,6 +226,9 @@ export function buildReducedRunConfig(
     ...system,
     equations: rewrittenEquations,
     varNames: [...snapshot.freeVariableNames],
+    periodicVariables: snapshot.freeVariableIndices.map(
+      (baseIndex) => normalizePeriodicVariables(system)[baseIndex]
+    ),
     params: [...baseParams, ...appendedParamValues],
     paramNames: [...system.paramNames, ...appendedParamNames],
   }

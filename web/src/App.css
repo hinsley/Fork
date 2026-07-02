@@ -1014,6 +1014,25 @@
   gap: 6px;
 }
 
+.periodic-control {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.periodic-control__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.periodic-control__period {
+  min-width: 0;
+}
+
 .inspector-row--param {
   grid-template-columns: 1fr 1fr auto;
 }

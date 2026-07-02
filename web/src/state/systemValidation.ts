@@ -11,6 +11,7 @@ export type SystemValidation = {
     paramNames?: string
     equations?: string[]
     params?: string[]
+    periodicVariables?: string[]
     solver?: string
   }
   warnings: string[]
@@ -99,6 +100,20 @@ export const validateSystemConfig = (system: SystemConfig): SystemValidation => 
     errors.params = system.params.map((value) =>
       Number.isFinite(value) ? '' : 'Parameter must be numeric.'
     )
+  }
+
+  if (system.periodicVariables) {
+    const periodicErrors: string[] = []
+    for (let index = 0; index < system.varNames.length; index += 1) {
+      const entry = system.periodicVariables[index]
+      if (!entry?.enabled) continue
+      if (!Number.isFinite(entry.period) || entry.period <= 0) {
+        periodicErrors[index] = 'Period must be positive.'
+      }
+    }
+    if (periodicErrors.some(Boolean)) {
+      errors.periodicVariables = periodicErrors
+    }
   }
 
   if (system.type === 'map' && system.solver !== 'discrete') {

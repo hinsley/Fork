@@ -109,6 +109,11 @@ import {
   resolveCodim1ParamNames,
   resolveContinuationParameterReadout,
 } from './branchPointDisplay'
+import {
+  DEFAULT_VARIABLE_PERIOD,
+  normalizePeriodicVariables,
+  parsePeriodExpression,
+} from '../system/periodicity'
 
 type InspectorDetailsPanelProps = {
   system: System
@@ -230,6 +235,7 @@ type SystemDraft = {
   paramNames: string[]
   params: string[]
   equations: string[]
+  periodicVariables: Array<{ enabled: boolean; period: string }>
 }
 
 type OrbitRunDraft = {
@@ -1425,6 +1431,10 @@ function makeIsochroneCurveDraft(system: SystemConfig): IsochroneCurveDraft {
 }
 
 function makeSystemDraft(system: SystemConfig): SystemDraft {
+  const periodicVariables = normalizePeriodicVariables(system).map((entry) => ({
+    enabled: entry.enabled,
+    period: entry.period.toString(),
+  }))
   return {
     name: system.name,
     type: system.type,
@@ -1433,6 +1443,7 @@ function makeSystemDraft(system: SystemConfig): SystemDraft {
     paramNames: [...system.paramNames],
     params: system.params.map((value) => value.toString()),
     equations: [...system.equations],
+    periodicVariables,
   }
 }
 
@@ -1549,18 +1560,33 @@ function buildCodim1ContinuationSettings(draft: Codim1CurveDraft) {
 }
 
 function buildSystemConfig(draft: SystemDraft): SystemConfig {
+  const varNames = draft.varNames.map((name) => name.trim())
+  const periodicVariables = adjustArray(
+    draft.periodicVariables,
+    varNames.length,
+    () => ({ enabled: false, period: DEFAULT_VARIABLE_PERIOD.toString() })
+  ).map((entry) => {
+    const period = parsePeriodExpression(entry.period) ?? Number.NaN
+    return {
+      enabled: entry.enabled,
+      period,
+    }
+  })
   return {
     name: draft.name.trim(),
     equations: draft.equations.map((eq) => eq.trim()),
     params: draft.params.map((value) => parseNumber(value) ?? Number.NaN),
     paramNames: draft.paramNames.map((name) => name.trim()),
-    varNames: draft.varNames.map((name) => name.trim()),
+    varNames,
+    periodicVariables,
     solver: draft.solver,
     type: draft.type,
   }
 }
 
 function isSystemEqual(a: SystemConfig, b: SystemConfig): boolean {
+  const periodicA = normalizePeriodicVariables(a)
+  const periodicB = normalizePeriodicVariables(b)
   return (
     a.name === b.name &&
     a.type === b.type &&
@@ -1568,7 +1594,13 @@ function isSystemEqual(a: SystemConfig, b: SystemConfig): boolean {
     a.equations.join('|') === b.equations.join('|') &&
     a.params.join('|') === b.params.join('|') &&
     a.paramNames.join('|') === b.paramNames.join('|') &&
-    a.varNames.join('|') === b.varNames.join('|')
+    a.varNames.join('|') === b.varNames.join('|') &&
+    periodicA.length === periodicB.length &&
+    periodicA.every(
+      (entry, index) =>
+        entry.enabled === periodicB[index]?.enabled &&
+        entry.period === periodicB[index]?.period
+    )
   )
 }
 
@@ -1581,6 +1613,7 @@ function buildSystemConfigKey(config: SystemConfig): string {
     config.params,
     config.paramNames,
     config.varNames,
+    normalizePeriodicVariables(config),
   ])
 }
 
@@ -6560,6 +6593,10 @@ export function InspectorDetailsPanel({
                   ...prev,
                   varNames: [...prev.varNames, `x${prev.varNames.length + 1}`],
                   equations: [...prev.equations, ''],
+                  periodicVariables: [
+                    ...prev.periodicVariables,
+                    { enabled: false, period: DEFAULT_VARIABLE_PERIOD.toString() },
+                  ],
                 }))
               }
               data-testid="system-add-variable"
@@ -6606,13 +6643,81 @@ export function InspectorDetailsPanel({
                       {wasmEquationErrors[index]}
                     </span>
                   ) : null}
+                  <div className="periodic-control">
+                    <label className="periodic-control__toggle">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(systemDraft.periodicVariables[index]?.enabled)}
+                        onChange={(event) =>
+                          setSystemDraft((prev) => {
+                            const nextPeriodic = adjustArray(
+                              prev.periodicVariables,
+                              prev.varNames.length,
+                              () => ({
+                                enabled: false,
+                                period: DEFAULT_VARIABLE_PERIOD.toString(),
+                              })
+                            )
+                            nextPeriodic[index] = {
+                              ...nextPeriodic[index],
+                              enabled: event.target.checked,
+                            }
+                            return { ...prev, periodicVariables: nextPeriodic }
+                          })
+                        }
+                        data-testid={`system-periodic-enabled-${index}`}
+                      />
+                      Periodic
+                    </label>
+                    <input
+                      className="periodic-control__period"
+                      value={
+                        systemDraft.periodicVariables[index]?.period ??
+                        DEFAULT_VARIABLE_PERIOD.toString()
+                      }
+                      disabled={!systemDraft.periodicVariables[index]?.enabled}
+                      onChange={(event) =>
+                        setSystemDraft((prev) => {
+                          const nextPeriodic = adjustArray(
+                            prev.periodicVariables,
+                            prev.varNames.length,
+                            () => ({
+                              enabled: false,
+                              period: DEFAULT_VARIABLE_PERIOD.toString(),
+                            })
+                          )
+                          nextPeriodic[index] = {
+                            ...nextPeriodic[index],
+                            period: event.target.value,
+                          }
+                          return { ...prev, periodicVariables: nextPeriodic }
+                        })
+                      }
+                      placeholder="2pi"
+                      data-testid={`system-periodic-period-${index}`}
+                    />
+                  </div>
+                  {showSystemErrors && systemValidation.errors.periodicVariables?.[index] ? (
+                    <span
+                      className="field-error"
+                      data-testid={`system-periodic-error-${index}`}
+                    >
+                      {systemValidation.errors.periodicVariables[index]}
+                    </span>
+                  ) : null}
                 </div>
                 <button
                   onClick={() =>
                     setSystemDraft((prev) => {
                       const nextVarNames = prev.varNames.filter((_, i) => i !== index)
                       const nextEquations = prev.equations.filter((_, i) => i !== index)
-                      return { ...prev, varNames: nextVarNames, equations: nextEquations }
+                      const nextPeriodic = prev.periodicVariables.filter((_, i) => i !== index)
+                      return {
+                        ...prev,
+                        varNames: nextVarNames,
+                        equations: nextEquations,
+                        periodicVariables: nextPeriodic,
+                      }
                     })
                   }
                   aria-label="Remove variable"

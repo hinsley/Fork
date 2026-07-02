@@ -6,6 +6,7 @@ pub mod equilibrium;
 pub mod event_series;
 pub mod isocline;
 pub mod solvers;
+pub mod state_periodicity;
 /// The `fork_core` crate provides the fundamental mathematical engine for the Fork CLI.
 /// It is designed to be generic, supporting both standard floating-point arithmetic (`f64`)
 /// and automatic differentiation via Dual numbers.

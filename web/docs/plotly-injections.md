@@ -126,6 +126,10 @@ behavior.
   - limit-cycle object traces set explicit `hovertemplate` strings so hover
     labels use active scene axis variable names and omit time/phase; selected
     limit-cycle points also render as dedicated `circle-open` overlay traces;
+  - scene and bifurcation-diagram line traces for periodic state variables insert Plotly `null`
+    separators at wrap jumps (orbit paths, cobweb paths, isoclines, manifold
+    curves, limit-cycle profiles, and continuation branch lines) so Plotly does
+    not draw a false chord across the period seam;
   - persisted limit-cycle Floquet mode vectors (when manually computed from the
     inspector) reuse the equilibrium eigenline/eigendisc trace pipeline and are
     sampled along the cycle with a configurable integer stride;

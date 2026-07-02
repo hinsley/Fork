@@ -4,6 +4,7 @@ use fork_core::autodiff::Dual;
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
 use fork_core::isocline::{compile_scalar_expression, compute_isocline, IsoclineAxisSpec};
 use fork_core::solvers::{DiscreteMap, Tsit5, RK4};
+use fork_core::state_periodicity::StatePeriodicity;
 use fork_core::traits::{DynamicalSystem, Steppable};
 use wasm_bindgen::prelude::*;
 
@@ -14,6 +15,7 @@ pub struct WasmSystem {
     t: f64,
     pub(crate) solver: SolverType,
     pub(crate) system_type: SystemType,
+    pub(crate) periodicity: StatePeriodicity,
 }
 
 pub(crate) enum SolverType {
@@ -90,15 +92,23 @@ impl WasmSystem {
             t: 0.0,
             solver,
             system_type,
+            periodicity: StatePeriodicity::none(),
         })
     }
 
     pub fn set_state(&mut self, state: &[f64]) {
         self.state = state.to_vec();
+        self.periodicity.wrap_state(&mut self.state);
     }
 
     pub fn get_state(&self) -> Vec<f64> {
         self.state.clone()
+    }
+
+    pub fn set_periods(&mut self, periods: &[f64]) {
+        let dim = self.system.equations.len();
+        self.periodicity = StatePeriodicity::from_periods(periods, dim);
+        self.periodicity.wrap_state(&mut self.state);
     }
 
     pub fn set_t(&mut self, t: f64) {
@@ -115,6 +125,7 @@ impl WasmSystem {
             SolverType::Tsit5(s) => s.step(&self.system, &mut self.t, &mut self.state, dt),
             SolverType::Discrete(s) => s.step(&self.system, &mut self.t, &mut self.state, dt),
         }
+        self.periodicity.wrap_state(&mut self.state);
     }
 
     pub fn compute_jacobian(&self) -> Vec<f64> {
@@ -300,6 +311,29 @@ mod tests {
         let state = system.get_state();
         assert!((state[0] - 3.0).abs() < 1e-12);
         assert!((system.get_t() - 1.25).abs() < 1e-12);
+    }
+
+    #[test]
+    fn wasm_system_wraps_state_after_set_and_step() {
+        let mut system = WasmSystem::new(
+            vec!["x + 0.5".to_string()],
+            Vec::new(),
+            Vec::new(),
+            vec!["x".to_string()],
+            "discrete",
+            "map",
+        )
+        .expect("system should build");
+
+        system.set_periods(&[1.0]);
+        system.set_state(&[1.2]);
+        assert!((system.get_state()[0] - 0.2).abs() < 1e-12);
+
+        system.step(1.0);
+        assert!((system.get_state()[0] - 0.7).abs() < 1e-12);
+
+        system.step(1.0);
+        assert!((system.get_state()[0] - 0.2).abs() < 1e-12);
     }
 
     #[test]

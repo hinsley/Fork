@@ -12,6 +12,7 @@ import {
     EquilibriumRunSummary,
     EquilibriumSolverParams,
     LimitCycleObject,
+    PeriodicVariableConfig,
     SystemConfig,
     OrbitObject
 } from './types';
@@ -56,6 +57,88 @@ function systemExists(name: string): boolean {
 
 function objectExists(sysName: string, objectName: string): boolean {
     return Storage.listObjects(sysName).includes(objectName);
+}
+
+const DEFAULT_VARIABLE_PERIOD = Math.PI * 2;
+
+function parsePeriodInput(value: string): number | null {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return null;
+    const normalized = trimmed
+        .toLowerCase()
+        .replace(/\s+/g, '')
+        .replace(/π/g, 'pi');
+    const piMatch = normalized.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)?(?:e[+-]?\d+)?)\*?pi$/);
+    if (piMatch) {
+        const coefficientText = piMatch[1];
+        const coefficient =
+            !coefficientText || coefficientText === '+'
+                ? 1
+                : coefficientText === '-'
+                    ? -1
+                    : Number(coefficientText);
+        const parsed = coefficient * Math.PI;
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizePeriodicVariables(config: Pick<SystemConfig, 'varNames' | 'periodicVariables'>): PeriodicVariableConfig[] {
+    return config.varNames.map((_, index) => {
+        const entry = config.periodicVariables?.[index];
+        const period = entry && Number.isFinite(entry.period) && entry.period > 0
+            ? entry.period
+            : DEFAULT_VARIABLE_PERIOD;
+        return {
+            enabled: Boolean(entry?.enabled),
+            period
+        };
+    });
+}
+
+function formatPeriodicVariables(config: Pick<SystemConfig, 'varNames' | 'periodicVariables'>): string {
+    const periodic = normalizePeriodicVariables(config)
+        .map((entry, index) => entry.enabled ? `${config.varNames[index]} mod ${entry.period}` : null)
+        .filter(Boolean);
+    return periodic.length > 0 ? periodic.join(', ') : 'none';
+}
+
+async function editPeriodicVariables(config: Pick<SystemConfig, 'varNames' | 'periodicVariables'>): Promise<PeriodicVariableConfig[]> {
+    const periodic = normalizePeriodicVariables(config);
+    if (config.varNames.length === 0) return periodic;
+
+    const entries: ConfigEntry[] = config.varNames.map((varName, index) => ({
+        id: `periodic_${index}`,
+        label: `${varName} period`,
+        getDisplay: () => periodic[index].enabled ? `mod ${periodic[index].period}` : 'off',
+        edit: async () => {
+            const current = periodic[index];
+            const { enabled } = await inquirer.prompt({
+                type: 'confirm',
+                name: 'enabled',
+                message: `Enable periodic wrapping for ${varName}?`,
+                default: current.enabled
+            });
+            let period = current.period;
+            if (enabled) {
+                const { value } = await inquirer.prompt({
+                    name: 'value',
+                    message: `Period for ${varName}:`,
+                    default: period.toString(),
+                    validate: (input: string) => {
+                        const parsed = parsePeriodInput(input);
+                        return parsed !== null && parsed > 0 ? true : 'Please enter a positive period.';
+                    }
+                });
+                period = parsePeriodInput(value) ?? DEFAULT_VARIABLE_PERIOD;
+            }
+            periodic[index] = { enabled, period };
+        }
+    }));
+
+    await runConfigMenu('Periodic State Variables', entries);
+    return periodic;
 }
 
 async function promptRename(
@@ -297,6 +380,7 @@ async function createSystem() {
     const paramNames = parseListInput(paramsInput);
 
     const equations = varNames.map(() => '');
+    let periodicVariables = normalizePeriodicVariables({ varNames });
 
     if (varNames.length > 0) {
         const equationEntries: ConfigEntry[] = varNames.map((varName, idx) => {
@@ -320,6 +404,8 @@ async function createSystem() {
         if (equationResult === 'back') {
             return;
         }
+
+        periodicVariables = await editPeriodicVariables({ varNames, periodicVariables });
     }
 
     const paramValuesInput = paramNames.map(() => '0');
@@ -360,6 +446,7 @@ async function createSystem() {
         params: paramValues,
         paramNames,
         varNames,
+        periodicVariables,
         solver: defaultSolver
     };
 
@@ -374,6 +461,7 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
         printHeader(`Edit: ${sys.name}`, `${sys.type || 'flow'} system`);
         printField('Solver', sys.solver);
         printField('Variables', sys.varNames.join(', '));
+        printField('Periods', formatPeriodicVariables(sys));
         console.log(chalk.dim('  Equations:'));
         sys.varNames.forEach((v, i) => {
             const prefix = sys.type === 'map' ? `${v}_{n+1}` : `d${v}/dt`;
@@ -385,6 +473,7 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
         const choices: any[] = [
             { name: 'Edit Name', value: 'Edit Name' },
             { name: 'Edit Equations', value: 'Edit Equations' },
+            { name: 'Edit Variable Periods', value: 'Edit Variable Periods' },
             { name: 'Edit Parameters', value: 'Edit Parameters' },
         ];
         if (!sys.type || sys.type === 'flow') {
@@ -409,6 +498,7 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
             if (sys.name !== originalName) {
                 Storage.deleteSystem(originalName);
             }
+            sys.periodicVariables = normalizePeriodicVariables(sys);
             Storage.saveSystem(sys);
             console.log(chalk.green("System saved."));
             if (sys.name !== originalName) {
@@ -457,6 +547,8 @@ async function editSystem(sys: SystemConfig): Promise<string | undefined> {
                 });
                 sys.equations[eqIdx] = eq;
             }
+        } else if (action === 'Edit Variable Periods') {
+            sys.periodicVariables = await editPeriodicVariables(sys);
         } else if (action === 'Edit Parameters') {
             while (true) {
                 const choices: any[] = sys.paramNames.map((p, i) => {
@@ -691,7 +783,7 @@ async function createOrbit(sysName: string): Promise<NavigationRequest | void> {
         const data = [];
 
         let current_t = 0;
-        data.push([current_t, ...ic]);
+        data.push([current_t, ...bridge.get_state()]);
 
         const updateInterval = isMap ? 10000 : 1000;
         printProgress(0, steps, 'Simulating');

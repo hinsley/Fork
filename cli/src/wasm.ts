@@ -77,6 +77,15 @@ try {
     console.warn("Could not load WASM module. Simulation will fail.", e);
 }
 
+function periodicPeriodsForConfig(config: SystemConfig): number[] {
+    return config.varNames.map((_, index) => {
+        const entry = config.periodicVariables?.[index];
+        return entry?.enabled && Number.isFinite(entry.period) && entry.period > 0
+            ? entry.period
+            : Number.NaN;
+    });
+}
+
 export class WasmBridge {
     instance: any;
     private readonly config: SystemConfig;
@@ -92,7 +101,8 @@ export class WasmBridge {
             equations: [...equations],
             params: [...params],
             paramNames: [...paramNames],
-            varNames: [...varNames]
+            varNames: [...varNames],
+            periodicVariables: config.periodicVariables?.map((entry) => ({ ...entry }))
         };
 
         this.instance = new wasmModule.WasmSystem(
@@ -103,6 +113,7 @@ export class WasmBridge {
             solver,
             systemType
         );
+        this.instance.set_periods?.(new Float64Array(periodicPeriodsForConfig(this.config)));
     }
 
     createEquilibriumContinuationRunner(
@@ -124,7 +135,8 @@ export class WasmBridge {
             new Float64Array(equilibriumState),
             parameterName,
             settings,
-            forward
+            forward,
+            new Float64Array(periodicPeriodsForConfig(this.config))
         ) as EquilibriumContinuationRunner;
     }
 
@@ -602,7 +614,8 @@ export class WasmBridge {
             mapIterations,
             new Float64Array(initialGuess),
             maxSteps,
-            dampingFactor
+            dampingFactor,
+            new Float64Array(periodicPeriodsForConfig(this.config))
         ) as EquilibriumSolverRunner;
     }
 

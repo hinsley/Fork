@@ -19,6 +19,7 @@ import type {
 } from './types'
 import { makeStableId as makeId, nowIso } from '../utils/determinism'
 import { resolveSceneAxisSelection } from './sceneAxes'
+import { normalizePeriodicVariables } from './periodicity'
 
 const DEFAULT_SYSTEM: SystemConfig = {
   name: 'Untitled System',
@@ -26,6 +27,10 @@ const DEFAULT_SYSTEM: SystemConfig = {
   params: [],
   paramNames: [],
   varNames: ['x', 'y'],
+  periodicVariables: [
+    { enabled: false, period: Math.PI * 2 },
+    { enabled: false, period: Math.PI * 2 },
+  ],
   solver: 'rk4',
   type: 'flow'
 }
@@ -227,8 +232,23 @@ export function createSystem(args: {
   config?: SystemConfig
 }): System {
   const config = args.config
-    ? { ...args.config }
-    : { ...DEFAULT_SYSTEM, name: args.name }
+    ? {
+        ...args.config,
+        equations: [...args.config.equations],
+        params: [...args.config.params],
+        paramNames: [...args.config.paramNames],
+        varNames: [...args.config.varNames],
+        periodicVariables: normalizePeriodicVariables(args.config),
+      }
+    : {
+        ...DEFAULT_SYSTEM,
+        name: args.name,
+        equations: [...DEFAULT_SYSTEM.equations],
+        params: [...DEFAULT_SYSTEM.params],
+        paramNames: [...DEFAULT_SYSTEM.paramNames],
+        varNames: [...DEFAULT_SYSTEM.varNames],
+        periodicVariables: normalizePeriodicVariables(DEFAULT_SYSTEM),
+      }
 
   return {
     id: makeId('system'),
@@ -1544,6 +1564,7 @@ export function updateSystem(system: System, config: SystemConfig): System {
     params: [...config.params],
     paramNames: [...config.paramNames],
     varNames: [...config.varNames],
+    periodicVariables: normalizePeriodicVariables(config),
     solver: config.solver,
     type: config.type
   }
@@ -1648,6 +1669,14 @@ export function normalizeSystem(system: System): System {
     ui?: SystemUiState & { layout?: Partial<SystemLayout> }
   }
   const existingIndex = structuredClone(next.index ?? emptySystemIndex())
+  next.config = {
+    ...next.config,
+    equations: [...next.config.equations],
+    params: [...next.config.params],
+    paramNames: [...next.config.paramNames],
+    varNames: [...next.config.varNames],
+    periodicVariables: normalizePeriodicVariables(next.config),
+  }
 
   if (!next.scenes) {
     next.scenes = [structuredClone(DEFAULT_SCENE)]

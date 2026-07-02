@@ -2,7 +2,7 @@
 
 use crate::system::{SolverType, WasmSystem};
 use fork_core::event_series::{
-    compile_event_series_expressions, compute_event_series_from_orbit,
+    compile_event_series_expressions, compute_event_series_from_orbit_with_periodicity,
     extract_event_series_from_samples, EventSeriesMode, EventSeriesResult, EventSeriesStepper,
     OrderedSample,
 };
@@ -49,7 +49,10 @@ fn serialize_result(result: EventSeriesResult) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen]
 impl WasmSystem {
-    pub fn compute_event_series_from_orbit(&self, request_val: JsValue) -> Result<JsValue, JsValue> {
+    pub fn compute_event_series_from_orbit(
+        &self,
+        request_val: JsValue,
+    ) -> Result<JsValue, JsValue> {
         let request: OrbitEventSeriesRequest = from_value(request_val)
             .map_err(|err| JsValue::from_str(&format!("Invalid event series request: {err}")))?;
         let compiled = compile_event_series_expressions(
@@ -60,7 +63,7 @@ impl WasmSystem {
         )
         .map_err(|err| JsValue::from_str(&format!("Event expression error: {err}")))?;
 
-        let result = compute_event_series_from_orbit(
+        let result = compute_event_series_from_orbit_with_periodicity(
             &self.system,
             to_stepper(&self.solver),
             self.system.params.as_slice(),
@@ -71,6 +74,7 @@ impl WasmSystem {
             &compiled,
             request.mode,
             request.event_level,
+            &self.periodicity,
         )
         .map_err(|err| JsValue::from_str(&format!("Event series extraction failed: {err}")))?;
 

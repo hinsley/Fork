@@ -3,11 +3,12 @@
 use crate::system::{build_system, SystemType, WasmSystem};
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::{
-    compute_system_jacobian, evaluate_equilibrium_residual,
-    solve_equilibrium as core_equilibrium_solver, EigenPair, EquilibriumResult, NewtonSettings,
-    SystemKind,
+    compute_map_cycle_points_with_periodicity, compute_system_jacobian,
+    evaluate_equilibrium_residual_with_periodicity,
+    solve_equilibrium_with_periodicity as core_equilibrium_solver, EigenPair, EquilibriumResult,
+    NewtonSettings, SystemKind,
 };
-use fork_core::traits::DynamicalSystem;
+use fork_core::state_periodicity::StatePeriodicity;
 use nalgebra::linalg::SVD;
 use nalgebra::{Complex, DMatrix, DVector};
 use serde::Serialize;
@@ -36,8 +37,14 @@ impl WasmSystem {
             },
         };
 
-        let result = core_equilibrium_solver(&self.system, kind, &initial_guess, settings)
-            .map_err(|e| JsValue::from_str(&format!("Equilibrium solve failed: {}", e)))?;
+        let result = core_equilibrium_solver(
+            &self.system,
+            kind,
+            &initial_guess,
+            settings,
+            &self.periodicity,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Equilibrium solve failed: {}", e)))?;
 
         to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
@@ -60,6 +67,7 @@ struct EquilibriumSolverState {
     residual_norm: f64,
     iterations: usize,
     settings: NewtonSettings,
+    periodicity: StatePeriodicity,
     done: bool,
 }
 
@@ -81,6 +89,7 @@ impl WasmEquilibriumSolverRunner {
         initial_guess: Vec<f64>,
         max_steps: u32,
         damping: f64,
+        periods: Vec<f64>,
     ) -> Result<WasmEquilibriumSolverRunner, JsValue> {
         console_error_panic_hook::set_once();
 
@@ -106,10 +115,18 @@ impl WasmEquilibriumSolverRunner {
             return Err(JsValue::from_str("Initial guess dimension mismatch."));
         }
 
-        let state = initial_guess;
+        let periodicity = StatePeriodicity::from_periods(&periods, dim);
+        let mut state = initial_guess;
+        periodicity.wrap_state(&mut state);
         let mut residual = vec![0.0; dim];
-        evaluate_equilibrium_residual(&system, kind, &state, &mut residual)
-            .map_err(|e| JsValue::from_str(&format!("Residual failed: {}", e)))?;
+        evaluate_equilibrium_residual_with_periodicity(
+            &system,
+            kind,
+            &state,
+            &mut residual,
+            &periodicity,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Residual failed: {}", e)))?;
         let residual_norm = l2_norm(&residual);
 
         Ok(WasmEquilibriumSolverRunner {
@@ -121,6 +138,7 @@ impl WasmEquilibriumSolverRunner {
                 residual_norm,
                 iterations: 0,
                 settings,
+                periodicity,
                 done: false,
             }),
         })
@@ -170,13 +188,15 @@ impl WasmEquilibriumSolverRunner {
             for i in 0..state.state.len() {
                 state.state[i] -= state.settings.damping * delta[i];
             }
+            state.periodicity.wrap_state(&mut state.state);
 
             state.iterations += 1;
-            evaluate_equilibrium_residual(
+            evaluate_equilibrium_residual_with_periodicity(
                 &state.system,
                 state.kind,
                 &state.state,
                 &mut state.residual,
+                &state.periodicity,
             )
             .map_err(|e| JsValue::from_str(&format!("Residual failed: {}", e)))?;
             state.residual_norm = l2_norm(&state.residual);
@@ -225,11 +245,14 @@ impl WasmEquilibriumSolverRunner {
         let eigenpairs = compute_equilibrium_eigenpairs(state.system.equations.len(), &jacobian)
             .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
         let cycle_points = match state.kind {
-            SystemKind::Map { iterations } if iterations > 1 => Some(compute_map_cycle_points(
-                &state.system,
-                &state.state,
-                iterations,
-            )),
+            SystemKind::Map { iterations } if iterations > 1 => {
+                Some(compute_map_cycle_points_with_periodicity(
+                    &state.system,
+                    &state.state,
+                    iterations,
+                    &state.periodicity,
+                ))
+            }
             _ => None,
         };
 
@@ -254,28 +277,6 @@ fn solve_linear_system(dim: usize, jacobian: &[f64], residual: &[f64]) -> anyhow
         .solve(&rhs)
         .map(|v| v.iter().cloned().collect())
         .ok_or_else(|| anyhow::anyhow!("Jacobian is singular."))
-}
-
-fn compute_map_cycle_points(
-    system: &EquationSystem,
-    state: &[f64],
-    iterations: usize,
-) -> Vec<Vec<f64>> {
-    let dim = system.equations.len();
-    let mut points = Vec::with_capacity(iterations.max(1));
-    points.push(state.to_vec());
-    if iterations <= 1 {
-        return points;
-    }
-
-    let mut current = state.to_vec();
-    let mut next = vec![0.0; dim];
-    for _ in 1..iterations {
-        system.apply(0.0, &current, &mut next);
-        points.push(next.clone());
-        std::mem::swap(&mut current, &mut next);
-    }
-    points
 }
 
 fn compute_equilibrium_eigenpairs(dim: usize, jacobian: &[f64]) -> anyhow::Result<Vec<EigenPair>> {
@@ -342,6 +343,7 @@ mod wasm_wrapper_tests {
             Vec::new(),
             10,
             1.0,
+            Vec::new(),
         );
 
         assert!(result.is_err(), "expected error for zero-dimension system");
@@ -359,6 +361,7 @@ mod wasm_wrapper_tests {
             vec![0.0, 1.0],
             10,
             1.0,
+            Vec::new(),
         );
 
         assert!(result.is_err(), "expected error for initial guess mismatch");
@@ -376,6 +379,7 @@ mod wasm_wrapper_tests {
             vec![1.0],
             10,
             1.0,
+            Vec::new(),
         )
         .expect("runner");
 
@@ -480,6 +484,7 @@ mod wasm_value_tests {
             vec![1.0, 2.0],
             5,
             1.0,
+            Vec::new(),
         );
 
         assert!(result.is_err(), "should error on dimension mismatch");
@@ -502,6 +507,7 @@ mod wasm_value_tests {
             vec![1.0],
             5,
             1.0,
+            Vec::new(),
         )
         .expect("runner");
 
@@ -525,6 +531,7 @@ mod wasm_value_tests {
             vec![0.0],
             5,
             1.0,
+            Vec::new(),
         )
         .expect("runner");
 

@@ -70,6 +70,10 @@ import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/p
 import { appendMathJaxWrappedSuffix } from '../utils/mathText'
 import { confirmDelete, getDeleteKindLabel } from './confirmDelete'
 import { clampMenuX } from './contextMenu'
+import {
+  insertPeriodicLineBreaks,
+  normalizePeriodicVariables,
+} from '../system/periodicity'
 import type {
   BranchPointSelection,
   LimitCyclePointSelection,
@@ -226,6 +230,30 @@ const COBWEB_FUNCTION_COLOR = '#6f7a89'
 const MAP_FUNCTION_SAMPLE_COUNT = 256
 const EMPTY_TRACES: Data[] = []
 
+function statePeriodicPeriods(config: SystemConfig): Array<number | null> {
+  return normalizePeriodicVariables(config).map((entry) =>
+    entry.enabled && Number.isFinite(entry.period) && entry.period > 0
+      ? entry.period
+      : null
+  )
+}
+
+function stateAxisPeriods(
+  periodsByStateIndex: Array<number | null>,
+  axes: number[]
+): Array<number | null> {
+  return axes.map((axis) => periodsByStateIndex[axis] ?? null)
+}
+
+function stateVariablePeriod(
+  config: SystemConfig,
+  variableName: string
+): number | null {
+  const index = config.varNames.indexOf(variableName)
+  if (index < 0) return null
+  return statePeriodicPeriods(config)[index] ?? null
+}
+
 function resolveAxisOrder(
   dimension: number,
   plotDim: number,
@@ -336,18 +364,30 @@ function buildCobwebPath(rows: number[][]): { x: number[]; y: number[] } {
 
 function buildCobwebLineTrace(
   rows: number[][],
-  options: { name: string; uid: string; color: string; lineWidth: number }
+  options: {
+    name: string
+    uid: string
+    color: string
+    lineWidth: number
+    variablePeriod?: number | null
+  }
 ): Data | null {
   const cobweb = buildCobwebPath(rows)
   if (cobweb.x.length === 0) return null
+  const split = insertPeriodicLineBreaks({
+    x: cobweb.x,
+    y: cobweb.y,
+    coordinatePeriods: [options.variablePeriod ?? null, options.variablePeriod ?? null],
+  })
   return {
     type: 'scatter',
     mode: 'lines',
     name: options.name,
     uid: options.uid,
-    x: cobweb.x,
-    y: cobweb.y,
+    x: split.x,
+    y: split.y,
     line: { color: options.color, width: options.lineWidth },
+    connectgaps: false,
     hoverinfo: 'skip',
     showlegend: false,
   }
@@ -370,7 +410,8 @@ function buildCobwebRowsFromStates(
 
 function buildCobwebBaseTraces(
   range: [number, number] | null,
-  samples?: { x: number[]; y: number[] } | null
+  samples?: { x: number[]; y: number[] } | null,
+  variablePeriod?: number | null
 ): Data[] {
   if (!range) return []
   const min = Math.min(range[0], range[1])
@@ -379,12 +420,18 @@ function buildCobwebBaseTraces(
 
   const traces: Data[] = []
   if (samples && samples.x.length > 0 && samples.y.length > 0) {
+    const split = insertPeriodicLineBreaks({
+      x: samples.x,
+      y: samples.y,
+      coordinatePeriods: [variablePeriod ?? null, variablePeriod ?? null],
+    })
     traces.push({
       type: 'scatter',
       mode: 'lines',
-      x: samples.x,
-      y: samples.y,
+      x: split.x,
+      y: split.y,
       line: { color: COBWEB_FUNCTION_COLOR, width: 1.5 },
+      connectgaps: false,
       hoverinfo: 'skip',
       showlegend: false,
     })
@@ -1429,6 +1476,7 @@ type LimitCycleTraceConfig = {
   hoverTemplate3D?: string
   hoverTemplate2D?: string
   hoverTemplate1D?: string
+  statePeriods?: Array<number | null>
 }
 
 function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
@@ -1452,6 +1500,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
     hoverTemplate3D,
     hoverTemplate2D,
     hoverTemplate1D,
+    statePeriods,
   } = config
   const traces: Data[] = []
   if (!state || state.length === 0 || dim <= 0) return traces
@@ -1481,6 +1530,7 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
   const displayProfilePoints = profilePoints.map(toDisplayPoint)
   const displayClosurePoint = closurePoint ? toDisplayPoint(closurePoint) : undefined
   const axisOrder = resolveAxisOrder(displayDimension, plotDim, axisIndices)
+  const axisPeriods = stateAxisPeriods(statePeriods ?? [], axisOrder)
   const closureCoords =
     displayClosurePoint && displayClosurePoint.length >= displayDimension
       ? axisOrder.map((axis) => displayClosurePoint[axis])
@@ -1505,16 +1555,24 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
       const y = cyclePoints.map(({ coords }) => coords[1] ?? Number.NaN)
       const z = cyclePoints.map(({ coords }) => coords[2] ?? Number.NaN)
       const customdata = cyclePoints.map(({ index }) => (index >= 0 ? index : null))
+      const split = insertPeriodicLineBreaks({
+        x,
+        y,
+        z,
+        customdata,
+        coordinatePeriods: axisPeriods,
+      })
       traces.push({
         type: 'scatter3d',
         mode: 'lines',
         name,
         uid,
-        x,
-        y,
-        z,
-        customdata,
+        x: split.x,
+        y: split.y,
+        z: split.z,
+        customdata: split.customdata,
         line: { color, width: lineWidth },
+        connectgaps: false,
         ...(hoverTemplate3D ? { hovertemplate: hoverTemplate3D } : {}),
         ...(showLegend === undefined ? {} : { showlegend: showLegend }),
       })
@@ -1536,15 +1594,22 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
       const x = cyclePoints.map(({ coords }) => coords[0] ?? Number.NaN)
       const y = cyclePoints.map(({ coords }) => coords[1] ?? Number.NaN)
       const customdata = cyclePoints.map(({ index }) => (index >= 0 ? index : null))
+      const split = insertPeriodicLineBreaks({
+        x,
+        y,
+        customdata,
+        coordinatePeriods: axisPeriods,
+      })
       traces.push({
         type: 'scatter',
         mode: 'lines',
         name,
         uid,
-        x,
-        y,
-        customdata,
+        x: split.x,
+        y: split.y,
+        customdata: split.customdata,
         line: { color, width: lineWidth },
+        connectgaps: false,
         ...(hoverTemplate2D ? { hovertemplate: hoverTemplate2D } : {}),
         ...(showLegend === undefined ? {} : { showlegend: showLegend }),
       })
@@ -1569,15 +1634,22 @@ function buildLimitCycleTraces(config: LimitCycleTraceConfig): Data[] {
       const x = cyclePoints.map((_, idx) => idx * step)
       const y = cyclePoints.map(({ coords }) => coords[0] ?? Number.NaN)
       const customdata = cyclePoints.map(({ index }) => (index >= 0 ? index : null))
+      const split = insertPeriodicLineBreaks({
+        x,
+        y,
+        customdata,
+        coordinatePeriods: [null, axisPeriods[0] ?? null],
+      })
       traces.push({
         type: 'scatter',
         mode: 'lines',
         name,
         uid,
-        x,
-        y,
-        customdata,
+        x: split.x,
+        y: split.y,
+        customdata: split.customdata,
         line: { color, width: lineWidth },
+        connectgaps: false,
         ...(hoverTemplate1D ? { hovertemplate: hoverTemplate1D } : {}),
         ...(showLegend === undefined ? {} : { showlegend: showLegend }),
       })
@@ -1696,6 +1768,7 @@ function buildLimitCyclePreviewTraces(
   const logicalIndex = indices[selection.pointIndex]
   const displayIndex = Number.isFinite(logicalIndex) ? logicalIndex : selection.pointIndex
   const traceName = `LC Preview: ${branch.name} @ ${displayIndex}`
+  const periodsByStateIndex = statePeriodicPeriods(system.config)
   return buildLimitCycleTraces({
     state: point.state,
     dim: packedStateDimension,
@@ -1713,6 +1786,7 @@ function buildLimitCyclePreviewTraces(
     plotDim,
     subsystemSnapshot: branchSnapshot,
     projection,
+    statePeriods: periodsByStateIndex,
   })
 }
 
@@ -1749,6 +1823,7 @@ function buildIsoclineTraces(config: {
   isTimeSeries: boolean
   timeRange: [number, number] | null
   renderAsTimeSeriesHorizontalLine: boolean
+  statePeriods?: Array<number | null>
 }): Data[] {
   const {
     nodeId,
@@ -1764,6 +1839,7 @@ function buildIsoclineTraces(config: {
     isTimeSeries,
     timeRange,
     renderAsTimeSeriesHorizontalLine,
+    statePeriods,
   } = config
   const traces: Data[] = []
   const dim = geometry.dim
@@ -1772,6 +1848,7 @@ function buildIsoclineTraces(config: {
   if (pointCount <= 0) return traces
   const plotDim = Math.max(1, Math.min(requestedPlotDim, dim, 3))
   const axes = resolveAxisOrder(dim, plotDim, axisIndices)
+  const axisPeriods = stateAxisPeriods(statePeriods ?? [], axes)
   const width = highlight ? lineWidth + 1 : lineWidth
   const markerSize = highlight ? pointSize + 2 : pointSize
   const readPoint = (index: number): number[] | null => {
@@ -1925,15 +2002,22 @@ function buildIsoclineTraces(config: {
         z.push(pa[2], pb[2], null)
       }
       if (x.length > 0) {
+        const split = insertPeriodicLineBreaks({
+          x,
+          y,
+          z,
+          coordinatePeriods: axisPeriods,
+        })
         traces.push({
           type: 'scatter3d',
           mode: 'lines',
           name,
           uid: nodeId,
-          x,
-          y,
-          z,
+          x: split.x,
+          y: split.y,
+          z: split.z,
           line: { color, width },
+          connectgaps: false,
         })
       }
       return traces
@@ -1952,14 +2036,20 @@ function buildIsoclineTraces(config: {
       y.push(pa[1], pb[1], null)
     }
     if (x.length > 0) {
+      const split = insertPeriodicLineBreaks({
+        x,
+        y,
+        coordinatePeriods: axisPeriods,
+      })
       traces.push({
         type: 'scatter',
         mode: 'lines',
         name,
         uid: nodeId,
-        x,
-        y,
+        x: split.x,
+        y: split.y,
         line: { color, width },
+        connectgaps: false,
       })
     }
     return traces
@@ -2246,6 +2336,7 @@ function buildManifoldCurveTraces(config: {
   axisIndices: number[] | null
   plotDim: 1 | 2 | 3
   selectedPointIndex: number | null
+  statePeriods?: Array<number | null>
 }): Data[] {
   const {
     nodeId,
@@ -2260,6 +2351,7 @@ function buildManifoldCurveTraces(config: {
     axisIndices,
     plotDim: requestedPlotDim,
     selectedPointIndex,
+    statePeriods,
   } = config
   const traces: Data[] = []
   if (!Number.isFinite(geometry.dim) || geometry.dim <= 0) return traces
@@ -2287,6 +2379,7 @@ function buildManifoldCurveTraces(config: {
   if (displayDim <= 0) return traces
   const plotDim = Math.max(1, Math.min(requestedPlotDim, displayDim, 3)) as 1 | 2 | 3
   const axes = resolveAxisOrder(displayDim, plotDim, axisIndices)
+  const axisPeriods = stateAxisPeriods(statePeriods ?? [], axes)
   const width = highlight ? lineWidth + 1 : lineWidth
   const markerSize = highlight ? pointSize + 4 : pointSize + 2
 
@@ -2308,16 +2401,24 @@ function buildManifoldCurveTraces(config: {
       customdata.push(index)
     }
     if (x.length > 0) {
+      const split = insertPeriodicLineBreaks({
+        x,
+        y,
+        z,
+        customdata,
+        coordinatePeriods: axisPeriods,
+      })
       traces.push({
         type: 'scatter3d',
         mode: 'lines',
         name,
         uid: nodeId,
-        x,
-        y,
-        z,
-        customdata,
+        x: split.x,
+        y: split.y,
+        z: split.z,
+        customdata: split.customdata,
         line: { color, width, dash: lineDash },
+        connectgaps: false,
       })
     }
     if (
@@ -2370,15 +2471,22 @@ function buildManifoldCurveTraces(config: {
       customdata.push(index)
     }
     if (x.length > 0) {
+      const split = insertPeriodicLineBreaks({
+        x,
+        y,
+        customdata,
+        coordinatePeriods: axisPeriods,
+      })
       traces.push({
         type: 'scatter',
         mode: 'lines',
         name,
         uid: nodeId,
-        x,
-        y,
-        customdata,
+        x: split.x,
+        y: split.y,
+        customdata: split.customdata,
         line: { color, width, dash: lineDash },
+        connectgaps: false,
       })
     }
     if (
@@ -2427,14 +2535,20 @@ function buildManifoldCurveTraces(config: {
     y.push(value)
   }
   if (y.length > 0) {
+    const split = insertPeriodicLineBreaks({
+      x: arclength.slice(0, y.length),
+      y,
+      coordinatePeriods: [null, axisPeriods[0] ?? null],
+    })
     traces.push({
       type: 'scatter',
       mode: 'lines',
       name,
       uid: nodeId,
-      x: arclength.slice(0, y.length),
-      y,
+      x: split.x,
+      y: split.y,
       line: { color, width, dash: lineDash },
+      connectgaps: false,
     })
   }
   return traces
@@ -2454,6 +2568,7 @@ function buildManifoldSurfaceTraces(config: {
   axisIndices: number[] | null
   plotDim: 1 | 2 | 3
   selectedPointIndex: number | null
+  statePeriods?: Array<number | null>
 }): Data[] {
   const {
     nodeId,
@@ -2469,6 +2584,7 @@ function buildManifoldSurfaceTraces(config: {
     axisIndices,
     plotDim: requestedPlotDim,
     selectedPointIndex,
+    statePeriods,
   } = config
   const traces: Data[] = []
   if (!Number.isFinite(geometry.dim) || geometry.dim <= 0) return traces
@@ -2497,6 +2613,7 @@ function buildManifoldSurfaceTraces(config: {
   const plotDim = Math.max(1, Math.min(requestedPlotDim, displayDim, 3)) as 1 | 2 | 3
   if (plotDim === 1) return traces
   const axes = resolveAxisOrder(displayDim, plotDim, axisIndices)
+  const axisPeriods = stateAxisPeriods(statePeriods ?? [], axes)
   const width = highlight ? lineWidth + 1 : lineWidth
   const markerSize = highlight ? pointSize + 4 : pointSize + 2
   const ringBounds = resolveManifoldSurfaceRingBounds(geometry, vertexCount)
@@ -2612,15 +2729,22 @@ function buildManifoldSurfaceTraces(config: {
         z.push(null)
       }
       if (x.length > 0) {
+        const split = insertPeriodicLineBreaks({
+          x,
+          y,
+          z,
+          coordinatePeriods: axisPeriods,
+        })
         traces.push({
           type: 'scatter3d',
           mode: 'lines',
           name,
           uid: nodeId,
-          x,
-          y,
-          z,
+          x: split.x,
+          y: split.y,
+          z: split.z,
           line: { color, width, dash: lineDash },
+          connectgaps: false,
         })
       }
     }
@@ -2688,14 +2812,20 @@ function buildManifoldSurfaceTraces(config: {
     y.push(null)
   }
   if (x.length > 0) {
+    const split = insertPeriodicLineBreaks({
+      x,
+      y,
+      coordinatePeriods: axisPeriods,
+    })
     traces.push({
       type: 'scatter',
       mode: 'lines',
       name,
       uid: nodeId,
-      x,
-      y,
+      x: split.x,
+      y: split.y,
       line: { color, width, dash: lineDash },
+      connectgaps: false,
     })
   }
   if (
@@ -2752,6 +2882,7 @@ function buildSceneTraces(
   plotSize?: PlotSize | null
 ): Data[] {
   const traces: Data[] = []
+  const periodsByStateIndex = statePeriodicPeriods(system.config)
   const isoclineCache = isoclineGeometryCache ?? {}
   const limitCycleRenderTargets = system.ui.limitCycleRenderTargets ?? {}
   const projection = resolveSceneProjection(system.config, scene.axisVariables)
@@ -2800,7 +2931,14 @@ function buildSceneTraces(
     const baseSamples = projection?.showMapFunctionCurve && mapFunctionSamples
       ? { x: mapFunctionSamples.x, y: mapFunctionSamples.y }
       : null
-    traces.push(...buildCobwebBaseTraces(cobwebRange, baseSamples))
+    const cobwebAxis = projectionAxisIndices[0] ?? 0
+    traces.push(
+      ...buildCobwebBaseTraces(
+        cobwebRange,
+        baseSamples,
+        periodsByStateIndex[cobwebAxis] ?? null
+      )
+    )
   }
   if (isTimeSeries) {
     let minT = Number.POSITIVE_INFINITY
@@ -2855,6 +2993,9 @@ function buildSceneTraces(
           isTimeSeries,
           timeRange,
           renderAsTimeSeriesHorizontalLine,
+          statePeriods: isoclineFreeVariables.map((variableName) =>
+            stateVariablePeriod(system.config, variableName)
+          ),
         })
       )
       continue
@@ -3094,6 +3235,7 @@ function buildSceneTraces(
               uid: nodeId,
               color: node.render.color,
               lineWidth,
+              variablePeriod: periodsByStateIndex[axisX] ?? null,
             }
           )
           if (cobwebTrace) {
@@ -3332,6 +3474,7 @@ function buildSceneTraces(
           hoverTemplate3D,
           hoverTemplate2D,
           hoverTemplate1D,
+          statePeriods: periodsByStateIndex,
         })
       )
       if (selectedLimitCyclePointIndex !== null && selectedLimitCyclePointIndex >= 0) {
@@ -3604,6 +3747,7 @@ function buildSceneTraces(
           uid: nodeId,
           color: node.render.color,
           lineWidth,
+          variablePeriod: periodsByStateIndex[axisX] ?? null,
         }
       )
       if (cobwebTrace) {
@@ -3730,36 +3874,56 @@ function buildSceneTraces(
       }
 
       if (objectPlotDim >= 3) {
-        traces.push({
-          type: 'scatter3d',
-          mode: 'lines',
-          name: object.name,
-          uid: nodeId,
+        const split = insertPeriodicLineBreaks({
           x,
           y,
           z,
           customdata,
           text: orbitTimeLabels,
+          coordinatePeriods: stateAxisPeriods(periodsByStateIndex, [axisX, axisY, axisZ]),
+        })
+        traces.push({
+          type: 'scatter3d',
+          mode: 'lines',
+          name: object.name,
+          uid: nodeId,
+          x: split.x,
+          y: split.y,
+          z: split.z,
+          customdata: split.customdata,
+          text: split.text,
           line: {
             color: node.render.color,
             width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
           },
+          connectgaps: false,
           hovertemplate: flowHoverTemplate3D,
         })
       } else {
+        const split = insertPeriodicLineBreaks({
+          x,
+          y,
+          customdata,
+          text: orbitTimeLabels,
+          coordinatePeriods:
+            objectPlotDim >= 2
+              ? stateAxisPeriods(periodsByStateIndex, [axisX, axisY])
+              : [null, periodsByStateIndex[axisX] ?? null],
+        })
         traces.push({
           type: 'scatter',
           mode: 'lines',
           name: object.name,
           uid: nodeId,
-          x,
-          y,
-          customdata,
-          text: orbitTimeLabels,
+          x: split.x,
+          y: split.y,
+          customdata: split.customdata,
+          text: split.text,
           line: {
             color: node.render.color,
             width: highlight ? node.render.lineWidth + 1 : node.render.lineWidth,
           },
+          connectgaps: false,
           hovertemplate: objectPlotDim >= 2 ? flowHoverTemplate2D : flowHoverTemplate1D,
         })
       }
@@ -3946,6 +4110,7 @@ function buildSceneTraces(
             axisIndices: projectionAxisIndices,
             plotDim: projectionPlotDim,
             selectedPointIndex: selectedBranchPointIndex,
+            statePeriods: periodsByStateIndex,
           })
         )
       }
@@ -3971,6 +4136,7 @@ function buildSceneTraces(
             axisIndices: projectionAxisIndices,
             plotDim: projectionPlotDim,
             selectedPointIndex: selectedBranchPointIndex,
+            statePeriods: periodsByStateIndex,
           })
         )
       }
@@ -4152,17 +4318,35 @@ function buildSceneTraces(
       const branchTraceParameterText = buildBranchTraceParameterText(pointIndices)
 
       if (projectionPlotDim >= 3) {
+        const coordinatePeriods = stateAxisPeriods(periodsByStateIndex, [axisX, axisY, axisZ])
+        const splitMax = insertPeriodicLineBreaks({
+          x: xMax,
+          y: yMax,
+          z: zMax,
+          customdata: pointIndices,
+          text: branchTraceParameterText ?? undefined,
+          coordinatePeriods,
+        })
+        const splitMin = insertPeriodicLineBreaks({
+          x: xMin,
+          y: yMin,
+          z: zMin,
+          customdata: pointIndices,
+          text: branchTraceParameterText ?? undefined,
+          coordinatePeriods,
+        })
         traces.push({
           type: 'scatter3d',
           mode: 'lines',
           name: branch.name,
           uid: nodeId,
-          x: xMax,
-          y: yMax,
-          z: zMax,
-          customdata: pointIndices,
+          x: splitMax.x,
+          y: splitMax.y,
+          z: splitMax.z,
+          customdata: splitMax.customdata,
           line: { color: node.render.color, width: lineWidth, dash: lineDash },
-          ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+          connectgaps: false,
+          ...(branchTraceParameterText ? { text: splitMax.text } : {}),
           ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate3D } : {}),
         })
         traces.push({
@@ -4170,26 +4354,43 @@ function buildSceneTraces(
           mode: 'lines',
           name: `${branch.name} min`,
           uid: nodeId,
-          x: xMin,
-          y: yMin,
-          z: zMin,
-          customdata: pointIndices,
+          x: splitMin.x,
+          y: splitMin.y,
+          z: splitMin.z,
+          customdata: splitMin.customdata,
           line: { color: node.render.color, width: lineWidth, dash: lineDash },
+          connectgaps: false,
           showlegend: false,
-          ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+          ...(branchTraceParameterText ? { text: splitMin.text } : {}),
           ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate3D } : {}),
         })
       } else {
+        const coordinatePeriods = stateAxisPeriods(periodsByStateIndex, [axisX, axisY])
+        const splitMax = insertPeriodicLineBreaks({
+          x: xMax,
+          y: yMax,
+          customdata: pointIndices,
+          text: branchTraceParameterText ?? undefined,
+          coordinatePeriods,
+        })
+        const splitMin = insertPeriodicLineBreaks({
+          x: xMin,
+          y: yMin,
+          customdata: pointIndices,
+          text: branchTraceParameterText ?? undefined,
+          coordinatePeriods,
+        })
         traces.push({
           type: 'scatter',
           mode: 'lines',
           name: branch.name,
           uid: nodeId,
-          x: xMax,
-          y: yMax,
-          customdata: pointIndices,
+          x: splitMax.x,
+          y: splitMax.y,
+          customdata: splitMax.customdata,
           line: { color: node.render.color, width: lineWidth, dash: lineDash },
-          ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+          connectgaps: false,
+          ...(branchTraceParameterText ? { text: splitMax.text } : {}),
           ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate2D } : {}),
         })
         traces.push({
@@ -4197,12 +4398,13 @@ function buildSceneTraces(
           mode: 'lines',
           name: `${branch.name} min`,
           uid: nodeId,
-          x: xMin,
-          y: yMin,
-          customdata: pointIndices,
+          x: splitMin.x,
+          y: splitMin.y,
+          customdata: splitMin.customdata,
           line: { color: node.render.color, width: lineWidth, dash: lineDash },
+          connectgaps: false,
           showlegend: false,
-          ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+          ...(branchTraceParameterText ? { text: splitMin.text } : {}),
           ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate2D } : {}),
         })
       }
@@ -4273,6 +4475,16 @@ function buildSceneTraces(
         if (x.length > 0) {
           const isCodim1Curve = CODIM1_BIFURCATION_CURVE_BRANCH_TYPES.has(branch.branchType)
           const branchTraceParameterText = buildBranchTraceParameterText(pointIndices)
+          const split = insertPeriodicLineBreaks({
+            x,
+            y,
+            customdata: pointIndices,
+            text: branchTraceParameterText ?? undefined,
+            coordinatePeriods: [
+              stateVariablePeriod(system.config, axisVarX),
+              stateVariablePeriod(system.config, axisVarY),
+            ],
+          })
           const positionByPointIndex = new Map<number, number>()
           pointIndices.forEach((pointIndex, position) => {
             if (!positionByPointIndex.has(pointIndex)) {
@@ -4284,12 +4496,13 @@ function buildSceneTraces(
             mode: isCodim1Curve ? 'lines' : 'lines+markers',
             name: branch.name,
             uid: nodeId,
-            x,
-            y,
-            customdata: pointIndices,
+            x: split.x,
+            y: split.y,
+            customdata: split.customdata,
             line: { color: node.render.color, width: lineWidth, dash: lineDash },
+            connectgaps: false,
             ...(isCodim1Curve ? {} : { marker: { color: node.render.color, size: markerSize } }),
-            ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+            ...(branchTraceParameterText ? { text: split.text } : {}),
             ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate2D } : {}),
           })
           if (isCodim1Curve && branch.data.bifurcations.length > 0) {
@@ -4417,16 +4630,35 @@ function buildSceneTraces(
         }
         if (xMax.length > 0) {
           const branchTraceParameterText = buildBranchTraceParameterText(pointIndices)
+          const coordinatePeriods = [
+            stateVariablePeriod(system.config, axisVarX),
+            stateVariablePeriod(system.config, axisVarY),
+          ]
+          const splitMax = insertPeriodicLineBreaks({
+            x: xMax,
+            y: yMax,
+            customdata: pointIndices,
+            text: branchTraceParameterText ?? undefined,
+            coordinatePeriods,
+          })
+          const splitMin = insertPeriodicLineBreaks({
+            x: xMin,
+            y: yMin,
+            customdata: pointIndices,
+            text: branchTraceParameterText ?? undefined,
+            coordinatePeriods,
+          })
           traces.push({
             type: 'scatter',
             mode: 'lines',
             name: branch.name,
             uid: nodeId,
-            x: xMax,
-            y: yMax,
-            customdata: pointIndices,
+            x: splitMax.x,
+            y: splitMax.y,
+            customdata: splitMax.customdata,
             line: { color: node.render.color, width: lineWidth, dash: lineDash },
-            ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+            connectgaps: false,
+            ...(branchTraceParameterText ? { text: splitMax.text } : {}),
             ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate2D } : {}),
           })
           traces.push({
@@ -4434,12 +4666,13 @@ function buildSceneTraces(
             mode: 'lines',
             name: `${branch.name} min`,
             uid: nodeId,
-            x: xMin,
-            y: yMin,
-            customdata: pointIndices,
+            x: splitMin.x,
+            y: splitMin.y,
+            customdata: splitMin.customdata,
             line: { color: node.render.color, width: lineWidth, dash: lineDash },
+            connectgaps: false,
             showlegend: false,
-            ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+            ...(branchTraceParameterText ? { text: splitMin.text } : {}),
             ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate2D } : {}),
           })
           if (selectedBranchPointIndex !== null && selectedPointLabel) {
@@ -4501,6 +4734,7 @@ function buildSceneTraces(
           hoverTemplate3D: branchHoverTemplate3D,
           hoverTemplate2D: branchHoverTemplate2D,
           hoverTemplate1D: isMap1D ? branchHoverTemplateMap1D : branchHoverTemplateTimeSeries1D,
+          statePeriods: periodsByStateIndex,
         })
         const pointParameterHoverText = resolvePointParameterHoverText(idx)
         for (const trace of pointTraces) {
@@ -4624,18 +4858,27 @@ function buildSceneTraces(
       }
     })
     if (projectionPlotDim >= 3) {
+      const split = insertPeriodicLineBreaks({
+        x,
+        y,
+        z,
+        customdata: pointIndices,
+        text: branchTraceParameterText ?? undefined,
+        coordinatePeriods: stateAxisPeriods(periodsByStateIndex, [axisX, axisY, axisZ]),
+      })
       traces.push({
         type: 'scatter3d',
         mode: renderPointMarkers ? 'lines+markers' : 'lines',
         name: branch.name,
         uid: nodeId,
-        x,
-        y,
-        z,
-        customdata: pointIndices,
+        x: split.x,
+        y: split.y,
+        z: split.z,
+        customdata: split.customdata,
         line: { color: node.render.color, width: lineWidth, dash: lineDash },
+        connectgaps: false,
         ...(renderPointMarkers ? { marker: { color: node.render.color, size: markerSize } } : {}),
-        ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+        ...(branchTraceParameterText ? { text: split.text } : {}),
         ...(branchTraceParameterText ? { hovertemplate: branchHoverTemplate3D } : {}),
       })
       if (renderBifurcationMarkers) {
@@ -4689,17 +4932,31 @@ function buildSceneTraces(
         }
       }
     } else if (projectionPlotDim === 2 || isMap1D || isTimeSeries) {
+      const coordinatePeriods =
+        projectionPlotDim === 2
+          ? stateAxisPeriods(periodsByStateIndex, [axisX, axisY])
+          : isMap1D
+            ? [periodsByStateIndex[axisX] ?? null, periodsByStateIndex[axisX] ?? null]
+            : [null, periodsByStateIndex[axisX] ?? null]
+      const split = insertPeriodicLineBreaks({
+        x,
+        y,
+        customdata: pointIndices,
+        text: branchTraceParameterText ?? undefined,
+        coordinatePeriods,
+      })
       traces.push({
         type: 'scatter',
         mode: renderPointMarkers ? 'lines+markers' : 'lines',
         name: branch.name,
         uid: nodeId,
-        x,
-        y,
-        customdata: pointIndices,
+        x: split.x,
+        y: split.y,
+        customdata: split.customdata,
         line: { color: node.render.color, width: lineWidth, dash: lineDash },
+        connectgaps: false,
         ...(renderPointMarkers ? { marker: { color: node.render.color, size: markerSize } } : {}),
-        ...(branchTraceParameterText ? { text: branchTraceParameterText } : {}),
+        ...(branchTraceParameterText ? { text: split.text } : {}),
         ...(branchTraceParameterText
           ? {
               hovertemplate:
@@ -4870,6 +5127,25 @@ function buildDiagramTraces(
   if (!xAxis || !yAxis) {
     return { traces, hasAxes, hasBranches, hasData: false, xTitle, yTitle }
   }
+
+  const periodsByStateIndex = statePeriodicPeriods(system.config)
+  const diagramAxisPeriod = (axis: BifurcationAxis): number | null => {
+    if (axis.kind !== 'state') return null
+    const index = system.config.varNames.indexOf(axis.name)
+    return index >= 0 ? periodsByStateIndex[index] ?? null : null
+  }
+  const diagramCoordinatePeriods = [diagramAxisPeriod(xAxis), diagramAxisPeriod(yAxis)]
+  const splitDiagramLine = (
+    x: Array<number | null>,
+    y: Array<number | null>,
+    customdata?: Array<number | null>
+  ) =>
+    insertPeriodicLineBreaks({
+      x,
+      y,
+      customdata,
+      coordinatePeriods: diagramCoordinatePeriods,
+    })
 
   let hasData = false
   const appendMultiLineMarkers = (
@@ -5221,35 +5497,39 @@ function buildDiagramTraces(
         const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
         const markerSize = highlight ? node.render.pointSize + 2 : node.render.pointSize
         const lineDash = resolveLineDash(node.render.lineStyle)
+        const splitMax = splitDiagramLine(xMax, yMax, envelopePointIndices)
+        const splitMin = splitDiagramLine(xMin, yMin, envelopePointIndices)
 
         traces.push({
           type: 'scatter',
           mode: 'lines',
           name: branch.name,
           uid: branchId,
-          x: xMax,
-          y: yMax,
-          customdata: envelopePointIndices,
+          x: splitMax.x,
+          y: splitMax.y,
+          customdata: splitMax.customdata,
           line: {
             color: node.render.color,
             width: lineWidth,
             dash: lineDash,
           },
+          connectgaps: false,
         })
         traces.push({
           type: 'scatter',
           mode: 'lines',
           name: `${branch.name} min`,
           uid: branchId,
-          x: xMin,
-          y: yMin,
-          customdata: envelopePointIndices,
+          x: splitMin.x,
+          y: splitMin.y,
+          customdata: splitMin.customdata,
           line: {
             color: node.render.color,
             width: lineWidth,
             dash: lineDash,
           },
           showlegend: false,
+          connectgaps: false,
         })
 
         if (bifX.length > 0) {
@@ -5408,15 +5688,16 @@ function buildDiagramTraces(
       const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
       const markerSize = highlight ? node.render.pointSize + 2 : node.render.pointSize
       const lineDash = resolveLineDash(node.render.lineStyle)
+      const splitCycle = splitDiagramLine(cycleX, cycleY, cycleCustomdata)
 
       traces.push({
         type: 'scatter',
         mode: 'lines',
         name: branch.name,
         uid: branchId,
-        x: cycleX,
-        y: cycleY,
-        customdata: cycleCustomdata,
+        x: splitCycle.x,
+        y: splitCycle.y,
+        customdata: splitCycle.customdata,
         line: {
           color: node.render.color,
           width: lineWidth,
@@ -5533,20 +5814,23 @@ function buildDiagramTraces(
       const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
       const markerSize = highlight ? node.render.pointSize + 2 : node.render.pointSize
       const lineDash = resolveLineDash(node.render.lineStyle)
+      const splitMax = splitDiagramLine(xMax, yMax, pointIndices)
+      const splitMin = splitDiagramLine(xMin, yMin, pointIndices)
 
       traces.push({
         type: 'scatter',
         mode: 'lines',
         name: branch.name,
         uid: branchId,
-        x: xMax,
-        y: yMax,
-        customdata: pointIndices,
+        x: splitMax.x,
+        y: splitMax.y,
+        customdata: splitMax.customdata,
         line: {
           color: node.render.color,
           width: lineWidth,
           dash: lineDash,
         },
+        connectgaps: false,
       })
 
       traces.push({
@@ -5554,15 +5838,16 @@ function buildDiagramTraces(
         mode: 'lines',
         name: `${branch.name} min`,
         uid: branchId,
-        x: xMin,
-        y: yMin,
-        customdata: pointIndices,
+        x: splitMin.x,
+        y: splitMin.y,
+        customdata: splitMin.customdata,
         line: {
           color: node.render.color,
           width: lineWidth,
           dash: lineDash,
         },
         showlegend: false,
+        connectgaps: false,
       })
 
       appendMultiLineMarkers(
@@ -5654,20 +5939,22 @@ function buildDiagramTraces(
       const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
       const markerSize = highlight ? node.render.pointSize + 2 : node.render.pointSize
       const lineDash = resolveLineDash(node.render.lineStyle)
+      const splitRepresentative = splitDiagramLine(x, y, pointIndices)
 
       traces.push({
         type: 'scatter',
         mode: 'lines',
         name: branch.name,
         uid: branchId,
-        x,
-        y,
-        customdata: pointIndices,
+        x: splitRepresentative.x,
+        y: splitRepresentative.y,
+        customdata: splitRepresentative.customdata,
         line: {
           color: node.render.color,
           width: lineWidth,
           dash: lineDash,
         },
+        connectgaps: false,
       })
 
       for (const [cycleIndex, line] of cycleLines.entries()) {
@@ -5675,14 +5962,15 @@ function buildDiagramTraces(
           (value) => typeof value === 'number' && Number.isFinite(value)
         )
         if (!hasValues) continue
+        const splitCycle = splitDiagramLine(line.x, line.y, pointIndices)
         traces.push({
           type: 'scatter',
           mode: 'lines',
           name: `${branch.name} cycle ${cycleIndex + 1}`,
           uid: branchId,
-          x: line.x,
-          y: line.y,
-          customdata: pointIndices,
+          x: splitCycle.x,
+          y: splitCycle.y,
+          customdata: splitCycle.customdata,
           line: {
             color: node.render.color,
             width: lineWidth,
@@ -5761,20 +6049,22 @@ function buildDiagramTraces(
       const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
       const markerSize = highlight ? node.render.pointSize + 2 : node.render.pointSize
       const lineDash = resolveLineDash(node.render.lineStyle)
+      const splitRepresentative = splitDiagramLine(x, y, pointIndices)
 
       traces.push({
         type: 'scatter',
         mode: 'lines',
         name: branch.name,
         uid: branchId,
-        x,
-        y,
-        customdata: pointIndices,
+        x: splitRepresentative.x,
+        y: splitRepresentative.y,
+        customdata: splitRepresentative.customdata,
         line: {
           color: node.render.color,
           width: lineWidth,
           dash: lineDash,
         },
+        connectgaps: false,
       })
 
       if (cycleX.length > 0) {
@@ -5896,20 +6186,22 @@ function buildDiagramTraces(
     const lineWidth = highlight ? node.render.lineWidth + 1 : node.render.lineWidth
     const markerSize = highlight ? node.render.pointSize + 2 : node.render.pointSize
     const lineDash = resolveLineDash(node.render.lineStyle)
+    const split = splitDiagramLine(x, y, pointIndices)
 
     traces.push({
       type: 'scatter',
       mode: 'lines',
       name: branch.name,
       uid: branchId,
-      x,
-      y,
-      customdata: pointIndices,
+      x: split.x,
+      y: split.y,
+      customdata: split.customdata,
       line: {
         color: node.render.color,
         width: lineWidth,
         dash: lineDash,
       },
+      connectgaps: false,
     })
 
     traces.push({

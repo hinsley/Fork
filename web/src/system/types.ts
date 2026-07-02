@@ -1,9 +1,15 @@
+export interface PeriodicVariableConfig {
+  enabled: boolean
+  period: number
+}
+
 export interface SystemConfig {
   name: string
   equations: string[]
   params: number[]
   paramNames: string[]
   varNames: string[]
+  periodicVariables?: PeriodicVariableConfig[]
   solver: string
   type: 'flow' | 'map'
 }

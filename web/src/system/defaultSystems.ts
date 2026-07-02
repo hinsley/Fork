@@ -1,4 +1,5 @@
 import { createSystem } from './model'
+import { normalizePeriodicVariables } from './periodicity'
 import type { System, SystemConfig } from './types'
 
 type DefaultSystemSpec = SystemConfig
@@ -149,6 +150,7 @@ function cloneSystemConfig(config: SystemConfig): SystemConfig {
     params: [...config.params],
     paramNames: [...config.paramNames],
     varNames: [...config.varNames],
+    periodicVariables: normalizePeriodicVariables(config),
   }
 }
 

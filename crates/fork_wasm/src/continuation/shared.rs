@@ -7,23 +7,35 @@ use fork_core::continuation::{
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::{
-    compute_param_jacobian, compute_system_jacobian, evaluate_equilibrium_residual, SystemKind,
+    compute_map_cycle_points_with_periodicity, compute_param_jacobian, compute_system_jacobian,
+    evaluate_equilibrium_residual_with_periodicity, SystemKind,
 };
-use fork_core::traits::DynamicalSystem;
+use fork_core::state_periodicity::StatePeriodicity;
 use nalgebra::{DMatrix, DVector};
 
 pub(crate) struct OwnedEquilibriumContinuationProblem {
     system: EquationSystem,
     kind: SystemKind,
     param_index: usize,
+    periodicity: StatePeriodicity,
 }
 
 impl OwnedEquilibriumContinuationProblem {
     pub(crate) fn new(system: EquationSystem, kind: SystemKind, param_index: usize) -> Self {
+        Self::new_with_periodicity(system, kind, param_index, StatePeriodicity::none())
+    }
+
+    pub(crate) fn new_with_periodicity(
+        system: EquationSystem,
+        kind: SystemKind,
+        param_index: usize,
+        periodicity: StatePeriodicity,
+    ) -> Self {
         Self {
             system,
             kind,
             param_index,
+            periodicity,
         }
     }
 
@@ -53,9 +65,16 @@ impl ContinuationProblem for OwnedEquilibriumContinuationProblem {
         let param = aug_state[0];
         let state: Vec<f64> = aug_state.rows(1, dim).iter().cloned().collect();
         let kind = self.kind;
+        let periodicity = self.periodicity.clone();
 
         self.with_param(param, |system| {
-            evaluate_equilibrium_residual(system, kind, &state, out.as_mut_slice())
+            evaluate_equilibrium_residual_with_periodicity(
+                system,
+                kind,
+                &state,
+                out.as_mut_slice(),
+                &periodicity,
+            )
         })?;
 
         Ok(())
@@ -94,6 +113,7 @@ impl ContinuationProblem for OwnedEquilibriumContinuationProblem {
         let param = aug_state[0];
         let state: Vec<f64> = aug_state.rows(1, dim).iter().cloned().collect();
         let kind = self.kind;
+        let periodicity = self.periodicity.clone();
 
         let iterations = kind.map_iterations();
         let (residual_mat, eigen_mat, cycle_points) = self.with_param(param, |system| {
@@ -111,7 +131,12 @@ impl ContinuationProblem for OwnedEquilibriumContinuationProblem {
                 residual_mat.clone()
             };
             let cycle_points = if kind.is_map() && iterations > 1 {
-                Some(compute_map_cycle_points(system, &state, iterations))
+                Some(compute_map_cycle_points_with_periodicity(
+                    system,
+                    &state,
+                    iterations,
+                    &periodicity,
+                ))
             } else {
                 None
             };
@@ -141,27 +166,6 @@ impl ContinuationProblem for OwnedEquilibriumContinuationProblem {
             cycle_points,
         })
     }
-}
-
-fn compute_map_cycle_points(
-    system: &EquationSystem,
-    state: &[f64],
-    iterations: usize,
-) -> Vec<Vec<f64>> {
-    if iterations == 0 {
-        return Vec::new();
-    }
-    let dim = system.equations.len();
-    let mut points = Vec::with_capacity(iterations);
-    let mut current = state.to_vec();
-    let mut next = vec![0.0; dim];
-    points.push(current.clone());
-    for _ in 1..iterations {
-        system.apply(0.0, &current, &mut next);
-        std::mem::swap(&mut current, &mut next);
-        points.push(current.clone());
-    }
-    points
 }
 
 pub(crate) fn compute_tangent_from_problem<P: ContinuationProblem>(
@@ -236,6 +240,37 @@ mod problem_tests {
             &vec!["x".to_string(), "y".to_string()],
         )
         .expect("system")
+    }
+
+    #[test]
+    fn equilibrium_problem_periodic_map_residual_and_cycle_points_wrap() {
+        let system = build_system(
+            vec!["x + a".to_string()],
+            vec![1.0],
+            &vec!["a".to_string()],
+            &vec!["x".to_string()],
+        )
+        .expect("system");
+        let periodicity = StatePeriodicity::from_periods(&[1.0], 1);
+        let mut problem = OwnedEquilibriumContinuationProblem::new_with_periodicity(
+            system,
+            SystemKind::Map { iterations: 2 },
+            0,
+            periodicity,
+        );
+
+        let aug_state = DVector::from_vec(vec![1.0, 1.2]);
+        let mut residual = DVector::zeros(1);
+        problem
+            .residual(&aug_state, &mut residual)
+            .expect("residual");
+        assert!(residual[0].abs() < 1e-12);
+
+        let diagnostics = problem.diagnostics(&aug_state).expect("diagnostics");
+        let cycle_points = diagnostics.cycle_points.expect("cycle points");
+        assert_eq!(cycle_points.len(), 2);
+        assert!((cycle_points[0][0] - 0.2).abs() < 1e-12);
+        assert!((cycle_points[1][0] - 0.2).abs() < 1e-12);
     }
 
     #[test]

@@ -47,6 +47,8 @@ import type {
   ValidateSystemResult,
 } from '../ForkCoreClient'
 import { discardHomoclinicInitialApproximationPoint } from '../../system/continuation'
+import { periodicPeriodsForConfig } from '../../system/periodicity'
+import type { SystemConfig } from '../../system/types'
 
 type WorkerRequest =
   | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
@@ -157,6 +159,7 @@ type WasmModule = {
   ) => {
     set_state: (state: Float64Array) => void
     get_state: () => Float64Array
+    set_periods?: (periods: Float64Array) => void
     set_t: (t: number) => void
     get_t: () => number
     step: (dt: number) => void
@@ -322,7 +325,8 @@ type WasmModule = {
     equilibriumState: Float64Array,
     parameterName: string,
     settings: Record<string, number>,
-    forward: boolean
+    forward: boolean,
+    periods: Float64Array
   ) => {
     run_steps: (batchSize: number) => ContinuationProgress
     get_progress: () => ContinuationProgress
@@ -522,23 +526,29 @@ async function loadWasm(): Promise<WasmModule> {
   return wasmPromise
 }
 
+function createWasmSystem(wasm: WasmModule, system: SystemConfig) {
+  const instance = new wasm.WasmSystem(
+    system.equations,
+    new Float64Array(system.params),
+    system.paramNames,
+    system.varNames,
+    system.solver,
+    system.type
+  )
+  instance.set_periods?.(new Float64Array(periodicPeriodsForConfig(system)))
+  return instance
+}
+
 async function runOrbit(request: SimulateOrbitRequest, signal: AbortSignal): Promise<SimulateOrbitResult> {
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
 
   system.set_t(0)
   system.set_state(new Float64Array(request.initialState))
 
   const data: number[][] = []
   let t = 0
-  data.push([t, ...request.initialState])
+  data.push([t, ...Array.from(system.get_state())])
 
   for (let i = 0; i < request.steps; i += 1) {
     if (signal.aborted) {
@@ -581,14 +591,7 @@ async function runSampleMap1DFunction(
   const xValues: number[] = []
   const yValues: number[] = []
 
-  const system = new wasm.WasmSystem(
-    config.equations,
-    new Float64Array(config.params),
-    config.paramNames,
-    config.varNames,
-    config.solver,
-    config.type
-  )
+  const system = createWasmSystem(wasm, config)
 
   for (let i = 0; i < sampleCount; i += 1) {
     abortIfNeeded(signal)
@@ -611,14 +614,7 @@ async function runComputeEventSeriesFromOrbit(
 ): Promise<EventSeriesResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
   abortIfNeeded(signal)
 
   const computeEventSeries =
@@ -650,14 +646,7 @@ async function runComputeEventSeriesFromSamples(
 ): Promise<EventSeriesResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
   abortIfNeeded(signal)
 
   const computeEventSeries =
@@ -689,14 +678,7 @@ async function runComputeIsocline(
 ): Promise<ComputeIsoclineResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
   abortIfNeeded(signal)
 
   const axisIndices = request.axes.map((axis) => request.system.varNames.indexOf(axis.variableName))
@@ -734,14 +716,7 @@ async function runLyapunovExponents(
 ): Promise<number[]> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
   abortIfNeeded(signal)
   const result = system.compute_lyapunov_exponents(
     new Float64Array(request.startState),
@@ -759,14 +734,7 @@ async function runCovariantLyapunovVectors(
 ): Promise<CovariantLyapunovResponse> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
   abortIfNeeded(signal)
   return system.compute_covariant_lyapunov_vectors(
     new Float64Array(request.startState),
@@ -785,14 +753,7 @@ async function runSolveEquilibrium(
 ): Promise<SolveEquilibriumResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
   abortIfNeeded(signal)
   const mapIterations =
     request.system.type === 'map' ? request.mapIterations ?? 1 : 1
@@ -831,7 +792,8 @@ async function runEquilibriumContinuation(
     new Float64Array(request.equilibriumState),
     request.parameterName,
     settings,
-    request.forward
+    request.forward,
+    new Float64Array(periodicPeriodsForConfig(request.system))
   )
 
   let progress = runner.get_progress()
@@ -946,14 +908,7 @@ async function runEquilibriumManifold2D(
 ): Promise<EquilibriumManifold2DResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
 
   const computeWithProgress = system.compute_eq_manifold_2d_with_progress
   if (typeof computeWithProgress === 'function') {
@@ -994,14 +949,7 @@ async function runLimitCycleManifold2D(
 ): Promise<LimitCycleManifold2DResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
 
   const computeWithProgress = system.compute_cycle_manifold_2d_with_progress
   if (typeof computeWithProgress === 'function') {
@@ -1047,14 +995,7 @@ async function runComputeLimitCycleFloquetModes(
 ): Promise<LimitCycleFloquetModesResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
   abortIfNeeded(signal)
   const computeModes = system.compute_limit_cycle_floquet_modes
   if (typeof computeModes !== 'function') {
@@ -1161,14 +1102,7 @@ async function runIsochroneCurveContinuation(
   const runnerCtor = (wasm as { WasmIsochroneCurveRunner?: WasmModule['WasmIsochroneCurveRunner'] })
     .WasmIsochroneCurveRunner
   if (typeof runnerCtor !== 'function') {
-    const system = new wasm.WasmSystem(
-      request.system.equations,
-      new Float64Array(request.system.params),
-      request.system.paramNames,
-      request.system.varNames,
-      request.system.solver,
-      request.system.type
-    )
+    const system = createWasmSystem(wasm, request.system)
     const continueIsochrone = (
       system as unknown as {
         continue_isochrone_curve?: (
@@ -1267,14 +1201,7 @@ async function runLimitCycleContinuationFromHopf(
 ): Promise<LimitCycleContinuationResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
 
   const setup = system.init_lc_from_hopf(
     new Float64Array(request.hopfState),
@@ -1318,14 +1245,7 @@ async function runLimitCycleContinuationFromOrbit(
 ): Promise<LimitCycleContinuationResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
 
   const orbitTimes = new Float64Array(request.orbitTimes)
   const orbitStates = new Float64Array(request.orbitStates.flat())
@@ -1371,14 +1291,7 @@ async function runLimitCycleContinuationFromPD(
 ): Promise<LimitCycleContinuationResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
 
   const setup = system.init_lc_from_pd(
     new Float64Array(request.lcState),
@@ -1422,14 +1335,7 @@ async function runHomoclinicFromLargeCycle(
 ): Promise<HomoclinicContinuationResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
 
   const initHomoclinicFromLargeCycle = system.init_homoclinic_from_large_cycle
   if (typeof initHomoclinicFromLargeCycle !== 'function') {
@@ -1488,14 +1394,7 @@ async function runHomoclinicFromHomoclinic(
 ): Promise<HomoclinicContinuationResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
 
   const initHomoclinicFromHomoclinic = system.init_homoclinic_from_homoclinic
   if (typeof initHomoclinicFromHomoclinic !== 'function') {
@@ -1560,14 +1459,7 @@ async function runHomotopySaddleFromEquilibrium(
 ): Promise<HomotopySaddleContinuationResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
 
   const initHomotopySaddleFromEquilibrium = system.init_homotopy_saddle_from_equilibrium
   if (typeof initHomotopySaddleFromEquilibrium !== 'function') {
@@ -1625,14 +1517,7 @@ async function runHomoclinicFromHomotopySaddle(
 ): Promise<HomoclinicContinuationResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
 
   const initHomoclinicFromHomotopySaddle = system.init_homoclinic_from_homotopy_saddle
   if (typeof initHomoclinicFromHomotopySaddle !== 'function') {
@@ -1691,14 +1576,7 @@ async function runMapCycleContinuationFromPD(
 ): Promise<EquilibriumContinuationResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const system = new wasm.WasmSystem(
-    request.system.equations,
-    new Float64Array(request.system.params),
-    request.system.paramNames,
-    request.system.varNames,
-    request.system.solver,
-    request.system.type
-  )
+  const system = createWasmSystem(wasm, request.system)
 
   let seed = system.init_map_cycle_from_pd(
     request.pdState,
@@ -1758,14 +1636,7 @@ async function runValidateSystem(
   try {
     abortIfNeeded(signal)
     // Attempt full system compile first for a fast pass.
-    const instance = new wasm.WasmSystem(
-      system.equations,
-      new Float64Array(system.params),
-      system.paramNames,
-      system.varNames,
-      system.solver,
-      system.type
-    )
+    const instance = createWasmSystem(wasm, system)
     void instance
     return { ok: true, equationErrors }
   } catch (err) {
@@ -1773,14 +1644,10 @@ async function runValidateSystem(
     for (let i = 0; i < system.equations.length; i += 1) {
       abortIfNeeded(signal)
       try {
-        const instance = new wasm.WasmSystem(
-          [system.equations[i]],
-          new Float64Array(system.params),
-          system.paramNames,
-          system.varNames,
-          system.solver,
-          system.type
-        )
+        const instance = createWasmSystem(wasm, {
+          ...system,
+          equations: [system.equations[i]],
+        })
         void instance
       } catch (eqErr) {
         const eqMessage = eqErr instanceof Error ? eqErr.message : String(eqErr)

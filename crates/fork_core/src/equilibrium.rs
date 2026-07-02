@@ -1,4 +1,7 @@
-use crate::{autodiff::Dual, equation_engine::EquationSystem, traits::DynamicalSystem};
+use crate::{
+    autodiff::Dual, equation_engine::EquationSystem, state_periodicity::StatePeriodicity,
+    traits::DynamicalSystem,
+};
 use anyhow::{anyhow, bail, Context, Result};
 use nalgebra::linalg::SVD;
 use nalgebra::{Complex, DMatrix, DVector};
@@ -90,6 +93,22 @@ pub fn solve_equilibrium(
     initial_guess: &[f64],
     settings: NewtonSettings,
 ) -> Result<EquilibriumResult> {
+    solve_equilibrium_with_periodicity(
+        system,
+        kind,
+        initial_guess,
+        settings,
+        &StatePeriodicity::none(),
+    )
+}
+
+pub fn solve_equilibrium_with_periodicity(
+    system: &EquationSystem,
+    kind: SystemKind,
+    initial_guess: &[f64],
+    settings: NewtonSettings,
+    periodicity: &StatePeriodicity,
+) -> Result<EquilibriumResult> {
     let map_iterations = kind.checked_map_iterations()?;
     let dim = system.equations.len();
     if dim == 0 {
@@ -113,8 +132,15 @@ pub fn solve_equilibrium(
     }
 
     let mut state = initial_guess.to_vec();
+    periodicity.wrap_state(&mut state);
     let mut residual = vec![0.0; dim];
-    evaluate_equilibrium_residual(system, kind, &state, &mut residual)?;
+    evaluate_equilibrium_residual_with_periodicity(
+        system,
+        kind,
+        &state,
+        &mut residual,
+        periodicity,
+    )?;
     let mut residual_norm = l2_norm(&residual);
     let mut iterations = 0usize;
 
@@ -138,9 +164,16 @@ pub fn solve_equilibrium(
         for i in 0..dim {
             state[i] -= settings.damping * delta[i];
         }
+        periodicity.wrap_state(&mut state);
 
         iterations += 1;
-        evaluate_equilibrium_residual(system, kind, &state, &mut residual)?;
+        evaluate_equilibrium_residual_with_periodicity(
+            system,
+            kind,
+            &state,
+            &mut residual,
+            periodicity,
+        )?;
         residual_norm = l2_norm(&residual);
     }
 
@@ -148,7 +181,12 @@ pub fn solve_equilibrium(
     let eigenpairs = compute_eigenpairs(dim, &jacobian)
         .context("Failed to compute eigenvalues/eigenvectors of Jacobian.")?;
     let cycle_points = if kind.is_map() && map_iterations > 1 {
-        Some(compute_map_cycle_points(system, &state, map_iterations))
+        Some(compute_map_cycle_points_with_periodicity(
+            system,
+            &state,
+            map_iterations,
+            periodicity,
+        ))
     } else {
         None
     };
@@ -169,13 +207,29 @@ pub fn evaluate_equilibrium_residual(
     state: &[f64],
     out: &mut [f64],
 ) -> Result<()> {
+    evaluate_equilibrium_residual_with_periodicity(
+        system,
+        kind,
+        state,
+        out,
+        &StatePeriodicity::none(),
+    )
+}
+
+pub fn evaluate_equilibrium_residual_with_periodicity(
+    system: &EquationSystem,
+    kind: SystemKind,
+    state: &[f64],
+    out: &mut [f64],
+    periodicity: &StatePeriodicity,
+) -> Result<()> {
     let iterations = kind.checked_map_iterations()?;
     match kind {
         SystemKind::Flow => system.apply(0.0, state, out),
         SystemKind::Map { .. } => {
-            iterate_map(system, state, iterations, out);
+            iterate_map_with_periodicity(system, state, iterations, out, periodicity);
             for i in 0..out.len() {
-                out[i] -= state[i];
+                out[i] = periodicity.wrapped_delta(i, out[i] - state[i]);
             }
         }
     }
@@ -250,21 +304,38 @@ fn compute_single_step_jacobian(system: &EquationSystem, state: &[f64]) -> Resul
     Ok(jacobian)
 }
 
-fn iterate_map(system: &EquationSystem, state: &[f64], iterations: usize, out: &mut [f64]) {
+fn iterate_map_with_periodicity(
+    system: &EquationSystem,
+    state: &[f64],
+    iterations: usize,
+    out: &mut [f64],
+    periodicity: &StatePeriodicity,
+) {
     let dim = out.len();
     let mut current = state.to_vec();
+    periodicity.wrap_state(&mut current);
     let mut next = vec![0.0; dim];
     for _ in 0..iterations {
         system.apply(0.0, &current, &mut next);
+        periodicity.wrap_state(&mut next);
         std::mem::swap(&mut current, &mut next);
     }
     out.copy_from_slice(&current);
 }
 
-pub(crate) fn compute_map_cycle_points(
+pub fn compute_map_cycle_points(
     system: &EquationSystem,
     state: &[f64],
     iterations: usize,
+) -> Vec<Vec<f64>> {
+    compute_map_cycle_points_with_periodicity(system, state, iterations, &StatePeriodicity::none())
+}
+
+pub fn compute_map_cycle_points_with_periodicity(
+    system: &EquationSystem,
+    state: &[f64],
+    iterations: usize,
+    periodicity: &StatePeriodicity,
 ) -> Vec<Vec<f64>> {
     if iterations == 0 {
         return Vec::new();
@@ -272,10 +343,12 @@ pub(crate) fn compute_map_cycle_points(
     let dim = system.equations.len();
     let mut points = Vec::with_capacity(iterations);
     let mut current = state.to_vec();
+    periodicity.wrap_state(&mut current);
     let mut next = vec![0.0; dim];
     points.push(current.clone());
     for _ in 1..iterations {
         system.apply(0.0, &current, &mut next);
+        periodicity.wrap_state(&mut next);
         std::mem::swap(&mut current, &mut next);
         points.push(current.clone());
     }
@@ -420,9 +493,11 @@ fn normalize_complex_vector(vec: &mut [Complex<f64>]) {
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_jacobian, compute_map_cycle_points, solve_equilibrium, NewtonSettings, SystemKind,
+        compute_jacobian, compute_map_cycle_points, evaluate_equilibrium_residual_with_periodicity,
+        solve_equilibrium, solve_equilibrium_with_periodicity, NewtonSettings, SystemKind,
     };
     use crate::equation_engine::{parse, Compiler, EquationSystem};
+    use crate::state_periodicity::StatePeriodicity;
 
     fn assert_err_contains<T: std::fmt::Debug>(result: anyhow::Result<T>, needle: &str) {
         let err = result.expect_err("expected error");
@@ -520,6 +595,53 @@ mod tests {
         assert!((points[0][0] - 0.2).abs() < 1e-12);
         assert!((points[1][0] - 0.8).abs() < 1e-12);
         assert!((points[2][0] - 0.2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn periodic_map_residual_uses_short_wrapped_displacement() {
+        let system = build_constant_system(0.05);
+        let periodicity = StatePeriodicity::from_periods(&[1.0], 1);
+        let mut residual = vec![0.0];
+
+        evaluate_equilibrium_residual_with_periodicity(
+            &system,
+            SystemKind::Map { iterations: 1 },
+            &[0.95],
+            &mut residual,
+            &periodicity,
+        )
+        .expect("periodic residual should compute");
+
+        assert!((residual[0] - 0.1_f64).abs() < 1e-12);
+    }
+
+    #[test]
+    fn periodic_map_solve_wraps_state_and_cycle_points() {
+        let equation = "x + 1";
+        let param_names: Vec<String> = Vec::new();
+        let var_names = vec!["x".to_string()];
+        let compiler = Compiler::new(&var_names, &param_names);
+        let expr = parse(equation).expect("map equation should parse");
+        let bytecode = compiler.compile(&expr);
+        let mut system = EquationSystem::new(vec![bytecode], Vec::new());
+        system.set_maps(compiler.param_map, compiler.var_map);
+        let periodicity = StatePeriodicity::from_periods(&[1.0], 1);
+
+        let result = solve_equilibrium_with_periodicity(
+            &system,
+            SystemKind::Map { iterations: 2 },
+            &[1.2],
+            NewtonSettings::default(),
+            &periodicity,
+        )
+        .expect("periodic identity map should converge");
+
+        assert!((result.state[0] - 0.2).abs() < 1e-12);
+        assert!(result.residual_norm < 1e-12);
+        assert_eq!(result.cycle_points.as_ref().map(Vec::len), Some(2));
+        let points = result.cycle_points.expect("cycle points");
+        assert!((points[0][0] - 0.2).abs() < 1e-12);
+        assert!((points[1][0] - 0.2).abs() < 1e-12);
     }
 
     #[test]
