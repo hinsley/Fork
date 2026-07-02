@@ -6669,35 +6669,38 @@ export function InspectorDetailsPanel({
                       />
                       Periodic
                     </label>
-                    <input
-                      className="periodic-control__period"
-                      value={
-                        systemDraft.periodicVariables[index]?.period ??
-                        DEFAULT_VARIABLE_PERIOD.toString()
-                      }
-                      disabled={!systemDraft.periodicVariables[index]?.enabled}
-                      onChange={(event) =>
-                        setSystemDraft((prev) => {
-                          const nextPeriodic = adjustArray(
-                            prev.periodicVariables,
-                            prev.varNames.length,
-                            () => ({
-                              enabled: false,
-                              period: DEFAULT_VARIABLE_PERIOD.toString(),
-                            })
-                          )
-                          nextPeriodic[index] = {
-                            ...nextPeriodic[index],
-                            period: event.target.value,
-                          }
-                          return { ...prev, periodicVariables: nextPeriodic }
-                        })
-                      }
-                      placeholder="2pi"
-                      data-testid={`system-periodic-period-${index}`}
-                    />
+                    {systemDraft.periodicVariables[index]?.enabled ? (
+                      <input
+                        className="periodic-control__period"
+                        value={
+                          systemDraft.periodicVariables[index]?.period ??
+                          DEFAULT_VARIABLE_PERIOD.toString()
+                        }
+                        onChange={(event) =>
+                          setSystemDraft((prev) => {
+                            const nextPeriodic = adjustArray(
+                              prev.periodicVariables,
+                              prev.varNames.length,
+                              () => ({
+                                enabled: false,
+                                period: DEFAULT_VARIABLE_PERIOD.toString(),
+                              })
+                            )
+                            nextPeriodic[index] = {
+                              ...nextPeriodic[index],
+                              period: event.target.value,
+                            }
+                            return { ...prev, periodicVariables: nextPeriodic }
+                          })
+                        }
+                        placeholder="2pi"
+                        data-testid={`system-periodic-period-${index}`}
+                      />
+                    ) : null}
                   </div>
-                  {showSystemErrors && systemValidation.errors.periodicVariables?.[index] ? (
+                  {systemDraft.periodicVariables[index]?.enabled &&
+                  showSystemErrors &&
+                  systemValidation.errors.periodicVariables?.[index] ? (
                     <span
                       className="field-error"
                       data-testid={`system-periodic-error-${index}`}

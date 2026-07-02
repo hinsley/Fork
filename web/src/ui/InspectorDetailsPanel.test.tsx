@@ -1130,6 +1130,51 @@ describe('InspectorDetailsPanel', () => {
     )
   })
 
+  it('only shows a variable period field when periodic is enabled', async () => {
+    const user = userEvent.setup()
+    const { system } = createDemoSystem()
+
+    render(
+      <InspectorDetailsPanel
+        system={system}
+        selectedNodeId={null}
+        view="system"
+        theme="light"
+        onRename={vi.fn()}
+        onToggleVisibility={vi.fn()}
+        onUpdateRender={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onUpdateBifurcationDiagram={vi.fn()}
+        onUpdateSystem={vi.fn().mockResolvedValue(undefined)}
+        onValidateSystem={vi.fn().mockResolvedValue({ ok: true, equationErrors: [] })}
+        onRunOrbit={vi.fn().mockResolvedValue(undefined)}
+        onComputeLyapunovExponents={vi.fn().mockResolvedValue(undefined)}
+        onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
+        onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
+        onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onExtendBranch={vi.fn().mockResolvedValue(undefined)}
+        onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
+        onCreateLimitCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+        onCreateCycleFromPD={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+
+    expect(screen.queryByTestId('system-periodic-period-0')).toBeNull()
+
+    await user.click(screen.getByTestId('system-periodic-enabled-0'))
+    expect(screen.getByTestId('system-periodic-period-0')).toHaveValue(
+      `${Math.PI * 2}`
+    )
+
+    await user.click(screen.getByTestId('system-periodic-enabled-0'))
+    expect(screen.queryByTestId('system-periodic-period-0')).toBeNull()
+  })
+
   it('runs orbit requests', async () => {
     const user = userEvent.setup()
     const { system, objectNodeId } = createDemoSystem()
