@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - automation/inspect-wasm-declarations
+  pull_request:
 
 permissions:
   contents: read
