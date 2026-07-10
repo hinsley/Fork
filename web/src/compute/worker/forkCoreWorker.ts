@@ -54,6 +54,7 @@ import type {
 import { discardHomoclinicInitialApproximationPoint } from '../../system/continuation'
 import { periodicPeriodsForConfig } from '../../system/periodicity'
 import type { SystemConfig } from '../../system/types'
+import { runSteppedRunnerToCompletion } from './steppedRunner'
 
 type WorkerRequest =
   | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
@@ -812,13 +813,6 @@ async function runSolveEquilibrium(
   )
 }
 
-const DEFAULT_PROGRESS_UPDATES = 50
-
-function computeBatchSize(maxSteps: number): number {
-  if (!Number.isFinite(maxSteps) || maxSteps <= 0) return 1
-  return Math.max(1, Math.ceil(maxSteps / DEFAULT_PROGRESS_UPDATES))
-}
-
 async function runEquilibriumContinuation(
   request: EquilibriumContinuationRequest,
   signal: AbortSignal,
@@ -843,17 +837,7 @@ async function runEquilibriumContinuation(
     new Float64Array(periodicPeriodsForConfig(request.system))
   )
 
-  let progress = runner.get_progress()
-  onProgress(progress)
-
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 function isCodim1BranchType(branchType: unknown): boolean {
@@ -907,17 +891,7 @@ async function runContinuationExtension(
         request.forward
       )
 
-  let progress = runner.get_progress()
-  onProgress(progress)
-
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runEquilibriumManifold1D(
@@ -938,15 +912,7 @@ async function runEquilibriumManifold1D(
     { ...request.settings },
     new Float64Array(periodicPeriodsForConfig(request.system))
   )
-  let progress = runner.get_progress()
-  onProgress(progress)
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runEquilibriumManifold1DExtension(
@@ -967,15 +933,7 @@ async function runEquilibriumManifold1DExtension(
     { ...request.settings },
     new Float64Array(periodicPeriodsForConfig(request.system))
   )
-  let progress = runner.get_progress()
-  onProgress(progress)
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runManifold2DExtension(
@@ -1008,15 +966,7 @@ async function runManifold2DExtension(
     request.branchData,
     { ...request.settings }
   )
-  let progress = runner.get_progress()
-  onProgress(progress)
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runEquilibriumManifold2D(
@@ -1049,15 +999,7 @@ async function runEquilibriumManifold2D(
     new Float64Array(request.equilibriumState),
     { ...request.settings }
   )
-  let progress = runner.get_progress()
-  onProgress(progress)
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runLimitCycleManifold2D(
@@ -1096,15 +1038,7 @@ async function runLimitCycleManifold2D(
     request.floquetMultipliers,
     { ...request.settings }
   )
-  let progress = runner.get_progress()
-  onProgress(progress)
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runComputeLimitCycleFloquetModes(
@@ -1156,17 +1090,7 @@ async function runFoldCurveContinuation(
     request.forward
   )
 
-  let progress = runner.get_progress()
-  onProgress(progress)
-
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runHopfCurveContinuation(
@@ -1196,17 +1120,7 @@ async function runHopfCurveContinuation(
     request.forward
   )
 
-  let progress = runner.get_progress()
-  onProgress(progress)
-
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runIsochroneCurveContinuation(
@@ -1299,17 +1213,7 @@ async function runIsochroneCurveContinuation(
     request.forward
   )
 
-  let progress = runner.get_progress()
-  onProgress(progress)
-
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runLimitCycleContinuationFromHopf(
@@ -1343,17 +1247,7 @@ async function runLimitCycleContinuationFromHopf(
     request.forward
   )
 
-  let progress = runner.get_progress()
-  onProgress(progress)
-
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runLimitCycleContinuationFromOrbit(
@@ -1389,17 +1283,7 @@ async function runLimitCycleContinuationFromOrbit(
     request.forward
   )
 
-  let progress = runner.get_progress()
-  onProgress(progress)
-
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runLimitCycleContinuationFromPD(
@@ -1433,17 +1317,7 @@ async function runLimitCycleContinuationFromPD(
     request.forward
   )
 
-  let progress = runner.get_progress()
-  onProgress(progress)
-
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runHomoclinicFromLargeCycle(
@@ -1492,17 +1366,9 @@ async function runHomoclinicFromLargeCycle(
     request.forward
   )
 
-  let progress = runner.get_progress()
-  onProgress(progress)
-
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-
-  return discardHomoclinicInitialApproximationPoint(runner.get_result())
+  return discardHomoclinicInitialApproximationPoint(
+    runSteppedRunnerToCompletion(runner, signal, onProgress)
+  )
 }
 
 async function runHomoclinicFromHomoclinic(
@@ -1557,17 +1423,7 @@ async function runHomoclinicFromHomoclinic(
     request.forward
   )
 
-  let progress = runner.get_progress()
-  onProgress(progress)
-
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runHomotopySaddleFromEquilibrium(
@@ -1615,17 +1471,7 @@ async function runHomotopySaddleFromEquilibrium(
     request.forward
   )
 
-  let progress = runner.get_progress()
-  onProgress(progress)
-
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runHomoclinicFromHomotopySaddle(
@@ -1674,17 +1520,7 @@ async function runHomoclinicFromHomotopySaddle(
     request.forward
   )
 
-  let progress = runner.get_progress()
-  onProgress(progress)
-
-  const batchSize = computeBatchSize(progress.max_steps)
-  while (!progress.done) {
-    abortIfNeeded(signal)
-    progress = runner.run_steps(batchSize)
-    onProgress(progress)
-  }
-
-  return runner.get_result()
+  return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runMapCycleContinuationFromPD(
