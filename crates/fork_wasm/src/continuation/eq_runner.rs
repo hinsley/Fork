@@ -1,5 +1,6 @@
 //! Stepped equilibrium continuation runner.
 
+use super::runner_boundary::{runner_error_to_js, serialize_js, RunnerHandle};
 use super::shared::OwnedEquilibriumContinuationProblem;
 use fork_core::continuation::{
     ContinuationBranch, ContinuationPoint, ContinuationRunner, ContinuationSettings,
@@ -7,14 +8,14 @@ use fork_core::continuation::{
 use fork_core::equation_engine::{parse, Compiler, EquationSystem};
 use fork_core::equilibrium::SystemKind;
 use fork_core::state_periodicity::StatePeriodicity;
-use serde_wasm_bindgen::{from_value, to_value};
+use serde_wasm_bindgen::from_value;
 use wasm_bindgen::prelude::*;
 
 /// WASM-exported runner for stepped equilibrium continuation.
 /// Allows progress reporting by running batches of steps at a time.
 #[wasm_bindgen]
 pub struct WasmEquilibriumRunner {
-    runner: Option<ContinuationRunner<OwnedEquilibriumContinuationProblem>>,
+    runner: RunnerHandle<OwnedEquilibriumContinuationProblem>,
     periodicity: StatePeriodicity,
 }
 
@@ -87,53 +88,31 @@ impl WasmEquilibriumRunner {
             .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?;
 
         Ok(WasmEquilibriumRunner {
-            runner: Some(runner),
+            runner: RunnerHandle::new(runner),
             periodicity,
         })
     }
 
     /// Check if the continuation is complete.
     pub fn is_done(&self) -> bool {
-        self.runner.as_ref().map_or(true, |runner| runner.is_done())
+        self.runner.is_done()
     }
 
     /// Run a batch of continuation steps and return progress.
     pub fn run_steps(&mut self, batch_size: u32) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner
-            .run_steps(batch_size as usize)
-            .map_err(|e| JsValue::from_str(&format!("Continuation step failed: {}", e)))?;
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.run_steps_js(batch_size)
     }
 
     /// Get progress information.
     pub fn get_progress(&self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_ref()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let result = runner.step_result();
-
-        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        self.runner.get_progress_js()
     }
 
     /// Get the final branch result.
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .take()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-
-        let mut branch = runner.take_result();
+        let mut branch = self.runner.take_result().map_err(runner_error_to_js)?;
         wrap_equilibrium_branch(&mut branch, &self.periodicity);
-
-        to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        serialize_js(&branch)
     }
 }
 
@@ -152,6 +131,7 @@ fn wrap_equilibrium_branch(branch: &mut ContinuationBranch, periodicity: &StateP
 mod tests {
     use super::*;
     use fork_core::continuation::ContinuationSettings;
+    use serde_wasm_bindgen::to_value;
     use wasm_bindgen_test::wasm_bindgen_test;
 
     fn settings_with_max_steps(max_steps: usize) -> JsValue {
