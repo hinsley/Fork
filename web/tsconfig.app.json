@@ -5,6 +5,10 @@
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
+    "baseUrl": ".",
+    "paths": {
+      "@fork-wasm": ["../crates/fork_wasm/pkg-web"]
+    },
     "types": ["vite/client", "vitest/globals"],
     "skipLibCheck": true,
 

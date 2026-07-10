@@ -17,7 +17,6 @@ import type {
   EquilibriumManifold1DResult,
   EquilibriumManifold1DExtensionRequest,
   EquilibriumManifold1DExtensionResult,
-  ContinuationBranchDataWire,
   EquilibriumManifold2DRequest,
   EquilibriumManifold2DResult,
   EventSeriesResult,
@@ -64,400 +63,20 @@ import type {
   WorkerResponse,
 } from '../computeProtocol'
 
-type WasmModule = {
-  WasmSystem: new (
-    equations: string[],
-    params: Float64Array,
-    paramNames: string[],
-    varNames: string[],
-    solver: string,
-    systemType: string
-  ) => {
-    set_state: (state: Float64Array) => void
-    get_state: () => Float64Array
-    set_periods?: (periods: Float64Array) => void
-    set_t: (t: number) => void
-    get_t: () => number
-    step: (dt: number) => void
-    compute_event_series_from_orbit?: (request: Record<string, unknown>) => EventSeriesResult
-    computeEventSeriesFromOrbit?: (request: Record<string, unknown>) => EventSeriesResult
-    compute_event_series_from_samples?: (request: Record<string, unknown>) => EventSeriesResult
-    computeEventSeriesFromSamples?: (request: Record<string, unknown>) => EventSeriesResult
-    compute_isocline?: (
-      expression: string,
-      level: number,
-      axisIndices: number[],
-      axisMins: number[],
-      axisMaxs: number[],
-      axisSamples: number[],
-      frozenState: number[],
-      varNames: string[],
-      paramNames: string[]
-    ) => ComputeIsoclineResult
-    computeIsocline?: (
-      expression: string,
-      level: number,
-      axisIndices: number[],
-      axisMins: number[],
-      axisMaxs: number[],
-      axisSamples: number[],
-      frozenState: number[],
-      varNames: string[],
-      paramNames: string[]
-    ) => ComputeIsoclineResult
-    solve_equilibrium: (
-      initialGuess: number[],
-      maxSteps: number,
-      dampingFactor: number,
-      mapIterations: number
-    ) => SolveEquilibriumResult
-    compute_eq_manifold_2d_with_progress?: (
-      equilibriumState: Float64Array,
-      settings: Record<string, unknown>,
-      onProgress: (progress: ContinuationProgress) => void
-    ) => EquilibriumManifold2DResult
-    compute_cycle_manifold_2d_with_progress?: (
-      cycleState: Float64Array,
-      ntst: number,
-      ncol: number,
-      floquetMultipliers: Array<{ re: number; im: number }>,
-      settings: Record<string, unknown>,
-      onProgress: (progress: ContinuationProgress) => void
-    ) => LimitCycleManifold2DResult
-    extend_manifold_2d_with_progress?: (
-      branchData: ContinuationBranchDataWire,
-      settings: Record<string, unknown>,
-      onProgress: (progress: ContinuationProgress) => void
-    ) => Manifold2DExtensionResult
-    compute_limit_cycle_floquet_modes?: (
-      cycleState: Float64Array,
-      ntst: number,
-      ncol: number,
-      parameterName: string
-    ) => LimitCycleFloquetModesResult
-    compute_lyapunov_exponents: (
-      startState: Float64Array,
-      startTime: number,
-      steps: number,
-      dt: number,
-      qrStride: number
-    ) => Float64Array
-    compute_covariant_lyapunov_vectors: (
-      startState: Float64Array,
-      startTime: number,
-      windowSteps: number,
-      dt: number,
-      qrStride: number,
-      forwardTransient: number,
-      backwardTransient: number
-    ) => CovariantLyapunovResponse
-    init_lc_from_hopf: (
-      hopfState: Float64Array,
-      parameterName: string,
-      paramValue: number,
-      amplitude: number,
-      ntst: number,
-      ncol: number
-    ) => unknown
-    init_lc_from_orbit: (
-      orbitTimes: Float64Array,
-      orbitStates: Float64Array,
-      paramValue: number,
-      ntst: number,
-      ncol: number,
-      tolerance: number
-    ) => unknown
-    init_lc_from_pd: (
-      lcState: Float64Array,
-      parameterName: string,
-      paramValue: number,
-      ntst: number,
-      ncol: number,
-      amplitude: number
-    ) => unknown
-    init_homoclinic_from_large_cycle: (
-      lcState: Float64Array,
-      sourceNtst: number,
-      sourceNcol: number,
-      parameterName: string,
-      param2Name: string,
-      targetNtst: number,
-      targetNcol: number,
-      freeTime: boolean,
-      freeEps0: boolean,
-      freeEps1: boolean
-    ) => unknown
-    init_homoclinic_from_homoclinic: (
-      pointState: Float64Array,
-      sourceNtst: number,
-      sourceNcol: number,
-      sourceFreeTime: boolean,
-      sourceFreeEps0: boolean,
-      sourceFreeEps1: boolean,
-      sourceFixedTime: number,
-      sourceFixedEps0: number,
-      sourceFixedEps1: number,
-      parameterName: string,
-      param2Name: string,
-      targetNtst: number,
-      targetNcol: number,
-      freeTime: boolean,
-      freeEps0: boolean,
-      freeEps1: boolean
-    ) => unknown
-    init_homotopy_saddle_from_equilibrium: (
-      equilibriumState: Float64Array,
-      parameterName: string,
-      param2Name: string,
-      ntst: number,
-      ncol: number,
-      eps0: number,
-      eps1: number,
-      time: number,
-      eps1Tol: number
-    ) => unknown
-    init_homoclinic_from_homotopy_saddle: (
-      stageDState: Float64Array,
-      sourceNtst: number,
-      sourceNcol: number,
-      parameterName: string,
-      param2Name: string,
-      targetNtst: number,
-      targetNcol: number,
-      freeTime: boolean,
-      freeEps0: boolean,
-      freeEps1: boolean
-    ) => unknown
-    init_map_cycle_from_pd: (
-      pdState: number[],
-      parameterName: string,
-      paramValue: number,
-      mapIterations: number,
-      amplitude: number
-    ) => unknown
-  }
-  WasmEquilibriumRunner: new (
-    equations: string[],
-    params: Float64Array,
-    paramNames: string[],
-    varNames: string[],
-    systemType: string,
-    mapIterations: number,
-    equilibriumState: Float64Array,
-    parameterName: string,
-    settings: Record<string, number>,
-    forward: boolean,
-    periods: Float64Array
-  ) => {
-    run_steps: (batchSize: number) => ContinuationProgress
-    get_progress: () => ContinuationProgress
-    get_result: () => EquilibriumContinuationResult
-  }
-  WasmEqManifold1DRunner: new (
-    equations: string[],
-    params: Float64Array,
-    paramNames: string[],
-    varNames: string[],
-    systemType: string,
-    mapIterations: number,
-    equilibriumState: Float64Array,
-    settings: Record<string, unknown>,
-    periods: Float64Array
-  ) => {
-    run_steps: (batchSize: number) => ContinuationProgress
-    get_progress: () => ContinuationProgress
-    get_result: () => EquilibriumManifold1DResult
-  }
-  WasmEqManifold1DExtensionRunner: new (
-    equations: string[],
-    params: Float64Array,
-    paramNames: string[],
-    varNames: string[],
-    systemType: string,
-    mapIterations: number,
-    branchData: ContinuationBranchDataWire,
-    settings: Record<string, unknown>,
-    periods: Float64Array
-  ) => {
-    run_steps: (batchSize: number) => ContinuationProgress
-    get_progress: () => ContinuationProgress
-    get_result: () => EquilibriumManifold1DExtensionResult
-  }
-  WasmManifold2DExtensionRunner: new (
-    equations: string[],
-    params: Float64Array,
-    paramNames: string[],
-    varNames: string[],
-    systemType: string,
-    branchData: ContinuationBranchDataWire,
-    settings: Record<string, unknown>
-  ) => {
-    run_steps: (batchSize: number) => ContinuationProgress
-    get_progress: () => ContinuationProgress
-    get_result: () => Manifold2DExtensionResult
-  }
-  WasmEqManifold2DRunner: new (
-    equations: string[],
-    params: Float64Array,
-    paramNames: string[],
-    varNames: string[],
-    systemType: string,
-    equilibriumState: Float64Array,
-    settings: Record<string, unknown>
-  ) => {
-    run_steps: (batchSize: number) => ContinuationProgress
-    get_progress: () => ContinuationProgress
-    get_result: () => EquilibriumManifold2DResult
-  }
-  WasmCycleManifold2DRunner: new (
-    equations: string[],
-    params: Float64Array,
-    paramNames: string[],
-    varNames: string[],
-    systemType: string,
-    cycleState: Float64Array,
-    ntst: number,
-    ncol: number,
-    floquetMultipliers: Array<{ re: number; im: number }>,
-    settings: Record<string, unknown>
-  ) => {
-    run_steps: (batchSize: number) => ContinuationProgress
-    get_progress: () => ContinuationProgress
-    get_result: () => LimitCycleManifold2DResult
-  }
-  WasmFoldCurveRunner: new (
-    equations: string[],
-    params: Float64Array,
-    paramNames: string[],
-    varNames: string[],
-    systemType: string,
-    mapIterations: number,
-    foldState: Float64Array,
-    param1Name: string,
-    param1Value: number,
-    param2Name: string,
-    param2Value: number,
-    settings: Record<string, number>,
-    forward: boolean
-  ) => {
-    run_steps: (batchSize: number) => ContinuationProgress
-    get_progress: () => ContinuationProgress
-    get_result: () => Codim1CurveBranch
-  }
-  WasmHopfCurveRunner: new (
-    equations: string[],
-    params: Float64Array,
-    paramNames: string[],
-    varNames: string[],
-    systemType: string,
-    mapIterations: number,
-    hopfState: Float64Array,
-    hopfOmega: number,
-    param1Name: string,
-    param1Value: number,
-    param2Name: string,
-    param2Value: number,
-    settings: Record<string, number>,
-    forward: boolean
-  ) => {
-    run_steps: (batchSize: number) => ContinuationProgress
-    get_progress: () => ContinuationProgress
-    get_result: () => Codim1CurveBranch
-  }
-  WasmIsochroneCurveRunner: new (
-    equations: string[],
-    params: Float64Array,
-    paramNames: string[],
-    varNames: string[],
-    lcState: Float64Array,
-    period: number,
-    param1Name: string,
-    param1Value: number,
-    param2Name: string,
-    param2Value: number,
-    ntst: number,
-    ncol: number,
-    settings: Record<string, number>,
-    forward: boolean
-  ) => {
-    run_steps: (batchSize: number) => ContinuationProgress
-    get_progress: () => ContinuationProgress
-    get_result: () => Codim1CurveBranch
-  }
-  WasmLimitCycleRunner: new (
-    equations: string[],
-    params: Float64Array,
-    paramNames: string[],
-    varNames: string[],
-    systemType: string,
-    setup: unknown,
-    parameterName: string,
-    settings: Record<string, number>,
-    forward: boolean
-  ) => {
-    run_steps: (batchSize: number) => ContinuationProgress
-    get_progress: () => ContinuationProgress
-    get_result: () => LimitCycleContinuationResult
-  }
-  WasmHomoclinicRunner: new (
-    equations: string[],
-    params: Float64Array,
-    paramNames: string[],
-    varNames: string[],
-    setup: unknown,
-    settings: Record<string, number>,
-    forward: boolean
-  ) => {
-    run_steps: (batchSize: number) => ContinuationProgress
-    get_progress: () => ContinuationProgress
-    get_result: () => HomoclinicContinuationResult
-  }
-  WasmHomotopySaddleRunner: new (
-    equations: string[],
-    params: Float64Array,
-    paramNames: string[],
-    varNames: string[],
-    setup: unknown,
-    settings: Record<string, number>,
-    forward: boolean
-  ) => {
-    run_steps: (batchSize: number) => ContinuationProgress
-    get_progress: () => ContinuationProgress
-    get_result: () => HomotopySaddleContinuationResult
-  }
-  WasmContinuationExtensionRunner: new (
-    equations: string[],
-    params: Float64Array,
-    paramNames: string[],
-    varNames: string[],
-    systemType: string,
-    mapIterations: number,
-    branchData: ContinuationExtensionRequest['branchData'],
-    parameterName: string,
-    settings: Record<string, number>,
-    forward: boolean
-  ) => {
-    run_steps: (batchSize: number) => ContinuationProgress
-    get_progress: () => ContinuationProgress
-    get_result: () => ContinuationExtensionResult
-  }
-  WasmCodim1CurveExtensionRunner: new (
-    equations: string[],
-    params: Float64Array,
-    paramNames: string[],
-    varNames: string[],
-    systemType: string,
-    mapIterations: number,
-    branchData: ContinuationExtensionRequest['branchData'],
-    parameterName: string,
-    settings: Record<string, number>,
-    forward: boolean
-  ) => {
-    run_steps: (batchSize: number) => ContinuationProgress
-    get_progress: () => ContinuationProgress
-    get_result: () => ContinuationExtensionResult
-  }
-  default?: (input?: RequestInfo | URL | Response | BufferSource | WebAssembly.Module) => Promise<void>
+type WasmModule = typeof import('@fork-wasm')
+type GeneratedWasmSystem = InstanceType<WasmModule['WasmSystem']>
+type WasmSystem = Omit<
+  GeneratedWasmSystem,
+  | 'compute_event_series_from_orbit'
+  | 'compute_event_series_from_samples'
+  | 'compute_isocline'
+> & {
+  compute_event_series_from_orbit?: GeneratedWasmSystem['compute_event_series_from_orbit']
+  computeEventSeriesFromOrbit?: GeneratedWasmSystem['compute_event_series_from_orbit']
+  compute_event_series_from_samples?: GeneratedWasmSystem['compute_event_series_from_samples']
+  computeEventSeriesFromSamples?: GeneratedWasmSystem['compute_event_series_from_samples']
+  compute_isocline?: GeneratedWasmSystem['compute_isocline']
+  computeIsocline?: GeneratedWasmSystem['compute_isocline']
 }
 
 const pendingControllers = new Map<string, AbortController>()
@@ -466,17 +85,15 @@ let wasmPromise: Promise<WasmModule> | null = null
 
 async function loadWasm(): Promise<WasmModule> {
   if (!wasmPromise) {
-    wasmPromise = import('@fork-wasm').then(async (mod) => {
-      if (typeof mod.default === 'function') {
-        await mod.default()
-      }
-      return mod as WasmModule
+    wasmPromise = import('@fork-wasm').then(async (module) => {
+      await module.default()
+      return module
     })
   }
   return wasmPromise
 }
 
-function createWasmSystem(wasm: WasmModule, system: SystemConfig) {
+function createWasmSystem(wasm: WasmModule, system: SystemConfig): WasmSystem {
   const instance = new wasm.WasmSystem(
     system.equations,
     new Float64Array(system.params),
@@ -484,8 +101,8 @@ function createWasmSystem(wasm: WasmModule, system: SystemConfig) {
     system.varNames,
     system.solver,
     system.type
-  )
-  instance.set_periods?.(new Float64Array(periodicPeriodsForConfig(system)))
+  ) as WasmSystem
+  instance.set_periods(new Float64Array(periodicPeriodsForConfig(system)))
   return instance
 }
 
@@ -635,9 +252,11 @@ async function runComputeIsocline(
   if (axisIndices.some((index) => index < 0)) {
     throw new Error('Isocline axis variable is not part of the system state variables.')
   }
-  const axisMins = request.axes.map((axis) => axis.min)
-  const axisMaxs = request.axes.map((axis) => axis.max)
-  const axisSamples = request.axes.map((axis) => axis.samples)
+  const axisIndexValues = Uint32Array.from(axisIndices)
+  const axisMins = Float64Array.from(request.axes.map((axis) => axis.min))
+  const axisMaxs = Float64Array.from(request.axes.map((axis) => axis.max))
+  const axisSamples = Uint32Array.from(request.axes.map((axis) => axis.samples))
+  const frozenState = Float64Array.from(request.frozenState)
   const computeIsocline = system.compute_isocline ?? system.computeIsocline
   if (typeof computeIsocline !== 'function') {
     throw new Error(
@@ -648,11 +267,11 @@ async function runComputeIsocline(
     system,
     request.expression,
     request.level,
-    axisIndices,
+    axisIndexValues,
     axisMins,
     axisMaxs,
     axisSamples,
-    request.frozenState,
+    frozenState,
     request.system.varNames,
     request.system.paramNames
   )
@@ -708,7 +327,7 @@ async function runSolveEquilibrium(
   const mapIterations =
     request.system.type === 'map' ? request.mapIterations ?? 1 : 1
   return system.solve_equilibrium(
-    request.initialGuess,
+    new Float64Array(request.initialGuess),
     request.maxSteps,
     request.dampingFactor,
     mapIterations
@@ -1435,7 +1054,7 @@ async function runMapCycleContinuationFromPD(
   const system = createWasmSystem(wasm, request.system)
 
   let seed = system.init_map_cycle_from_pd(
-    request.pdState,
+    new Float64Array(request.pdState),
     request.parameterName,
     request.paramValue,
     request.mapIterations,
@@ -1448,7 +1067,7 @@ async function runMapCycleContinuationFromPD(
       request.solverParams.mapIterations ?? nextIterations
     const mapIterations = Math.max(1, Math.trunc(solverIterations))
     const solution = system.solve_equilibrium(
-      seed,
+      new Float64Array(seed),
       request.solverParams.maxSteps,
       request.solverParams.dampingFactor,
       mapIterations

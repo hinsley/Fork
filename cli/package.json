@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "prestart": "npm run wasm:node",
     "start": "ts-node src/index.ts",
+    "prebuild": "npm run wasm:node",
     "build": "tsc",
     "test": "npm run test:wasm && npm run test:unit",
     "test:unit": "node -r ts-node/register tests/run.ts",

@@ -96,6 +96,7 @@ beforeAll(async () => {
           throw new Error('bad equation')
         }
       }
+      set_periods() {}
       set_state(state: Float64Array) {
         this.state = new Float64Array(state)
       }
