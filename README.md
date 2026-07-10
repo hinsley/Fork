@@ -34,44 +34,67 @@ Fork is a 4-part monorepo: a Rust core, WASM bindings, a Node.js CLI, and a web 
 
 Rust and WebAssembly were chosen so the performance-critical numerical kernels and automatic differentiation live in one place, and the browser and CLI run identical continuation logic without a separate JavaScript reimplementation.
 
-## Bifurcations by codimension
-A checkmark denotes that support for the bifurcation type has been implemented. Codim-2 support currently means detection on codim-1 curves (not full codim-2 continuation).
+## Continuation and bifurcation support
+
+Fork uses pseudo-arclength continuation (PALC) to follow solution branches through turns that a simple parameter sweep would miss. The tables below separate four different capabilities:
+
+- **Branch continuation** follows equilibria, map cycles, or ODE limit cycles while one parameter varies.
+- **Detection** marks and refines a bifurcation encountered on an existing branch.
+- **Bifurcation-curve continuation** follows that bifurcation in a two-parameter plane.
+- **Codimension-two detection** looks for special points on a bifurcation curve. Fork does not yet continue codimension-two sets.
+
+**Available** means the main numerical path is implemented and integrated. **Experimental** means a usable code path exists, but it is simplified, contains temporary diagnostics, or still lacks benchmark coverage. **Not implemented** means that only types, placeholders, or no numerical path exist.
 
 ### Maps
-- Codimension 0
-    - [X] Equilibrium (Fixed Point)
-    - [ ] Periodic Orbit
-- Codimension 1
-    - [X] Saddle-Node (Fold)
-    - [ ] Period-Doubling (Flip)
-    - [ ] Neimark-Sacker
-- Codimension 2
-    - [ ] Cusp
-    - [ ] Bogdanov-Takens
-    - [ ] Chenciner
 
-### ODE systems
-- Codimension 0
-    - [X] Equilibrium
-    - [X] Periodic Orbit
-- Codimension 1
-    - [X] Andronov-Hopf
-    - [ ] Homoclinic to Saddle-Equilibrium
-    - [ ] Homoclinic to Saddle-Focus
-    - [ ] Homoclinic to Saddle-Periodic-Orbit
-    - [X] Saddle-Node (Fold)
-    - [X] Saddle-Node of Periodic Orbits (LPC: Limit Point of Cycles)
-- Codimension 2
-    - [ ] Bautin Point / Generalized Andronov-Hopf
-    - [X] Bogdanov-Takens
-    - [ ] Saddle-to-Saddle-Focus
-    - [X] Zero-Hopf
-    - [X] Double Hopf
-    - [X] Resonance 1:1 (Neimark-Sacker)
-    - [X] Resonance 1:2 (Neimark-Sacker)
-    - [X] Resonance 1:3 (Neimark-Sacker)
-    - [X] Resonance 1:4 (Neimark-Sacker)
-    - [ ] Shilnikov-Hopf
+Map cycles are represented as fixed points of an iterated map, <code>F<sup>k</sup>(x) = x</code>. The case <code>k = 1</code> gives fixed points, while <code>k > 1</code> can represent higher-period points.
+
+| Object or event | Status | Current capability |
+| --- | --- | --- |
+| Fixed points and periodic points | **Available** | Solve and continue <code>F<sup>k</sup>(x) = x</code>; return the individual points of a <code>k</code>-cycle. |
+| Saddle-node (fold) | **Available** | Detect and refine folds on map branches; continue fold curves in two parameters. |
+| Period-doubling (flip) | **Detection and branch switching available** | Detect and refine a multiplier crossing <code>-1</code>; construct a seed for the doubled cycle. Two-parameter flip curves are not implemented. |
+| Neimark-Sacker | **Detection available** | Detect and refine a complex multiplier pair crossing the unit circle. Two-parameter Neimark-Sacker curves are not implemented for maps. |
+| Map codimension-two points | **Not implemented** | No dedicated map codimension-two defining system or validated detection path is present. |
+
+### ODE equilibria
+
+| Object or event | Status | Current capability |
+| --- | --- | --- |
+| Equilibrium branch | **Available** | One-parameter equilibrium continuation with adaptive PALC and branch extension. |
+| Saddle-node (fold) | **Available** | Detect and refine folds; continue fold curves in two parameters. |
+| Andronov-Hopf | **Available** | Detect and refine Hopf points, initialize a nearby limit cycle, and continue Hopf curves in two parameters. |
+| Neutral saddle | **Detection available** | Detect a zero crossing of the real-eigenvalue pair-sum test on an equilibrium branch. No dedicated two-parameter connection locus is implemented. |
+
+### ODE periodic orbits
+
+| Object or event | Status | Current capability |
+| --- | --- | --- |
+| Limit-cycle branch | **Available** | Orthogonal collocation, initialization from a Hopf point or sampled orbit, branch extension, Floquet multipliers, and Floquet modes. |
+| Limit point of cycles (LPC) | **Experimental** | A two-parameter LPC defining system and runner exist. Automatic LPC detection on ordinary limit-cycle branches is currently disabled, and LPC codimension-two tests remain placeholders. |
+| Period-doubling of cycles | **Detection and branch switching available; curve experimental** | Detect a multiplier crossing <code>-1</code> and initialize the doubled-period branch. The two-parameter PD-curve path still contains temporary diagnostics and disabled adaptation logic. |
+| Neimark-Sacker / torus bifurcation | **Detection available; curve experimental** | Detect a complex Floquet pair crossing the unit circle. The two-parameter NS-curve path uses a simplified singularity formulation and is not yet benchmarked as a production solver. |
+| Isoperiodic curves | **Available** | Continue a limit-cycle family in two parameters while holding its period fixed. This is a continuation constraint, not a bifurcation type. |
+
+### Global connections
+
+| Connection | Status | Current capability |
+| --- | --- | --- |
+| Homoclinic to a saddle equilibrium | **Experimental** | Open-orbit collocation with equilibrium, endpoint-distance, invariant-subspace, and Riccati constraints. Initialization is available from a large cycle or a homotopy-saddle workflow. |
+| Homoclinic to a saddle-focus | **Experimental and not benchmarked** | The generic saddle-equilibrium formulation can construct real invariant-subspace bases from complex eigenvectors, but dedicated saddle-focus benchmark coverage is still missing. |
+| Homoclinic to a periodic orbit | **Not implemented** | No periodic-orbit endpoint and invariant-bundle defining system is present. |
+
+### Codimension-two points
+
+Codimension-two support currently means sign-change tests evaluated while extending a codimension-one curve. These labels are not yet produced by a dedicated root-refinement pass, and no codimension-two set is itself continued.
+
+| Point type | Status | Current capability |
+| --- | --- | --- |
+| Bogdanov-Takens, zero-Hopf, and double-Hopf | **Experimental detection** | Test functions exist on equilibrium fold and Hopf curves, but coverage and numerical validation remain limited. |
+| Strong resonances 1:1, 1:2, 1:3, and 1:4 | **Experimental detection** | Algebraic tests exist on the experimental Neimark-Sacker curve path. |
+| Cusp and generalized Hopf (Bautin) | **Not implemented** | Public types exist, but the relevant normal-form test functions are placeholders. |
+| Chenciner and cycle interaction points | **Not implemented** | Chenciner, fold-flip, fold-NS, flip-NS, double-NS, generalized PD, and cusp-of-cycles tests are incomplete or placeholders. |
+| Full codimension-two continuation | **Not implemented** | Fork currently detects candidate points only; it does not continue codimension-two loci. |
 
 ## Rendering
 Fork uses [Plotly](https://plotly.com/javascript/) to render trajectories, bifurcation diagrams, and other visualizations.
