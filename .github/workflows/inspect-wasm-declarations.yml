@@ -21,7 +21,7 @@ jobs:
         run: |
           wasm-pack build --target web --out-dir pkg-web
           wasm-pack build --target nodejs
-      - name: Upload generated package metadata
+      - name: Upload generated package metadata and source seams
         uses: actions/upload-artifact@v4
         with:
           name: wasm-pack-declarations
@@ -30,4 +30,13 @@ jobs:
             crates/fork_wasm/pkg-web/package.json
             crates/fork_wasm/pkg/fork_wasm.d.ts
             crates/fork_wasm/pkg/package.json
+            web/src/compute/worker/forkCoreWorker.ts
+            web/src/compute/worker/forkCoreWorker.test.ts
+            web/src/types/wasm.d.ts
+            web/vite.config.ts
+            web/tsconfig.app.json
+            web/package.json
+            cli/src/wasm.ts
+            cli/package.json
+            cli/tsconfig.json
           if-no-files-found: error
