@@ -54,19 +54,32 @@ jobs:
           python ../automation/.github/scripts/refactor_generated_wasm_declarations.py
           python <<'PY'
           from pathlib import Path
-          path = Path('cli/src/wasm.ts')
-          source = path.read_text()
-          source = source.replace(
+
+          cli_path = Path('cli/src/wasm.ts')
+          cli_source = cli_path.read_text()
+          cli_source = cli_source.replace(
               '        return continueFromHopf(\n            new Float64Array(hopfState),',
               '        return continueFromHopf.call(\n            this.instance,\n            new Float64Array(hopfState),',
               1,
           )
-          source = source.replace(
+          cli_source = cli_source.replace(
               '        return extendBranch(\n            branchData,',
               '        return extendBranch.call(\n            this.instance,\n            branchData,',
               1,
           )
-          path.write_text(source)
+          cli_path.write_text(cli_source)
+
+          mock_path = Path('web/src/compute/worker/forkCoreWorker.test.ts')
+          mock_source = mock_path.read_text()
+          anchor = '      set_state(state: Float64Array) {\n'
+          if mock_source.count(anchor) != 1:
+              raise RuntimeError('Expected one MockWasmSystem set_state method')
+          mock_source = mock_source.replace(
+              anchor,
+              '      set_periods() {}\n' + anchor,
+              1,
+          )
+          mock_path.write_text(mock_source)
           PY
 
       - name: Verify refactor shape
@@ -84,6 +97,7 @@ jobs:
           ! grep -Fq 'instance: any' cli/src/wasm.ts
           grep -Fq 'return continueFromHopf.call(' cli/src/wasm.ts
           grep -Fq 'return extendBranch.call(' cli/src/wasm.ts
+          grep -Fq '      set_periods() {}' web/src/compute/worker/forkCoreWorker.test.ts
           grep -Fq '"prebuild": "npm run wasm:node"' cli/package.json
           grep -Fq '"prestart": "npm run wasm:node"' cli/package.json
 
@@ -162,6 +176,7 @@ jobs:
             web/tsconfig.app.json \
             web/src/types/wasm.d.ts \
             web/src/compute/worker/forkCoreWorker.ts \
+            web/src/compute/worker/forkCoreWorker.test.ts \
             cli/package.json \
             cli/src/wasm.ts
           git diff --cached --check
