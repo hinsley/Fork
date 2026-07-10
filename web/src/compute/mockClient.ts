@@ -38,6 +38,8 @@ import type {
   LimitCycleFloquetModesResult,
   LimitCycleManifold2DRequest,
   LimitCycleManifold2DResult,
+  Manifold2DExtensionRequest,
+  Manifold2DExtensionResult,
   MapCycleContinuationFromPDRequest,
   LyapunovExponentsRequest,
   SampleMap1DFunctionRequest,
@@ -705,6 +707,45 @@ export class MockForkCoreClient implements ForkCoreClient {
           points_computed: 1,
           bifurcations_found: 0,
           current_param: branch.points.at(-1)?.param_value ?? 0,
+        })
+        return normalizeBranchEigenvalues(branch)
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runManifold2DExtension(
+    request: Manifold2DExtensionRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<Manifold2DExtensionResult> {
+    const job = this.queue.enqueue(
+      'runManifold2DExtension',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+        const branch = structuredClone(request.branchData)
+        const endpoint = branch.points.at(-1)
+        if (endpoint) {
+          branch.points.push({
+            ...endpoint,
+            state: [...endpoint.state],
+            param_value: endpoint.param_value + 1,
+          })
+          branch.indices.push((branch.indices.at(-1) ?? -1) + 1)
+        }
+        opts?.onProgress?.({
+          done: true,
+          current_step: 1,
+          max_steps: 1,
+          points_computed: endpoint ? 1 : 0,
+          bifurcations_found: 0,
+          current_param: branch.points.at(-1)?.param_value ?? 0,
+          rings_computed: 1,
         })
         return normalizeBranchEigenvalues(branch)
       },

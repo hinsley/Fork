@@ -241,6 +241,28 @@ export class WasmBridge {
         ) as ManifoldRunner<EquilibriumManifold2DResult>;
     }
 
+    createManifold2DExtensionRunner(
+        branchData: ContinuationBranchData,
+        settings: EquilibriumManifold2DSettings | LimitCycleManifold2DSettings
+    ): ManifoldRunner<ContinuationBranchData> {
+        if (!wasmModule) throw new Error("WASM module not loaded");
+        if (typeof (wasmModule as any).WasmManifold2DExtensionRunner !== 'function') {
+            throw new Error(
+                "2D manifold extension runner is unavailable in this WASM build. Rebuild fork_wasm with `wasm-pack build --target nodejs`."
+            );
+        }
+
+        return new wasmModule.WasmManifold2DExtensionRunner(
+            this.config.equations,
+            new Float64Array(this.config.params),
+            this.config.paramNames,
+            this.config.varNames,
+            this.config.type || "flow",
+            branchData,
+            settings
+        ) as ManifoldRunner<ContinuationBranchData>;
+    }
+
     createLimitCycleManifold2DRunner(
         cycleState: number[],
         ntst: number,

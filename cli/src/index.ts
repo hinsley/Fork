@@ -909,7 +909,11 @@ async function manageBranch(
             choices: [
                 { name: 'Inspect Data', value: 'Inspect Data' },
                 {
-                    name: branch.branchType === 'eq_manifold_1d' ? 'Extend Manifold' : 'Extend Branch',
+                    name: branch.branchType === 'eq_manifold_1d' ||
+                        branch.branchType === 'eq_manifold_2d' ||
+                        branch.branchType === 'cycle_manifold_2d'
+                        ? 'Extend Manifold'
+                        : 'Extend Branch',
                     value: 'Extend Branch'
                 },
                 new inquirer.Separator(),

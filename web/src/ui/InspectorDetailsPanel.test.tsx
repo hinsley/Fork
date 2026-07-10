@@ -132,7 +132,8 @@ function renderInspectorForStateSpaceStride(
   system: System,
   selectedNodeId: string,
   onUpdateRender: ReturnType<typeof vi.fn>,
-  onExtendEquilibriumManifold1D: ReturnType<typeof vi.fn> = vi.fn()
+  onExtendEquilibriumManifold1D: ReturnType<typeof vi.fn> = vi.fn(),
+  onExtendManifold2D: ReturnType<typeof vi.fn> = vi.fn()
 ) {
   render(
     <InspectorDetailsPanel
@@ -153,6 +154,7 @@ function renderInspectorForStateSpaceStride(
       onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
       onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
       onExtendEquilibriumManifold1D={onExtendEquilibriumManifold1D}
+      onExtendManifold2D={onExtendManifold2D}
       onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
       onExtendBranch={vi.fn().mockResolvedValue(undefined)}
       onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
@@ -295,6 +297,100 @@ describe('InspectorDetailsPanel', () => {
         })
       )
     })
+  })
+
+  it('offers ring and vertex budgets when extending a 2D manifold', async () => {
+    const user = userEvent.setup()
+    const config: SystemConfig = {
+      name: 'Surface_Extension_Inspector',
+      equations: ['x', 'y', '-z'],
+      params: [],
+      paramNames: [],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const base = createSystem({ name: config.name, config })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq_Surface',
+      systemName: config.name,
+    }
+    const added = addObject(base, equilibrium)
+    const caps = {
+      max_steps: 80,
+      max_points: 200,
+      max_rings: 12,
+      max_vertices: 400,
+      max_time: 10,
+    }
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'surface',
+      systemName: config.name,
+      parameterName: 'manifold',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'eq_manifold_2d',
+      data: {
+        points: [{ state: [0, 0, 0], param_value: 0, stability: 'None', eigenvalues: [] }],
+        bifurcations: [],
+        indices: [0],
+        branch_type: {
+          type: 'ManifoldEq2D',
+          stability: 'Unstable',
+          eig_kind: 'RealPair',
+          eig_indices: [0, 1],
+          method: 'krauskopf_osinga_geodesic_leaf_continuation',
+          caps,
+        },
+      },
+      settings: continuationSettings,
+      manifoldSettings: {
+        stability: 'Unstable',
+        eig_indices: [0, 1],
+        initial_radius: 0.01,
+        leaf_delta: 0.01,
+        delta_min: 0.001,
+        ring_points: 8,
+        min_spacing: 0.001,
+        max_spacing: 0.02,
+        alpha_min: 0.3,
+        alpha_max: 0.4,
+        delta_alpha_min: 0.1,
+        delta_alpha_max: 1,
+        integration_dt: 0.01,
+        target_radius: 1,
+        target_arclength: 0.1,
+        caps,
+      },
+      timestamp: new Date().toISOString(),
+    }
+    const fixture = addBranch(added.system, branch, added.nodeId)
+    const onExtend2D = vi.fn().mockResolvedValue(undefined)
+
+    renderInspectorForStateSpaceStride(
+      fixture.system,
+      fixture.nodeId,
+      vi.fn(),
+      vi.fn(),
+      onExtend2D
+    )
+
+    await user.click(screen.getByTestId('manifold-extend-toggle'))
+    expect(screen.getByTestId('manifold-extend-max-rings')).toBeVisible()
+    expect(screen.getByTestId('manifold-extend-max-vertices')).toBeVisible()
+    expect(screen.queryByTestId('manifold-extend-max-points')).not.toBeInTheDocument()
+    await user.click(screen.getByTestId('manifold-extend-submit'))
+
+    expect(onExtend2D).toHaveBeenCalledWith(
+      expect.objectContaining({
+        branchId: fixture.nodeId,
+        targetArclength: 0.1,
+        integrationDt: 0.01,
+        caps: expect.objectContaining({ max_rings: 12, max_vertices: 400 }),
+      })
+    )
   })
 
   it('binds name and render fields', async () => {

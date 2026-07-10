@@ -11,6 +11,8 @@ import { WasmBridge } from '../wasm';
 import {
   ContinuationObject,
   EquilibriumManifold1DSettings,
+  EquilibriumManifold2DSettings,
+  LimitCycleManifold2DSettings,
   ManifoldDirection,
   ManifoldStability
 } from '../types';
@@ -29,7 +31,8 @@ import { inspectBranch } from './inspect';
 import { getBranchParams } from './utils';
 import {
   runContinuationExtensionWithProgress,
-  runEquilibriumManifold1DExtensionWithProgress
+  runEquilibriumManifold1DExtensionWithProgress,
+  runManifold2DExtensionWithProgress
 } from './progress';
 
 type ManifoldEq1DBranchMetadata = {
@@ -212,6 +215,206 @@ async function extendEquilibriumManifold1D(
   }
 }
 
+async function extendManifold2D(
+  sysName: string,
+  branch: ContinuationObject
+): Promise<NavigationRequest | void> {
+  const sysConfig = Storage.loadSystem(sysName);
+  if (sysConfig.type === 'map') {
+    printError('2D invariant-manifold extension is available for flows only.');
+    return;
+  }
+  const metadata = branch.data.branch_type;
+  const geometry = branch.data.manifold_geometry;
+  if (
+    !metadata ||
+    (metadata.type !== 'ManifoldEq2D' && metadata.type !== 'ManifoldCycle2D')
+  ) {
+    printError('The stored 2D manifold is missing its numerical metadata.');
+    return;
+  }
+  if (!geometry || geometry.type !== 'Surface' || !geometry.resume_state) {
+    printError('This manifold predates resumable 2D state. Recompute it once before extending.');
+    return;
+  }
+  const defaults = branch.settings as Partial<
+    EquilibriumManifold2DSettings & LimitCycleManifold2DSettings
+  >;
+  if (
+    defaults.initial_radius === undefined ||
+    defaults.leaf_delta === undefined ||
+    defaults.delta_min === undefined ||
+    defaults.ring_points === undefined
+  ) {
+    printError('This manifold predates stored 2D settings. Recompute it once before extending.');
+    return;
+  }
+  const defaultCaps = defaults.caps;
+  let targetArclengthInput = defaults.target_arclength?.toString() ?? '1';
+  let integrationDtInput = defaults.integration_dt?.toString() ?? '0.01';
+  let maxStepsInput = defaultCaps?.max_steps?.toString() ?? '300';
+  let maxRingsInput = defaultCaps?.max_rings?.toString() ?? '24';
+  let maxVerticesInput = defaultCaps?.max_vertices?.toString() ?? '10000';
+  let maxTimeInput = defaultCaps?.max_time?.toString() ?? '200';
+
+  const entries: ConfigEntry[] = [
+    {
+      id: 'targetArclength',
+      label: 'Additional arclength',
+      section: 'Extension Settings',
+      getDisplay: () => formatUnset(targetArclengthInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Additional Arclength:',
+          default: targetArclengthInput
+        });
+        targetArclengthInput = value;
+      }
+    },
+    {
+      id: 'integrationDt',
+      label: 'Integration dt',
+      section: 'Extension Settings',
+      getDisplay: () => formatUnset(integrationDtInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Integration dt:',
+          default: integrationDtInput
+        });
+        integrationDtInput = value;
+      }
+    },
+    {
+      id: 'maxSteps',
+      label: 'Max integration/BVP steps',
+      section: 'Resource Limits',
+      getDisplay: () => formatUnset(maxStepsInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Max Steps:',
+          default: maxStepsInput
+        });
+        maxStepsInput = value;
+      }
+    },
+    {
+      id: 'maxRings',
+      label: 'Max rings to add',
+      section: 'Resource Limits',
+      getDisplay: () => formatUnset(maxRingsInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Max Rings to Add:',
+          default: maxRingsInput
+        });
+        maxRingsInput = value;
+      }
+    },
+    {
+      id: 'maxVertices',
+      label: 'Max vertices to add',
+      section: 'Resource Limits',
+      getDisplay: () => formatUnset(maxVerticesInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Max Vertices to Add:',
+          default: maxVerticesInput
+        });
+        maxVerticesInput = value;
+      }
+    },
+    {
+      id: 'maxTime',
+      label: 'Max integration time',
+      section: 'Resource Limits',
+      getDisplay: () => formatUnset(maxTimeInput),
+      edit: async () => {
+        const { value } = await inquirer.prompt({
+          name: 'value',
+          message: 'Max Integration Time:',
+          default: maxTimeInput
+        });
+        maxTimeInput = value;
+      }
+    }
+  ];
+
+  const result = await runConfigMenu(`Extend Manifold: ${branch.name}`, entries);
+  if (result === 'back') return;
+  const targetArclength = parseFloatOrDefault(targetArclengthInput, 1);
+  const integrationDt = parseFloatOrDefault(integrationDtInput, 0.01);
+  const caps = {
+    max_steps: parseIntOrDefault(maxStepsInput, 300),
+    max_points: defaultCaps?.max_points ?? 8000,
+    max_rings: parseIntOrDefault(maxRingsInput, 24),
+    max_vertices: parseIntOrDefault(maxVerticesInput, 10000),
+    max_time: parseFloatOrDefault(maxTimeInput, 200),
+    ...(defaultCaps?.max_iterations !== undefined
+      ? { max_iterations: defaultCaps.max_iterations }
+      : {})
+  };
+  let settings: EquilibriumManifold2DSettings | LimitCycleManifold2DSettings;
+  if (metadata.type === 'ManifoldEq2D') {
+    settings = {
+      ...(defaults as EquilibriumManifold2DSettings),
+      stability: metadata.stability,
+      eig_indices: metadata.eig_indices,
+      target_arclength: targetArclength,
+      integration_dt: integrationDt,
+      caps
+    };
+  } else {
+    const algorithm =
+      defaults.algorithm ??
+      (metadata.method === 'hko_fundamental_segment_bvp'
+        ? 'IsochronFibers'
+        : metadata.method === 'segmented_preimage_collocation'
+          ? 'SegmentedPreimageFibers'
+          : 'GeodesicRings');
+    settings = {
+      ...(defaults as LimitCycleManifold2DSettings),
+      stability: metadata.stability,
+      direction: metadata.direction ?? defaults.direction ?? 'Plus',
+      algorithm,
+      floquet_index: metadata.floquet_index,
+      ntst: metadata.ntst,
+      ncol: metadata.ncol,
+      target_arclength: targetArclength,
+      integration_dt: integrationDt,
+      caps
+    };
+  }
+
+  try {
+    const runConfig = { ...sysConfig, params: getBranchParams(sysName, branch, sysConfig) };
+    const bridge = new WasmBridge(runConfig);
+    const previousPointCount = branch.data.points.length;
+    const updatedData = runManifold2DExtensionWithProgress(
+      bridge,
+      serializeBranchDataForWasm(branch.data),
+      settings,
+      '2D Manifold Extension'
+    );
+    if (updatedData.points.length <= previousPointCount) {
+      throw new Error('No new surface points were produced. Increase the applicable limits.');
+    }
+    branch.data = normalizeBranchEigenvalues(updatedData);
+    branch.settings = settings;
+    branch.timestamp = new Date().toISOString();
+    Storage.saveBranch(sysName, branch.parentObject, branch);
+    printSuccess(`Manifold extension successful! Total points: ${branch.data.points.length}`);
+    return await inspectBranch(sysName, branch);
+  } catch (error) {
+    printError(`Manifold Extension Failed: ${error}`);
+    return;
+  }
+}
+
 /**
  * Extends an existing continuation branch in either the forward or backward direction.
  * 
@@ -232,6 +435,9 @@ export async function extendBranch(
 ): Promise<NavigationRequest | void> {
   if (branch.branchType === 'eq_manifold_1d') {
     return extendEquilibriumManifold1D(sysName, branch);
+  }
+  if (branch.branchType === 'eq_manifold_2d' || branch.branchType === 'cycle_manifold_2d') {
+    return extendManifold2D(sysName, branch);
   }
   const sysConfig = Storage.loadSystem(sysName);
   const defaults = branch.settings || {};

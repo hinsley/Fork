@@ -21,6 +21,30 @@ References:
 
 ---
 
+### 2026-07-10: Extend 2D manifolds from accepted numerical frontiers
+Context:
+Two-dimensional equilibrium and limit-cycle manifolds could only be recomputed from their local
+seed, even when a valid partial surface was already stored.
+Decision:
+Persist a versioned, backend-specific resume state with every 2D surface. Geodesic continuation
+stores the accepted outer ring, inward leaf anchors, adaptive leaf delta, and accumulated
+arclength. HKO continuation stores each phase fiber, its fundamental-segment family position, and
+the converged collocation warm start. Segmented preimage continuation stores its phase fibers,
+outer ring, arclengths, and return-segment configuration. Extension treats target arclength and
+resource limits as additional work, retains the old mesh exactly, and appends seam-connected bands.
+Why:
+The rendered mesh alone does not contain the leaf genealogy or collocation state required for a
+faithful restart. Replaying from the local seed is expensive and can produce a numerically
+different surface.
+Impact:
+New 2D manifold branches can be extended in the web and CLI. Preexisting branches without resume
+state must be recomputed once. Failed solves leave the stored branch unchanged.
+References:
+`crates/fork_core/src/continuation/manifold.rs`,
+`crates/fork_core/src/continuation/types.rs`,
+`crates/fork_wasm/src/continuation/manifold_2d_extension_runner.rs`,
+`web/src/state/appState.tsx`, `cli/src/continuation/extend.ts`
+
 ### 2026-07-10: Use true K-O leaf continuation and HKO fundamental-segment BVPs for 2D manifolds
 Context:
 The equilibrium surface solver could jump between polygon segments or accept relaxed leaf hits, and

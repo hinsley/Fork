@@ -14,6 +14,7 @@ mod extension_runner;
 mod homoc_runner;
 mod homotopy_saddle_runner;
 mod lc_runner;
+mod manifold_2d_extension_runner;
 mod runner_boundary;
 mod shared;
 mod system_methods;
@@ -32,6 +33,7 @@ pub use extension_runner::WasmContinuationExtensionRunner;
 pub use homoc_runner::WasmHomoclinicRunner;
 pub use homotopy_saddle_runner::WasmHomotopySaddleRunner;
 pub use lc_runner::WasmLimitCycleRunner;
+pub use manifold_2d_extension_runner::WasmManifold2DExtensionRunner;
 
 #[cfg(test)]
 mod tests {
@@ -40,7 +42,7 @@ mod tests {
         WasmEqManifold1DExtensionRunner, WasmEqManifold1DRunner, WasmEqManifold2DRunner,
         WasmEquilibriumRunner, WasmFoldCurveRunner, WasmHomoclinicRunner, WasmHomotopySaddleRunner,
         WasmHopfCurveRunner, WasmIsochroneCurveRunner, WasmLPCCurveRunner, WasmLimitCycleRunner,
-        WasmNSCurveRunner, WasmPDCurveRunner,
+        WasmManifold2DExtensionRunner, WasmNSCurveRunner, WasmPDCurveRunner,
     };
 
     #[test]
@@ -60,6 +62,8 @@ mod tests {
         assert!(std::any::type_name::<WasmEqManifold2DRunner>().ends_with("WasmEqManifold2DRunner"));
         assert!(std::any::type_name::<WasmCycleManifold2DRunner>()
             .ends_with("WasmCycleManifold2DRunner"));
+        assert!(std::any::type_name::<WasmManifold2DExtensionRunner>()
+            .ends_with("WasmManifold2DExtensionRunner"));
         assert!(std::any::type_name::<WasmContinuationExtensionRunner>()
             .ends_with("WasmContinuationExtensionRunner"));
         assert!(std::any::type_name::<WasmCodim1CurveExtensionRunner>()

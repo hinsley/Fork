@@ -38,6 +38,8 @@ import type {
   LimitCycleFloquetModesResult,
   LimitCycleManifold2DRequest,
   LimitCycleManifold2DResult,
+  Manifold2DExtensionRequest,
+  Manifold2DExtensionResult,
   LyapunovExponentsRequest,
   MapCycleContinuationFromPDRequest,
   SampleMap1DFunctionRequest,
@@ -74,6 +76,7 @@ type WorkerRequest =
       kind: 'runEquilibriumManifold1DExtension'
       payload: EquilibriumManifold1DExtensionRequest
     }
+  | { id: string; kind: 'runManifold2DExtension'; payload: Manifold2DExtensionRequest }
   | { id: string; kind: 'runEquilibriumManifold2D'; payload: EquilibriumManifold2DRequest }
   | { id: string; kind: 'runLimitCycleManifold2D'; payload: LimitCycleManifold2DRequest }
   | { id: string; kind: 'computeLimitCycleFloquetModes'; payload: LimitCycleFloquetModesRequest }
@@ -146,6 +149,7 @@ type WorkerResponse =
         | ContinuationExtensionResult
         | EquilibriumManifold1DResult
         | EquilibriumManifold1DExtensionResult
+        | Manifold2DExtensionResult
         | EquilibriumManifold2DResult
         | LimitCycleManifold2DResult
         | LimitCycleFloquetModesResult
@@ -370,6 +374,19 @@ type WasmModule = {
     run_steps: (batchSize: number) => ContinuationProgress
     get_progress: () => ContinuationProgress
     get_result: () => EquilibriumManifold1DExtensionResult
+  }
+  WasmManifold2DExtensionRunner: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    systemType: string,
+    branchData: ContinuationBranchDataWire,
+    settings: Record<string, unknown>
+  ) => {
+    run_steps: (batchSize: number) => ContinuationProgress
+    get_progress: () => ContinuationProgress
+    get_result: () => Manifold2DExtensionResult
   }
   WasmEqManifold2DRunner: new (
     equations: string[],
@@ -944,6 +961,33 @@ async function runEquilibriumManifold1DExtension(
     request.branchData,
     { ...request.settings },
     new Float64Array(periodicPeriodsForConfig(request.system))
+  )
+  let progress = runner.get_progress()
+  onProgress(progress)
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+  return runner.get_result()
+}
+
+async function runManifold2DExtension(
+  request: Manifold2DExtensionRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<Manifold2DExtensionResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const runner = new wasm.WasmManifold2DExtensionRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.type,
+    request.branchData,
+    { ...request.settings }
   )
   let progress = runner.get_progress()
   onProgress(progress)
@@ -1847,6 +1891,24 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     if (message.kind === 'runEquilibriumManifold1DExtension') {
       const result = await runEquilibriumManifold1DExtension(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runManifold2DExtension') {
+      const result = await runManifold2DExtension(
         message.payload,
         controller.signal,
         (progress) => {

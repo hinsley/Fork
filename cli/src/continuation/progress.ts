@@ -420,6 +420,17 @@ export function runEquilibriumManifold1DExtensionWithProgress(
   return runContinuationRunnerWithProgress(runner, label);
 }
 
+/** Extend a stored 2D manifold with progress updates. */
+export function runManifold2DExtensionWithProgress(
+  bridge: WasmBridge,
+  branchData: ContinuationBranchData,
+  settings: EquilibriumManifold2DSettings | LimitCycleManifold2DSettings,
+  label: string
+): ContinuationBranchData {
+  const runner = bridge.createManifold2DExtensionRunner(branchData, settings);
+  return runContinuationRunnerWithProgress(runner, label);
+}
+
 /**
  * Compute a 2D equilibrium manifold branch with stepped progress updates.
  */

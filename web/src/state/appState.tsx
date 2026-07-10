@@ -25,6 +25,7 @@ import type {
   ContinuationSettings,
   CovariantLyapunovData,
   EquilibriumObject,
+  EquilibriumManifold2DSettings,
   EquilibriumSolverParams,
   FrozenVariablesConfig,
   IsoclineAxis,
@@ -32,6 +33,7 @@ import type {
   IsoclineSource,
   LimitCycleRenderTarget,
   LimitCycleObject,
+  LimitCycleManifold2DSettings,
   ManifoldCycle2DAlgorithm,
   Manifold2DProfile,
   ManifoldDirection,
@@ -1208,6 +1210,13 @@ export type EquilibriumManifold1DExtensionRequest = {
   settings: EquilibriumManifold1DRequest['settings']
 }
 
+export type Manifold2DExtensionRequest = {
+  branchId: string
+  targetArclength: number
+  integrationDt: number
+  caps: ManifoldTerminationCaps
+}
+
 export type EquilibriumManifold2DRequest = {
   equilibriumId: string
   name: string
@@ -1495,6 +1504,7 @@ type AppActions = {
   extendEquilibriumManifold1D: (
     request: EquilibriumManifold1DExtensionRequest
   ) => Promise<void>
+  extendManifold2D: (request: Manifold2DExtensionRequest) => Promise<void>
   createEquilibriumManifold2D: (request: EquilibriumManifold2DRequest) => Promise<void>
   createLimitCycleManifold2D: (request: LimitCycleManifold2DRequest) => Promise<void>
   createBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
@@ -3568,6 +3578,150 @@ export function AppProvider({
     [client, state.system, store]
   )
 
+  const extendManifold2D = useCallback(
+    async (request: Manifold2DExtensionRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) throw new Error('System settings are invalid.')
+        if (system.type === 'map') {
+          throw new Error('2D invariant-manifold extension is available for flows only.')
+        }
+        if (!Number.isFinite(request.targetArclength) || request.targetArclength <= 0) {
+          throw new Error('Additional arclength must be a positive number.')
+        }
+        if (!Number.isFinite(request.integrationDt) || request.integrationDt === 0) {
+          throw new Error('Integration dt must be non-zero.')
+        }
+        const capsError = validateManifoldCaps(request.caps)
+        if (capsError) throw new Error(capsError)
+
+        const sourceBranch = state.system.branches[request.branchId]
+        if (
+          !sourceBranch ||
+          (sourceBranch.branchType !== 'eq_manifold_2d' &&
+            sourceBranch.branchType !== 'cycle_manifold_2d')
+        ) {
+          throw new Error('Select a valid 2D invariant-manifold branch to extend.')
+        }
+        const branchType = sourceBranch.data.branch_type
+        const previousSettings = sourceBranch.manifoldSettings
+        if (!branchType || !previousSettings || !('initial_radius' in previousSettings)) {
+          throw new Error(
+            'This manifold predates resumable 2D settings. Recompute it once before extending.'
+          )
+        }
+        const geometry = sourceBranch.data.manifold_geometry
+        const surface =
+          geometry?.type === 'Surface'
+            ? 'Surface' in geometry
+              ? geometry.Surface
+              : geometry
+            : null
+        if (!surface?.resume_state) {
+          throw new Error(
+            'This manifold predates resumable 2D state. Recompute it once before extending.'
+          )
+        }
+
+        let extensionSettings:
+          | EquilibriumManifold2DSettings
+          | LimitCycleManifold2DSettings
+        if (sourceBranch.branchType === 'eq_manifold_2d') {
+          if (branchType.type !== 'ManifoldEq2D' || !('target_radius' in previousSettings)) {
+            throw new Error('The equilibrium manifold is missing its numerical metadata.')
+          }
+          extensionSettings = {
+            ...previousSettings,
+            stability: branchType.stability,
+            eig_indices: branchType.eig_indices,
+            target_arclength: request.targetArclength,
+            integration_dt: request.integrationDt,
+            caps: { ...request.caps },
+          }
+        } else {
+          if (branchType.type !== 'ManifoldCycle2D' || !('algorithm' in previousSettings)) {
+            throw new Error('The cycle manifold is missing its numerical metadata.')
+          }
+          extensionSettings = {
+            ...previousSettings,
+            stability: branchType.stability,
+            direction: branchType.direction ?? previousSettings.direction,
+            floquet_index: branchType.floquet_index,
+            ntst: branchType.ntst,
+            ncol: branchType.ncol,
+            target_arclength: request.targetArclength,
+            integration_dt: request.integrationDt,
+            caps: { ...request.caps },
+          }
+        }
+
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
+        const sourceObjectCandidate = sourceObjectId
+          ? state.system.objects[sourceObjectId]
+          : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate)
+          ? sourceObjectCandidate
+          : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        const runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        if (
+          sourceBranch.manifoldFingerprint &&
+          sourceBranch.manifoldFingerprint !== equilibriumSolutionFingerprint(runConfig)
+        ) {
+          throw new Error(
+            'This manifold was computed for a different system or parameter state. Rebuild it before extending.'
+          )
+        }
+
+        const updatedData = await client.runManifold2DExtension(
+          {
+            system: runConfig,
+            branchData: serializeBranchDataForWasm(sourceBranch),
+            settings: extensionSettings,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Extend Invariant Manifold (2D)', progress },
+              }),
+          }
+        )
+        const normalized = normalizeBranchEigenvalues(updatedData, {
+          stateDimension: snapshot.freeVariableNames.length,
+        })
+        if (normalized.points.length <= sourceBranch.data.points.length) {
+          throw new Error(
+            'Manifold extension produced no new surface points. Increase the applicable caps or change the bounds.'
+          )
+        }
+        const updatedBranch: ContinuationObject = {
+          ...sourceBranch,
+          data: normalized,
+          manifoldSettings: extensionSettings,
+          timestamp: new Date().toISOString(),
+          subsystemSnapshot: snapshot,
+        }
+        const updated = updateBranch(state.system, request.branchId, updatedBranch)
+        const selected = selectNode(updated, request.branchId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
   const createEquilibriumManifold2D = useCallback(
     async (request: EquilibriumManifold2DRequest) => {
       if (!state.system) return
@@ -3730,6 +3884,11 @@ export function AppProvider({
             caps: settings.caps,
             integrationDt: settings.integration_dt,
           }),
+          manifoldSettings: {
+            ...settings,
+            caps: { ...settings.caps },
+          },
+          manifoldFingerprint: equilibriumSolutionFingerprint(runConfig),
           timestamp: new Date().toISOString(),
           params: [...baseParams],
           subsystemSnapshot: snapshot,
@@ -3939,6 +4098,15 @@ export function AppProvider({
         )
         const parameterName = limitCycle.parameterName ?? ''
         const parameterIndex = system.paramNames.indexOf(parameterName)
+        const resolvedManifoldSettings = {
+          ...settings,
+          direction: settings.direction ?? ('Plus' as const),
+          algorithm: settings.algorithm ?? ('GeodesicRings' as const),
+          parameter_index: parameterIndex >= 0 ? parameterIndex : undefined,
+          ntst: settings.ntst ?? seedNtst,
+          ncol: settings.ncol ?? seedNcol,
+          caps: { ...settings.caps },
+        }
         const branchData = await client.runLimitCycleManifold2D(
           {
             system: runConfig,
@@ -3946,15 +4114,7 @@ export function AppProvider({
             ntst: seedNtst,
             ncol: seedNcol,
             floquetMultipliers: floquet,
-            settings: {
-              ...settings,
-              direction: settings.direction ?? 'Plus',
-              algorithm: settings.algorithm ?? 'GeodesicRings',
-              parameter_index: parameterIndex >= 0 ? parameterIndex : undefined,
-              ntst: settings.ntst ?? seedNtst,
-              ncol: settings.ncol ?? seedNcol,
-              caps: { ...settings.caps },
-            },
+            settings: resolvedManifoldSettings,
           },
           {
             onProgress: (progress) =>
@@ -3992,6 +4152,8 @@ export function AppProvider({
             caps: settings.caps,
             integrationDt: settings.integration_dt,
           }),
+          manifoldSettings: resolvedManifoldSettings,
+          manifoldFingerprint: equilibriumSolutionFingerprint(runConfig),
           timestamp: new Date().toISOString(),
           params: [...baseParams],
           subsystemSnapshot: snapshot,
@@ -6948,6 +7110,7 @@ export function AppProvider({
       createEquilibriumBranch,
       createEquilibriumManifold1D,
       extendEquilibriumManifold1D,
+      extendManifold2D,
       createEquilibriumManifold2D,
       createLimitCycleManifold2D,
       createBranchFromPoint,
@@ -6990,6 +7153,7 @@ export function AppProvider({
       createEquilibriumBranch,
       createEquilibriumManifold1D,
       extendEquilibriumManifold1D,
+      extendManifold2D,
       createEquilibriumManifold2D,
       createLimitCycleManifold2D,
       createBranchFromPoint,

@@ -3533,6 +3533,11 @@ describe('appState equilibrium manifold actions', () => {
         branchId: fixture.nodeId,
         settings: {
           ...fixture.system.branches[fixture.nodeId].manifoldSettings!,
+          stability: 'Unstable',
+          direction: 'Plus',
+          eig_index: 0,
+          eps: 1e-3,
+          integration_dt: 0.01,
           target_arclength: 0.05,
           caps: { ...manifoldCaps },
         },
@@ -3558,6 +3563,11 @@ describe('appState equilibrium manifold actions', () => {
         branchId: fixture.nodeId,
         settings: {
           ...fixture.system.branches[fixture.nodeId].manifoldSettings!,
+          stability: 'Unstable',
+          direction: 'Plus',
+          eig_index: 0,
+          eps: 1e-3,
+          integration_dt: 0.01,
           target_arclength: 0.05,
           caps: { ...manifoldCaps },
         },
@@ -3566,6 +3576,110 @@ describe('appState equilibrium manifold actions', () => {
 
     expect(extensionSpy).not.toHaveBeenCalled()
     expect(getContext().state.error).toContain('different system or parameter state')
+  })
+
+  function createStoredSurfaceManifold() {
+    const fixture = createStoredFlowManifold()
+    const branch = fixture.system.branches[fixture.nodeId]
+    branch.branchType = 'eq_manifold_2d'
+    branch.manifoldFingerprint = undefined
+    branch.data.branch_type = {
+      type: 'ManifoldEq2D',
+      stability: 'Unstable',
+      eig_kind: 'RealPair',
+      eig_indices: [0, 1],
+      method: 'krauskopf_osinga_geodesic_leaf_continuation',
+      caps: manifoldCaps,
+    }
+    branch.data.manifold_geometry = {
+      type: 'Surface',
+      dim: 1,
+      vertices_flat: [0.001, 0.101],
+      triangles: [],
+      ring_offsets: [0, 1],
+      resume_state: {
+        type: 'GeodesicRings',
+        version: 1,
+        outer_ring: [[0.101], [0.102], [0.103], [0.104]],
+        inward_anchors: [[0], [0], [0], [0]],
+        current_leaf_delta: 0.01,
+        accumulated_arclength: 0.1,
+        center: [0],
+      },
+    }
+    branch.manifoldSettings = {
+      stability: 'Unstable',
+      eig_indices: [0, 1],
+      initial_radius: 1e-3,
+      leaf_delta: 0.01,
+      delta_min: 0.001,
+      ring_points: 4,
+      min_spacing: 0.001,
+      max_spacing: 0.02,
+      alpha_min: 0.3,
+      alpha_max: 0.4,
+      delta_alpha_min: 0.1,
+      delta_alpha_max: 1,
+      integration_dt: 0.01,
+      target_radius: 1,
+      target_arclength: 0.1,
+      caps: manifoldCaps,
+    }
+    return fixture
+  }
+
+  it('extends a stored 2D manifold in place through the dedicated worker path', async () => {
+    const fixture = createStoredSurfaceManifold()
+    const client = new MockForkCoreClient(0)
+    let capturedResumeType: string | undefined
+    client.runManifold2DExtension = async (request) => {
+      const geometry = request.branchData.manifold_geometry
+      const surface = geometry?.type === 'Surface' && !('Surface' in geometry) ? geometry : null
+      capturedResumeType = surface?.resume_state?.type
+      return normalizeBranchEigenvalues({
+        ...request.branchData,
+        points: [
+          ...request.branchData.points,
+          { state: [0.151], param_value: 2, stability: 'None', eigenvalues: [] },
+        ],
+        indices: [...request.branchData.indices, 2],
+      })
+    }
+    const { getContext } = setupApp(fixture.system, client)
+
+    await act(async () => {
+      await getContext().actions.extendManifold2D({
+        branchId: fixture.nodeId,
+        targetArclength: 0.05,
+        integrationDt: 0.01,
+        caps: { ...manifoldCaps },
+      })
+    })
+
+    expect(capturedResumeType).toBe('GeodesicRings')
+    expect(getContext().state.system!.branches[fixture.nodeId].data.points).toHaveLength(3)
+  })
+
+  it('keeps the original 2D surface unchanged when extension fails', async () => {
+    const fixture = createStoredSurfaceManifold()
+    const client = new MockForkCoreClient(0)
+    client.runManifold2DExtension = async () => {
+      throw new Error('collocation failed')
+    }
+    const before = structuredClone(fixture.system.branches[fixture.nodeId].data)
+    const { getContext } = setupApp(fixture.system, client)
+
+    await act(async () => {
+      await getContext().actions.extendManifold2D({
+        branchId: fixture.nodeId,
+        targetArclength: 0.05,
+        integrationDt: 0.01,
+        caps: { ...manifoldCaps },
+      })
+    })
+
+    expect(getContext().state.system!.branches[fixture.nodeId].data).toEqual(before)
+    expect(getContext().state.error).toContain('collocation failed')
   })
 
   it('forwards map iterations and applies cycle-point naming for map 1D manifolds', async () => {

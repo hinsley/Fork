@@ -30,6 +30,7 @@ const requiredExports = [
   'WasmEqManifold1DExtensionRunner',
   'WasmEqManifold2DRunner',
   'WasmCycleManifold2DRunner',
+  'WasmManifold2DExtensionRunner',
   'WasmIsochroneCurveRunner',
   'WasmLyapunovRunner',
   'WasmCovariantLyapunovRunner',
@@ -225,5 +226,59 @@ assert.match(
   hkoBranch.manifold_geometry.solver_diagnostics.termination_detail,
   /fundamental_solves=/
 );
+
+const hkoVerticesBefore = [...hkoBranch.manifold_geometry.vertices_flat];
+const hkoTrianglesBefore = [...hkoBranch.manifold_geometry.triangles];
+const hkoRingsBefore = [...hkoBranch.manifold_geometry.ring_offsets];
+const hkoExtensionRunner = new wasm.WasmManifold2DExtensionRunner(
+  ['-y', 'x', 'lambda*z'],
+  new Float64Array([0.2]),
+  ['lambda'],
+  ['x', 'y', 'z'],
+  'flow',
+  hkoBranch,
+  {
+    stability: 'Unstable',
+    direction: 'Plus',
+    algorithm: 'IsochronFibers',
+    floquet_index: 0,
+    initial_radius: 1e-3,
+    leaf_delta: 5e-3,
+    delta_min: 5e-4,
+    ring_points: 8,
+    min_spacing: 1e-3,
+    max_spacing: 1e-2,
+    alpha_min: 0.3,
+    alpha_max: 0.4,
+    delta_alpha_min: 0.1,
+    delta_alpha_max: 1,
+    integration_dt: 2e-2,
+    target_arclength: 5e-3,
+    ntst: cycleNtst,
+    ncol: cycleNcol,
+    caps: {
+      max_steps: 100,
+      max_points: 1000,
+      max_rings: 4,
+      max_vertices: 256,
+      max_time: 20,
+    },
+  }
+);
+const extendedHkoBranch = hkoExtensionRunner.get_result();
+assert.deepEqual(
+  extendedHkoBranch.manifold_geometry.vertices_flat.slice(0, hkoVerticesBefore.length),
+  hkoVerticesBefore
+);
+assert.deepEqual(
+  extendedHkoBranch.manifold_geometry.triangles.slice(0, hkoTrianglesBefore.length),
+  hkoTrianglesBefore
+);
+assert.deepEqual(
+  extendedHkoBranch.manifold_geometry.ring_offsets.slice(0, hkoRingsBefore.length),
+  hkoRingsBefore
+);
+assert.ok(extendedHkoBranch.manifold_geometry.ring_offsets.length > hkoRingsBefore.length);
+assert.equal(extendedHkoBranch.manifold_geometry.solver_diagnostics.extension_count, 1);
 
 console.log('PASS real WASM node boundary smoke');

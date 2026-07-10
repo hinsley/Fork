@@ -12,7 +12,8 @@ use crate::continuation::types::{
     Manifold2DProfile, Manifold2DSettings, ManifoldBounds, ManifoldCurveGeometry,
     ManifoldCurveResumeState, ManifoldCurveSolverDiagnostics, ManifoldCycle2DAlgorithm,
     ManifoldCycle2DSettings, ManifoldDirection, ManifoldEigenKind, ManifoldGeometry,
-    ManifoldMapDomainCursor, ManifoldRingDiagnostic, ManifoldStability, ManifoldSurfaceGeometry,
+    ManifoldHkoFiberResumeState, ManifoldMapDomainCursor, ManifoldRingDiagnostic,
+    ManifoldStability, ManifoldSurfaceGeometry, ManifoldSurfaceResumeState,
     ManifoldSurfaceSolverDiagnostics, ManifoldTerminationCaps,
 };
 use crate::equation_engine::EquationSystem;
@@ -1059,8 +1060,239 @@ pub fn continue_manifold_eq_2d_with_progress(
             ring_offsets: surface.ring_offsets,
             ring_diagnostics: surface.ring_diagnostics,
             solver_diagnostics: Some(surface.solver_diagnostics),
+            resume_state: surface.resume_state.map(Box::new),
         })),
     })
+}
+
+/// Extend a computed two-dimensional equilibrium manifold by additional
+/// geodesic arclength while retaining the accepted mesh as an exact prefix.
+pub fn extend_manifold_eq_2d(
+    system: &mut EquationSystem,
+    branch: ContinuationBranch,
+    settings: Manifold2DSettings,
+) -> Result<ContinuationBranch> {
+    extend_manifold_eq_2d_with_progress(system, branch, settings, None)
+}
+
+/// Progress-reporting variant of [`extend_manifold_eq_2d`].
+pub fn extend_manifold_eq_2d_with_progress(
+    system: &mut EquationSystem,
+    branch: ContinuationBranch,
+    mut settings: Manifold2DSettings,
+    on_ring_progress: Option<&mut dyn FnMut(usize, usize, f64, f64)>,
+) -> Result<ContinuationBranch> {
+    apply_eq_2d_profile(&mut settings);
+    if !settings.target_arclength.is_finite() || settings.target_arclength <= 0.0 {
+        bail!("2D manifold extension arclength must be a finite positive number.");
+    }
+    let (stability, eig_indices, method) = match &branch.branch_type {
+        BranchType::ManifoldEq2D {
+            stability,
+            eig_indices,
+            method,
+            ..
+        } => (*stability, *eig_indices, method.as_str()),
+        _ => bail!("Only a 2D equilibrium manifold branch can be extended here."),
+    };
+    if method != "krauskopf_osinga_geodesic_leaf_continuation" {
+        bail!("The stored equilibrium manifold backend does not support geodesic extension.");
+    }
+    if settings.stability != stability {
+        bail!("Extension stability must match the existing 2D manifold branch.");
+    }
+    if settings
+        .eig_indices
+        .is_some_and(|requested| requested != eig_indices)
+    {
+        bail!("Extension eigen indices must match the existing 2D manifold branch.");
+    }
+    let resume = geodesic_surface_resume_state(&branch)?;
+    let accumulated_arclength = resume.accumulated_arclength;
+    let outer_ring = resume.outer_ring;
+    let controls = growth_controls_from_eq_settings(&settings);
+    let extension = grow_surface_from_geodesic_seed(
+        system,
+        GeodesicGrowthSeed {
+            outer_ring: outer_ring.clone(),
+            inward_anchors: resume.inward_anchors,
+            current_leaf_delta: resume.current_leaf_delta,
+            accumulated_arclength,
+            global_ring_index: surface_ring_count(&branch)?.saturating_sub(1),
+            center: resume.center,
+        },
+        stability_sigma(stability),
+        controls,
+        settings.integration_dt.abs().max(1e-9),
+        settings.caps.max_steps.max(2),
+        settings.caps.max_points.max(8),
+        settings.caps.max_rings.saturating_add(1).max(2),
+        outer_ring
+            .len()
+            .saturating_add(settings.caps.max_vertices.max(1)),
+        settings.caps.max_time.max(1e-9),
+        f64::INFINITY,
+        accumulated_arclength + settings.target_arclength,
+        settings.bounds.as_ref(),
+        on_ring_progress,
+    );
+    merge_manifold_surface_extension(branch, extension)
+}
+
+fn surface_ring_count(branch: &ContinuationBranch) -> Result<usize> {
+    match branch.manifold_geometry.as_ref() {
+        Some(ManifoldGeometry::Surface(geometry)) if !geometry.ring_offsets.is_empty() => {
+            Ok(geometry.ring_offsets.len())
+        }
+        Some(ManifoldGeometry::Surface(_)) => bail!("Stored manifold surface has no rings."),
+        _ => bail!("Manifold branch is missing surface geometry."),
+    }
+}
+
+struct GeodesicResumeData {
+    outer_ring: Vec<Vec<f64>>,
+    inward_anchors: Vec<Vec<f64>>,
+    current_leaf_delta: f64,
+    accumulated_arclength: f64,
+    center: Option<Vec<f64>>,
+}
+
+fn geodesic_surface_resume_state(branch: &ContinuationBranch) -> Result<GeodesicResumeData> {
+    let state = match branch.manifold_geometry.as_ref() {
+        Some(ManifoldGeometry::Surface(geometry)) => geometry.resume_state.as_deref(),
+        _ => None,
+    };
+    match state {
+        Some(ManifoldSurfaceResumeState::GeodesicRings {
+            version: 1,
+            outer_ring,
+            inward_anchors,
+            current_leaf_delta,
+            accumulated_arclength,
+            center,
+        }) if outer_ring.len() >= 4 && outer_ring.len() == inward_anchors.len() => {
+            Ok(GeodesicResumeData {
+                outer_ring: outer_ring.clone(),
+                inward_anchors: inward_anchors.clone(),
+                current_leaf_delta: *current_leaf_delta,
+                accumulated_arclength: *accumulated_arclength,
+                center: center.clone(),
+            })
+        }
+        Some(ManifoldSurfaceResumeState::GeodesicRings { version, .. }) => {
+            bail!("Unsupported or inconsistent geodesic resume state version {version}.")
+        }
+        Some(_) => bail!("Stored 2D manifold resume state belongs to a different backend."),
+        None => bail!(
+            "This 2D manifold predates resumable surface state; recompute it once before extending."
+        ),
+    }
+}
+
+fn merge_manifold_surface_extension(
+    mut branch: ContinuationBranch,
+    extension: SurfaceGrowthResult,
+) -> Result<ContinuationBranch> {
+    if extension.ring_offsets.len() < 2 {
+        bail!("2D manifold extension produced no new accepted ring.");
+    }
+    let local_seam_start = extension.ring_offsets[0];
+    let local_seam_end = extension.ring_offsets[1];
+    if local_seam_start != 0 || local_seam_end == 0 {
+        bail!("2D manifold extension returned an inconsistent seam ring.");
+    }
+    let seam_len = local_seam_end;
+    let old_point_count = branch.points.len();
+    let geometry = match branch.manifold_geometry.as_mut() {
+        Some(ManifoldGeometry::Surface(geometry)) => geometry,
+        _ => bail!("Manifold branch is missing surface geometry."),
+    };
+    let dim = geometry.dim;
+    if dim == 0 || geometry.vertices_flat.len() % dim != 0 {
+        bail!("Stored manifold surface vertex data is inconsistent.");
+    }
+    let old_vertex_count = geometry.vertices_flat.len() / dim;
+    let old_outer_start = *geometry
+        .ring_offsets
+        .last()
+        .ok_or_else(|| anyhow!("Stored manifold surface has no outer ring."))?;
+    let old_outer_len = old_vertex_count.saturating_sub(old_outer_start);
+    if old_outer_len != seam_len
+        || extension.vertices[..seam_len]
+            .iter()
+            .any(|point| point.len() != dim)
+    {
+        bail!("Stored manifold outer ring does not match its numerical resume frontier.");
+    }
+
+    for point in extension.vertices.iter().skip(seam_len) {
+        if point.len() != dim {
+            bail!("2D manifold extension vertex dimension mismatch.");
+        }
+        geometry.vertices_flat.extend_from_slice(point);
+    }
+    for &index in &extension.triangles {
+        let mapped = if index < seam_len {
+            old_outer_start + index
+        } else {
+            old_vertex_count + index - seam_len
+        };
+        geometry.triangles.push(mapped);
+    }
+    for offset in extension.ring_offsets.iter().skip(1) {
+        geometry
+            .ring_offsets
+            .push(old_vertex_count + offset.saturating_sub(seam_len));
+    }
+    geometry.ring_diagnostics.extend(extension.ring_diagnostics);
+    let mut diagnostics = extension.solver_diagnostics;
+    let previous = geometry.solver_diagnostics.take().unwrap_or_default();
+    diagnostics.ring_attempts += previous.ring_attempts;
+    diagnostics.build_failures += previous.build_failures;
+    diagnostics.spacing_failures += previous.spacing_failures;
+    diagnostics.reject_ring_quality += previous.reject_ring_quality;
+    diagnostics.reject_geodesic_quality += previous.reject_geodesic_quality;
+    diagnostics.reject_too_small += previous.reject_too_small;
+    diagnostics.leaf_fail_plane_no_convergence += previous.leaf_fail_plane_no_convergence;
+    diagnostics.leaf_fail_plane_root_not_bracketed += previous.leaf_fail_plane_root_not_bracketed;
+    diagnostics.leaf_fail_segment_switch_limit += previous.leaf_fail_segment_switch_limit;
+    diagnostics.leaf_fail_integrator_non_finite += previous.leaf_fail_integrator_non_finite;
+    diagnostics.leaf_fail_no_first_hit_within_max_time +=
+        previous.leaf_fail_no_first_hit_within_max_time;
+    diagnostics.local_leaf_shrinks += previous.local_leaf_shrinks;
+    diagnostics.extension_count = previous.extension_count + 1;
+    geometry.solver_diagnostics = Some(diagnostics);
+    geometry.resume_state = extension.resume_state.map(Box::new);
+
+    let old_ring_count = geometry
+        .ring_offsets
+        .len()
+        .saturating_sub(extension.ring_offsets.len().saturating_sub(1));
+    for local_ring_index in 1..extension.ring_offsets.len() {
+        let start = extension.ring_offsets[local_ring_index];
+        let end = extension
+            .ring_offsets
+            .get(local_ring_index + 1)
+            .copied()
+            .unwrap_or(extension.vertices.len());
+        let param_value = (old_ring_count + local_ring_index - 1) as f64;
+        for point in &extension.vertices[start..end] {
+            branch.points.push(ContinuationPoint {
+                state: point.clone(),
+                param_value,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            });
+            branch
+                .indices
+                .push(branch.indices.last().copied().unwrap_or(-1) + 1);
+        }
+    }
+    if branch.points.len() == old_point_count {
+        bail!("2D manifold extension produced no new surface vertices.");
+    }
+    Ok(branch)
 }
 
 fn add_equilibrium_center_cap(
@@ -1335,6 +1567,119 @@ pub fn continue_limit_cycle_manifold_2d_with_progress(
     )
 }
 
+/// Extend one computed two-dimensional limit-cycle manifold sheet by
+/// additional common fiber/geodesic arclength.
+pub fn extend_limit_cycle_manifold_2d(
+    system: &mut EquationSystem,
+    branch: ContinuationBranch,
+    settings: ManifoldCycle2DSettings,
+) -> Result<ContinuationBranch> {
+    extend_limit_cycle_manifold_2d_with_progress(system, branch, settings, None)
+}
+
+/// Progress-reporting variant of [`extend_limit_cycle_manifold_2d`].
+pub fn extend_limit_cycle_manifold_2d_with_progress(
+    system: &mut EquationSystem,
+    branch: ContinuationBranch,
+    mut settings: ManifoldCycle2DSettings,
+    on_ring_progress: Option<&mut dyn FnMut(usize, usize, f64, f64)>,
+) -> Result<ContinuationBranch> {
+    apply_cycle_2d_profile(&mut settings);
+    if !settings.target_arclength.is_finite() || settings.target_arclength <= 0.0 {
+        bail!("2D manifold extension arclength must be a finite positive number.");
+    }
+    let (stability, direction, floquet_index, ntst, ncol, method) = match &branch.branch_type {
+        BranchType::ManifoldCycle2D {
+            stability,
+            direction,
+            floquet_index,
+            ntst,
+            ncol,
+            method,
+            ..
+        } => (
+            *stability,
+            *direction,
+            *floquet_index,
+            *ntst,
+            *ncol,
+            method.clone(),
+        ),
+        _ => bail!("Only a 2D limit-cycle manifold branch can be extended here."),
+    };
+    if settings.stability != stability {
+        bail!("Extension stability must match the existing 2D manifold branch.");
+    }
+    if settings.direction != direction {
+        bail!("Extension direction must match the existing 2D manifold sheet.");
+    }
+    if settings
+        .floquet_index
+        .is_some_and(|requested| requested != floquet_index)
+    {
+        bail!("Extension Floquet index must match the existing 2D manifold branch.");
+    }
+    if settings.ntst > 0 && settings.ntst != ntst || settings.ncol > 0 && settings.ncol != ncol {
+        bail!("Extension collocation mesh must match the existing 2D manifold branch.");
+    }
+    let expected_method = match settings.algorithm {
+        ManifoldCycle2DAlgorithm::GeodesicRings => "krauskopf_osinga_geodesic_leaf_continuation",
+        ManifoldCycle2DAlgorithm::IsochronFibers => "hko_fundamental_segment_bvp",
+        ManifoldCycle2DAlgorithm::SegmentedPreimageFibers => "segmented_preimage_collocation",
+    };
+    if method != expected_method {
+        bail!("Extension algorithm must match the existing 2D manifold backend.");
+    }
+
+    match settings.algorithm {
+        ManifoldCycle2DAlgorithm::GeodesicRings => {
+            let resume = geodesic_surface_resume_state(&branch)?;
+            if resume.center.is_some() {
+                bail!("Cycle geodesic resume state unexpectedly contains an equilibrium center.");
+            }
+            let accumulated_arclength = resume.accumulated_arclength;
+            let outer_ring = resume.outer_ring;
+            let extension = grow_surface_from_geodesic_seed(
+                system,
+                GeodesicGrowthSeed {
+                    outer_ring: outer_ring.clone(),
+                    inward_anchors: resume.inward_anchors,
+                    current_leaf_delta: resume.current_leaf_delta,
+                    accumulated_arclength,
+                    global_ring_index: surface_ring_count(&branch)?.saturating_sub(1),
+                    center: None,
+                },
+                stability_sigma(stability),
+                growth_controls_from_cycle_settings(&settings),
+                settings.integration_dt.abs().max(1e-9),
+                settings.caps.max_steps.max(2),
+                settings.caps.max_points.max(8),
+                settings.caps.max_rings.saturating_add(1).max(2),
+                outer_ring
+                    .len()
+                    .saturating_add(settings.caps.max_vertices.max(1)),
+                settings.caps.max_time.max(1e-9),
+                f64::INFINITY,
+                accumulated_arclength + settings.target_arclength,
+                settings.bounds.as_ref(),
+                on_ring_progress,
+            );
+            merge_manifold_surface_extension(branch, extension)
+        }
+        ManifoldCycle2DAlgorithm::IsochronFibers => {
+            extend_limit_cycle_manifold_2d_hko(system, branch, &settings, on_ring_progress)
+        }
+        ManifoldCycle2DAlgorithm::SegmentedPreimageFibers => {
+            extend_limit_cycle_manifold_2d_segmented_preimage(
+                system,
+                branch,
+                &settings,
+                on_ring_progress,
+            )
+        }
+    }
+}
+
 fn build_cycle_manifold_branch(
     dim: usize,
     surface: SurfaceGrowthResult,
@@ -1377,6 +1722,7 @@ fn build_cycle_manifold_branch(
             ring_offsets: surface.ring_offsets,
             ring_diagnostics: surface.ring_diagnostics,
             solver_diagnostics: Some(surface.solver_diagnostics),
+            resume_state: surface.resume_state.map(Box::new),
         })),
     })
 }
@@ -1387,6 +1733,389 @@ struct HkoFundamentalSegment {
     outer: Vec<f64>,
     solution: IsochronBvpSolution,
     lift_off: f64,
+}
+
+fn extend_limit_cycle_manifold_2d_hko(
+    system: &mut EquationSystem,
+    branch: ContinuationBranch,
+    settings: &ManifoldCycle2DSettings,
+    mut on_ring_progress: Option<&mut dyn FnMut(usize, usize, f64, f64)>,
+) -> Result<ContinuationBranch> {
+    let state = match branch.manifold_geometry.as_ref() {
+        Some(ManifoldGeometry::Surface(geometry)) => geometry.resume_state.as_deref().cloned(),
+        _ => None,
+    };
+    let (
+        version,
+        mut fibers,
+        emitted_arclength,
+        sigma,
+        return_time,
+        bvp_intervals,
+        bvp_degree,
+    ) = match state {
+        Some(ManifoldSurfaceResumeState::HkoIsochronFibers {
+            version,
+            fibers,
+            emitted_arclength,
+            sigma,
+            return_time,
+            bvp_intervals,
+            bvp_degree,
+        }) => (
+            version,
+            fibers,
+            emitted_arclength,
+            sigma,
+            return_time,
+            bvp_intervals,
+            bvp_degree,
+        ),
+        Some(_) => bail!("Stored 2D manifold resume state belongs to a different backend."),
+        None => bail!(
+            "This HKO manifold predates resumable surface state; recompute it once before extending."
+        ),
+    };
+    if version != 1 || fibers.len() < 4 || !emitted_arclength.is_finite() {
+        bail!("Stored HKO surface resume state is unsupported or inconsistent.");
+    }
+    if (sigma + stability_sigma(settings.stability)).abs() > 1e-12 {
+        bail!("Stored HKO time direction does not match extension stability.");
+    }
+    let target_arclength = emitted_arclength + settings.target_arclength;
+    let dt = settings.integration_dt.abs().max(1e-9);
+    let max_steps = settings.caps.max_steps.max(2);
+    let max_time = settings.caps.max_time.max(return_time).max(1e-9);
+    let mut stats = IsochronBvpStats::default();
+    let mut bounds_exit = false;
+    for (phase_index, fiber) in fibers.iter_mut().enumerate() {
+        let max_total_points = fiber
+            .fiber
+            .len()
+            .saturating_add(settings.caps.max_steps.max(16));
+        let (continued, fiber_bounds_exit) = continue_hko_isochron_resume_state(
+            system,
+            phase_index,
+            fiber.clone(),
+            settings,
+            sigma,
+            return_time,
+            bvp_intervals,
+            bvp_degree,
+            dt,
+            max_steps,
+            max_time,
+            target_arclength,
+            max_total_points,
+            &mut stats,
+        )?;
+        *fiber = continued;
+        bounds_exit |= fiber_bounds_exit;
+    }
+    let min_fiber_arclength = fibers
+        .iter()
+        .map(|fiber| open_curve_arclength(&fiber.fiber))
+        .fold(f64::INFINITY, f64::min);
+    if !min_fiber_arclength.is_finite() || min_fiber_arclength <= emitted_arclength + NORM_EPS {
+        bail!("HKO extension did not advance the common fiber frontier.");
+    }
+    let usable_arclength = target_arclength.min(min_fiber_arclength);
+    let phase_count = fibers.len();
+    let leaf_delta = settings.leaf_delta.max(1e-9);
+    let requested_new_rings =
+        (((usable_arclength - emitted_arclength) / leaf_delta).ceil() as usize).max(1);
+    let max_new_rings = settings.caps.max_rings.max(1);
+    let max_new_by_vertices = (settings.caps.max_vertices / phase_count.max(1)).max(1);
+    let new_ring_count = requested_new_rings
+        .min(max_new_rings)
+        .min(max_new_by_vertices)
+        .max(1);
+    let mut rings = Vec::with_capacity(new_ring_count + 1);
+    let mut ring_diagnostics = Vec::with_capacity(new_ring_count);
+    let global_ring_index = surface_ring_count(&branch)?.saturating_sub(1);
+    for local_ring_index in 0..=new_ring_count {
+        let arclength = emitted_arclength
+            + (usable_arclength - emitted_arclength) * (local_ring_index as f64)
+                / (new_ring_count as f64);
+        let ring = fibers
+            .iter()
+            .map(|fiber| sample_open_curve_at_arclength(&fiber.fiber, arclength))
+            .collect::<Vec<_>>();
+        if local_ring_index > 0 {
+            ring_diagnostics.push(ManifoldRingDiagnostic {
+                ring_index: global_ring_index + local_ring_index,
+                radius_estimate: arclength,
+                point_count: ring.len(),
+            });
+            if let Some(callback) = on_ring_progress.as_deref_mut() {
+                callback(
+                    global_ring_index + local_ring_index + 1,
+                    local_ring_index * ring.len(),
+                    arclength,
+                    arclength,
+                );
+            }
+        }
+        rings.push(ring);
+    }
+    let mut vertices = Vec::new();
+    let mut ring_offsets = Vec::with_capacity(rings.len());
+    for ring in &rings {
+        ring_offsets.push(vertices.len());
+        vertices.extend(ring.iter().cloned());
+    }
+    let uniform_parent_anchors = (0..rings.len())
+        .map(|ring_index| {
+            if ring_index == 0 {
+                Vec::new()
+            } else {
+                (0..phase_count)
+                    .map(|index| (index as f64) / (phase_count as f64))
+                    .collect()
+            }
+        })
+        .collect::<Vec<Vec<f64>>>();
+    let triangles =
+        triangulate_ring_bands_with_parent_anchors(&rings, &ring_offsets, &uniform_parent_anchors);
+    let target_reached = min_fiber_arclength + 1e-8 >= target_arclength;
+    let termination_reason = if bounds_exit {
+        SurfaceTerminationReason::BoundsExit
+    } else if !target_reached {
+        SurfaceTerminationReason::MaxSteps
+    } else if requested_new_rings > max_new_by_vertices && max_new_by_vertices <= max_new_rings {
+        SurfaceTerminationReason::MaxVertices
+    } else if requested_new_rings > max_new_rings {
+        SurfaceTerminationReason::MaxRings
+    } else {
+        SurfaceTerminationReason::TargetArclength
+    };
+    let solver_diagnostics = ManifoldSurfaceSolverDiagnostics {
+        termination_reason: termination_reason.as_str().to_string(),
+        termination_detail: Some(format!(
+            "HKO extension: phases={}, new_rings={}, from_arclength={:.6e}, achieved_arclength={:.6e}, target_arclength={:.6e}, continuation_solves={}, rejected_nonconverged={}, max_residual={:.3e}",
+            phase_count,
+            new_ring_count,
+            emitted_arclength,
+            usable_arclength,
+            target_arclength,
+            stats.continuation_solves,
+            stats.nonconverged,
+            stats.max_residual,
+        )),
+        final_leaf_delta: leaf_delta,
+        ring_attempts: stats.solves,
+        build_failures: stats.nonconverged,
+        leaf_delta_floor: settings.delta_min.max(1e-12),
+        ..ManifoldSurfaceSolverDiagnostics::default()
+    };
+    merge_manifold_surface_extension(
+        branch,
+        SurfaceGrowthResult {
+            vertices,
+            triangles,
+            ring_offsets,
+            ring_diagnostics,
+            solver_diagnostics,
+            resume_state: Some(ManifoldSurfaceResumeState::HkoIsochronFibers {
+                version: 1,
+                fibers,
+                emitted_arclength: usable_arclength,
+                sigma,
+                return_time,
+                bvp_intervals,
+                bvp_degree,
+            }),
+        },
+    )
+}
+
+fn extend_limit_cycle_manifold_2d_segmented_preimage(
+    system: &mut EquationSystem,
+    branch: ContinuationBranch,
+    settings: &ManifoldCycle2DSettings,
+    mut on_ring_progress: Option<&mut dyn FnMut(usize, usize, f64, f64)>,
+) -> Result<ContinuationBranch> {
+    let state = match branch.manifold_geometry.as_ref() {
+        Some(ManifoldGeometry::Surface(geometry)) => geometry.resume_state.as_deref().cloned(),
+        _ => None,
+    };
+    let (
+        version,
+        fibers,
+        current_ring,
+        arclengths,
+        emitted_arclength,
+        sigma,
+        segment_duration,
+        phase_shift_per_segment,
+        bvp_intervals,
+        bvp_degree,
+    ) = match state {
+        Some(ManifoldSurfaceResumeState::SegmentedPreimageFibers {
+            version,
+            fibers,
+            current_ring,
+            arclengths,
+            emitted_arclength,
+            sigma,
+            segment_duration,
+            phase_shift_per_segment,
+            bvp_intervals,
+            bvp_degree,
+        }) => (
+            version,
+            fibers,
+            current_ring,
+            arclengths,
+            emitted_arclength,
+            sigma,
+            segment_duration,
+            phase_shift_per_segment,
+            bvp_intervals,
+            bvp_degree,
+        ),
+        Some(_) => bail!("Stored 2D manifold resume state belongs to a different backend."),
+        None => bail!(
+            "This segmented-preimage manifold predates resumable surface state; recompute it once before extending."
+        ),
+    };
+    if version != 1 || fibers.len() < 4 || !emitted_arclength.is_finite() {
+        bail!("Stored segmented-preimage resume state is unsupported or inconsistent.");
+    }
+    if (sigma + stability_sigma(settings.stability)).abs() > 1e-12 {
+        bail!("Stored segmented-preimage time direction does not match extension stability.");
+    }
+    let target_arclength = emitted_arclength + settings.target_arclength;
+    let dt = settings.integration_dt.abs().max(1e-9);
+    let max_steps_per_segment = settings
+        .caps
+        .max_steps
+        .max((segment_duration / dt).ceil() as usize + 2)
+        .max(2);
+    let max_time = settings.caps.max_time.max(segment_duration).max(1e-9);
+    let per_phase_segment_cap = settings.caps.max_steps.max(settings.caps.max_rings).max(2);
+    let mut stats = IsochronBvpStats::default();
+    let (fibers, current_ring, arclengths, bounds_exit) = continue_isochron_segmented_fibers(
+        system,
+        fibers,
+        current_ring,
+        arclengths,
+        target_arclength,
+        settings,
+        sigma,
+        segment_duration,
+        phase_shift_per_segment,
+        bvp_intervals,
+        bvp_degree,
+        dt,
+        max_steps_per_segment,
+        max_time,
+        per_phase_segment_cap,
+        &mut stats,
+    )?;
+    let min_fiber_arclength = arclengths.iter().copied().fold(f64::INFINITY, f64::min);
+    if !min_fiber_arclength.is_finite() || min_fiber_arclength <= emitted_arclength + NORM_EPS {
+        bail!("Segmented-preimage extension did not advance the common fiber frontier.");
+    }
+    let usable_arclength = target_arclength.min(min_fiber_arclength);
+    let phase_count = fibers.len();
+    let leaf_delta = settings.leaf_delta.max(1e-9);
+    let requested_new_rings =
+        (((usable_arclength - emitted_arclength) / leaf_delta).ceil() as usize).max(1);
+    let max_new_rings = settings.caps.max_rings.max(1);
+    let max_new_by_vertices = (settings.caps.max_vertices / phase_count.max(1)).max(1);
+    let new_ring_count = requested_new_rings
+        .min(max_new_rings)
+        .min(max_new_by_vertices)
+        .max(1);
+    let global_ring_index = surface_ring_count(&branch)?.saturating_sub(1);
+    let mut rings = Vec::with_capacity(new_ring_count + 1);
+    let mut ring_diagnostics = Vec::with_capacity(new_ring_count);
+    for local_ring_index in 0..=new_ring_count {
+        let arclength = emitted_arclength
+            + (usable_arclength - emitted_arclength) * (local_ring_index as f64)
+                / (new_ring_count as f64);
+        let ring = fibers
+            .iter()
+            .map(|fiber| sample_open_curve_at_arclength(fiber, arclength))
+            .collect::<Vec<_>>();
+        if local_ring_index > 0 {
+            ring_diagnostics.push(ManifoldRingDiagnostic {
+                ring_index: global_ring_index + local_ring_index,
+                radius_estimate: arclength,
+                point_count: ring.len(),
+            });
+            if let Some(callback) = on_ring_progress.as_deref_mut() {
+                callback(
+                    global_ring_index + local_ring_index + 1,
+                    local_ring_index * ring.len(),
+                    arclength,
+                    leaf_delta,
+                );
+            }
+        }
+        rings.push(ring);
+    }
+    let mut vertices = Vec::new();
+    let mut ring_offsets = Vec::with_capacity(rings.len());
+    for ring in &rings {
+        ring_offsets.push(vertices.len());
+        vertices.extend(ring.iter().cloned());
+    }
+    let triangles = triangulate_ring_bands(&rings, &ring_offsets);
+    let target_reached = min_fiber_arclength + 1e-8 >= target_arclength;
+    let termination_reason = if bounds_exit {
+        SurfaceTerminationReason::BoundsExit
+    } else if !target_reached {
+        SurfaceTerminationReason::MaxSteps
+    } else if requested_new_rings > max_new_by_vertices && max_new_by_vertices <= max_new_rings {
+        SurfaceTerminationReason::MaxVertices
+    } else if requested_new_rings > max_new_rings {
+        SurfaceTerminationReason::MaxRings
+    } else {
+        SurfaceTerminationReason::TargetArclength
+    };
+    let solver_diagnostics = ManifoldSurfaceSolverDiagnostics {
+        termination_reason: termination_reason.as_str().to_string(),
+        termination_detail: Some(format!(
+            "segmented-preimage extension: phases={}, new_rings={}, from_arclength={:.6e}, achieved_arclength={:.6e}, target_arclength={:.6e}, bvp_solves={}, rejected_nonconverged={}, max_residual={:.3e}",
+            phase_count,
+            new_ring_count,
+            emitted_arclength,
+            usable_arclength,
+            target_arclength,
+            stats.solves,
+            stats.nonconverged,
+            stats.max_residual,
+        )),
+        final_leaf_delta: leaf_delta,
+        ring_attempts: stats.solves,
+        build_failures: stats.nonconverged,
+        leaf_delta_floor: settings.delta_min.max(1e-12),
+        ..ManifoldSurfaceSolverDiagnostics::default()
+    };
+    merge_manifold_surface_extension(
+        branch,
+        SurfaceGrowthResult {
+            vertices,
+            triangles,
+            ring_offsets,
+            ring_diagnostics,
+            solver_diagnostics,
+            resume_state: Some(ManifoldSurfaceResumeState::SegmentedPreimageFibers {
+                version: 1,
+                fibers,
+                current_ring,
+                arclengths,
+                emitted_arclength: usable_arclength,
+                sigma,
+                segment_duration,
+                phase_shift_per_segment,
+                bvp_intervals,
+                bvp_degree,
+            }),
+        },
+    )
 }
 
 fn record_isochron_bvp_attempt(
@@ -1560,7 +2289,7 @@ fn continue_hko_isochron_from_fundamental_segment(
     system: &EquationSystem,
     phase_point: &[f64],
     phase_index: usize,
-    mut fundamental: HkoFundamentalSegment,
+    fundamental: HkoFundamentalSegment,
     settings: &ManifoldCycle2DSettings,
     sigma: f64,
     return_time: f64,
@@ -1570,106 +2299,149 @@ fn continue_hko_isochron_from_fundamental_segment(
     max_steps: usize,
     max_time: f64,
     stats: &mut IsochronBvpStats,
-) -> Result<(Vec<Vec<f64>>, bool)> {
-    let target_arclength = settings
-        .target_arclength
-        .max(settings.initial_radius.max(1e-9));
-    let target_spacing = settings.leaf_delta.max(1e-9);
+) -> Result<(ManifoldHkoFiberResumeState, bool)> {
     let mut fiber = vec![phase_point.to_vec()];
     for point in [&fundamental.inner, &fundamental.outer] {
         if l2_distance(fiber.last().expect("fiber seed"), point) > NORM_EPS {
             fiber.push(point.clone());
         }
     }
-    let mut arclength = open_curve_arclength(&fiber);
+    let resume = ManifoldHkoFiberResumeState {
+        phase_point: phase_point.to_vec(),
+        fiber,
+        inner: fundamental.inner,
+        outer: fundamental.outer,
+        solution_start: fundamental.solution.start,
+        solution_unknown: fundamental.solution.unknown,
+        lift_off: fundamental.lift_off,
+        family_parameter: 0.0,
+        family_step: 0.25,
+    };
+    continue_hko_isochron_resume_state(
+        system,
+        phase_index,
+        resume,
+        settings,
+        sigma,
+        return_time,
+        bvp_intervals,
+        bvp_degree,
+        dt,
+        max_steps,
+        max_time,
+        settings
+            .target_arclength
+            .max(settings.initial_radius.max(1e-9)),
+        settings.caps.max_steps.max(16),
+        stats,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn continue_hko_isochron_resume_state(
+    system: &EquationSystem,
+    phase_index: usize,
+    mut resume: ManifoldHkoFiberResumeState,
+    settings: &ManifoldCycle2DSettings,
+    sigma: f64,
+    return_time: f64,
+    bvp_intervals: usize,
+    bvp_degree: usize,
+    dt: f64,
+    max_steps: usize,
+    max_time: f64,
+    target_arclength: f64,
+    max_total_points: usize,
+    stats: &mut IsochronBvpStats,
+) -> Result<(ManifoldHkoFiberResumeState, bool)> {
+    if resume.fiber.is_empty()
+        || resume.inner.len() != resume.phase_point.len()
+        || resume.outer.len() != resume.phase_point.len()
+        || resume.solution_start.len() != resume.phase_point.len()
+    {
+        bail!(
+            "Stored HKO fiber resume state is inconsistent at phase {}.",
+            phase_index + 1
+        );
+    }
+    let target_spacing = settings.leaf_delta.max(1e-9);
+    let mut arclength = open_curve_arclength(&resume.fiber);
     let mut bounds_exit = false;
-    let mut accepted_points = fiber.len();
-    let accepted_point_cap = settings.caps.max_steps.max(16);
+    let mut accepted_points = resume.fiber.len();
+    let accepted_point_cap = max_total_points.max(accepted_points);
+    const MIN_FAMILY_STEP: f64 = 1e-5;
 
     while arclength < target_arclength && accepted_points < accepted_point_cap {
-        let inner = fundamental.inner.clone();
-        let outer = fundamental.outer.clone();
-        let mut previous_solution = fundamental.solution.clone();
-        let mut family_parameter = 0.0_f64;
-        let mut family_step = 0.25_f64;
-        const MIN_FAMILY_STEP: f64 = 1e-5;
-
-        while family_parameter < 1.0 - 1e-12
-            && arclength < target_arclength
-            && accepted_points < accepted_point_cap
-        {
-            let candidate_parameter = (family_parameter + family_step).min(1.0);
-            let endpoint = lerp(&inner, &outer, candidate_parameter);
-            let candidate = solve_isochron_return_preimage_bvp_with_guess(
-                system,
-                &endpoint,
-                sigma,
-                return_time,
-                bvp_intervals,
-                bvp_degree,
-                dt,
-                max_steps,
-                max_time,
-                Some(&previous_solution.unknown),
-            )?;
-            record_isochron_bvp_attempt(stats, &candidate, phase_index, false);
-            if !candidate.converged {
-                family_step *= 0.5;
-                if family_step < MIN_FAMILY_STEP {
-                    bail!(
-                        "HKO isochron continuation failed at phase {} and family parameter {:.6}: residual {:.3e} after {} Newton iterations.",
-                        phase_index + 1,
-                        candidate_parameter,
-                        candidate.residual_norm,
-                        candidate.iterations
-                    );
-                }
-                continue;
-            }
-            let spatial_step = l2_distance(fiber.last().expect("fiber point"), &candidate.start);
-            if spatial_step > 1.5 * target_spacing {
-                if family_step > MIN_FAMILY_STEP {
-                    family_step *= 0.5;
-                    continue;
-                }
+        if resume.family_parameter >= 1.0 - 1e-12 {
+            resume.inner = resume.outer.clone();
+            resume.outer = resume.solution_start.clone();
+            resume.family_parameter = 0.0;
+            resume.family_step = 0.25;
+        }
+        let candidate_parameter =
+            (resume.family_parameter + resume.family_step.max(MIN_FAMILY_STEP)).min(1.0);
+        let endpoint = lerp(&resume.inner, &resume.outer, candidate_parameter);
+        let candidate = solve_isochron_return_preimage_bvp_with_guess(
+            system,
+            &endpoint,
+            sigma,
+            return_time,
+            bvp_intervals,
+            bvp_degree,
+            dt,
+            max_steps,
+            max_time,
+            Some(&resume.solution_unknown),
+        )?;
+        record_isochron_bvp_attempt(stats, &candidate, phase_index, false);
+        if !candidate.converged {
+            resume.family_step *= 0.5;
+            if resume.family_step < MIN_FAMILY_STEP {
                 bail!(
-                    "HKO isochron continuation could not meet arclength spacing at phase {}: step {:.3e} exceeds target {:.3e}.",
+                    "HKO isochron continuation failed at phase {} and family parameter {:.6}: residual {:.3e} after {} Newton iterations.",
                     phase_index + 1,
-                    spatial_step,
-                    target_spacing
+                    candidate_parameter,
+                    candidate.residual_norm,
+                    candidate.iterations
                 );
             }
-            if !spatial_step.is_finite() || candidate.start.iter().any(|value| !value.is_finite()) {
-                bail!("HKO isochron continuation produced non-finite geometry.");
+            continue;
+        }
+        let spatial_step = l2_distance(resume.fiber.last().expect("fiber point"), &candidate.start);
+        if spatial_step > 1.5 * target_spacing {
+            if resume.family_step > MIN_FAMILY_STEP {
+                resume.family_step *= 0.5;
+                continue;
             }
-            if let Some(bounds) = settings.bounds.as_ref() {
-                if !inside_bounds(&candidate.start, bounds) {
-                    bounds_exit = true;
-                    break;
-                }
-            }
-            if spatial_step > NORM_EPS {
-                fiber.push(candidate.start.clone());
-                arclength += spatial_step;
-                accepted_points += 1;
-            }
-            family_parameter = candidate_parameter;
-            previous_solution = candidate;
-            if spatial_step < 0.5 * target_spacing {
-                family_step = (family_step * 1.5).min(1.0 - family_parameter);
+            bail!(
+                "HKO isochron continuation could not meet arclength spacing at phase {}: step {:.3e} exceeds target {:.3e}.",
+                phase_index + 1,
+                spatial_step,
+                target_spacing
+            );
+        }
+        if !spatial_step.is_finite() || candidate.start.iter().any(|value| !value.is_finite()) {
+            bail!("HKO isochron continuation produced non-finite geometry.");
+        }
+        if let Some(bounds) = settings.bounds.as_ref() {
+            if !inside_bounds(&candidate.start, bounds) {
+                bounds_exit = true;
+                break;
             }
         }
-        if bounds_exit || family_parameter < 1.0 - 1e-12 {
-            break;
+        if spatial_step > NORM_EPS {
+            resume.fiber.push(candidate.start.clone());
+            arclength += spatial_step;
+            accepted_points += 1;
         }
-        fundamental = HkoFundamentalSegment {
-            inner: outer,
-            outer: previous_solution.start.clone(),
-            solution: previous_solution,
-            lift_off: fundamental.lift_off,
-        };
+        resume.family_parameter = candidate_parameter;
+        resume.solution_start = candidate.start;
+        resume.solution_unknown = candidate.unknown;
+        if spatial_step < 0.5 * target_spacing && resume.family_parameter < 1.0 - 1e-12 {
+            resume.family_step = (resume.family_step * 1.5).min(1.0 - resume.family_parameter);
+        }
     }
-    Ok((fiber, bounds_exit))
+    Ok((resume, bounds_exit))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1728,6 +2500,7 @@ fn continue_limit_cycle_manifold_2d_hko(
     let max_time = settings.caps.max_time.max(return_time).max(1e-9);
     let mut stats = IsochronBvpStats::default();
     let mut fibers = Vec::with_capacity(phase_cycle.len());
+    let mut fiber_resume_states = Vec::with_capacity(phase_cycle.len());
     let mut bounds_exit = false;
     for (phase_index, (phase_point, direction)) in
         phase_cycle.iter().zip(phase_dirs.iter()).enumerate()
@@ -1747,7 +2520,7 @@ fn continue_limit_cycle_manifold_2d_hko(
             max_time,
             &mut stats,
         )?;
-        let (fiber, fiber_bounds_exit) = continue_hko_isochron_from_fundamental_segment(
+        let (fiber_resume, fiber_bounds_exit) = continue_hko_isochron_from_fundamental_segment(
             system,
             phase_point,
             phase_index,
@@ -1763,7 +2536,8 @@ fn continue_limit_cycle_manifold_2d_hko(
             &mut stats,
         )?;
         bounds_exit |= fiber_bounds_exit;
-        fibers.push(fiber);
+        fibers.push(fiber_resume.fiber.clone());
+        fiber_resume_states.push(fiber_resume);
     }
 
     let target_arclength = settings
@@ -1870,6 +2644,15 @@ fn continue_limit_cycle_manifold_2d_hko(
             ring_offsets,
             ring_diagnostics,
             solver_diagnostics,
+            resume_state: Some(ManifoldSurfaceResumeState::HkoIsochronFibers {
+                version: 1,
+                fibers: fiber_resume_states,
+                emitted_arclength: usable_arclength,
+                sigma,
+                return_time,
+                bvp_intervals,
+                bvp_degree,
+            }),
         },
         settings,
         floquet_index,
@@ -1954,7 +2737,7 @@ fn continue_limit_cycle_manifold_2d_segmented_preimage(
     let per_phase_segment_cap = settings.caps.max_steps.max(max_rings).max(2);
 
     let mut stats = IsochronBvpStats::default();
-    let (fibers, bounds_exit) = build_isochron_segmented_fibers(
+    let (fibers, current_ring, arclengths, bounds_exit) = build_isochron_segmented_fibers(
         system,
         &phase_cycle,
         &phase_dirs,
@@ -2063,6 +2846,18 @@ fn continue_limit_cycle_manifold_2d_segmented_preimage(
             ring_offsets,
             ring_diagnostics,
             solver_diagnostics,
+            resume_state: Some(ManifoldSurfaceResumeState::SegmentedPreimageFibers {
+                version: 1,
+                fibers,
+                current_ring,
+                arclengths,
+                emitted_arclength: usable_arclength,
+                sigma,
+                segment_duration,
+                phase_shift_per_segment,
+                bvp_intervals,
+                bvp_degree,
+            }),
         },
         settings,
         floquet_index,
@@ -2162,6 +2957,7 @@ struct IsochronBvpStats {
     last_nonconverged_phase: Option<usize>,
 }
 
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn build_isochron_segmented_fibers(
     system: &EquationSystem,
     phase_cycle: &[Vec<f64>],
@@ -2177,7 +2973,7 @@ fn build_isochron_segmented_fibers(
     max_time: f64,
     per_phase_segment_cap: usize,
     stats: &mut IsochronBvpStats,
-) -> Result<(Vec<Vec<Vec<f64>>>, bool)> {
+) -> Result<(Vec<Vec<Vec<f64>>>, Vec<Vec<f64>>, Vec<f64>, bool)> {
     if phase_cycle.len() != phase_dirs.len() || phase_cycle.is_empty() {
         bail!("Isochron phase cycle and direction samples must match.");
     }
@@ -2197,11 +2993,52 @@ fn build_isochron_segmented_fibers(
         current_ring.push(seed);
     }
 
-    let target_arclength = settings.target_arclength.max(radius);
-    let mut arclengths = fibers
+    let arclengths = fibers
         .iter()
         .map(|fiber| open_curve_arclength(fiber))
         .collect::<Vec<_>>();
+    continue_isochron_segmented_fibers(
+        system,
+        fibers,
+        current_ring,
+        arclengths,
+        settings.target_arclength.max(radius),
+        settings,
+        sigma,
+        segment_duration,
+        phase_shift_per_segment,
+        bvp_intervals,
+        bvp_degree,
+        dt,
+        max_steps_per_segment,
+        max_time,
+        per_phase_segment_cap,
+        stats,
+    )
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn continue_isochron_segmented_fibers(
+    system: &EquationSystem,
+    mut fibers: Vec<Vec<Vec<f64>>>,
+    mut current_ring: Vec<Vec<f64>>,
+    mut arclengths: Vec<f64>,
+    target_arclength: f64,
+    settings: &ManifoldCycle2DSettings,
+    sigma: f64,
+    segment_duration: f64,
+    phase_shift_per_segment: f64,
+    bvp_intervals: usize,
+    bvp_degree: usize,
+    dt: f64,
+    max_steps_per_segment: usize,
+    max_time: f64,
+    per_phase_segment_cap: usize,
+    stats: &mut IsochronBvpStats,
+) -> Result<(Vec<Vec<Vec<f64>>>, Vec<Vec<f64>>, Vec<f64>, bool)> {
+    if fibers.is_empty() || fibers.len() != current_ring.len() || fibers.len() != arclengths.len() {
+        bail!("Stored segmented-preimage fiber frontier is inconsistent.");
+    }
     let mut bounds_exit = false;
     let segment_cap = per_phase_segment_cap.max(2);
     for _segment_index in 0..segment_cap {
@@ -2263,7 +3100,7 @@ fn build_isochron_segmented_fibers(
             break;
         }
     }
-    Ok((fibers, bounds_exit))
+    Ok((fibers, current_ring, arclengths, bounds_exit))
 }
 
 #[derive(Clone)]
@@ -2640,6 +3477,7 @@ struct SurfaceGrowthResult {
     ring_offsets: Vec<usize>,
     ring_diagnostics: Vec<ManifoldRingDiagnostic>,
     solver_diagnostics: ManifoldSurfaceSolverDiagnostics,
+    resume_state: Option<ManifoldSurfaceResumeState>,
 }
 
 #[derive(Clone, Copy)]
@@ -2727,6 +3565,15 @@ struct RingLayer {
     points: Vec<Vec<f64>>,
     in_anchors: Vec<Vec<f64>>,
     parent_anchors: Vec<f64>,
+}
+
+struct GeodesicGrowthSeed {
+    outer_ring: Vec<Vec<f64>>,
+    inward_anchors: Vec<Vec<f64>>,
+    current_leaf_delta: f64,
+    accumulated_arclength: f64,
+    global_ring_index: usize,
+    center: Option<Vec<f64>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -3245,7 +4092,7 @@ fn grow_surface_from_ring(
     center: Option<&[f64]>,
     initial_in_anchors: Option<&[Vec<f64>]>,
     bounds: Option<&ManifoldBounds>,
-    mut on_ring_progress: Option<&mut dyn FnMut(usize, usize, f64, f64)>,
+    on_ring_progress: Option<&mut dyn FnMut(usize, usize, f64, f64)>,
 ) -> SurfaceGrowthResult {
     let initial_inward = if let Some(anchors) = initial_in_anchors {
         anchors.to_vec()
@@ -3259,15 +4106,59 @@ fn grow_surface_from_ring(
         &initial_inward,
         initial_ring.len().max(4),
     );
+    grow_surface_from_geodesic_seed(
+        system,
+        GeodesicGrowthSeed {
+            outer_ring: initial_ring,
+            inward_anchors: initial_inward,
+            current_leaf_delta: leaf_delta,
+            accumulated_arclength: 0.0,
+            global_ring_index: 0,
+            center: center.map(<[f64]>::to_vec),
+        },
+        sigma,
+        controls,
+        integration_dt,
+        max_steps_per_leaf,
+        max_ring_points,
+        max_rings,
+        max_vertices,
+        max_time,
+        target_radius,
+        target_arclength,
+        bounds,
+        on_ring_progress,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn grow_surface_from_geodesic_seed(
+    system: &EquationSystem,
+    seed: GeodesicGrowthSeed,
+    sigma: f64,
+    controls: SurfaceGrowthControls,
+    integration_dt: f64,
+    max_steps_per_leaf: usize,
+    max_ring_points: usize,
+    max_rings: usize,
+    max_vertices: usize,
+    max_time: f64,
+    target_radius: f64,
+    target_arclength: f64,
+    bounds: Option<&ManifoldBounds>,
+    mut on_ring_progress: Option<&mut dyn FnMut(usize, usize, f64, f64)>,
+) -> SurfaceGrowthResult {
+    let center = seed.center.as_deref();
+    let global_ring_offset = seed.global_ring_index;
     let mut rings = vec![RingLayer {
-        points: initial_ring,
-        in_anchors: initial_inward,
+        points: seed.outer_ring,
+        in_anchors: seed.inward_anchors,
         parent_anchors: Vec::new(),
     }];
     let mut ring_diagnostics = Vec::new();
-    let mut accumulated_arc = 0.0;
+    let mut accumulated_arc = seed.accumulated_arclength;
     let mut ring_index = 0usize;
-    let mut current_leaf_delta = leaf_delta.max(1e-9);
+    let mut current_leaf_delta = seed.current_leaf_delta.max(1e-9);
     let delta_min = controls.delta_min.max(1e-12);
     if current_leaf_delta < delta_min {
         current_leaf_delta = delta_min;
@@ -3299,7 +4190,12 @@ fn grow_surface_from_ring(
         } else {
             0.0
         };
-        progress(rings.len(), initial_vertices, 0.0, initial_radius);
+        progress(
+            global_ring_offset + rings.len(),
+            initial_vertices,
+            accumulated_arc,
+            initial_radius,
+        );
     }
 
     while ring_index + 1 < max_rings {
@@ -3642,7 +4538,7 @@ fn grow_surface_from_ring(
             accumulated_arc
         };
         ring_diagnostics.push(ManifoldRingDiagnostic {
-            ring_index: ring_index + 1,
+            ring_index: global_ring_offset + ring_index + 1,
             radius_estimate,
             point_count: next.len(),
         });
@@ -3657,7 +4553,7 @@ fn grow_surface_from_ring(
         let total_vertices: usize = rings.iter().map(|ring| ring.points.len()).sum();
         if let Some(progress) = on_ring_progress.as_deref_mut() {
             progress(
-                rings.len(),
+                global_ring_offset + rings.len(),
                 total_vertices,
                 accumulated_arc,
                 radius_estimate,
@@ -3712,15 +4608,25 @@ fn grow_surface_from_ring(
         .iter()
         .map(|ring| ring.parent_anchors.clone())
         .collect::<Vec<_>>();
+    let resume_layer = rings.last().cloned();
     let ring_points: Vec<Vec<Vec<f64>>> = rings.into_iter().map(|ring| ring.points).collect();
     let triangles =
         triangulate_ring_bands_with_parent_anchors(&ring_points, &ring_offsets, &parent_anchors);
+    let resume_state = resume_layer.map(|layer| ManifoldSurfaceResumeState::GeodesicRings {
+        version: 1,
+        outer_ring: layer.points,
+        inward_anchors: layer.in_anchors,
+        current_leaf_delta,
+        accumulated_arclength: accumulated_arc,
+        center: seed.center,
+    });
     SurfaceGrowthResult {
         vertices,
         triangles,
         ring_offsets,
         ring_diagnostics,
         solver_diagnostics,
+        resume_state,
     }
 }
 
@@ -12726,5 +13632,258 @@ mod tests {
             "Rossler run should avoid segment-switch-limit failures; detail={:?}",
             diagnostics.termination_detail
         );
+    }
+
+    fn assert_surface_extension_appends_without_rewriting(
+        original: &ContinuationBranch,
+        extended: &ContinuationBranch,
+    ) {
+        let ManifoldGeometry::Surface(original_surface) = original
+            .manifold_geometry
+            .as_ref()
+            .expect("original surface geometry")
+        else {
+            panic!("expected original surface geometry");
+        };
+        let ManifoldGeometry::Surface(extended_surface) = extended
+            .manifold_geometry
+            .as_ref()
+            .expect("extended surface geometry")
+        else {
+            panic!("expected extended surface geometry");
+        };
+        assert!(
+            extended_surface
+                .vertices_flat
+                .starts_with(&original_surface.vertices_flat),
+            "extension must preserve every existing surface vertex"
+        );
+        assert!(
+            extended_surface
+                .triangles
+                .starts_with(&original_surface.triangles),
+            "extension must preserve every existing surface triangle"
+        );
+        assert!(
+            extended_surface
+                .ring_offsets
+                .starts_with(&original_surface.ring_offsets),
+            "extension must preserve existing ring offsets"
+        );
+        assert!(
+            extended_surface.vertices_flat.len() > original_surface.vertices_flat.len(),
+            "extension must append new vertices"
+        );
+        assert!(
+            extended_surface.ring_offsets.len() > original_surface.ring_offsets.len(),
+            "extension must append at least one ring"
+        );
+        assert!(extended_surface.resume_state.is_some());
+        assert_eq!(
+            extended_surface
+                .solver_diagnostics
+                .as_ref()
+                .expect("surface diagnostics")
+                .extension_count,
+            1
+        );
+        assert_eq!(
+            &extended.points[..original.points.len()]
+                .iter()
+                .map(|point| (&point.state, point.param_value))
+                .collect::<Vec<_>>(),
+            &original
+                .points
+                .iter()
+                .map(|point| (&point.state, point.param_value))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn manifold_eq_2d_extension_resumes_the_outer_geodesic_ring() {
+        for (equations, stability) in [
+            (["1.5*x", "0.8*y", "-z"], ManifoldStability::Unstable),
+            (["-1.5*x", "-0.8*y", "z"], ManifoldStability::Stable),
+        ] {
+            let mut system = build_system(&equations, &["x", "y", "z"], &[]);
+            let initial = continue_manifold_eq_2d(
+                &mut system,
+                &[0.0, 0.0, 0.0],
+                Manifold2DSettings {
+                    stability,
+                    initial_radius: 0.02,
+                    leaf_delta: 0.02,
+                    delta_min: 1e-4,
+                    ring_points: 12,
+                    target_radius: f64::INFINITY,
+                    target_arclength: 1.0,
+                    caps: ManifoldTerminationCaps {
+                        max_rings: 2,
+                        max_vertices: 256,
+                        max_time: 2.0,
+                        ..ManifoldTerminationCaps::default()
+                    },
+                    ..Manifold2DSettings::default()
+                },
+            )
+            .expect("initial equilibrium surface");
+            let original = initial.clone();
+
+            let extended = extend_manifold_eq_2d(
+                &mut system,
+                initial,
+                Manifold2DSettings {
+                    stability,
+                    leaf_delta: 0.02,
+                    delta_min: 1e-4,
+                    target_arclength: 0.04,
+                    caps: ManifoldTerminationCaps {
+                        max_rings: 3,
+                        max_vertices: 256,
+                        max_time: 2.0,
+                        ..ManifoldTerminationCaps::default()
+                    },
+                    ..Manifold2DSettings::default()
+                },
+            )
+            .expect("extended equilibrium surface");
+
+            assert_surface_extension_appends_without_rewriting(&original, &extended);
+        }
+    }
+
+    #[test]
+    fn manifold_cycle_2d_extension_resumes_geodesic_rings() {
+        let ntst = 8;
+        let ncol = 2;
+        let mut system = build_system(&["x", "y", "-z"], &["x", "y", "z"], &[]);
+        let ring = build_equilibrium_initial_ring(
+            &[0.0, 0.0, 0.0],
+            &[1.0, 0.0, 0.0],
+            &[0.0, 1.0, 0.0],
+            0.02,
+            12,
+        );
+        let initial = ContinuationBranch {
+            points: surface_points_to_branch_points(&ring, &[0]),
+            bifurcations: Vec::new(),
+            indices: (0..ring.len() as i32).collect(),
+            branch_type: BranchType::ManifoldCycle2D {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Plus,
+                floquet_index: 0,
+                ntst,
+                ncol,
+                method: "krauskopf_osinga_geodesic_leaf_continuation".to_string(),
+                caps: ManifoldTerminationCaps::default(),
+            },
+            upoldp: None,
+            homoc_context: None,
+            resume_state: None,
+            manifold_geometry: Some(ManifoldGeometry::Surface(ManifoldSurfaceGeometry {
+                dim: 3,
+                vertices_flat: flatten_points(&ring),
+                triangles: Vec::new(),
+                ring_offsets: vec![0],
+                ring_diagnostics: Vec::new(),
+                solver_diagnostics: Some(ManifoldSurfaceSolverDiagnostics::default()),
+                resume_state: Some(Box::new(ManifoldSurfaceResumeState::GeodesicRings {
+                    version: 1,
+                    outer_ring: ring.clone(),
+                    inward_anchors: vec![vec![0.0, 0.0, 0.0]; ring.len()],
+                    current_leaf_delta: 0.02,
+                    accumulated_arclength: 0.0,
+                    center: None,
+                })),
+            })),
+        };
+        let original = initial.clone();
+
+        let extended = extend_limit_cycle_manifold_2d(
+            &mut system,
+            initial,
+            ManifoldCycle2DSettings {
+                stability: ManifoldStability::Unstable,
+                floquet_index: Some(0),
+                leaf_delta: 0.02,
+                delta_min: 1e-4,
+                target_arclength: 0.04,
+                ntst,
+                ncol,
+                caps: ManifoldTerminationCaps {
+                    max_rings: 3,
+                    max_vertices: 256,
+                    max_time: 2.0,
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..ManifoldCycle2DSettings::default()
+            },
+        )
+        .expect("extended geodesic cycle surface");
+
+        assert_surface_extension_appends_without_rewriting(&original, &extended);
+    }
+
+    fn assert_cycle_fiber_backend_extends(algorithm: ManifoldCycle2DAlgorithm) {
+        let ntst = 8;
+        let ncol = 2;
+        let lambda = 0.2_f64;
+        let mut system = build_system(
+            &["-y", "x", "lambda*z"],
+            &["x", "y", "z"],
+            &[("lambda", lambda)],
+        );
+        let cycle = circular_cycle_state(ntst, ncol, 1.0);
+        let mut settings = ManifoldCycle2DSettings {
+            stability: ManifoldStability::Unstable,
+            algorithm,
+            floquet_index: Some(0),
+            initial_radius: 1e-3,
+            leaf_delta: 2e-3,
+            ring_points: 8,
+            integration_dt: 2e-2,
+            target_arclength: 6e-3,
+            ntst,
+            ncol,
+            caps: ManifoldTerminationCaps {
+                max_steps: 100,
+                max_rings: 6,
+                max_vertices: 256,
+                max_time: 20.0,
+                ..ManifoldTerminationCaps::default()
+            },
+            ..ManifoldCycle2DSettings::default()
+        };
+        let initial = continue_limit_cycle_manifold_2d(
+            &mut system,
+            &cycle,
+            ntst,
+            ncol,
+            &[
+                Complex::new((lambda * std::f64::consts::TAU).exp(), 0.0),
+                Complex::new(1.0, 0.0),
+            ],
+            settings.clone(),
+        )
+        .expect("initial fiber surface");
+        let original = initial.clone();
+        settings.target_arclength = 4e-3;
+        settings.caps.max_rings = 4;
+
+        let extended = extend_limit_cycle_manifold_2d(&mut system, initial, settings)
+            .expect("extended fiber surface");
+
+        assert_surface_extension_appends_without_rewriting(&original, &extended);
+    }
+
+    #[test]
+    fn manifold_cycle_2d_extension_resumes_hko_fundamental_segments() {
+        assert_cycle_fiber_backend_extends(ManifoldCycle2DAlgorithm::IsochronFibers);
+    }
+
+    #[test]
+    fn manifold_cycle_2d_extension_resumes_segmented_preimage_fibers() {
+        assert_cycle_fiber_backend_extends(ManifoldCycle2DAlgorithm::SegmentedPreimageFibers);
     }
 }

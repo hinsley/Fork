@@ -488,6 +488,58 @@ pub struct ManifoldSurfaceSolverDiagnostics {
     pub last_geodesic_max_angle: f64,
     #[serde(default)]
     pub last_geodesic_max_distance_angle: f64,
+    #[serde(default)]
+    pub extension_count: usize,
+}
+
+/// Accepted per-phase HKO state used to resume a fundamental-segment family.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ManifoldHkoFiberResumeState {
+    pub phase_point: Vec<f64>,
+    pub fiber: Vec<Vec<f64>>,
+    pub inner: Vec<f64>,
+    pub outer: Vec<f64>,
+    pub solution_start: Vec<f64>,
+    pub solution_unknown: Vec<f64>,
+    pub lift_off: f64,
+    pub family_parameter: f64,
+    pub family_step: f64,
+}
+
+/// Versioned accepted numerical frontier for extending a 2D manifold surface.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
+pub enum ManifoldSurfaceResumeState {
+    GeodesicRings {
+        version: usize,
+        outer_ring: Vec<Vec<f64>>,
+        inward_anchors: Vec<Vec<f64>>,
+        current_leaf_delta: f64,
+        accumulated_arclength: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        center: Option<Vec<f64>>,
+    },
+    HkoIsochronFibers {
+        version: usize,
+        fibers: Vec<ManifoldHkoFiberResumeState>,
+        emitted_arclength: f64,
+        sigma: f64,
+        return_time: f64,
+        bvp_intervals: usize,
+        bvp_degree: usize,
+    },
+    SegmentedPreimageFibers {
+        version: usize,
+        fibers: Vec<Vec<Vec<f64>>>,
+        current_ring: Vec<Vec<f64>>,
+        arclengths: Vec<f64>,
+        emitted_arclength: f64,
+        sigma: f64,
+        segment_duration: f64,
+        phase_shift_per_segment: f64,
+        bvp_intervals: usize,
+        bvp_degree: usize,
+    },
 }
 
 /// Geometry payload for 2D manifold surfaces.
@@ -501,6 +553,8 @@ pub struct ManifoldSurfaceGeometry {
     pub ring_diagnostics: Vec<ManifoldRingDiagnostic>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub solver_diagnostics: Option<ManifoldSurfaceSolverDiagnostics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_state: Option<Box<ManifoldSurfaceResumeState>>,
 }
 
 /// Persisted manifold geometry attached to a continuation branch.

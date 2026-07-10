@@ -36,6 +36,8 @@ import type {
   LimitCycleFloquetModesResult,
   LimitCycleManifold2DRequest,
   LimitCycleManifold2DResult,
+  Manifold2DExtensionRequest,
+  Manifold2DExtensionResult,
   MapCycleContinuationFromPDRequest,
   LyapunovExponentsRequest,
   SampleMap1DFunctionRequest,
@@ -71,6 +73,7 @@ type WorkerRequest =
       kind: 'runEquilibriumManifold1DExtension'
       payload: EquilibriumManifold1DExtensionRequest
     }
+  | { id: string; kind: 'runManifold2DExtension'; payload: Manifold2DExtensionRequest }
   | { id: string; kind: 'runEquilibriumManifold2D'; payload: EquilibriumManifold2DRequest }
   | { id: string; kind: 'runLimitCycleManifold2D'; payload: LimitCycleManifold2DRequest }
   | { id: string; kind: 'computeLimitCycleFloquetModes'; payload: LimitCycleFloquetModesRequest }
@@ -359,6 +362,19 @@ export class WasmForkCoreClient implements ForkCoreClient {
           signal,
           opts?.onProgress
         ),
+      opts
+    )
+    return await job.promise
+  }
+
+  async runManifold2DExtension(
+    request: Manifold2DExtensionRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<Manifold2DExtensionResult> {
+    const job = this.queue.enqueue(
+      'runManifold2DExtension',
+      (signal) =>
+        this.runWorker('runManifold2DExtension', request, signal, opts?.onProgress),
       opts
     )
     return await job.promise
@@ -661,6 +677,12 @@ export class WasmForkCoreClient implements ForkCoreClient {
     onProgress?: (progress: ContinuationProgress) => void
   ): Promise<EquilibriumManifold1DExtensionResult>
   private runWorker(
+    kind: 'runManifold2DExtension',
+    payload: Manifold2DExtensionRequest,
+    signal: AbortSignal,
+    onProgress?: (progress: ContinuationProgress) => void
+  ): Promise<Manifold2DExtensionResult>
+  private runWorker(
     kind: 'runEquilibriumManifold2D',
     payload: EquilibriumManifold2DRequest,
     signal: AbortSignal,
@@ -762,6 +784,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | 'runContinuationExtension'
       | 'runEquilibriumManifold1D'
       | 'runEquilibriumManifold1DExtension'
+      | 'runManifold2DExtension'
       | 'runEquilibriumManifold2D'
       | 'runLimitCycleManifold2D'
       | 'computeLimitCycleFloquetModes'
@@ -790,6 +813,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | ContinuationExtensionRequest
       | EquilibriumManifold1DRequest
       | EquilibriumManifold1DExtensionRequest
+      | Manifold2DExtensionRequest
       | EquilibriumManifold2DRequest
       | LimitCycleManifold2DRequest
       | LimitCycleFloquetModesRequest
@@ -820,6 +844,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
     | ContinuationExtensionResult
     | EquilibriumManifold1DResult
     | EquilibriumManifold1DExtensionResult
+    | Manifold2DExtensionResult
     | EquilibriumManifold2DResult
     | LimitCycleManifold2DResult
     | LimitCycleFloquetModesResult
@@ -854,12 +879,14 @@ export class WasmForkCoreClient implements ForkCoreClient {
                 ? { id, kind, payload: payload as EquilibriumManifold1DRequest }
                 : kind === 'runEquilibriumManifold1DExtension'
                   ? { id, kind, payload: payload as EquilibriumManifold1DExtensionRequest }
-                  : kind === 'runEquilibriumManifold2D'
-                    ? { id, kind, payload: payload as EquilibriumManifold2DRequest }
-                  : kind === 'runLimitCycleManifold2D'
-                    ? { id, kind, payload: payload as LimitCycleManifold2DRequest }
-                    : kind === 'computeLimitCycleFloquetModes'
-                      ? { id, kind, payload: payload as LimitCycleFloquetModesRequest }
+                  : kind === 'runManifold2DExtension'
+                    ? { id, kind, payload: payload as Manifold2DExtensionRequest }
+                    : kind === 'runEquilibriumManifold2D'
+                      ? { id, kind, payload: payload as EquilibriumManifold2DRequest }
+                    : kind === 'runLimitCycleManifold2D'
+                      ? { id, kind, payload: payload as LimitCycleManifold2DRequest }
+                      : kind === 'computeLimitCycleFloquetModes'
+                        ? { id, kind, payload: payload as LimitCycleFloquetModesRequest }
               : kind === 'runFoldCurveContinuation'
                 ? { id, kind, payload: payload as FoldCurveContinuationRequest }
         : kind === 'runHopfCurveContinuation'
@@ -905,6 +932,7 @@ export class WasmForkCoreClient implements ForkCoreClient {
       | ContinuationExtensionResult
       | EquilibriumManifold1DResult
       | EquilibriumManifold1DExtensionResult
+      | Manifold2DExtensionResult
       | EquilibriumManifold2DResult
       | LimitCycleManifold2DResult
       | LimitCycleFloquetModesResult

@@ -164,6 +164,52 @@ export interface EquilibriumManifold1DSettings {
   bounds?: { min: number[]; max: number[] }
 }
 
+export interface EquilibriumManifold2DSettings {
+  stability: ManifoldStability
+  eig_indices?: [number, number]
+  profile?: Manifold2DProfile
+  initial_radius: number
+  leaf_delta: number
+  delta_min: number
+  ring_points: number
+  min_spacing: number
+  max_spacing: number
+  alpha_min: number
+  alpha_max: number
+  delta_alpha_min: number
+  delta_alpha_max: number
+  integration_dt: number
+  target_radius: number
+  target_arclength: number
+  caps: ManifoldTerminationCaps
+  bounds?: { min: number[]; max: number[] }
+}
+
+export interface LimitCycleManifold2DSettings {
+  stability: ManifoldStability
+  direction: ManifoldDirection
+  algorithm: ManifoldCycle2DAlgorithm
+  floquet_index?: number
+  parameter_index?: number
+  profile?: Manifold2DProfile
+  initial_radius: number
+  leaf_delta: number
+  delta_min: number
+  ring_points: number
+  min_spacing: number
+  max_spacing: number
+  alpha_min: number
+  alpha_max: number
+  delta_alpha_min: number
+  delta_alpha_max: number
+  integration_dt: number
+  target_arclength: number
+  ntst?: number
+  ncol?: number
+  caps: ManifoldTerminationCaps
+  bounds?: { min: number[]; max: number[] }
+}
+
 export interface ManifoldCurveGeometry {
   dim: number
   points_flat: number[]
@@ -244,7 +290,54 @@ export interface ManifoldSurfaceSolverDiagnostics {
   last_ring_max_distance_angle?: number
   last_geodesic_max_angle?: number
   last_geodesic_max_distance_angle?: number
+  extension_count?: number
 }
+
+export interface ManifoldHkoFiberResumeState {
+  phase_point: number[]
+  fiber: number[][]
+  inner: number[]
+  outer: number[]
+  solution_start: number[]
+  solution_unknown: number[]
+  lift_off: number
+  family_parameter: number
+  family_step: number
+}
+
+export type ManifoldSurfaceResumeState =
+  | {
+      type: 'GeodesicRings'
+      version: number
+      outer_ring: number[][]
+      inward_anchors: number[][]
+      current_leaf_delta: number
+      accumulated_arclength: number
+      center?: number[]
+    }
+  | {
+      type: 'HkoIsochronFibers'
+      version: number
+      fibers: ManifoldHkoFiberResumeState[]
+      emitted_arclength: number
+      sigma: number
+      return_time: number
+      bvp_intervals: number
+      bvp_degree: number
+    }
+  | {
+      type: 'SegmentedPreimageFibers'
+      version: number
+      fibers: number[][][]
+      current_ring: number[][]
+      arclengths: number[]
+      emitted_arclength: number
+      sigma: number
+      segment_duration: number
+      phase_shift_per_segment: number
+      bvp_intervals: number
+      bvp_degree: number
+    }
 
 export interface ManifoldSurfaceGeometry {
   dim: number
@@ -253,6 +346,7 @@ export interface ManifoldSurfaceGeometry {
   ring_offsets: number[]
   ring_diagnostics?: ManifoldRingDiagnostic[]
   solver_diagnostics?: ManifoldSurfaceSolverDiagnostics
+  resume_state?: ManifoldSurfaceResumeState
 }
 
 export type ManifoldGeometry =
@@ -276,6 +370,7 @@ export type ManifoldGeometry =
       ring_offsets: number[]
       ring_diagnostics?: ManifoldRingDiagnostic[]
       solver_diagnostics?: ManifoldSurfaceSolverDiagnostics
+      resume_state?: ManifoldSurfaceResumeState
     }
 
 export interface ContinuationEndpointSeed {
@@ -452,7 +547,10 @@ export interface ContinuationObject {
     | 'cycle_manifold_2d'
   data: ContinuationBranchData
   settings: ContinuationSettings
-  manifoldSettings?: EquilibriumManifold1DSettings
+  manifoldSettings?:
+    | EquilibriumManifold1DSettings
+    | EquilibriumManifold2DSettings
+    | LimitCycleManifold2DSettings
   manifoldFingerprint?: string
   timestamp: string
   params?: number[]

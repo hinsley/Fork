@@ -23,6 +23,7 @@ const wasmState = {
   lastEqManifoldPeriods: null as number[] | null,
   lastEqManifoldExtensionPeriods: null as number[] | null,
   lastEqManifoldExtensionPointCount: null as number | null,
+  lastManifold2DExtensionPointCount: null as number | null,
   initPromise: Promise.resolve() as Promise<void>,
   initResolver: null as null | (() => void),
 }
@@ -338,6 +339,37 @@ beforeAll(async () => {
       }
     }
 
+    class MockManifold2DExtensionRunner {
+      private readonly branch: Record<string, unknown>
+      private readonly progress = {
+        done: true,
+        current_step: 1,
+        max_steps: 1,
+        points_computed: 8,
+        bifurcations_found: 0,
+        current_param: 1,
+        rings_computed: 1,
+      }
+
+      constructor(...args: unknown[]) {
+        this.branch = args[5] as Record<string, unknown>
+        const points = (this.branch.points as unknown[]) ?? []
+        wasmState.lastManifold2DExtensionPointCount = points.length
+      }
+
+      run_steps() {
+        return this.progress
+      }
+
+      get_progress() {
+        return this.progress
+      }
+
+      get_result() {
+        return this.branch
+      }
+    }
+
     class MockHomoclinicRunner extends MockContinuationRunner {
       override get_result(): MockRunnerResult {
         return {
@@ -406,6 +438,7 @@ beforeAll(async () => {
       WasmEquilibriumRunner: MockWasmEquilibriumRunner,
       WasmEqManifold1DRunner: MockEqManifold1DRunner,
       WasmEqManifold1DExtensionRunner: MockEqManifold1DExtensionRunner,
+      WasmManifold2DExtensionRunner: MockManifold2DExtensionRunner,
       WasmFoldCurveRunner: MockContinuationRunner,
       WasmHopfCurveRunner: MockContinuationRunner,
       get WasmIsochroneCurveRunner() {
@@ -439,6 +472,7 @@ beforeEach(() => {
   wasmState.lastEqManifoldPeriods = null
   wasmState.lastEqManifoldExtensionPeriods = null
   wasmState.lastEqManifoldExtensionPointCount = null
+  wasmState.lastManifold2DExtensionPointCount = null
   wasmState.initPromise = Promise.resolve()
   wasmState.initResolver = null
 })
@@ -1113,6 +1147,77 @@ describe('forkCoreWorker', () => {
         }),
         expect.objectContaining({
           id: 'job-manifold-1d-extension',
+          ok: true,
+          result: branchData,
+        }),
+      ])
+    )
+  })
+
+  it('passes persisted 2D surface state to the 2D manifold extension runner', async () => {
+    const handler = requireHandler()
+    const branchData = {
+      points: [{ state: [0, 0, 0], param_value: 0, stability: 'None', eigenvalues: [] }],
+      bifurcations: [],
+      indices: [0],
+      branch_type: {
+        type: 'ManifoldEq2D',
+        stability: 'Unstable',
+        eig_kind: 'RealPair',
+        eig_indices: [0, 1],
+        method: 'krauskopf_osinga_geodesic_leaf_continuation',
+        caps: {},
+      },
+      manifold_geometry: {
+        type: 'Surface',
+        dim: 3,
+        vertices_flat: [0, 0, 0],
+        triangles: [],
+        ring_offsets: [0],
+        resume_state: {
+          type: 'GeodesicRings',
+          version: 1,
+          outer_ring: [[0, 0, 0]],
+          inward_anchors: [[0, 0, 0]],
+          current_leaf_delta: 0.01,
+          accumulated_arclength: 0,
+        },
+      },
+    }
+
+    await handler({
+      data: {
+        id: 'job-manifold-2d-extension',
+        kind: 'runManifold2DExtension',
+        payload: {
+          system: { ...baseSystem, equations: ['x', 'y', '-z'], varNames: ['x', 'y', 'z'] },
+          branchData,
+          settings: {
+            stability: 'Unstable',
+            target_arclength: 1,
+            integration_dt: 0.01,
+            caps: {
+              max_steps: 20,
+              max_points: 100,
+              max_rings: 10,
+              max_vertices: 100,
+              max_time: 2,
+            },
+          },
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(wasmState.lastManifold2DExtensionPointCount).toBe(1)
+    expect(workerScope.postMessage.mock.calls.map(([message]) => message)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'job-manifold-2d-extension',
+          kind: 'progress',
+          progress: expect.objectContaining({ done: true, rings_computed: 1 }),
+        }),
+        expect.objectContaining({
+          id: 'job-manifold-2d-extension',
           ok: true,
           result: branchData,
         }),

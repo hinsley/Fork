@@ -14,6 +14,7 @@ import type {
   BranchExtensionRequest,
   EquilibriumContinuationRequest,
   EquilibriumManifold1DExtensionRequest,
+  Manifold2DExtensionRequest,
   EquilibriumManifold1DRequest,
   EquilibriumManifold2DRequest,
   EquilibriumSolveRequest,
@@ -106,6 +107,7 @@ type InspectorPanelProps = {
   onExtendEquilibriumManifold1D?: (
     request: EquilibriumManifold1DExtensionRequest
   ) => Promise<void>
+  onExtendManifold2D?: (request: Manifold2DExtensionRequest) => Promise<void>
   onCreateEquilibriumManifold2D?: (
     request: EquilibriumManifold2DRequest
   ) => Promise<void>
@@ -172,6 +174,7 @@ export function InspectorPanel({
   onCreateEquilibriumBranch,
   onCreateEquilibriumManifold1D,
   onExtendEquilibriumManifold1D,
+  onExtendManifold2D,
   onCreateEquilibriumManifold2D,
   onCreateBranchFromPoint,
   onExtendBranch,
@@ -225,6 +228,7 @@ export function InspectorPanel({
           onCreateEquilibriumBranch={onCreateEquilibriumBranch}
           onCreateEquilibriumManifold1D={onCreateEquilibriumManifold1D}
           onExtendEquilibriumManifold1D={onExtendEquilibriumManifold1D}
+          onExtendManifold2D={onExtendManifold2D}
           onCreateEquilibriumManifold2D={onCreateEquilibriumManifold2D}
           onCreateBranchFromPoint={onCreateBranchFromPoint}
           onExtendBranch={onExtendBranch}

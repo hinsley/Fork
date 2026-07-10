@@ -185,7 +185,54 @@ export interface ManifoldSurfaceSolverDiagnostics {
   last_ring_max_distance_angle?: number;
   last_geodesic_max_angle?: number;
   last_geodesic_max_distance_angle?: number;
+  extension_count?: number;
 }
+
+export interface ManifoldHkoFiberResumeState {
+  phase_point: number[];
+  fiber: number[][];
+  inner: number[];
+  outer: number[];
+  solution_start: number[];
+  solution_unknown: number[];
+  lift_off: number;
+  family_parameter: number;
+  family_step: number;
+}
+
+export type ManifoldSurfaceResumeState =
+  | {
+      type: 'GeodesicRings';
+      version: number;
+      outer_ring: number[][];
+      inward_anchors: number[][];
+      current_leaf_delta: number;
+      accumulated_arclength: number;
+      center?: number[];
+    }
+  | {
+      type: 'HkoIsochronFibers';
+      version: number;
+      fibers: ManifoldHkoFiberResumeState[];
+      emitted_arclength: number;
+      sigma: number;
+      return_time: number;
+      bvp_intervals: number;
+      bvp_degree: number;
+    }
+  | {
+      type: 'SegmentedPreimageFibers';
+      version: number;
+      fibers: number[][][];
+      current_ring: number[][];
+      arclengths: number[];
+      emitted_arclength: number;
+      sigma: number;
+      segment_duration: number;
+      phase_shift_per_segment: number;
+      bvp_intervals: number;
+      bvp_degree: number;
+    };
 
 export interface ManifoldSurfaceGeometry {
   dim: number;
@@ -194,6 +241,7 @@ export interface ManifoldSurfaceGeometry {
   ring_offsets: number[];
   ring_diagnostics?: ManifoldRingDiagnostic[];
   solver_diagnostics?: ManifoldSurfaceSolverDiagnostics;
+  resume_state?: ManifoldSurfaceResumeState;
 }
 
 export interface ManifoldBounds {
@@ -268,6 +316,7 @@ export type ManifoldGeometry =
       ring_offsets: number[];
       ring_diagnostics?: ManifoldRingDiagnostic[];
       solver_diagnostics?: ManifoldSurfaceSolverDiagnostics;
+      resume_state?: ManifoldSurfaceResumeState;
     };
 
 export interface ContinuationEndpointSeed {
