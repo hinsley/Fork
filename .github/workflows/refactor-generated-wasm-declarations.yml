@@ -87,21 +87,6 @@ jobs:
           grep -Fq '"prebuild": "npm run wasm:node"' cli/package.json
           grep -Fq '"prestart": "npm run wasm:node"' cli/package.json
 
-      - name: Run Rust workspace tests
-        working-directory: target
-        run: cargo test --workspace
-
-      - name: Validate clean-checkout CLI build and tests
-        working-directory: target
-        shell: bash
-        run: |
-          rm -rf crates/fork_wasm/pkg
-          cd cli
-          npm ci
-          npm run build
-          test -f ../crates/fork_wasm/pkg/fork_wasm.d.ts
-          npm test
-
       - name: Install web dependencies from a clean generated-package state
         working-directory: target
         shell: bash
@@ -123,7 +108,40 @@ jobs:
 
       - name: Run web unit tests
         working-directory: target/web
-        run: npm run test:unit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set +e
+          npm run test:unit > /tmp/web-unit.log 2>&1
+          status=$?
+          cat /tmp/web-unit.log
+          if [ "$status" -ne 0 ]; then
+            {
+              echo 'Web unit-test diagnostics:'
+              echo '```text'
+              tail -n 220 /tmp/web-unit.log
+              echo '```'
+            } > /tmp/web-unit-comment.md
+            gh pr comment "$PR_NUMBER" --repo hinsley/Fork --body-file /tmp/web-unit-comment.md
+            exit "$status"
+          fi
+
+      - name: Run Rust workspace tests
+        working-directory: target
+        run: cargo test --workspace
+
+      - name: Validate clean-checkout CLI build and tests
+        working-directory: target
+        shell: bash
+        run: |
+          rm -rf crates/fork_wasm/pkg
+          cd cli
+          npm ci
+          npm run build
+          test -f ../crates/fork_wasm/pkg/fork_wasm.d.ts
+          npm test
 
       - name: Install Playwright browsers
         working-directory: target/web
