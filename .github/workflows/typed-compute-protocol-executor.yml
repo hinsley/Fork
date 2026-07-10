@@ -68,6 +68,29 @@ jobs:
         working-directory: target/web
         run: npx vitest run src/compute/computeProtocol.test.ts src/compute/wasmClient.test.ts
 
+      - name: Type-check web
+        id: typecheck
+        working-directory: target/web
+        shell: bash
+        run: |
+          set -o pipefail
+          npx tsc -b --pretty false 2>&1 | tee /tmp/typed-protocol-typecheck.log
+
+      - name: Report type-check failure
+        if: failure() && steps.typecheck.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          {
+            echo 'TypeScript diagnostics:'
+            echo '```text'
+            tail -n 180 /tmp/typed-protocol-typecheck.log
+            echo '```'
+          } > /tmp/typed-protocol-comment.md
+          gh pr comment "$PR_NUMBER" --repo hinsley/Fork --body-file /tmp/typed-protocol-comment.md
+
       - name: Build web and WASM
         working-directory: target/web
         run: npm run build
