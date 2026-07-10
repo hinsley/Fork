@@ -1,0 +1,108 @@
+name: Temporary Rust runner lifecycle executor
+
+on:
+  pull_request:
+    branches:
+      - refactor/rust-runner-lifecycle
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refactor-test-commit:
+    if: github.repository == 'hinsley/Fork'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out automation source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: automation
+
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: refactor/rust-runner-lifecycle
+          fetch-depth: 0
+          path: target
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            target/cli/package-lock.json
+            target/web/package-lock.json
+
+      - name: Apply runner lifecycle refactor
+        working-directory: target
+        run: python ../automation/.github/scripts/refactor_runner_lifecycle.py
+
+      - name: Verify refactor shape and formatting
+        working-directory: target
+        shell: bash
+        run: |
+          git diff --check
+          grep -q 'pub(crate) struct RunnerHandle' crates/fork_wasm/src/continuation/runner_boundary.rs
+          grep -q 'runner: RunnerHandle<OwnedEquilibriumContinuationProblem>' crates/fork_wasm/src/continuation/eq_runner.rs
+          ! grep -q 'runner: Option<ContinuationRunner<OwnedEquilibriumContinuationProblem>>' crates/fork_wasm/src/continuation/eq_runner.rs
+          cargo fmt --all -- --check
+
+      - name: Run focused WASM crate tests
+        working-directory: target
+        run: cargo test -p fork_wasm
+
+      - name: Run Rust workspace tests
+        working-directory: target
+        run: cargo test --workspace
+
+      - name: Rebuild Node WASM bindings
+        working-directory: target/crates/fork_wasm
+        run: wasm-pack build --target nodejs
+
+      - name: Install and validate CLI
+        working-directory: target/cli
+        run: |
+          npm ci
+          npm run build
+          npm test
+
+      - name: Install and validate web
+        working-directory: target/web
+        run: |
+          npm ci
+          npm run build
+          npm run test:unit
+
+      - name: Commit tested implementation
+        working-directory: target
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            crates/fork_wasm/src/continuation/runner_boundary.rs \
+            crates/fork_wasm/src/continuation/eq_runner.rs
+          git diff --cached --check
+          git commit -m "refactor(wasm): share continuation runner lifecycle"
+          git push origin HEAD:refs/heads/refactor/rust-runner-lifecycle
+
+      - name: Close and remove temporary automation branch
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr close "$PR_NUMBER" \
+            --repo hinsley/Fork \
+            --comment "Automation completed: the tested runner-lifecycle implementation was committed to refactor/rust-runner-lifecycle." \
+            --delete-branch
