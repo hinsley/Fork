@@ -6,6 +6,10 @@ on:
       - refactor/generated-wasm-declarations
     types: [opened, synchronize, reopened]
 
+concurrency:
+  group: generated-wasm-declarations-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   pull-requests: write
