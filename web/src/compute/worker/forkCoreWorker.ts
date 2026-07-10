@@ -15,6 +15,9 @@ import type {
   EquilibriumContinuationResult,
   EquilibriumManifold1DRequest,
   EquilibriumManifold1DResult,
+  EquilibriumManifold1DExtensionRequest,
+  EquilibriumManifold1DExtensionResult,
+  ContinuationBranchDataWire,
   EquilibriumManifold2DRequest,
   EquilibriumManifold2DResult,
   EventSeriesResult,
@@ -66,6 +69,11 @@ type WorkerRequest =
   | { id: string; kind: 'runEquilibriumContinuation'; payload: EquilibriumContinuationRequest }
   | { id: string; kind: 'runContinuationExtension'; payload: ContinuationExtensionRequest }
   | { id: string; kind: 'runEquilibriumManifold1D'; payload: EquilibriumManifold1DRequest }
+  | {
+      id: string
+      kind: 'runEquilibriumManifold1DExtension'
+      payload: EquilibriumManifold1DExtensionRequest
+    }
   | { id: string; kind: 'runEquilibriumManifold2D'; payload: EquilibriumManifold2DRequest }
   | { id: string; kind: 'runLimitCycleManifold2D'; payload: LimitCycleManifold2DRequest }
   | { id: string; kind: 'computeLimitCycleFloquetModes'; payload: LimitCycleFloquetModesRequest }
@@ -137,6 +145,7 @@ type WorkerResponse =
         | EquilibriumContinuationResult
         | ContinuationExtensionResult
         | EquilibriumManifold1DResult
+        | EquilibriumManifold1DExtensionResult
         | EquilibriumManifold2DResult
         | LimitCycleManifold2DResult
         | LimitCycleFloquetModesResult
@@ -346,6 +355,21 @@ type WasmModule = {
     run_steps: (batchSize: number) => ContinuationProgress
     get_progress: () => ContinuationProgress
     get_result: () => EquilibriumManifold1DResult
+  }
+  WasmEqManifold1DExtensionRunner: new (
+    equations: string[],
+    params: Float64Array,
+    paramNames: string[],
+    varNames: string[],
+    systemType: string,
+    mapIterations: number,
+    branchData: ContinuationBranchDataWire,
+    settings: Record<string, unknown>,
+    periods: Float64Array
+  ) => {
+    run_steps: (batchSize: number) => ContinuationProgress
+    get_progress: () => ContinuationProgress
+    get_result: () => EquilibriumManifold1DExtensionResult
   }
   WasmEqManifold2DRunner: new (
     equations: string[],
@@ -889,6 +913,35 @@ async function runEquilibriumManifold1D(
     request.system.type,
     request.mapIterations ?? 1,
     new Float64Array(request.equilibriumState),
+    { ...request.settings },
+    new Float64Array(periodicPeriodsForConfig(request.system))
+  )
+  let progress = runner.get_progress()
+  onProgress(progress)
+  const batchSize = computeBatchSize(progress.max_steps)
+  while (!progress.done) {
+    abortIfNeeded(signal)
+    progress = runner.run_steps(batchSize)
+    onProgress(progress)
+  }
+  return runner.get_result()
+}
+
+async function runEquilibriumManifold1DExtension(
+  request: EquilibriumManifold1DExtensionRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<EquilibriumManifold1DExtensionResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const runner = new wasm.WasmEqManifold1DExtensionRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.type,
+    request.mapIterations ?? 1,
+    request.branchData,
     { ...request.settings },
     new Float64Array(periodicPeriodsForConfig(request.system))
   )
@@ -1776,6 +1829,24 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     if (message.kind === 'runEquilibriumManifold1D') {
       const result = await runEquilibriumManifold1D(
+        message.payload,
+        controller.signal,
+        (progress) => {
+          const response: WorkerResponse = {
+            id: message.id,
+            kind: 'progress',
+            progress,
+          }
+          ctx.postMessage(response)
+        }
+      )
+      const response: WorkerResponse = { id: message.id, ok: true, result }
+      ctx.postMessage(response)
+      return
+    }
+
+    if (message.kind === 'runEquilibriumManifold1DExtension') {
+      const result = await runEquilibriumManifold1DExtension(
         message.payload,
         controller.signal,
         (progress) => {

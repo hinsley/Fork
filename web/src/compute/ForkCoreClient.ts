@@ -256,6 +256,15 @@ export type EquilibriumManifold1DRequest = {
 
 export type EquilibriumManifold1DResult = ContinuationBranchData[]
 
+export type EquilibriumManifold1DExtensionRequest = {
+  system: SystemConfig
+  branchData: ContinuationBranchDataWire
+  mapIterations?: number
+  settings: EquilibriumManifold1DSettingsRequest
+}
+
+export type EquilibriumManifold1DExtensionResult = ContinuationBranchData
+
 export type EquilibriumManifold2DRequest = {
   system: SystemConfig
   equilibriumState: number[]
@@ -540,6 +549,10 @@ export interface ForkCoreClient {
     request: EquilibriumManifold1DRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<EquilibriumManifold1DResult>
+  runEquilibriumManifold1DExtension(
+    request: EquilibriumManifold1DExtensionRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<EquilibriumManifold1DExtensionResult>
   runEquilibriumManifold2D(
     request: EquilibriumManifold2DRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }

@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { AppProvider } from './appState'
 import { useAppContext } from './appContext'
 import { MockForkCoreClient } from '../compute/mockClient'
@@ -3433,6 +3433,140 @@ describe('appState equilibrium manifold actions', () => {
     max_vertices: 120,
     max_time: 10,
   }
+
+  function createStoredFlowManifold(manifoldFingerprint?: string) {
+    const base = createSystem({
+      name: 'Stored_Flow_Manifold',
+      config: {
+        name: 'Stored_Flow_Manifold',
+        equations: ['x'],
+        params: [0],
+        paramNames: ['mu'],
+        varNames: ['x'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Eq_Stored',
+      systemName: base.config.name,
+      parameters: [...base.config.params],
+    }
+    const withEquilibrium = addObject(base, equilibrium)
+    const manifoldSettings = {
+      stability: 'Unstable' as const,
+      direction: 'Plus' as const,
+      eig_index: 0,
+      eps: 1e-3,
+      target_arclength: 0.1,
+      integration_dt: 0.01,
+      caps: manifoldCaps,
+    }
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'stored_manifold_plus',
+      systemName: base.config.name,
+      parameterName: 'manifold',
+      parentObjectId: withEquilibrium.nodeId,
+      startObjectId: withEquilibrium.nodeId,
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'eq_manifold_1d',
+      data: {
+        points: [
+          { state: [0.001], param_value: 0, stability: 'None', eigenvalues: [] },
+          { state: [0.101], param_value: 0.1, stability: 'None', eigenvalues: [] },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: {
+          type: 'ManifoldEq1D',
+          stability: 'Unstable',
+          direction: 'Plus',
+          eig_index: 0,
+          method: 'test',
+          caps: manifoldCaps,
+        },
+        manifold_geometry: {
+          type: 'Curve',
+          dim: 1,
+          points_flat: [0.001, 0.101],
+          arclength: [0, 0.1],
+          direction: 'Plus',
+          resume_state: { type: 'Flow', version: 1, endpoint: [0.101] },
+        },
+      },
+      settings: continuationSettings,
+      manifoldSettings,
+      manifoldFingerprint,
+      timestamp: new Date().toISOString(),
+      params: [...base.config.params],
+    }
+    return addBranch(withEquilibrium.system, branch, withEquilibrium.nodeId)
+  }
+
+  it('extends a stored 1D manifold in place and forwards its serialized branch', async () => {
+    const fixture = createStoredFlowManifold()
+    const client = new MockForkCoreClient(0)
+    let capturedPointCount = 0
+    client.runEquilibriumManifold1DExtension = async (request) => {
+      capturedPointCount = request.branchData.points.length
+      return normalizeBranchEigenvalues({
+        ...request.branchData,
+        points: [
+          ...request.branchData.points,
+          {
+            state: [0.151],
+            param_value: 0.15,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        indices: [...request.branchData.indices, 2],
+      })
+    }
+    const { getContext } = setupApp(fixture.system, client)
+
+    await act(async () => {
+      await getContext().actions.extendEquilibriumManifold1D({
+        branchId: fixture.nodeId,
+        settings: {
+          ...fixture.system.branches[fixture.nodeId].manifoldSettings!,
+          target_arclength: 0.05,
+          caps: { ...manifoldCaps },
+        },
+      })
+    })
+
+    await waitFor(() => {
+      expect(capturedPointCount).toBe(2)
+      expect(Object.keys(getContext().state.system!.branches)).toHaveLength(1)
+      expect(getContext().state.system!.branches[fixture.nodeId].data.points).toHaveLength(3)
+      expect(getContext().state.system!.ui.selectedNodeId).toBe(fixture.nodeId)
+    })
+  })
+
+  it('rejects extension when the stored manifold fingerprint is stale', async () => {
+    const fixture = createStoredFlowManifold('stale-fingerprint')
+    const client = new MockForkCoreClient(0)
+    const extensionSpy = vi.spyOn(client, 'runEquilibriumManifold1DExtension')
+    const { getContext } = setupApp(fixture.system, client)
+
+    await act(async () => {
+      await getContext().actions.extendEquilibriumManifold1D({
+        branchId: fixture.nodeId,
+        settings: {
+          ...fixture.system.branches[fixture.nodeId].manifoldSettings!,
+          target_arclength: 0.05,
+          caps: { ...manifoldCaps },
+        },
+      })
+    })
+
+    expect(extensionSpy).not.toHaveBeenCalled()
+    expect(getContext().state.error).toContain('different system or parameter state')
+  })
 
   it('forwards map iterations and applies cycle-point naming for map 1D manifolds', async () => {
     const base = createSystem({

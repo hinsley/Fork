@@ -21,6 +21,27 @@ References:
 
 ---
 
+### 2026-07-10: Persist resumable state for 1D invariant-manifold extension
+Context:
+Flow and map 1D manifolds could only be recomputed from their equilibrium or cycle seed, while map
+growth may stop partway through an adaptively sampled fundamental domain.
+Decision:
+Persist a versioned curve resume state. Flow branches store the terminal state. Map branches store
+the cycle anchor, active domain, pending samples/cursor, spacing target, effective iterate count,
+and growth count; cycle-phase states are propagated independently. Extend through a dedicated
+stepped WASM runner and atomically replace the stored branch only after success. Replay legacy map
+branches once when resume metadata is absent.
+Why:
+Endpoint-only continuation must preserve accepted points and resume the numerical construction,
+including stable preimages, negative multipliers, cycle phases, and interrupted domains.
+Impact:
+`eq_manifold_1d` curve geometry has optional `resume_state`; web and CLI expose `Extend Manifold`,
+and consumers must preserve this field when normalizing or serializing branch geometry.
+References:
+`crates/fork_core/src/continuation/manifold.rs`, `crates/fork_core/src/continuation/types.rs`,
+`crates/fork_wasm/src/continuation/eq_manifold_1d_extension_runner.rs`,
+`web/src/state/appState.tsx`, `cli/src/continuation/extend.ts`, `docs/invariant_manifolds.md`
+
 ### 2026-04-25: 2D manifold growth keeps solved adaptive rings
 Context:
 The 2D equilibrium manifold solver had Krauskopf-Osinga-style controls, but robustness suffered

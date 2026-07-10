@@ -46,6 +46,9 @@ CLI:
   - 2D equilibrium manifold
   - 2D limit-cycle manifold
 
+Stored `eq_manifold_1d` branches can also be extended from their current endpoint in both the Web UI
+and CLI. Select the branch and choose `Extend Manifold`.
+
 ## Eligibility Rules
 
 ### Equilibrium 1D
@@ -384,6 +387,30 @@ Notable CLI differences:
 
 ## Progress, Output, and Rendering
 
+## Extending a Stored 1D Manifold
+
+Extension adds a requested arclength to one existing directed half-branch and updates that branch in
+place. Stability, direction, eigenmode, map-cycle length, parameter snapshot, periodic coordinates,
+and optional bounds are inherited from the stored branch and cannot be changed during extension.
+
+- Flow branches resume integration from the terminal state.
+- Map branches resume the adaptive fundamental domain, including an unfinished domain when a prior
+  run stopped on a point or iteration cap.
+- Each map-cycle phase branch carries an independently propagated resume state, so any saved phase
+  can be extended directly.
+- Extending a nonrepresentative cycle phase clears `source_arclength`, because its independently
+  adapted new samples no longer have an exact sample-by-sample correspondence to the original
+  representative curve; physical arclength remains complete.
+- Older map branches without resume metadata are supported by replaying their fundamental-domain
+  growth to the stored endpoint once; the resulting branch then receives current resume metadata.
+- The merge removes the shared endpoint, offsets arclength and logical indices, accumulates solver
+  diagnostics, and increments `extension_count`.
+
+The extension request treats `target_arclength`, `max_points`, `max_steps`, `max_time`, and
+`max_iterations` as additional-run limits rather than lifetime totals. The Web worker and CLI use a
+dedicated stepped WASM runner so progress remains responsive and the stored branch is replaced only
+after a successful result is available.
+
 ## Progress Display
 
 During 2D manifold runs, the toolbar progress UI now shows:
@@ -426,7 +453,7 @@ Notes:
 
 Manifold geometry is persisted in `branch.data.manifold_geometry` and rehydrates on reload without recomputation.
 
-- 1D: `Curve { points_flat, arclength, direction }`
+- 1D: `Curve { points_flat, arclength, direction, solver_diagnostics, resume_state }`
 - 2D: `Surface { vertices_flat, triangles, ring_offsets, ring_diagnostics, solver_diagnostics }`
 
 ## Practical Tuning Guide
@@ -581,7 +608,8 @@ Then adjust only as needed:
 - 2D map manifolds are not available yet.
 - 2D ring-growth still depends on suitable target/cap choices for very large or highly folded surfaces.
 - `cycle_manifold_2d` (limit-cycle 2D manifolds) is experimental and may require substantial tuning.
-- Branch extension for manifold branches is not exposed as a continuation extension workflow.
+- 1D extension is endpoint-only; branching from an arbitrary interior manifold point is not exposed.
+- 2D manifold branch extension is not available yet.
 
 ## Developer Touchpoints
 
@@ -593,6 +621,7 @@ Core:
 WASM bridge:
 
 - `crates/fork_wasm/src/continuation/system_methods.rs`
+- `crates/fork_wasm/src/continuation/eq_manifold_1d_extension_runner.rs`
 
 Web:
 
@@ -604,6 +633,7 @@ Web:
 CLI:
 
 - `cli/src/continuation/initiate-eq.ts`
+- `cli/src/continuation/extend.ts`
 - `cli/src/continuation/initiate-lc.ts`
 - `cli/src/continuation/inspect.ts`
 

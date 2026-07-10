@@ -1199,7 +1199,13 @@ export type EquilibriumManifold1DRequest = {
     target_arclength: number
     integration_dt: number
     caps: ManifoldTerminationCaps
+    bounds?: { min: number[]; max: number[] }
   }
+}
+
+export type EquilibriumManifold1DExtensionRequest = {
+  branchId: string
+  settings: EquilibriumManifold1DRequest['settings']
 }
 
 export type EquilibriumManifold2DRequest = {
@@ -1486,6 +1492,9 @@ type AppActions = {
   solveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   createEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   createEquilibriumManifold1D: (request: EquilibriumManifold1DRequest) => Promise<void>
+  extendEquilibriumManifold1D: (
+    request: EquilibriumManifold1DExtensionRequest
+  ) => Promise<void>
   createEquilibriumManifold2D: (request: EquilibriumManifold2DRequest) => Promise<void>
   createLimitCycleManifold2D: (request: LimitCycleManifold2DRequest) => Promise<void>
   createBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
@@ -3408,6 +3417,7 @@ export function AppProvider({
               ...settings,
               caps: { ...normalizedCaps },
             },
+            manifoldFingerprint: equilibriumSolutionFingerprint(runConfig, mapIterations),
             timestamp: new Date().toISOString(),
             params: [...baseParams],
             mapIterations: system.type === 'map' ? mapIterations : undefined,
@@ -3421,6 +3431,130 @@ export function AppProvider({
 
         const selectedId = createdNodeIds[0] ?? null
         const selected = selectedId ? selectNode(nextSystem, selectedId) : nextSystem
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const extendEquilibriumManifold1D = useCallback(
+    async (request: EquilibriumManifold1DExtensionRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        const sourceBranch = state.system.branches[request.branchId]
+        if (!sourceBranch || sourceBranch.branchType !== 'eq_manifold_1d') {
+          throw new Error('Select a valid 1D equilibrium manifold branch to extend.')
+        }
+        if (sourceBranch.data.points.length < 2) {
+          throw new Error('The manifold branch has too few points to extend.')
+        }
+        const branchType = sourceBranch.data.branch_type
+        if (!branchType || branchType.type !== 'ManifoldEq1D') {
+          throw new Error('The manifold branch is missing its numerical metadata.')
+        }
+        const settings = request.settings
+        if (
+          settings.stability !== branchType.stability ||
+          settings.direction !== branchType.direction ||
+          (settings.eig_index ?? branchType.eig_index) !== branchType.eig_index
+        ) {
+          throw new Error(
+            'Manifold stability, direction, and eigen index must match the existing branch.'
+          )
+        }
+        if (!Number.isFinite(settings.target_arclength) || settings.target_arclength <= 0) {
+          throw new Error('Additional arclength must be a positive number.')
+        }
+        if (
+          system.type !== 'map' &&
+          (!Number.isFinite(settings.integration_dt) || settings.integration_dt === 0)
+        ) {
+          throw new Error('Integration dt must be non-zero.')
+        }
+        const normalizedCaps: ManifoldTerminationCaps =
+          system.type === 'map'
+            ? {
+                ...settings.caps,
+                max_iterations:
+                  settings.caps.max_iterations ?? Math.max(1, settings.caps.max_steps),
+              }
+            : settings.caps
+        const capsError = validateManifoldCaps(normalizedCaps, {
+          requireMaxTime: system.type !== 'map',
+          requireMaxIterations: system.type === 'map',
+        })
+        if (capsError) throw new Error(capsError)
+
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
+        const sourceObjectCandidate = sourceObjectId
+          ? state.system.objects[sourceObjectId]
+          : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate)
+          ? sourceObjectCandidate
+          : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        const runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        const mapIterations = system.type === 'map' ? sourceBranch.mapIterations ?? 1 : undefined
+        if (
+          sourceBranch.manifoldFingerprint &&
+          sourceBranch.manifoldFingerprint !==
+            equilibriumSolutionFingerprint(runConfig, mapIterations)
+        ) {
+          throw new Error(
+            'This manifold was computed for a different system or parameter state. Rebuild it before extending.'
+          )
+        }
+
+        const updatedData = await client.runEquilibriumManifold1DExtension(
+          {
+            system: runConfig,
+            branchData: serializeBranchDataForWasm(sourceBranch),
+            mapIterations,
+            settings: {
+              ...settings,
+              eig_index: branchType.eig_index,
+              caps: { ...normalizedCaps },
+            },
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Extend Invariant Manifold (1D)', progress },
+              }),
+          }
+        )
+        const normalized = normalizeBranchEigenvalues(updatedData, {
+          stateDimension: snapshot.freeVariableNames.length,
+        })
+        if (normalized.points.length <= sourceBranch.data.points.length) {
+          throw new Error(
+            'Manifold extension produced no new points. Increase the applicable caps or change the bounds.'
+          )
+        }
+        const updatedBranch: ContinuationObject = {
+          ...sourceBranch,
+          data: normalized,
+          timestamp: new Date().toISOString(),
+          subsystemSnapshot: snapshot,
+        }
+        const updated = updateBranch(state.system, request.branchId, updatedBranch)
+        const selected = selectNode(updated, request.branchId)
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
       } catch (err) {
@@ -6810,6 +6944,7 @@ export function AppProvider({
       solveEquilibrium,
       createEquilibriumBranch,
       createEquilibriumManifold1D,
+      extendEquilibriumManifold1D,
       createEquilibriumManifold2D,
       createLimitCycleManifold2D,
       createBranchFromPoint,
@@ -6851,6 +6986,7 @@ export function AppProvider({
       solveEquilibrium,
       createEquilibriumBranch,
       createEquilibriumManifold1D,
+      extendEquilibriumManifold1D,
       createEquilibriumManifold2D,
       createLimitCycleManifold2D,
       createBranchFromPoint,

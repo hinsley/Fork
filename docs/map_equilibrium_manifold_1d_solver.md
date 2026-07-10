@@ -95,6 +95,16 @@ For map branches, `BranchType::ManifoldEq1D` stores:
 
 Curve geometry also stores `solver_diagnostics` (stop reason, requested/achieved length, growth counts, correction size, and least period). Cycle-phase curves store `source_arclength` separately from physical arclength.
 
+Curve geometry stores a versioned map resume state containing the current cycle anchor, adaptive
+fundamental domain, pending mapped samples/cursor, spacing target, effective iterate count, and
+growth counter. This permits exact endpoint extension without reconstructing accepted geometry.
+Each emitted cycle phase receives the corresponding state propagated by `F^k`, so it can be resumed
+independently. Legacy branches without this field are replayed to their saved endpoint on first
+extension and upgraded when the extension result is saved.
+After a nonrepresentative phase is extended independently, `source_arclength` is cleared rather than
+claiming a representative-sample correspondence for newly adapted points; physical arclength is
+preserved for the entire branch.
+
 Naming behavior:
 
 - `mapIterations = 1`: standard fixed-point naming
@@ -155,6 +165,13 @@ For cycle runs (`mapIterations > 1`), one branch is emitted per cycle point per 
 
 This is expected and encodes cycle-point provenance explicitly.
 
+## Extending a Saved Map Branch
+
+Select any saved fixed-point or cycle-phase `eq_manifold_1d` branch and choose `Extend Manifold`.
+The requested arclength and caps apply only to the new segment. Fork preserves the branch's map
+period, phase, side, directed half-branch, periodic coordinates, parameter snapshot, and bounds.
+The shared endpoint is emitted once, and new physical arclength is offset from the old endpoint.
+
 ## Developer Touchpoints
 
 - Core implementation:
@@ -167,3 +184,5 @@ This is expected and encodes cycle-point provenance explicitly.
   - `web/src/ui/InspectorDetailsPanel.tsx`
 - CLI initiation path:
   - `cli/src/continuation/initiate-eq.ts`
+- CLI extension path:
+  - `cli/src/continuation/extend.ts`

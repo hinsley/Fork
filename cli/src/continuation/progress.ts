@@ -402,6 +402,25 @@ export function runEquilibriumManifold1DWithProgress(
 }
 
 /**
+ * Extend a stored 1D equilibrium manifold with stepped progress updates.
+ */
+export function runEquilibriumManifold1DExtensionWithProgress(
+  bridge: WasmBridge,
+  branchData: ContinuationBranchData,
+  settings: EquilibriumManifold1DSettings,
+  label: string,
+  mapIterations?: number
+): ContinuationBranchData {
+  const runner = bridge.createEquilibriumManifold1DExtensionRunner(
+    branchData,
+    settings,
+    mapIterations
+  );
+
+  return runContinuationRunnerWithProgress(runner, label);
+}
+
+/**
  * Compute a 2D equilibrium manifold branch with stepped progress updates.
  */
 export function runEquilibriumManifold2DWithProgress(

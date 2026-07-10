@@ -73,7 +73,7 @@ function summarizeManifoldSolverDiagnostics(branch: ContinuationObject): string 
     const diagnostics = curve.solver_diagnostics;
     if (!diagnostics) return null;
     const detail = diagnostics.termination_detail ? ` (${diagnostics.termination_detail})` : '';
-    return `Termination: ${formatTerminationReason(diagnostics.termination_reason)} • arclength=${formatNumber(diagnostics.achieved_arclength)}/${formatNumber(diagnostics.requested_arclength)} • target reached=${diagnostics.target_reached ? 'yes' : 'no'} • flow steps=${diagnostics.integration_steps} • map growth=${diagnostics.map_growth_iterations}${detail}`;
+    return `Termination: ${formatTerminationReason(diagnostics.termination_reason)} • arclength=${formatNumber(diagnostics.achieved_arclength)}/${formatNumber(diagnostics.requested_arclength)} • target reached=${diagnostics.target_reached ? 'yes' : 'no'} • extensions=${diagnostics.extension_count ?? 0} • flow steps=${diagnostics.integration_steps} • map growth=${diagnostics.map_growth_iterations}${detail}`;
   }
   if (branch.branchType !== 'eq_manifold_2d' && branch.branchType !== 'cycle_manifold_2d') {
     return null;

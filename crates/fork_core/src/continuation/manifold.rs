@@ -10,10 +10,10 @@ use crate::continuation::types::{
     default_manifold_eps, default_manifold_leaf_delta, default_manifold_ring_points,
     BifurcationType, BranchType, ContinuationBranch, ContinuationPoint, Manifold1DSettings,
     Manifold2DProfile, Manifold2DSettings, ManifoldBounds, ManifoldCurveGeometry,
-    ManifoldCurveSolverDiagnostics, ManifoldCycle2DAlgorithm, ManifoldCycle2DSettings,
-    ManifoldDirection, ManifoldEigenKind, ManifoldGeometry, ManifoldRingDiagnostic,
-    ManifoldStability, ManifoldSurfaceGeometry, ManifoldSurfaceSolverDiagnostics,
-    ManifoldTerminationCaps,
+    ManifoldCurveResumeState, ManifoldCurveSolverDiagnostics, ManifoldCycle2DAlgorithm,
+    ManifoldCycle2DSettings, ManifoldDirection, ManifoldEigenKind, ManifoldGeometry,
+    ManifoldMapDomainCursor, ManifoldRingDiagnostic, ManifoldStability, ManifoldSurfaceGeometry,
+    ManifoldSurfaceSolverDiagnostics, ManifoldTerminationCaps,
 };
 use crate::equation_engine::EquationSystem;
 use crate::equilibrium::{
@@ -103,6 +103,7 @@ struct ManifoldCurveSolve {
     points: Vec<Vec<f64>>,
     arclength: Vec<f64>,
     diagnostics: ManifoldCurveSolverDiagnostics,
+    resume_state: Option<ManifoldCurveResumeState>,
 }
 
 #[derive(Clone)]
@@ -197,6 +198,120 @@ pub fn continue_manifold_eq_1d_with_kind_and_periodicity(
     }
 }
 
+/// Extend an existing one-dimensional manifold branch by an additional arclength.
+pub fn extend_manifold_eq_1d_with_kind_and_periodicity(
+    system: &mut EquationSystem,
+    kind: SystemKind,
+    branch: ContinuationBranch,
+    mut settings: Manifold1DSettings,
+    periodicity: &StatePeriodicity,
+) -> Result<ContinuationBranch> {
+    let dim = system.equations.len();
+    validate_manifold_1d_settings(dim, kind, &settings)?;
+    let (branch_stability, branch_direction, branch_eig_index, map_iterations, cycle_point_index) =
+        match &branch.branch_type {
+            BranchType::ManifoldEq1D {
+                stability,
+                direction,
+                eig_index,
+                map_iterations,
+                cycle_point_index,
+                ..
+            } => (
+                *stability,
+                *direction,
+                *eig_index,
+                *map_iterations,
+                *cycle_point_index,
+            ),
+            _ => bail!("Only a 1D equilibrium manifold branch can be extended."),
+        };
+    if settings.stability != branch_stability {
+        bail!("Extension stability must match the existing manifold branch.");
+    }
+    if settings.direction != branch_direction {
+        bail!("Extension direction must match the existing manifold branch.");
+    }
+    if settings.direction == ManifoldDirection::Both {
+        bail!("A stored 1D manifold branch must have a single directed half-branch.");
+    }
+    if settings
+        .eig_index
+        .is_some_and(|eig_index| eig_index != branch_eig_index)
+    {
+        bail!("Extension eigen index must match the existing manifold branch.");
+    }
+    settings.eig_index = Some(branch_eig_index);
+    match (kind, map_iterations) {
+        (SystemKind::Flow, None) => {}
+        (SystemKind::Flow, Some(_)) => {
+            bail!("Extension system kind does not match the existing map manifold branch.");
+        }
+        (SystemKind::Map { iterations }, Some(stored_iterations))
+            if iterations == stored_iterations => {}
+        (SystemKind::Map { .. }, _) => {
+            bail!("Extension map cycle length does not match the existing branch.");
+        }
+    }
+    if branch.points.len() < 2 {
+        bail!("A manifold branch needs at least two points before it can be extended.");
+    }
+
+    match kind {
+        SystemKind::Flow => {
+            let endpoint = branch
+                .points
+                .last()
+                .map(|point| point.state.clone())
+                .ok_or_else(|| anyhow!("Manifold branch has no endpoint."))?;
+            let solved = build_flow_manifold_extension(
+                system,
+                &endpoint,
+                settings.stability,
+                &settings,
+                periodicity,
+            )?;
+            merge_manifold_curve_extension(branch, solved, None)
+        }
+        SystemKind::Map { .. } => {
+            let mut branch = branch;
+            let resume_state = match branch.manifold_geometry.as_ref() {
+                Some(ManifoldGeometry::Curve(geometry)) => geometry.resume_state.clone(),
+                _ => None,
+            };
+            let resume_state = match resume_state {
+                Some(state @ ManifoldCurveResumeState::Map { .. }) => state,
+                _ => {
+                    replay_map_manifold_resume_state(system, kind, &branch, &settings, periodicity)?
+                }
+            };
+            let endpoint = branch
+                .points
+                .last()
+                .map(|point| point.state.clone())
+                .ok_or_else(|| anyhow!("Map manifold branch has no endpoint."))?;
+            let solved = build_map_manifold_extension(
+                system,
+                &endpoint,
+                settings.stability,
+                &settings,
+                periodicity,
+                resume_state,
+            )?;
+            let local_source_arclength = solved.arclength.clone();
+            let source_extension = if cycle_point_index.unwrap_or(0) > 0 {
+                if let Some(ManifoldGeometry::Curve(geometry)) = branch.manifold_geometry.as_mut() {
+                    geometry.source_arclength = None;
+                }
+                None
+            } else {
+                Some(local_source_arclength)
+            };
+            merge_manifold_curve_extension(branch, solved, source_extension)
+        }
+    }
+}
+
 fn validate_manifold_1d_settings(
     dim: usize,
     kind: SystemKind,
@@ -263,6 +378,7 @@ fn continue_manifold_eq_1d_flow(
             &solved.arclength,
             None,
             Some(solved.diagnostics),
+            solved.resume_state,
             settings.stability,
             direction,
             source.mode.index,
@@ -354,12 +470,23 @@ fn continue_manifold_eq_1d_map(
             let source_arclength = cycle_component_arclength(&base.arclength, points.len());
             let mut diagnostics = base.diagnostics.clone();
             diagnostics.achieved_arclength = *arclength.last().unwrap_or(&0.0);
+            let resume_state = if cycle_point_index == 0 {
+                base.resume_state.clone()
+            } else {
+                propagate_map_resume_state(
+                    system,
+                    base.resume_state.as_ref(),
+                    cycle_point_index,
+                    periodicity,
+                )?
+            };
 
             branches.push(build_eq_1d_branch(
                 &points,
                 &arclength,
                 Some(&source_arclength),
                 Some(diagnostics),
+                resume_state,
                 settings.stability,
                 direction,
                 source.mode.index,
@@ -373,11 +500,61 @@ fn continue_manifold_eq_1d_map(
     Ok(branches)
 }
 
+fn propagate_map_resume_state(
+    system: &EquationSystem,
+    resume_state: Option<&ManifoldCurveResumeState>,
+    steps: usize,
+    periodicity: &StatePeriodicity,
+) -> Result<Option<ManifoldCurveResumeState>> {
+    let Some(ManifoldCurveResumeState::Map {
+        version,
+        cycle_anchor,
+        active_domain,
+        pending_points,
+        cursor,
+        spacing_target,
+        map_step_iterations,
+        growth_iterations,
+    }) = resume_state
+    else {
+        return Ok(None);
+    };
+    let propagate_point = |point: &[f64]| -> Result<Vec<f64>> {
+        apply_map_iterates_with_periodicity(system, point, steps, periodicity)
+            .ok_or_else(|| anyhow!("Map manifold resume state propagation was non-finite."))
+    };
+    let propagated_anchor = propagate_point(cycle_anchor)?;
+    let propagated_domain = active_domain
+        .iter()
+        .map(|point| propagate_point(point))
+        .collect::<Result<Vec<_>>>()?;
+    let propagated_pending = pending_points
+        .as_ref()
+        .map(|points| {
+            points
+                .iter()
+                .map(|point| propagate_point(point))
+                .collect::<Result<Vec<_>>>()
+        })
+        .transpose()?;
+    Ok(Some(ManifoldCurveResumeState::Map {
+        version: *version,
+        cycle_anchor: propagated_anchor,
+        active_domain: propagated_domain,
+        pending_points: propagated_pending,
+        cursor: cursor.clone(),
+        spacing_target: *spacing_target,
+        map_step_iterations: *map_step_iterations,
+        growth_iterations: *growth_iterations,
+    }))
+}
+
 fn build_eq_1d_branch(
     points: &[Vec<f64>],
     arclength: &[f64],
     source_arclength: Option<&[f64]>,
     solver_diagnostics: Option<ManifoldCurveSolverDiagnostics>,
+    resume_state: Option<ManifoldCurveResumeState>,
     stability: ManifoldStability,
     direction: ManifoldDirection,
     eig_index: usize,
@@ -405,6 +582,7 @@ fn build_eq_1d_branch(
         direction,
         source_arclength: source_arclength.map(|values| values.to_vec()),
         solver_diagnostics,
+        resume_state,
     });
     let indices: Vec<i32> = (0..branch_points.len() as i32).collect();
     ContinuationBranch {
@@ -5441,6 +5619,13 @@ fn build_flow_manifold_curve(
             periodicity,
         );
         return Ok(ManifoldCurveSolve {
+            resume_state: points
+                .last()
+                .cloned()
+                .map(|endpoint| ManifoldCurveResumeState::Flow {
+                    version: 1,
+                    endpoint,
+                }),
             points,
             arclength,
             diagnostics: ManifoldCurveSolverDiagnostics {
@@ -5530,6 +5715,13 @@ fn build_flow_manifold_curve(
     );
     let achieved_arclength = *arclength.last().unwrap_or(&0.0);
     Ok(ManifoldCurveSolve {
+        resume_state: points
+            .last()
+            .cloned()
+            .map(|endpoint| ManifoldCurveResumeState::Flow {
+                version: 1,
+                endpoint,
+            }),
         points,
         arclength,
         diagnostics: ManifoldCurveSolverDiagnostics {
@@ -5544,6 +5736,204 @@ fn build_flow_manifold_curve(
             ..ManifoldCurveSolverDiagnostics::default()
         },
     })
+}
+
+fn build_flow_manifold_extension(
+    system: &EquationSystem,
+    endpoint: &[f64],
+    stability: ManifoldStability,
+    settings: &Manifold1DSettings,
+    periodicity: &StatePeriodicity,
+) -> Result<ManifoldCurveSolve> {
+    if endpoint.len() != system.equations.len() {
+        bail!("Flow manifold extension endpoint dimension mismatch.");
+    }
+    let mut start = endpoint.to_vec();
+    periodicity.wrap_state(&mut start);
+    if let Some(bounds) = settings.bounds.as_ref() {
+        if !inside_bounds(&start, bounds) {
+            bail!("The manifold extension endpoint lies outside configured bounds.");
+        }
+    }
+
+    let target = settings.target_arclength;
+    let sigma = stability_sigma(stability);
+    let dt = settings.integration_dt.abs();
+    let mut lifted_points = vec![start.clone()];
+    let mut local_arclength = vec![0.0];
+    let mut state = start;
+    let mut cumulative = 0.0;
+    let mut elapsed = 0.0;
+    let mut integration_steps = 0usize;
+    let mut termination_reason = "max_steps".to_string();
+    let mut termination_detail = None;
+    let mut target_reached = false;
+
+    while integration_steps < settings.caps.max_steps {
+        if elapsed >= settings.caps.max_time {
+            termination_reason = "max_time".to_string();
+            break;
+        }
+        let h = dt.min(settings.caps.max_time - elapsed);
+        if h <= 0.0 {
+            termination_reason = "max_time".to_string();
+            break;
+        }
+        let mut next = state.clone();
+        rk4_step_with_periodicity(system, &mut next, h, sigma, periodicity);
+        integration_steps += 1;
+        elapsed += h;
+        if next.iter().any(|value| !value.is_finite()) {
+            termination_reason = "non_finite_state".to_string();
+            termination_detail = Some(format!(
+                "non-finite state after extension step {}",
+                integration_steps
+            ));
+            break;
+        }
+        let mut next_wrapped = next.clone();
+        periodicity.wrap_state(&mut next_wrapped);
+        if let Some(bounds) = settings.bounds.as_ref() {
+            if !inside_bounds(&next_wrapped, bounds) {
+                termination_reason = "bounds_exit".to_string();
+                termination_detail = Some(format!(
+                    "left configured bounds after extension step {}",
+                    integration_steps
+                ));
+                break;
+            }
+        }
+        let step_arc = periodic_l2_distance(&state, &next, periodicity);
+        if !step_arc.is_finite() {
+            termination_reason = "non_finite_arclength".to_string();
+            break;
+        }
+        if cumulative + step_arc >= target && step_arc > NORM_EPS {
+            let alpha = ((target - cumulative) / step_arc).clamp(0.0, 1.0);
+            lifted_points.push(lerp(&state, &next, alpha));
+            local_arclength.push(target);
+            termination_reason = "target_arclength".to_string();
+            target_reached = true;
+            break;
+        }
+        cumulative += step_arc;
+        lifted_points.push(next.clone());
+        local_arclength.push(cumulative);
+        state = next;
+    }
+
+    let (points, arclength) = resample_and_wrap_curve(
+        &lifted_points,
+        &local_arclength,
+        settings.caps.max_points,
+        periodicity,
+    );
+    let achieved_arclength = *arclength.last().unwrap_or(&0.0);
+    Ok(ManifoldCurveSolve {
+        resume_state: points
+            .last()
+            .cloned()
+            .map(|endpoint| ManifoldCurveResumeState::Flow {
+                version: 1,
+                endpoint,
+            }),
+        points,
+        arclength,
+        diagnostics: ManifoldCurveSolverDiagnostics {
+            termination_reason,
+            termination_detail,
+            requested_arclength: target,
+            achieved_arclength,
+            target_reached,
+            integration_steps,
+            ..ManifoldCurveSolverDiagnostics::default()
+        },
+    })
+}
+
+fn merge_manifold_curve_extension(
+    mut branch: ContinuationBranch,
+    extension: ManifoldCurveSolve,
+    source_arclength: Option<Vec<f64>>,
+) -> Result<ContinuationBranch> {
+    if extension.points.len() < 2 || extension.arclength.len() != extension.points.len() {
+        bail!("Manifold extension produced no new curve segment.");
+    }
+    let old_total = branch
+        .points
+        .last()
+        .map(|point| point.param_value)
+        .unwrap_or(0.0);
+    let old_count = branch.points.len();
+    for (point, local_s) in extension
+        .points
+        .iter()
+        .zip(extension.arclength.iter())
+        .skip(1)
+    {
+        branch.points.push(ContinuationPoint {
+            state: point.clone(),
+            param_value: old_total + local_s,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+        });
+        branch
+            .indices
+            .push(branch.indices.last().copied().unwrap_or(-1) + 1);
+    }
+
+    let ManifoldGeometry::Curve(geometry) = branch
+        .manifold_geometry
+        .as_mut()
+        .ok_or_else(|| anyhow!("Manifold branch is missing curve geometry."))?
+    else {
+        bail!("Manifold branch geometry is not a curve.");
+    };
+    if geometry.dim == 0 || geometry.points_flat.len() != old_count * geometry.dim {
+        bail!("Stored manifold curve geometry is inconsistent with branch points.");
+    }
+    for point in extension.points.iter().skip(1) {
+        geometry.points_flat.extend_from_slice(point);
+    }
+    geometry.arclength.extend(
+        extension
+            .arclength
+            .iter()
+            .skip(1)
+            .map(|local_s| old_total + local_s),
+    );
+    if let Some(source_extension) = source_arclength {
+        let source_offset = geometry
+            .source_arclength
+            .as_ref()
+            .and_then(|values| values.last())
+            .copied()
+            .unwrap_or(old_total);
+        geometry
+            .source_arclength
+            .get_or_insert_with(|| geometry.arclength[..old_count].to_vec())
+            .extend(
+                source_extension
+                    .iter()
+                    .skip(1)
+                    .map(|local_s| source_offset + local_s),
+            );
+    }
+    let mut diagnostics = geometry.solver_diagnostics.take().unwrap_or_default();
+    diagnostics.requested_arclength = old_total + extension.diagnostics.requested_arclength;
+    diagnostics.achieved_arclength = old_total + extension.diagnostics.achieved_arclength;
+    diagnostics.target_reached = extension.diagnostics.target_reached;
+    diagnostics.termination_reason = extension.diagnostics.termination_reason;
+    diagnostics.termination_detail = extension.diagnostics.termination_detail;
+    diagnostics.integration_steps += extension.diagnostics.integration_steps;
+    diagnostics.map_growth_iterations += extension.diagnostics.map_growth_iterations;
+    diagnostics.preimage_failures += extension.diagnostics.preimage_failures;
+    diagnostics.refinement_failures += extension.diagnostics.refinement_failures;
+    diagnostics.extension_count += 1;
+    geometry.solver_diagnostics = Some(diagnostics);
+    geometry.resume_state = extension.resume_state;
+    Ok(branch)
 }
 
 fn resample_and_wrap_curve(
@@ -5681,6 +6071,522 @@ fn cumulative_polyline_arclength(points: &[Vec<f64>], periodicity: &StatePeriodi
     arclength
 }
 
+#[derive(Clone)]
+struct ResumableMapManifoldState {
+    version: usize,
+    cycle_anchor: Vec<f64>,
+    active_domain: Vec<Vec<f64>>,
+    pending_points: Option<Vec<Vec<f64>>>,
+    cursor: Option<ManifoldMapDomainCursor>,
+    spacing_target: f64,
+    map_step_iterations: usize,
+    growth_iterations: usize,
+}
+
+impl ResumableMapManifoldState {
+    fn from_resume(resume: ManifoldCurveResumeState) -> Result<Self> {
+        let ManifoldCurveResumeState::Map {
+            version,
+            cycle_anchor,
+            active_domain,
+            pending_points,
+            cursor,
+            spacing_target,
+            map_step_iterations,
+            growth_iterations,
+        } = resume
+        else {
+            bail!("Stored manifold resume state is not a map state.");
+        };
+        if version != 1 {
+            bail!("Unsupported map manifold resume-state version {}.", version);
+        }
+        if active_domain.len() < 2 || map_step_iterations == 0 {
+            bail!("Stored map manifold resume state is incomplete.");
+        }
+        if !spacing_target.is_finite() || spacing_target <= 0.0 {
+            bail!("Stored map manifold spacing target is invalid.");
+        }
+        if let Some(cursor) = cursor.as_ref() {
+            let pending_len = pending_points
+                .as_ref()
+                .map(|points| points.len())
+                .unwrap_or(active_domain.len());
+            if cursor.segment_index + 1 >= pending_len {
+                bail!("Stored map manifold output cursor is out of range.");
+            }
+        }
+        Ok(Self {
+            version,
+            cycle_anchor,
+            active_domain,
+            pending_points,
+            cursor,
+            spacing_target,
+            map_step_iterations,
+            growth_iterations,
+        })
+    }
+
+    fn to_resume(&self) -> ManifoldCurveResumeState {
+        ManifoldCurveResumeState::Map {
+            version: self.version,
+            cycle_anchor: self.cycle_anchor.clone(),
+            active_domain: self.active_domain.clone(),
+            pending_points: self.pending_points.clone(),
+            cursor: self.cursor.clone(),
+            spacing_target: self.spacing_target,
+            map_step_iterations: self.map_step_iterations,
+            growth_iterations: self.growth_iterations,
+        }
+    }
+}
+
+fn build_map_manifold_extension(
+    system: &EquationSystem,
+    endpoint: &[f64],
+    stability: ManifoldStability,
+    settings: &Manifold1DSettings,
+    periodicity: &StatePeriodicity,
+    resume: ManifoldCurveResumeState,
+) -> Result<ManifoldCurveSolve> {
+    let mut state = ResumableMapManifoldState::from_resume(resume)?;
+    let dim = endpoint.len();
+    if state.cycle_anchor.len() != dim
+        || state
+            .active_domain
+            .iter()
+            .any(|point| point.len() != dim || point.iter().any(|value| !value.is_finite()))
+    {
+        bail!("Stored map manifold resume state has inconsistent dimensions.");
+    }
+    let target = settings.target_arclength;
+    let max_points = settings.caps.max_points;
+    let step_limit = settings
+        .caps
+        .max_iterations
+        .unwrap_or(settings.caps.max_steps);
+    let mut start = endpoint.to_vec();
+    periodicity.wrap_state(&mut start);
+    if let Some(bounds) = settings.bounds.as_ref() {
+        if !inside_bounds(&start, bounds) {
+            bail!("The map manifold extension endpoint lies outside configured bounds.");
+        }
+    }
+
+    let mut points = vec![start.clone()];
+    let mut arclength = vec![0.0];
+    let mut cumulative = 0.0;
+    let mut growth_steps = 0usize;
+    let mut termination_reason = "max_iterations".to_string();
+    let mut termination_detail = None;
+    let mut target_reached = false;
+    let mut preimage_failures = 0usize;
+
+    loop {
+        if let Some(mut cursor) = state.cursor.clone() {
+            let pending = state
+                .pending_points
+                .as_ref()
+                .unwrap_or(&state.active_domain)
+                .clone();
+            let mut current = points.last().cloned().unwrap_or_else(|| start.clone());
+            while cursor.segment_index + 1 < pending.len() {
+                let next_index = cursor.segment_index + 1;
+                let candidate = &pending[next_index];
+                if let Some(bounds) = settings.bounds.as_ref() {
+                    if !inside_bounds(candidate, bounds) {
+                        termination_reason = "bounds_exit".to_string();
+                        termination_detail =
+                            Some("pending fundamental domain left bounds".to_string());
+                        state.cursor = Some(cursor);
+                        return Ok(map_extension_solve(
+                            points,
+                            arclength,
+                            target,
+                            termination_reason,
+                            termination_detail,
+                            false,
+                            growth_steps,
+                            preimage_failures,
+                            &state,
+                        ));
+                    }
+                }
+                let step_arc = periodic_l2_distance(&current, candidate, periodicity);
+                if !step_arc.is_finite() {
+                    bail!("Map manifold extension arclength became non-finite.");
+                }
+                if step_arc <= NORM_EPS {
+                    current = candidate.clone();
+                    cursor = ManifoldMapDomainCursor {
+                        segment_index: next_index,
+                        alpha: 0.0,
+                    };
+                    continue;
+                }
+                if cumulative + step_arc >= target && step_arc > NORM_EPS {
+                    let fraction = ((target - cumulative) / step_arc).clamp(0.0, 1.0);
+                    points.push(periodic_lerp(&current, candidate, fraction, periodicity));
+                    arclength.push(target);
+                    cursor.alpha = fraction;
+                    state.cursor = Some(cursor);
+                    termination_reason = "target_arclength".to_string();
+                    target_reached = true;
+                    return Ok(map_extension_solve(
+                        points,
+                        arclength,
+                        target,
+                        termination_reason,
+                        None,
+                        target_reached,
+                        growth_steps,
+                        preimage_failures,
+                        &state,
+                    ));
+                }
+                cumulative += step_arc;
+                points.push(candidate.clone());
+                arclength.push(cumulative);
+                current = candidate.clone();
+                cursor = ManifoldMapDomainCursor {
+                    segment_index: next_index,
+                    alpha: 0.0,
+                };
+                if points.len() >= max_points {
+                    state.cursor = (next_index + 1 < pending.len()).then_some(cursor);
+                    if state.cursor.is_none() {
+                        state.pending_points = None;
+                    }
+                    termination_reason = "max_points".to_string();
+                    return Ok(map_extension_solve(
+                        points,
+                        arclength,
+                        target,
+                        termination_reason,
+                        None,
+                        false,
+                        growth_steps,
+                        preimage_failures,
+                        &state,
+                    ));
+                }
+            }
+            state.cursor = None;
+            state.pending_points = None;
+        }
+
+        if growth_steps >= step_limit {
+            break;
+        }
+        let current_endpoint = points.last().cloned().unwrap_or_else(|| start.clone());
+        match grow_map_manifold_domain(
+            system,
+            &mut state.active_domain,
+            &state.cycle_anchor,
+            stability,
+            state.map_step_iterations,
+            state.spacing_target,
+            max_points.saturating_sub(points.len()).max(2),
+            settings.bounds.as_ref(),
+            periodicity,
+        )? {
+            MapDomainGrowth::Accepted(mut next_domain) => {
+                if let Some(first) = next_domain.first_mut() {
+                    *first = current_endpoint;
+                }
+                state.active_domain = next_domain;
+                state.cursor = Some(ManifoldMapDomainCursor {
+                    segment_index: 0,
+                    alpha: 0.0,
+                });
+                state.growth_iterations += 1;
+                growth_steps += 1;
+            }
+            MapDomainGrowth::Stopped { reason, detail } => {
+                if reason == "preimage_failed" {
+                    preimage_failures += 1;
+                }
+                termination_reason = reason;
+                termination_detail = detail;
+                break;
+            }
+        }
+    }
+
+    Ok(map_extension_solve(
+        points,
+        arclength,
+        target,
+        termination_reason,
+        termination_detail,
+        target_reached,
+        growth_steps,
+        preimage_failures,
+        &state,
+    ))
+}
+
+enum MapDomainGrowth {
+    Accepted(Vec<Vec<f64>>),
+    Stopped {
+        reason: String,
+        detail: Option<String>,
+    },
+}
+
+fn grow_map_manifold_domain(
+    system: &EquationSystem,
+    domain_samples: &mut Vec<Vec<f64>>,
+    cycle_anchor: &[f64],
+    stability: ManifoldStability,
+    map_step_iterations: usize,
+    spacing_target: f64,
+    max_domain_samples: usize,
+    bounds: Option<&ManifoldBounds>,
+    periodicity: &StatePeriodicity,
+) -> Result<MapDomainGrowth> {
+    let mut next_samples = Vec::with_capacity(domain_samples.len());
+    let mut previous_q: Option<Vec<f64>> = None;
+    let mut previous_mapped: Option<Vec<f64>> = None;
+    for (sample_index, q) in domain_samples.iter().enumerate() {
+        let mapped = match stability {
+            ManifoldStability::Unstable => {
+                let Some(value) = apply_map_iterates_with_periodicity(
+                    system,
+                    q,
+                    map_step_iterations,
+                    periodicity,
+                ) else {
+                    return Ok(MapDomainGrowth::Stopped {
+                        reason: "non_finite_image".to_string(),
+                        detail: Some("map image was non-finite during extension".to_string()),
+                    });
+                };
+                value
+            }
+            ManifoldStability::Stable => {
+                let guess = if sample_index == 0 {
+                    domain_samples.last().cloned().unwrap_or_else(|| q.clone())
+                } else if let (Some(prev_q), Some(prev_mapped)) =
+                    (previous_q.as_ref(), previous_mapped.as_ref())
+                {
+                    let offset = periodic_difference(prev_q, q, periodicity);
+                    let mut guess = prev_mapped
+                        .iter()
+                        .zip(offset.iter())
+                        .map(|(value, delta)| value + delta)
+                        .collect::<Vec<_>>();
+                    periodicity.wrap_state(&mut guess);
+                    guess
+                } else {
+                    domain_samples.last().cloned().unwrap_or_else(|| q.clone())
+                };
+                let Some(value) = solve_map_preimage_newton(
+                    system,
+                    q,
+                    &guess,
+                    cycle_anchor,
+                    cycle_anchor,
+                    map_step_iterations,
+                    periodicity,
+                )?
+                else {
+                    return Ok(MapDomainGrowth::Stopped {
+                        reason: "preimage_failed".to_string(),
+                        detail: Some("map preimage solve failed during extension".to_string()),
+                    });
+                };
+                value
+            }
+        };
+        if mapped.iter().any(|value| !value.is_finite()) {
+            return Ok(MapDomainGrowth::Stopped {
+                reason: "non_finite_image".to_string(),
+                detail: None,
+            });
+        }
+        if let Some(bounds) = bounds {
+            if !inside_bounds(&mapped, bounds) {
+                return Ok(MapDomainGrowth::Stopped {
+                    reason: "bounds_exit".to_string(),
+                    detail: Some("mapped fundamental domain left bounds".to_string()),
+                });
+            }
+        }
+        previous_q = Some(q.clone());
+        previous_mapped = Some(mapped.clone());
+        next_samples.push(mapped);
+    }
+    let max_domain_samples = max_domain_samples.max(next_samples.len());
+    refine_map_domain_samples(
+        system,
+        domain_samples,
+        &mut next_samples,
+        cycle_anchor,
+        stability,
+        map_step_iterations,
+        spacing_target,
+        max_domain_samples,
+        bounds,
+        periodicity,
+    )?;
+    Ok(MapDomainGrowth::Accepted(next_samples))
+}
+
+fn map_extension_solve(
+    points: Vec<Vec<f64>>,
+    arclength: Vec<f64>,
+    requested_arclength: f64,
+    termination_reason: String,
+    termination_detail: Option<String>,
+    target_reached: bool,
+    map_growth_iterations: usize,
+    preimage_failures: usize,
+    state: &ResumableMapManifoldState,
+) -> ManifoldCurveSolve {
+    let achieved_arclength = *arclength.last().unwrap_or(&0.0);
+    ManifoldCurveSolve {
+        points,
+        arclength,
+        resume_state: Some(state.to_resume()),
+        diagnostics: ManifoldCurveSolverDiagnostics {
+            termination_reason,
+            termination_detail,
+            requested_arclength,
+            achieved_arclength,
+            target_reached,
+            map_growth_iterations,
+            preimage_failures,
+            ..ManifoldCurveSolverDiagnostics::default()
+        },
+    }
+}
+
+fn replay_map_manifold_resume_state(
+    system: &mut EquationSystem,
+    kind: SystemKind,
+    branch: &ContinuationBranch,
+    settings: &Manifold1DSettings,
+    periodicity: &StatePeriodicity,
+) -> Result<ManifoldCurveResumeState> {
+    let (stability, eig_index, stored_caps) = match &branch.branch_type {
+        BranchType::ManifoldEq1D {
+            stability,
+            eig_index,
+            caps,
+            ..
+        } => (*stability, *eig_index, *caps),
+        _ => bail!("Legacy replay requires a 1D manifold branch."),
+    };
+    let anchor = branch
+        .points
+        .first()
+        .map(|point| point.state.clone())
+        .ok_or_else(|| anyhow!("Legacy manifold branch has no anchor."))?;
+    let endpoint = branch
+        .points
+        .last()
+        .map(|point| point.state.clone())
+        .ok_or_else(|| anyhow!("Legacy manifold branch has no endpoint."))?;
+    let old_arclength = branch
+        .points
+        .last()
+        .map(|point| point.param_value)
+        .unwrap_or(0.0);
+    if !old_arclength.is_finite() || old_arclength <= 0.0 {
+        bail!("Legacy manifold branch has invalid arclength metadata.");
+    }
+
+    let mut replay_settings = settings.clone();
+    replay_settings.stability = stability;
+    replay_settings.direction = ManifoldDirection::Both;
+    replay_settings.eig_index = Some(eig_index);
+    replay_settings.target_arclength = old_arclength;
+    replay_settings.caps = stored_caps;
+    replay_settings.caps.max_points = replay_settings
+        .caps
+        .max_points
+        .max(branch.points.len().saturating_mul(2))
+        .max(64);
+    let previous_growth = match branch.manifold_geometry.as_ref() {
+        Some(ManifoldGeometry::Curve(geometry)) => geometry
+            .solver_diagnostics
+            .as_ref()
+            .map(|diagnostics| diagnostics.map_growth_iterations)
+            .unwrap_or(0),
+        _ => 0,
+    };
+    replay_settings.caps.max_iterations = Some(
+        replay_settings
+            .caps
+            .max_iterations
+            .unwrap_or(replay_settings.caps.max_steps)
+            .max(previous_growth.saturating_add(2)),
+    );
+
+    let replayed = continue_manifold_eq_1d_with_kind_and_periodicity(
+        system,
+        kind,
+        &anchor,
+        replay_settings,
+        periodicity,
+    )?;
+    let reference_near = branch
+        .points
+        .get(1)
+        .map(|point| point.state.as_slice())
+        .unwrap_or(endpoint.as_slice());
+    let mut candidates = replayed
+        .into_iter()
+        .filter(|candidate| {
+            matches!(
+                candidate.branch_type,
+                BranchType::ManifoldEq1D {
+                    cycle_point_index: Some(0),
+                    ..
+                }
+            )
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        let left_distance = left
+            .points
+            .get(1)
+            .map(|point| periodic_l2_distance(&point.state, reference_near, periodicity))
+            .unwrap_or(f64::INFINITY);
+        let right_distance = right
+            .points
+            .get(1)
+            .map(|point| periodic_l2_distance(&point.state, reference_near, periodicity))
+            .unwrap_or(f64::INFINITY);
+        left_distance.total_cmp(&right_distance)
+    });
+    let replay = candidates
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("Legacy map manifold replay produced no matching direction."))?;
+    let replay_endpoint = replay
+        .points
+        .last()
+        .map(|point| point.state.as_slice())
+        .ok_or_else(|| anyhow!("Legacy map manifold replay produced no endpoint."))?;
+    let endpoint_error = periodic_l2_distance(replay_endpoint, &endpoint, periodicity);
+    let endpoint_tolerance = 1e-4 * (1.0 + old_arclength + l2_norm(&endpoint));
+    if endpoint_error > endpoint_tolerance {
+        bail!(
+            "Legacy map manifold replay did not reproduce the stored endpoint (error {}). Rebuild this branch before extending it.",
+            endpoint_error
+        );
+    }
+    match replay.manifold_geometry {
+        Some(ManifoldGeometry::Curve(geometry)) => geometry.resume_state.ok_or_else(|| {
+            anyhow!("Legacy map manifold replay did not produce resumable solver state.")
+        }),
+        _ => bail!("Legacy map manifold replay did not produce curve geometry."),
+    }
+}
+
 fn build_map_manifold_curve(
     system: &EquationSystem,
     seed: &[f64],
@@ -5736,8 +6642,12 @@ fn build_map_manifold_curve(
         domain_samples.push(periodic_lerp(seed, &domain_end, alpha, periodicity));
     }
     let initial_domain_arc = polyline_arclength(&domain_samples, periodicity);
-    let mut spacing_target = if target > 0.0 && max_points > 1 {
-        target / ((max_points - 1) as f64)
+    let mut spacing_target = if target > 0.0 && max_points > 2 {
+        // Reserve roughly half the output budget for domain overlaps, the
+        // anchor/seed, and curvature-driven insertions. Using target/(N-1)
+        // consumes the entire budget on ideal straight segments and can stop
+        // short solely because fundamental domains share boundary points.
+        target / ((max_points.saturating_sub(2) / 2).max(1) as f64)
     } else {
         initial_domain_arc / (domain_subdivisions as f64)
     };
@@ -5766,6 +6676,8 @@ fn build_map_manifold_curve(
             periodicity,
         ));
         arclength.push(target);
+        let mut pending_points = vec![anchor.clone(), seed.clone()];
+        pending_points.extend(domain_samples.iter().skip(1).cloned());
         return Ok(map_curve_solve(
             points,
             arclength,
@@ -5776,6 +6688,18 @@ fn build_map_manifold_curve(
             0,
             source_correction_norm,
             least_period,
+            Some(map_resume_state(
+                &anchor,
+                domain_samples.clone(),
+                Some(pending_points),
+                Some(ManifoldMapDomainCursor {
+                    segment_index: 0,
+                    alpha: (target / seed_arc).clamp(0.0, 1.0),
+                }),
+                spacing_target,
+                map_step_iterations,
+                0,
+            )),
         ));
     }
     points.push(seed);
@@ -5785,7 +6709,7 @@ fn build_map_manifold_curve(
     let mut termination_reason = "max_iterations".to_string();
     let mut termination_detail = None;
 
-    for sample in domain_samples.iter().skip(1) {
+    for (sample_index, sample) in domain_samples.iter().enumerate().skip(1) {
         if sample.iter().any(|value| !value.is_finite()) {
             bail!("Map manifold initial domain contains a non-finite sample.");
         }
@@ -5803,6 +6727,18 @@ fn build_map_manifold_curve(
                     map_growth_steps,
                     source_correction_norm,
                     least_period,
+                    Some(map_resume_state(
+                        &anchor,
+                        domain_samples.clone(),
+                        None,
+                        Some(ManifoldMapDomainCursor {
+                            segment_index: sample_index - 1,
+                            alpha: 0.0,
+                        }),
+                        spacing_target,
+                        map_step_iterations,
+                        map_growth_steps,
+                    )),
                 ));
             }
         }
@@ -5825,6 +6761,18 @@ fn build_map_manifold_curve(
                 map_growth_steps,
                 source_correction_norm,
                 least_period,
+                Some(map_resume_state(
+                    &anchor,
+                    domain_samples.clone(),
+                    None,
+                    Some(ManifoldMapDomainCursor {
+                        segment_index: sample_index - 1,
+                        alpha: alpha_hit,
+                    }),
+                    spacing_target,
+                    map_step_iterations,
+                    map_growth_steps,
+                )),
             ));
         }
         cumulative_arc += step_arc;
@@ -5845,6 +6793,18 @@ fn build_map_manifold_curve(
                 map_growth_steps,
                 source_correction_norm,
                 least_period,
+                Some(map_resume_state(
+                    &anchor,
+                    domain_samples.clone(),
+                    None,
+                    (sample_index + 1 < domain_samples.len()).then_some(ManifoldMapDomainCursor {
+                        segment_index: sample_index,
+                        alpha: 0.0,
+                    }),
+                    spacing_target,
+                    map_step_iterations,
+                    map_growth_steps,
+                )),
             ));
         }
     }
@@ -5961,7 +6921,7 @@ fn build_map_manifold_curve(
             )?;
         }
 
-        for mapped in next_samples.iter().skip(1) {
+        for (mapped_index, mapped) in next_samples.iter().enumerate().skip(1) {
             let last_point = points.last().cloned().unwrap_or_else(|| mapped.clone());
             let step_arc = periodic_l2_distance(&last_point, mapped, periodicity);
             if !step_arc.is_finite() {
@@ -5982,6 +6942,18 @@ fn build_map_manifold_curve(
                     map_growth_steps,
                     source_correction_norm,
                     least_period,
+                    Some(map_resume_state(
+                        &anchor,
+                        next_samples.clone(),
+                        None,
+                        Some(ManifoldMapDomainCursor {
+                            segment_index: mapped_index - 1,
+                            alpha: alpha_hit,
+                        }),
+                        spacing_target,
+                        map_step_iterations,
+                        map_growth_steps,
+                    )),
                 ));
             }
             cumulative_arc += step_arc;
@@ -6002,6 +6974,20 @@ fn build_map_manifold_curve(
                     map_growth_steps,
                     source_correction_norm,
                     least_period,
+                    Some(map_resume_state(
+                        &anchor,
+                        next_samples.clone(),
+                        None,
+                        (mapped_index + 1 < next_samples.len()).then_some(
+                            ManifoldMapDomainCursor {
+                                segment_index: mapped_index,
+                                alpha: 0.0,
+                            },
+                        ),
+                        spacing_target,
+                        map_step_iterations,
+                        map_growth_steps,
+                    )),
                 ));
             }
         }
@@ -6036,7 +7022,37 @@ fn build_map_manifold_curve(
         map_growth_steps,
         source_correction_norm,
         least_period,
+        Some(map_resume_state(
+            &anchor,
+            domain_samples,
+            None,
+            None,
+            spacing_target,
+            map_step_iterations,
+            map_growth_steps,
+        )),
     ))
+}
+
+fn map_resume_state(
+    cycle_anchor: &[f64],
+    active_domain: Vec<Vec<f64>>,
+    pending_points: Option<Vec<Vec<f64>>>,
+    cursor: Option<ManifoldMapDomainCursor>,
+    spacing_target: f64,
+    map_step_iterations: usize,
+    growth_iterations: usize,
+) -> ManifoldCurveResumeState {
+    ManifoldCurveResumeState::Map {
+        version: 1,
+        cycle_anchor: cycle_anchor.to_vec(),
+        active_domain,
+        pending_points,
+        cursor,
+        spacing_target,
+        map_step_iterations,
+        growth_iterations,
+    }
 }
 
 fn map_curve_solve(
@@ -6049,11 +7065,13 @@ fn map_curve_solve(
     map_growth_iterations: usize,
     source_correction_norm: f64,
     least_period: Option<usize>,
+    resume_state: Option<ManifoldCurveResumeState>,
 ) -> ManifoldCurveSolve {
     let achieved_arclength = *arclength.last().unwrap_or(&0.0);
     ManifoldCurveSolve {
         points,
         arclength,
+        resume_state,
         diagnostics: ManifoldCurveSolverDiagnostics {
             termination_reason: termination_reason.to_string(),
             termination_detail,
@@ -6676,6 +7694,454 @@ mod tests {
 
     fn logistic_period_two_point(r: f64) -> f64 {
         (r + 1.0 - ((r - 3.0) * (r + 1.0)).sqrt()) / (2.0 * r)
+    }
+
+    fn extension_test_settings(
+        stability: ManifoldStability,
+        target_arclength: f64,
+    ) -> Manifold1DSettings {
+        Manifold1DSettings {
+            stability,
+            direction: ManifoldDirection::Plus,
+            eig_index: Some(0),
+            eps: 1e-3,
+            target_arclength,
+            integration_dt: 1e-3,
+            caps: ManifoldTerminationCaps {
+                max_steps: 20_000,
+                max_points: 512,
+                max_time: 20.0,
+                max_iterations: Some(64),
+                ..ManifoldTerminationCaps::default()
+            },
+            bounds: None,
+        }
+    }
+
+    fn map_extension_test_settings(
+        stability: ManifoldStability,
+        target_arclength: f64,
+    ) -> Manifold1DSettings {
+        let mut settings = extension_test_settings(stability, target_arclength);
+        settings.integration_dt = 1.0;
+        settings.caps.max_points = 64;
+        settings
+    }
+
+    fn assert_extension_matches_one_shot(
+        extended: &ContinuationBranch,
+        one_shot: &ContinuationBranch,
+        tolerance: f64,
+    ) {
+        let extended_end = extended.points.last().expect("extended endpoint");
+        let one_shot_end = one_shot.points.last().expect("one-shot endpoint");
+        assert!(
+            l2_distance(&extended_end.state, &one_shot_end.state) <= tolerance,
+            "extended={:?}, one_shot={:?}",
+            extended_end.state,
+            one_shot_end.state
+        );
+        assert!(
+            (extended_end.param_value - one_shot_end.param_value).abs() <= 1e-9,
+            "extended s={}, one-shot s={}",
+            extended_end.param_value,
+            one_shot_end.param_value
+        );
+        assert!(extended
+            .points
+            .windows(2)
+            .all(|pair| pair[1].param_value > pair[0].param_value));
+    }
+
+    #[test]
+    fn manifold_eq_1d_extension_matches_one_shot_unstable_flow() {
+        let mut system = build_system(&["x"], &["x"], &[]);
+        let initial = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Flow,
+            &[0.0],
+            extension_test_settings(ManifoldStability::Unstable, 0.04),
+        )
+        .unwrap()
+        .remove(0);
+        let extended = extend_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Flow,
+            initial,
+            extension_test_settings(ManifoldStability::Unstable, 0.06),
+            &StatePeriodicity::none(),
+        )
+        .expect("flow extension");
+        let one_shot = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Flow,
+            &[0.0],
+            extension_test_settings(ManifoldStability::Unstable, 0.10),
+        )
+        .unwrap()
+        .remove(0);
+        assert_extension_matches_one_shot(&extended, &one_shot, 2e-5);
+    }
+
+    #[test]
+    fn manifold_eq_1d_extension_matches_one_shot_stable_flow() {
+        let mut system = build_system(&["-x"], &["x"], &[]);
+        let initial = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Flow,
+            &[0.0],
+            extension_test_settings(ManifoldStability::Stable, 0.03),
+        )
+        .unwrap()
+        .remove(0);
+        let extended = extend_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Flow,
+            initial,
+            extension_test_settings(ManifoldStability::Stable, 0.05),
+            &StatePeriodicity::none(),
+        )
+        .expect("stable flow extension");
+        let one_shot = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Flow,
+            &[0.0],
+            extension_test_settings(ManifoldStability::Stable, 0.08),
+        )
+        .unwrap()
+        .remove(0);
+        assert_extension_matches_one_shot(&extended, &one_shot, 2e-5);
+    }
+
+    #[test]
+    fn manifold_eq_1d_extension_rejects_a_different_eigen_index() {
+        let mut system = build_system(&["x"], &["x"], &[]);
+        let initial = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Flow,
+            &[0.0],
+            extension_test_settings(ManifoldStability::Unstable, 0.04),
+        )
+        .unwrap()
+        .remove(0);
+        let mut settings = extension_test_settings(ManifoldStability::Unstable, 0.04);
+        settings.eig_index = Some(1);
+        let error = extend_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Flow,
+            initial,
+            settings,
+            &StatePeriodicity::none(),
+        )
+        .expect_err("mismatched eigen index should be rejected");
+        assert!(error.to_string().contains("eigen index"));
+    }
+
+    #[test]
+    fn manifold_eq_1d_extension_rejects_map_branch_with_flow_kind() {
+        let mut system = build_system(&["2*x"], &["x"], &[]);
+        let initial = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            map_extension_test_settings(ManifoldStability::Unstable, 0.04),
+        )
+        .unwrap()
+        .remove(0);
+        let error = extend_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Flow,
+            initial,
+            extension_test_settings(ManifoldStability::Unstable, 0.04),
+            &StatePeriodicity::none(),
+        )
+        .expect_err("map branch must not be integrated as a flow");
+        assert!(error.to_string().contains("system kind"));
+    }
+
+    #[test]
+    fn manifold_eq_1d_extension_matches_one_shot_negative_map_multiplier() {
+        let mut system = build_system(&["-2*x"], &["x"], &[]);
+        let initial = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            map_extension_test_settings(ManifoldStability::Unstable, 0.05),
+        )
+        .unwrap()
+        .remove(0);
+        let extended = extend_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            initial,
+            map_extension_test_settings(ManifoldStability::Unstable, 0.08),
+            &StatePeriodicity::none(),
+        )
+        .expect("negative-multiplier map extension");
+        let one_shot = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            map_extension_test_settings(ManifoldStability::Unstable, 0.13),
+        )
+        .unwrap()
+        .remove(0);
+        assert_extension_matches_one_shot(&extended, &one_shot, 1e-9);
+    }
+
+    #[test]
+    fn manifold_eq_1d_extension_matches_one_shot_stable_map() {
+        let mut system = build_system(&["0.5*x"], &["x"], &[]);
+        let initial = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            map_extension_test_settings(ManifoldStability::Stable, 0.04),
+        )
+        .unwrap()
+        .remove(0);
+        let extended = extend_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            initial,
+            map_extension_test_settings(ManifoldStability::Stable, 0.07),
+            &StatePeriodicity::none(),
+        )
+        .expect("stable map extension");
+        let one_shot = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            map_extension_test_settings(ManifoldStability::Stable, 0.11),
+        )
+        .unwrap()
+        .remove(0);
+        assert_extension_matches_one_shot(&extended, &one_shot, 1e-9);
+    }
+
+    #[test]
+    fn manifold_eq_1d_extension_matches_one_shot_map_cycle() {
+        let r = 3.5;
+        let cycle_point = logistic_period_two_point(r);
+        let mut system = build_system(&["r*x*(1-x)"], &["x"], &[("r", r)]);
+        let initial_branches = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &[cycle_point],
+            map_extension_test_settings(ManifoldStability::Unstable, 0.004),
+        )
+        .unwrap();
+        let initial = initial_branches
+            .into_iter()
+            .find(|branch| {
+                matches!(
+                    branch.branch_type,
+                    BranchType::ManifoldEq1D {
+                        cycle_point_index: Some(0),
+                        ..
+                    }
+                )
+            })
+            .unwrap();
+        let extended = extend_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            initial,
+            map_extension_test_settings(ManifoldStability::Unstable, 0.004),
+            &StatePeriodicity::none(),
+        )
+        .expect("map-cycle phase extension");
+        let one_shot = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &[cycle_point],
+            map_extension_test_settings(ManifoldStability::Unstable, 0.008),
+        )
+        .unwrap()
+        .into_iter()
+        .find(|branch| {
+            matches!(
+                branch.branch_type,
+                BranchType::ManifoldEq1D {
+                    cycle_point_index: Some(0),
+                    ..
+                }
+            )
+        })
+        .unwrap();
+        assert_extension_matches_one_shot(&extended, &one_shot, 2e-7);
+    }
+
+    #[test]
+    fn manifold_eq_1d_extension_advances_propagated_map_cycle_phase() {
+        let r = 3.5;
+        let cycle_point = logistic_period_two_point(r);
+        let mut system = build_system(&["r*x*(1-x)"], &["x"], &[("r", r)]);
+        let mut settings = map_extension_test_settings(ManifoldStability::Unstable, 0.04);
+        settings.caps.max_points = 256;
+        let initial = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &[cycle_point],
+            settings,
+        )
+        .unwrap()
+        .into_iter()
+        .find(|branch| {
+            matches!(
+                branch.branch_type,
+                BranchType::ManifoldEq1D {
+                    cycle_point_index: Some(1),
+                    ..
+                }
+            )
+        })
+        .unwrap();
+        let old_count = initial.points.len();
+        let old_arclength = initial.points.last().unwrap().param_value;
+        let mut extension_settings = map_extension_test_settings(ManifoldStability::Unstable, 0.01);
+        extension_settings.caps.max_points = 256;
+        let extended = extend_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            initial,
+            extension_settings,
+            &StatePeriodicity::none(),
+        )
+        .expect("propagated map-cycle phase extension");
+        assert!(extended.points.len() > old_count);
+        assert!(extended.points.last().unwrap().param_value > old_arclength);
+        let Some(ManifoldGeometry::Curve(geometry)) = extended.manifold_geometry.as_ref() else {
+            panic!("expected curve geometry");
+        };
+        assert!(matches!(
+            geometry.resume_state,
+            Some(ManifoldCurveResumeState::Map { .. })
+        ));
+        assert!(
+            geometry.source_arclength.is_none(),
+            "an independently extended cycle phase no longer has representative-source alignment"
+        );
+    }
+
+    #[test]
+    fn manifold_eq_1d_extension_replays_legacy_map_branch_without_resume_state() {
+        let mut system = build_system(&["-2*x"], &["x"], &[]);
+        let mut initial = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            map_extension_test_settings(ManifoldStability::Unstable, 0.03),
+        )
+        .unwrap()
+        .remove(0);
+        let Some(ManifoldGeometry::Curve(geometry)) = initial.manifold_geometry.as_mut() else {
+            panic!("expected curve geometry");
+        };
+        geometry.resume_state = None;
+        let old_arclength = initial.points.last().unwrap().param_value;
+        let extended = extend_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            initial,
+            map_extension_test_settings(ManifoldStability::Unstable, 0.02),
+            &StatePeriodicity::none(),
+        )
+        .expect("legacy map replay extension");
+        assert!(extended.points.last().unwrap().param_value > old_arclength);
+    }
+
+    #[test]
+    fn manifold_eq_1d_extension_preserves_periodic_flow_coordinates() {
+        let periodicity = StatePeriodicity::from_periods(&[std::f64::consts::TAU], 1);
+        let mut system = build_system(&["sin(theta)"], &["theta"], &[]);
+        let initial = continue_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Flow,
+            &[0.0],
+            extension_test_settings(ManifoldStability::Unstable, 0.1),
+            &periodicity,
+        )
+        .unwrap()
+        .remove(0);
+        let extended = extend_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Flow,
+            initial,
+            extension_test_settings(ManifoldStability::Unstable, 0.1),
+            &periodicity,
+        )
+        .expect("periodic flow extension");
+        assert!(extended
+            .points
+            .iter()
+            .all(|point| { point.state[0] >= 0.0 && point.state[0] < std::f64::consts::TAU }));
+    }
+
+    #[test]
+    fn manifold_eq_1d_extension_preserves_periodic_map_coordinates() {
+        let periodicity = StatePeriodicity::from_periods(&[1.0], 1);
+        let mut system = build_system(&["2*theta"], &["theta"], &[]);
+        let initial = continue_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            map_extension_test_settings(ManifoldStability::Unstable, 0.1),
+            &periodicity,
+        )
+        .unwrap()
+        .remove(0);
+        let extended = extend_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            initial,
+            map_extension_test_settings(ManifoldStability::Unstable, 0.1),
+            &periodicity,
+        )
+        .expect("periodic map extension");
+        assert!(extended
+            .points
+            .iter()
+            .all(|point| point.state[0] >= 0.0 && point.state[0] < 1.0));
+    }
+
+    #[test]
+    fn manifold_eq_1d_extension_advances_stable_map_cycle() {
+        let r = 3.2;
+        let cycle_point = logistic_period_two_point(r);
+        let mut system = build_system(&["r*x*(1-x)"], &["x"], &[("r", r)]);
+        let mut settings = map_extension_test_settings(ManifoldStability::Stable, 0.01);
+        settings.caps.max_points = 256;
+        let initial = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            &[cycle_point],
+            settings,
+        )
+        .unwrap()
+        .into_iter()
+        .find(|branch| {
+            matches!(
+                branch.branch_type,
+                BranchType::ManifoldEq1D {
+                    cycle_point_index: Some(0),
+                    ..
+                }
+            )
+        })
+        .unwrap();
+        let old_count = initial.points.len();
+        let mut extension_settings = map_extension_test_settings(ManifoldStability::Stable, 0.01);
+        extension_settings.caps.max_points = 256;
+        let extended = extend_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 2 },
+            initial,
+            extension_settings,
+            &StatePeriodicity::none(),
+        )
+        .expect("stable map-cycle extension");
+        assert!(extended.points.len() > old_count);
     }
 
     fn circular_cycle_state(ntst: usize, ncol: usize, radius: f64) -> Vec<f64> {

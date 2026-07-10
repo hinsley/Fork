@@ -27,6 +27,7 @@ const requiredExports = [
   'WasmNSCurveRunner',
   'WasmPDCurveRunner',
   'WasmEqManifold1DRunner',
+  'WasmEqManifold1DExtensionRunner',
   'WasmEqManifold2DRunner',
   'WasmCycleManifold2DRunner',
   'WasmIsochroneCurveRunner',
@@ -91,5 +92,72 @@ for (const branch of manifoldBranches) {
   assert.equal(branch.manifold_geometry.type, 'Curve');
   assert.equal(branch.manifold_geometry.solver_diagnostics.target_reached, true);
 }
+
+const storedBranch = manifoldBranches[0];
+const storedPointCount = storedBranch.points.length;
+const manifoldExtensionRunner = new wasm.WasmEqManifold1DExtensionRunner(
+  ['x'],
+  new Float64Array(),
+  [],
+  ['x'],
+  'flow',
+  1,
+  storedBranch,
+  {
+    stability: 'Unstable',
+    direction: storedBranch.branch_type.direction,
+    eig_index: 0,
+    eps: 1e-4,
+    target_arclength: 0.005,
+    integration_dt: 0.1,
+    caps: {
+      max_steps: 100,
+      max_points: 100,
+      max_rings: 1,
+      max_vertices: 1,
+      max_time: 10,
+    },
+  },
+  new Float64Array([0])
+);
+assert.equal(manifoldExtensionRunner.get_progress().done, false);
+while (!manifoldExtensionRunner.get_progress().done) {
+  manifoldExtensionRunner.run_steps(10);
+}
+const extendedManifold = manifoldExtensionRunner.get_result();
+assert.ok(extendedManifold.points.length > storedPointCount);
+assert.equal(extendedManifold.manifold_geometry.solver_diagnostics.extension_count, 1);
+
+const timeCappedExtensionRunner = new wasm.WasmEqManifold1DExtensionRunner(
+  ['x'],
+  new Float64Array(),
+  [],
+  ['x'],
+  'flow',
+  1,
+  storedBranch,
+  {
+    stability: 'Unstable',
+    direction: storedBranch.branch_type.direction,
+    eig_index: 0,
+    eps: 1e-4,
+    target_arclength: 1,
+    integration_dt: 0.1,
+    caps: {
+      max_steps: 100,
+      max_points: 100,
+      max_rings: 1,
+      max_vertices: 1,
+      max_time: 0.15,
+    },
+  },
+  new Float64Array([0])
+);
+while (!timeCappedExtensionRunner.get_progress().done) {
+  timeCappedExtensionRunner.run_steps(1);
+}
+const timeCappedManifold = timeCappedExtensionRunner.get_result();
+assert.equal(timeCappedManifold.manifold_geometry.solver_diagnostics.target_reached, false);
+assert.equal(timeCappedManifold.manifold_geometry.solver_diagnostics.termination_reason, 'max_time');
 
 console.log('PASS real WASM node boundary smoke');

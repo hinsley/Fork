@@ -14,6 +14,8 @@ import type {
   CovariantLyapunovResponse,
   EquilibriumManifold1DRequest,
   EquilibriumManifold1DResult,
+  EquilibriumManifold1DExtensionRequest,
+  EquilibriumManifold1DExtensionResult,
   EquilibriumManifold2DRequest,
   EquilibriumManifold2DResult,
   EquilibriumContinuationRequest,
@@ -664,6 +666,47 @@ export class MockForkCoreClient implements ForkCoreClient {
           }
         }
         return branches
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runEquilibriumManifold1DExtension(
+    request: EquilibriumManifold1DExtensionRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<EquilibriumManifold1DExtensionResult> {
+    const job = this.queue.enqueue(
+      'runEquilibriumManifold1DExtension',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+        const branch = structuredClone(request.branchData)
+        const endpoint = branch.points.at(-1)
+        if (endpoint) {
+          const next = {
+            ...endpoint,
+            state: endpoint.state.map((value, index) =>
+              index === 0 ? value + request.settings.target_arclength : value
+            ),
+            param_value: endpoint.param_value + request.settings.target_arclength,
+          }
+          branch.points.push(next)
+          branch.indices.push((branch.indices.at(-1) ?? -1) + 1)
+        }
+        opts?.onProgress?.({
+          done: true,
+          current_step: 1,
+          max_steps: 1,
+          points_computed: 1,
+          bifurcations_found: 0,
+          current_param: branch.points.at(-1)?.param_value ?? 0,
+        })
+        return normalizeBranchEigenvalues(branch)
       },
       opts
     )

@@ -908,7 +908,10 @@ async function manageBranch(
             message: 'Branch Actions',
             choices: [
                 { name: 'Inspect Data', value: 'Inspect Data' },
-                { name: 'Extend Branch', value: 'Extend Branch' },
+                {
+                    name: branch.branchType === 'eq_manifold_1d' ? 'Extend Manifold' : 'Extend Branch',
+                    value: 'Extend Branch'
+                },
                 new inquirer.Separator(),
                 { name: 'Rename Branch', value: 'Rename Branch' },
                 { name: 'Delete Branch', value: 'Delete Branch' },

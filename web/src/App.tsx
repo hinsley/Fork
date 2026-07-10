@@ -308,6 +308,7 @@ function App() {
         onSolveEquilibrium={actions.solveEquilibrium}
         onCreateEquilibriumBranch={actions.createEquilibriumBranch}
         onCreateEquilibriumManifold1D={actions.createEquilibriumManifold1D}
+        onExtendEquilibriumManifold1D={actions.extendEquilibriumManifold1D}
         onCreateEquilibriumManifold2D={actions.createEquilibriumManifold2D}
         onCreateBranchFromPoint={actions.createBranchFromPoint}
         onExtendBranch={actions.extendBranch}
@@ -490,6 +491,7 @@ function App() {
                 onSolveEquilibrium={actions.solveEquilibrium}
                 onCreateEquilibriumBranch={actions.createEquilibriumBranch}
                 onCreateEquilibriumManifold1D={actions.createEquilibriumManifold1D}
+                onExtendEquilibriumManifold1D={actions.extendEquilibriumManifold1D}
                 onCreateEquilibriumManifold2D={actions.createEquilibriumManifold2D}
                 onCreateBranchFromPoint={actions.createBranchFromPoint}
                 onExtendBranch={actions.extendBranch}

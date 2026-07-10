@@ -131,7 +131,8 @@ function createStateSpaceStrideBranchFixture(branchType: StateSpaceStrideCycleLi
 function renderInspectorForStateSpaceStride(
   system: System,
   selectedNodeId: string,
-  onUpdateRender: ReturnType<typeof vi.fn>
+  onUpdateRender: ReturnType<typeof vi.fn>,
+  onExtendEquilibriumManifold1D: ReturnType<typeof vi.fn> = vi.fn()
 ) {
   render(
     <InspectorDetailsPanel
@@ -151,6 +152,7 @@ function renderInspectorForStateSpaceStride(
       onComputeCovariantLyapunovVectors={vi.fn().mockResolvedValue(undefined)}
       onSolveEquilibrium={vi.fn().mockResolvedValue(undefined)}
       onCreateEquilibriumBranch={vi.fn().mockResolvedValue(undefined)}
+      onExtendEquilibriumManifold1D={onExtendEquilibriumManifold1D}
       onCreateBranchFromPoint={vi.fn().mockResolvedValue(undefined)}
       onExtendBranch={vi.fn().mockResolvedValue(undefined)}
       onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
@@ -187,6 +189,112 @@ describe('InspectorDetailsPanel', () => {
     const lorenz = makeSurfaceProfileDefaults('lorenz_global')
     expect(adaptive.maxSpacing).toBe('0.5')
     expect(lorenz.maxSpacing).toBe('2.0')
+  })
+
+  it('offers map-cycle manifold extension without unrelated surface caps', async () => {
+    const user = userEvent.setup()
+    const config: SystemConfig = {
+      name: 'Map_Manifold_Extension_Inspector',
+      equations: ['2 * x'],
+      params: [],
+      paramNames: [],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map',
+    }
+    const base = createSystem({ name: config.name, config })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Cycle_2',
+      systemName: config.name,
+    }
+    const withEquilibrium = addObject(base, equilibrium)
+    const caps = {
+      max_steps: 80,
+      max_points: 200,
+      max_rings: 1,
+      max_vertices: 1,
+      max_time: 10,
+      max_iterations: 60,
+    }
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'cycle_manifold_p2_plus',
+      systemName: config.name,
+      parameterName: 'manifold',
+      parentObject: equilibrium.name,
+      startObject: equilibrium.name,
+      branchType: 'eq_manifold_1d',
+      data: {
+        points: [
+          { state: [0.01], param_value: 0, stability: 'None', eigenvalues: [] },
+          { state: [0.1], param_value: 0.09, stability: 'None', eigenvalues: [] },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: {
+          type: 'ManifoldEq1D',
+          stability: 'Unstable',
+          direction: 'Plus',
+          eig_index: 0,
+          method: 'test',
+          caps,
+          map_iterations: 2,
+          cycle_point_index: 1,
+        },
+        manifold_geometry: {
+          type: 'Curve',
+          dim: 1,
+          points_flat: [0.01, 0.1],
+          arclength: [0, 0.09],
+          direction: 'Plus',
+        },
+      },
+      settings: continuationSettings,
+      manifoldSettings: {
+        stability: 'Unstable',
+        direction: 'Plus',
+        eig_index: 0,
+        eps: 0.01,
+        target_arclength: 0.09,
+        integration_dt: 1,
+        caps,
+      },
+      timestamp: new Date().toISOString(),
+      mapIterations: 2,
+    }
+    const fixture = addBranch(withEquilibrium.system, branch, withEquilibrium.nodeId)
+    const onExtend = vi.fn().mockResolvedValue(undefined)
+
+    renderInspectorForStateSpaceStride(
+      fixture.system,
+      fixture.nodeId,
+      vi.fn(),
+      onExtend
+    )
+
+    await user.click(screen.getByTestId('manifold-extend-toggle'))
+    expect(screen.getByTestId('manifold-extend-max-iterations')).toBeVisible()
+    expect(screen.queryByText('Max vertices')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('manifold-extend-integration-dt')).not.toBeInTheDocument()
+    await user.clear(screen.getByTestId('manifold-extend-arclength'))
+    await user.type(screen.getByTestId('manifold-extend-arclength'), '0.25')
+    await user.click(screen.getByTestId('manifold-extend-submit'))
+
+    await waitFor(() => {
+      expect(onExtend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          branchId: fixture.nodeId,
+          settings: expect.objectContaining({
+            stability: 'Unstable',
+            direction: 'Plus',
+            eig_index: 0,
+            target_arclength: 0.25,
+            integration_dt: 1,
+          }),
+        })
+      )
+    })
   })
 
   it('binds name and render fields', async () => {

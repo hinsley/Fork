@@ -53,7 +53,7 @@ pub use manifold::{
     continue_limit_cycle_manifold_2d, continue_limit_cycle_manifold_2d_with_progress,
     continue_manifold_eq_1d, continue_manifold_eq_1d_with_kind,
     continue_manifold_eq_1d_with_kind_and_periodicity, continue_manifold_eq_2d,
-    continue_manifold_eq_2d_with_progress,
+    continue_manifold_eq_2d_with_progress, extend_manifold_eq_1d_with_kind_and_periodicity,
 };
 pub use periodic::{
     compute_limit_cycle_floquet_modes, continue_limit_cycle_collocation,
@@ -67,9 +67,9 @@ pub use types::{
     Codim2BifurcationType, ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint,
     ContinuationResumeState, ContinuationSettings, HomoclinicBasisSnapshot,
     HomoclinicResumeContext, HomotopyStage, Manifold1DSettings, Manifold2DSettings, ManifoldBounds,
-    ManifoldCurveGeometry, ManifoldCycle2DSettings, ManifoldDirection, ManifoldEigenKind,
-    ManifoldGeometry, ManifoldRingDiagnostic, ManifoldStability, ManifoldSurfaceGeometry,
-    ManifoldTerminationCaps, StepResult,
+    ManifoldCurveGeometry, ManifoldCurveResumeState, ManifoldCycle2DSettings, ManifoldDirection,
+    ManifoldEigenKind, ManifoldGeometry, ManifoldMapDomainCursor, ManifoldRingDiagnostic,
+    ManifoldStability, ManifoldSurfaceGeometry, ManifoldTerminationCaps, StepResult,
 };
 pub use util::{
     compute_eigenvalues, compute_nullspace_tangent, continuation_point_to_aug, hopf_pair_count,

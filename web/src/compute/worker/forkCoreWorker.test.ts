@@ -21,6 +21,8 @@ const wasmState = {
   lastSystemType: null as string | null,
   lastLimitCycleRunnerSystemType: null as string | null,
   lastEqManifoldPeriods: null as number[] | null,
+  lastEqManifoldExtensionPeriods: null as number[] | null,
+  lastEqManifoldExtensionPointCount: null as number | null,
   initPromise: Promise.resolve() as Promise<void>,
   initResolver: null as null | (() => void),
 }
@@ -299,6 +301,43 @@ beforeAll(async () => {
       }
     }
 
+    class MockEqManifold1DExtensionRunner {
+      private readonly branch: Record<string, unknown>
+      private progress = {
+        done: false,
+        current_step: 0,
+        max_steps: 2,
+        points_computed: 0,
+        bifurcations_found: 0,
+        current_param: 0,
+      }
+
+      constructor(...args: unknown[]) {
+        this.branch = args[6] as Record<string, unknown>
+        const points = (this.branch.points as unknown[]) ?? []
+        wasmState.lastEqManifoldExtensionPointCount = points.length
+        wasmState.lastEqManifoldExtensionPeriods = Array.from(args[8] as Float64Array)
+      }
+
+      run_steps() {
+        this.progress = {
+          ...this.progress,
+          done: true,
+          current_step: 2,
+          points_computed: 1,
+        }
+        return this.progress
+      }
+
+      get_progress() {
+        return this.progress
+      }
+
+      get_result() {
+        return this.branch
+      }
+    }
+
     class MockHomoclinicRunner extends MockContinuationRunner {
       override get_result(): MockRunnerResult {
         return {
@@ -366,6 +405,7 @@ beforeAll(async () => {
       WasmSystem: MockWasmSystem,
       WasmEquilibriumRunner: MockWasmEquilibriumRunner,
       WasmEqManifold1DRunner: MockEqManifold1DRunner,
+      WasmEqManifold1DExtensionRunner: MockEqManifold1DExtensionRunner,
       WasmFoldCurveRunner: MockContinuationRunner,
       WasmHopfCurveRunner: MockContinuationRunner,
       get WasmIsochroneCurveRunner() {
@@ -397,6 +437,8 @@ beforeEach(() => {
   wasmState.lastSystemType = null
   wasmState.lastLimitCycleRunnerSystemType = null
   wasmState.lastEqManifoldPeriods = null
+  wasmState.lastEqManifoldExtensionPeriods = null
+  wasmState.lastEqManifoldExtensionPointCount = null
   wasmState.initPromise = Promise.resolve()
   wasmState.initResolver = null
 })
@@ -1016,6 +1058,64 @@ describe('forkCoreWorker', () => {
           progress: expect.objectContaining({ done: false }),
         }),
         expect.objectContaining({ id: 'job-manifold-1d', ok: true, result: [] }),
+      ])
+    )
+  })
+
+  it('passes stored branches and periodic coordinates to the manifold extension runner', async () => {
+    const handler = requireHandler()
+    const branchData = {
+      points: [
+        { state: [0], param_value: 0, stability: 'None', eigenvalues: [] },
+        { state: [0.1], param_value: 0.1, stability: 'None', eigenvalues: [] },
+      ],
+      bifurcations: [],
+      indices: [0, 1],
+    }
+
+    await handler({
+      data: {
+        id: 'job-manifold-1d-extension',
+        kind: 'runEquilibriumManifold1DExtension',
+        payload: {
+          system: {
+            ...baseSystem,
+            periodicVariables: [{ enabled: true, period: 4.5 }],
+          },
+          branchData,
+          settings: {
+            stability: 'Unstable',
+            direction: 'Plus',
+            eig_index: 0,
+            eps: 1e-4,
+            target_arclength: 1,
+            integration_dt: 0.01,
+            caps: {
+              max_steps: 20,
+              max_points: 100,
+              max_rings: 1,
+              max_vertices: 1,
+              max_time: 2,
+            },
+          },
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(wasmState.lastEqManifoldExtensionPeriods).toEqual([4.5])
+    expect(wasmState.lastEqManifoldExtensionPointCount).toBe(2)
+    expect(workerScope.postMessage.mock.calls.map(([message]) => message)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'job-manifold-1d-extension',
+          kind: 'progress',
+          progress: expect.objectContaining({ done: false }),
+        }),
+        expect.objectContaining({
+          id: 'job-manifold-1d-extension',
+          ok: true,
+          result: branchData,
+        }),
       ])
     )
   })

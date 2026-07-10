@@ -41,6 +41,7 @@ import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/p
 import type {
   BranchContinuationRequest,
   BranchExtensionRequest,
+  EquilibriumManifold1DExtensionRequest,
   EquilibriumManifold1DRequest,
   EquilibriumManifold2DRequest,
   EquilibriumContinuationRequest,
@@ -176,6 +177,9 @@ type InspectorDetailsPanelProps = {
   onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   onCreateEquilibriumManifold1D?: (
     request: EquilibriumManifold1DRequest
+  ) => Promise<void>
+  onExtendEquilibriumManifold1D?: (
+    request: EquilibriumManifold1DExtensionRequest
   ) => Promise<void>
   onCreateEquilibriumManifold2D?: (
     request: EquilibriumManifold2DRequest
@@ -410,6 +414,12 @@ type EquilibriumManifoldDraft = {
   deltaAlphaMax: string
   integrationDt: string
   targetArclength: string
+  caps: ManifoldCapsDraft
+}
+
+type EquilibriumManifoldExtensionDraft = {
+  targetArclength: string
+  integrationDt: string
   caps: ManifoldCapsDraft
 }
 
@@ -797,6 +807,7 @@ function resolveManifoldCurveGeometryForInspector(
       source_arclength: geometry.source_arclength,
       direction: geometry.direction,
       solver_diagnostics: geometry.solver_diagnostics,
+      resume_state: geometry.resume_state,
     }
   }
   return null
@@ -1271,6 +1282,26 @@ function makeEquilibriumManifoldDraft(
     integrationDt: surfaceDefaults ? profileDefaults.integrationDt : '0.01',
     targetArclength: surfaceDefaults ? profileDefaults.targetArclength : '10',
     caps: surfaceDefaults ? profileDefaults.caps : makeDefaultManifoldCapsDraft('curve_1d'),
+  }
+}
+
+function makeEquilibriumManifoldExtensionDraft(
+  branch?: ContinuationObject | null
+): EquilibriumManifoldExtensionDraft {
+  const settings = branch?.manifoldSettings
+  const defaultCaps = makeDefaultManifoldCapsDraft('curve_1d')
+  const caps = settings?.caps
+  return {
+    targetArclength: settings?.target_arclength?.toString() ?? '10',
+    integrationDt: settings?.integration_dt?.toString() ?? '0.01',
+    caps: {
+      maxSteps: caps?.max_steps?.toString() ?? defaultCaps.maxSteps,
+      maxPoints: caps?.max_points?.toString() ?? defaultCaps.maxPoints,
+      maxRings: caps?.max_rings?.toString() ?? defaultCaps.maxRings,
+      maxVertices: caps?.max_vertices?.toString() ?? defaultCaps.maxVertices,
+      maxTime: caps?.max_time?.toString() ?? defaultCaps.maxTime,
+      maxIterations: caps?.max_iterations?.toString() ?? defaultCaps.maxIterations,
+    },
   }
 }
 
@@ -1827,6 +1858,7 @@ export function InspectorDetailsPanel({
   onSolveEquilibrium,
   onCreateEquilibriumBranch,
   onCreateEquilibriumManifold1D = async () => {},
+  onExtendEquilibriumManifold1D = async () => {},
   onCreateEquilibriumManifold2D = async () => {},
   onCreateBranchFromPoint,
   onExtendBranch,
@@ -1933,6 +1965,7 @@ export function InspectorDetailsPanel({
         'ns_curve',
       ].includes(branch.branchType)
   )
+  const canExtendEquilibriumManifold1D = branch?.branchType === 'eq_manifold_1d'
   const hasBranch = Boolean(branch)
   const isLimitCycleBranch =
     branch?.branchType === 'limit_cycle' || branch?.branchType === 'isochrone_curve'
@@ -2272,6 +2305,12 @@ export function InspectorDetailsPanel({
     () => makeEquilibriumManifoldDraft(system.config, equilibrium)
   )
   const [equilibriumManifoldError, setEquilibriumManifoldError] = useState<string | null>(null)
+  const [equilibriumManifoldExtensionDraft, setEquilibriumManifoldExtensionDraft] =
+    useState<EquilibriumManifoldExtensionDraft>(() =>
+      makeEquilibriumManifoldExtensionDraft(branch)
+    )
+  const [equilibriumManifoldExtensionError, setEquilibriumManifoldExtensionError] =
+    useState<string | null>(null)
   const [limitCycleFromOrbitDraft, setLimitCycleFromOrbitDraft] =
     useState<LimitCycleFromOrbitDraft>(() => makeLimitCycleFromOrbitDraft(system.config))
   const [limitCycleFromOrbitError, setLimitCycleFromOrbitError] = useState<string | null>(
@@ -3433,8 +3472,10 @@ export function InspectorDetailsPanel({
       return { ...prev, name }
     })
     setBranchExtensionDraft(makeBranchExtensionDraft(stableSystemConfigRef.current, branch))
+    setEquilibriumManifoldExtensionDraft(makeEquilibriumManifoldExtensionDraft(branch))
     setBranchContinuationError(null)
     setBranchExtensionError(null)
+    setEquilibriumManifoldExtensionError(null)
     setBranchPointError(null)
     setFoldCurveError(null)
     setHopfCurveError(null)
@@ -5400,6 +5441,73 @@ export function InspectorDetailsPanel({
       branchId: selectedNodeId,
       settings,
       forward: branchExtensionDraft.forward,
+    })
+  }
+
+  const handleExtendEquilibriumManifold1D = async () => {
+    if (runDisabled) {
+      setEquilibriumManifoldExtensionError(
+        'Apply valid system settings before extending.'
+      )
+      return
+    }
+    if (!branch || !selectedNodeId || branch.branchType !== 'eq_manifold_1d') {
+      setEquilibriumManifoldExtensionError(
+        'Select a 1D equilibrium manifold branch to extend.'
+      )
+      return
+    }
+    const branchType = branch.data.branch_type
+    if (!branchType || branchType.type !== 'ManifoldEq1D') {
+      setEquilibriumManifoldExtensionError(
+        'The manifold branch is missing its numerical metadata.'
+      )
+      return
+    }
+    const targetArclength = parseDraftNumber(
+      equilibriumManifoldExtensionDraft.targetArclength
+    )
+    const parsedIntegrationDt = parseDraftNumber(
+      equilibriumManifoldExtensionDraft.integrationDt
+    )
+    const integrationDt = systemDraft.type === 'map' ? 1 : parsedIntegrationDt
+    if (targetArclength === null || targetArclength <= 0) {
+      setEquilibriumManifoldExtensionError(
+        'Additional arclength must be a positive number.'
+      )
+      return
+    }
+    if (integrationDt === null || integrationDt === 0) {
+      setEquilibriumManifoldExtensionError('Integration dt must be non-zero.')
+      return
+    }
+    const parsedCaps = parseManifoldCapsDraft(
+      equilibriumManifoldExtensionDraft.caps,
+      {
+        requireMaxTime: systemDraft.type !== 'map',
+        requireMaxIterations: systemDraft.type === 'map',
+      }
+    )
+    if (!parsedCaps.caps) {
+      setEquilibriumManifoldExtensionError(
+        parsedCaps.error ?? 'Invalid manifold caps.'
+      )
+      return
+    }
+    const previousSettings = branch.manifoldSettings
+    setEquilibriumManifoldExtensionError(null)
+    await onExtendEquilibriumManifold1D({
+      branchId: selectedNodeId,
+      settings: {
+        stability: branchType.stability,
+        direction: branchType.direction,
+        eig_index: branchType.eig_index,
+        eps: previousSettings?.eps ?? 1e-3,
+        target_arclength: targetArclength,
+        integration_dt: integrationDt,
+        caps: parsedCaps.caps,
+        bounds: previousSettings?.bounds,
+      },
     })
   }
 
@@ -11060,6 +11168,10 @@ export function InspectorDetailsPanel({
                                       ? 'yes'
                                       : 'no',
                                   },
+                                  {
+                                    label: 'Extensions',
+                                    value: manifoldCurveSolverDiagnostics.extension_count ?? 0,
+                                  },
                                 ]
                               : []),
                             ...(branchStartPoint
@@ -11521,6 +11633,127 @@ export function InspectorDetailsPanel({
                     </InspectorDisclosure>
                   </>
                 )}
+
+                {canExtendEquilibriumManifold1D ? (
+                  <InspectorDisclosure
+                    key={`${selectionKey}-manifold-extend`}
+                    title="Extend Manifold"
+                    testId="manifold-extend-toggle"
+                    defaultOpen={false}
+                  >
+                    <div className="inspector-section">
+                      {runDisabled ? (
+                        <div className="field-warning">
+                          Apply valid system changes before extending.
+                        </div>
+                      ) : null}
+                      <label>
+                        Additional arclength
+                        <input
+                          type="number"
+                          value={equilibriumManifoldExtensionDraft.targetArclength}
+                          onChange={(event) =>
+                            setEquilibriumManifoldExtensionDraft((prev) => ({
+                              ...prev,
+                              targetArclength: event.target.value,
+                            }))
+                          }
+                          data-testid="manifold-extend-arclength"
+                        />
+                      </label>
+                      {systemDraft.type === 'flow' ? (
+                        <label>
+                          Integration dt
+                          <input
+                            type="number"
+                            value={equilibriumManifoldExtensionDraft.integrationDt}
+                            onChange={(event) =>
+                              setEquilibriumManifoldExtensionDraft((prev) => ({
+                                ...prev,
+                                integrationDt: event.target.value,
+                              }))
+                            }
+                            data-testid="manifold-extend-integration-dt"
+                          />
+                        </label>
+                      ) : null}
+                      <label>
+                        Max integration steps
+                        <input
+                          type="number"
+                          value={equilibriumManifoldExtensionDraft.caps.maxSteps}
+                          onChange={(event) =>
+                            setEquilibriumManifoldExtensionDraft((prev) => ({
+                              ...prev,
+                              caps: { ...prev.caps, maxSteps: event.target.value },
+                            }))
+                          }
+                          data-testid="manifold-extend-max-steps"
+                        />
+                      </label>
+                      <label>
+                        Max points to add
+                        <input
+                          type="number"
+                          value={equilibriumManifoldExtensionDraft.caps.maxPoints}
+                          onChange={(event) =>
+                            setEquilibriumManifoldExtensionDraft((prev) => ({
+                              ...prev,
+                              caps: { ...prev.caps, maxPoints: event.target.value },
+                            }))
+                          }
+                          data-testid="manifold-extend-max-points"
+                        />
+                      </label>
+                      {systemDraft.type === 'flow' ? (
+                        <label>
+                          Max integration time
+                          <input
+                            type="number"
+                            value={equilibriumManifoldExtensionDraft.caps.maxTime}
+                            onChange={(event) =>
+                              setEquilibriumManifoldExtensionDraft((prev) => ({
+                                ...prev,
+                                caps: { ...prev.caps, maxTime: event.target.value },
+                              }))
+                            }
+                            data-testid="manifold-extend-max-time"
+                          />
+                        </label>
+                      ) : (
+                        <label>
+                          Max map iterations
+                          <input
+                            type="number"
+                            value={equilibriumManifoldExtensionDraft.caps.maxIterations}
+                            onChange={(event) =>
+                              setEquilibriumManifoldExtensionDraft((prev) => ({
+                                ...prev,
+                                caps: {
+                                  ...prev.caps,
+                                  maxIterations: event.target.value,
+                                },
+                              }))
+                            }
+                            data-testid="manifold-extend-max-iterations"
+                          />
+                        </label>
+                      )}
+                      {equilibriumManifoldExtensionError ? (
+                        <div className="field-error">
+                          {equilibriumManifoldExtensionError}
+                        </div>
+                      ) : null}
+                      <button
+                        onClick={handleExtendEquilibriumManifold1D}
+                        disabled={runDisabled}
+                        data-testid="manifold-extend-submit"
+                      >
+                        Extend Manifold
+                      </button>
+                    </div>
+                  </InspectorDisclosure>
+                ) : null}
 
                 {canExtendBranch ? (
                   <InspectorDisclosure

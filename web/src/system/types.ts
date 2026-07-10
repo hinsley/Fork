@@ -168,7 +168,27 @@ export interface ManifoldCurveGeometry {
   source_arclength?: number[]
   direction: ManifoldDirection
   solver_diagnostics?: ManifoldCurveSolverDiagnostics
+  resume_state?: ManifoldCurveResumeState
 }
+
+export interface ManifoldMapDomainCursor {
+  segment_index: number
+  alpha: number
+}
+
+export type ManifoldCurveResumeState =
+  | { type: 'Flow'; version: number; endpoint: number[] }
+  | {
+      type: 'Map'
+      version: number
+      cycle_anchor: number[]
+      active_domain: number[][]
+      pending_points?: number[][]
+      cursor?: ManifoldMapDomainCursor
+      spacing_target: number
+      map_step_iterations: number
+      growth_iterations: number
+    }
 
 export interface ManifoldCurveSolverDiagnostics {
   termination_reason: string
@@ -180,6 +200,7 @@ export interface ManifoldCurveSolverDiagnostics {
   map_growth_iterations: number
   preimage_failures: number
   refinement_failures: number
+  extension_count: number
   source_correction_norm: number
   least_period?: number
 }
@@ -241,6 +262,7 @@ export type ManifoldGeometry =
       source_arclength?: number[]
       direction: ManifoldDirection
       solver_diagnostics?: ManifoldCurveSolverDiagnostics
+      resume_state?: ManifoldCurveResumeState
     }
   | {
       type: 'Surface'
@@ -427,6 +449,7 @@ export interface ContinuationObject {
   data: ContinuationBranchData
   settings: ContinuationSettings
   manifoldSettings?: EquilibriumManifold1DSettings
+  manifoldFingerprint?: string
   timestamp: string
   params?: number[]
   mapIterations?: number

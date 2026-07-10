@@ -355,6 +355,37 @@ pub struct ManifoldCurveGeometry {
     pub source_arclength: Option<Vec<f64>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub solver_diagnostics: Option<ManifoldCurveSolverDiagnostics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_state: Option<ManifoldCurveResumeState>,
+}
+
+/// Position of the emitted endpoint within a stored map fundamental domain.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ManifoldMapDomainCursor {
+    pub segment_index: usize,
+    pub alpha: f64,
+}
+
+/// Versioned numerical state required to extend a 1D manifold without recomputing it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
+pub enum ManifoldCurveResumeState {
+    Flow {
+        version: usize,
+        endpoint: Vec<f64>,
+    },
+    Map {
+        version: usize,
+        cycle_anchor: Vec<f64>,
+        active_domain: Vec<Vec<f64>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pending_points: Option<Vec<Vec<f64>>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cursor: Option<ManifoldMapDomainCursor>,
+        spacing_target: f64,
+        map_step_iterations: usize,
+        growth_iterations: usize,
+    },
 }
 
 /// Solver-level diagnostics for a 1D manifold curve.
@@ -378,6 +409,8 @@ pub struct ManifoldCurveSolverDiagnostics {
     pub preimage_failures: usize,
     #[serde(default)]
     pub refinement_failures: usize,
+    #[serde(default)]
+    pub extension_count: usize,
     #[serde(default)]
     pub source_correction_norm: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -36,7 +36,7 @@ test('lorenz 2D stable manifold adaptive defaults produce nontrivial growth', as
 
   await harness.openDisclosure('equilibrium-manifold-toggle')
   await page.getByTestId('equilibrium-manifold-name').fill('lorenz_eqm2d_e2e')
-  await page.getByTestId('equilibrium-manifold-mode').selectOption('surface_2d')
+  await expect(page.getByTestId('equilibrium-manifold-mode')).toHaveValue('surface_2d')
   await expect(page.getByTestId('equilibrium-manifold2d-profile')).toHaveValue('adaptive_global')
   await page.getByTestId('equilibrium-manifold2d-target-radius').fill('8')
   await page.getByTestId('equilibrium-manifold2d-target-arclength').fill('20')
