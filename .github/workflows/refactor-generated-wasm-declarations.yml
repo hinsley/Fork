@@ -49,7 +49,25 @@ jobs:
 
       - name: Apply generated-declaration refactor
         working-directory: target
-        run: python ../automation/.github/scripts/refactor_generated_wasm_declarations.py
+        shell: bash
+        run: |
+          python ../automation/.github/scripts/refactor_generated_wasm_declarations.py
+          python <<'PY'
+          from pathlib import Path
+          path = Path('cli/src/wasm.ts')
+          source = path.read_text()
+          source = source.replace(
+              '        return continueFromHopf(\n            new Float64Array(hopfState),',
+              '        return continueFromHopf.call(\n            this.instance,\n            new Float64Array(hopfState),',
+              1,
+          )
+          source = source.replace(
+              '        return extendBranch(\n            branchData,',
+              '        return extendBranch.call(\n            this.instance,\n            branchData,',
+              1,
+          )
+          path.write_text(source)
+          PY
 
       - name: Verify refactor shape
         working-directory: target
@@ -64,6 +82,8 @@ jobs:
           grep -Fq 'export type ForkWasmModule = typeof import' cli/src/wasm.ts
           ! grep -Fq 'let wasmModule: any' cli/src/wasm.ts
           ! grep -Fq 'instance: any' cli/src/wasm.ts
+          grep -Fq 'return continueFromHopf.call(' cli/src/wasm.ts
+          grep -Fq 'return extendBranch.call(' cli/src/wasm.ts
           grep -Fq '"prebuild": "npm run wasm:node"' cli/package.json
           grep -Fq '"prestart": "npm run wasm:node"' cli/package.json
 
