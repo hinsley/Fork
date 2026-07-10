@@ -1,0 +1,122 @@
+name: Temporary generated WASM declaration executor
+
+on:
+  pull_request:
+    branches:
+      - refactor/generated-wasm-declarations
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refactor-test-commit:
+    if: github.repository == 'hinsley/Fork'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out automation source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: automation
+
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: refactor/generated-wasm-declarations
+          fetch-depth: 0
+          path: target
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            target/cli/package-lock.json
+            target/web/package-lock.json
+
+      - name: Apply generated-declaration refactor
+        working-directory: target
+        run: python ../automation/.github/scripts/refactor_generated_wasm_declarations.py
+
+      - name: Verify refactor shape
+        working-directory: target
+        shell: bash
+        run: |
+          git diff --check
+          test ! -e web/src/types/wasm.d.ts
+          grep -Fq "type WasmModule = typeof import('@fork-wasm')" web/src/compute/worker/forkCoreWorker.ts
+          ! grep -Fq 'type WasmModule = {' web/src/compute/worker/forkCoreWorker.ts
+          grep -Fq "'@fork-wasm': path.resolve(__dirname, '..', 'crates', 'fork_wasm', 'pkg-web')" web/vite.config.ts
+          grep -Fq '"@fork-wasm": ["../crates/fork_wasm/pkg-web"]' web/tsconfig.app.json
+          grep -Fq 'export type ForkWasmModule = typeof import' cli/src/wasm.ts
+          ! grep -Fq 'let wasmModule: any' cli/src/wasm.ts
+          ! grep -Fq 'instance: any' cli/src/wasm.ts
+          grep -Fq '"prebuild": "npm run wasm:node"' cli/package.json
+          grep -Fq '"prestart": "npm run wasm:node"' cli/package.json
+
+      - name: Run Rust workspace tests
+        working-directory: target
+        run: cargo test --workspace
+
+      - name: Validate clean-checkout CLI build and tests
+        working-directory: target
+        shell: bash
+        run: |
+          rm -rf crates/fork_wasm/pkg
+          cd cli
+          npm ci
+          npm run build
+          test -f ../crates/fork_wasm/pkg/fork_wasm.d.ts
+          npm test
+
+      - name: Validate clean-checkout web build and tests
+        working-directory: target
+        shell: bash
+        run: |
+          rm -rf crates/fork_wasm/pkg-web
+          cd web
+          npm ci
+          npm run lint
+          npm run build
+          test -f ../crates/fork_wasm/pkg-web/fork_wasm.d.ts
+          npx playwright install --with-deps
+          npm test
+
+      - name: Commit tested implementation
+        working-directory: target
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -- \
+            web/vite.config.ts \
+            web/tsconfig.app.json \
+            web/src/types/wasm.d.ts \
+            web/src/compute/worker/forkCoreWorker.ts \
+            cli/package.json \
+            cli/src/wasm.ts
+          git diff --cached --check
+          git commit -m "refactor(wasm): consume generated wasm-pack declarations"
+          git push origin HEAD:refs/heads/refactor/generated-wasm-declarations
+
+      - name: Close and remove temporary branches
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr close "$PR_NUMBER" \
+            --repo hinsley/Fork \
+            --comment "Automation completed: the tested generated-declaration implementation was committed to refactor/generated-wasm-declarations." \
+            --delete-branch
+          gh pr close 30 --repo hinsley/Fork --comment "Inspection complete; generated declaration artifacts were consumed by the feature implementation." || true
+          gh api -X DELETE repos/hinsley/Fork/git/refs/heads/automation/inspect-wasm-declarations || true
