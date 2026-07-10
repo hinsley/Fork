@@ -1,0 +1,106 @@
+name: Temporary typed compute protocol executor
+
+on:
+  pull_request:
+    branches:
+      - refactor/typed-compute-protocol
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refactor-test-commit:
+    if: github.repository == 'hinsley/Fork'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out automation source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: automation
+
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: refactor/typed-compute-protocol
+          fetch-depth: 0
+          path: target
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: target/web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: target/web
+        run: npm ci
+
+      - name: Apply typed protocol refactor
+        working-directory: target
+        run: python ../automation/.github/scripts/refactor_compute_protocol.py
+
+      - name: Verify mechanical shape
+        working-directory: target
+        shell: bash
+        run: |
+          git diff --check
+          test -f web/src/compute/computeProtocol.ts
+          ! grep -q '^type WorkerRequest =' web/src/compute/wasmClient.ts
+          ! grep -q '^type WorkerRequest =' web/src/compute/worker/forkCoreWorker.ts
+          ! grep -q "if (message.kind === 'simulateOrbit')" web/src/compute/worker/forkCoreWorker.ts
+          grep -q 'satisfies ComputeHandlerMap' web/src/compute/worker/forkCoreWorker.ts
+
+      - name: Lint web
+        working-directory: target/web
+        run: npm run lint
+
+      - name: Run protocol and client tests
+        working-directory: target/web
+        run: npx vitest run src/compute/computeProtocol.test.ts src/compute/wasmClient.test.ts
+
+      - name: Build web and WASM
+        working-directory: target/web
+        run: npm run build
+
+      - name: Run worker integration tests
+        working-directory: target/web
+        run: npx vitest run src/compute/worker/forkCoreWorker.test.ts
+
+      - name: Run full web unit suite
+        working-directory: target/web
+        run: npm run test:unit
+
+      - name: Commit tested implementation
+        working-directory: target
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            web/src/compute/computeProtocol.ts \
+            web/src/compute/wasmClient.ts \
+            web/src/compute/worker/forkCoreWorker.ts
+          git diff --cached --check
+          git commit -m "refactor(web): centralize compute operation protocol"
+          git push origin HEAD:refs/heads/refactor/typed-compute-protocol
+
+      - name: Close and remove temporary automation branch
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr close "$PR_NUMBER" \
+            --repo hinsley/Fork \
+            --comment "Automation completed: the tested typed-protocol implementation was committed to refactor/typed-compute-protocol." \
+            --delete-branch
