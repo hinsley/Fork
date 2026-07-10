@@ -12,6 +12,7 @@ use fork_core::continuation::{
     continue_limit_cycle_manifold_2d, continue_limit_cycle_manifold_2d_with_progress,
     continue_manifold_eq_1d_with_kind_and_periodicity, continue_manifold_eq_2d,
     continue_manifold_eq_2d_with_progress, continue_with_problem, extend_limit_cycle_collocation,
+    extend_limit_cycle_manifold_2d_with_progress, extend_manifold_eq_2d_with_progress,
     homoclinic_setup_from_homoclinic_point_with_source_extras,
     homoclinic_setup_from_homotopy_saddle_point, homoclinic_setup_from_large_cycle,
     homotopy_saddle_setup_from_equilibrium, limit_cycle_setup_from_hopf,
@@ -20,8 +21,8 @@ use fork_core::continuation::{
     ContinuationBranch, ContinuationSettings, FoldCurveProblem, HomoclinicExtraFlags,
     HomoclinicFixedScalars, HomoclinicSetup, HomotopySaddleSetup, HopfCurveProblem,
     IsochroneCurveProblem, LPCCurveProblem, LimitCycleSetup, Manifold1DSettings,
-    Manifold2DSettings, ManifoldCycle2DSettings, ManifoldGeometry, NSCurveProblem, OrbitTimeMode,
-    PDCurveProblem, StepResult,
+    Manifold2DSettings, ManifoldCycle2DSettings, ManifoldGeometry, ManifoldSurfaceResumeState,
+    NSCurveProblem, OrbitTimeMode, PDCurveProblem, StepResult,
 };
 use fork_core::equilibrium::{compute_jacobian, SystemKind};
 use fork_core::traits::DynamicalSystem;
@@ -42,6 +43,40 @@ fn manifold_ring_count(branch: &ContinuationBranch) -> usize {
     match branch.manifold_geometry.as_ref() {
         Some(ManifoldGeometry::Surface(surface)) => surface.ring_offsets.len(),
         _ => 0,
+    }
+}
+
+fn manifold_surface_arclength(branch: &ContinuationBranch) -> f64 {
+    let resume_state = match branch.manifold_geometry.as_ref() {
+        Some(ManifoldGeometry::Surface(surface)) => surface.resume_state.as_deref(),
+        _ => None,
+    };
+    match resume_state {
+        Some(ManifoldSurfaceResumeState::GeodesicRings {
+            accumulated_arclength,
+            ..
+        }) => *accumulated_arclength,
+        Some(ManifoldSurfaceResumeState::HkoIsochronFibers {
+            emitted_arclength, ..
+        })
+        | Some(ManifoldSurfaceResumeState::SegmentedPreimageFibers {
+            emitted_arclength, ..
+        }) => *emitted_arclength,
+        None => 0.0,
+    }
+}
+
+enum Manifold2DExtensionSettings {
+    Equilibrium(Manifold2DSettings),
+    Cycle(ManifoldCycle2DSettings),
+}
+
+impl Manifold2DExtensionSettings {
+    fn target_arclength(&self) -> f64 {
+        match self {
+            Self::Equilibrium(settings) => settings.target_arclength,
+            Self::Cycle(settings) => settings.target_arclength,
+        }
     }
 }
 
@@ -502,6 +537,115 @@ impl WasmSystem {
         .with_rings_computed(rings);
         emit_progress(&progress_callback, final_progress)?;
         to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    /// Extend a persisted 2D manifold while reporting each accepted new ring.
+    pub fn extend_manifold_2d_with_progress(
+        &mut self,
+        branch_val: JsValue,
+        settings_val: JsValue,
+        progress_callback: Function,
+    ) -> Result<JsValue, JsValue> {
+        if !matches!(self.system_type, SystemType::Flow) {
+            return Err(JsValue::from_str(
+                "2D invariant-manifold extension is available for flow systems only.",
+            ));
+        }
+        let branch: ContinuationBranch = from_value(branch_val)
+            .map_err(|e| JsValue::from_str(&format!("Invalid manifold branch: {}", e)))?;
+        let extension_settings = match &branch.branch_type {
+            BranchType::ManifoldEq2D { .. } => {
+                Manifold2DExtensionSettings::Equilibrium(from_value(settings_val).map_err(|e| {
+                    JsValue::from_str(&format!("Invalid equilibrium manifold settings: {}", e))
+                })?)
+            }
+            BranchType::ManifoldCycle2D { .. } => {
+                Manifold2DExtensionSettings::Cycle(from_value(settings_val).map_err(|e| {
+                    JsValue::from_str(&format!("Invalid cycle manifold settings: {}", e))
+                })?)
+            }
+            _ => {
+                return Err(JsValue::from_str(
+                    "Only 2D equilibrium or limit-cycle manifold branches can be extended.",
+                ));
+            }
+        };
+
+        let start_arclength = manifold_surface_arclength(&branch);
+        let start_rings = manifold_ring_count(&branch);
+        let start_points = branch.points.len();
+        let target_arclength = extension_settings.target_arclength().max(0.0);
+        let max_arclength_steps = arclength_progress_max(target_arclength);
+        emit_progress(
+            &progress_callback,
+            StepResult::new(false, 0, max_arclength_steps, 0, 0, 0.0).with_rings_computed(0),
+        )?;
+
+        let mut callback_error: Option<JsValue> = None;
+        let mut latest_arclength = 0.0f64;
+        let mut latest_radius = 0.0f64;
+        let mut on_ring_progress = |rings: usize, points: usize, arclength: f64, radius: f64| {
+            if callback_error.is_some() {
+                return;
+            }
+            latest_arclength = (arclength - start_arclength).max(0.0);
+            latest_radius = radius;
+            let arclength_step = arclength_progress_step(latest_arclength);
+            let max_step = max_arclength_steps.max(arclength_step.max(1));
+            let progress = StepResult::new(
+                false,
+                arclength_step.min(max_step),
+                max_step,
+                points,
+                0,
+                radius,
+            )
+            .with_rings_computed(rings.saturating_sub(start_rings));
+            if let Err(err) = emit_progress(&progress_callback, progress) {
+                callback_error = Some(err);
+            }
+        };
+
+        let extended = match extension_settings {
+            Manifold2DExtensionSettings::Equilibrium(settings) => {
+                extend_manifold_eq_2d_with_progress(
+                    &mut self.system,
+                    branch,
+                    settings,
+                    Some(&mut on_ring_progress),
+                )
+            }
+            Manifold2DExtensionSettings::Cycle(settings) => {
+                extend_limit_cycle_manifold_2d_with_progress(
+                    &mut self.system,
+                    branch,
+                    settings,
+                    Some(&mut on_ring_progress),
+                )
+            }
+        }
+        .map_err(|e| JsValue::from_str(&format!("2D manifold extension failed: {}", e)))?;
+        if let Some(err) = callback_error {
+            return Err(err);
+        }
+
+        let rings = manifold_ring_count(&extended).saturating_sub(start_rings);
+        let points = extended.points.len().saturating_sub(start_points);
+        let final_step = arclength_progress_step(latest_arclength);
+        let final_max_step = max_arclength_steps.max(final_step.max(1));
+        emit_progress(
+            &progress_callback,
+            StepResult::new(
+                true,
+                final_step.min(final_max_step),
+                final_max_step,
+                points,
+                0,
+                latest_radius,
+            )
+            .with_rings_computed(rings),
+        )?;
+        to_value(&extended).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
     pub fn compute_limit_cycle_floquet_modes(

@@ -175,6 +175,33 @@ beforeAll(async () => {
           indices: [],
         }
       }
+      extend_manifold_2d_with_progress(
+        branch: Record<string, unknown>,
+        _settings: Record<string, unknown>,
+        onProgress: (progress: Record<string, unknown>) => void
+      ) {
+        const points = (branch.points as unknown[]) ?? []
+        wasmState.lastManifold2DExtensionPointCount = points.length
+        onProgress({
+          done: false,
+          current_step: 0,
+          max_steps: 1,
+          points_computed: 0,
+          bifurcations_found: 0,
+          current_param: 0,
+          rings_computed: 0,
+        })
+        onProgress({
+          done: true,
+          current_step: 1,
+          max_steps: 1,
+          points_computed: 8,
+          bifurcations_found: 0,
+          current_param: 1,
+          rings_computed: 1,
+        })
+        return branch
+      }
     }
 
     class MockWasmEquilibriumRunner {
@@ -1211,6 +1238,11 @@ describe('forkCoreWorker', () => {
     expect(wasmState.lastManifold2DExtensionPointCount).toBe(1)
     expect(workerScope.postMessage.mock.calls.map(([message]) => message)).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          id: 'job-manifold-2d-extension',
+          kind: 'progress',
+          progress: expect.objectContaining({ done: false }),
+        }),
         expect.objectContaining({
           id: 'job-manifold-2d-extension',
           kind: 'progress',

@@ -246,7 +246,8 @@ function App() {
                 ringsComputed: continuationProgress.progress.rings_computed,
                 showArclength:
                   continuationProgress.label === 'Invariant Manifold (Equilibrium 2D)' ||
-                  continuationProgress.label === 'Invariant Manifold (Limit Cycle 2D)',
+                  continuationProgress.label === 'Invariant Manifold (Limit Cycle 2D)' ||
+                  continuationProgress.label === 'Extend Invariant Manifold (2D)',
                 arclength: continuationProgress.progress.current_step,
                 arclengthTarget: continuationProgress.progress.max_steps,
                 radius: continuationProgress.progress.current_param,
