@@ -1,0 +1,32 @@
+name: Inspect generated wasm declarations
+
+on:
+  push:
+    branches:
+      - automation/inspect-wasm-declarations
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: jetli/wasm-pack-action@v0.4.0
+      - name: Generate web and Node packages
+        working-directory: crates/fork_wasm
+        run: |
+          wasm-pack build --target web --out-dir pkg-web
+          wasm-pack build --target nodejs
+      - name: Upload generated package metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-pack-declarations
+          path: |
+            crates/fork_wasm/pkg-web/fork_wasm.d.ts
+            crates/fork_wasm/pkg-web/package.json
+            crates/fork_wasm/pkg/fork_wasm.d.ts
+            crates/fork_wasm/pkg/package.json
+          if-no-files-found: error
