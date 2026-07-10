@@ -3,11 +3,12 @@ import type { WasmBridge } from './wasm'
 type GeneratedWasmModule = typeof import('../../crates/fork_wasm/pkg/fork_wasm')
 type Assert<T extends true> = T
 type IsAny<T> = 0 extends 1 & T ? true : false
-type IsConstructable<T> = T extends abstract new (
-  ...args: infer _Arguments
-) => infer _Instance
-  ? true
-  : false
+type ConstructorParts<T> = T extends abstract new (
+  ...args: infer Arguments
+) => infer Instance
+  ? [Arguments, Instance]
+  : never
+type IsConstructable<T> = [ConstructorParts<T>] extends [never] ? false : true
 
 type BridgeInstance = WasmBridge['instance']
 
