@@ -169,7 +169,8 @@ describe('runSteppedRunnerToCompletion', () => {
         vi.fn()
       )
     ).toBe('complete')
-    expect(runSteps).toHaveBeenCalledExactlyOnceWith(1)
+    expect(runSteps).toHaveBeenCalledTimes(1)
+    expect(runSteps).toHaveBeenCalledWith(1)
   })
 
   it('returns immediately when the runner is already done', () => {
@@ -190,7 +191,8 @@ describe('runSteppedRunnerToCompletion', () => {
       )
     ).toBe('complete')
     expect(runSteps).not.toHaveBeenCalled()
-    expect(onProgress).toHaveBeenCalledExactlyOnceWith(makeProgress(0, 0, true))
+    expect(onProgress).toHaveBeenCalledTimes(1)
+    expect(onProgress).toHaveBeenCalledWith(makeProgress(0, 0, true))
     expect(getResult).toHaveBeenCalledTimes(1)
   })
 
