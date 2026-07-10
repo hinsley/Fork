@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
   pull-requests: write
 
 jobs:
@@ -62,15 +63,60 @@ jobs:
         working-directory: target/web
         run: npm run lint
 
-      - name: Run web unit tests
+      - name: Run focused stepped runner tests
+        id: focused-tests
         working-directory: target/web
-        run: npm run test:unit
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:unit -- src/compute/worker/steppedRunner.test.ts 2>&1 | tee /tmp/focused-tests.log
+
+      - name: Report focused test failure
+        if: always() && steps.focused-tests.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          {
+            echo 'Focused stepped-runner test failure:'
+            echo '```text'
+            tail -n 180 /tmp/focused-tests.log
+            echo '```'
+          } > /tmp/test-comment.md
+          gh pr comment "$PR_NUMBER" --repo hinsley/Fork --body-file /tmp/test-comment.md
+
+      - name: Run web unit tests
+        id: unit-tests
+        if: steps.focused-tests.outcome == 'success'
+        working-directory: target/web
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:unit 2>&1 | tee /tmp/unit-tests.log
+
+      - name: Report unit test failure
+        if: always() && steps.unit-tests.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          {
+            echo 'Full web unit-suite failure:'
+            echo '```text'
+            tail -n 180 /tmp/unit-tests.log
+            echo '```'
+          } > /tmp/test-comment.md
+          gh pr comment "$PR_NUMBER" --repo hinsley/Fork --body-file /tmp/test-comment.md
 
       - name: Build web
+        if: steps.unit-tests.outcome == 'success'
         working-directory: target/web
         run: npm run build
 
       - name: Commit tested refactor
+        if: success()
         working-directory: target
         shell: bash
         run: |
