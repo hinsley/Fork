@@ -1,0 +1,55 @@
+name: Temporary stepped-runner main sync
+
+on:
+  pull_request:
+    branches:
+      - refactor/web-stepped-runner-executor
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-branch:
+    if: github.repository == 'hinsley/Fork'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out automation source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: automation
+
+      - name: Check out target repository
+        uses: actions/checkout@v4
+        with:
+          ref: refactor/web-stepped-runner-executor
+          fetch-depth: 0
+          path: target
+
+      - name: Merge current main into clean refactor history
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main refactor/web-stepped-runner-executor
+          git reset --hard fe151966329ea2c68c3e62d9dbd0da62c15cb6c8
+          git merge --no-ff origin/main \
+            -m "Merge branch 'main' into refactor/web-stepped-runner-executor"
+          git diff --check
+          git push --force-with-lease \
+            origin HEAD:refs/heads/refactor/web-stepped-runner-executor
+
+      - name: Close and remove temporary automation branch
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr close "$PR_NUMBER" \
+            --repo hinsley/Fork \
+            --comment "Synchronized refactor/web-stepped-runner-executor with current main and removed the stray automation commit." \
+            --delete-branch
