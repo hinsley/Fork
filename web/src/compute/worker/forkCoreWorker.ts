@@ -55,112 +55,14 @@ import { discardHomoclinicInitialApproximationPoint } from '../../system/continu
 import { periodicPeriodsForConfig } from '../../system/periodicity'
 import type { SystemConfig } from '../../system/types'
 import { runSteppedRunnerToCompletion } from './steppedRunner'
-
-type WorkerRequest =
-  | { id: string; kind: 'simulateOrbit'; payload: SimulateOrbitRequest }
-  | { id: string; kind: 'sampleMap1DFunction'; payload: SampleMap1DFunctionRequest }
-  | { id: string; kind: 'computeEventSeriesFromOrbit'; payload: ComputeEventSeriesFromOrbitRequest }
-  | {
-      id: string
-      kind: 'computeEventSeriesFromSamples'
-      payload: ComputeEventSeriesFromSamplesRequest
-    }
-  | { id: string; kind: 'computeIsocline'; payload: ComputeIsoclineRequest }
-  | { id: string; kind: 'computeLyapunovExponents'; payload: LyapunovExponentsRequest }
-  | { id: string; kind: 'computeCovariantLyapunovVectors'; payload: CovariantLyapunovRequest }
-  | { id: string; kind: 'solveEquilibrium'; payload: SolveEquilibriumRequest }
-  | { id: string; kind: 'runEquilibriumContinuation'; payload: EquilibriumContinuationRequest }
-  | { id: string; kind: 'runContinuationExtension'; payload: ContinuationExtensionRequest }
-  | { id: string; kind: 'runEquilibriumManifold1D'; payload: EquilibriumManifold1DRequest }
-  | {
-      id: string
-      kind: 'runEquilibriumManifold1DExtension'
-      payload: EquilibriumManifold1DExtensionRequest
-    }
-  | { id: string; kind: 'runManifold2DExtension'; payload: Manifold2DExtensionRequest }
-  | { id: string; kind: 'runEquilibriumManifold2D'; payload: EquilibriumManifold2DRequest }
-  | { id: string; kind: 'runLimitCycleManifold2D'; payload: LimitCycleManifold2DRequest }
-  | { id: string; kind: 'computeLimitCycleFloquetModes'; payload: LimitCycleFloquetModesRequest }
-  | { id: string; kind: 'runFoldCurveContinuation'; payload: FoldCurveContinuationRequest }
-  | { id: string; kind: 'runHopfCurveContinuation'; payload: HopfCurveContinuationRequest }
-  | {
-      id: string
-      kind: 'runIsochroneCurveContinuation'
-      payload: IsochroneCurveContinuationRequest
-    }
-  | {
-      id: string
-      kind: 'runLimitCycleContinuationFromHopf'
-      payload: LimitCycleContinuationFromHopfRequest
-    }
-  | {
-      id: string
-      kind: 'runLimitCycleContinuationFromOrbit'
-      payload: LimitCycleContinuationFromOrbitRequest
-    }
-  | {
-      id: string
-      kind: 'runLimitCycleContinuationFromPD'
-      payload: LimitCycleContinuationFromPDRequest
-    }
-  | {
-      id: string
-      kind: 'runMapCycleContinuationFromPD'
-      payload: MapCycleContinuationFromPDRequest
-    }
-  | {
-      id: string
-      kind: 'runHomoclinicFromLargeCycle'
-      payload: HomoclinicFromLargeCycleRequest
-    }
-  | {
-      id: string
-      kind: 'runHomoclinicFromHomoclinic'
-      payload: HomoclinicFromHomoclinicRequest
-    }
-  | {
-      id: string
-      kind: 'runHomotopySaddleFromEquilibrium'
-      payload: HomotopySaddleFromEquilibriumRequest
-    }
-  | {
-      id: string
-      kind: 'runHomoclinicFromHomotopySaddle'
-      payload: HomoclinicFromHomotopySaddleRequest
-    }
-  | { id: string; kind: 'validateSystem'; payload: ValidateSystemRequest }
-  | { id: string; kind: 'cancel' }
-
-type WorkerProgress = { id: string; kind: 'progress'; progress: ContinuationProgress }
-
-type WorkerResponse =
-  | {
-      id: string
-      ok: true
-      result:
-        | SimulateOrbitResult
-        | SampleMap1DFunctionResult
-        | EventSeriesResult
-        | ComputeIsoclineResult
-        | number[]
-        | CovariantLyapunovResponse
-        | SolveEquilibriumResult
-        | ValidateSystemResult
-        | EquilibriumContinuationResult
-        | ContinuationExtensionResult
-        | EquilibriumManifold1DResult
-        | EquilibriumManifold1DExtensionResult
-        | Manifold2DExtensionResult
-        | EquilibriumManifold2DResult
-        | LimitCycleManifold2DResult
-        | LimitCycleFloquetModesResult
-        | Codim1CurveBranch
-        | LimitCycleContinuationResult
-        | HomoclinicContinuationResult
-        | HomotopySaddleContinuationResult
-    }
-  | { id: string; ok: false; error: string; aborted?: boolean }
-  | WorkerProgress
+import { createWorkerSuccessResponse, getComputeHandler } from '../computeProtocol'
+import type {
+  ComputeHandlerMap,
+  ComputeOperationKind,
+  WorkerOperationRequest,
+  WorkerRequest,
+  WorkerResponse,
+} from '../computeProtocol'
 
 type WasmModule = {
   WasmSystem: new (
@@ -1617,7 +1519,50 @@ async function runValidateSystem(
   }
 }
 
+const handlers = {
+  simulateOrbit: runOrbit,
+  sampleMap1DFunction: runSampleMap1DFunction,
+  computeEventSeriesFromOrbit: runComputeEventSeriesFromOrbit,
+  computeEventSeriesFromSamples: runComputeEventSeriesFromSamples,
+  computeIsocline: runComputeIsocline,
+  computeLyapunovExponents: runLyapunovExponents,
+  computeCovariantLyapunovVectors: runCovariantLyapunovVectors,
+  solveEquilibrium: runSolveEquilibrium,
+  runEquilibriumContinuation,
+  runContinuationExtension,
+  runEquilibriumManifold1D,
+  runEquilibriumManifold1DExtension,
+  runManifold2DExtension,
+  runEquilibriumManifold2D,
+  runLimitCycleManifold2D,
+  computeLimitCycleFloquetModes: runComputeLimitCycleFloquetModes,
+  runFoldCurveContinuation,
+  runHopfCurveContinuation,
+  runIsochroneCurveContinuation,
+  runLimitCycleContinuationFromHopf,
+  runLimitCycleContinuationFromOrbit,
+  runLimitCycleContinuationFromPD,
+  runHomoclinicFromLargeCycle,
+  runHomoclinicFromHomoclinic,
+  runHomotopySaddleFromEquilibrium,
+  runHomoclinicFromHomotopySaddle,
+  runMapCycleContinuationFromPD,
+  validateSystem: runValidateSystem,
+} satisfies ComputeHandlerMap
+
 const ctx = self as DedicatedWorkerGlobalScope
+
+async function dispatchWorkerOperation<K extends ComputeOperationKind>(
+  message: WorkerOperationRequest<K>,
+  controller: AbortController
+): Promise<void> {
+  const handler = getComputeHandler(handlers, message.kind)
+  const result = await handler(message.payload, controller.signal, (progress) => {
+    const response: WorkerResponse = { id: message.id, kind: 'progress', progress }
+    ctx.postMessage(response)
+  })
+  ctx.postMessage(createWorkerSuccessResponse(message, result))
+}
 
 ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const message = event.data
@@ -1634,402 +1579,7 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   pendingControllers.set(message.id, controller)
 
   try {
-    if (message.kind === 'simulateOrbit') {
-      const result = await runOrbit(message.payload, controller.signal)
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'sampleMap1DFunction') {
-      const result = await runSampleMap1DFunction(message.payload, controller.signal)
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'computeEventSeriesFromOrbit') {
-      const result = await runComputeEventSeriesFromOrbit(message.payload, controller.signal)
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'computeEventSeriesFromSamples') {
-      const result = await runComputeEventSeriesFromSamples(message.payload, controller.signal)
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'computeIsocline') {
-      const result = await runComputeIsocline(message.payload, controller.signal)
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'computeLyapunovExponents') {
-      const result = await runLyapunovExponents(message.payload, controller.signal)
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'computeCovariantLyapunovVectors') {
-      const result = await runCovariantLyapunovVectors(message.payload, controller.signal)
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'solveEquilibrium') {
-      const result = await runSolveEquilibrium(message.payload, controller.signal)
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runEquilibriumContinuation') {
-      const result = await runEquilibriumContinuation(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runContinuationExtension') {
-      const result = await runContinuationExtension(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runEquilibriumManifold1D') {
-      const result = await runEquilibriumManifold1D(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runEquilibriumManifold1DExtension') {
-      const result = await runEquilibriumManifold1DExtension(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runManifold2DExtension') {
-      const result = await runManifold2DExtension(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runEquilibriumManifold2D') {
-      const result = await runEquilibriumManifold2D(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runLimitCycleManifold2D') {
-      const result = await runLimitCycleManifold2D(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'computeLimitCycleFloquetModes') {
-      const result = await runComputeLimitCycleFloquetModes(
-        message.payload,
-        controller.signal
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runFoldCurveContinuation') {
-      const result = await runFoldCurveContinuation(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runHopfCurveContinuation') {
-      const result = await runHopfCurveContinuation(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runIsochroneCurveContinuation') {
-      const result = await runIsochroneCurveContinuation(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runLimitCycleContinuationFromHopf') {
-      const result = await runLimitCycleContinuationFromHopf(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runLimitCycleContinuationFromOrbit') {
-      const result = await runLimitCycleContinuationFromOrbit(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runLimitCycleContinuationFromPD') {
-      const result = await runLimitCycleContinuationFromPD(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runMapCycleContinuationFromPD') {
-      const result = await runMapCycleContinuationFromPD(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runHomoclinicFromLargeCycle') {
-      const result = await runHomoclinicFromLargeCycle(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runHomoclinicFromHomoclinic') {
-      const result = await runHomoclinicFromHomoclinic(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runHomotopySaddleFromEquilibrium') {
-      const result = await runHomotopySaddleFromEquilibrium(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'runHomoclinicFromHomotopySaddle') {
-      const result = await runHomoclinicFromHomotopySaddle(
-        message.payload,
-        controller.signal,
-        (progress) => {
-          const response: WorkerResponse = {
-            id: message.id,
-            kind: 'progress',
-            progress,
-          }
-          ctx.postMessage(response)
-        }
-      )
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
-
-    if (message.kind === 'validateSystem') {
-      const result = await runValidateSystem(message.payload, controller.signal)
-      const response: WorkerResponse = { id: message.id, ok: true, result }
-      ctx.postMessage(response)
-      return
-    }
+    await dispatchWorkerOperation(message, controller)
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err))
     const response: WorkerResponse = {
