@@ -7,14 +7,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@fork-wasm': path.resolve(
-        __dirname,
-        '..',
-        'crates',
-        'fork_wasm',
-        'pkg-web',
-        'fork_wasm.js'
-      ),
+      '@fork-wasm': path.resolve(__dirname, '..', 'crates', 'fork_wasm', 'pkg-web'),
     },
   },
   worker: {
