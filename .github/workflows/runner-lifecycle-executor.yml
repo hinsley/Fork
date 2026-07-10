@@ -47,6 +47,10 @@ jobs:
         working-directory: target
         run: python ../automation/.github/scripts/refactor_runner_lifecycle.py
 
+      - name: Format Rust
+        working-directory: target
+        run: cargo fmt --all
+
       - name: Verify refactor shape and formatting
         working-directory: target
         shell: bash
