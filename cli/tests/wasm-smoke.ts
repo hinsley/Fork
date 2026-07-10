@@ -57,4 +57,39 @@ assert.equal(state.length, 1);
 assert.ok(Math.abs(state[0] - 0.25) < 1e-10, `Expected x ~= 0.25 after one step, got ${state[0]}`);
 assert.ok(Math.abs(system.get_t() - 0.25) < 1e-12, `Expected t ~= 0.25, got ${system.get_t()}`);
 
+const manifoldRunner = new wasm.WasmEqManifold1DRunner(
+  ['x'],
+  new Float64Array(),
+  [],
+  ['x'],
+  'flow',
+  1,
+  new Float64Array([0]),
+  {
+    stability: 'Unstable',
+    direction: 'Both',
+    eig_index: 0,
+    eps: 1e-4,
+    target_arclength: 0.01,
+    integration_dt: 0.1,
+    caps: {
+      max_steps: 100,
+      max_points: 100,
+      max_rings: 1,
+      max_vertices: 1,
+      max_time: 10,
+    },
+  },
+  new Float64Array([0])
+);
+assert.equal(manifoldRunner.get_progress().done, false);
+assert.equal(manifoldRunner.run_steps(1).done, false);
+assert.equal(manifoldRunner.run_steps(1).done, true);
+const manifoldBranches = manifoldRunner.get_result();
+assert.equal(manifoldBranches.length, 2);
+for (const branch of manifoldBranches) {
+  assert.equal(branch.manifold_geometry.type, 'Curve');
+  assert.equal(branch.manifold_geometry.solver_diagnostics.target_reached, true);
+}
+
 console.log('PASS real WASM node boundary smoke');

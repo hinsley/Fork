@@ -349,6 +349,39 @@ pub struct ManifoldCurveGeometry {
     pub points_flat: Vec<f64>,
     pub arclength: Vec<f64>,
     pub direction: ManifoldDirection,
+    /// Optional shared parameter inherited from a representative cycle phase.
+    /// This is distinct from the physical arclength of the emitted curve.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_arclength: Option<Vec<f64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub solver_diagnostics: Option<ManifoldCurveSolverDiagnostics>,
+}
+
+/// Solver-level diagnostics for a 1D manifold curve.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ManifoldCurveSolverDiagnostics {
+    #[serde(default)]
+    pub termination_reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub termination_detail: Option<String>,
+    #[serde(default)]
+    pub requested_arclength: f64,
+    #[serde(default)]
+    pub achieved_arclength: f64,
+    #[serde(default)]
+    pub target_reached: bool,
+    #[serde(default)]
+    pub integration_steps: usize,
+    #[serde(default)]
+    pub map_growth_iterations: usize,
+    #[serde(default)]
+    pub preimage_failures: usize,
+    #[serde(default)]
+    pub refinement_failures: usize,
+    #[serde(default)]
+    pub source_correction_norm: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub least_period: Option<usize>,
 }
 
 /// Per-ring diagnostics for 2D manifold growth.

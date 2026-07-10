@@ -157,7 +157,7 @@ pub fn solve_equilibrium_with_periodicity(
             );
         }
 
-        let jacobian = compute_jacobian(system, kind, &state)?;
+        let jacobian = compute_jacobian_with_periodicity(system, kind, &state, periodicity)?;
         let delta = solve_linear_system(dim, &jacobian, &residual)
             .context("Failed to solve linear system during Newton iteration.")?;
 
@@ -177,7 +177,7 @@ pub fn solve_equilibrium_with_periodicity(
         residual_norm = l2_norm(&residual);
     }
 
-    let jacobian = compute_system_jacobian(system, kind, &state)?;
+    let jacobian = compute_system_jacobian_with_periodicity(system, kind, &state, periodicity)?;
     let eigenpairs = compute_eigenpairs(dim, &jacobian)
         .context("Failed to compute eigenvalues/eigenvectors of Jacobian.")?;
     let cycle_points = if kind.is_map() && map_iterations > 1 {
@@ -261,8 +261,17 @@ pub fn compute_jacobian(
     kind: SystemKind,
     state: &[f64],
 ) -> Result<Vec<f64>> {
+    compute_jacobian_with_periodicity(system, kind, state, &StatePeriodicity::none())
+}
+
+pub fn compute_jacobian_with_periodicity(
+    system: &EquationSystem,
+    kind: SystemKind,
+    state: &[f64],
+    periodicity: &StatePeriodicity,
+) -> Result<Vec<f64>> {
     let dim = system.equations.len();
-    let mut jacobian = compute_system_jacobian(system, kind, state)?;
+    let mut jacobian = compute_system_jacobian_with_periodicity(system, kind, state, periodicity)?;
     if kind.is_map() {
         for i in 0..dim {
             jacobian[i * dim + i] -= 1.0;
@@ -277,10 +286,21 @@ pub fn compute_system_jacobian(
     kind: SystemKind,
     state: &[f64],
 ) -> Result<Vec<f64>> {
+    compute_system_jacobian_with_periodicity(system, kind, state, &StatePeriodicity::none())
+}
+
+pub fn compute_system_jacobian_with_periodicity(
+    system: &EquationSystem,
+    kind: SystemKind,
+    state: &[f64],
+    periodicity: &StatePeriodicity,
+) -> Result<Vec<f64>> {
     let iterations = kind.checked_map_iterations()?;
     match kind {
         SystemKind::Flow => compute_single_step_jacobian(system, state),
-        SystemKind::Map { .. } => compute_map_iterate_jacobian(system, state, iterations),
+        SystemKind::Map { .. } => {
+            compute_map_iterate_jacobian(system, state, iterations, periodicity)
+        }
     }
 }
 
@@ -359,6 +379,7 @@ fn compute_map_iterate_jacobian(
     system: &EquationSystem,
     state: &[f64],
     iterations: usize,
+    periodicity: &StatePeriodicity,
 ) -> Result<Vec<f64>> {
     if iterations == 1 {
         return compute_single_step_jacobian(system, state);
@@ -371,6 +392,7 @@ fn compute_map_iterate_jacobian(
     }
 
     let mut current = state.to_vec();
+    periodicity.wrap_state(&mut current);
     let mut next_state = vec![0.0; dim];
     let mut next_total = vec![0.0; dim * dim];
 
@@ -379,6 +401,7 @@ fn compute_map_iterate_jacobian(
         mat_mul(dim, &step, &total, &mut next_total);
         total.copy_from_slice(&next_total);
         system.apply(0.0, &current, &mut next_state);
+        periodicity.wrap_state(&mut next_state);
         std::mem::swap(&mut current, &mut next_state);
     }
 

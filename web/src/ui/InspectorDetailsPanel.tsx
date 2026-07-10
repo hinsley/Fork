@@ -784,6 +784,24 @@ function resolveManifoldSurfaceGeometryForInspector(
   return null
 }
 
+function resolveManifoldCurveGeometryForInspector(
+  geometry: ContinuationObject['data']['manifold_geometry'] | undefined
+) {
+  if (!geometry || geometry.type !== 'Curve') return null
+  if ('Curve' in geometry && geometry.Curve) return geometry.Curve
+  if ('points_flat' in geometry && Array.isArray(geometry.points_flat)) {
+    return {
+      dim: geometry.dim,
+      points_flat: geometry.points_flat,
+      arclength: geometry.arclength,
+      source_arclength: geometry.source_arclength,
+      direction: geometry.direction,
+      solver_diagnostics: geometry.solver_diagnostics,
+    }
+  }
+  return null
+}
+
 function formatTerminationReasonLabel(reason: string | undefined): string {
   if (!reason || reason.trim().length === 0) return 'unknown'
   return reason
@@ -1922,6 +1940,11 @@ export function InspectorDetailsPanel({
     () => resolveManifoldSurfaceGeometryForInspector(branch?.data.manifold_geometry),
     [branch?.data.manifold_geometry]
   )
+  const manifoldCurveGeometry = useMemo(
+    () => resolveManifoldCurveGeometryForInspector(branch?.data.manifold_geometry),
+    [branch?.data.manifold_geometry]
+  )
+  const manifoldCurveSolverDiagnostics = manifoldCurveGeometry?.solver_diagnostics
   const manifoldSolverDiagnostics = manifoldSurfaceGeometry?.solver_diagnostics
   const manifoldSurfaceRingCount = manifoldSurfaceGeometry?.ring_offsets?.length ?? 0
   const manifoldSurfaceVertexCount =
@@ -2201,8 +2224,9 @@ export function InspectorDetailsPanel({
     systemDraft.type === 'map'
       ? (() => {
           const fromObject =
-            equilibrium?.lastSolverParams?.mapIterations ??
-            equilibrium?.solution?.cycle_points?.length
+            equilibrium?.solutionProvenance?.mapIterations ??
+            equilibrium?.solution?.cycle_points?.length ??
+            equilibrium?.lastSolverParams?.mapIterations
           if (typeof fromObject === 'number' && Number.isFinite(fromObject)) {
             return Math.max(1, Math.trunc(fromObject))
           }
@@ -2311,7 +2335,10 @@ export function InspectorDetailsPanel({
         return [{ value: 'curve_1d', label: '1D curve' }]
       }
       const options: Array<{ value: EquilibriumManifoldMode; label: string }> = []
-      if (equilibriumManifoldEligibleRealIndexOptions.length > 0) {
+      if (
+        equilibriumManifoldEligibleIndexOptions.length === 1 &&
+        equilibriumManifoldEligibleRealIndexOptions.length === 1
+      ) {
         options.push({ value: 'curve_1d', label: '1D curve' })
       }
       if (
@@ -4925,9 +4952,12 @@ export function InspectorDetailsPanel({
         return
       }
       let eigIndex: number | undefined
-      if (equilibriumManifoldEligibleRealIndexOptions.length === 0) {
+      if (
+        equilibriumManifoldEligibleIndexOptions.length !== 1 ||
+        equilibriumManifoldEligibleRealIndexOptions.length !== 1
+      ) {
         setEquilibriumManifoldError(
-          `No real ${equilibriumManifoldDraft.stability.toLowerCase()} eigenmodes are available for 1D manifolds.`
+          `The ${equilibriumManifoldDraft.stability.toLowerCase()} eigenspace has dimension ${equilibriumManifoldEligibleIndexOptions.length}; the 1D manifold solver requires one real dimension.`
         )
         return
       }
@@ -9261,19 +9291,21 @@ export function InspectorDetailsPanel({
                           />
                         </label>
                       ) : null}
-                      <label>
-                        Max vertices
-                        <input
-                          value={equilibriumManifoldDraft.caps.maxVertices}
-                          onChange={(event) =>
-                            setEquilibriumManifoldDraft((prev) => ({
-                              ...prev,
-                              caps: { ...prev.caps, maxVertices: event.target.value },
-                            }))
-                          }
-                          data-testid="equilibrium-manifold-caps-max-vertices"
-                        />
-                      </label>
+                      {equilibriumManifoldDraft.mode === 'surface_2d' ? (
+                        <label>
+                          Max vertices
+                          <input
+                            value={equilibriumManifoldDraft.caps.maxVertices}
+                            onChange={(event) =>
+                              setEquilibriumManifoldDraft((prev) => ({
+                                ...prev,
+                                caps: { ...prev.caps, maxVertices: event.target.value },
+                              }))
+                            }
+                            data-testid="equilibrium-manifold-caps-max-vertices"
+                          />
+                        </label>
+                      ) : null}
                       {systemDraft.type === 'map' && equilibriumManifoldDraft.mode === 'curve_1d' ? (
                         <label>
                           Max iterations
@@ -11007,6 +11039,26 @@ export function InspectorDetailsPanel({
                                       manifoldSolverDiagnostics.final_leaf_delta ?? Number.NaN,
                                       3
                                     ),
+                                  },
+                                ]
+                              : []),
+                            ...(manifoldCurveSolverDiagnostics
+                              ? [
+                                  {
+                                    label: 'Termination',
+                                    value: formatTerminationReasonLabel(
+                                      manifoldCurveSolverDiagnostics.termination_reason
+                                    ),
+                                  },
+                                  {
+                                    label: 'Arclength',
+                                    value: `${formatNumberSafe(manifoldCurveSolverDiagnostics.achieved_arclength)} / ${formatNumberSafe(manifoldCurveSolverDiagnostics.requested_arclength)}`,
+                                  },
+                                  {
+                                    label: 'Target reached',
+                                    value: manifoldCurveSolverDiagnostics.target_reached
+                                      ? 'yes'
+                                      : 'no',
                                   },
                                 ]
                               : []),

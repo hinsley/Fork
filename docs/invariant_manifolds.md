@@ -52,14 +52,14 @@ CLI:
 
 - System can be flow or map.
 - Selected equilibrium must be solved.
-- Chosen side must have at least one eligible **real** mode:
+- The selected stable or unstable side must have dimension exactly one, represented by one eligible **real** mode:
   - Flow:
     - `Unstable`: real part `> 0`
     - `Stable`: real part `< 0`
   - Map:
     - `Unstable`: `|lambda| > 1 + 1e-6`
     - `Stable`: `|lambda| < 1 - 1e-6`
-- In the Web UI, the `Eigen index` list is filtered to eligible real modes for the selected side.
+- The Web UI and CLI reject a 1D request when that side has zero or multiple dimensions; selecting one eigenvector from a higher-dimensional invariant manifold does not define a canonical 1D invariant manifold.
 
 Map cycle fan-out:
 
@@ -111,7 +111,8 @@ The 1D workflow computes a trajectory branch seeded from the equilibrium along a
       - solve `F^n(y) = x_k` for `y`
       - use Jacobian of `F^n` in the Newton solve
     - emit additional cycle-phase branches by forward propagation of the representative curve phase-by-phase (`p0 -> p1 -> ...`), equivalent to `F^k` at phase `k`
-    - cycle-phase branches reuse the representative arclength schedule (`param_value`) so branch components at each cycle point stay arclength-aligned
+    - cycle-phase branches store their own physical arclength in `param_value`; `source_arclength` preserves correspondence to the representative samples
+    - negative multipliers use `F^(2n)` growth for each directed half-branch so `Plus` and `Minus` do not alternate and overlap
     - mapped fundamental-domain samples are adaptively refined (spacing + turn/curvature checks) before appending branch points
 - Directed modes:
   - `Both` computes `Plus` and `Minus`
@@ -121,8 +122,10 @@ The 1D workflow computes a trajectory branch seeded from the equilibrium along a
 Targeting:
 
 - Primary target is `target_arclength`.
-- Internally, the solver uses an arclength-hit boundary solve in time.
-- If the target is not reachable under caps/time/step budgets, it falls back to the maximal reachable trajectory under current caps.
+- Flow curves are traced once with RK4 from the corrected equilibrium and resampled from that single trajectory; `max_steps`, `max_time`, bounds, and non-finite exits preserve the last valid prefix.
+- Map curves use fundamental-domain growth and adaptive refinement.
+- If the target is not reachable under the configured budgets, the valid prefix is returned with a precise `solver_diagnostics.termination_reason`.
+- Periodic state coordinates are evaluated and stored canonically, with arclength measured using shortest modular displacements.
 
 Output:
 
@@ -389,7 +392,7 @@ During 2D manifold runs, the toolbar progress UI now shows:
 - metadata rows for `rings` and `points`
 - metadata value `radius` (current radius estimate)
 
-For non-manifold continuations and 1D manifold runs, the generic progress display remains step-based and the same metadata slot shows `bifurcations`.
+For 1D manifold runs, progress advances by completed directed half-branches (`Plus` and/or `Minus`) and reports the number of curve points produced so far.
 
 ## Branch Summary and Diagnostics
 
@@ -398,6 +401,7 @@ For manifold branches, Inspector `Branch Summary` includes:
 - branch metadata (type/parent/start/points)
 - surface counts (`Surface rings`, `Surface vertices`) for 2D
 - solver stop reason and final delta (`Termination`, `Final leaf delta`)
+- 1D curve termination, achieved/requested arclength, and whether the target was reached
 - full solver diagnostics counters and last-failure context (2D)
 
 The generic `Bifurcations` row is still present in branch summary and is typically `0` for manifold branches.

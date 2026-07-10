@@ -340,7 +340,8 @@ type WasmModule = {
     systemType: string,
     mapIterations: number,
     equilibriumState: Float64Array,
-    settings: Record<string, unknown>
+    settings: Record<string, unknown>,
+    periods: Float64Array
   ) => {
     run_steps: (batchSize: number) => ContinuationProgress
     get_progress: () => ContinuationProgress
@@ -888,7 +889,8 @@ async function runEquilibriumManifold1D(
     request.system.type,
     request.mapIterations ?? 1,
     new Float64Array(request.equilibriumState),
-    { ...request.settings }
+    { ...request.settings },
+    new Float64Array(periodicPeriodsForConfig(request.system))
   )
   let progress = runner.get_progress()
   onProgress(progress)

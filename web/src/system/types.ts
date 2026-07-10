@@ -88,12 +88,18 @@ export interface EquilibriumObject {
   name: string
   systemName: string
   solution?: EquilibriumSolution
+  solutionProvenance?: EquilibriumSolutionProvenance
   lastSolverParams?: EquilibriumSolverParams
   lastRun?: EquilibriumRunSummary
   parameters?: number[]
   customParameters?: number[]
   frozenVariables?: FrozenVariablesConfig
   subsystemSnapshot?: SubsystemSnapshot
+}
+
+export interface EquilibriumSolutionProvenance {
+  fingerprint: string
+  mapIterations?: number
 }
 
 export interface ContinuationEigenvalue {
@@ -144,11 +150,38 @@ export interface ManifoldTerminationCaps {
   max_iterations?: number
 }
 
+export interface EquilibriumManifold1DSettings {
+  stability: ManifoldStability
+  direction: ManifoldDirection
+  eig_index?: number
+  eps: number
+  target_arclength: number
+  integration_dt: number
+  caps: ManifoldTerminationCaps
+  bounds?: { min: number[]; max: number[] }
+}
+
 export interface ManifoldCurveGeometry {
   dim: number
   points_flat: number[]
   arclength: number[]
+  source_arclength?: number[]
   direction: ManifoldDirection
+  solver_diagnostics?: ManifoldCurveSolverDiagnostics
+}
+
+export interface ManifoldCurveSolverDiagnostics {
+  termination_reason: string
+  termination_detail?: string
+  requested_arclength: number
+  achieved_arclength: number
+  target_reached: boolean
+  integration_steps: number
+  map_growth_iterations: number
+  preimage_failures: number
+  refinement_failures: number
+  source_correction_norm: number
+  least_period?: number
 }
 
 export interface ManifoldRingDiagnostic {
@@ -205,7 +238,9 @@ export type ManifoldGeometry =
       dim: number
       points_flat: number[]
       arclength: number[]
+      source_arclength?: number[]
       direction: ManifoldDirection
+      solver_diagnostics?: ManifoldCurveSolverDiagnostics
     }
   | {
       type: 'Surface'
@@ -391,6 +426,7 @@ export interface ContinuationObject {
     | 'cycle_manifold_2d'
   data: ContinuationBranchData
   settings: ContinuationSettings
+  manifoldSettings?: EquilibriumManifold1DSettings
   timestamp: string
   params?: number[]
   mapIterations?: number

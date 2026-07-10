@@ -10,7 +10,7 @@ use fork_core::continuation::{
     compute_limit_cycle_floquet_modes as core_compute_limit_cycle_floquet_modes,
     continue_homoclinic_curve, continue_homotopy_saddle_curve, continue_limit_cycle_collocation,
     continue_limit_cycle_manifold_2d, continue_limit_cycle_manifold_2d_with_progress,
-    continue_manifold_eq_1d_with_kind, continue_manifold_eq_2d,
+    continue_manifold_eq_1d_with_kind_and_periodicity, continue_manifold_eq_2d,
     continue_manifold_eq_2d_with_progress, continue_with_problem, extend_limit_cycle_collocation,
     homoclinic_setup_from_homoclinic_point_with_source_extras,
     homoclinic_setup_from_homotopy_saddle_point, homoclinic_setup_from_large_cycle,
@@ -303,11 +303,14 @@ impl WasmSystem {
         };
         let settings: Manifold1DSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid manifold settings: {}", e)))?;
-        let branches =
-            continue_manifold_eq_1d_with_kind(&mut self.system, kind, &equilibrium_state, settings)
-                .map_err(|e| {
-                    JsValue::from_str(&format!("1D manifold computation failed: {}", e))
-                })?;
+        let branches = continue_manifold_eq_1d_with_kind_and_periodicity(
+            &mut self.system,
+            kind,
+            &equilibrium_state,
+            settings,
+            &self.periodicity,
+        )
+        .map_err(|e| JsValue::from_str(&format!("1D manifold computation failed: {}", e)))?;
         to_value(&branches).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 

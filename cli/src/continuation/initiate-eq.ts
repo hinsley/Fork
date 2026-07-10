@@ -587,20 +587,6 @@ export async function initiateEquilibriumManifold1DFromPoint(
         maxPointsInput = value;
       }
     },
-    {
-      id: 'maxVertices',
-      label: 'Caps: max vertices',
-      section: 'Termination Caps',
-      getDisplay: () => maxVerticesInput,
-      edit: async () => {
-        const { value } = await inquirer.prompt({
-          name: 'value',
-          message: 'Maximum vertices:',
-          default: maxVerticesInput
-        });
-        maxVerticesInput = value;
-      }
-    },
     ...(isMapSystem
       ? [{
           id: 'maxIterations',
@@ -654,8 +640,10 @@ export async function initiateEquilibriumManifold1DFromPoint(
       continue;
     }
     const eligible = eligibleRealEigenIndices();
-    if (eligible.length === 0) {
-      printError(`No eligible real ${stability.toLowerCase()} eigenmodes at this point.`);
+    if (eligible.length !== 1) {
+      printError(
+        `The ${stability.toLowerCase()} eigenspace has dimension ${eligible.length}; the 1D manifold solver requires dimension 1.`
+      );
       continue;
     }
     if (eigIndex !== undefined && !eligible.includes(eigIndex)) {
@@ -782,7 +770,7 @@ export async function initiateEquilibriumManifold1DFromPoint(
           type: 'continuation',
           name: resolvedName,
           systemName: sysName,
-          parameterName: sourceBranch.parameterName,
+          parameterName: 'manifold',
           parentObject,
           startObject: sourceBranch.name,
           branchType: 'eq_manifold_1d',

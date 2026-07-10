@@ -106,6 +106,21 @@ function findObjectIdByName(system: System, name: string): string | null {
   return match ? match[0] : null
 }
 
+function equilibriumSolutionFingerprint(
+  config: SystemConfig,
+  mapIterations?: number
+): string {
+  return JSON.stringify({
+    type: config.type,
+    equations: config.equations,
+    params: config.params,
+    paramNames: config.paramNames,
+    varNames: config.varNames,
+    periodicVariables: config.periodicVariables ?? [],
+    mapIterations: config.type === 'map' ? mapIterations ?? 1 : undefined,
+  })
+}
+
 function branchNameExists(system: System, parentObjectId: string, name: string): boolean {
   return Object.values(system.branches).some(
     (branch) =>
@@ -3023,6 +3038,10 @@ export function AppProvider({
 
         const updated = updateObject(current, request.equilibriumId, {
           solution: result,
+          solutionProvenance: {
+            fingerprint: equilibriumSolutionFingerprint(runConfig, mapIterations),
+            mapIterations,
+          },
           parameters: [...baseParams],
           lastSolverParams: solverParams,
           lastRun: runSummary,
@@ -3257,13 +3276,13 @@ export function AppProvider({
                 ) {
                   return Math.trunc(requested as number)
                 }
-                const fromSolver = equilibrium.lastSolverParams?.mapIterations
+                const fromProvenance = equilibrium.solutionProvenance?.mapIterations
                 if (
-                  Number.isFinite(fromSolver) &&
-                  (fromSolver as number) > 0 &&
-                  Number.isInteger(fromSolver)
+                  Number.isFinite(fromProvenance) &&
+                  (fromProvenance as number) > 0 &&
+                  Number.isInteger(fromProvenance)
                 ) {
-                  return Math.trunc(fromSolver as number)
+                  return Math.trunc(fromProvenance as number)
                 }
                 const fromCycle = equilibrium.solution?.cycle_points?.length
                 if (
@@ -3272,6 +3291,15 @@ export function AppProvider({
                   Number.isInteger(fromCycle)
                 ) {
                   return Math.trunc(fromCycle as number)
+                }
+                const fromSolver = equilibrium.lastSolverParams?.mapIterations
+                if (
+                  !equilibrium.solutionProvenance &&
+                  Number.isFinite(fromSolver) &&
+                  (fromSolver as number) > 0 &&
+                  Number.isInteger(fromSolver)
+                ) {
+                  return Math.trunc(fromSolver as number)
                 }
                 return 1
               })()
@@ -3283,6 +3311,15 @@ export function AppProvider({
           equilibrium,
           baseParams
         )
+        if (
+          equilibrium.solutionProvenance &&
+          equilibrium.solutionProvenance.fingerprint !==
+            equilibriumSolutionFingerprint(runConfig, mapIterations)
+        ) {
+          throw new Error(
+            `The saved ${equilibriumLabelLower} solution does not match the current system or cycle length. Re-solve it before computing manifolds.`
+          )
+        }
         const reducedEquilibriumState = projectStateForSnapshot(
           snapshot,
           equilibrium.solution.state,
@@ -3367,6 +3404,10 @@ export function AppProvider({
               caps: normalizedCaps,
               integrationDt: settings.integration_dt,
             }),
+            manifoldSettings: {
+              ...settings,
+              caps: { ...normalizedCaps },
+            },
             timestamp: new Date().toISOString(),
             params: [...baseParams],
             mapIterations: system.type === 'map' ? mapIterations : undefined,

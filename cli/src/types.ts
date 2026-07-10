@@ -106,7 +106,23 @@ export interface ManifoldCurveGeometry {
   dim: number;
   points_flat: number[];
   arclength: number[];
+  source_arclength?: number[];
   direction: ManifoldDirection;
+  solver_diagnostics?: ManifoldCurveSolverDiagnostics;
+}
+
+export interface ManifoldCurveSolverDiagnostics {
+  termination_reason: string;
+  termination_detail?: string;
+  requested_arclength: number;
+  achieved_arclength: number;
+  target_reached: boolean;
+  integration_steps: number;
+  map_growth_iterations: number;
+  preimage_failures: number;
+  refinement_failures: number;
+  source_correction_norm: number;
+  least_period?: number;
 }
 
 export interface ManifoldRingDiagnostic {
@@ -218,7 +234,7 @@ export interface LimitCycleManifold2DSettings {
 }
 
 export type ManifoldGeometry =
-  | { type: 'Curve'; dim: number; points_flat: number[]; arclength: number[]; direction: ManifoldDirection }
+  | ({ type: 'Curve' } & ManifoldCurveGeometry)
   | {
       type: 'Surface';
       dim: number;

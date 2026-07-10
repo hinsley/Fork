@@ -10,15 +10,17 @@ use crate::continuation::types::{
     default_manifold_eps, default_manifold_leaf_delta, default_manifold_ring_points,
     BifurcationType, BranchType, ContinuationBranch, ContinuationPoint, Manifold1DSettings,
     Manifold2DProfile, Manifold2DSettings, ManifoldBounds, ManifoldCurveGeometry,
-    ManifoldCycle2DAlgorithm, ManifoldCycle2DSettings, ManifoldDirection, ManifoldEigenKind,
-    ManifoldGeometry, ManifoldRingDiagnostic, ManifoldStability, ManifoldSurfaceGeometry,
-    ManifoldSurfaceSolverDiagnostics, ManifoldTerminationCaps,
+    ManifoldCurveSolverDiagnostics, ManifoldCycle2DAlgorithm, ManifoldCycle2DSettings,
+    ManifoldDirection, ManifoldEigenKind, ManifoldGeometry, ManifoldRingDiagnostic,
+    ManifoldStability, ManifoldSurfaceGeometry, ManifoldSurfaceSolverDiagnostics,
+    ManifoldTerminationCaps,
 };
 use crate::equation_engine::EquationSystem;
 use crate::equilibrium::{
-    compute_jacobian, compute_map_cycle_points, compute_system_jacobian, solve_equilibrium,
-    NewtonSettings, SystemKind,
+    compute_jacobian, compute_system_jacobian_with_periodicity, solve_equilibrium,
+    solve_equilibrium_with_periodicity, NewtonSettings, SystemKind,
 };
+use crate::state_periodicity::StatePeriodicity;
 use crate::traits::DynamicalSystem;
 
 const EIG_IM_TOL: f64 = 1e-8;
@@ -67,8 +69,6 @@ const TAU_SWITCH_EPS: f64 = 1e-6;
 const LEAF_SIGN_EPS_SCALE: f64 = 1e-14;
 #[cfg(test)]
 const SOURCE_PARAM_MONO_EPS: f64 = 1e-6;
-const MANIFOLD_1D_ARCLENGTH_TOL: f64 = 1e-8;
-const MANIFOLD_1D_ARCLENGTH_MAX_ITERS: usize = 96;
 const MAP_MANIFOLD_REAL_TOL: f64 = 1e-8;
 const MAP_MANIFOLD_SIDE_TOL: f64 = 1e-6;
 const MAP_PREIMAGE_NEWTON_TOL: f64 = 1e-10;
@@ -86,7 +86,23 @@ const ISOCHRON_MAX_RETURN_SEGMENTS: usize = 256;
 #[derive(Clone)]
 struct RealEigenMode {
     index: usize,
+    value: Complex<f64>,
     vector: Vec<f64>,
+}
+
+#[derive(Clone)]
+struct PreparedManifold1DSource {
+    state: Vec<f64>,
+    cycle_points: Vec<Vec<f64>>,
+    mode: RealEigenMode,
+    correction_norm: f64,
+    least_period: Option<usize>,
+}
+
+struct ManifoldCurveSolve {
+    points: Vec<Vec<f64>>,
+    arclength: Vec<f64>,
+    diagnostics: ManifoldCurveSolverDiagnostics,
 }
 
 #[derive(Clone)]
@@ -102,7 +118,13 @@ pub fn continue_manifold_eq_1d(
     equilibrium_state: &[f64],
     settings: Manifold1DSettings,
 ) -> Result<Vec<ContinuationBranch>> {
-    continue_manifold_eq_1d_with_kind(system, SystemKind::Flow, equilibrium_state, settings)
+    continue_manifold_eq_1d_with_kind_and_periodicity(
+        system,
+        SystemKind::Flow,
+        equilibrium_state,
+        settings,
+        &StatePeriodicity::none(),
+    )
 }
 
 /// Compute one-dimensional stable/unstable manifolds of a flow equilibrium or map cycle.
@@ -111,6 +133,23 @@ pub fn continue_manifold_eq_1d_with_kind(
     kind: SystemKind,
     equilibrium_state: &[f64],
     settings: Manifold1DSettings,
+) -> Result<Vec<ContinuationBranch>> {
+    continue_manifold_eq_1d_with_kind_and_periodicity(
+        system,
+        kind,
+        equilibrium_state,
+        settings,
+        &StatePeriodicity::none(),
+    )
+}
+
+/// Compute a one-dimensional stable/unstable manifold with periodic state metadata.
+pub fn continue_manifold_eq_1d_with_kind_and_periodicity(
+    system: &mut EquationSystem,
+    kind: SystemKind,
+    equilibrium_state: &[f64],
+    settings: Manifold1DSettings,
+    periodicity: &StatePeriodicity,
 ) -> Result<Vec<ContinuationBranch>> {
     let dim = system.equations.len();
     if dim == 0 {
@@ -123,6 +162,16 @@ pub fn continue_manifold_eq_1d_with_kind(
             equilibrium_state.len()
         );
     }
+    validate_manifold_1d_settings(dim, kind, &settings)?;
+
+    let source = prepare_manifold_1d_source(
+        system,
+        kind,
+        equilibrium_state,
+        settings.stability,
+        settings.eig_index,
+        periodicity,
+    )?;
     let mut directions = Vec::new();
     match settings.direction {
         ManifoldDirection::Both => {
@@ -135,113 +184,90 @@ pub fn continue_manifold_eq_1d_with_kind(
 
     match kind {
         SystemKind::Flow => {
-            continue_manifold_eq_1d_flow(system, equilibrium_state, settings, &directions)
+            continue_manifold_eq_1d_flow(system, &source, settings, &directions, periodicity)
         }
         SystemKind::Map { iterations } => continue_manifold_eq_1d_map(
             system,
-            equilibrium_state,
+            &source,
             settings,
             iterations,
             &directions,
+            periodicity,
         ),
     }
 }
 
+fn validate_manifold_1d_settings(
+    dim: usize,
+    kind: SystemKind,
+    settings: &Manifold1DSettings,
+) -> Result<()> {
+    if !settings.eps.is_finite() || settings.eps <= 0.0 {
+        bail!("Manifold epsilon must be a finite positive number.");
+    }
+    if !settings.target_arclength.is_finite() || settings.target_arclength <= 0.0 {
+        bail!("Target arclength must be a finite positive number.");
+    }
+    if kind.is_flow() && (!settings.integration_dt.is_finite() || settings.integration_dt == 0.0) {
+        bail!("Integration dt must be finite and non-zero.");
+    }
+    if settings.caps.max_steps == 0 {
+        bail!("Manifold max_steps must be greater than zero.");
+    }
+    if settings.caps.max_points < 2 {
+        bail!("Manifold max_points must be at least two.");
+    }
+    if kind.is_flow() && (!settings.caps.max_time.is_finite() || settings.caps.max_time <= 0.0) {
+        bail!("Manifold max_time must be a finite positive number.");
+    }
+    if kind.is_map() && settings.caps.max_iterations == Some(0) {
+        bail!("Map manifold max_iterations must be greater than zero.");
+    }
+    if let Some(bounds) = settings.bounds.as_ref() {
+        if bounds.min.len() != dim || bounds.max.len() != dim {
+            bail!(
+                "Manifold bounds dimension mismatch: expected {}, got min={} and max={}.",
+                dim,
+                bounds.min.len(),
+                bounds.max.len()
+            );
+        }
+        for index in 0..dim {
+            if !bounds.min[index].is_finite() || !bounds.max[index].is_finite() {
+                bail!("Manifold bounds must be finite.");
+            }
+            if bounds.min[index] > bounds.max[index] {
+                bail!(
+                    "Manifold bound min exceeds max at coordinate {}.",
+                    index + 1
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 fn continue_manifold_eq_1d_flow(
     system: &mut EquationSystem,
-    equilibrium_state: &[f64],
+    source: &PreparedManifold1DSource,
     settings: Manifold1DSettings,
     directions: &[ManifoldDirection],
+    periodicity: &StatePeriodicity,
 ) -> Result<Vec<ContinuationBranch>> {
-    let dim = system.equations.len();
-    let eig = select_real_eigenmode_with_kind(
-        system,
-        SystemKind::Flow,
-        equilibrium_state,
-        settings.stability,
-        settings.eig_index,
-    )?;
-
-    let sigma = stability_sigma(settings.stability);
     let mut branches = Vec::new();
     for direction in directions.iter().copied() {
-        let sign = if direction == ManifoldDirection::Minus {
-            -1.0
-        } else {
-            1.0
-        };
-        let mut seed = equilibrium_state.to_vec();
-        for i in 0..dim {
-            seed[i] += sign * settings.eps * eig.vector[i];
-        }
-
-        let mut points = vec![seed.clone()];
-        let mut arclength = vec![0.0];
-        let target_arclength = settings.target_arclength.max(0.0);
-        let dt = settings.integration_dt.abs().max(1e-9);
-        let max_time = settings.caps.max_time.max(dt);
-        let solved = solve_arclength_hit_bvp(
-            system,
-            &seed,
-            target_arclength,
-            sigma,
-            dt,
-            max_time,
-            0.0,
-            MANIFOLD_1D_ARCLENGTH_TOL,
-            MANIFOLD_1D_ARCLENGTH_MAX_ITERS,
-            settings.bounds.as_ref(),
-        )?;
-        let (terminal_point, terminal_time, terminal_arclength) =
-            if let Some((point, hit_time)) = solved {
-                (point, hit_time, target_arclength)
-            } else if let Some((point, reachable_arc)) = integrate_flow_with_arclength(
-                system,
-                &seed,
-                sigma,
-                max_time,
-                dt,
-                settings.bounds.as_ref(),
-            ) {
-                (point, max_time, reachable_arc)
-            } else {
-                (seed.clone(), 0.0, 0.0)
-            };
-
-        let (sampled_points, sampled_arclength) = integrate_trajectory_samples(
-            system,
-            &seed,
-            sigma,
-            terminal_time,
-            dt,
-            settings.caps.max_steps.max(1),
-            settings.caps.max_points.max(2),
-            settings.bounds.as_ref(),
-        );
-        if sampled_points.len() > 1 && sampled_arclength.len() == sampled_points.len() {
-            points = sampled_points;
-            arclength = sampled_arclength;
-        }
-        if let Some(last_point) = points.last_mut() {
-            *last_point = terminal_point;
-        }
-        let previous_arc = if arclength.len() >= 2 {
-            arclength[arclength.len() - 2]
-        } else {
-            0.0
-        };
-        if let Some(last_arc) = arclength.last_mut() {
-            *last_arc = terminal_arclength.max(previous_arc);
-        }
+        let solved = build_flow_manifold_curve(system, source, direction, &settings, periodicity)?;
 
         branches.push(build_eq_1d_branch(
-            &points,
-            &arclength,
+            &solved.points,
+            &solved.arclength,
+            None,
+            Some(solved.diagnostics),
             settings.stability,
             direction,
-            eig.index,
+            source.mode.index,
             settings.caps,
-            "shooting_bvp",
+            "trajectory_arclength_event",
             None,
             None,
         ));
@@ -251,34 +277,28 @@ fn continue_manifold_eq_1d_flow(
 
 fn continue_manifold_eq_1d_map(
     system: &mut EquationSystem,
-    equilibrium_state: &[f64],
+    source: &PreparedManifold1DSource,
     settings: Manifold1DSettings,
     map_iterations: usize,
     directions: &[ManifoldDirection],
+    periodicity: &StatePeriodicity,
 ) -> Result<Vec<ContinuationBranch>> {
     if map_iterations == 0 {
         bail!("Map iteration count must be greater than zero.");
     }
 
-    let cycle_points = if map_iterations > 1 {
-        compute_map_cycle_points(system, equilibrium_state, map_iterations)
-    } else {
-        vec![equilibrium_state.to_vec()]
-    };
-    if cycle_points.is_empty() {
+    if source.cycle_points.is_empty() {
         bail!("Map cycle seed generation failed: no cycle points available.");
     }
     let dim = system.equations.len();
-    let representative = &cycle_points[0];
-    let eig = select_real_eigenmode_with_kind(
-        system,
-        SystemKind::Map {
-            iterations: map_iterations,
-        },
-        representative,
-        settings.stability,
-        settings.eig_index,
-    )?;
+    let representative = &source.state;
+    let growth_iterations = if source.mode.value.re < 0.0 {
+        map_iterations
+            .checked_mul(2)
+            .ok_or_else(|| anyhow!("Map manifold growth iteration count overflow."))?
+    } else {
+        map_iterations
+    };
     let mut branches = Vec::new();
     for direction in directions.iter().copied() {
         let sign = if direction == ManifoldDirection::Minus {
@@ -288,55 +308,63 @@ fn continue_manifold_eq_1d_map(
         };
         let mut seed = representative.clone();
         for i in 0..dim {
-            seed[i] += sign * settings.eps * eig.vector[i];
+            seed[i] += sign * settings.eps * source.mode.vector[i];
         }
+        periodicity.wrap_state(&mut seed);
 
-        let (base_points, base_arclength) = build_map_manifold_curve(
+        let base = build_map_manifold_curve(
             system,
             &seed,
             representative,
             settings.stability,
-            map_iterations,
+            growth_iterations,
             settings.target_arclength,
             settings.caps,
             settings.bounds.as_ref(),
+            periodicity,
+            source.correction_norm,
+            source.least_period,
         )?;
 
-        let mut propagated_points = base_points.clone();
         for cycle_point_index in 0..map_iterations {
             let points = if cycle_point_index == 0 {
-                propagated_points.clone()
+                base.points.clone()
             } else {
-                let mapped = propagate_curve_by_map_steps(
+                propagate_curve_by_map_steps(
                     system,
-                    &propagated_points,
-                    1,
+                    &base.points,
+                    cycle_point_index,
                     settings.bounds.as_ref(),
+                    periodicity,
                 )
-                .or_else(|| {
-                    propagate_curve_by_map_steps(
-                        system,
-                        &base_points,
-                        cycle_point_index,
-                        settings.bounds.as_ref(),
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Map manifold phase {} could not be propagated.",
+                        cycle_point_index + 1
                     )
-                });
-                let Some(points) = mapped else {
-                    continue;
-                };
-                propagated_points = points.clone();
-                points
+                })?
             };
-            let arclength = cycle_component_arclength(&base_arclength, points.len());
+            if points.len() < 2 {
+                bail!(
+                    "Map manifold phase {} contains no meaningful growth.",
+                    cycle_point_index + 1
+                );
+            }
+            let arclength = cumulative_polyline_arclength(&points, periodicity);
+            let source_arclength = cycle_component_arclength(&base.arclength, points.len());
+            let mut diagnostics = base.diagnostics.clone();
+            diagnostics.achieved_arclength = *arclength.last().unwrap_or(&0.0);
 
             branches.push(build_eq_1d_branch(
                 &points,
                 &arclength,
+                Some(&source_arclength),
+                Some(diagnostics),
                 settings.stability,
                 direction,
-                eig.index,
+                source.mode.index,
                 settings.caps,
-                "map_iterate_bvp",
+                "map_fundamental_domain",
                 Some(map_iterations),
                 Some(cycle_point_index),
             ));
@@ -348,6 +376,8 @@ fn continue_manifold_eq_1d_map(
 fn build_eq_1d_branch(
     points: &[Vec<f64>],
     arclength: &[f64],
+    source_arclength: Option<&[f64]>,
+    solver_diagnostics: Option<ManifoldCurveSolverDiagnostics>,
     stability: ManifoldStability,
     direction: ManifoldDirection,
     eig_index: usize,
@@ -373,6 +403,8 @@ fn build_eq_1d_branch(
         points_flat: flatten_points(points),
         arclength: arclength.to_vec(),
         direction,
+        source_arclength: source_arclength.map(|values| values.to_vec()),
+        solver_diagnostics,
     });
     let indices: Vec<i32> = (0..branch_points.len() as i32).collect();
     ContinuationBranch {
@@ -1933,6 +1965,166 @@ struct Basis2D {
     indices: [usize; 2],
 }
 
+fn prepare_manifold_1d_source(
+    system: &EquationSystem,
+    kind: SystemKind,
+    equilibrium_state: &[f64],
+    stability: ManifoldStability,
+    requested_index: Option<usize>,
+    periodicity: &StatePeriodicity,
+) -> Result<PreparedManifold1DSource> {
+    let result = solve_equilibrium_with_periodicity(
+        system,
+        kind,
+        equilibrium_state,
+        NewtonSettings {
+            max_steps: 25,
+            damping: 1.0,
+            tolerance: 1e-10,
+        },
+        periodicity,
+    )?;
+
+    let side_indices: Vec<usize> = result
+        .eigenpairs
+        .iter()
+        .enumerate()
+        .filter_map(|(index, pair)| {
+            matches_stability_for_kind(Complex::new(pair.value.re, pair.value.im), kind, stability)
+                .then_some(index)
+        })
+        .collect();
+    if side_indices.len() != 1 {
+        bail!(
+            "Selected {} manifold dimension is {}; the 1D manifold solver requires dimension 1.",
+            match stability {
+                ManifoldStability::Stable => "stable",
+                ManifoldStability::Unstable => "unstable",
+            },
+            side_indices.len()
+        );
+    }
+
+    let selected_index = side_indices[0];
+    if let Some(index) = requested_index {
+        if index != selected_index {
+            bail!(
+                "Requested eigen index {} is not an eligible real mode.",
+                index.saturating_add(1)
+            );
+        }
+    }
+    let pair = &result.eigenpairs[selected_index];
+    if pair.value.im.abs() > EIG_IM_TOL {
+        bail!("The one-dimensional manifold direction is not a real eigenmode.");
+    }
+    let vector = canonical_real_eigenvector(pair)?;
+    let mode = RealEigenMode {
+        index: selected_index,
+        value: Complex::new(pair.value.re, pair.value.im),
+        vector,
+    };
+
+    if matches!(stability, ManifoldStability::Stable) && kind.is_map() {
+        let jacobian =
+            compute_system_jacobian_with_periodicity(system, kind, &result.state, periodicity)?;
+        let dim = result.state.len();
+        let matrix = DMatrix::from_row_slice(dim, dim, &jacobian);
+        let singular_values = SVD::new(matrix, false, false).singular_values;
+        let largest = singular_values.iter().copied().fold(0.0_f64, f64::max);
+        let smallest = singular_values
+            .iter()
+            .copied()
+            .fold(f64::INFINITY, f64::min);
+        if !smallest.is_finite() || smallest <= 1e-10 * largest.max(1.0) {
+            bail!(
+                "Stable map manifold growth requires a locally invertible return map (smallest singular value {}).",
+                smallest
+            );
+        }
+    }
+
+    let map_iterations = kind.map_iterations();
+    let least_period = if kind.is_map() {
+        let mut period = map_iterations;
+        for divisor in 1..map_iterations {
+            if map_iterations % divisor != 0 {
+                continue;
+            }
+            let mapped =
+                apply_map_iterates_with_periodicity(system, &result.state, divisor, periodicity)
+                    .ok_or_else(|| {
+                        anyhow!("Map cycle period validation produced a non-finite state.")
+                    })?;
+            let scale = 1.0 + l2_norm(&result.state).max(l2_norm(&mapped));
+            if periodic_l2_distance(&mapped, &result.state, periodicity) <= 1e-8 * scale {
+                period = divisor;
+                break;
+            }
+        }
+        if period != map_iterations {
+            bail!(
+                "Requested map cycle period is not minimal; least period is {}.",
+                period
+            );
+        }
+        Some(period)
+    } else {
+        None
+    };
+
+    let cycle_points = if kind.is_map() && map_iterations > 1 {
+        result
+            .cycle_points
+            .clone()
+            .unwrap_or_else(|| vec![result.state.clone()])
+    } else {
+        vec![result.state.clone()]
+    };
+    let correction_norm = periodic_l2_distance(equilibrium_state, &result.state, periodicity);
+
+    Ok(PreparedManifold1DSource {
+        state: result.state,
+        cycle_points,
+        mode,
+        correction_norm,
+        least_period,
+    })
+}
+
+fn canonical_real_eigenvector(pair: &crate::equilibrium::EigenPair) -> Result<Vec<f64>> {
+    let mut vector: Vec<Complex<f64>> = pair
+        .vector
+        .iter()
+        .map(|entry| Complex::new(entry.re, entry.im))
+        .collect();
+    let pivot = vector
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.norm().total_cmp(&right.norm()))
+        .map(|(_, value)| *value)
+        .ok_or_else(|| anyhow!("Eigenvector is empty."))?;
+    if pivot.norm() <= NORM_EPS {
+        bail!("Eigenvector norm is too small.");
+    }
+    let phase = pivot.conj() / pivot.norm();
+    for value in &mut vector {
+        *value *= phase;
+    }
+    let imaginary_norm = vector
+        .iter()
+        .map(|entry| entry.im * entry.im)
+        .sum::<f64>()
+        .sqrt();
+    let real = vector.iter().map(|entry| entry.re).collect::<Vec<_>>();
+    let real_norm = l2_norm(&real);
+    if real_norm <= NORM_EPS || imaginary_norm > 1e-7 * real_norm.max(1.0) {
+        bail!("Failed to recover a real eigenvector for the selected real eigenvalue.");
+    }
+    normalize(real)
+}
+
+#[allow(dead_code)]
 fn select_real_eigenmode_with_kind(
     system: &EquationSystem,
     kind: SystemKind,
@@ -1940,53 +2132,15 @@ fn select_real_eigenmode_with_kind(
     stability: ManifoldStability,
     requested_index: Option<usize>,
 ) -> Result<RealEigenMode> {
-    let result = solve_equilibrium(
+    Ok(prepare_manifold_1d_source(
         system,
         kind,
         equilibrium_state,
-        NewtonSettings {
-            max_steps: 8,
-            damping: 1.0,
-            tolerance: 1e-10,
-        },
-    )?;
-    let mut candidates = Vec::new();
-    for (idx, pair) in result.eigenpairs.iter().enumerate() {
-        if pair.value.im.abs() > EIG_IM_TOL {
-            continue;
-        }
-        if !matches_stability_for_kind(Complex::new(pair.value.re, pair.value.im), kind, stability)
-        {
-            continue;
-        }
-        let vector: Vec<f64> = pair.vector.iter().map(|entry| entry.re).collect();
-        if l2_norm(&vector) <= NORM_EPS {
-            continue;
-        }
-        candidates.push(RealEigenMode {
-            index: idx,
-            vector: normalize(vector)?,
-        });
-    }
-    if candidates.is_empty() {
-        bail!("No real eigenmode matches the requested manifold stability.");
-    }
-    if requested_index.is_none() && candidates.len() != 1 {
-        bail!(
-            "Expected exactly one real eigenmode for 1D manifold, found {}.",
-            candidates.len()
-        );
-    }
-    if let Some(index) = requested_index {
-        if let Some(found) = candidates.into_iter().find(|mode| mode.index == index) {
-            return Ok(found);
-        }
-        bail!(
-            "Requested eigen index {} is not an eligible real mode.",
-            index.saturating_add(1)
-        );
-    }
-    Ok(candidates.remove(0))
+        stability,
+        requested_index,
+        &StatePeriodicity::none(),
+    )?
+    .mode)
 }
 
 fn select_2d_equilibrium_basis(
@@ -2089,6 +2243,7 @@ fn select_2d_equilibrium_basis(
             if l2_norm(&vector) > NORM_EPS {
                 real_modes.push(RealEigenMode {
                     index: idx,
+                    value: Complex::new(pair.value.re, pair.value.im),
                     vector: normalize(vector)?,
                 });
             }
@@ -5240,79 +5395,290 @@ fn matches_stability_for_kind(
     }
 }
 
-fn integrate_flow_with_arclength(
+fn build_flow_manifold_curve(
     system: &EquationSystem,
-    initial_state: &[f64],
-    sigma: f64,
-    time: f64,
-    dt: f64,
-    bounds: Option<&ManifoldBounds>,
-) -> Option<(Vec<f64>, f64)> {
-    if time <= 0.0 {
-        return Some((initial_state.to_vec(), 0.0));
+    source: &PreparedManifold1DSource,
+    direction: ManifoldDirection,
+    settings: &Manifold1DSettings,
+    periodicity: &StatePeriodicity,
+) -> Result<ManifoldCurveSolve> {
+    let sign = if direction == ManifoldDirection::Minus {
+        -1.0
+    } else {
+        1.0
+    };
+    let sigma = stability_sigma(settings.stability);
+    let mut anchor = source.state.clone();
+    periodicity.wrap_state(&mut anchor);
+    let mut seed_lifted = source.state.clone();
+    for (value, direction_value) in seed_lifted.iter_mut().zip(source.mode.vector.iter()) {
+        *value += sign * settings.eps * direction_value;
     }
-    let steps = (time / dt.max(1e-9)).ceil().max(1.0) as usize;
-    let h = time / (steps as f64);
-    let mut state = initial_state.to_vec();
-    let mut arc = 0.0;
-    for _ in 0..steps {
-        let prev = state.clone();
-        rk4_step(system, &mut state, h, sigma);
-        if state.iter().any(|value| !value.is_finite()) {
-            return None;
-        }
-        if let Some(box_bounds) = bounds {
-            if !inside_bounds(&state, box_bounds) {
-                return None;
-            }
-        }
-        arc += l2_distance(&prev, &state);
-    }
-    Some((state, arc))
-}
+    let mut seed_wrapped = seed_lifted.clone();
+    periodicity.wrap_state(&mut seed_wrapped);
 
-fn integrate_trajectory_samples(
-    system: &EquationSystem,
-    initial_state: &[f64],
-    sigma: f64,
-    time: f64,
-    dt: f64,
-    max_steps: usize,
-    max_points: usize,
-    bounds: Option<&ManifoldBounds>,
-) -> (Vec<Vec<f64>>, Vec<f64>) {
-    let mut points = vec![initial_state.to_vec()];
+    if let Some(bounds) = settings.bounds.as_ref() {
+        if !inside_bounds(&anchor, bounds) {
+            bail!("The corrected equilibrium lies outside the configured manifold bounds.");
+        }
+        if !inside_bounds(&seed_wrapped, bounds) {
+            bail!("The local manifold seed lies outside the configured manifold bounds.");
+        }
+    }
+
+    let target = settings.target_arclength;
+    let seed_arc = periodic_l2_distance(&anchor, &seed_lifted, periodicity);
+    let mut lifted_points = vec![source.state.clone()];
     let mut arclength = vec![0.0];
-    if time <= 0.0 || max_points <= 1 {
-        return (points, arclength);
+    if target <= seed_arc && seed_arc > NORM_EPS {
+        let alpha = (target / seed_arc).clamp(0.0, 1.0);
+        lifted_points.push(lerp(&source.state, &seed_lifted, alpha));
+        arclength.push(target);
+        let (points, arclength) = resample_and_wrap_curve(
+            &lifted_points,
+            &arclength,
+            settings.caps.max_points,
+            periodicity,
+        );
+        return Ok(ManifoldCurveSolve {
+            points,
+            arclength,
+            diagnostics: ManifoldCurveSolverDiagnostics {
+                termination_reason: "target_arclength".to_string(),
+                requested_arclength: target,
+                achieved_arclength: target,
+                target_reached: true,
+                source_correction_norm: source.correction_norm,
+                least_period: source.least_period,
+                ..ManifoldCurveSolverDiagnostics::default()
+            },
+        });
     }
 
-    let nominal_steps = (time / dt.max(1e-9)).ceil().max(1.0) as usize;
-    let step_cap = max_steps.max(1).min(max_points.saturating_sub(1).max(1));
-    let steps = nominal_steps.min(step_cap).max(1);
-    let h = time / (steps as f64);
+    lifted_points.push(seed_lifted.clone());
+    arclength.push(seed_arc);
+    let mut state = seed_lifted;
+    let mut cumulative = seed_arc;
+    let mut elapsed = 0.0;
+    let dt = settings.integration_dt.abs();
+    let mut integration_steps = 0usize;
+    let mut termination_reason = "max_steps".to_string();
+    let mut termination_detail = None;
+    let mut target_reached = false;
 
-    let mut state = initial_state.to_vec();
-    let mut cumulative = 0.0;
-    for _ in 0..steps {
-        let prev = state.clone();
-        rk4_step(system, &mut state, h, sigma);
-        if state.iter().any(|value| !value.is_finite()) {
+    while integration_steps < settings.caps.max_steps {
+        if elapsed >= settings.caps.max_time {
+            termination_reason = "max_time".to_string();
             break;
         }
-        if let Some(box_bounds) = bounds {
-            if !inside_bounds(&state, box_bounds) {
+        let h = dt.min(settings.caps.max_time - elapsed);
+        if h <= 0.0 {
+            termination_reason = "max_time".to_string();
+            break;
+        }
+        let mut next = state.clone();
+        rk4_step_with_periodicity(system, &mut next, h, sigma, periodicity);
+        integration_steps += 1;
+        elapsed += h;
+
+        if next.iter().any(|value| !value.is_finite()) {
+            termination_reason = "non_finite_state".to_string();
+            termination_detail = Some(format!(
+                "non-finite state after integration step {}",
+                integration_steps
+            ));
+            break;
+        }
+        let mut next_wrapped = next.clone();
+        periodicity.wrap_state(&mut next_wrapped);
+        if let Some(bounds) = settings.bounds.as_ref() {
+            if !inside_bounds(&next_wrapped, bounds) {
+                termination_reason = "bounds_exit".to_string();
+                termination_detail = Some(format!(
+                    "left configured bounds after integration step {}",
+                    integration_steps
+                ));
                 break;
             }
         }
-        cumulative += l2_distance(&prev, &state);
-        points.push(state.clone());
-        arclength.push(cumulative);
-        if points.len() >= max_points {
+
+        let step_arc = periodic_l2_distance(&state, &next, periodicity);
+        if !step_arc.is_finite() {
+            termination_reason = "non_finite_arclength".to_string();
             break;
         }
+        if cumulative + step_arc >= target && step_arc > NORM_EPS {
+            let alpha = ((target - cumulative) / step_arc).clamp(0.0, 1.0);
+            lifted_points.push(lerp(&state, &next, alpha));
+            arclength.push(target);
+            termination_reason = "target_arclength".to_string();
+            target_reached = true;
+            break;
+        }
+
+        cumulative += step_arc;
+        lifted_points.push(next.clone());
+        arclength.push(cumulative);
+        state = next;
     }
-    (points, arclength)
+
+    let (points, arclength) = resample_and_wrap_curve(
+        &lifted_points,
+        &arclength,
+        settings.caps.max_points,
+        periodicity,
+    );
+    let achieved_arclength = *arclength.last().unwrap_or(&0.0);
+    Ok(ManifoldCurveSolve {
+        points,
+        arclength,
+        diagnostics: ManifoldCurveSolverDiagnostics {
+            termination_reason,
+            termination_detail,
+            requested_arclength: target,
+            achieved_arclength,
+            target_reached,
+            integration_steps,
+            source_correction_norm: source.correction_norm,
+            least_period: source.least_period,
+            ..ManifoldCurveSolverDiagnostics::default()
+        },
+    })
+}
+
+fn resample_and_wrap_curve(
+    lifted_points: &[Vec<f64>],
+    arclength: &[f64],
+    max_points: usize,
+    periodicity: &StatePeriodicity,
+) -> (Vec<Vec<f64>>, Vec<f64>) {
+    if lifted_points.is_empty() || arclength.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let count = lifted_points.len().min(arclength.len());
+    let output_count = count.min(max_points.max(2));
+    let total = arclength[count - 1];
+    let mut points = Vec::with_capacity(output_count);
+    let mut output_arclength = Vec::with_capacity(output_count);
+    let mut segment = 0usize;
+    for output_index in 0..output_count {
+        let target = if output_count <= 1 {
+            0.0
+        } else {
+            total * (output_index as f64) / ((output_count - 1) as f64)
+        };
+        while segment + 1 < count && arclength[segment + 1] < target {
+            segment += 1;
+        }
+        let mut point = if segment + 1 < count {
+            let left = arclength[segment];
+            let right = arclength[segment + 1];
+            let alpha = if right > left {
+                ((target - left) / (right - left)).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            lerp(&lifted_points[segment], &lifted_points[segment + 1], alpha)
+        } else {
+            lifted_points[count - 1].clone()
+        };
+        periodicity.wrap_state(&mut point);
+        points.push(point);
+        output_arclength.push(target);
+    }
+    (points, output_arclength)
+}
+
+fn apply_flow_with_periodicity(
+    system: &EquationSystem,
+    state: &[f64],
+    out: &mut [f64],
+    periodicity: &StatePeriodicity,
+) {
+    let mut wrapped = state.to_vec();
+    periodicity.wrap_state(&mut wrapped);
+    system.apply(0.0, &wrapped, out);
+}
+
+fn rk4_step_with_periodicity(
+    system: &EquationSystem,
+    state: &mut [f64],
+    dt: f64,
+    sigma: f64,
+    periodicity: &StatePeriodicity,
+) {
+    let dim = state.len();
+    let mut k1 = vec![0.0; dim];
+    let mut k2 = vec![0.0; dim];
+    let mut k3 = vec![0.0; dim];
+    let mut k4 = vec![0.0; dim];
+    let mut tmp = vec![0.0; dim];
+
+    apply_flow_with_periodicity(system, state, &mut k1, periodicity);
+    for i in 0..dim {
+        k1[i] *= sigma;
+        tmp[i] = state[i] + 0.5 * dt * k1[i];
+    }
+    apply_flow_with_periodicity(system, &tmp, &mut k2, periodicity);
+    for i in 0..dim {
+        k2[i] *= sigma;
+        tmp[i] = state[i] + 0.5 * dt * k2[i];
+    }
+    apply_flow_with_periodicity(system, &tmp, &mut k3, periodicity);
+    for i in 0..dim {
+        k3[i] *= sigma;
+        tmp[i] = state[i] + dt * k3[i];
+    }
+    apply_flow_with_periodicity(system, &tmp, &mut k4, periodicity);
+    for i in 0..dim {
+        k4[i] *= sigma;
+        state[i] += dt * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]) / 6.0;
+    }
+}
+
+fn periodic_l2_distance(a: &[f64], b: &[f64], periodicity: &StatePeriodicity) -> f64 {
+    a.iter()
+        .zip(b.iter())
+        .enumerate()
+        .map(|(index, (left, right))| {
+            let delta = periodicity.wrapped_delta(index, right - left);
+            delta * delta
+        })
+        .sum::<f64>()
+        .sqrt()
+}
+
+fn periodic_difference(from: &[f64], to: &[f64], periodicity: &StatePeriodicity) -> Vec<f64> {
+    from.iter()
+        .zip(to.iter())
+        .enumerate()
+        .map(|(index, (left, right))| periodicity.wrapped_delta(index, right - left))
+        .collect()
+}
+
+fn periodic_lerp(from: &[f64], to: &[f64], alpha: f64, periodicity: &StatePeriodicity) -> Vec<f64> {
+    let delta = periodic_difference(from, to, periodicity);
+    let mut point = from
+        .iter()
+        .zip(delta.iter())
+        .map(|(value, offset)| value + alpha * offset)
+        .collect::<Vec<_>>();
+    periodicity.wrap_state(&mut point);
+    point
+}
+
+fn cumulative_polyline_arclength(points: &[Vec<f64>], periodicity: &StatePeriodicity) -> Vec<f64> {
+    if points.is_empty() {
+        return Vec::new();
+    }
+    let mut arclength = Vec::with_capacity(points.len());
+    arclength.push(0.0);
+    for pair in points.windows(2) {
+        let next = arclength.last().copied().unwrap_or(0.0)
+            + periodic_l2_distance(&pair[0], &pair[1], periodicity);
+        arclength.push(next);
+    }
+    arclength
 }
 
 fn build_map_manifold_curve(
@@ -5324,7 +5690,10 @@ fn build_map_manifold_curve(
     target_arclength: f64,
     caps: ManifoldTerminationCaps,
     bounds: Option<&ManifoldBounds>,
-) -> Result<(Vec<Vec<f64>>, Vec<f64>)> {
+    periodicity: &StatePeriodicity,
+    source_correction_norm: f64,
+    least_period: Option<usize>,
+) -> Result<ManifoldCurveSolve> {
     if representative_point.len() != seed.len() {
         bail!("Map manifold representative point dimension mismatch.");
     }
@@ -5332,17 +5701,15 @@ fn build_map_manifold_curve(
         bail!("Map manifold step iterations must be greater than zero.");
     }
 
-    let target = target_arclength.max(0.0);
-    let max_points = caps.max_points.max(2);
-    let step_limit = caps.max_iterations.unwrap_or(caps.max_steps).max(1);
+    let target = target_arclength;
+    let max_points = caps.max_points;
+    let step_limit = caps.max_iterations.unwrap_or(caps.max_steps);
     let domain_subdivisions = ((max_points as f64).sqrt().round() as usize).clamp(8, 32);
 
     let domain_end = match stability {
         ManifoldStability::Unstable => {
-            match apply_map_iterates(system, seed, map_step_iterations) {
-                Some(mapped) => mapped,
-                None => return Ok((vec![seed.to_vec()], vec![0.0])),
-            }
+            apply_map_iterates_with_periodicity(system, seed, map_step_iterations, periodicity)
+                .ok_or_else(|| anyhow!("Map manifold initial image is non-finite."))?
         }
         ManifoldStability::Stable => {
             let preimage = solve_map_preimage_newton(
@@ -5352,23 +5719,23 @@ fn build_map_manifold_curve(
                 representative_point,
                 representative_point,
                 map_step_iterations,
+                periodicity,
             )?;
-            let Some(value) = preimage else {
-                return Ok((vec![seed.to_vec()], vec![0.0]));
-            };
-            value
+            preimage.ok_or_else(|| {
+                anyhow!("Stable map manifold could not construct its initial inverse domain.")
+            })?
         }
     };
     if domain_end.iter().any(|value| !value.is_finite()) {
-        return Ok((vec![seed.to_vec()], vec![0.0]));
+        bail!("Map manifold initial fundamental domain is non-finite.");
     }
 
     let mut domain_samples = Vec::with_capacity(domain_subdivisions + 1);
     for sub in 0..=domain_subdivisions {
         let alpha = (sub as f64) / (domain_subdivisions as f64);
-        domain_samples.push(lerp(seed, &domain_end, alpha));
+        domain_samples.push(periodic_lerp(seed, &domain_end, alpha, periodicity));
     }
-    let initial_domain_arc = polyline_arclength(&domain_samples);
+    let initial_domain_arc = polyline_arclength(&domain_samples, periodicity);
     let mut spacing_target = if target > 0.0 && max_points > 1 {
         target / ((max_points - 1) as f64)
     } else {
@@ -5379,44 +5746,111 @@ fn build_map_manifold_curve(
     }
     spacing_target = spacing_target.max(1e-9);
 
-    let mut points = vec![domain_samples[0].clone()];
+    let mut anchor = representative_point.to_vec();
+    periodicity.wrap_state(&mut anchor);
+    let mut seed = seed.to_vec();
+    periodicity.wrap_state(&mut seed);
+    let mut points = vec![anchor.clone()];
     let mut arclength = vec![0.0];
     if let Some(box_bounds) = bounds {
-        if !inside_bounds(&points[0], box_bounds) {
-            return Ok((points, arclength));
+        if !inside_bounds(&anchor, box_bounds) || !inside_bounds(&seed, box_bounds) {
+            bail!("Map manifold source or local seed lies outside configured bounds.");
         }
     }
-    let mut cumulative_arc = 0.0;
+    let seed_arc = periodic_l2_distance(&anchor, &seed, periodicity);
+    if target <= seed_arc && seed_arc > NORM_EPS {
+        points.push(periodic_lerp(
+            &anchor,
+            &seed,
+            target / seed_arc,
+            periodicity,
+        ));
+        arclength.push(target);
+        return Ok(map_curve_solve(
+            points,
+            arclength,
+            target,
+            "target_arclength",
+            None,
+            true,
+            0,
+            source_correction_norm,
+            least_period,
+        ));
+    }
+    points.push(seed);
+    arclength.push(seed_arc);
+    let mut cumulative_arc = seed_arc;
+    let mut map_growth_steps = 0usize;
+    let mut termination_reason = "max_iterations".to_string();
+    let mut termination_detail = None;
 
     for sample in domain_samples.iter().skip(1) {
         if sample.iter().any(|value| !value.is_finite()) {
-            return Ok((points, arclength));
+            bail!("Map manifold initial domain contains a non-finite sample.");
         }
         if let Some(box_bounds) = bounds {
             if !inside_bounds(sample, box_bounds) {
-                return Ok((points, arclength));
+                termination_reason = "bounds_exit".to_string();
+                termination_detail = Some("initial fundamental domain left bounds".to_string());
+                return Ok(map_curve_solve(
+                    points,
+                    arclength,
+                    target,
+                    &termination_reason,
+                    termination_detail,
+                    false,
+                    map_growth_steps,
+                    source_correction_norm,
+                    least_period,
+                ));
             }
         }
         let last_point = points.last().cloned().unwrap_or_else(|| sample.clone());
-        let step_arc = l2_distance(&last_point, sample);
+        let step_arc = periodic_l2_distance(&last_point, sample, periodicity);
         if !step_arc.is_finite() {
-            return Ok((points, arclength));
+            bail!("Map manifold arclength became non-finite.");
         }
         if target > 0.0 && cumulative_arc + step_arc >= target && step_arc > NORM_EPS {
             let alpha_hit = ((target - cumulative_arc) / step_arc).clamp(0.0, 1.0);
-            points.push(lerp(&last_point, sample, alpha_hit));
+            points.push(periodic_lerp(&last_point, sample, alpha_hit, periodicity));
             arclength.push(target);
-            return Ok((points, arclength));
+            return Ok(map_curve_solve(
+                points,
+                arclength,
+                target,
+                "target_arclength",
+                None,
+                true,
+                map_growth_steps,
+                source_correction_norm,
+                least_period,
+            ));
         }
         cumulative_arc += step_arc;
         points.push(sample.clone());
         arclength.push(cumulative_arc);
         if points.len() >= max_points || (target > 0.0 && cumulative_arc >= target) {
-            return Ok((points, arclength));
+            return Ok(map_curve_solve(
+                points,
+                arclength,
+                target,
+                if cumulative_arc >= target {
+                    "target_arclength"
+                } else {
+                    "max_points"
+                },
+                None,
+                cumulative_arc >= target,
+                map_growth_steps,
+                source_correction_norm,
+                least_period,
+            ));
         }
     }
 
     for _ in 1..step_limit {
+        map_growth_steps += 1;
         if points.len() >= max_points || (target > 0.0 && cumulative_arc >= target) {
             break;
         }
@@ -5429,8 +5863,14 @@ fn build_map_manifold_curve(
         for (sample_index, q) in domain_samples.iter().enumerate() {
             let mapped = match stability {
                 ManifoldStability::Unstable => {
-                    let Some(value) = apply_map_iterates(system, q, map_step_iterations) else {
+                    let Some(value) = apply_map_iterates_with_periodicity(
+                        system,
+                        q,
+                        map_step_iterations,
+                        periodicity,
+                    ) else {
                         failed = true;
+                        termination_reason = "non_finite_image".to_string();
                         break;
                     };
                     value
@@ -5441,13 +5881,14 @@ fn build_map_manifold_curve(
                     } else if let (Some(prev_q), Some(prev_mapped)) =
                         (previous_q.as_ref(), previous_mapped.as_ref())
                     {
-                        prev_mapped
+                        let offset = periodic_difference(prev_q, q, periodicity);
+                        let mut guess = prev_mapped
                             .iter()
-                            .zip(q.iter().zip(prev_q.iter()))
-                            .map(|(value, (q_value, prev_q_value))| {
-                                value + (q_value - prev_q_value)
-                            })
-                            .collect::<Vec<_>>()
+                            .zip(offset.iter())
+                            .map(|(value, delta)| value + delta)
+                            .collect::<Vec<_>>();
+                        periodicity.wrap_state(&mut guess);
+                        guess
                     } else {
                         domain_samples.last().cloned().unwrap_or_else(|| q.clone())
                     };
@@ -5458,9 +5899,11 @@ fn build_map_manifold_curve(
                         representative_point,
                         representative_point,
                         map_step_iterations,
+                        periodicity,
                     )?;
                     let Some(value) = preimage else {
                         failed = true;
+                        termination_reason = "preimage_failed".to_string();
                         break;
                     };
                     value
@@ -5474,6 +5917,7 @@ fn build_map_manifold_curve(
             if let Some(box_bounds) = bounds {
                 if !inside_bounds(&mapped, box_bounds) {
                     failed = true;
+                    termination_reason = "bounds_exit".to_string();
                     break;
                 }
             }
@@ -5484,6 +5928,10 @@ fn build_map_manifold_curve(
         }
 
         if failed || next_samples.len() != domain_samples.len() {
+            termination_detail = Some(format!(
+                "map growth stopped on fundamental-domain step {}",
+                map_growth_steps
+            ));
             break;
         }
         if let Some(last_point) = points.last() {
@@ -5509,27 +5957,52 @@ fn build_map_manifold_curve(
                 spacing_target,
                 max_domain_samples,
                 bounds,
+                periodicity,
             )?;
         }
 
         for mapped in next_samples.iter().skip(1) {
             let last_point = points.last().cloned().unwrap_or_else(|| mapped.clone());
-            let step_arc = l2_distance(&last_point, mapped);
+            let step_arc = periodic_l2_distance(&last_point, mapped, periodicity);
             if !step_arc.is_finite() {
                 failed = true;
                 break;
             }
             if target > 0.0 && cumulative_arc + step_arc >= target && step_arc > NORM_EPS {
                 let alpha_hit = ((target - cumulative_arc) / step_arc).clamp(0.0, 1.0);
-                points.push(lerp(&last_point, mapped, alpha_hit));
+                points.push(periodic_lerp(&last_point, mapped, alpha_hit, periodicity));
                 arclength.push(target);
-                return Ok((points, arclength));
+                return Ok(map_curve_solve(
+                    points,
+                    arclength,
+                    target,
+                    "target_arclength",
+                    None,
+                    true,
+                    map_growth_steps,
+                    source_correction_norm,
+                    least_period,
+                ));
             }
             cumulative_arc += step_arc;
             points.push(mapped.clone());
             arclength.push(cumulative_arc);
             if points.len() >= max_points || (target > 0.0 && cumulative_arc >= target) {
-                return Ok((points, arclength));
+                return Ok(map_curve_solve(
+                    points,
+                    arclength,
+                    target,
+                    if cumulative_arc >= target {
+                        "target_arclength"
+                    } else {
+                        "max_points"
+                    },
+                    None,
+                    cumulative_arc >= target,
+                    map_growth_steps,
+                    source_correction_norm,
+                    least_period,
+                ));
             }
         }
         if failed {
@@ -5537,8 +6010,8 @@ fn build_map_manifold_curve(
         }
 
         if target <= 0.0 && next_samples.len() >= 2 {
-            let current_avg =
-                polyline_arclength(&next_samples) / ((next_samples.len().saturating_sub(1)) as f64);
+            let current_avg = polyline_arclength(&next_samples, periodicity)
+                / ((next_samples.len().saturating_sub(1)) as f64);
             if current_avg.is_finite() && current_avg > 0.0 {
                 spacing_target = spacing_target.max(0.5 * current_avg);
             }
@@ -5547,7 +6020,53 @@ fn build_map_manifold_curve(
         domain_samples = next_samples;
     }
 
-    Ok((points, arclength))
+    if points.len() < 3 {
+        bail!("Map manifold computation produced no meaningful growth.");
+    }
+    if points.len() >= max_points {
+        termination_reason = "max_points".to_string();
+    }
+    Ok(map_curve_solve(
+        points,
+        arclength,
+        target,
+        &termination_reason,
+        termination_detail,
+        false,
+        map_growth_steps,
+        source_correction_norm,
+        least_period,
+    ))
+}
+
+fn map_curve_solve(
+    points: Vec<Vec<f64>>,
+    arclength: Vec<f64>,
+    requested_arclength: f64,
+    termination_reason: &str,
+    termination_detail: Option<String>,
+    target_reached: bool,
+    map_growth_iterations: usize,
+    source_correction_norm: f64,
+    least_period: Option<usize>,
+) -> ManifoldCurveSolve {
+    let achieved_arclength = *arclength.last().unwrap_or(&0.0);
+    ManifoldCurveSolve {
+        points,
+        arclength,
+        diagnostics: ManifoldCurveSolverDiagnostics {
+            termination_reason: termination_reason.to_string(),
+            termination_detail,
+            requested_arclength,
+            achieved_arclength,
+            target_reached,
+            map_growth_iterations,
+            preimage_failures: usize::from(termination_reason == "preimage_failed"),
+            source_correction_norm,
+            least_period,
+            ..ManifoldCurveSolverDiagnostics::default()
+        },
+    }
 }
 
 fn refine_map_domain_samples(
@@ -5560,6 +6079,7 @@ fn refine_map_domain_samples(
     spacing_target: f64,
     max_domain_samples: usize,
     bounds: Option<&ManifoldBounds>,
+    periodicity: &StatePeriodicity,
 ) -> Result<()> {
     if mapped_samples.len() < 2 || domain_samples.len() != mapped_samples.len() {
         return Ok(());
@@ -5576,6 +6096,7 @@ fn refine_map_domain_samples(
             delta_max,
             MAP_DOMAIN_ALPHA_MAX,
             delta_alpha_max,
+            periodicity,
         );
         if insertion_indices.is_empty() {
             break;
@@ -5596,29 +6117,37 @@ fn refine_map_domain_samples(
 
         let mut offset = 0usize;
         let mut inserted = 0usize;
+        let mut failed_required_insertions = 0usize;
         for idx in insertion_indices {
             let insert_at = idx + offset;
             if insert_at + 1 >= domain_samples.len() || insert_at + 1 >= mapped_samples.len() {
                 continue;
             }
-            let q_mid = lerp(
+            let q_mid = periodic_lerp(
                 &domain_samples[insert_at],
                 &domain_samples[insert_at + 1],
                 0.5,
+                periodicity,
             );
             let mapped_mid = match stability {
                 ManifoldStability::Unstable => {
-                    let Some(value) = apply_map_iterates(system, &q_mid, map_step_iterations)
-                    else {
+                    let Some(value) = apply_map_iterates_with_periodicity(
+                        system,
+                        &q_mid,
+                        map_step_iterations,
+                        periodicity,
+                    ) else {
+                        failed_required_insertions += 1;
                         continue;
                     };
                     value
                 }
                 ManifoldStability::Stable => {
-                    let guess = lerp(
+                    let guess = periodic_lerp(
                         &mapped_samples[insert_at],
                         &mapped_samples[insert_at + 1],
                         0.5,
+                        periodicity,
                     );
                     let preimage = solve_map_preimage_newton(
                         system,
@@ -5627,18 +6156,22 @@ fn refine_map_domain_samples(
                         representative_point,
                         representative_point,
                         map_step_iterations,
+                        periodicity,
                     )?;
                     let Some(value) = preimage else {
+                        failed_required_insertions += 1;
                         continue;
                     };
                     value
                 }
             };
             if mapped_mid.iter().any(|value| !value.is_finite()) {
+                failed_required_insertions += 1;
                 continue;
             }
             if let Some(box_bounds) = bounds {
                 if !inside_bounds(&mapped_mid, box_bounds) {
+                    failed_required_insertions += 1;
                     continue;
                 }
             }
@@ -5646,6 +6179,12 @@ fn refine_map_domain_samples(
             mapped_samples.insert(insert_at + 1, mapped_mid);
             offset += 1;
             inserted += 1;
+        }
+        if failed_required_insertions > 0 {
+            bail!(
+                "Map manifold refinement failed to solve {} required midpoint sample(s).",
+                failed_required_insertions
+            );
         }
         if inserted == 0 {
             break;
@@ -5659,21 +6198,24 @@ fn collect_map_refinement_intervals(
     delta_max: f64,
     alpha_max: f64,
     delta_alpha_max: f64,
+    periodicity: &StatePeriodicity,
 ) -> Vec<usize> {
     if mapped_samples.len() < 2 {
         return Vec::new();
     }
     let mut intervals = Vec::new();
     for i in 0..(mapped_samples.len() - 1) {
-        let delta = l2_distance(&mapped_samples[i], &mapped_samples[i + 1]);
+        let delta = periodic_l2_distance(&mapped_samples[i], &mapped_samples[i + 1], periodicity);
         if delta.is_finite() && delta > delta_max {
             intervals.push(i);
         }
     }
     if mapped_samples.len() >= 3 {
         for i in 1..(mapped_samples.len() - 1) {
-            let delta_prev = l2_distance(&mapped_samples[i - 1], &mapped_samples[i]);
-            let delta_next = l2_distance(&mapped_samples[i], &mapped_samples[i + 1]);
+            let delta_prev =
+                periodic_l2_distance(&mapped_samples[i - 1], &mapped_samples[i], periodicity);
+            let delta_next =
+                periodic_l2_distance(&mapped_samples[i], &mapped_samples[i + 1], periodicity);
             if !delta_prev.is_finite() || !delta_next.is_finite() {
                 continue;
             }
@@ -5684,6 +6226,7 @@ fn collect_map_refinement_intervals(
                 &mapped_samples[i - 1],
                 &mapped_samples[i],
                 &mapped_samples[i + 1],
+                periodicity,
             );
             if !alpha.is_finite() {
                 continue;
@@ -5701,9 +6244,14 @@ fn collect_map_refinement_intervals(
     intervals
 }
 
-fn map_turn_angle(prev: &[f64], current: &[f64], next: &[f64]) -> f64 {
-    let v0 = subtract(prev, current);
-    let v1 = subtract(next, current);
+fn map_turn_angle(
+    prev: &[f64],
+    current: &[f64],
+    next: &[f64],
+    periodicity: &StatePeriodicity,
+) -> f64 {
+    let v0 = periodic_difference(prev, current, periodicity);
+    let v1 = periodic_difference(current, next, periodicity);
     let n0 = l2_norm(&v0);
     let n1 = l2_norm(&v1);
     if n0 <= NORM_EPS || n1 <= NORM_EPS {
@@ -5713,13 +6261,13 @@ fn map_turn_angle(prev: &[f64], current: &[f64], next: &[f64]) -> f64 {
     cos_theta.acos()
 }
 
-fn polyline_arclength(points: &[Vec<f64>]) -> f64 {
+fn polyline_arclength(points: &[Vec<f64>], periodicity: &StatePeriodicity) -> f64 {
     if points.len() < 2 {
         return 0.0;
     }
     points
         .windows(2)
-        .map(|segment| l2_distance(&segment[0], &segment[1]))
+        .map(|segment| periodic_l2_distance(&segment[0], &segment[1], periodicity))
         .sum()
 }
 
@@ -5740,21 +6288,26 @@ fn cycle_component_arclength(reference_arclength: &[f64], point_count: usize) ->
     arclength
 }
 
-fn apply_map_iterates(
+fn apply_map_iterates_with_periodicity(
     system: &EquationSystem,
     state: &[f64],
     iterations: usize,
+    periodicity: &StatePeriodicity,
 ) -> Option<Vec<f64>> {
     if iterations == 0 {
-        return Some(state.to_vec());
+        let mut state = state.to_vec();
+        periodicity.wrap_state(&mut state);
+        return Some(state);
     }
     let mut current = state.to_vec();
+    periodicity.wrap_state(&mut current);
     let mut mapped = vec![0.0; state.len()];
     for _ in 0..iterations {
         system.apply(0.0, &current, &mut mapped);
         if mapped.iter().any(|value| !value.is_finite()) {
             return None;
         }
+        periodicity.wrap_state(&mut mapped);
         std::mem::swap(&mut current, &mut mapped);
     }
     Some(current)
@@ -5765,6 +6318,7 @@ fn propagate_curve_by_map_steps(
     base_points: &[Vec<f64>],
     steps: usize,
     bounds: Option<&ManifoldBounds>,
+    periodicity: &StatePeriodicity,
 ) -> Option<Vec<Vec<f64>>> {
     if base_points.is_empty() {
         return Some(Vec::new());
@@ -5774,7 +6328,7 @@ fn propagate_curve_by_map_steps(
     }
     let mut out = Vec::with_capacity(base_points.len());
     for point in base_points {
-        let mapped = apply_map_iterates(system, point, steps)?;
+        let mapped = apply_map_iterates_with_periodicity(system, point, steps, periodicity)?;
         if let Some(box_bounds) = bounds {
             if !inside_bounds(&mapped, box_bounds) {
                 break;
@@ -5796,6 +6350,7 @@ fn solve_map_preimage_newton(
     prev_cycle_point: &[f64],
     current_cycle_point: &[f64],
     map_iterations: usize,
+    periodicity: &StatePeriodicity,
 ) -> Result<Option<Vec<f64>>> {
     if target.len() != initial_guess.len()
         || target.len() != prev_cycle_point.len()
@@ -5809,15 +6364,16 @@ fn solve_map_preimage_newton(
     }
     let map_iterations = map_iterations.max(1);
 
-    let step_jacobian = compute_system_jacobian(
+    let step_jacobian = compute_system_jacobian_with_periodicity(
         system,
         SystemKind::Map {
             iterations: map_iterations,
         },
         prev_cycle_point,
+        periodicity,
     )?;
-    let rhs = subtract(target, current_cycle_point);
-    let linearized_guess =
+    let rhs = periodic_difference(current_cycle_point, target, periodicity);
+    let mut linearized_guess =
         if let Some(offset) = solve_dense_linear_system(dim, &step_jacobian, &rhs) {
             prev_cycle_point
                 .iter()
@@ -5827,34 +6383,48 @@ fn solve_map_preimage_newton(
         } else {
             prev_cycle_point.to_vec()
         };
+    periodicity.wrap_state(&mut linearized_guess);
     let mut guess = if initial_guess.iter().all(|value| value.is_finite()) {
         initial_guess.to_vec()
     } else {
-        linearized_guess
+        linearized_guess.clone()
     };
+    periodicity.wrap_state(&mut guess);
+
+    let initial_residual =
+        apply_map_iterates_with_periodicity(system, &guess, map_iterations, periodicity)
+            .map(|value| l2_norm(&periodic_difference(target, &value, periodicity)))
+            .unwrap_or(f64::INFINITY);
+    let linearized_residual =
+        apply_map_iterates_with_periodicity(system, &linearized_guess, map_iterations, periodicity)
+            .map(|value| l2_norm(&periodic_difference(target, &value, periodicity)))
+            .unwrap_or(f64::INFINITY);
+    if linearized_residual < initial_residual {
+        guess = linearized_guess;
+    }
 
     let mut map_value = vec![0.0; dim];
+    let tolerance = MAP_PREIMAGE_NEWTON_TOL * (1.0 + l2_norm(target));
     for _ in 0..MAP_PREIMAGE_NEWTON_MAX_ITERS {
-        let Some(value) = apply_map_iterates(system, &guess, map_iterations) else {
+        let Some(value) =
+            apply_map_iterates_with_periodicity(system, &guess, map_iterations, periodicity)
+        else {
             return Ok(None);
         };
         map_value = value;
-        let residual: Vec<f64> = map_value
-            .iter()
-            .zip(target.iter())
-            .map(|(value, target_value)| value - target_value)
-            .collect();
+        let residual = periodic_difference(target, &map_value, periodicity);
         let residual_norm = l2_norm(&residual);
-        if residual_norm <= MAP_PREIMAGE_NEWTON_TOL {
+        if residual_norm <= tolerance {
             return Ok(Some(guess));
         }
 
-        let jacobian = compute_system_jacobian(
+        let jacobian = compute_system_jacobian_with_periodicity(
             system,
             SystemKind::Map {
                 iterations: map_iterations,
             },
             &guess,
+            periodicity,
         )?;
         let Some(delta) = solve_dense_linear_system(dim, &jacobian, &residual) else {
             return Ok(None);
@@ -5867,21 +6437,23 @@ fn solve_map_preimage_newton(
                 .zip(delta.iter())
                 .map(|(x, d)| x - step_scale * d)
                 .collect();
+            let mut candidate = candidate;
             if candidate.iter().any(|value| !value.is_finite()) {
                 step_scale *= 0.5;
                 continue;
             }
-            let Some(value) = apply_map_iterates(system, &candidate, map_iterations) else {
+            periodicity.wrap_state(&mut candidate);
+            let Some(value) = apply_map_iterates_with_periodicity(
+                system,
+                &candidate,
+                map_iterations,
+                periodicity,
+            ) else {
                 step_scale *= 0.5;
                 continue;
             };
             map_value = value;
-            let candidate_residual = map_value
-                .iter()
-                .zip(target.iter())
-                .map(|(value, target_value)| (value - target_value) * (value - target_value))
-                .sum::<f64>()
-                .sqrt();
+            let candidate_residual = l2_norm(&periodic_difference(target, &map_value, periodicity));
             if candidate_residual + 1e-14 < residual_norm {
                 guess = candidate;
                 accepted = true;
@@ -5894,17 +6466,14 @@ fn solve_map_preimage_newton(
         }
     }
 
-    let Some(value) = apply_map_iterates(system, &guess, map_iterations) else {
+    let Some(value) =
+        apply_map_iterates_with_periodicity(system, &guess, map_iterations, periodicity)
+    else {
         return Ok(None);
     };
     map_value = value;
-    let residual_norm = map_value
-        .iter()
-        .zip(target.iter())
-        .map(|(value, target_value)| (value - target_value) * (value - target_value))
-        .sum::<f64>()
-        .sqrt();
-    if residual_norm <= 1e-7 {
+    let residual_norm = l2_norm(&periodic_difference(target, &map_value, periodicity));
+    if residual_norm <= 1e-8 * (1.0 + l2_norm(target)) {
         Ok(Some(guess))
     } else {
         Ok(None)
@@ -5923,90 +6492,6 @@ fn solve_dense_linear_system(dim: usize, matrix: &[f64], rhs: &[f64]) -> Option<
     a.lu()
         .solve(&b)
         .map(|solution| solution.iter().copied().collect())
-}
-
-fn solve_arclength_hit_bvp(
-    system: &EquationSystem,
-    seed: &[f64],
-    target_arclength: f64,
-    sigma: f64,
-    dt: f64,
-    max_time: f64,
-    min_time: f64,
-    tolerance: f64,
-    max_iterations: usize,
-    bounds: Option<&ManifoldBounds>,
-) -> Result<Option<(Vec<f64>, f64)>> {
-    let target_arclength = target_arclength.max(0.0);
-    let min_time = min_time.max(0.0).min(max_time);
-    let Some((mut x_lo, arc_lo)) =
-        integrate_flow_with_arclength(system, seed, sigma, min_time, dt, bounds)
-    else {
-        return Ok(None);
-    };
-    let mut t_lo = min_time;
-    let mut g_lo = arc_lo - target_arclength;
-    if g_lo >= 0.0 {
-        return Ok(Some((x_lo, t_lo)));
-    }
-
-    let mut t_hi = (t_lo + dt.max(1e-6)).min(max_time);
-    if t_hi <= t_lo {
-        return Ok(None);
-    }
-    let Some((mut x_hi, arc_hi)) =
-        integrate_flow_with_arclength(system, seed, sigma, t_hi, dt, bounds)
-    else {
-        return Ok(None);
-    };
-    let mut g_hi = arc_hi - target_arclength;
-    let mut bracketed = g_hi >= 0.0;
-    while !bracketed && t_hi < max_time {
-        t_lo = t_hi;
-        x_lo = x_hi;
-        g_lo = g_hi;
-        t_hi = (t_hi * 2.0).min(max_time);
-        let Some((next_x_hi, next_arc_hi)) =
-            integrate_flow_with_arclength(system, seed, sigma, t_hi, dt, bounds)
-        else {
-            return Ok(None);
-        };
-        x_hi = next_x_hi;
-        g_hi = next_arc_hi - target_arclength;
-        bracketed = g_hi >= 0.0;
-    }
-    if !bracketed {
-        return Ok(None);
-    }
-
-    let tol = tolerance.max(1e-10);
-    for _ in 0..max_iterations.max(8) {
-        let t_mid = 0.5 * (t_lo + t_hi);
-        let Some((x_mid, arc_mid)) =
-            integrate_flow_with_arclength(system, seed, sigma, t_mid, dt, bounds)
-        else {
-            return Ok(None);
-        };
-        let g_mid = arc_mid - target_arclength;
-        if g_mid.abs() <= tol || (t_hi - t_lo).abs() <= tol {
-            return Ok(Some((x_mid, t_mid)));
-        }
-        if g_lo * g_mid <= 0.0 {
-            t_hi = t_mid;
-            x_hi = x_mid;
-            g_hi = g_mid;
-        } else {
-            t_lo = t_mid;
-            x_lo = x_mid;
-            g_lo = g_mid;
-        }
-    }
-
-    if g_hi.abs() < g_lo.abs() {
-        Ok(Some((x_hi, t_hi)))
-    } else {
-        Ok(Some((x_lo, t_lo)))
-    }
 }
 
 fn rk4_step(system: &EquationSystem, state: &mut [f64], dt: f64, sigma: f64) {
@@ -6189,6 +6674,10 @@ mod tests {
         system
     }
 
+    fn logistic_period_two_point(r: f64) -> f64 {
+        (r + 1.0 - ((r - 3.0) * (r + 1.0)).sqrt()) / (2.0 * r)
+    }
+
     fn circular_cycle_state(ntst: usize, ncol: usize, radius: f64) -> Vec<f64> {
         let mut state = Vec::new();
         for i in 0..ntst {
@@ -6266,6 +6755,89 @@ mod tests {
     }
 
     #[test]
+    fn manifold_eq_1d_uses_newton_corrected_equilibrium_as_anchor() {
+        let mut system = build_system(&["x-1", "-2*(y-2)"], &["x", "y"], &[]);
+        let branches = continue_manifold_eq_1d(
+            &mut system,
+            &[1.01, 2.01],
+            Manifold1DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Plus,
+                eig_index: Some(0),
+                eps: 1e-3,
+                target_arclength: 0.05,
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect("corrected-anchor manifold");
+
+        let anchor = &branches[0].points[0].state;
+        assert!(
+            l2_distance(anchor, &[1.0, 2.0]) <= 1e-10,
+            "anchor={anchor:?}"
+        );
+        assert!(branches[0]
+            .points
+            .iter()
+            .all(|point| (point.state[1] - 2.0).abs() <= 1e-9));
+    }
+
+    #[test]
+    fn manifold_eq_1d_wraps_periodic_flow_anchor_and_output() {
+        let mut system = build_system(&["sin(theta)"], &["theta"], &[]);
+        let periodicity = StatePeriodicity::from_periods(&[std::f64::consts::TAU], 1);
+        let branches = continue_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Flow,
+            &[std::f64::consts::TAU + 1e-3],
+            Manifold1DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Plus,
+                target_arclength: 0.2,
+                ..Manifold1DSettings::default()
+            },
+            &periodicity,
+        )
+        .expect("periodic flow manifold");
+
+        assert!(branches[0].points[0].state[0].abs() <= 1e-10);
+        assert!(branches[0]
+            .points
+            .iter()
+            .all(|point| { point.state[0] >= 0.0 && point.state[0] < std::f64::consts::TAU }));
+    }
+
+    #[test]
+    fn manifold_eq_1d_wraps_periodic_map_anchor_and_output() {
+        let mut system = build_system(&["2*theta"], &["theta"], &[]);
+        let periodicity = StatePeriodicity::from_periods(&[1.0], 1);
+        let branches = continue_manifold_eq_1d_with_kind_and_periodicity(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[1.001],
+            Manifold1DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Plus,
+                eps: 1e-4,
+                target_arclength: 0.2,
+                caps: ManifoldTerminationCaps {
+                    max_iterations: Some(16),
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..Manifold1DSettings::default()
+            },
+            &periodicity,
+        )
+        .expect("periodic map manifold");
+
+        assert!(branches[0].points[0].state[0].abs() <= 1e-10);
+        assert!(branches[0]
+            .points
+            .iter()
+            .all(|point| point.state[0] >= 0.0 && point.state[0] < 1.0));
+    }
+
+    #[test]
     fn manifold_eq_1d_records_dense_trajectory_samples() {
         let mut system = build_system(&["x", "-y"], &["x", "y"], &[]);
         let branches = continue_manifold_eq_1d(
@@ -6328,6 +6900,97 @@ mod tests {
     }
 
     #[test]
+    fn manifold_eq_1d_max_steps_caps_integration_work() {
+        let mut system = build_system(&["x", "-y"], &["x", "y"], &[]);
+        let branches = continue_manifold_eq_1d(
+            &mut system,
+            &[0.0, 0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Plus,
+                eps: 1e-3,
+                target_arclength: 1.0,
+                integration_dt: 1e-2,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 3,
+                    max_points: 100,
+                    max_time: 100.0,
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect("step-capped manifold");
+        let branch = &branches[0];
+        assert!(branch.points.len() <= 5, "points={}", branch.points.len());
+        let achieved = branch
+            .points
+            .last()
+            .map(|point| point.param_value)
+            .unwrap_or(0.0);
+        assert!(
+            achieved < 0.1,
+            "max_steps did not cap integration: s={achieved}"
+        );
+        let ManifoldGeometry::Curve(geometry) = branch.manifold_geometry.as_ref().unwrap() else {
+            panic!("expected curve geometry");
+        };
+        let diagnostics = geometry.solver_diagnostics.as_ref().unwrap();
+        assert_eq!(diagnostics.termination_reason, "max_steps");
+        assert_eq!(diagnostics.integration_steps, 3);
+        assert!(!diagnostics.target_reached);
+    }
+
+    #[test]
+    fn manifold_eq_1d_bounds_exit_keeps_valid_prefix() {
+        let mut system = build_system(&["x", "-y"], &["x", "y"], &[]);
+        let branches = continue_manifold_eq_1d(
+            &mut system,
+            &[0.0, 0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Plus,
+                eps: 1e-3,
+                target_arclength: 1.0,
+                integration_dt: 1e-3,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 10_000,
+                    max_points: 1_000,
+                    max_time: 20.0,
+                    ..ManifoldTerminationCaps::default()
+                },
+                bounds: Some(ManifoldBounds {
+                    min: vec![-1.0, -1.0],
+                    max: vec![0.01, 1.0],
+                }),
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect("bounded manifold");
+        let branch = &branches[0];
+        assert!(
+            branch.points.len() > 3,
+            "valid in-bounds prefix was discarded"
+        );
+        assert!(branch
+            .points
+            .iter()
+            .all(|point| point.state[0] <= 0.01 + 1e-10));
+        assert!(branch.points.last().unwrap().param_value > 0.0);
+        let ManifoldGeometry::Curve(geometry) = branch.manifold_geometry.as_ref().unwrap() else {
+            panic!("expected curve geometry");
+        };
+        assert_eq!(
+            geometry
+                .solver_diagnostics
+                .as_ref()
+                .unwrap()
+                .termination_reason,
+            "bounds_exit"
+        );
+    }
+
+    #[test]
     fn manifold_eq_1d_lorenz_trajectory_has_no_large_jumps() {
         let mut system = build_system(
             &["sigma*(y-x)", "x*(rho-z)-y", "x*y-beta*z"],
@@ -6384,6 +7047,24 @@ mod tests {
             text.contains("Requested eigen index 1 is not an eligible real mode."),
             "unexpected error text: {text}"
         );
+    }
+
+    #[test]
+    fn manifold_eq_1d_rejects_mode_inside_higher_dimensional_side() {
+        let mut system = build_system(&["x", "2*y", "-z"], &["x", "y", "z"], &[]);
+        let error = continue_manifold_eq_1d(
+            &mut system,
+            &[0.0, 0.0, 0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Plus,
+                eig_index: Some(0),
+                target_arclength: 0.05,
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect_err("a two-dimensional unstable side is not a 1D manifold");
+        assert!(format!("{error:#}").contains("dimension is 2"));
     }
 
     #[test]
@@ -6499,6 +7180,25 @@ mod tests {
     }
 
     #[test]
+    fn manifold_eq_1d_map_uses_corrected_fixed_point_as_anchor() {
+        let mut system = build_system(&["1.5*x + 0.1"], &["x"], &[]);
+        let branches = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Plus,
+                eps: 1e-4,
+                target_arclength: 0.05,
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect("corrected map anchor");
+        assert!((branches[0].points[0].state[0] + 0.2).abs() <= 1e-10);
+    }
+
+    #[test]
     fn manifold_eq_1d_map_stable_uses_inverse_preimage_steps() {
         let mut system = build_system(&["0.5*x"], &["x"], &[]);
         let branches = continue_manifold_eq_1d_with_kind(
@@ -6544,12 +7244,32 @@ mod tests {
     }
 
     #[test]
+    fn manifold_eq_1d_map_stable_rejects_noninvertible_return_map() {
+        let mut system = build_system(&["0*x"], &["x"], &[]);
+        let error = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Stable,
+                direction: ManifoldDirection::Plus,
+                target_arclength: 0.1,
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect_err("noninvertible stable-map growth must not report success");
+        assert!(format!("{error:#}").contains("invertible"));
+    }
+
+    #[test]
     fn manifold_eq_1d_map_cycle_fanout_emits_per_point_and_direction() {
-        let mut system = build_system(&["2*x"], &["x"], &[]);
+        let r = 3.5;
+        let cycle_point = logistic_period_two_point(r);
+        let mut system = build_system(&["r*x*(1-x)"], &["x"], &[("r", r)]);
         let branches = continue_manifold_eq_1d_with_kind(
             &mut system,
-            SystemKind::Map { iterations: 3 },
-            &[0.0],
+            SystemKind::Map { iterations: 2 },
+            &[cycle_point],
             Manifold1DSettings {
                 stability: ManifoldStability::Unstable,
                 direction: ManifoldDirection::Both,
@@ -6566,9 +7286,9 @@ mod tests {
             },
         )
         .expect("map cycle manifold");
-        assert_eq!(branches.len(), 6);
-        let mut seen_plus = [false; 3];
-        let mut seen_minus = [false; 3];
+        assert_eq!(branches.len(), 4);
+        let mut seen_plus = [false; 2];
+        let mut seen_minus = [false; 2];
         for branch in &branches {
             let BranchType::ManifoldEq1D {
                 direction,
@@ -6579,16 +7299,16 @@ mod tests {
             else {
                 panic!("expected 1D manifold branch type");
             };
-            assert_eq!(*map_iterations, Some(3));
+            assert_eq!(*map_iterations, Some(2));
             let idx = cycle_point_index.expect("map manifold branch should include cycle index");
-            assert!(idx < 3);
+            assert!(idx < 2);
             match direction {
                 ManifoldDirection::Plus => seen_plus[idx] = true,
                 ManifoldDirection::Minus => seen_minus[idx] = true,
                 ManifoldDirection::Both => panic!("unexpected Both direction for emitted branch"),
             }
         }
-        for idx in 0..3 {
+        for idx in 0..2 {
             assert!(seen_plus[idx], "missing plus branch for cycle point {idx}");
             assert!(
                 seen_minus[idx],
@@ -6598,12 +7318,35 @@ mod tests {
     }
 
     #[test]
+    fn manifold_eq_1d_map_rejects_nonminimal_cycle_period() {
+        let mut system = build_system(&["2*x"], &["x"], &[]);
+        let error = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 3 },
+            &[0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Plus,
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect_err("fixed point must not be emitted as a 3-cycle");
+        let text = format!("{error:#}");
+        assert!(
+            text.contains("least period is 1"),
+            "unexpected error: {text}"
+        );
+    }
+
+    #[test]
     fn manifold_eq_1d_map_cycle_branches_propagate_from_representative_curve() {
-        let mut system = build_system(&["1.5*x + 0.1"], &["x"], &[]);
+        let r = 3.5;
+        let cycle_point = logistic_period_two_point(r);
+        let mut system = build_system(&["r*x*(1-x)"], &["x"], &[("r", r)]);
         let branches = continue_manifold_eq_1d_with_kind(
             &mut system,
             SystemKind::Map { iterations: 2 },
-            &[0.0],
+            &[cycle_point],
             Manifold1DSettings {
                 stability: ManifoldStability::Unstable,
                 direction: ManifoldDirection::Plus,
@@ -6660,20 +7403,41 @@ mod tests {
                 l2_distance(&mapped, &propagated_point.state) <= 1e-10,
                 "expected cycle phase branch to be one map iterate of representative branch"
             );
-            assert!(
-                (rep_point.param_value - propagated_point.param_value).abs() <= 1e-12,
-                "expected cycle phase branch to reuse representative arclength parameterization"
-            );
         }
+        let ManifoldGeometry::Curve(rep_geometry) = rep_branch
+            .manifold_geometry
+            .as_ref()
+            .expect("representative geometry")
+        else {
+            panic!("expected curve geometry");
+        };
+        let ManifoldGeometry::Curve(propagated_geometry) = propagated_branch
+            .manifold_geometry
+            .as_ref()
+            .expect("propagated geometry")
+        else {
+            panic!("expected curve geometry");
+        };
+        assert_eq!(
+            propagated_geometry.source_arclength.as_deref(),
+            Some(rep_geometry.arclength.as_slice())
+        );
+        assert_ne!(
+            propagated_geometry.arclength.last(),
+            rep_geometry.arclength.last(),
+            "non-isometric phase propagation should record physical arclength"
+        );
     }
 
     #[test]
-    fn manifold_eq_1d_map_cycle_stable_branches_reuse_representative_arclength() {
-        let mut system = build_system(&["0.6*x + 0.1"], &["x"], &[]);
+    fn manifold_eq_1d_map_cycle_stable_branches_record_source_and_physical_arclength() {
+        let r = 3.2;
+        let cycle_point = logistic_period_two_point(r);
+        let mut system = build_system(&["r*x*(1-x)"], &["x"], &[("r", r)]);
         let branches = continue_manifold_eq_1d_with_kind(
             &mut system,
             SystemKind::Map { iterations: 2 },
-            &[0.0],
+            &[cycle_point],
             Manifold1DSettings {
                 stability: ManifoldStability::Stable,
                 direction: ManifoldDirection::Plus,
@@ -6721,16 +7485,35 @@ mod tests {
             propagated_branch.points.len(),
             "propagated stable branch should preserve representative sampling"
         );
-        for (rep_point, propagated_point) in rep_branch
-            .points
-            .iter()
-            .zip(propagated_branch.points.iter())
-        {
-            assert!(
-                (rep_point.param_value - propagated_point.param_value).abs() <= 1e-12,
-                "expected stable cycle phase branch to reuse representative arclength parameterization"
-            );
-        }
+        let ManifoldGeometry::Curve(rep_geometry) = rep_branch
+            .manifold_geometry
+            .as_ref()
+            .expect("representative geometry")
+        else {
+            panic!("expected curve geometry");
+        };
+        let ManifoldGeometry::Curve(propagated_geometry) = propagated_branch
+            .manifold_geometry
+            .as_ref()
+            .expect("propagated geometry")
+        else {
+            panic!("expected curve geometry");
+        };
+        assert_eq!(
+            propagated_geometry.source_arclength.as_deref(),
+            Some(rep_geometry.arclength.as_slice())
+        );
+        assert_eq!(
+            propagated_geometry.arclength,
+            cumulative_polyline_arclength(
+                &propagated_branch
+                    .points
+                    .iter()
+                    .map(|point| point.state.clone())
+                    .collect::<Vec<_>>(),
+                &StatePeriodicity::none()
+            )
+        );
     }
 
     #[test]
@@ -6771,6 +7554,40 @@ mod tests {
     }
 
     #[test]
+    fn manifold_eq_1d_map_negative_multiplier_preserves_directed_half_branch() {
+        let mut system = build_system(&["-1.4*x"], &["x"], &[]);
+        let branches = continue_manifold_eq_1d_with_kind(
+            &mut system,
+            SystemKind::Map { iterations: 1 },
+            &[0.0],
+            Manifold1DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Plus,
+                eps: 1e-3,
+                target_arclength: 0.05,
+                caps: ManifoldTerminationCaps {
+                    max_points: 200,
+                    max_iterations: Some(8),
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..Manifold1DSettings::default()
+            },
+        )
+        .expect("negative-multiplier manifold");
+        let nonzero: Vec<f64> = branches[0]
+            .points
+            .iter()
+            .map(|point| point.state[0])
+            .filter(|value| value.abs() > 1e-12)
+            .collect();
+        let sign = nonzero[0].signum();
+        assert!(
+            nonzero.iter().all(|value| value.signum() == sign),
+            "directed half-branch crossed the fixed point: {nonzero:?}"
+        );
+    }
+
+    #[test]
     fn manifold_eq_1d_map_uses_max_iterations_cap() {
         let mut system = build_system(&["2*x"], &["x"], &[]);
         let branches = continue_manifold_eq_1d_with_kind(
@@ -6799,7 +7616,7 @@ mod tests {
         assert!(branch.points.len() > 3);
         let seed = branch
             .points
-            .first()
+            .get(1)
             .map(|point| point.state[0])
             .unwrap_or(0.0);
         let terminal = branch
@@ -6839,10 +7656,28 @@ mod tests {
         .expect("map manifold with densified samples");
         let branch = &branches[0];
         assert!(
-            branch.points.len() > 20,
-            "expected dense map sampling between iterates, got {} points",
-            branch.points.len()
+            (branch.points.last().unwrap().param_value - 1.0).abs() <= 1e-9,
+            "expected target attainment, got s={} with {} points",
+            branch.points.last().unwrap().param_value,
+            branch.points.len(),
         );
+        let ManifoldGeometry::Curve(geometry) = branch.manifold_geometry.as_ref().unwrap() else {
+            panic!("expected curve geometry");
+        };
+        let diagnostics = geometry.solver_diagnostics.as_ref().unwrap();
+        assert_eq!(diagnostics.termination_reason, "target_arclength");
+        assert!(diagnostics.target_reached);
+    }
+
+    #[test]
+    fn map_turn_angle_is_zero_for_forward_collinear_points() {
+        let angle = map_turn_angle(
+            &[-1.0, 0.0],
+            &[0.0, 0.0],
+            &[1.0, 0.0],
+            &StatePeriodicity::none(),
+        );
+        assert!(angle.abs() <= 1e-12, "straight-line turn angle={angle}");
     }
 
     #[test]

@@ -3463,6 +3463,18 @@ describe('appState equilibrium manifold actions', () => {
         initialGuess: [0.2],
         maxSteps: 20,
         dampingFactor: 1,
+        mapIterations: 3,
+      },
+      solutionProvenance: {
+        fingerprint: JSON.stringify({
+          type: base.config.type,
+          equations: base.config.equations,
+          params: base.config.params,
+          paramNames: base.config.paramNames,
+          varNames: base.config.varNames,
+          periodicVariables: base.config.periodicVariables ?? [],
+          mapIterations: 2,
+        }),
         mapIterations: 2,
       },
       parameters: [...base.config.params],
@@ -3526,7 +3538,6 @@ describe('appState equilibrium manifold actions', () => {
       await getContext().actions.createEquilibriumManifold1D({
         equilibriumId: added.nodeId,
         name: 'map_branch',
-        mapIterations: 2,
         settings: {
           stability: 'Unstable',
           direction: 'Both',
@@ -3553,6 +3564,7 @@ describe('appState equilibrium manifold actions', () => {
       for (const name of expectedNames) {
         const branchId = findBranchIdByName(next!, name)
         expect(next!.branches[branchId].mapIterations).toBe(2)
+        expect(next!.branches[branchId].manifoldSettings?.target_arclength).toBe(0.05)
       }
     })
   })

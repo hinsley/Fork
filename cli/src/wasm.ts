@@ -185,7 +185,8 @@ export class WasmBridge {
             this.config.type || "flow",
             iterations,
             new Float64Array(equilibriumState),
-            settings
+            settings,
+            new Float64Array(periodicPeriodsForConfig(this.config))
         ) as ManifoldRunner<EquilibriumManifold1DResult>;
     }
 

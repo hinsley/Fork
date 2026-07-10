@@ -9,7 +9,12 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
-import { ContinuationObject, ContinuationPoint, ManifoldSurfaceGeometry } from '../types';
+import {
+  ContinuationObject,
+  ContinuationPoint,
+  ManifoldCurveGeometry,
+  ManifoldSurfaceGeometry
+} from '../types';
 import { NavigationRequest } from '../navigation';
 import { MENU_PAGE_SIZE } from '../menu';
 import {
@@ -61,6 +66,15 @@ function formatTerminationReason(reason: string | undefined): string {
 }
 
 function summarizeManifoldSolverDiagnostics(branch: ContinuationObject): string | null {
+  if (branch.branchType === 'eq_manifold_1d') {
+    const geometry = branch.data.manifold_geometry;
+    if (!geometry || geometry.type !== 'Curve') return null;
+    const curve = geometry as ManifoldCurveGeometry & { type?: 'Curve' };
+    const diagnostics = curve.solver_diagnostics;
+    if (!diagnostics) return null;
+    const detail = diagnostics.termination_detail ? ` (${diagnostics.termination_detail})` : '';
+    return `Termination: ${formatTerminationReason(diagnostics.termination_reason)} • arclength=${formatNumber(diagnostics.achieved_arclength)}/${formatNumber(diagnostics.requested_arclength)} • target reached=${diagnostics.target_reached ? 'yes' : 'no'} • flow steps=${diagnostics.integration_steps} • map growth=${diagnostics.map_growth_iterations}${detail}`;
+  }
   if (branch.branchType !== 'eq_manifold_2d' && branch.branchType !== 'cycle_manifold_2d') {
     return null;
   }

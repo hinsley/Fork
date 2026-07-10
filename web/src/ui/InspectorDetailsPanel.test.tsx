@@ -4937,7 +4937,7 @@ describe('InspectorDetailsPanel', () => {
     })
   })
 
-  it('filters equilibrium manifold eigen-index dropdowns by selected stability', async () => {
+  it('filters surface eigen-indexes and hides 1D mode for higher-dimensional sides', async () => {
     const user = userEvent.setup()
     const baseSystem = createSystem({
       name: 'Manifold_Index_Filter_System',
@@ -5034,10 +5034,10 @@ describe('InspectorDetailsPanel', () => {
       expect(Array.from(eigA.options).map((option) => option.textContent)).toEqual(['1', '3'])
     })
 
-    await user.selectOptions(screen.getByTestId('equilibrium-manifold-mode'), 'curve_1d')
     await user.selectOptions(screen.getByTestId('equilibrium-manifold-stability'), 'Stable')
-    const eig1d = screen.getByTestId('equilibrium-manifold-eig-index') as HTMLSelectElement
-    expect(Array.from(eig1d.options).map((option) => option.textContent)).toEqual(['2', '5'])
+    const mode = screen.getByTestId('equilibrium-manifold-mode') as HTMLSelectElement
+    expect(Array.from(mode.options).map((option) => option.value)).toEqual(['surface_2d'])
+    expect(screen.queryByTestId('equilibrium-manifold-eig-index')).toBeNull()
   })
 
   it('auto-picks equilibrium manifold mode when only one mode is eligible for selected stability', async () => {

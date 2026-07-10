@@ -20,6 +20,7 @@ const wasmState = {
   lastRunStepsArg: null as number | null,
   lastSystemType: null as string | null,
   lastLimitCycleRunnerSystemType: null as string | null,
+  lastEqManifoldPeriods: null as number[] | null,
   initPromise: Promise.resolve() as Promise<void>,
   initResolver: null as null | (() => void),
 }
@@ -265,6 +266,39 @@ beforeAll(async () => {
       }
     }
 
+    class MockEqManifold1DRunner {
+      private progress = {
+        done: false,
+        current_step: 0,
+        max_steps: 2,
+        points_computed: 0,
+        bifurcations_found: 0,
+        current_param: 0,
+      }
+
+      constructor(...args: unknown[]) {
+        wasmState.lastEqManifoldPeriods = Array.from(args[8] as Float64Array)
+      }
+
+      run_steps() {
+        this.progress = {
+          ...this.progress,
+          done: true,
+          current_step: 2,
+          points_computed: 2,
+        }
+        return this.progress
+      }
+
+      get_progress() {
+        return this.progress
+      }
+
+      get_result() {
+        return []
+      }
+    }
+
     class MockHomoclinicRunner extends MockContinuationRunner {
       override get_result(): MockRunnerResult {
         return {
@@ -331,6 +365,7 @@ beforeAll(async () => {
       default: vi.fn(() => wasmState.initPromise ?? Promise.resolve()),
       WasmSystem: MockWasmSystem,
       WasmEquilibriumRunner: MockWasmEquilibriumRunner,
+      WasmEqManifold1DRunner: MockEqManifold1DRunner,
       WasmFoldCurveRunner: MockContinuationRunner,
       WasmHopfCurveRunner: MockContinuationRunner,
       get WasmIsochroneCurveRunner() {
@@ -361,6 +396,7 @@ beforeEach(() => {
   wasmState.lastRunStepsArg = null
   wasmState.lastSystemType = null
   wasmState.lastLimitCycleRunnerSystemType = null
+  wasmState.lastEqManifoldPeriods = null
   wasmState.initPromise = Promise.resolve()
   wasmState.initResolver = null
 })
@@ -937,6 +973,51 @@ describe('forkCoreWorker', () => {
       ok: true,
       result: { points: [] },
     })
+  })
+
+  it('passes periodic coordinates to the stepped 1D manifold runner', async () => {
+    const handler = requireHandler()
+
+    await handler({
+      data: {
+        id: 'job-manifold-1d',
+        kind: 'runEquilibriumManifold1D',
+        payload: {
+          system: {
+            ...baseSystem,
+            periodicVariables: [{ enabled: true, period: 6.25 }],
+          },
+          equilibriumState: [0],
+          settings: {
+            stability: 'Unstable',
+            direction: 'Both',
+            eig_index: 0,
+            eps: 1e-4,
+            target_arclength: 1,
+            integration_dt: 0.01,
+            caps: {
+              max_steps: 20,
+              max_points: 100,
+              max_rings: 1,
+              max_vertices: 1,
+              max_time: 2,
+            },
+          },
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(wasmState.lastEqManifoldPeriods).toEqual([6.25])
+    expect(workerScope.postMessage.mock.calls.map(([message]) => message)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'job-manifold-1d',
+          kind: 'progress',
+          progress: expect.objectContaining({ done: false }),
+        }),
+        expect.objectContaining({ id: 'job-manifold-1d', ok: true, result: [] }),
+      ])
+    )
   })
 
   it('posts progress and results for isochrone continuation runners', async () => {

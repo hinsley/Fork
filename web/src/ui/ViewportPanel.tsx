@@ -2106,7 +2106,9 @@ function resolveManifoldCurveGeometry(
       dim: geometry.dim,
       points_flat: geometry.points_flat,
       arclength: geometry.arclength,
+      source_arclength: geometry.source_arclength,
       direction: geometry.direction,
+      solver_diagnostics: geometry.solver_diagnostics,
     }
   }
   return null
