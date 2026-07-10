@@ -102,18 +102,36 @@ jobs:
           test -f ../crates/fork_wasm/pkg/fork_wasm.d.ts
           npm test
 
-      - name: Validate clean-checkout web build and tests
+      - name: Install web dependencies from a clean generated-package state
         working-directory: target
         shell: bash
         run: |
           rm -rf crates/fork_wasm/pkg-web
           cd web
           npm ci
-          npm run lint
+
+      - name: Lint web
+        working-directory: target/web
+        run: npm run lint
+
+      - name: Build web and generated declarations
+        working-directory: target/web
+        shell: bash
+        run: |
           npm run build
           test -f ../crates/fork_wasm/pkg-web/fork_wasm.d.ts
-          npx playwright install --with-deps
-          npm test
+
+      - name: Run web unit tests
+        working-directory: target/web
+        run: npm run test:unit
+
+      - name: Install Playwright browsers
+        working-directory: target/web
+        run: npx playwright install --with-deps
+
+      - name: Run web end-to-end tests
+        working-directory: target/web
+        run: npm run test:e2e
 
       - name: Commit tested implementation
         working-directory: target
