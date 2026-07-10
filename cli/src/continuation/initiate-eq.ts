@@ -1441,7 +1441,7 @@ export async function initiateEquilibriumManifold2DFromPoint(
         stability: settings.stability,
         eig_kind: 'RealPair',
         eig_indices: settings.eig_indices ?? [0, 1],
-        method: 'leaf_shooting_bvp',
+        method: 'krauskopf_osinga_geodesic_leaf_continuation',
         caps: settings.caps
       };
 

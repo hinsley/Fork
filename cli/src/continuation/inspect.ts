@@ -123,7 +123,8 @@ function summarizeManifoldSolverDiagnostics(branch: ContinuationObject): string 
   const leafTau = Number.isFinite(diagnostics.last_leaf_failure_tau)
     ? formatNumber(diagnostics.last_leaf_failure_tau as number)
     : 'n/a';
-  return `Termination: ${reason} • Final leaf delta=${delta} • floor=${floor} (reached=${floorFlag}) • failed ring/attempt/solved=${failedRing}/${failedAttempt}/${failedLeafPoints} • leaf reason=${leafReason} @ point/seg=${leafPoint}/${leafSeg} time=${leafTime} tau=${leafTau}${detail}`;
+  const localShrinks = diagnostics.local_leaf_shrinks ?? 0;
+  return `Termination: ${reason} • Final leaf delta=${delta} • floor=${floor} (reached=${floorFlag}) • per-leaf reductions=${localShrinks} • failed ring/attempt/solved=${failedRing}/${failedAttempt}/${failedLeafPoints} • leaf reason=${leafReason} @ point/seg=${leafPoint}/${leafSeg} time=${leafTime} tau=${leafTau}${detail}`;
 }
 
 /**

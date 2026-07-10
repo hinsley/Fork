@@ -5670,6 +5670,9 @@ describe('InspectorDetailsPanel', () => {
     await user.click(screen.getByTestId('limit-cycle-manifold-toggle'))
     const algorithm = screen.getByTestId('limit-cycle-manifold-algorithm') as HTMLSelectElement
     expect(algorithm.value).toBe('GeodesicRings')
+    expect(
+      Array.from(algorithm.options).map((option) => [option.value, option.textContent])
+    ).toContainEqual(['SegmentedPreimageFibers', 'segmented preimage fibers (fast)'])
     await user.selectOptions(algorithm, 'IsochronFibers')
     await user.click(screen.getByTestId('limit-cycle-manifold-submit'))
 

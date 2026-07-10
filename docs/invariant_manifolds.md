@@ -136,9 +136,9 @@ Output:
 - Full curve geometry is persisted in `manifold_geometry`.
 - Map runs also store `map_iterations` and `cycle_point_index` in `branch_type` metadata for each emitted branch.
 
-## 2D Ring-Growth Solver (Equilibrium and Cycle)
+## 2D Geodesic Ring-Growth Solver
 
-Both 2D workflows use the same growth engine.
+Equilibrium surfaces and the optional limit-cycle `geodesic rings` backend use the Krauskopf-Osinga ring-growth engine. Limit-cycle HKO and segmented-preimage fibers use separate phase-fiber engines described below.
 
 ### Surface Representation
 
@@ -151,7 +151,9 @@ A surface is grown ring-by-ring:
 
 Equilibrium 2D:
 
-- Build basis vectors `e1,e2` from selected eigenspace.
+- Newton-correct the supplied equilibrium and use the corrected point as the surface center.
+- Require the complete selected stable/unstable side to have dimension exactly two; an arbitrary eigenvector pair from a higher-dimensional side is not treated as a 2D invariant manifold.
+- Build basis vectors `e1,e2` from the selected eigenspace.
 - Initial ring points:
   - `x_k = x0 + r0 * (cos(theta_k) e1 + sin(theta_k) e2)`
   - uses a half-step phase offset in `theta_k`.
@@ -161,40 +163,38 @@ Cycle 2D:
 - Start from cycle mesh points and local normal direction.
 - Perturb each cycle point by `initial_radius`.
 - If selected multiplier is negative, a doubled cover is used for anti-periodic direction continuity.
+- If a positive multiplier is requested with `Both` through the plural core API, the plus and minus circles are grown as two independent surface branches; they are never joined into one polygon.
 
 ### Leaf Solve at One Base Point
 
 Given base point `r` on current ring:
 
-1. Construct leaf plane normal from ring tangent (neighbor-averaged tangent).
-2. Parameterize startpoint on current ring polygon segment.
-3. For fixed integration time `T`, solve plane residual in segment parameter using:
-   - Newton with analytic derivative from variational equations,
-   - segment switching on `[0,1]` boundary crossing,
-   - bisection fallback if needed.
-4. Continue in `T` from `0` until the first outward half-leaf hit whose Euclidean distance from `r` reaches `leaf_delta`.
-5. Refine first hit by bisection in `T`.
+1. Construct the leaf plane from the chord through the two neighboring ring points, matching the Krauskopf-Osinga normal construction.
+2. Treat source position on the current polygon and integration time as two unknowns.
+3. Start at the exact zero-time solution and use predictor-corrector continuation along the local plane-intersection branch. This permits folds in integration time without searching or jumping to unrelated polygon segments.
+4. Detect the first outward Euclidean-distance event and solve the coupled plane and distance equations to tight tolerance.
+5. Reject the leaf if the local branch ends or the exact event cannot be solved. There is no off-plane or relaxed-projection fallback.
 
 Derivatives:
 
-- The plane solve first uses the variational flow derivative.
+- The continuation corrector and distance event use variational flow derivatives with respect to both source position and integration time.
 - Jacobian `Df(x)` is evaluated through the autodiff path (`compute_jacobian`).
-- Finite differences are retained only as a fallback if variational transport is unavailable or degenerate.
+- Integration time is allowed to fold under pseudo-arclength continuation; source position remains on the current ring polygon.
 
 ### Ring Attempt and Acceptance
 
 For each candidate ring attempt:
 
 1. Build raw next ring (`same point count as previous ring`).
-2. Evaluate raw geodesic-quality metrics:
+2. Evaluate the Krauskopf-Osinga geodesic-quality metrics:
    - `max_angle`
    - `max_delta_angle`
 3. Reject and shrink `leaf_delta` if quality exceeds configured bounds.
 4. If accepted, run ring spacing adaptation:
    - edges shorter than `min_spacing` are removed
-   - long edges are split by solving additional leaf problems at midpoint source parameters
+   - long edges are split by solving additional leaf problems inside the parent-anchor interval; a bracket search retains only an exact leaf whose source anchor stays between its parents and whose point actually shortens the spatial edge
    - inserted points keep their source parameter and remain actual integrated leaf hits
-5. Re-check ring/geodesic quality using the stored source parameters after spacing adaptation.
+5. Re-check both angle and `Delta * angle` using the stored source parameters and each leaf's actual accepted delta after spacing adaptation.
 6. If a required leaf cannot be solved, reject and retry with smaller `leaf_delta`.
 
 Delta adaptation:
@@ -207,7 +207,12 @@ Important implementation detail:
 
 - Geodesic acceptance uses both the raw ring and the adapted ring.
 - Adapted rings are not resampled back to the previous point count.
-- The solver does not synthesize missing leaves or relaxed plane projections; if a leaf cannot be solved, it is reported as a failure and the attempt is retried with a smaller `leaf_delta`.
+- When a leaf cannot reach the common delta within `Max time`, it may reduce only that leaf toward `Delta min`, as in the convergence-to-an-attractor treatment from the original algorithm. `Per-leaf delta reductions` reports how often accepted rings used this path.
+- At the global `Delta min`, an angular trigger may pass only when its distance-weighted `Delta * angle` remains within `Delta-alpha max`; a weighted violation is never placed in the mesh.
+- If the insertion point cap is reached while long edges remain, spacing adaptation fails instead of silently accepting an under-resolved ring.
+- Spacing refinement may use the full configured `Max points` budget for a ring; it is not limited to a fixed multiple of the previous ring size.
+- Source/parent anchors are retained through triangulation, so folded or self-near rings are joined by their leaf genealogy rather than ambient nearest-point guesses.
+- The solver does not synthesize missing leaves or accept relaxed plane projections.
 
 ### Termination Conditions
 
@@ -215,12 +220,14 @@ Important implementation detail:
 
 - `target_radius`
 - `target_arclength`
+- `max_steps`
 - `max_rings`
 - `max_vertices`
 - `bounds_exit`
 - `ring_too_small`
 - `ring_build_failed`
 - `ring_spacing_failed`
+- `ring_quality_rejected`
 - `geodesic_quality_rejected`
 - `ring_candidate_too_small`
 
@@ -313,7 +320,7 @@ The profile is not just a convenience preset. It sets the geometric scale of the
 
 Both profiles use the same default geodesic acceptance thresholds (`alpha_max = 0.4`, `delta_alpha_max = 1.0`). If `Lorenz reference` succeeds where `adaptive global` fails, that usually means the run needed the larger K-O/global length scale, not that Lorenz is using looser quality gates.
 
-On the Lorenz origin stable manifold, long runs can expose this clearly. `adaptive global` may shrink `Leaf delta` repeatedly until it hits `Delta min = 0.001`; after enough tiny rings, spacing adaptation can create a fragile ring with a huge edge ratio or near-`pi` turn angle. That may surface as `geodesic_quality_rejected` in the termination summary, but the more informative `Termination detail` can say something like `reparameterized ring quality trigger`. In that case, do not keep shrinking `Leaf delta`. Switch to `Lorenz reference`, or manually coarsen toward that scale, and keep `Target radius` high enough that arclength stops first.
+On the Lorenz origin stable manifold, long runs can expose this clearly. `adaptive global` may shrink `Leaf delta` repeatedly until it hits `Delta min = 0.001`; after enough tiny rings, spacing adaptation can create a fragile ring with a huge edge ratio or near-`pi` turn angle. That terminates as `ring_quality_rejected`, with `Termination detail` identifying the edge ratio or turn-angle trigger. In that case, do not keep shrinking `Leaf delta`. Switch to `Lorenz reference`, or manually coarsen toward that scale, and keep `Target radius` high enough that arclength stops first.
 
 ## Limit-Cycle 2D
 
@@ -322,7 +329,7 @@ On the Lorenz origin stable manifold, long runs can expose this clearly. `adapti
 | `Kind` | Stable or unstable cycle manifold side. | Requires an eligible nontrivial real Floquet multiplier. |
 | `Floquet index` | Floquet mode used to seed the cycle tube. | Wrong index produces a different manifold direction. |
 | `Direction` | `plus` or `minus` side of the selected Floquet eigenvector. | Start with one side; compute the other separately if needed. |
-| `Algorithm` | `geodesic rings` or `isochron fibers (HKO)`. | Use geodesic rings for legacy runs; use isochron fibers for phase-foliated LC surfaces. |
+| `Algorithm` | `geodesic rings`, `isochron fibers (HKO)`, or `segmented preimage fibers (fast)`. | Use HKO for faithful phase-foliated global surfaces; use segmented preimages for a faster fixed-return approximation. |
 | `Initial radius` | Offset from the cycle profile in the selected normal direction. | Smaller is safer locally; larger may skip a difficult near-cycle region. |
 | `Leaf delta` | Distance between successive rings. | Same accuracy/speed tradeoff as equilibrium 2D. |
 | `Ring points` | Number of cycle/profile samples used for each ring. | More points resolve cycle variation better and cost more leaf solves. |
@@ -343,9 +350,11 @@ Note:
 
 ### Limit-Cycle Algorithms
 
-`geodesic rings` is the original Fork backend. It seeds a ring around the limit cycle and advances the whole ring with the same leaf-shooting/ring-quality machinery used for equilibrium surfaces. It is useful as a quick legacy baseline, but it is not the Krauskopf-Osinga limit-cycle method.
+`geodesic rings` seeds a ring around the limit cycle and advances it with the Krauskopf-Osinga geodesic leaf and mesh-quality machinery. It is useful when geodesic level sets are the desired parametrization.
 
-`isochron fibers (HKO)` follows the Hinke-Krauskopf-Osinga construction more closely. Fork samples phases on the limit cycle, transports the selected real Floquet bundle, offsets each phase by `Initial radius`, and grows the phase foliation using open orbit-segment BVP solves. The open-orbit residual uses collocation equations and autodiff Jacobians from the core equation engine. For strongly expanding or contracting Floquet multipliers, Fork subdivides the return map into shorter phase-shifted BVP segments instead of integrating a full period in the unstable direction. The resulting fibers are resampled by arclength into rings so the existing surface renderer can draw a clean translucent mesh.
+`isochron fibers (HKO)` implements the two-stage Hannam-Krauskopf-Osinga construction. At each phase it continues period-length orbit-segment BVPs away from the periodic-orbit solution along the Floquet direction until a small nonlinear departure event constructs a fundamental segment. It then continues a second BVP family whose endpoint traverses that segment; the opposite endpoint traces the isochron. Successive return segments are appended until the requested common fiber arclength is reached. Phase shear and normal lift-off are measured separately, all families are warm-started from the previous collocation solution, and no nonconverged BVP output is appended.
+
+`segmented preimage fibers (fast)` preserves Fork's former `IsochronFibers` implementation under an accurate name. It starts from a linear Floquet offset and repeatedly solves shorter fixed-return preimage BVPs. This is useful for fast previews and mildly nonlinear tubes, but it does not construct the nonlinear HKO fundamental segment.
 
 Important topology rules:
 
@@ -358,21 +367,22 @@ For `isochron fibers (HKO)`, the settings have slightly different practical mean
 - `Ring points` is the number of phase fibers. Negative multipliers double this internally.
 - `Leaf delta` is the target arclength spacing after fiber resampling, not a geodesic leaf step.
 - `Target arclength` is the requested length along each fixed-phase fiber.
-- `Max steps` limits the total return-preimage BVP budget; raise it when a long target with many phase fibers stops early.
-- `NTST` and `NCOL` set the open-orbit collocation resolution. Fork caps the internal HKO BVP mesh to keep browser runs tractable, but larger source meshes still improve Floquet/profile data.
+- `Max steps` limits accepted continuation points along each phase fiber; raise it for longer or tightly folded isochrons.
+- `NTST` and `NCOL` set the open-orbit collocation resolution. HKO uses at least 12 intervals and degree 3 so numerical cycle-closure error is not mistaken for nonlinear lift-off.
 - `Integration dt` is used for initial BVP guesses and the variational Floquet fallback; reduce it if the diagnostics report non-finite integration or visibly rough fibers.
 
 ### Limit-Cycle Troubleshooting
 
-If `geodesic rings` fails but `isochron fibers (HKO)` works, the failure is usually geometric: the old backend is trying to advance a full ring through a region where the correct surface is better described as fixed-phase fibers. Prefer the HKO backend for LC manifolds unless you are comparing against old results.
+If `geodesic rings` fails but `isochron fibers (HKO)` works, the failure is usually geometric: a geodesic level set is difficult while fixed-phase isochrons remain well conditioned. Prefer HKO when phase information or the published HKO parametrization is the objective.
 
-For HKO runs, first read `Termination detail`. It reports the phase count, ring count, return time, number of return segments, per-segment time, BVP mesh, BVP solve count, nonconverged solve count, and maximum residual.
+For HKO runs, first read `Termination detail`. It reports phase and ring counts, return time, BVP mesh, fundamental and isochron continuation solve counts, rejected nonconverged attempts, maximum residual/iterations, maximum phase shear, and maximum normal lift-off.
 
-- `nonconverged > 0`: reduce `Target arclength`, reduce `Initial radius`, lower `Integration dt`, or increase `NTST`/`NCOL`. If only a few solves miss tolerance and the surface is smooth, the run may still be usable.
-- Very large `return_segments`: the selected multiplier is strongly expanding/contracting, so Fork is protecting the BVP initial guesses by using shorter phase-shifted segments. This is expected for Lorenz-like unstable periodic orbits, but it raises the BVP solve count; lower `Ring points` or `Target arclength` for quick previews.
+- `rejected_nonconverged > 0`: one or more trial continuation steps were rejected and retried. No rejected point is present in the surface. If the run ultimately fails, reduce `Initial radius`/`Target arclength`, lower `Integration dt`, or increase `NTST`/`NCOL`.
+- Large phase shear or lift-off at the fundamental segment: reduce `Initial radius` so the local linear-to-nonlinear transition is resolved more conservatively.
 - `termination = max_rings`: raise `Max rings` or increase `Leaf delta`.
 - `termination = max_vertices`: raise `Max vertices`, reduce `Ring points`, or increase `Leaf delta`.
-- Very slow HKO runs: lower `Ring points`, raise `Leaf delta`, lower `Target arclength`, or raise `Initial radius` modestly to skip an expensive near-cycle layer.
+- `termination = max_steps`: raise `Max steps` or lower `Target arclength`; for HKO, at least one phase fiber exhausted its accepted continuation-point budget before the common target.
+- Very slow HKO runs: lower `Ring points`, raise `Leaf delta`, lower `Target arclength`, or use `segmented preimage fibers (fast)` for a preview.
 - Rough or twisted surfaces: verify the Floquet index, raise `Ring points`, reduce `Leaf delta`, and check whether the selected multiplier is negative, which intentionally doubles the phase cover.
 - No visible growth away from the cycle: verify `Kind`, `Floquet index`, and `Direction`; then raise `Max steps` because the HKO return budget is shared across all phase fibers.
 
@@ -476,18 +486,20 @@ After a 2D run, inspect `Branch Summary -> Manifold solver diagnostics`.
 | --- | --- | --- |
 | `termination = target_arclength` | Desired long-growth target was reached. | Successful run; only tune density or visual clarity. |
 | `termination = target_radius` | Desired radial target was reached before arclength target. | Successful if radius was the goal; otherwise raise `Target radius`. |
+| `termination = max_steps` | A phase fiber or continuation family exhausted its accepted-point budget before the common target length. | Raise `Max steps` or lower `Target arclength`; for HKO also inspect BVP residuals and continuation retries. |
 | `termination = max_rings` | Ring cap stopped growth. | Raise `Max rings`, raise `Leaf delta`, or lower the target. |
 | `termination = max_vertices` | Mesh density cap stopped growth. | Raise `Max vertices` or coarsen with larger `Max spacing`, `Min spacing`, or `Leaf delta`. |
 | `termination = ring_build_failed` | At least one leaf in the next ring could not be solved after retries. | Use leaf failure counters below; usually adjust `Leaf delta`, `Max time`, or profile scale. |
 | `termination = ring_spacing_failed` | Base ring was accepted, but inserted spacing leaves could not be solved. | Increase `Max spacing`, increase `Max time`, or reduce `Leaf delta` less aggressively. |
-| `termination = geodesic_quality_rejected` | Candidate rings repeatedly violated geodesic angle/distance quality, or a ring-quality guard was summarized by this termination reason. | Read `Termination detail`. If it mentions a geodesic angle/distance, reduce `Leaf delta`; if it mentions reparameterized ring quality, edge ratio, or a large turn angle after shrinking to `Delta min`, choose a coarser profile scale such as `Lorenz reference`. |
+| `termination = ring_quality_rejected` | Spacing adaptation produced invalid ring geometry, such as a non-finite edge ratio or near-reversal turn. | Read `Termination detail`; choose a coarser profile scale, raise `Min spacing`, or improve angular resolution. |
+| `termination = geodesic_quality_rejected` | Candidate rings repeatedly violated the inter-strip angle or distance-weighted angle thresholds. | Read `Termination detail` and reduce `Leaf delta`; only then consider modest threshold changes. |
 | `Ring-quality rejects > 0` | Rings had near-duplicate, inverted, or badly ordered local geometry. | Increase `Ring points`, increase `Min spacing`, or reduce `Leaf delta`. |
-| `Geodesic rejects > 0` | Strip-to-strip geometry was too steep for current thresholds. | Reduce `Leaf delta`; only then consider a modestly higher `Alpha max` or `Delta-alpha max`. |
+| `Geodesic rejects > 0` | Strip-to-strip geometry triggered a geodesic threshold; trials were shrunk, or an angular trigger at `Delta min` was retained because its weighted error passed. | Read the final termination and weighted metric. Reduce `Leaf delta`; only then consider a modestly higher `Alpha max` or `Delta-alpha max`. |
+| `Per-leaf delta reductions > 0` | One or more leaves could not reach the common ring distance within `Max time`, but converged after reducing only their local distance. | Usually acceptable near finite-length leaves or attractors; inspect the resulting local mesh and raise `Max time` if reductions occur unexpectedly. |
 | `Min leaf delta reached = yes` | Adaptive shrinking hit `Delta min`. | Settings are at the wrong scale or too strict; for long Lorenz use `Lorenz reference` or coarser spacing, otherwise reduce target or revise `Delta min`/thresholds. |
 | `Final leaf delta` much smaller than requested | Solver needed repeated shrinkage. | Start with a smaller `Leaf delta` or improve resolution with more `Ring points`. |
 | `Leaf fail: no first hit before max time` | The flow did not reach the required outward section within the time search. | Increase `Max time`, reduce `Leaf delta`, and verify stable/unstable side. |
 | `Leaf fail: plane no-convergence` | Newton/bisection could not solve the section residual. | Reduce `Leaf delta`, increase `Ring points`, and check for a bad eigenspace choice. |
-| `Leaf fail: segment switch limit` | The solved intersection walked across too many ring segments. | Reduce `Leaf delta`, use more `Ring points`, or choose a less local/global profile as appropriate. |
 | `Leaf fail: integrator non-finite` | The trajectory left finite numeric range. | Reduce `Integration dt`, lower targets, and check equations/parameters for blow-up. |
 
 ## Common Tuning Scenarios
@@ -541,23 +553,24 @@ This configuration has been manually smoke-tested in the Web UI for the Lorenz o
 Check these diagnostic fields:
 
 - `Leaf fail: plane no-convergence`
-- `Leaf fail: segment switch limit`
 - `Leaf fail: integrator non-finite`
 - `Leaf fail: no first hit before max time`
+- `Per-leaf delta reductions`
 - `Failed ring`, `Failed attempt`, `Solved leaf points before fail`
-- `Last leaf failure reason`, `point`, `segment`, `time`, `tau`
+- `Last leaf failure reason`, `point`, `time`, `tau`
 
 Use this interpretation:
 
 - High `no first hit before max time`: increase `Max time`, and reduce `Leaf delta` if the requested next ring is too far away.
-- High `segment switch limit` or `plane no-convergence`: reduce `Leaf delta`, increase `Ring points`, and verify the profile scale.
+- High `plane no-convergence`: reduce `Leaf delta`, increase `Ring points`, and verify the eigenspace and profile scale.
+- High `Per-leaf delta reductions`: inspect whether a subset of leaves is approaching a finite-length limit. If not, raise `Max time` before globally reducing `Leaf delta`.
 - High `integrator non-finite`: reduce `Integration dt`; if it persists, lower targets and check the equations or parameter regime.
 
 ### Quality rejects
 
 `Ring-quality rejects` and `Geodesic rejects` mean the candidate surface did not satisfy the mesh quality constraints at the current step scale.
 
-First read `Termination detail`. A detail with `angle=` or `distance_angle=` is a direct geodesic-quality failure. A detail with `reparameterized ring quality trigger`, `edge_ratio`, or a large `turn_angle` means the run produced a pathological ring after spacing adaptation; this often happens when a long run is attempted at too small a profile scale and the solver has already shrunk to `Delta min`.
+First read `Termination detail`. A `geodesic_quality_rejected` detail with `angle=` or `distance_angle=` is an inter-strip quality failure. A `ring_quality_rejected` detail with `edge_ratio` or a large `turn_angle` means spacing adaptation produced a pathological ring; this often happens when a long run is attempted at too small a profile scale and the solver has already shrunk to `Delta min`.
 
 Try, in order:
 

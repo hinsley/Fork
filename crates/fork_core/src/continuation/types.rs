@@ -119,10 +119,12 @@ pub enum Manifold2DProfile {
 /// Algorithm selector for two-dimensional limit-cycle manifolds.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ManifoldCycle2DAlgorithm {
-    /// Existing geodesic ring-growth solver.
+    /// Krauskopf-Osinga geodesic ring-growth solver.
     GeodesicRings,
-    /// Hinke-Krauskopf-Osinga style isochron-fiber continuation.
+    /// Hannam-Krauskopf-Osinga fundamental-segment isochron continuation.
     IsochronFibers,
+    /// Faster fixed-return preimage fibers solved by collocation.
+    SegmentedPreimageFibers,
 }
 
 /// Global stop criteria shared by manifold workflows.
@@ -456,6 +458,8 @@ pub struct ManifoldSurfaceSolverDiagnostics {
     pub leaf_fail_integrator_non_finite: usize,
     #[serde(default)]
     pub leaf_fail_no_first_hit_within_max_time: usize,
+    #[serde(default)]
+    pub local_leaf_shrinks: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failed_ring: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

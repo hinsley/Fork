@@ -61,9 +61,9 @@ test('lorenz 2D stable manifold adaptive defaults produce nontrivial growth', as
 
   const rings = parseNumericMetric(await readMetricValue(page, 'Surface rings'))
   const vertices = parseNumericMetric(await readMetricValue(page, 'Surface vertices'))
-  const minLeafDeltaReached = await readMetricValue(page, 'Min leaf delta reached')
+  const finalLeafDelta = parseNumericMetric(await readMetricValue(page, 'Final leaf delta'))
 
   expect(rings).toBeGreaterThanOrEqual(6)
   expect(vertices).toBeGreaterThan(32 * rings + 8)
-  expect(minLeafDeltaReached.toLowerCase()).toBe('no')
+  expect(finalLeafDelta).toBeGreaterThan(0.001)
 })

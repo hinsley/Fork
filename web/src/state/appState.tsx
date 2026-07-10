@@ -3854,9 +3854,12 @@ export function AppProvider({
         if (
           settings.algorithm !== undefined &&
           settings.algorithm !== 'GeodesicRings' &&
-          settings.algorithm !== 'IsochronFibers'
+          settings.algorithm !== 'IsochronFibers' &&
+          settings.algorithm !== 'SegmentedPreimageFibers'
         ) {
-          throw new Error('Cycle manifold algorithm must be GeodesicRings or IsochronFibers.')
+          throw new Error(
+            'Cycle manifold algorithm must be GeodesicRings, IsochronFibers, or SegmentedPreimageFibers.'
+          )
         }
         if (
           settings.ntst !== undefined &&

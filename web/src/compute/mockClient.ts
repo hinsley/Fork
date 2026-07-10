@@ -865,8 +865,10 @@ export class MockForkCoreClient implements ForkCoreClient {
             ncol: request.ncol,
             method:
               request.settings.algorithm === 'IsochronFibers'
-                ? 'hko_isochron_bvp'
-                : 'mock',
+                ? 'hko_fundamental_segment_bvp'
+                : request.settings.algorithm === 'SegmentedPreimageFibers'
+                  ? 'segmented_preimage_collocation'
+                  : 'krauskopf_osinga_geodesic_leaf_continuation',
             caps: request.settings.caps,
           },
           manifold_geometry: {

@@ -51,7 +51,7 @@ pub use lc_codim1_curves::{
 };
 pub use manifold::{
     continue_limit_cycle_manifold_2d, continue_limit_cycle_manifold_2d_with_progress,
-    continue_manifold_eq_1d, continue_manifold_eq_1d_with_kind,
+    continue_limit_cycle_manifolds_2d, continue_manifold_eq_1d, continue_manifold_eq_1d_with_kind,
     continue_manifold_eq_1d_with_kind_and_periodicity, continue_manifold_eq_2d,
     continue_manifold_eq_2d_with_progress, extend_manifold_eq_1d_with_kind_and_periodicity,
 };

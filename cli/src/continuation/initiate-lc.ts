@@ -1151,7 +1151,11 @@ export async function initiateLimitCycleManifold2DFromPoint(
       label: 'Algorithm',
       section: 'Manifold Selection',
       getDisplay: () =>
-        manifoldAlgorithm === 'IsochronFibers' ? 'Isochron fibers (HKO)' : 'Geodesic rings',
+        manifoldAlgorithm === 'IsochronFibers'
+          ? 'Isochron fibers (HKO)'
+          : manifoldAlgorithm === 'SegmentedPreimageFibers'
+            ? 'Segmented preimage fibers (fast)'
+            : 'Geodesic rings',
       edit: async () => {
         const { value } = await inquirer.prompt({
           type: 'rawlist',
@@ -1159,7 +1163,8 @@ export async function initiateLimitCycleManifold2DFromPoint(
           message: 'Select limit-cycle manifold algorithm:',
           choices: [
             { name: 'Geodesic rings', value: 'GeodesicRings' },
-            { name: 'Isochron fibers (HKO)', value: 'IsochronFibers' }
+            { name: 'Isochron fibers (HKO)', value: 'IsochronFibers' },
+            { name: 'Segmented preimage fibers (fast)', value: 'SegmentedPreimageFibers' }
           ],
           default: manifoldAlgorithm
         });
@@ -1409,7 +1414,12 @@ export async function initiateLimitCycleManifold2DFromPoint(
         floquet_index: settings.floquet_index ?? 0,
         ntst: sourceNtst,
         ncol: sourceNcol,
-        method: 'leaf_shooting_bvp',
+        method:
+          settings.algorithm === 'IsochronFibers'
+            ? 'hko_fundamental_segment_bvp'
+            : settings.algorithm === 'SegmentedPreimageFibers'
+              ? 'segmented_preimage_collocation'
+              : 'krauskopf_osinga_geodesic_leaf_continuation',
         caps: settings.caps
       };
 

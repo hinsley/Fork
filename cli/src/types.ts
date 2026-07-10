@@ -91,7 +91,10 @@ export type ManifoldStability = 'Stable' | 'Unstable';
 export type ManifoldDirection = 'Plus' | 'Minus' | 'Both';
 export type ManifoldEigenKind = 'RealPair' | 'ComplexPair';
 export type Manifold2DProfile = 'LocalPreview' | 'AdaptiveGlobal' | 'LorenzGlobalKo';
-export type ManifoldCycle2DAlgorithm = 'GeodesicRings' | 'IsochronFibers';
+export type ManifoldCycle2DAlgorithm =
+  | 'GeodesicRings'
+  | 'IsochronFibers'
+  | 'SegmentedPreimageFibers';
 
 export interface ManifoldTerminationCaps {
   max_steps: number;
@@ -167,6 +170,7 @@ export interface ManifoldSurfaceSolverDiagnostics {
   leaf_fail_segment_switch_limit?: number;
   leaf_fail_integrator_non_finite?: number;
   leaf_fail_no_first_hit_within_max_time?: number;
+  local_leaf_shrinks?: number;
   failed_ring?: number;
   failed_attempt?: number;
   failed_leaf_points?: number;

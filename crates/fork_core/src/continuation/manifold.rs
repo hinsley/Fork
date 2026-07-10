@@ -34,27 +34,27 @@ const DEFAULT_GEODESIC_DELTA_ALPHA_MAX: f64 = 1.0;
 const LEAF_DELTA_SHRINK: f64 = 0.5;
 const LEAF_DELTA_GROW: f64 = 2.0;
 const LEAF_REFINE_ATTEMPTS: usize = 12;
+#[cfg(test)]
 const LEAF_TAU_NEWTON_MAX_ITERS: usize = 24;
+#[cfg(test)]
 const LEAF_TAU_NEWTON_MAX_STEP: f64 = 0.25;
+#[cfg(test)]
 const LEAF_TAU_DERIV_FD_EPS: f64 = 1e-4;
 const LEAF_PLANE_DERIV_EPS: f64 = 1e-12;
-const LEAF_FIRST_HIT_BISECT_ITERS: usize = 24;
+#[cfg(test)]
 const LEAF_PLANE_BISECT_ITERS: usize = 16;
-const LEAF_PLANE_TOL_FACTOR: f64 = 1e-2;
-const LEAF_DISTANCE_TOL_FACTOR: f64 = 1e-2;
-const LEAF_TAU_MIN_FACTOR: f64 = 1e-4;
-const LEAF_TAU_INIT_ABS: f64 = 1e-2;
-const LEAF_TAU_MAX_ABS: f64 = 0.5;
-const LEAF_TAU_MAX_TIME_FACTOR: f64 = 0.1;
-const LEAF_MAX_TIME_GROWTH: f64 = 2.0;
-const LEAF_MAX_TIME_RETRIES: usize = 2;
+const LEAF_CONTINUATION_NEWTON_MAX_ITERS: usize = 16;
+const LEAF_CONTINUATION_EVENT_MAX_ITERS: usize = 24;
+const LEAF_CONTINUATION_MIN_STEP: f64 = 1e-6;
+const LEAF_CONTINUATION_MAX_STEP: f64 = 5e-2;
+const LEAF_CONTINUATION_GROWTH: f64 = 1.35;
 const LEAF_DT_SHRINK: f64 = 0.5;
 const LEAF_DT_RETRIES: usize = 3;
 const LEAF_DT_MIN_FACTOR: f64 = 1e-3;
 const LEAF_RETRY_MAX_FAILURES: usize = 4;
 const LEAF_SEGMENT_SWITCH_EPS: f64 = 1e-4;
+#[cfg(test)]
 const LEAF_SEGMENT_SWITCH_MAX: usize = 64;
-const RING_ADAPT_POINT_FACTOR: usize = 4;
 const RING_TURN_REPARAM_TRIGGER_RAD: f64 = 170.0_f64.to_radians();
 #[cfg(test)]
 const RING_OUTLIER_DISPLACEMENT_FACTOR: f64 = 4.0;
@@ -64,10 +64,9 @@ const RING_OUTLIER_MIN_SCALE: f64 = 8.0;
 const RING_OUTLIER_MAX_SCALE: f64 = 64.0;
 #[cfg(test)]
 const RING_OUTLIER_PASSES: usize = 2;
-const STRIP_ARCLENGTH_TRIM_FRAC: f64 = 0.1;
+#[cfg(test)]
 const TAU_SWITCH_EPS: f64 = 1e-6;
 const LEAF_SIGN_EPS_SCALE: f64 = 1e-14;
-#[cfg(test)]
 const SOURCE_PARAM_MONO_EPS: f64 = 1e-6;
 const MAP_MANIFOLD_REAL_TOL: f64 = 1e-8;
 const MAP_MANIFOLD_SIDE_TOL: f64 = 1e-6;
@@ -1007,8 +1006,9 @@ pub fn continue_manifold_eq_2d_with_progress(
         settings.stability,
         settings.eig_indices,
     )?;
+    let corrected_equilibrium = &basis.center;
     let initial_ring = build_equilibrium_initial_ring(
-        equilibrium_state,
+        corrected_equilibrium,
         &basis.e1,
         &basis.e2,
         settings.initial_radius.max(1e-9),
@@ -1030,12 +1030,12 @@ pub fn continue_manifold_eq_2d_with_progress(
         settings.caps.max_time.max(1e-9),
         settings.target_radius.max(0.0),
         settings.target_arclength.max(0.0),
-        Some(equilibrium_state),
+        Some(corrected_equilibrium),
         None,
         settings.bounds.as_ref(),
         on_ring_progress,
     );
-    let surface = add_equilibrium_center_cap(surface, equilibrium_state);
+    let surface = add_equilibrium_center_cap(surface, corrected_equilibrium);
     let points = surface_points_to_branch_points(&surface.vertices, &surface.ring_offsets);
     let indices: Vec<i32> = (0..points.len() as i32).collect();
     Ok(ContinuationBranch {
@@ -1046,7 +1046,7 @@ pub fn continue_manifold_eq_2d_with_progress(
             stability: settings.stability,
             eig_kind: basis.kind,
             eig_indices: basis.indices,
-            method: "leaf_shooting_bvp".to_string(),
+            method: "krauskopf_osinga_geodesic_leaf_continuation".to_string(),
             caps: settings.caps,
         },
         upoldp: None,
@@ -1098,6 +1098,72 @@ fn add_equilibrium_center_cap(
 }
 
 /// Compute a two-dimensional stable/unstable manifold of a limit cycle.
+///
+/// For an orientable manifold, `Both` returns the two components of the
+/// manifold with the periodic orbit removed as independent surface branches.
+/// For a negative multiplier the transverse line bundle is nonorientable, so
+/// one doubled-cover branch represents the complete local manifold.
+pub fn continue_limit_cycle_manifolds_2d(
+    system: &mut EquationSystem,
+    cycle_state: &[f64],
+    ntst: usize,
+    ncol: usize,
+    floquet_multipliers: &[Complex<f64>],
+    settings: ManifoldCycle2DSettings,
+) -> Result<Vec<ContinuationBranch>> {
+    if settings.direction != ManifoldDirection::Both {
+        return Ok(vec![continue_limit_cycle_manifold_2d(
+            system,
+            cycle_state,
+            ntst,
+            ncol,
+            floquet_multipliers,
+            settings,
+        )?]);
+    }
+    let (_, multiplier) = select_floquet_multiplier(
+        floquet_multipliers,
+        settings.stability,
+        settings.floquet_index,
+    )?;
+    if multiplier.re < 0.0 {
+        let mut doubled = settings;
+        doubled.direction = ManifoldDirection::Plus;
+        return Ok(vec![continue_limit_cycle_manifold_2d(
+            system,
+            cycle_state,
+            ntst,
+            ncol,
+            floquet_multipliers,
+            doubled,
+        )?]);
+    }
+
+    let mut plus_settings = settings.clone();
+    plus_settings.direction = ManifoldDirection::Plus;
+    let plus = continue_limit_cycle_manifold_2d(
+        system,
+        cycle_state,
+        ntst,
+        ncol,
+        floquet_multipliers,
+        plus_settings,
+    )?;
+    let mut minus_settings = settings;
+    minus_settings.direction = ManifoldDirection::Minus;
+    let minus = continue_limit_cycle_manifold_2d(
+        system,
+        cycle_state,
+        ntst,
+        ncol,
+        floquet_multipliers,
+        minus_settings,
+    )?;
+    Ok(vec![plus, minus])
+}
+
+/// Compute one connected sheet of a two-dimensional stable/unstable manifold
+/// of a limit cycle.
 pub fn continue_limit_cycle_manifold_2d(
     system: &mut EquationSystem,
     cycle_state: &[f64],
@@ -1143,18 +1209,42 @@ pub fn continue_limit_cycle_manifold_2d_with_progress(
         settings.stability,
         settings.floquet_index,
     )?;
-    if settings.algorithm == ManifoldCycle2DAlgorithm::IsochronFibers {
-        return continue_limit_cycle_manifold_2d_isochron(
-            system,
-            cycle_state,
-            ntst,
-            ncol,
-            &cycle_profile,
-            floquet_index,
-            multiplier,
-            &settings,
-            on_ring_progress,
+    if settings.direction == ManifoldDirection::Both && multiplier.re >= 0.0 {
+        bail!(
+            "A positive Floquet multiplier has two orientable manifold sheets; use continue_limit_cycle_manifolds_2d to compute Both without joining them."
         );
+    }
+    if settings.direction == ManifoldDirection::Both {
+        settings.direction = ManifoldDirection::Plus;
+    }
+    match settings.algorithm {
+        ManifoldCycle2DAlgorithm::IsochronFibers => {
+            return continue_limit_cycle_manifold_2d_hko(
+                system,
+                cycle_state,
+                ntst,
+                ncol,
+                &cycle_profile,
+                floquet_index,
+                multiplier,
+                &settings,
+                on_ring_progress,
+            );
+        }
+        ManifoldCycle2DAlgorithm::SegmentedPreimageFibers => {
+            return continue_limit_cycle_manifold_2d_segmented_preimage(
+                system,
+                cycle_state,
+                ntst,
+                ncol,
+                &cycle_profile,
+                floquet_index,
+                multiplier,
+                &settings,
+                on_ring_progress,
+            );
+        }
+        ManifoldCycle2DAlgorithm::GeodesicRings => {}
     }
 
     let (cycle, floquet_dirs) = build_cycle_floquet_seed(
@@ -1241,7 +1331,7 @@ pub fn continue_limit_cycle_manifold_2d_with_progress(
         floquet_index,
         ntst,
         ncol,
-        "leaf_shooting_bvp",
+        "krauskopf_osinga_geodesic_leaf_continuation",
     )
 }
 
@@ -1291,7 +1381,506 @@ fn build_cycle_manifold_branch(
     })
 }
 
-fn continue_limit_cycle_manifold_2d_isochron(
+#[derive(Clone)]
+struct HkoFundamentalSegment {
+    inner: Vec<f64>,
+    outer: Vec<f64>,
+    solution: IsochronBvpSolution,
+    lift_off: f64,
+}
+
+fn record_isochron_bvp_attempt(
+    stats: &mut IsochronBvpStats,
+    solve: &IsochronBvpSolution,
+    phase_index: usize,
+    fundamental: bool,
+) {
+    stats.solves += 1;
+    if fundamental {
+        stats.fundamental_solves += 1;
+    } else {
+        stats.continuation_solves += 1;
+    }
+    stats.max_residual = stats.max_residual.max(solve.residual_norm);
+    stats.max_iterations = stats.max_iterations.max(solve.iterations);
+    if !solve.converged {
+        stats.nonconverged += 1;
+        stats.last_nonconverged_phase = Some(phase_index + 1);
+    }
+}
+
+fn hko_departure_components(
+    system: &EquationSystem,
+    point: &[f64],
+    origin: &[f64],
+    direction: &[f64],
+) -> (f64, f64) {
+    if point.len() != origin.len() || point.len() != direction.len() {
+        return (f64::INFINITY, f64::INFINITY);
+    }
+    let direction = normalize(direction.to_vec()).unwrap_or_else(|_| vec![0.0; point.len()]);
+    let mut offset = subtract(point, origin);
+    let projection = dot(&offset, &direction);
+    for index in 0..offset.len() {
+        offset[index] -= projection * direction[index];
+    }
+    let mut phase_axis = vec![0.0; origin.len()];
+    system.apply(0.0, origin, &mut phase_axis);
+    let phase_projection = dot(&phase_axis, &direction);
+    for index in 0..phase_axis.len() {
+        phase_axis[index] -= phase_projection * direction[index];
+    }
+    let phase_axis = normalize(phase_axis).unwrap_or_else(|_| vec![0.0; point.len()]);
+    let signed_phase_shear = dot(&offset, &phase_axis);
+    for index in 0..offset.len() {
+        offset[index] -= signed_phase_shear * phase_axis[index];
+    }
+    (signed_phase_shear.abs(), l2_norm(&offset))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn construct_hko_fundamental_segment(
+    system: &EquationSystem,
+    phase_point: &[f64],
+    floquet_direction: &[f64],
+    phase_index: usize,
+    target_segment_length: f64,
+    sigma: f64,
+    return_time: f64,
+    bvp_intervals: usize,
+    bvp_degree: usize,
+    dt: f64,
+    max_steps: usize,
+    max_time: f64,
+    stats: &mut IsochronBvpStats,
+) -> Result<HkoFundamentalSegment> {
+    let direction = normalize(floquet_direction.to_vec())?;
+    let initial = solve_isochron_return_preimage_bvp_with_guess(
+        system,
+        phase_point,
+        sigma,
+        return_time,
+        bvp_intervals,
+        bvp_degree,
+        dt,
+        max_steps,
+        max_time,
+        None,
+    )?;
+    record_isochron_bvp_attempt(stats, &initial, phase_index, true);
+    require_converged_isochron_bvp(
+        &initial,
+        &format!(
+            "HKO fundamental-segment initialization at phase {}",
+            phase_index + 1
+        ),
+    )?;
+
+    let target_segment_length = target_segment_length.max(1e-9);
+    let lift_off_limit = (target_segment_length * target_segment_length).max(1e-12);
+    let (baseline_phase_shear, baseline_lift_off) =
+        hko_departure_components(system, &initial.start, phase_point, &direction);
+    let minimum_eta_step = (target_segment_length * 1e-6).max(1e-12);
+    let mut eta = 0.0;
+    let mut eta_step = (0.25 * target_segment_length).max(1e-9);
+    let mut previous = initial;
+
+    for _ in 0..128 {
+        let candidate_eta = eta + eta_step;
+        let mut endpoint = phase_point.to_vec();
+        for index in 0..endpoint.len() {
+            endpoint[index] += candidate_eta * direction[index];
+        }
+        let candidate = solve_isochron_return_preimage_bvp_with_guess(
+            system,
+            &endpoint,
+            sigma,
+            return_time,
+            bvp_intervals,
+            bvp_degree,
+            dt,
+            max_steps,
+            max_time,
+            Some(&previous.unknown),
+        )?;
+        record_isochron_bvp_attempt(stats, &candidate, phase_index, true);
+        if !candidate.converged {
+            eta_step *= 0.5;
+            if eta_step < minimum_eta_step {
+                bail!(
+                    "HKO fundamental-segment continuation failed at phase {}: residual {:.3e} after {} Newton iterations.",
+                    phase_index + 1,
+                    candidate.residual_norm,
+                    candidate.iterations
+                );
+            }
+            continue;
+        }
+        let segment_length = l2_distance(&endpoint, &candidate.start);
+        let (phase_shear, lift_off) =
+            hko_departure_components(system, &candidate.start, phase_point, &direction);
+        let nonlinear_phase_shear = (phase_shear - baseline_phase_shear).max(0.0);
+        let nonlinear_lift_off = (lift_off - baseline_lift_off).max(0.0);
+        if !segment_length.is_finite() || !lift_off.is_finite() {
+            bail!("HKO fundamental-segment continuation produced non-finite geometry.");
+        }
+        let lift_event_ratio = if segment_length >= 0.25 * target_segment_length {
+            nonlinear_phase_shear.hypot(nonlinear_lift_off) / lift_off_limit
+        } else {
+            0.0
+        };
+        let event_ratio = (segment_length / target_segment_length).max(lift_event_ratio);
+        if event_ratio >= 1.0 {
+            if event_ratio > 1.25 && eta_step > minimum_eta_step {
+                eta_step *= 0.5;
+                continue;
+            }
+            stats.max_fundamental_lift_off = stats.max_fundamental_lift_off.max(nonlinear_lift_off);
+            stats.max_fundamental_phase_shear =
+                stats.max_fundamental_phase_shear.max(nonlinear_phase_shear);
+            return Ok(HkoFundamentalSegment {
+                inner: endpoint,
+                outer: candidate.start.clone(),
+                solution: candidate,
+                lift_off: nonlinear_lift_off,
+            });
+        }
+        eta = candidate_eta;
+        previous = candidate;
+        eta_step *= 1.5;
+    }
+    bail!(
+        "HKO fundamental-segment continuation did not reach its local accuracy event at phase {}.",
+        phase_index + 1
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn continue_hko_isochron_from_fundamental_segment(
+    system: &EquationSystem,
+    phase_point: &[f64],
+    phase_index: usize,
+    mut fundamental: HkoFundamentalSegment,
+    settings: &ManifoldCycle2DSettings,
+    sigma: f64,
+    return_time: f64,
+    bvp_intervals: usize,
+    bvp_degree: usize,
+    dt: f64,
+    max_steps: usize,
+    max_time: f64,
+    stats: &mut IsochronBvpStats,
+) -> Result<(Vec<Vec<f64>>, bool)> {
+    let target_arclength = settings
+        .target_arclength
+        .max(settings.initial_radius.max(1e-9));
+    let target_spacing = settings.leaf_delta.max(1e-9);
+    let mut fiber = vec![phase_point.to_vec()];
+    for point in [&fundamental.inner, &fundamental.outer] {
+        if l2_distance(fiber.last().expect("fiber seed"), point) > NORM_EPS {
+            fiber.push(point.clone());
+        }
+    }
+    let mut arclength = open_curve_arclength(&fiber);
+    let mut bounds_exit = false;
+    let mut accepted_points = fiber.len();
+    let accepted_point_cap = settings.caps.max_steps.max(16);
+
+    while arclength < target_arclength && accepted_points < accepted_point_cap {
+        let inner = fundamental.inner.clone();
+        let outer = fundamental.outer.clone();
+        let mut previous_solution = fundamental.solution.clone();
+        let mut family_parameter = 0.0_f64;
+        let mut family_step = 0.25_f64;
+        const MIN_FAMILY_STEP: f64 = 1e-5;
+
+        while family_parameter < 1.0 - 1e-12
+            && arclength < target_arclength
+            && accepted_points < accepted_point_cap
+        {
+            let candidate_parameter = (family_parameter + family_step).min(1.0);
+            let endpoint = lerp(&inner, &outer, candidate_parameter);
+            let candidate = solve_isochron_return_preimage_bvp_with_guess(
+                system,
+                &endpoint,
+                sigma,
+                return_time,
+                bvp_intervals,
+                bvp_degree,
+                dt,
+                max_steps,
+                max_time,
+                Some(&previous_solution.unknown),
+            )?;
+            record_isochron_bvp_attempt(stats, &candidate, phase_index, false);
+            if !candidate.converged {
+                family_step *= 0.5;
+                if family_step < MIN_FAMILY_STEP {
+                    bail!(
+                        "HKO isochron continuation failed at phase {} and family parameter {:.6}: residual {:.3e} after {} Newton iterations.",
+                        phase_index + 1,
+                        candidate_parameter,
+                        candidate.residual_norm,
+                        candidate.iterations
+                    );
+                }
+                continue;
+            }
+            let spatial_step = l2_distance(fiber.last().expect("fiber point"), &candidate.start);
+            if spatial_step > 1.5 * target_spacing {
+                if family_step > MIN_FAMILY_STEP {
+                    family_step *= 0.5;
+                    continue;
+                }
+                bail!(
+                    "HKO isochron continuation could not meet arclength spacing at phase {}: step {:.3e} exceeds target {:.3e}.",
+                    phase_index + 1,
+                    spatial_step,
+                    target_spacing
+                );
+            }
+            if !spatial_step.is_finite() || candidate.start.iter().any(|value| !value.is_finite()) {
+                bail!("HKO isochron continuation produced non-finite geometry.");
+            }
+            if let Some(bounds) = settings.bounds.as_ref() {
+                if !inside_bounds(&candidate.start, bounds) {
+                    bounds_exit = true;
+                    break;
+                }
+            }
+            if spatial_step > NORM_EPS {
+                fiber.push(candidate.start.clone());
+                arclength += spatial_step;
+                accepted_points += 1;
+            }
+            family_parameter = candidate_parameter;
+            previous_solution = candidate;
+            if spatial_step < 0.5 * target_spacing {
+                family_step = (family_step * 1.5).min(1.0 - family_parameter);
+            }
+        }
+        if bounds_exit || family_parameter < 1.0 - 1e-12 {
+            break;
+        }
+        fundamental = HkoFundamentalSegment {
+            inner: outer,
+            outer: previous_solution.start.clone(),
+            solution: previous_solution,
+            lift_off: fundamental.lift_off,
+        };
+    }
+    Ok((fiber, bounds_exit))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn continue_limit_cycle_manifold_2d_hko(
+    system: &mut EquationSystem,
+    cycle_state: &[f64],
+    ntst: usize,
+    ncol: usize,
+    cycle_profile: &DecodedCycleProfile,
+    floquet_index: usize,
+    multiplier: Complex<f64>,
+    settings: &ManifoldCycle2DSettings,
+    mut on_ring_progress: Option<&mut dyn FnMut(usize, usize, f64, f64)>,
+) -> Result<ContinuationBranch> {
+    if settings.direction == ManifoldDirection::Both {
+        bail!("HKO isochron manifolds require one orientable sheet at a time.");
+    }
+    if multiplier.im.abs() > EIG_IM_TOL {
+        bail!("HKO isochron manifolds require a real Floquet multiplier.");
+    }
+    let period = cycle_profile.period;
+    if !period.is_finite() || period <= 0.0 {
+        bail!("HKO isochron manifolds require a positive limit-cycle period.");
+    }
+    let dim = system.equations.len();
+    let phase_points = settings.ring_points.max(8);
+    let (cycle, floquet_dirs) = build_cycle_floquet_seed(
+        system,
+        cycle_state,
+        cycle_profile,
+        ntst,
+        ncol,
+        settings.parameter_index,
+        multiplier,
+        phase_points,
+        settings.integration_dt.abs().max(1e-9),
+        settings.caps.max_steps.max(2),
+        settings.caps.max_time.max(period).max(1e-9),
+    )?;
+    let (phase_cycle, phase_dirs, return_time) = build_isochron_phase_cover(
+        &cycle,
+        &floquet_dirs,
+        multiplier.re,
+        settings.direction,
+        period,
+    )?;
+    let sigma = -stability_sigma(settings.stability);
+    // HKO continuation relies on a numerically closed return segment at each
+    // phase. A low-order source cycle mesh is therefore refined before it is
+    // used as the baseline BVP rather than allowing closure error to masquerade
+    // as nonlinear lift-off.
+    let bvp_intervals = effective_isochron_bvp_intervals(settings, ntst).max(12);
+    let bvp_degree = effective_isochron_bvp_degree(settings, ncol).max(3);
+    let dt = settings.integration_dt.abs().max(1e-9);
+    let max_steps = settings.caps.max_steps.max(2);
+    let max_time = settings.caps.max_time.max(return_time).max(1e-9);
+    let mut stats = IsochronBvpStats::default();
+    let mut fibers = Vec::with_capacity(phase_cycle.len());
+    let mut bounds_exit = false;
+    for (phase_index, (phase_point, direction)) in
+        phase_cycle.iter().zip(phase_dirs.iter()).enumerate()
+    {
+        let fundamental = construct_hko_fundamental_segment(
+            system,
+            phase_point,
+            direction,
+            phase_index,
+            settings.initial_radius.max(1e-9),
+            sigma,
+            return_time,
+            bvp_intervals,
+            bvp_degree,
+            dt,
+            max_steps,
+            max_time,
+            &mut stats,
+        )?;
+        let (fiber, fiber_bounds_exit) = continue_hko_isochron_from_fundamental_segment(
+            system,
+            phase_point,
+            phase_index,
+            fundamental,
+            settings,
+            sigma,
+            return_time,
+            bvp_intervals,
+            bvp_degree,
+            dt,
+            max_steps,
+            max_time,
+            &mut stats,
+        )?;
+        bounds_exit |= fiber_bounds_exit;
+        fibers.push(fiber);
+    }
+
+    let target_arclength = settings
+        .target_arclength
+        .max(settings.initial_radius.max(1e-9));
+    let min_fiber_arclength = fibers
+        .iter()
+        .map(|fiber| open_curve_arclength(fiber))
+        .fold(f64::INFINITY, f64::min);
+    if !min_fiber_arclength.is_finite() || min_fiber_arclength <= NORM_EPS {
+        bail!("HKO continuation did not produce a valid common fiber length.");
+    }
+    let usable_arclength = target_arclength.min(min_fiber_arclength);
+    let max_rings = settings.caps.max_rings.max(2);
+    let max_vertices = settings.caps.max_vertices.max(phase_cycle.len() * 2);
+    let max_rings_by_vertices = (max_vertices / phase_cycle.len().max(1)).max(2);
+    let requested_rings = ((usable_arclength / settings.leaf_delta.max(1e-9)).ceil() as usize)
+        .saturating_add(1)
+        .max(2);
+    let ring_count = requested_rings
+        .min(max_rings)
+        .min(max_rings_by_vertices)
+        .max(2);
+    let mut rings = Vec::with_capacity(ring_count);
+    let mut ring_diagnostics = Vec::with_capacity(ring_count);
+    for ring_index in 0..ring_count {
+        let arclength = usable_arclength * (ring_index as f64) / ((ring_count - 1) as f64);
+        let ring = fibers
+            .iter()
+            .map(|fiber| sample_open_curve_at_arclength(fiber, arclength))
+            .collect::<Vec<_>>();
+        ring_diagnostics.push(ManifoldRingDiagnostic {
+            ring_index,
+            radius_estimate: arclength,
+            point_count: ring.len(),
+        });
+        if let Some(callback) = on_ring_progress.as_deref_mut() {
+            callback(
+                ring_index + 1,
+                (ring_index + 1) * ring.len(),
+                arclength,
+                arclength,
+            );
+        }
+        rings.push(ring);
+    }
+    let mut vertices = Vec::new();
+    let mut ring_offsets = Vec::with_capacity(rings.len());
+    for ring in &rings {
+        ring_offsets.push(vertices.len());
+        vertices.extend(ring.iter().cloned());
+    }
+    let uniform_parent_anchors = (0..rings.len())
+        .map(|ring_index| {
+            if ring_index == 0 {
+                Vec::new()
+            } else {
+                (0..phase_cycle.len())
+                    .map(|index| (index as f64) / (phase_cycle.len() as f64))
+                    .collect()
+            }
+        })
+        .collect::<Vec<Vec<f64>>>();
+    let triangles =
+        triangulate_ring_bands_with_parent_anchors(&rings, &ring_offsets, &uniform_parent_anchors);
+    let termination_reason = fiber_surface_termination_reason(
+        bounds_exit,
+        min_fiber_arclength + 1e-8 >= target_arclength,
+        requested_rings,
+        max_rings,
+        max_rings_by_vertices,
+    );
+    let solver_diagnostics = ManifoldSurfaceSolverDiagnostics {
+        termination_reason: termination_reason.as_str().to_string(),
+        termination_detail: Some(format!(
+            "HKO fundamental-segment continuation: phases={}, rings={}, achieved_arclength={:.6e}, target_arclength={:.6e}, return_time={:.6e}, bvp_intervals={}, ncol={}, fundamental_solves={}, continuation_solves={}, rejected_nonconverged={}, max_residual={:.3e}, max_iterations={}, max_phase_shear={:.3e}, max_lift_off={:.3e}",
+            phase_cycle.len(),
+            ring_count,
+            usable_arclength,
+            target_arclength,
+            return_time,
+            bvp_intervals,
+            bvp_degree,
+            stats.fundamental_solves,
+            stats.continuation_solves,
+            stats.nonconverged,
+            stats.max_residual,
+            stats.max_iterations,
+            stats.max_fundamental_phase_shear,
+            stats.max_fundamental_lift_off
+        )),
+        final_leaf_delta: settings.leaf_delta.max(1e-9),
+        ring_attempts: stats.solves,
+        build_failures: stats.nonconverged,
+        leaf_delta_floor: settings.delta_min.max(1e-12),
+        min_leaf_delta_reached: false,
+        ..ManifoldSurfaceSolverDiagnostics::default()
+    };
+    build_cycle_manifold_branch(
+        dim,
+        SurfaceGrowthResult {
+            vertices,
+            triangles,
+            ring_offsets,
+            ring_diagnostics,
+            solver_diagnostics,
+        },
+        settings,
+        floquet_index,
+        ntst,
+        ncol,
+        "hko_fundamental_segment_bvp",
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn continue_limit_cycle_manifold_2d_segmented_preimage(
     system: &mut EquationSystem,
     cycle_state: &[f64],
     ntst: usize,
@@ -1430,21 +2019,17 @@ fn continue_limit_cycle_manifold_2d_isochron(
     }
     let triangles = triangulate_ring_bands(&rings, &ring_offsets);
 
-    let termination_reason = if bounds_exit {
-        SurfaceTerminationReason::BoundsExit
-    } else if ring_count >= max_rings_by_vertices && max_rings_by_vertices <= max_rings {
-        SurfaceTerminationReason::MaxVertices
-    } else if ring_count >= max_rings {
-        SurfaceTerminationReason::MaxRings
-    } else if min_fiber_arclength + 1e-8 < target_arclength {
-        SurfaceTerminationReason::MaxRings
-    } else {
-        SurfaceTerminationReason::TargetArclength
-    };
+    let termination_reason = fiber_surface_termination_reason(
+        bounds_exit,
+        min_fiber_arclength + 1e-8 >= target_arclength,
+        requested_rings,
+        max_rings,
+        max_rings_by_vertices,
+    );
     let mut solver_diagnostics = ManifoldSurfaceSolverDiagnostics {
         termination_reason: termination_reason.as_str().to_string(),
         termination_detail: Some(format!(
-            "hko isochron fibers: phases={}, rings={}, return_time={:.6e}, return_segments={}, segment_time={:.6e}, bvp_intervals={}, ncol={}, bvp_solves={}, nonconverged={}, max_residual={:.3e}, max_iterations={}",
+            "segmented preimage fibers: phases={}, rings={}, return_time={:.6e}, return_segments={}, segment_time={:.6e}, bvp_intervals={}, ncol={}, bvp_solves={}, rejected_nonconverged={}, max_residual={:.3e}, max_iterations={}",
             phase_cycle.len(),
             ring_count,
             return_time,
@@ -1483,7 +2068,7 @@ fn continue_limit_cycle_manifold_2d_isochron(
         floquet_index,
         ntst,
         ncol,
-        "hko_isochron_bvp",
+        "segmented_preimage_collocation",
     )
 }
 
@@ -1567,9 +2152,13 @@ fn scaled_unit_direction(direction: &[f64], sign: f64) -> Result<Vec<f64>> {
 #[derive(Default)]
 struct IsochronBvpStats {
     solves: usize,
+    fundamental_solves: usize,
+    continuation_solves: usize,
     nonconverged: usize,
     max_residual: f64,
     max_iterations: usize,
+    max_fundamental_phase_shear: f64,
+    max_fundamental_lift_off: f64,
     last_nonconverged_phase: Option<usize>,
 }
 
@@ -1641,6 +2230,13 @@ fn build_isochron_segmented_fibers(
             if !solve.converged {
                 stats.nonconverged += 1;
                 stats.last_nonconverged_phase = Some(phase_index);
+                require_converged_isochron_bvp(
+                    &solve,
+                    &format!(
+                        "Segmented preimage collocation at phase {}",
+                        phase_index + 1
+                    ),
+                )?;
             }
             let next = solve.start;
             if next.iter().any(|value| !value.is_finite()) {
@@ -1670,11 +2266,25 @@ fn build_isochron_segmented_fibers(
     Ok((fibers, bounds_exit))
 }
 
+#[derive(Clone)]
 struct IsochronBvpSolution {
     start: Vec<f64>,
+    unknown: Vec<f64>,
     residual_norm: f64,
     iterations: usize,
     converged: bool,
+}
+
+fn require_converged_isochron_bvp(solve: &IsochronBvpSolution, context: &str) -> Result<()> {
+    if solve.converged && solve.residual_norm.is_finite() {
+        return Ok(());
+    }
+    bail!(
+        "{} did not converge: residual {:.3e} after {} Newton iterations.",
+        context,
+        solve.residual_norm,
+        solve.iterations
+    )
 }
 
 fn solve_isochron_return_preimage_bvp(
@@ -1688,12 +2298,65 @@ fn solve_isochron_return_preimage_bvp(
     max_steps: usize,
     max_time: f64,
 ) -> Result<IsochronBvpSolution> {
+    solve_isochron_return_preimage_bvp_with_guess(
+        system, endpoint, sigma, duration, intervals, degree, dt, max_steps, max_time, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn solve_isochron_return_preimage_bvp_with_guess(
+    system: &EquationSystem,
+    endpoint: &[f64],
+    sigma: f64,
+    duration: f64,
+    intervals: usize,
+    degree: usize,
+    dt: f64,
+    max_steps: usize,
+    max_time: f64,
+    initial_guess: Option<&[f64]>,
+) -> Result<IsochronBvpSolution> {
     let intervals = intervals.max(1);
     let degree = degree.max(1);
     let coeffs = CollocationCoefficients::new(degree)?;
-    let mut unknown = build_isochron_open_orbit_initial_guess(
-        system, endpoint, sigma, duration, intervals, &coeffs, dt, max_steps, max_time,
-    )?;
+    let expected_unknowns = isochron_unknown_count(intervals, coeffs.nodes.len(), endpoint.len());
+    let mut unknown =
+        if let Some(guess) = initial_guess.filter(|guess| guess.len() == expected_unknowns) {
+            let mut guess = guess.to_vec();
+            let final_offset = isochron_mesh_offset(intervals, endpoint.len());
+            let shift = endpoint
+                .iter()
+                .enumerate()
+                .map(|(index, value)| value - guess[final_offset + index])
+                .collect::<Vec<_>>();
+            for mesh in 0..=intervals {
+                let weight = (mesh as f64) / (intervals as f64);
+                let offset = isochron_mesh_offset(mesh, endpoint.len());
+                for index in 0..endpoint.len() {
+                    guess[offset + index] += weight * shift[index];
+                }
+            }
+            for interval in 0..intervals {
+                for (stage, node) in coeffs.nodes.iter().enumerate() {
+                    let weight = ((interval as f64) + *node) / (intervals as f64);
+                    let offset = isochron_stage_offset(
+                        interval,
+                        stage,
+                        intervals,
+                        coeffs.nodes.len(),
+                        endpoint.len(),
+                    );
+                    for index in 0..endpoint.len() {
+                        guess[offset + index] += weight * shift[index];
+                    }
+                }
+            }
+            guess
+        } else {
+            build_isochron_open_orbit_initial_guess(
+                system, endpoint, sigma, duration, intervals, &coeffs, dt, max_steps, max_time,
+            )?
+        };
     let unknowns = unknown.len();
     let mut residual = vec![0.0; unknowns];
     evaluate_isochron_open_orbit_residual(
@@ -1710,6 +2373,7 @@ fn solve_isochron_return_preimage_bvp(
     if residual_norm <= ISOCHRON_BVP_NEWTON_TOL {
         return Ok(IsochronBvpSolution {
             start: unknown[..endpoint.len()].to_vec(),
+            unknown,
             residual_norm,
             iterations: 0,
             converged: true,
@@ -1777,6 +2441,7 @@ fn solve_isochron_return_preimage_bvp(
 
     Ok(IsochronBvpSolution {
         start: unknown[..endpoint.len()].to_vec(),
+        unknown,
         residual_norm,
         iterations,
         converged,
@@ -1988,8 +2653,9 @@ struct SurfaceGrowthControls {
     delta_alpha_max: f64,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SurfaceTerminationReason {
+    MaxSteps,
     MaxRings,
     MaxVertices,
     TargetRadius,
@@ -1998,6 +2664,7 @@ enum SurfaceTerminationReason {
     RingTooSmall,
     RingBuildFailed,
     RingSpacingFailed,
+    RingQualityRejected,
     GeodesicQualityRejected,
     RingCandidateTooSmall,
 }
@@ -2005,6 +2672,7 @@ enum SurfaceTerminationReason {
 impl SurfaceTerminationReason {
     fn as_str(self) -> &'static str {
         match self {
+            SurfaceTerminationReason::MaxSteps => "max_steps",
             SurfaceTerminationReason::MaxRings => "max_rings",
             SurfaceTerminationReason::MaxVertices => "max_vertices",
             SurfaceTerminationReason::TargetRadius => "target_radius",
@@ -2013,9 +2681,30 @@ impl SurfaceTerminationReason {
             SurfaceTerminationReason::RingTooSmall => "ring_too_small",
             SurfaceTerminationReason::RingBuildFailed => "ring_build_failed",
             SurfaceTerminationReason::RingSpacingFailed => "ring_spacing_failed",
+            SurfaceTerminationReason::RingQualityRejected => "ring_quality_rejected",
             SurfaceTerminationReason::GeodesicQualityRejected => "geodesic_quality_rejected",
             SurfaceTerminationReason::RingCandidateTooSmall => "ring_candidate_too_small",
         }
+    }
+}
+
+fn fiber_surface_termination_reason(
+    bounds_exit: bool,
+    fiber_target_reached: bool,
+    requested_rings: usize,
+    max_rings: usize,
+    max_rings_by_vertices: usize,
+) -> SurfaceTerminationReason {
+    if bounds_exit {
+        SurfaceTerminationReason::BoundsExit
+    } else if !fiber_target_reached {
+        SurfaceTerminationReason::MaxSteps
+    } else if requested_rings > max_rings_by_vertices && max_rings_by_vertices <= max_rings {
+        SurfaceTerminationReason::MaxVertices
+    } else if requested_rings > max_rings {
+        SurfaceTerminationReason::MaxRings
+    } else {
+        SurfaceTerminationReason::TargetArclength
     }
 }
 
@@ -2030,12 +2719,14 @@ struct RingSolve {
     points: Vec<Vec<f64>>,
     base_anchors: Vec<f64>,
     in_anchors: Vec<Vec<f64>>,
+    leaf_deltas: Vec<f64>,
 }
 
 #[derive(Clone)]
 struct RingLayer {
     points: Vec<Vec<f64>>,
     in_anchors: Vec<Vec<f64>>,
+    parent_anchors: Vec<f64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2051,6 +2742,8 @@ struct RingBuildFailure {
 #[derive(Clone, Copy, Debug)]
 enum RingSpacingFailure {
     InvalidCandidate,
+    PointCapExceeded,
+    InsertionDidNotSplitEdge,
     InsertionLeafFailed(LeafFailureKind),
 }
 
@@ -2058,6 +2751,8 @@ impl RingSpacingFailure {
     fn as_str(self) -> &'static str {
         match self {
             RingSpacingFailure::InvalidCandidate => "invalid_candidate",
+            RingSpacingFailure::PointCapExceeded => "point_cap_exceeded",
+            RingSpacingFailure::InsertionDidNotSplitEdge => "insertion_did_not_split_edge",
             RingSpacingFailure::InsertionLeafFailed(_) => "insertion_leaf_failed",
         }
     }
@@ -2069,15 +2764,6 @@ struct LeafHit {
     tau_hit: f64,
     base_anchor: f64,
     in_anchor: Vec<f64>,
-}
-
-#[derive(Clone)]
-struct LeafSample {
-    point: Vec<f64>,
-    seg_index: usize,
-    seg_tau: f64,
-    radial_distance: f64,
-    outward_distance: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2116,6 +2802,10 @@ struct GeodesicQuality {
     max_delta_angle: f64,
 }
 
+fn geodesic_quality_exceeds(quality: GeodesicQuality, controls: SurfaceGrowthControls) -> bool {
+    quality.max_angle > controls.alpha_max || quality.max_delta_angle > controls.delta_alpha_max
+}
+
 fn record_leaf_failure_diagnostics(
     diagnostics: &mut ManifoldSurfaceSolverDiagnostics,
     reason: LeafFailureKind,
@@ -2137,6 +2827,7 @@ fn record_leaf_failure_diagnostics(
 
 #[derive(Clone)]
 struct Basis2D {
+    center: Vec<f64>,
     e1: Vec<f64>,
     e2: Vec<f64>,
     kind: ManifoldEigenKind,
@@ -2337,6 +3028,21 @@ fn select_2d_equilibrium_basis(
             tolerance: 1e-10,
         },
     )?;
+    let side_dimension = result
+        .eigenpairs
+        .iter()
+        .filter(|pair| matches_stability(pair.value.re, stability))
+        .count();
+    if side_dimension != 2 {
+        bail!(
+            "Selected {} manifold dimension is {}; the 2D manifold solver requires the full selected side to have dimension 2.",
+            match stability {
+                ManifoldStability::Stable => "stable",
+                ManifoldStability::Unstable => "unstable",
+            },
+            side_dimension
+        );
+    }
 
     if let Some(indices) = requested_indices {
         let mode_a = result.eigenpairs.get(indices[0]).ok_or_else(|| {
@@ -2389,6 +3095,7 @@ fn select_2d_equilibrium_basis(
                 .collect();
             let (e1, e2) = orthonormal_complex_pair_basis(&vector)?;
             return Ok(Basis2D {
+                center: result.state.clone(),
                 e1,
                 e2,
                 kind: ManifoldEigenKind::ComplexPair,
@@ -2403,6 +3110,7 @@ fn select_2d_equilibrium_basis(
         let e2_raw: Vec<f64> = mode_b.vector.iter().map(|entry| entry.re).collect();
         let e2 = orthonormalize_or_fallback(&e2_raw, &e1)?;
         return Ok(Basis2D {
+            center: result.state.clone(),
             e1,
             e2,
             kind: ManifoldEigenKind::RealPair,
@@ -2444,6 +3152,7 @@ fn select_2d_equilibrium_basis(
         let e1 = selected[0].vector.clone();
         let e2 = orthonormalize_or_fallback(&selected[1].vector, &e1)?;
         return Ok(Basis2D {
+            center: result.state.clone(),
             e1,
             e2,
             kind: ManifoldEigenKind::RealPair,
@@ -2457,6 +3166,7 @@ fn select_2d_equilibrium_basis(
         .ok_or_else(|| anyhow!("No eligible 2D eigenspace found for manifold initialization."))?;
     let (e1, e2) = orthonormal_complex_pair_basis(&complex_mode.vector)?;
     Ok(Basis2D {
+        center: result.state,
         e1,
         e2,
         kind: ManifoldEigenKind::ComplexPair,
@@ -2552,6 +3262,7 @@ fn grow_surface_from_ring(
     let mut rings = vec![RingLayer {
         points: initial_ring,
         in_anchors: initial_inward,
+        parent_anchors: Vec::new(),
     }];
     let mut ring_diagnostics = Vec::new();
     let mut accumulated_arc = 0.0;
@@ -2619,6 +3330,7 @@ fn grow_surface_from_ring(
                 prev_in_anchors,
                 sigma,
                 used_delta,
+                delta_min,
                 integration_dt,
                 max_steps_per_leaf,
                 max_time,
@@ -2673,9 +3385,7 @@ fn grow_surface_from_ring(
             solver_diagnostics.last_geodesic_max_angle = geodesic_raw.max_angle;
             solver_diagnostics.last_geodesic_max_distance_angle = geodesic_raw.max_delta_angle;
 
-            if geodesic_raw.max_angle > controls.alpha_max
-                || geodesic_raw.max_delta_angle > controls.delta_alpha_max
-            {
+            if geodesic_quality_exceeds(geodesic_raw, controls) {
                 solver_diagnostics.reject_geodesic_quality += 1;
                 solver_diagnostics.failed_ring = Some(ring_index + 1);
                 solver_diagnostics.failed_attempt = Some(attempt + 1);
@@ -2700,6 +3410,13 @@ fn grow_surface_from_ring(
                 }
                 if used_delta <= delta_min + 1e-12 {
                     solver_diagnostics.min_leaf_delta_reached = true;
+                    // At the configured numerical floor, a large raw angle can
+                    // be retained only when its distance-weighted error remains
+                    // inside the K-O bound. This lets a resolved small strip
+                    // pass a sharp turn without accepting a large spatial error.
+                    if geodesic_raw.max_delta_angle > controls.delta_alpha_max {
+                        break;
+                    }
                 } else {
                     break;
                 }
@@ -2712,6 +3429,7 @@ fn grow_surface_from_ring(
                 raw_next,
                 sigma,
                 used_delta,
+                delta_min,
                 controls.min_spacing,
                 controls.max_spacing,
                 integration_dt,
@@ -2730,14 +3448,16 @@ fn grow_surface_from_ring(
                     last_failure = Some((
                         SurfaceTerminationReason::RingSpacingFailed,
                         format!(
-                            "ring={} attempt={} delta={:.6e}: spacing adaptation failed ({})",
+                            "ring={} attempt={} delta={:.6e}: spacing adaptation failed ({}, point_cap={}, previous_ring_points={})",
                             ring_index,
                             attempt,
                             used_delta,
                             match reason {
                                 RingSpacingFailure::InsertionLeafFailed(kind) => kind.as_str(),
                                 _ => reason.as_str(),
-                            }
+                            },
+                            max_ring_points,
+                            prev.len(),
                         ),
                     ));
                     if used_delta > delta_min + 1e-12 && attempt + 1 < LEAF_REFINE_ATTEMPTS {
@@ -2765,7 +3485,7 @@ fn grow_surface_from_ring(
                 solver_diagnostics.failed_ring = Some(ring_index + 1);
                 solver_diagnostics.failed_attempt = Some(attempt + 1);
                 last_failure = Some((
-                    SurfaceTerminationReason::GeodesicQualityRejected,
+                    SurfaceTerminationReason::RingQualityRejected,
                     format!(
                         "ring={} attempt={} delta={:.6e}: reparameterized ring quality trigger (edge_ratio={:.3}, turn_angle={:.3} rad)",
                         ring_index,
@@ -2791,17 +3511,18 @@ fn grow_surface_from_ring(
             let geodesic_adapt = evaluate_geodesic_quality_for_solve(prev, prev_in_anchors, &next);
             solver_diagnostics.last_geodesic_max_angle = geodesic_adapt.max_angle;
             solver_diagnostics.last_geodesic_max_distance_angle = geodesic_adapt.max_delta_angle;
-            if geodesic_adapt.max_delta_angle > controls.delta_alpha_max {
+            if geodesic_quality_exceeds(geodesic_adapt, controls) {
                 solver_diagnostics.reject_geodesic_quality += 1;
                 solver_diagnostics.failed_ring = Some(ring_index + 1);
                 solver_diagnostics.failed_attempt = Some(attempt + 1);
                 last_failure = Some((
                     SurfaceTerminationReason::GeodesicQualityRejected,
                     format!(
-                        "ring={} attempt={} delta={:.6e}: post-spacing geodesic reject distance_angle={:.4e}",
+                        "ring={} attempt={} delta={:.6e}: post-spacing geodesic reject angle={:.4e} distance_angle={:.4e}",
                         ring_index,
                         attempt,
                         used_delta,
+                        geodesic_adapt.max_angle,
                         geodesic_adapt.max_delta_angle
                     ),
                 ));
@@ -2815,8 +3536,14 @@ fn grow_surface_from_ring(
                 }
                 if used_delta <= delta_min + 1e-12 {
                     solver_diagnostics.min_leaf_delta_reached = true;
+                    // Apply the same floor rule after mesh adaptation so a
+                    // reparameterized ring cannot bypass the weighted bound.
+                    if geodesic_adapt.max_delta_angle > controls.delta_alpha_max {
+                        break;
+                    }
+                } else {
+                    break;
                 }
-                break;
             }
 
             if next.points.len() < 4 {
@@ -2867,11 +3594,25 @@ fn grow_surface_from_ring(
         solver_diagnostics.failed_ring = None;
         solver_diagnostics.failed_attempt = None;
         solver_diagnostics.failed_leaf_points = None;
+        let accepted_step = next_solve
+            .leaf_deltas
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .fold(used_delta, f64::min);
+        solver_diagnostics.local_leaf_shrinks += next_solve
+            .leaf_deltas
+            .iter()
+            .filter(|delta| **delta + 1e-12 < used_delta)
+            .count();
+        let used_local_shrink = accepted_step + 1e-12 < used_delta;
         let next = next_solve.points;
         let next_in_anchors = next_solve.in_anchors;
+        let next_parent_anchors = next_solve.base_anchors;
         current_leaf_delta = used_delta;
         reported_leaf_delta = used_delta;
         if accepted_attempt == 0
+            && !used_local_shrink
             && accepted_geodesic.max_angle < controls.alpha_min
             && accepted_geodesic.max_delta_angle < controls.delta_alpha_min
         {
@@ -2889,8 +3630,7 @@ fn grow_surface_from_ring(
             }
         }
 
-        let strip_avg = average_strip_distance(prev, &next);
-        accumulated_arc += strip_avg;
+        accumulated_arc += accepted_step;
 
         let radius_estimate = if let Some(center_state) = center {
             let mut sum = 0.0;
@@ -2899,7 +3639,7 @@ fn grow_surface_from_ring(
             }
             sum / (next.len() as f64)
         } else {
-            strip_avg * ((ring_index + 1) as f64)
+            accumulated_arc
         };
         ring_diagnostics.push(ManifoldRingDiagnostic {
             ring_index: ring_index + 1,
@@ -2910,6 +3650,7 @@ fn grow_surface_from_ring(
         rings.push(RingLayer {
             points: next,
             in_anchors: next_in_anchors,
+            parent_anchors: next_parent_anchors,
         });
         ring_index += 1;
 
@@ -2967,8 +3708,13 @@ fn grow_surface_from_ring(
             vertices.push(point.clone());
         }
     }
+    let parent_anchors = rings
+        .iter()
+        .map(|ring| ring.parent_anchors.clone())
+        .collect::<Vec<_>>();
     let ring_points: Vec<Vec<Vec<f64>>> = rings.into_iter().map(|ring| ring.points).collect();
-    let triangles = triangulate_ring_bands(&ring_points, &ring_offsets);
+    let triangles =
+        triangulate_ring_bands_with_parent_anchors(&ring_points, &ring_offsets, &parent_anchors);
     SurfaceGrowthResult {
         vertices,
         triangles,
@@ -2984,12 +3730,14 @@ fn build_next_ring(
     prev_in_anchors: &[Vec<f64>],
     sigma: f64,
     leaf_delta: f64,
+    leaf_delta_floor: f64,
     dt: f64,
     max_steps_per_leaf: usize,
     max_time: f64,
 ) -> Result<RingSolve, RingBuildFailure> {
     let m = prev_ring.len();
     let mut hits = vec![None; m];
+    let mut hit_deltas = vec![leaf_delta; m];
     let mut failures: Vec<(usize, LeafFailure)> = Vec::new();
     for i in 0..m {
         let s = (i as f64) / (m as f64);
@@ -3005,7 +3753,7 @@ fn build_next_ring(
                 }
                 fallback
             });
-        match solve_leaf_point_with_retries(
+        match solve_leaf_point_with_local_floor(
             system,
             prev_ring,
             base_point,
@@ -3013,14 +3761,16 @@ fn build_next_ring(
             &tangent,
             &outward,
             leaf_delta,
+            leaf_delta_floor,
             sigma,
             dt,
             max_steps_per_leaf,
             max_time,
             None,
         ) {
-            Ok(hit) => {
+            Ok((hit, achieved_delta)) => {
                 hits[i] = Some(hit);
+                hit_deltas[i] = achieved_delta;
                 continue;
             }
             Err(failure) => {
@@ -3062,7 +3812,7 @@ fn build_next_ring(
                     });
                 let outward = leaf_outward_hint_from_neighbors(&hits, prev_ring, i, &tangent)
                     .unwrap_or_else(|| outward_default.clone());
-                match solve_leaf_point_with_retries(
+                match solve_leaf_point_with_local_floor(
                     system,
                     prev_ring,
                     base_point,
@@ -3070,14 +3820,16 @@ fn build_next_ring(
                     &tangent,
                     &outward,
                     leaf_delta,
+                    leaf_delta_floor,
                     sigma,
                     dt,
                     max_steps_per_leaf,
                     max_time,
                     None,
                 ) {
-                    Ok(hit) => {
+                    Ok((hit, achieved_delta)) => {
                         hits[i] = Some(hit);
+                        hit_deltas[i] = achieved_delta;
                     }
                     Err(retry_failure) => {
                         unresolved.push((i, retry_failure));
@@ -3131,7 +3883,8 @@ fn build_next_ring(
     let mut next = Vec::with_capacity(m);
     let mut base_anchors = Vec::with_capacity(m);
     let mut in_anchors = Vec::with_capacity(m);
-    for hit in hits.into_iter() {
+    let mut leaf_deltas = Vec::with_capacity(m);
+    for (index, hit) in hits.into_iter().enumerate() {
         let hit = hit.ok_or(RingBuildFailure {
             solved_points: next.len(),
             reason: LeafFailureKind::PlaneSolveNoConvergence,
@@ -3144,6 +3897,7 @@ fn build_next_ring(
         next.push(hit.point);
         base_anchors.push(hit.base_anchor);
         in_anchors.push(hit.in_anchor);
+        leaf_deltas.push(hit_deltas[index]);
     }
     if next.len() < 4 || base_anchors.len() != next.len() || in_anchors.len() != next.len() {
         return Err(RingBuildFailure {
@@ -3159,6 +3913,7 @@ fn build_next_ring(
         points: next,
         base_anchors,
         in_anchors,
+        leaf_deltas,
     })
 }
 
@@ -3252,6 +4007,7 @@ fn adapt_ring_spacing(
     raw_next: RingSolve,
     sigma: f64,
     leaf_delta: f64,
+    leaf_delta_floor: f64,
     min_spacing: f64,
     max_spacing: f64,
     dt: f64,
@@ -3259,23 +4015,22 @@ fn adapt_ring_spacing(
     max_time: f64,
     max_ring_points: usize,
 ) -> Result<RingSolve, RingSpacingFailure> {
-    let adaptive_point_cap = max_ring_points
-        .min(
-            prev_ring
-                .len()
-                .saturating_mul(RING_ADAPT_POINT_FACTOR)
-                .max(8),
-        )
-        .max(4);
+    // The configured per-ring point budget is the real K-O mesh cap. A fixed
+    // multiple of the previous ring can reject a valid strongly stretched
+    // strip even when the caller deliberately provided ample point and vertex
+    // budgets.
+    let adaptive_point_cap = adaptive_ring_point_cap(max_ring_points);
 
     if raw_next.points.len() < 4
         || raw_next.base_anchors.len() != raw_next.points.len()
         || raw_next.in_anchors.len() != raw_next.points.len()
+        || raw_next.leaf_deltas.len() != raw_next.points.len()
+        || !anchor_params_strictly_monotone_cyclic(&raw_next.base_anchors)
     {
         return Err(RingSpacingFailure::InvalidCandidate);
     }
     if raw_next.points.len() > adaptive_point_cap {
-        return Ok(raw_next);
+        return Err(RingSpacingFailure::PointCapExceeded);
     }
 
     let mut ring = raw_next;
@@ -3294,6 +4049,7 @@ fn adapt_ring_spacing(
                 ring.points.remove(j);
                 ring.base_anchors.remove(j);
                 ring.in_anchors.remove(j);
+                ring.leaf_deltas.remove(j);
                 changed = true;
                 continue;
             }
@@ -3307,12 +4063,14 @@ fn adapt_ring_spacing(
         let mut points = Vec::with_capacity((m * 2).min(adaptive_point_cap));
         let mut base_anchors = Vec::with_capacity((m * 2).min(adaptive_point_cap));
         let mut in_anchors = Vec::with_capacity((m * 2).min(adaptive_point_cap));
+        let mut leaf_deltas = Vec::with_capacity((m * 2).min(adaptive_point_cap));
         let mut insertion_budget_exhausted = false;
         for i in 0..m {
             let j = (i + 1) % m;
             points.push(ring.points[i].clone());
             base_anchors.push(ring.base_anchors[i]);
             in_anchors.push(ring.in_anchors[i].clone());
+            leaf_deltas.push(ring.leaf_deltas[i]);
 
             let spacing = l2_distance(&ring.points[i], &ring.points[j]);
             let needs_insert = spacing > max_spacing;
@@ -3324,41 +4082,30 @@ fn adapt_ring_spacing(
                 insertion_budget_exhausted = true;
                 continue;
             }
-            let base_s_mid = circular_midpoint(ring.base_anchors[i], ring.base_anchors[j]);
-            let base_point = sample_ring_uniform(prev_ring, base_s_mid);
-            let base_in_anchor = sample_ring_uniform(prev_in_anchors, base_s_mid);
-            let tangent = ring_tangent_uniform(prev_ring, base_s_mid);
-            let outward = outward_from_in_anchor(&base_point, &base_in_anchor, &tangent)
-                .or_else(|_| canonical_orthogonal_unit(&tangent))
-                .unwrap_or_else(|_| {
-                    let mut fallback = vec![0.0; base_point.len()];
-                    if let Some(first) = fallback.first_mut() {
-                        *first = 1.0;
-                    }
-                    fallback
-                });
-            let hit = solve_leaf_point_with_retries(
+            let hit = solve_spacing_insertion_leaf(
                 system,
                 prev_ring,
-                &base_point,
-                base_s_mid,
-                &tangent,
-                &outward,
+                prev_in_anchors,
+                &ring.points[i],
+                &ring.points[j],
+                ring.base_anchors[i],
+                ring.base_anchors[j],
                 leaf_delta,
+                leaf_delta_floor,
                 sigma,
                 dt,
                 max_steps_per_leaf,
                 max_time,
-                None,
             );
             match hit {
-                Ok(hit) => {
+                Ok((hit, achieved_delta)) => {
                     points.push(hit.point);
                     base_anchors.push(hit.base_anchor);
                     in_anchors.push(hit.in_anchor);
+                    leaf_deltas.push(achieved_delta);
                 }
                 Err(failure) => {
-                    return Err(RingSpacingFailure::InsertionLeafFailed(failure.kind));
+                    return Err(failure);
                 }
             }
             changed = true;
@@ -3368,11 +4115,15 @@ fn adapt_ring_spacing(
             points,
             base_anchors,
             in_anchors,
+            leaf_deltas,
         };
         if insertion_budget_exhausted {
-            return Ok(ring);
+            return Err(RingSpacingFailure::PointCapExceeded);
         }
         if !changed {
+            if !anchor_params_strictly_monotone_cyclic(&ring.base_anchors) {
+                return Err(RingSpacingFailure::InvalidCandidate);
+            }
             return Ok(ring);
         }
     }
@@ -3380,7 +4131,120 @@ fn adapt_ring_spacing(
     if ring.points.len() < 4 {
         return Err(RingSpacingFailure::InvalidCandidate);
     }
+    if !anchor_params_strictly_monotone_cyclic(&ring.base_anchors) {
+        return Err(RingSpacingFailure::InvalidCandidate);
+    }
+    if ring.points.iter().enumerate().any(|(index, point)| {
+        l2_distance(point, &ring.points[(index + 1) % ring.points.len()]) > max_spacing
+    }) {
+        return Err(RingSpacingFailure::PointCapExceeded);
+    }
     Ok(ring)
+}
+
+fn adaptive_ring_point_cap(max_ring_points: usize) -> usize {
+    max_ring_points.max(4)
+}
+
+fn circular_lerp_parameter(a: f64, b: f64, fraction: f64) -> f64 {
+    let width = (b - a).rem_euclid(1.0);
+    (a + fraction.clamp(0.0, 1.0) * width).rem_euclid(1.0)
+}
+
+fn anchor_strictly_between_cyclic(a: f64, b: f64, candidate: f64) -> bool {
+    let width = (b - a).rem_euclid(1.0);
+    if width <= SOURCE_PARAM_MONO_EPS {
+        return false;
+    }
+    let offset = (candidate - a).rem_euclid(1.0);
+    offset > SOURCE_PARAM_MONO_EPS && offset + SOURCE_PARAM_MONO_EPS < width
+}
+
+#[allow(clippy::too_many_arguments)]
+fn solve_spacing_insertion_leaf(
+    system: &EquationSystem,
+    prev_ring: &[Vec<f64>],
+    prev_in_anchors: &[Vec<f64>],
+    edge_start: &[f64],
+    edge_end: &[f64],
+    anchor_start: f64,
+    anchor_end: f64,
+    leaf_delta: f64,
+    leaf_delta_floor: f64,
+    sigma: f64,
+    dt: f64,
+    max_steps_per_leaf: usize,
+    max_time: f64,
+) -> Result<(LeafHit, f64), RingSpacingFailure> {
+    const CANDIDATE_FRACTIONS: [f64; 15] = [
+        0.5, 0.25, 0.75, 0.125, 0.375, 0.625, 0.875, 0.0625, 0.1875, 0.3125, 0.4375, 0.5625,
+        0.6875, 0.8125, 0.9375,
+    ];
+    let original_spacing = l2_distance(edge_start, edge_end);
+    let mut best: Option<(LeafHit, f64, f64)> = None;
+    let mut last_failure = None;
+
+    for fraction in CANDIDATE_FRACTIONS {
+        let base_s = circular_lerp_parameter(anchor_start, anchor_end, fraction);
+        let base_point = sample_ring_uniform(prev_ring, base_s);
+        let base_in_anchor = sample_ring_uniform(prev_in_anchors, base_s);
+        let tangent = ring_tangent_uniform(prev_ring, base_s);
+        let outward = outward_from_in_anchor(&base_point, &base_in_anchor, &tangent)
+            .or_else(|_| canonical_orthogonal_unit(&tangent))
+            .unwrap_or_else(|_| {
+                let mut fallback = vec![0.0; base_point.len()];
+                if let Some(first) = fallback.first_mut() {
+                    *first = 1.0;
+                }
+                fallback
+            });
+        match solve_leaf_point_with_local_floor(
+            system,
+            prev_ring,
+            &base_point,
+            base_s,
+            &tangent,
+            &outward,
+            leaf_delta,
+            leaf_delta_floor,
+            sigma,
+            dt,
+            max_steps_per_leaf,
+            max_time,
+            None,
+        ) {
+            Ok((hit, achieved_delta))
+                if anchor_strictly_between_cyclic(anchor_start, anchor_end, hit.base_anchor) =>
+            {
+                let score =
+                    l2_distance(edge_start, &hit.point).max(l2_distance(&hit.point, edge_end));
+                if score.is_finite()
+                    && best
+                        .as_ref()
+                        .is_none_or(|(_, _, best_score)| score < *best_score)
+                {
+                    best = Some((hit, achieved_delta, score));
+                    if score <= 0.75 * original_spacing {
+                        break;
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(failure) => last_failure = Some(failure),
+        }
+    }
+
+    if let Some((hit, achieved_delta, score)) = best {
+        if score + 1e-12 < original_spacing {
+            return Ok((hit, achieved_delta));
+        }
+        return Err(RingSpacingFailure::InsertionDidNotSplitEdge);
+    }
+    Err(RingSpacingFailure::InsertionLeafFailed(
+        last_failure
+            .map(|failure| failure.kind)
+            .unwrap_or(LeafFailureKind::PlaneSolveNoConvergence),
+    ))
 }
 
 #[cfg(test)]
@@ -3479,6 +4343,7 @@ fn evaluate_geodesic_quality(
     prev_ring: &[Vec<f64>],
     prev_in_anchors: &[Vec<f64>],
     next_ring: &[Vec<f64>],
+    leaf_delta: f64,
 ) -> GeodesicQuality {
     if next_ring.len() != prev_ring.len() {
         return GeodesicQuality::default();
@@ -3486,7 +4351,13 @@ fn evaluate_geodesic_quality(
     let base_anchors: Vec<f64> = (0..next_ring.len())
         .map(|idx| (idx as f64) / (next_ring.len().max(1) as f64))
         .collect();
-    evaluate_geodesic_quality_with_anchors(prev_ring, prev_in_anchors, next_ring, &base_anchors)
+    evaluate_geodesic_quality_with_anchors(
+        prev_ring,
+        prev_in_anchors,
+        next_ring,
+        &base_anchors,
+        &vec![leaf_delta; next_ring.len()],
+    )
 }
 
 fn evaluate_geodesic_quality_for_solve(
@@ -3494,7 +4365,7 @@ fn evaluate_geodesic_quality_for_solve(
     prev_in_anchors: &[Vec<f64>],
     next: &RingSolve,
 ) -> GeodesicQuality {
-    if next.points.len() != next.base_anchors.len() {
+    if next.points.len() != next.base_anchors.len() || next.points.len() != next.leaf_deltas.len() {
         return GeodesicQuality::default();
     }
     evaluate_geodesic_quality_with_anchors(
@@ -3502,6 +4373,7 @@ fn evaluate_geodesic_quality_for_solve(
         prev_in_anchors,
         &next.points,
         &next.base_anchors,
+        &next.leaf_deltas,
     )
 }
 
@@ -3510,10 +4382,12 @@ fn evaluate_geodesic_quality_with_anchors(
     prev_in_anchors: &[Vec<f64>],
     next_ring: &[Vec<f64>],
     base_anchors: &[f64],
+    leaf_deltas: &[f64],
 ) -> GeodesicQuality {
     if prev_ring.is_empty()
         || prev_in_anchors.len() != prev_ring.len()
         || next_ring.len() != base_anchors.len()
+        || next_ring.len() != leaf_deltas.len()
     {
         return GeodesicQuality::default();
     }
@@ -3539,19 +4413,10 @@ fn evaluate_geodesic_quality_with_anchors(
         let cos_theta = (dot(&v_prev, &v_next) / (n_prev * n_next)).clamp(-1.0, 1.0);
         let alpha = cos_theta.acos();
         quality.max_angle = quality.max_angle.max(alpha);
-        let strip_scale = 0.5 * (n_prev + n_next);
-        quality.max_delta_angle = quality.max_delta_angle.max(alpha * strip_scale);
+        quality.max_delta_angle = quality.max_delta_angle.max(alpha * leaf_deltas[idx].abs());
     }
 
     quality
-}
-
-fn circular_midpoint(a: f64, b: f64) -> f64 {
-    let mut rhs = b;
-    if rhs < a {
-        rhs += 1.0;
-    }
-    (0.5 * (a + rhs)).rem_euclid(1.0)
 }
 
 fn ring_vertex_angle(ring: &[Vec<f64>], index: usize) -> f64 {
@@ -3571,34 +4436,6 @@ fn ring_vertex_angle(ring: &[Vec<f64>], index: usize) -> f64 {
     }
     let cos_theta = (dot(&v1, &v2) / (n1 * n2)).clamp(-1.0, 1.0);
     cos_theta.acos()
-}
-
-fn average_strip_distance(prev_ring: &[Vec<f64>], next_ring: &[Vec<f64>]) -> f64 {
-    if prev_ring.is_empty() || next_ring.is_empty() {
-        return 0.0;
-    }
-    let samples = prev_ring.len().max(next_ring.len()).max(8);
-    let mut distances = Vec::with_capacity(samples);
-    for i in 0..samples {
-        let s = (i as f64) / (samples as f64);
-        let p_prev = sample_ring_uniform(prev_ring, s);
-        let p_next = sample_ring_uniform(next_ring, s);
-        distances.push(l2_distance(&p_prev, &p_next));
-    }
-    let mut finite: Vec<f64> = distances
-        .into_iter()
-        .filter(|value| value.is_finite())
-        .collect();
-    if finite.is_empty() {
-        return 0.0;
-    }
-    finite.sort_by(|a, b| a.total_cmp(b));
-    let trim = ((finite.len() as f64) * STRIP_ARCLENGTH_TRIM_FRAC) as usize;
-    if trim.saturating_mul(2) >= finite.len() {
-        return finite.iter().sum::<f64>() / (finite.len() as f64);
-    }
-    let core = &finite[trim..(finite.len() - trim)];
-    core.iter().sum::<f64>() / (core.len() as f64)
 }
 
 fn sample_ring_uniform(ring: &[Vec<f64>], s: f64) -> Vec<f64> {
@@ -3637,17 +4474,8 @@ fn ring_tangent_neighbor_average(ring: &[Vec<f64>], index: usize) -> Vec<f64> {
     }
     let m = ring.len();
     let prev = &ring[(index + m - 1) % m];
-    let curr = &ring[index % m];
     let next = &ring[(index + 1) % m];
-    let left = normalize(subtract(curr, prev)).unwrap_or_else(|_| vec![0.0; curr.len()]);
-    let right = normalize(subtract(next, curr)).unwrap_or_else(|_| vec![0.0; curr.len()]);
-    let mut tangent = vec![0.0; curr.len()];
-    for d in 0..curr.len() {
-        tangent[d] = left[d] + right[d];
-    }
-    if l2_norm(&tangent) <= NORM_EPS {
-        tangent = subtract(next, prev);
-    }
+    let tangent = subtract(next, prev);
     normalize(tangent).unwrap_or_else(|_| ring_tangent_uniform(ring, (index as f64) / (m as f64)))
 }
 
@@ -3667,7 +4495,6 @@ fn sample_anchor_param(anchor_params: &[f64], s: f64) -> f64 {
     circular_lerp(anchor_params[i0], anchor_params[i1], alpha)
 }
 
-#[cfg(test)]
 fn anchor_params_strictly_monotone_cyclic(anchor_params: &[f64]) -> bool {
     let n = anchor_params.len();
     if n < 3 {
@@ -3804,6 +4631,7 @@ fn uniform_s_to_segment_tau(ring_len: usize, s: f64) -> (usize, f64) {
     (seg_index, tau)
 }
 
+#[cfg(test)]
 fn segment_point_with_derivative(
     ring: &[Vec<f64>],
     seg_index: usize,
@@ -3820,6 +4648,7 @@ fn segment_point_with_derivative(
     (point, derivative)
 }
 
+#[cfg(test)]
 fn eval_plane_residual_and_derivative_on_segment(
     system: &EquationSystem,
     ring: &[Vec<f64>],
@@ -3913,6 +4742,7 @@ fn eval_plane_residual_and_derivative_on_segment(
     Ok((residual, deriv, start, point))
 }
 
+#[cfg(test)]
 fn canonicalize_segment_tau(tau: f64) -> f64 {
     if tau <= TAU_SWITCH_EPS {
         0.0
@@ -3923,6 +4753,7 @@ fn canonicalize_segment_tau(tau: f64) -> f64 {
     }
 }
 
+#[cfg(test)]
 fn try_solve_plane_root_on_segment(
     system: &EquationSystem,
     ring: &[Vec<f64>],
@@ -4096,6 +4927,7 @@ fn try_solve_plane_root_on_segment(
     Ok(None)
 }
 
+#[cfg(test)]
 fn solve_plane_root_polygon(
     system: &EquationSystem,
     ring: &[Vec<f64>],
@@ -4127,6 +4959,7 @@ fn solve_plane_root_polygon(
     )
 }
 
+#[cfg(test)]
 fn solve_plane_root_polygon_with_switch_cap(
     system: &EquationSystem,
     ring: &[Vec<f64>],
@@ -4253,79 +5086,6 @@ fn solve_plane_root_polygon_with_switch_cap(
     Err(LeafFailureKind::PlaneSolveNoConvergence)
 }
 
-fn evaluate_leaf_sample_at_time(
-    system: &EquationSystem,
-    ring: &[Vec<f64>],
-    base_point: &[f64],
-    leaf_normal: &[f64],
-    signed_direction: &[f64],
-    tau_time: f64,
-    segment_index: usize,
-    segment_tau_seed: f64,
-    sigma: f64,
-    dt: f64,
-    max_steps_per_leaf: usize,
-    max_time: f64,
-    plane_tol: f64,
-) -> Result<LeafSample, LeafFailureKind> {
-    if ring.is_empty() {
-        return Err(LeafFailureKind::PlaneSolveNoConvergence);
-    }
-    let (seg_index, seg_tau, point) = match solve_plane_root_polygon(
-        system,
-        ring,
-        base_point,
-        leaf_normal,
-        tau_time,
-        segment_index,
-        segment_tau_seed,
-        sigma,
-        dt,
-        max_steps_per_leaf,
-        max_time,
-        plane_tol,
-    ) {
-        Ok((seg, tau, _start, point)) => (seg, tau, point),
-        Err(LeafFailureKind::PlaneSolveNoConvergence) => {
-            // Fallback for first-ring robustness: if strict projection fails, keep the
-            // seeded segment parameterization and evaluate the leaf from that startpoint.
-            let seg = segment_index % ring.len();
-            let tau = canonicalize_segment_tau(segment_tau_seed.clamp(0.0, 1.0));
-            let (start, _dldt) = segment_point_with_derivative(ring, seg, tau);
-            let point = integrate_state_only(
-                system,
-                &start,
-                tau_time,
-                sigma,
-                dt,
-                max_steps_per_leaf,
-                max_time,
-            )
-            .ok_or(LeafFailureKind::IntegratorNonFinite)?;
-            (seg, tau, point)
-        }
-        Err(reason) => return Err(reason),
-    };
-    let offset = subtract(&point, base_point);
-    let radial_distance = l2_norm(&offset);
-    let outward_distance = signed_distance_with_direction(signed_direction, &offset);
-    Ok(LeafSample {
-        point,
-        seg_index,
-        seg_tau,
-        radial_distance,
-        outward_distance,
-    })
-}
-
-fn leaf_sample_reaches_delta(sample: &LeafSample, leaf_delta: f64, outward_tol: f64) -> bool {
-    sample.radial_distance >= leaf_delta && sample.outward_distance >= -outward_tol
-}
-
-fn leaf_delta_error(sample: &LeafSample, leaf_delta: f64) -> f64 {
-    (sample.radial_distance - leaf_delta).abs()
-}
-
 fn solve_leaf_point_with_retries(
     system: &EquationSystem,
     ring: &[Vec<f64>],
@@ -4340,11 +5100,9 @@ fn solve_leaf_point_with_retries(
     max_time: f64,
     center: Option<&[f64]>,
 ) -> Result<LeafHit, LeafFailure> {
-    let mut time_cap = max_time.max(dt.max(1e-9));
-    let max_time_cap = max_time.max(dt.max(1e-9)) * 8.0;
+    let time_cap = max_time.max(dt.max(1e-9));
     let mut dt_try = dt.max(1e-9);
     let dt_min = (dt.abs() * LEAF_DT_MIN_FACTOR).max(1e-9);
-    let mut time_retries = 0usize;
     let mut dt_retries = 0usize;
     loop {
         match shoot_leaf_point(
@@ -4363,16 +5121,6 @@ fn solve_leaf_point_with_retries(
         ) {
             Ok(hit) => return Ok(hit),
             Err(failure) => {
-                if failure.kind == LeafFailureKind::NoFirstHitWithinMaxTime
-                    && time_retries < LEAF_MAX_TIME_RETRIES
-                    && time_cap + 1e-12 < max_time_cap
-                {
-                    time_cap = (time_cap * LEAF_MAX_TIME_GROWTH)
-                        .max(time_cap + dt_try.max(1e-9))
-                        .min(max_time_cap);
-                    time_retries += 1;
-                    continue;
-                }
                 if failure.kind == LeafFailureKind::IntegratorNonFinite
                     && dt_retries < LEAF_DT_RETRIES
                     && dt_try > dt_min + 1e-12
@@ -4385,6 +5133,337 @@ fn solve_leaf_point_with_retries(
             }
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn solve_leaf_point_with_local_floor(
+    system: &EquationSystem,
+    ring: &[Vec<f64>],
+    base_point: &[f64],
+    base_s: f64,
+    tangent: &[f64],
+    outward: &[f64],
+    leaf_delta: f64,
+    leaf_delta_floor: f64,
+    sigma: f64,
+    dt: f64,
+    max_steps_per_leaf: usize,
+    max_time: f64,
+    center: Option<&[f64]>,
+) -> Result<(LeafHit, f64), LeafFailure> {
+    let floor = leaf_delta_floor.max(1e-12).min(leaf_delta);
+    let mut local_delta = leaf_delta;
+    let mut last_failure = None;
+    for _ in 0..LEAF_REFINE_ATTEMPTS {
+        match solve_leaf_point_with_retries(
+            system,
+            ring,
+            base_point,
+            base_s,
+            tangent,
+            outward,
+            local_delta,
+            sigma,
+            dt,
+            max_steps_per_leaf,
+            max_time,
+            center,
+        ) {
+            Ok(hit) => return Ok((hit, local_delta)),
+            Err(failure) => {
+                let can_shrink = failure.kind == LeafFailureKind::NoFirstHitWithinMaxTime
+                    && local_delta > floor + 1e-12;
+                last_failure = Some(failure);
+                if !can_shrink {
+                    break;
+                }
+                local_delta = (local_delta * LEAF_DELTA_SHRINK).max(floor);
+            }
+        }
+    }
+    Err(last_failure.unwrap_or(LeafFailure {
+        kind: LeafFailureKind::NoFirstHitWithinMaxTime,
+        last_time: 0.0,
+        last_segment: 0,
+        last_tau: 0.0,
+    }))
+}
+
+#[derive(Clone)]
+struct LeafContinuationSample {
+    source_s: f64,
+    time: f64,
+    point: Vec<f64>,
+    point_source_derivative: Vec<f64>,
+    point_time_derivative: Vec<f64>,
+    plane_residual: f64,
+    radial_distance: f64,
+    outward_distance: f64,
+}
+
+fn sample_ring_parameter_with_derivative(ring: &[Vec<f64>], source_s: f64) -> (Vec<f64>, Vec<f64>) {
+    if ring.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    if ring.len() == 1 {
+        return (ring[0].clone(), vec![0.0; ring[0].len()]);
+    }
+    let count = ring.len();
+    let scaled = source_s.rem_euclid(1.0) * (count as f64);
+    let index = (scaled.floor() as usize) % count;
+    let alpha = scaled - scaled.floor();
+    let next = (index + 1) % count;
+    let point = lerp(&ring[index], &ring[next], alpha);
+    let mut derivative = subtract(&ring[next], &ring[index]);
+    for value in &mut derivative {
+        *value *= count as f64;
+    }
+    (point, derivative)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate_leaf_continuation_sample(
+    system: &EquationSystem,
+    ring: &[Vec<f64>],
+    base_point: &[f64],
+    plane_normal: &[f64],
+    outward: &[f64],
+    source_s: f64,
+    time: f64,
+    sigma: f64,
+    dt: f64,
+    max_steps_per_leaf: usize,
+    max_time: f64,
+) -> Result<LeafContinuationSample, LeafFailureKind> {
+    if !source_s.is_finite() || !time.is_finite() || time < 0.0 || time > max_time + 1e-12 {
+        return Err(LeafFailureKind::PlaneSolveNoConvergence);
+    }
+    let (start, start_source_derivative) = sample_ring_parameter_with_derivative(ring, source_s);
+    if start.len() != base_point.len() || start_source_derivative.len() != base_point.len() {
+        return Err(LeafFailureKind::PlaneSolveNoConvergence);
+    }
+    let (point, phi) = integrate_state_and_variational(
+        system,
+        &start,
+        time,
+        sigma,
+        dt,
+        max_steps_per_leaf,
+        max_time,
+    )
+    .ok_or(LeafFailureKind::IntegratorNonFinite)?;
+    let point_source_derivative = mat_vec_mul_row_major(&phi, &start_source_derivative)
+        .ok_or(LeafFailureKind::PlaneSolveNoConvergence)?;
+    let mut point_time_derivative = vec![0.0; point.len()];
+    system.apply(0.0, &point, &mut point_time_derivative);
+    for value in &mut point_time_derivative {
+        *value *= sigma;
+    }
+    if point.iter().any(|value| !value.is_finite())
+        || point_source_derivative
+            .iter()
+            .any(|value| !value.is_finite())
+        || point_time_derivative.iter().any(|value| !value.is_finite())
+    {
+        return Err(LeafFailureKind::IntegratorNonFinite);
+    }
+    let offset = subtract(&point, base_point);
+    Ok(LeafContinuationSample {
+        source_s,
+        time,
+        plane_residual: dot(plane_normal, &offset),
+        radial_distance: l2_norm(&offset),
+        outward_distance: signed_distance_with_direction(outward, &offset),
+        point,
+        point_source_derivative,
+        point_time_derivative,
+    })
+}
+
+fn leaf_continuation_tangent(
+    sample: &LeafContinuationSample,
+    plane_normal: &[f64],
+    previous: Option<[f64; 2]>,
+) -> Option<[f64; 2]> {
+    let gradient_source = dot(plane_normal, &sample.point_source_derivative);
+    let gradient_time = dot(plane_normal, &sample.point_time_derivative);
+    let norm = gradient_source.hypot(gradient_time);
+    if !norm.is_finite() || norm <= LEAF_PLANE_DERIV_EPS {
+        return None;
+    }
+    let mut tangent = [-gradient_time / norm, gradient_source / norm];
+    if let Some(previous) = previous {
+        if tangent[0] * previous[0] + tangent[1] * previous[1] < 0.0 {
+            tangent[0] = -tangent[0];
+            tangent[1] = -tangent[1];
+        }
+    } else if tangent[1] < 0.0 {
+        tangent[0] = -tangent[0];
+        tangent[1] = -tangent[1];
+    }
+    Some(tangent)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn correct_leaf_continuation_predictor(
+    system: &EquationSystem,
+    ring: &[Vec<f64>],
+    base_point: &[f64],
+    plane_normal: &[f64],
+    outward: &[f64],
+    predictor: [f64; 2],
+    tangent: [f64; 2],
+    sigma: f64,
+    dt: f64,
+    max_steps_per_leaf: usize,
+    max_time: f64,
+    plane_tol: f64,
+) -> Result<(LeafContinuationSample, usize), LeafFailureKind> {
+    let mut source_s = predictor[0];
+    let mut time = predictor[1];
+    for iteration in 0..LEAF_CONTINUATION_NEWTON_MAX_ITERS {
+        let sample = evaluate_leaf_continuation_sample(
+            system,
+            ring,
+            base_point,
+            plane_normal,
+            outward,
+            source_s,
+            time,
+            sigma,
+            dt,
+            max_steps_per_leaf,
+            max_time,
+        )?;
+        let pseudo_residual =
+            (source_s - predictor[0]) * tangent[0] + (time - predictor[1]) * tangent[1];
+        if sample.plane_residual.abs() <= plane_tol && pseudo_residual.abs() <= plane_tol {
+            return Ok((sample, iteration + 1));
+        }
+        let gradient_source = dot(plane_normal, &sample.point_source_derivative);
+        let gradient_time = dot(plane_normal, &sample.point_time_derivative);
+        let determinant = gradient_source * tangent[1] - gradient_time * tangent[0];
+        if !determinant.is_finite() || determinant.abs() <= LEAF_PLANE_DERIV_EPS {
+            return Err(LeafFailureKind::PlaneSolveNoConvergence);
+        }
+        let delta_source =
+            (-sample.plane_residual * tangent[1] + gradient_time * pseudo_residual) / determinant;
+        let delta_time =
+            (-gradient_source * pseudo_residual + sample.plane_residual * tangent[0]) / determinant;
+        if !delta_source.is_finite() || !delta_time.is_finite() {
+            return Err(LeafFailureKind::PlaneSolveNoConvergence);
+        }
+        let mut damping = 1.0;
+        while time + damping * delta_time < 0.0 || time + damping * delta_time > max_time + 1e-12 {
+            damping *= 0.5;
+            if damping < 1.0 / 256.0 {
+                return Err(LeafFailureKind::PlaneSolveNoConvergence);
+            }
+        }
+        source_s += damping * delta_source;
+        time += damping * delta_time;
+    }
+    Err(LeafFailureKind::PlaneSolveNoConvergence)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn solve_leaf_distance_event(
+    system: &EquationSystem,
+    ring: &[Vec<f64>],
+    base_point: &[f64],
+    plane_normal: &[f64],
+    outward: &[f64],
+    initial_source_s: f64,
+    initial_time: f64,
+    leaf_delta: f64,
+    sigma: f64,
+    dt: f64,
+    max_steps_per_leaf: usize,
+    max_time: f64,
+    plane_tol: f64,
+    distance_tol: f64,
+) -> Result<LeafContinuationSample, LeafFailureKind> {
+    let mut source_s = initial_source_s;
+    let mut time = initial_time;
+    for _ in 0..LEAF_CONTINUATION_EVENT_MAX_ITERS {
+        let sample = evaluate_leaf_continuation_sample(
+            system,
+            ring,
+            base_point,
+            plane_normal,
+            outward,
+            source_s,
+            time,
+            sigma,
+            dt,
+            max_steps_per_leaf,
+            max_time,
+        )?;
+        let distance_residual = sample.radial_distance - leaf_delta;
+        if sample.plane_residual.abs() <= plane_tol && distance_residual.abs() <= distance_tol {
+            return Ok(sample);
+        }
+        if sample.radial_distance <= NORM_EPS {
+            return Err(LeafFailureKind::PlaneRootNotBracketed);
+        }
+        let offset = subtract(&sample.point, base_point);
+        let plane_source = dot(plane_normal, &sample.point_source_derivative);
+        let plane_time = dot(plane_normal, &sample.point_time_derivative);
+        let distance_source =
+            dot(&offset, &sample.point_source_derivative) / sample.radial_distance;
+        let distance_time = dot(&offset, &sample.point_time_derivative) / sample.radial_distance;
+        let determinant = plane_source * distance_time - plane_time * distance_source;
+        if !determinant.is_finite() || determinant.abs() <= LEAF_PLANE_DERIV_EPS {
+            return Err(LeafFailureKind::PlaneRootNotBracketed);
+        }
+        let delta_source =
+            (-sample.plane_residual * distance_time + plane_time * distance_residual) / determinant;
+        let delta_time = (-plane_source * distance_residual
+            + sample.plane_residual * distance_source)
+            / determinant;
+        if !delta_source.is_finite() || !delta_time.is_finite() {
+            return Err(LeafFailureKind::PlaneRootNotBracketed);
+        }
+
+        let scaled_residual = (sample.plane_residual / plane_tol.max(1e-14))
+            .hypot(distance_residual / distance_tol.max(1e-14));
+        let mut accepted = false;
+        let mut damping = 1.0;
+        for _ in 0..8 {
+            let candidate_source = source_s + damping * delta_source;
+            let candidate_time = time + damping * delta_time;
+            if candidate_time < 0.0 || candidate_time > max_time + 1e-12 {
+                damping *= 0.5;
+                continue;
+            }
+            let candidate = evaluate_leaf_continuation_sample(
+                system,
+                ring,
+                base_point,
+                plane_normal,
+                outward,
+                candidate_source,
+                candidate_time,
+                sigma,
+                dt,
+                max_steps_per_leaf,
+                max_time,
+            )?;
+            let candidate_residual = (candidate.plane_residual / plane_tol.max(1e-14))
+                .hypot((candidate.radial_distance - leaf_delta) / distance_tol.max(1e-14));
+            if candidate_residual.is_finite() && candidate_residual < scaled_residual {
+                source_s = candidate_source;
+                time = candidate_time;
+                accepted = true;
+                break;
+            }
+            damping *= 0.5;
+        }
+        if !accepted {
+            return Err(LeafFailureKind::PlaneRootNotBracketed);
+        }
+    }
+    Err(LeafFailureKind::PlaneRootNotBracketed)
 }
 
 fn shoot_leaf_point(
@@ -4424,161 +5503,155 @@ fn shoot_leaf_point(
             fallback
         })
     });
-    let min_tau_step = (dt * LEAF_TAU_MIN_FACTOR).max(1e-9);
-    let tau_step_cap = (max_time * LEAF_TAU_MAX_TIME_FACTOR)
-        .max(LEAF_TAU_INIT_ABS)
-        .min(LEAF_TAU_MAX_ABS);
-    let mut tau_step = dt.max(LEAF_TAU_INIT_ABS).min(tau_step_cap);
-    let (mut seg_idx, mut seg_tau) = uniform_s_to_segment_tau(ring.len(), base_s);
-    let plane_tol = (leaf_delta * LEAF_PLANE_TOL_FACTOR).max(1e-8);
-    let dist_tol = (leaf_delta * LEAF_DISTANCE_TOL_FACTOR).max(1e-8);
+    let plane_tol = (leaf_delta * 1e-8).max(1e-10);
+    let distance_tol = (leaf_delta * 1e-8).max(1e-10);
     let outward_tol = (leaf_delta * 1e-6).max(1e-10);
-    let mut prev_time = 0.0;
-    let mut prev_sample = LeafSample {
-        point: base_point.to_vec(),
-        seg_index: seg_idx,
-        seg_tau,
-        radial_distance: 0.0,
-        outward_distance: 0.0,
-    };
+    let mut current = evaluate_leaf_continuation_sample(
+        system,
+        ring,
+        base_point,
+        &leaf_normal,
+        &signed_direction,
+        base_s,
+        0.0,
+        sigma,
+        dt,
+        max_steps_per_leaf,
+        max_time,
+    )
+    .map_err(|kind| LeafFailure {
+        kind,
+        last_time: 0.0,
+        last_segment: 0,
+        last_tau: 0.0,
+    })?;
+    let mut continuation_tangent =
+        leaf_continuation_tangent(&current, &leaf_normal, None).ok_or(LeafFailure {
+            kind: LeafFailureKind::PlaneSolveNoConvergence,
+            last_time: 0.0,
+            last_segment: 0,
+            last_tau: 0.0,
+        })?;
+    let mut continuation_step = (2.0 * dt).clamp(1e-3, LEAF_CONTINUATION_MAX_STEP);
+    let mut last_failure_kind = LeafFailureKind::NoFirstHitWithinMaxTime;
+    let max_attempts = max_steps_per_leaf.max(64).saturating_mul(8);
 
-    while prev_time < max_time {
-        let tau_time = (prev_time + tau_step).min(max_time);
-        let curr_sample = match evaluate_leaf_sample_at_time(
+    for _ in 0..max_attempts {
+        if current.time >= max_time - 1e-12 {
+            break;
+        }
+        let predictor = [
+            current.source_s + continuation_step * continuation_tangent[0],
+            current.time + continuation_step * continuation_tangent[1],
+        ];
+        if predictor[1] < 0.0 || predictor[1] > max_time + 1e-12 {
+            continuation_step *= 0.5;
+            if continuation_step < LEAF_CONTINUATION_MIN_STEP {
+                break;
+            }
+            continue;
+        }
+        let (next, corrector_iterations) = match correct_leaf_continuation_predictor(
             system,
             ring,
             base_point,
             &leaf_normal,
             &signed_direction,
-            tau_time,
-            seg_idx,
-            seg_tau,
+            predictor,
+            continuation_tangent,
             sigma,
             dt,
             max_steps_per_leaf,
             max_time,
             plane_tol,
         ) {
-            Ok(sample) => sample,
+            Ok(next) => next,
             Err(reason) => {
-                if tau_step > min_tau_step {
-                    tau_step = (tau_step * 0.5).max(min_tau_step);
+                last_failure_kind = reason;
+                continuation_step *= 0.5;
+                if continuation_step >= LEAF_CONTINUATION_MIN_STEP {
                     continue;
                 }
-                return Err(LeafFailure {
-                    kind: reason,
-                    last_time: tau_time,
-                    last_segment: seg_idx,
-                    last_tau: seg_tau,
-                });
+                break;
             }
         };
 
-        if !leaf_sample_reaches_delta(&prev_sample, leaf_delta, outward_tol)
-            && leaf_sample_reaches_delta(&curr_sample, leaf_delta, outward_tol)
-        {
-            let mut left_time = prev_time;
-            let mut right_time = tau_time;
-            let mut left_sample = prev_sample.clone();
-            let mut right_sample = curr_sample.clone();
-
-            for _ in 0..LEAF_FIRST_HIT_BISECT_ITERS {
-                let mid_time = 0.5 * (left_time + right_time);
-                let alpha = if right_time > left_time {
-                    (mid_time - left_time) / (right_time - left_time)
-                } else {
-                    0.5
-                };
-                let (seed_seg, seed_tau) = if alpha < 0.5 {
-                    (left_sample.seg_index, left_sample.seg_tau)
-                } else {
-                    (right_sample.seg_index, right_sample.seg_tau)
-                };
-                let mid_sample = match evaluate_leaf_sample_at_time(
-                    system,
-                    ring,
-                    base_point,
-                    &leaf_normal,
-                    &signed_direction,
-                    mid_time,
-                    seed_seg,
-                    seed_tau,
-                    sigma,
-                    dt,
-                    max_steps_per_leaf,
-                    max_time,
-                    plane_tol,
-                ) {
-                    Ok(sample) => sample,
-                    Err(_) => {
-                        right_time = mid_time;
-                        continue;
-                    }
-                };
-
-                if leaf_sample_reaches_delta(&mid_sample, leaf_delta, outward_tol) {
-                    right_time = mid_time;
-                    right_sample = mid_sample.clone();
-                } else {
-                    left_time = mid_time;
-                    left_sample = mid_sample.clone();
-                }
-
-                if leaf_sample_reaches_delta(&mid_sample, leaf_delta, outward_tol)
-                    && leaf_delta_error(&mid_sample, leaf_delta) <= dist_tol
+        let previous_event = current.radial_distance - leaf_delta;
+        let next_event = next.radial_distance - leaf_delta;
+        if previous_event * next_event <= 0.0 && next.radial_distance > NORM_EPS {
+            let denominator = next.radial_distance - current.radial_distance;
+            let alpha = if denominator.abs() <= NORM_EPS {
+                0.5
+            } else {
+                ((leaf_delta - current.radial_distance) / denominator).clamp(0.0, 1.0)
+            };
+            let source_seed = current.source_s + alpha * (next.source_s - current.source_s);
+            let time_seed = current.time + alpha * (next.time - current.time);
+            match solve_leaf_distance_event(
+                system,
+                ring,
+                base_point,
+                &leaf_normal,
+                &signed_direction,
+                source_seed,
+                time_seed,
+                leaf_delta,
+                sigma,
+                dt,
+                max_steps_per_leaf,
+                max_time,
+                plane_tol,
+                distance_tol,
+            ) {
+                Ok(hit)
+                    if hit.outward_distance >= -outward_tol
+                        && hit.plane_residual.abs() <= plane_tol
+                        && (hit.radial_distance - leaf_delta).abs() <= distance_tol =>
                 {
+                    let solved_source_s = hit.source_s.rem_euclid(1.0);
+                    let (solved_source, _) =
+                        sample_ring_parameter_with_derivative(ring, solved_source_s);
                     return Ok(LeafHit {
-                        point: mid_sample.point,
-                        tau_hit: mid_time,
-                        base_anchor: base_s.rem_euclid(1.0),
-                        in_anchor: base_point.to_vec(),
+                        point: hit.point,
+                        tau_hit: hit.time,
+                        base_anchor: solved_source_s,
+                        in_anchor: solved_source,
                     });
                 }
+                Ok(_) => {}
+                Err(reason) => last_failure_kind = reason,
             }
-
-            if leaf_sample_reaches_delta(&right_sample, leaf_delta, outward_tol)
-                && leaf_delta_error(&right_sample, leaf_delta) <= 10.0 * dist_tol
-            {
-                return Ok(LeafHit {
-                    point: right_sample.point,
-                    tau_hit: right_time,
-                    base_anchor: base_s.rem_euclid(1.0),
-                    in_anchor: base_point.to_vec(),
-                });
-            }
-            // Robust fallback: if we bracketed the first outward Euclidean hit but
-            // refinement could not satisfy a tight distance tolerance, keep the
-            // reached endpoint rather than accepting a below-delta point.
-            if leaf_sample_reaches_delta(&right_sample, leaf_delta, outward_tol) {
-                return Ok(LeafHit {
-                    point: right_sample.point,
-                    tau_hit: right_time,
-                    base_anchor: base_s.rem_euclid(1.0),
-                    in_anchor: base_point.to_vec(),
-                });
-            }
-            return Err(LeafFailure {
-                kind: LeafFailureKind::PlaneRootNotBracketed,
-                last_time: left_time,
-                last_segment: left_sample.seg_index,
-                last_tau: left_sample.seg_tau,
-            });
         }
 
-        prev_time = tau_time;
-        seg_idx = curr_sample.seg_index;
-        seg_tau = curr_sample.seg_tau;
-        prev_sample = curr_sample;
-        tau_step = (tau_step * 1.25).min(tau_step_cap);
-        if tau_time >= max_time {
-            break;
+        let Some(next_tangent) =
+            leaf_continuation_tangent(&next, &leaf_normal, Some(continuation_tangent))
+        else {
+            last_failure_kind = LeafFailureKind::PlaneSolveNoConvergence;
+            continuation_step *= 0.5;
+            if continuation_step < LEAF_CONTINUATION_MIN_STEP {
+                break;
+            }
+            continue;
+        };
+        current = next;
+        continuation_tangent = next_tangent;
+        if corrector_iterations <= 4 {
+            continuation_step =
+                (continuation_step * LEAF_CONTINUATION_GROWTH).min(LEAF_CONTINUATION_MAX_STEP);
+        } else if corrector_iterations >= 10 {
+            continuation_step = (continuation_step * 0.5).max(LEAF_CONTINUATION_MIN_STEP);
         }
     }
+    let (last_segment, last_tau) = uniform_s_to_segment_tau(ring.len(), current.source_s);
     Err(LeafFailure {
-        kind: LeafFailureKind::NoFirstHitWithinMaxTime,
-        last_time: prev_time,
-        last_segment: seg_idx,
-        last_tau: seg_tau,
+        kind: if current.time >= max_time - 1e-12 {
+            LeafFailureKind::NoFirstHitWithinMaxTime
+        } else {
+            last_failure_kind
+        },
+        last_time: current.time,
+        last_segment,
+        last_tau,
     })
 }
 
@@ -4768,7 +5841,6 @@ fn circular_lerp(a: f64, b: f64, alpha: f64) -> f64 {
     (a + alpha.clamp(0.0, 1.0) * (rhs - a)).rem_euclid(1.0)
 }
 
-#[cfg(test)]
 fn circular_delta(from: f64, to: f64) -> f64 {
     let mut delta = to - from;
     if delta > 0.5 {
@@ -4800,6 +5872,14 @@ fn leaf_plane_normal(tangent: &[f64]) -> Option<Vec<f64>> {
 }
 
 fn triangulate_ring_bands(rings: &[Vec<Vec<f64>>], ring_offsets: &[usize]) -> Vec<usize> {
+    triangulate_ring_bands_with_parent_anchors(rings, ring_offsets, &[])
+}
+
+fn triangulate_ring_bands_with_parent_anchors(
+    rings: &[Vec<Vec<f64>>],
+    ring_offsets: &[usize],
+    parent_anchors: &[Vec<f64>],
+) -> Vec<usize> {
     if rings.len() < 2 {
         return Vec::new();
     }
@@ -4814,24 +5894,57 @@ fn triangulate_ring_bands(rings: &[Vec<Vec<f64>>], ring_offsets: &[usize]) -> Ve
         let b0 = ring_offsets[band + 1];
         let m = a_ring.len();
         let n = b_ring.len();
-        let mut best_i = 0usize;
-        let mut best_j = 0usize;
-        let mut best_dist = f64::INFINITY;
-        for (i, a_point) in a_ring.iter().enumerate() {
-            for (j, b_point) in b_ring.iter().enumerate() {
-                let distance = l2_distance(a_point, b_point);
-                if distance < best_dist {
-                    best_dist = distance;
-                    best_i = i;
-                    best_j = j;
+        let valid_parent_anchors = parent_anchors.get(band + 1).filter(|anchors| {
+            anchors.len() == n && anchor_params_strictly_monotone_cyclic(anchors)
+        });
+        let (a_params, b_params, best_i, best_j) = if let Some(anchors) = valid_parent_anchors {
+            let a_params = (0..m)
+                .map(|index| (index as f64) / (m as f64))
+                .collect::<Vec<_>>();
+            let b_params = anchors
+                .iter()
+                .map(|anchor| anchor.rem_euclid(1.0))
+                .collect::<Vec<_>>();
+            let mut best_i = 0usize;
+            let mut best_j = 0usize;
+            let mut best_distance = f64::INFINITY;
+            for (i, a_param) in a_params.iter().enumerate() {
+                for (j, b_param) in b_params.iter().enumerate() {
+                    let distance = circular_delta(*a_param, *b_param).abs();
+                    if distance < best_distance {
+                        best_distance = distance;
+                        best_i = i;
+                        best_j = j;
+                    }
                 }
             }
-        }
+            (a_params, b_params, best_i, best_j)
+        } else {
+            let mut best_i = 0usize;
+            let mut best_j = 0usize;
+            let mut best_distance = f64::INFINITY;
+            for (i, a_point) in a_ring.iter().enumerate() {
+                for (j, b_point) in b_ring.iter().enumerate() {
+                    let distance = l2_distance(a_point, b_point);
+                    if distance < best_distance {
+                        best_distance = distance;
+                        best_i = i;
+                        best_j = j;
+                    }
+                }
+            }
+            (
+                normalized_ring_arclength_params(a_ring),
+                normalized_ring_arclength_params(b_ring),
+                best_i,
+                best_j,
+            )
+        };
 
         let a_order: Vec<usize> = (0..m).map(|step| (best_i + step) % m).collect();
         let b_order: Vec<usize> = (0..n).map(|step| (best_j + step) % n).collect();
-        let a_alpha = ring_progress_from_start(&normalized_ring_arclength_params(a_ring), best_i);
-        let b_beta = ring_progress_from_start(&normalized_ring_arclength_params(b_ring), best_j);
+        let a_alpha = ring_progress_from_start(&a_params, best_i);
+        let b_beta = ring_progress_from_start(&b_params, best_j);
 
         let mut advanced_a = 0usize;
         let mut advanced_b = 0usize;
@@ -4843,7 +5956,7 @@ fn triangulate_ring_bands(rings: &[Vec<Vec<f64>>], ring_offsets: &[usize]) -> Ve
             } else if advanced_b >= n {
                 true
             } else {
-                a_alpha[advanced_a + 1] <= b_beta[advanced_b + 1]
+                a_alpha[advanced_a + 1] < b_beta[advanced_b + 1]
             };
             if advance_a {
                 let i_next = a_order[(advanced_a + 1) % m];
@@ -5505,6 +6618,29 @@ fn select_floquet_multiplier(
     stability: ManifoldStability,
     requested_index: Option<usize>,
 ) -> Result<(usize, Complex<f64>)> {
+    let transverse_dimension = multipliers
+        .iter()
+        .filter(|value| {
+            if (value.re - 1.0).abs() <= 1e-3 && value.im.abs() <= 1e-3 {
+                return false;
+            }
+            let modulus = value.norm();
+            match stability {
+                ManifoldStability::Unstable => modulus > 1.0 + 1e-6,
+                ManifoldStability::Stable => modulus < 1.0 - 1e-6,
+            }
+        })
+        .count();
+    if transverse_dimension != 1 {
+        bail!(
+            "Selected {} cycle manifold dimension is {}; the 2D cycle-manifold solver requires exactly one transverse mode on the selected side.",
+            match stability {
+                ManifoldStability::Stable => "stable",
+                ManifoldStability::Unstable => "unstable",
+            },
+            transverse_dimension + 1
+        );
+    }
     let mut candidates = Vec::new();
     for (idx, value) in multipliers.iter().copied().enumerate() {
         if value.im.abs() > 1e-8 {
@@ -8581,6 +9717,24 @@ mod tests {
     }
 
     #[test]
+    fn manifold_cycle_2d_rejects_a_selected_side_with_more_than_one_transverse_mode() {
+        let error = select_floquet_multiplier(
+            &[
+                Complex::new(2.0, 0.0),
+                Complex::new(3.0, 0.0),
+                Complex::new(1.0, 0.0),
+            ],
+            ManifoldStability::Unstable,
+            Some(0),
+        )
+        .expect_err("two transverse modes define a three-dimensional cycle manifold");
+        assert!(
+            error.to_string().contains("dimension is 3"),
+            "unexpected dimension error: {error:#}"
+        );
+    }
+
+    #[test]
     fn manifold_eq_1d_directed_mode_returns_single_branch() {
         let mut system = build_system(&["x", "-y"], &["x", "y"], &[]);
         let branches = continue_manifold_eq_1d(
@@ -9247,6 +10401,40 @@ mod tests {
     }
 
     #[test]
+    fn manifold_eq_2d_uses_newton_corrected_equilibrium_as_center() {
+        let mut system = build_system(&["x-1", "2*(y+2)", "-z"], &["x", "y", "z"], &[]);
+        let corrected = [1.0, -2.0, 0.0];
+        let branch = continue_manifold_eq_2d(
+            &mut system,
+            &[1.1, -2.1, 0.1],
+            Manifold2DSettings {
+                stability: ManifoldStability::Unstable,
+                initial_radius: 0.01,
+                leaf_delta: 0.01,
+                ring_points: 12,
+                target_radius: 0.0,
+                target_arclength: 0.0,
+                caps: ManifoldTerminationCaps {
+                    max_rings: 1,
+                    max_vertices: 128,
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..Manifold2DSettings::default()
+            },
+        )
+        .expect("corrected equilibrium surface");
+
+        let ManifoldGeometry::Surface(surface) = branch.manifold_geometry.expect("geometry") else {
+            panic!("expected surface geometry");
+        };
+        assert!(
+            l2_distance(&surface.vertices_flat[..3], &corrected) <= 1e-10,
+            "surface center should use the Newton-corrected equilibrium, got {:?}",
+            &surface.vertices_flat[..3]
+        );
+    }
+
+    #[test]
     fn manifold_eq_2d_lorenz_stable_builds_centered_surface_with_multiple_rings() {
         let mut system = build_system(
             &["sigma*(y-x)", "x*(rho-z)-y", "x*y-beta*z"],
@@ -9376,6 +10564,24 @@ mod tests {
     }
 
     #[test]
+    fn manifold_eq_2d_rejects_a_selected_side_with_dimension_greater_than_two() {
+        let mut system = build_system(&["x", "2*y", "3*z", "-w"], &["x", "y", "z", "w"], &[]);
+        let error = continue_manifold_eq_2d(
+            &mut system,
+            &[0.0, 0.0, 0.0, 0.0],
+            Manifold2DSettings {
+                stability: ManifoldStability::Unstable,
+                ..Manifold2DSettings::default()
+            },
+        )
+        .expect_err("an arbitrary pair is not the full three-dimensional unstable manifold");
+        assert!(
+            error.to_string().contains("dimension is 3"),
+            "unexpected dimensionality error: {error:#}"
+        );
+    }
+
+    #[test]
     fn manifold_eq_2d_leaf_solve_finds_first_ring_hit_for_lorenz_stable_origin() {
         let system = build_system(
             &["sigma*(y-x)", "x*(rho-z)-y", "x*y-beta*z"],
@@ -9467,6 +10673,77 @@ mod tests {
             success >= 40,
             "expected most Lorenz leaves to solve, but only {success}/{} succeeded",
             ring.len()
+        );
+    }
+
+    #[test]
+    fn manifold_eq_2d_leaf_never_accepts_an_off_plane_fallback() {
+        let system = build_system(&["1", "1", "0"], &["x", "y", "z"], &[]);
+        let samples = 64usize;
+        let ring = (0..samples)
+            .map(|index| {
+                let theta = std::f64::consts::TAU * (index as f64) / (samples as f64);
+                vec![theta.cos(), theta.sin(), 0.0]
+            })
+            .collect::<Vec<_>>();
+        let base = ring[0].clone();
+        let tangent = ring_tangent_neighbor_average(&ring, 0);
+        let outward = vec![1.0, 0.0, 0.0];
+
+        let failure = match shoot_leaf_point(
+            &system, &ring, &base, 0.0, &tangent, &outward, 0.8, 1.0, 0.01, 2_000, 2.0, None,
+        ) {
+            Ok(_) => panic!("the local plane-intersection branch ends before distance 0.8"),
+            Err(failure) => failure,
+        };
+
+        assert!(
+            matches!(
+                failure.kind,
+                LeafFailureKind::PlaneSolveNoConvergence | LeafFailureKind::NoFirstHitWithinMaxTime
+            ),
+            "unexpected leaf failure: {:?}",
+            failure.kind
+        );
+    }
+
+    #[test]
+    fn manifold_eq_2d_leaf_can_shrink_locally_near_finite_arclength() {
+        let system = build_system(&["1", "1", "0"], &["x", "y", "z"], &[]);
+        let samples = 64usize;
+        let ring = (0..samples)
+            .map(|index| {
+                let theta = std::f64::consts::TAU * (index as f64) / (samples as f64);
+                vec![theta.cos(), theta.sin(), 0.0]
+            })
+            .collect::<Vec<_>>();
+        let base = ring[0].clone();
+        let tangent = ring_tangent_neighbor_average(&ring, 0);
+        let (hit, achieved_delta) = solve_leaf_point_with_local_floor(
+            &system,
+            &ring,
+            &base,
+            0.0,
+            &tangent,
+            &[1.0, 0.0, 0.0],
+            0.8,
+            0.2,
+            1.0,
+            0.01,
+            2_000,
+            2.0,
+            None,
+        )
+        .expect("a smaller local leaf step should remain available");
+        assert!(achieved_delta < 0.8 && achieved_delta >= 0.2);
+        assert!(
+            (l2_distance(&hit.point, &base) - achieved_delta).abs() <= 1e-8,
+            "locally reduced leaf must still satisfy its exact distance event"
+        );
+        let normal = leaf_plane_normal(&tangent).expect("leaf normal");
+        assert!(
+            dot(&normal, &subtract(&hit.point, &base)).abs() <= 1e-8,
+            "locally reduced leaf must remain in its exact plane"
         );
     }
 
@@ -9658,6 +10935,7 @@ mod tests {
             &prev_in_anchors,
             -1.0,
             0.00075,
+            0.00075,
             0.01,
             150,
             2.0,
@@ -9675,6 +10953,37 @@ mod tests {
     }
 
     #[test]
+    fn manifold_eq_2d_leaf_records_the_solved_source_anchor_after_phase_shear() {
+        let system = build_system(&["x-y", "x+y", "0"], &["x", "y", "z"], &[]);
+        let ring_points = 64usize;
+        let ring = (0..ring_points)
+            .map(|index| {
+                let angle = std::f64::consts::TAU * (index as f64) / (ring_points as f64);
+                vec![angle.cos(), angle.sin(), 0.0]
+            })
+            .collect::<Vec<_>>();
+        let base_s = 0.0;
+        let base = &ring[0];
+        let tangent = subtract(&ring[1], &ring[ring_points - 1]);
+        let outward = vec![1.0, 0.0, 0.0];
+
+        let hit = shoot_leaf_point(
+            &system, &ring, base, base_s, &tangent, &outward, 0.1, 1.0, 1e-3, 2000, 1.0, None,
+        )
+        .expect("rotating radial leaf hit");
+
+        let circular_shift = hit.base_anchor.min(1.0 - hit.base_anchor);
+        assert!(
+            circular_shift > 1e-3,
+            "the solved source must move around the ring under phase shear; anchor={}",
+            hit.base_anchor
+        );
+        let (solved_source, _) = sample_ring_parameter_with_derivative(&ring, hit.base_anchor);
+        assert!(l2_distance(&hit.in_anchor, &solved_source) <= 1e-12);
+        assert!(l2_distance(&hit.in_anchor, base) > 1e-3);
+    }
+
+    #[test]
     fn manifold_eq_2d_reports_missing_leaf_without_synthesis() {
         let system = build_system(&["0", "0", "0"], &["x", "y", "z"], &[]);
         let prev_ring = vec![
@@ -9689,6 +10998,7 @@ mod tests {
             &prev_ring,
             &prev_in_anchors,
             1.0,
+            0.1,
             0.1,
             1e-2,
             8,
@@ -9718,6 +11028,7 @@ mod tests {
             ],
             base_anchors: vec![0.0, 0.25, 0.5, 0.75],
             in_anchors: prev_ring.clone(),
+            leaf_deltas: vec![0.1; 4],
         };
         let adapted = adapt_ring_spacing(
             &system,
@@ -9725,6 +11036,7 @@ mod tests {
             &prev_in_anchors,
             raw_next,
             1.0,
+            0.1,
             0.1,
             0.01,
             1.0,
@@ -9749,6 +11061,41 @@ mod tests {
             "expected inserted midpoint source anchor to be retained: {:?}",
             adapted.base_anchors
         );
+    }
+
+    #[test]
+    fn manifold_eq_2d_spacing_adaptation_never_accepts_unresolved_long_edges_at_cap() {
+        let system = build_system(&["x", "y", "0"], &["x", "y", "z"], &[]);
+        let prev_ring = vec![
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0],
+            vec![-1.0, 0.0, 0.0],
+            vec![0.0, -1.0, 0.0],
+        ];
+        let raw_next = RingSolve {
+            points: vec![
+                vec![1.1, 0.0, 0.0],
+                vec![0.0, 1.1, 0.0],
+                vec![-1.1, 0.0, 0.0],
+                vec![0.0, -1.1, 0.0],
+            ],
+            base_anchors: vec![0.0, 0.25, 0.5, 0.75],
+            in_anchors: prev_ring.clone(),
+            leaf_deltas: vec![0.1; 4],
+        };
+        let result = adapt_ring_spacing(
+            &system, &prev_ring, &prev_ring, raw_next, 1.0, 0.1, 0.1, 0.01, 0.2, 1e-2, 64, 2.0, 4,
+        );
+        assert!(
+            matches!(result, Err(RingSpacingFailure::PointCapExceeded)),
+            "a ring with unresolved long edges must not be accepted at the point cap"
+        );
+    }
+
+    #[test]
+    fn manifold_eq_2d_spacing_adaptation_uses_the_configured_point_budget() {
+        assert_eq!(adaptive_ring_point_cap(256), 256);
+        assert_eq!(adaptive_ring_point_cap(3), 4);
     }
 
     #[test]
@@ -9799,8 +11146,8 @@ mod tests {
 
         let (prev_prev_a, prev_a, next_a) = make_rings(1.0);
         let (prev_prev_b, prev_b, next_b) = make_rings(3.0);
-        let qa = evaluate_geodesic_quality(&prev_a, &prev_prev_a, &next_a);
-        let qb = evaluate_geodesic_quality(&prev_b, &prev_prev_b, &next_b);
+        let qa = evaluate_geodesic_quality(&prev_a, &prev_prev_a, &next_a, 0.2);
+        let qb = evaluate_geodesic_quality(&prev_b, &prev_prev_b, &next_b, 0.6);
         assert!(qa.max_angle > 0.0);
         assert!(qa.max_delta_angle > 0.0);
         assert!(
@@ -9813,6 +11160,40 @@ mod tests {
         assert!(
             (ratio - 3.0).abs() < 1e-8,
             "expected distance-angle metric to scale with geometric strip distance, got ratio={ratio}"
+        );
+    }
+
+    #[test]
+    fn manifold_eq_2d_delta_alpha_uses_candidate_delta_not_previous_strip_length() {
+        let prev = vec![
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0],
+            vec![-1.0, 0.0, 0.0],
+            vec![0.0, -1.0, 0.0],
+        ];
+        let next = prev
+            .iter()
+            .map(|point| vec![1.1 * point[0], 1.1 * point[1], 0.1])
+            .collect::<Vec<_>>();
+        let short_previous = prev
+            .iter()
+            .map(|point| vec![0.9 * point[0], 0.9 * point[1], 0.0])
+            .collect::<Vec<_>>();
+        let long_previous = prev
+            .iter()
+            .map(|point| vec![-9.0 * point[0], -9.0 * point[1], 0.0])
+            .collect::<Vec<_>>();
+
+        let short = evaluate_geodesic_quality(&prev, &short_previous, &next, 0.2);
+        let long = evaluate_geodesic_quality(&prev, &long_previous, &next, 0.2);
+        assert!(short.max_angle > 0.0);
+        assert!(
+            (short.max_delta_angle - 0.2 * short.max_angle).abs() <= 1e-12,
+            "delta-alpha must equal candidate delta times alpha"
+        );
+        assert!(
+            (short.max_delta_angle - long.max_delta_angle).abs() <= 1e-12,
+            "previous strip length must not change delta-alpha"
         );
     }
 
@@ -9890,6 +11271,51 @@ mod tests {
         assert!(
             diagnostics.min_leaf_delta_reached,
             "expected solver to flag min leaf-delta reached when requested delta starts below floor"
+        );
+    }
+
+    #[test]
+    fn manifold_eq_2d_never_accepts_a_weighted_geodesic_violation_at_the_delta_floor() {
+        let mut system = build_system(&["2*x", "0.5*y", "-z"], &["x", "y", "z"], &[]);
+        let branch = continue_manifold_eq_2d(
+            &mut system,
+            &[0.0, 0.0, 0.0],
+            Manifold2DSettings {
+                stability: ManifoldStability::Unstable,
+                initial_radius: 0.1,
+                leaf_delta: 0.05,
+                delta_min: 0.05,
+                ring_points: 12,
+                min_spacing: 1e-4,
+                max_spacing: 1.0,
+                alpha_min: 1e-8,
+                alpha_max: 1e-7,
+                delta_alpha_min: 1e-8,
+                delta_alpha_max: 1e-7,
+                integration_dt: 1e-3,
+                target_radius: 1.0,
+                target_arclength: 1.0,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 500,
+                    max_rings: 3,
+                    max_vertices: 128,
+                    max_time: 2.0,
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..Manifold2DSettings::default()
+            },
+        )
+        .expect("strict-quality surface result");
+        let ManifoldGeometry::Surface(surface) = branch.manifold_geometry.expect("geometry") else {
+            panic!("expected surface geometry");
+        };
+        let diagnostics = surface.solver_diagnostics.expect("diagnostics");
+
+        assert_eq!(diagnostics.termination_reason, "geodesic_quality_rejected");
+        assert_eq!(
+            surface.ring_offsets.len(),
+            1,
+            "a distance-weighted threshold violation at the configured floor must not enter the mesh"
         );
     }
 
@@ -10097,6 +11523,62 @@ mod tests {
     }
 
     #[test]
+    fn triangulate_ring_bands_uses_leaf_parent_anchors_on_folded_geometry() {
+        let previous_count = 8usize;
+        let next_count = 4usize;
+        let previous = (0..previous_count)
+            .map(|index| {
+                let phase = (index as f64) / (previous_count as f64);
+                vec![phase, (4.0 * std::f64::consts::PI * phase).sin(), 0.0]
+            })
+            .collect::<Vec<_>>();
+        // Deliberately make ambient proximity uninformative; correspondence must come
+        // from the leaf planes that generated these points.
+        let next = (0..next_count)
+            .map(|index| vec![1e-6 * (index as f64), 0.0, 0.1])
+            .collect::<Vec<_>>();
+        let parent_anchors = vec![0.125, 0.375, 0.625, 0.875];
+        let rings = vec![previous, next];
+        let offsets = vec![0usize, previous_count];
+        let anchors = vec![Vec::new(), parent_anchors.clone()];
+        let triangles = triangulate_ring_bands_with_parent_anchors(&rings, &offsets, &anchors);
+
+        let max_parent_gap = triangles
+            .chunks_exact(3)
+            .flat_map(|triangle| {
+                [
+                    (triangle[0], triangle[1]),
+                    (triangle[1], triangle[2]),
+                    (triangle[2], triangle[0]),
+                ]
+            })
+            .filter_map(|(left, right)| {
+                let left_is_previous = left < previous_count;
+                let right_is_previous = right < previous_count;
+                if left_is_previous == right_is_previous {
+                    return None;
+                }
+                let (previous_index, next_index) = if left_is_previous {
+                    (left, right - previous_count)
+                } else {
+                    (right, left - previous_count)
+                };
+                Some(
+                    circular_delta(
+                        (previous_index as f64) / (previous_count as f64),
+                        parent_anchors[next_index],
+                    )
+                    .abs(),
+                )
+            })
+            .fold(0.0_f64, f64::max);
+        assert!(
+            max_parent_gap <= 0.125 + 1e-12,
+            "triangles must follow leaf genealogy, max parent gap={max_parent_gap}"
+        );
+    }
+
+    #[test]
     fn manifold_cycle_2d_builds_surface_geometry() {
         let mut system = build_system(&["-y", "x", "0.1*z"], &["x", "y", "z"], &[]);
         let ntst = 8usize;
@@ -10135,7 +11617,7 @@ mod tests {
                 ntst,
                 ncol,
                 caps: ManifoldTerminationCaps {
-                    max_rings: 6,
+                    max_rings: 1,
                     max_vertices: 512,
                     max_time: 1.0,
                     ..ManifoldTerminationCaps::default()
@@ -10209,7 +11691,31 @@ mod tests {
 
         let plus = run(ManifoldDirection::Plus);
         let minus = run(ManifoldDirection::Minus);
-        let both = run(ManifoldDirection::Both);
+        let both = continue_limit_cycle_manifolds_2d(
+            &mut system,
+            &state,
+            ntst,
+            ncol,
+            &[Complex::new(1.25, 0.0), Complex::new(1.0, 0.0)],
+            ManifoldCycle2DSettings {
+                stability: ManifoldStability::Unstable,
+                direction: ManifoldDirection::Both,
+                initial_radius: 0.02,
+                leaf_delta: 0.03,
+                ring_points: 10,
+                target_arclength: 0.0,
+                ntst,
+                ncol,
+                caps: ManifoldTerminationCaps {
+                    max_rings: 1,
+                    max_vertices: 1024,
+                    max_time: 1.0,
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..ManifoldCycle2DSettings::default()
+            },
+        )
+        .expect("both orientable cycle sheets");
 
         let get_first_ring_count = |branch: &ContinuationBranch| -> usize {
             let ManifoldGeometry::Surface(surface) =
@@ -10226,10 +11732,13 @@ mod tests {
 
         let plus_count = get_first_ring_count(&plus);
         let minus_count = get_first_ring_count(&minus);
-        let both_count = get_first_ring_count(&both);
         assert_eq!(plus_count, 10, "plus should seed one sheet");
         assert_eq!(minus_count, 10, "minus should seed one sheet");
-        assert_eq!(both_count, 20, "both should seed both sheets");
+        assert_eq!(both.len(), 2, "both should return two independent sheets");
+        assert!(
+            both.iter().all(|branch| get_first_ring_count(branch) == 10),
+            "each orientable sheet must retain its own closed seed circle"
+        );
     }
 
     #[test]
@@ -10265,7 +11774,7 @@ mod tests {
             ntst,
             ncol,
             caps: ManifoldTerminationCaps {
-                max_rings: 2,
+                max_rings: 1,
                 max_vertices: 1_024,
                 max_time: 2.0,
                 ..ManifoldTerminationCaps::default()
@@ -10552,7 +12061,7 @@ mod tests {
         let BranchType::ManifoldCycle2D { method, .. } = &branch.branch_type else {
             panic!("expected cycle manifold branch");
         };
-        assert_eq!(method, "hko_isochron_bvp");
+        assert_eq!(method, "hko_fundamental_segment_bvp");
         let ManifoldGeometry::Surface(surface) = branch.manifold_geometry.expect("geometry") else {
             panic!("expected surface geometry");
         };
@@ -10574,7 +12083,10 @@ mod tests {
             .iter()
             .map(|point| point[2].abs())
             .fold(0.0, f64::max);
-        assert!(max_abs_z > 1e-3, "expected the unstable sheet to grow in z");
+        assert!(
+            max_abs_z > 1e-3,
+            "expected the unstable sheet to grow in z, max_abs_z={max_abs_z}"
+        );
         let diagnostics = surface.solver_diagnostics.expect("diagnostics");
         assert_eq!(diagnostics.termination_reason, "target_arclength");
         assert!(
@@ -10582,7 +12094,7 @@ mod tests {
                 .termination_detail
                 .as_deref()
                 .unwrap_or_default()
-                .contains("hko isochron fibers"),
+                .contains("HKO fundamental-segment continuation"),
             "expected HKO diagnostics detail"
         );
         assert!(
@@ -10590,8 +12102,99 @@ mod tests {
                 .termination_detail
                 .as_deref()
                 .unwrap_or_default()
-                .contains("return_segments="),
-            "expected segmented-return diagnostics detail"
+                .contains("fundamental_solves="),
+            "expected fundamental-segment diagnostics detail"
+        );
+    }
+
+    #[test]
+    fn manifold_cycle_2d_hko_reports_max_steps_when_the_common_fiber_is_short() {
+        let ntst = 8usize;
+        let ncol = 2usize;
+        let lambda = 0.2_f64;
+        let mut system = build_system(
+            &["-y", "x", "lambda*z"],
+            &["x", "y", "z"],
+            &[("lambda", lambda)],
+        );
+        let state = circular_cycle_state(ntst, ncol, 1.0);
+        let multipliers = [
+            Complex::new((lambda * std::f64::consts::TAU).exp(), 0.0),
+            Complex::new(1.0, 0.0),
+        ];
+        let target_arclength = 100.0;
+        let branch = continue_limit_cycle_manifold_2d(
+            &mut system,
+            &state,
+            ntst,
+            ncol,
+            &multipliers,
+            ManifoldCycle2DSettings {
+                stability: ManifoldStability::Unstable,
+                algorithm: ManifoldCycle2DAlgorithm::IsochronFibers,
+                floquet_index: Some(0),
+                initial_radius: 1e-3,
+                leaf_delta: 0.1,
+                ring_points: 8,
+                integration_dt: 2e-2,
+                target_arclength,
+                ntst,
+                ncol,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 2,
+                    max_rings: 100,
+                    max_vertices: 10_000,
+                    max_time: 20.0,
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..ManifoldCycle2DSettings::default()
+            },
+        )
+        .expect("point-capped HKO manifold");
+        let ManifoldGeometry::Surface(surface) = branch.manifold_geometry.expect("geometry") else {
+            panic!("expected surface geometry");
+        };
+        let diagnostics = surface.solver_diagnostics.expect("diagnostics");
+        let achieved = surface
+            .ring_diagnostics
+            .last()
+            .map(|ring| ring.radius_estimate)
+            .unwrap_or(0.0);
+
+        assert!(achieved + 1e-8 < target_arclength);
+        assert_eq!(diagnostics.termination_reason, "max_steps");
+    }
+
+    #[test]
+    fn manifold_cycle_2d_fiber_caps_report_only_actual_truncation() {
+        assert_eq!(
+            fiber_surface_termination_reason(false, true, 8, 8, 8),
+            SurfaceTerminationReason::TargetArclength,
+            "an exactly filled ring/vertex budget still reaches the target"
+        );
+        assert_eq!(
+            fiber_surface_termination_reason(false, true, 9, 10, 8),
+            SurfaceTerminationReason::MaxVertices
+        );
+        assert_eq!(
+            fiber_surface_termination_reason(false, true, 9, 8, 10),
+            SurfaceTerminationReason::MaxRings
+        );
+        assert_eq!(
+            fiber_surface_termination_reason(false, false, 2, 10, 10),
+            SurfaceTerminationReason::MaxSteps
+        );
+    }
+
+    #[test]
+    fn manifold_surface_ring_quality_has_a_distinct_termination_label() {
+        assert_eq!(
+            SurfaceTerminationReason::RingQualityRejected.as_str(),
+            "ring_quality_rejected"
+        );
+        assert_ne!(
+            SurfaceTerminationReason::RingQualityRejected.as_str(),
+            SurfaceTerminationReason::GeodesicQualityRejected.as_str()
         );
     }
 
@@ -10659,8 +12262,169 @@ mod tests {
             .fold(0.0, f64::max);
         assert!(
             max_abs_z > 1e-3,
-            "expected the stable sheet to grow outward in the reversed-time z direction"
+            "expected the stable sheet to grow outward in the reversed-time z direction, max_abs_z={max_abs_z}"
         );
+    }
+
+    #[test]
+    fn manifold_cycle_2d_hko_separates_phase_shear_from_normal_lift_off() {
+        let system = build_system(&["-y", "x", "0.2*z", "-w"], &["x", "y", "z", "w"], &[]);
+        let origin = [1.0, 0.0, 0.0, 0.0];
+        let floquet_direction = [0.0, 0.0, 1.0, 0.0];
+        let point = [1.0, 3.0, 2.0, 4.0];
+
+        let (phase_shear, normal_lift_off) =
+            hko_departure_components(&system, &point, &origin, &floquet_direction);
+
+        assert!((phase_shear - 3.0).abs() <= 1e-12);
+        assert!((normal_lift_off - 4.0).abs() <= 1e-12);
+    }
+
+    #[test]
+    fn manifold_cycle_2d_hko_constructs_nonlinear_fundamental_segments() {
+        let ntst = 8usize;
+        let ncol = 2usize;
+        let lambda = 0.2_f64;
+        let mut system = build_system(
+            &[
+                "-y + x*(1-x*x-y*y) + 5*z*z",
+                "x + y*(1-x*x-y*y)",
+                "lambda*z",
+            ],
+            &["x", "y", "z"],
+            &[("lambda", lambda)],
+        );
+        let state = circular_cycle_state(ntst, ncol, 1.0);
+        let multipliers = [
+            Complex::new((lambda * std::f64::consts::TAU).exp(), 0.0),
+            Complex::new((-2.0 * std::f64::consts::TAU).exp(), 0.0),
+            Complex::new(1.0, 0.0),
+        ];
+        let branch = continue_limit_cycle_manifold_2d(
+            &mut system,
+            &state,
+            ntst,
+            ncol,
+            &multipliers,
+            ManifoldCycle2DSettings {
+                stability: ManifoldStability::Unstable,
+                algorithm: ManifoldCycle2DAlgorithm::IsochronFibers,
+                floquet_index: Some(0),
+                direction: ManifoldDirection::Plus,
+                initial_radius: 1e-3,
+                leaf_delta: 2e-3,
+                ring_points: 8,
+                integration_dt: 2e-2,
+                target_arclength: 1e-2,
+                ntst,
+                ncol,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 100,
+                    max_rings: 8,
+                    max_vertices: 512,
+                    max_time: 20.0,
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..ManifoldCycle2DSettings::default()
+            },
+        )
+        .expect("nonlinear HKO manifold");
+
+        let BranchType::ManifoldCycle2D { method, .. } = &branch.branch_type else {
+            panic!("expected cycle manifold branch");
+        };
+        assert_eq!(method, "hko_fundamental_segment_bvp");
+        let ManifoldGeometry::Surface(surface) = branch.manifold_geometry.expect("geometry") else {
+            panic!("expected surface geometry");
+        };
+        let max_radial_lift = surface
+            .vertices_flat
+            .chunks_exact(3)
+            .map(|point| ((point[0] * point[0] + point[1] * point[1]).sqrt() - 1.0).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            max_radial_lift > 1e-8,
+            "nonlinear coupling should lift the fundamental segment away from the linear Floquet cylinder"
+        );
+        let diagnostics = surface.solver_diagnostics.expect("diagnostics");
+        assert_eq!(diagnostics.build_failures, 0);
+        assert!(
+            diagnostics
+                .termination_detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("max_lift_off="),
+            "HKO diagnostics should expose nonlinear lift-off"
+        );
+        assert!(
+            diagnostics
+                .termination_detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("max_phase_shear="),
+            "HKO diagnostics should expose phase shear"
+        );
+    }
+
+    #[test]
+    fn manifold_cycle_2d_never_accepts_a_nonconverged_collocation_solution() {
+        let nonconverged = IsochronBvpSolution {
+            start: vec![1.0, 2.0, 3.0],
+            unknown: vec![1.0, 2.0, 3.0],
+            residual_norm: 1e-2,
+            iterations: ISOCHRON_BVP_NEWTON_MAX_ITERS,
+            converged: false,
+        };
+        let error = require_converged_isochron_bvp(&nonconverged, "test phase")
+            .expect_err("nonconverged collocation output must be rejected");
+        assert!(error.to_string().contains("did not converge"));
+    }
+
+    #[test]
+    fn manifold_cycle_2d_segmented_preimage_backend_remains_available_by_name() {
+        let ntst = 8usize;
+        let ncol = 2usize;
+        let lambda = 0.2_f64;
+        let mut system = build_system(
+            &["-y", "x", "lambda*z"],
+            &["x", "y", "z"],
+            &[("lambda", lambda)],
+        );
+        let state = circular_cycle_state(ntst, ncol, 1.0);
+        let branch = continue_limit_cycle_manifold_2d(
+            &mut system,
+            &state,
+            ntst,
+            ncol,
+            &[
+                Complex::new((lambda * std::f64::consts::TAU).exp(), 0.0),
+                Complex::new(1.0, 0.0),
+            ],
+            ManifoldCycle2DSettings {
+                stability: ManifoldStability::Unstable,
+                algorithm: ManifoldCycle2DAlgorithm::SegmentedPreimageFibers,
+                floquet_index: Some(0),
+                initial_radius: 1e-3,
+                leaf_delta: 5e-3,
+                ring_points: 8,
+                target_arclength: 1e-2,
+                ntst,
+                ncol,
+                caps: ManifoldTerminationCaps {
+                    max_steps: 80,
+                    max_rings: 6,
+                    max_vertices: 256,
+                    max_time: 20.0,
+                    ..ManifoldTerminationCaps::default()
+                },
+                ..ManifoldCycle2DSettings::default()
+            },
+        )
+        .expect("segmented preimage manifold");
+        let BranchType::ManifoldCycle2D { method, .. } = branch.branch_type else {
+            panic!("expected cycle manifold branch");
+        };
+        assert_eq!(method, "segmented_preimage_collocation");
     }
 
     #[test]
@@ -10814,9 +12578,13 @@ mod tests {
             diagnostics.termination_detail
         );
         assert!(
-            !diagnostics.min_leaf_delta_reached,
-            "Lorenz global profile should not collapse to the leaf-delta floor: detail={:?}",
-            diagnostics.termination_detail
+            diagnostics.final_leaf_delta > 0.01 + 1e-12,
+            "Lorenz global profile should recover from any floor trial instead of collapsing there: final_delta={} geodesic_rejects={} ring_rejects={} local_shrinks={} detail={:?}",
+            diagnostics.final_leaf_delta,
+            diagnostics.reject_geodesic_quality,
+            diagnostics.reject_ring_quality,
+            diagnostics.local_leaf_shrinks,
+            diagnostics.termination_detail,
         );
         assert!(
             surface.ring_offsets.len() >= 5,

@@ -21,6 +21,35 @@ References:
 
 ---
 
+### 2026-07-10: Use true K-O leaf continuation and HKO fundamental-segment BVPs for 2D manifolds
+Context:
+The equilibrium surface solver could jump between polygon segments or accept relaxed leaf hits, and
+the limit-cycle option called `IsochronFibers` was a fixed-return preimage approximation rather than
+the Hannam-Krauskopf-Osinga construction. Positive-multiplier `Both` also joined two distinct sheets
+into one artificial ring.
+Decision:
+Continue every equilibrium leaf from its exact zero-time solution in source-position/time space,
+solve the first Euclidean-distance event exactly, retain the solved source genealogy and per-leaf
+step reductions, and refine long edges with exact leaves that demonstrably split their parent edge,
+up to the configured point budget. Reject unresolved spacing. Implement HKO as two warm-started
+collocation continuations: first build a nonlinear fundamental segment from the periodic-orbit BVP,
+then traverse that segment and append full return segments along each phase isochron. Reject every
+nonconverged collocation solve. Keep the old
+backend as the explicitly named `SegmentedPreimageFibers` preview algorithm. Represent positive
+`Both` as two branches and negative multipliers on a continuous double cover.
+Why:
+These are the topology, continuation, mesh, and convergence contracts used by the published K-O and
+HKO algorithms; accepting approximations under the same names made failures fragile and misleading.
+Impact:
+Equilibrium 2D surfaces require the complete selected stable/unstable side to have dimension two.
+Limit-cycle 2D surfaces require exactly one nontrivial real transverse Floquet direction. HKO runs are
+more expensive than segmented preimages but expose phase shear, normal lift-off, and rejected-solve
+diagnostics, and never place a nonconverged BVP point in the mesh.
+References:
+`crates/fork_core/src/continuation/manifold.rs`, `crates/fork_core/src/continuation/types.rs`,
+`web/src/ui/InspectorDetailsPanel.tsx`, `cli/src/continuation/initiate-lc.ts`,
+`docs/invariant_manifolds.md`, `docs/limit_cycle_manifold_2d_experimental.md`
+
 ### 2026-07-10: Persist resumable state for 1D invariant-manifold extension
 Context:
 Flow and map 1D manifolds could only be recomputed from their equilibrium or cycle seed, while map

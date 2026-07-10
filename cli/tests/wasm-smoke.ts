@@ -160,4 +160,70 @@ const timeCappedManifold = timeCappedExtensionRunner.get_result();
 assert.equal(timeCappedManifold.manifold_geometry.solver_diagnostics.target_reached, false);
 assert.equal(timeCappedManifold.manifold_geometry.solver_diagnostics.termination_reason, 'max_time');
 
+const cycleNtst = 8;
+const cycleNcol = 2;
+const cycleState: number[] = [];
+for (let interval = 0; interval < cycleNtst; interval += 1) {
+  const theta = interval * Math.PI * 2 / cycleNtst;
+  cycleState.push(Math.cos(theta), Math.sin(theta), 0);
+}
+for (let interval = 0; interval < cycleNtst; interval += 1) {
+  for (let stage = 0; stage < cycleNcol; stage += 1) {
+    const fraction = (stage + 1) / (cycleNcol + 1);
+    const theta = (interval + fraction) * Math.PI * 2 / cycleNtst;
+    cycleState.push(Math.cos(theta), Math.sin(theta), 0);
+  }
+}
+cycleState.push(Math.PI * 2);
+
+const hkoRunner = new wasm.WasmCycleManifold2DRunner(
+  ['-y', 'x', 'lambda*z'],
+  new Float64Array([0.2]),
+  ['lambda'],
+  ['x', 'y', 'z'],
+  'flow',
+  new Float64Array(cycleState),
+  cycleNtst,
+  cycleNcol,
+  [
+    { re: Math.exp(0.2 * Math.PI * 2), im: 0 },
+    { re: 1, im: 0 },
+  ],
+  {
+    stability: 'Unstable',
+    direction: 'Plus',
+    algorithm: 'IsochronFibers',
+    floquet_index: 0,
+    initial_radius: 1e-3,
+    leaf_delta: 5e-3,
+    delta_min: 5e-4,
+    ring_points: 8,
+    min_spacing: 1e-3,
+    max_spacing: 1e-2,
+    alpha_min: 0.3,
+    alpha_max: 0.4,
+    delta_alpha_min: 0.1,
+    delta_alpha_max: 1,
+    integration_dt: 2e-2,
+    target_arclength: 1e-2,
+    ntst: cycleNtst,
+    ncol: cycleNcol,
+    caps: {
+      max_steps: 100,
+      max_points: 1000,
+      max_rings: 6,
+      max_vertices: 256,
+      max_time: 20,
+    },
+  }
+);
+const hkoBranch = hkoRunner.get_result();
+assert.equal(hkoBranch.branch_type.method, 'hko_fundamental_segment_bvp');
+assert.equal(hkoBranch.manifold_geometry.type, 'Surface');
+assert.equal(hkoBranch.manifold_geometry.solver_diagnostics.termination_reason, 'target_arclength');
+assert.match(
+  hkoBranch.manifold_geometry.solver_diagnostics.termination_detail,
+  /fundamental_solves=/
+);
+
 console.log('PASS real WASM node boundary smoke');

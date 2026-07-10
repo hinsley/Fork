@@ -9959,6 +9959,9 @@ export function InspectorDetailsPanel({
                       >
                         <option value="GeodesicRings">geodesic rings</option>
                         <option value="IsochronFibers">isochron fibers (HKO)</option>
+                        <option value="SegmentedPreimageFibers">
+                          segmented preimage fibers (fast)
+                        </option>
                       </select>
                     </label>
                     <label>
@@ -11277,7 +11280,7 @@ export function InspectorDetailsPanel({
                                   manifoldSolverDiagnostics.leaf_fail_plane_root_not_bracketed ?? 0,
                               },
                               {
-                                label: 'Leaf fail: segment switch limit',
+                                label: 'Legacy leaf fail: segment switch limit',
                                 value: manifoldSolverDiagnostics.leaf_fail_segment_switch_limit ?? 0,
                               },
                               {
@@ -11289,6 +11292,10 @@ export function InspectorDetailsPanel({
                                 value:
                                   manifoldSolverDiagnostics.leaf_fail_no_first_hit_within_max_time ??
                                   0,
+                              },
+                              {
+                                label: 'Per-leaf delta reductions',
+                                value: manifoldSolverDiagnostics.local_leaf_shrinks ?? 0,
                               },
                               {
                                 label: 'Spacing failures',
