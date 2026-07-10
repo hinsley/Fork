@@ -227,6 +227,59 @@ assert.match(
   /fundamental_solves=/
 );
 
+const hkoExtensionSettings = {
+  stability: 'Unstable',
+  direction: 'Plus',
+  algorithm: 'IsochronFibers',
+  floquet_index: 0,
+  initial_radius: 1e-3,
+  leaf_delta: 5e-3,
+  delta_min: 5e-4,
+  ring_points: 8,
+  min_spacing: 1e-3,
+  max_spacing: 1e-2,
+  alpha_min: 0.3,
+  alpha_max: 0.4,
+  delta_alpha_min: 0.1,
+  delta_alpha_max: 1,
+  integration_dt: 2e-2,
+  target_arclength: 5e-3,
+  ntst: cycleNtst,
+  ncol: cycleNcol,
+  caps: {
+    max_steps: 100,
+    max_points: 1000,
+    max_rings: 4,
+    max_vertices: 256,
+    max_time: 20,
+  },
+};
+const hkoExtensionSystem = new wasm.WasmSystem(
+  ['-y', 'x', 'lambda*z'],
+  new Float64Array([0.2]),
+  ['lambda'],
+  ['x', 'y', 'z'],
+  'rk4',
+  'flow'
+);
+const hkoExtensionProgress: Array<{ done: boolean; rings_computed?: number }> = [];
+const progressedHkoBranch = hkoExtensionSystem.extend_manifold_2d_with_progress(
+  hkoBranch,
+  hkoExtensionSettings,
+  (progress: { done: boolean; rings_computed?: number }) => hkoExtensionProgress.push(progress)
+);
+assert.equal(hkoExtensionProgress[0]?.done, false);
+assert.ok(
+  hkoExtensionProgress.some(
+    (progress) => !progress.done && (progress.rings_computed ?? 0) > 0
+  )
+);
+assert.equal(hkoExtensionProgress.at(-1)?.done, true);
+assert.ok(
+  progressedHkoBranch.manifold_geometry.ring_offsets.length >
+    hkoBranch.manifold_geometry.ring_offsets.length
+);
+
 const hkoVerticesBefore = [...hkoBranch.manifold_geometry.vertices_flat];
 const hkoTrianglesBefore = [...hkoBranch.manifold_geometry.triangles];
 const hkoRingsBefore = [...hkoBranch.manifold_geometry.ring_offsets];
@@ -237,33 +290,7 @@ const hkoExtensionRunner = new wasm.WasmManifold2DExtensionRunner(
   ['x', 'y', 'z'],
   'flow',
   hkoBranch,
-  {
-    stability: 'Unstable',
-    direction: 'Plus',
-    algorithm: 'IsochronFibers',
-    floquet_index: 0,
-    initial_radius: 1e-3,
-    leaf_delta: 5e-3,
-    delta_min: 5e-4,
-    ring_points: 8,
-    min_spacing: 1e-3,
-    max_spacing: 1e-2,
-    alpha_min: 0.3,
-    alpha_max: 0.4,
-    delta_alpha_min: 0.1,
-    delta_alpha_max: 1,
-    integration_dt: 2e-2,
-    target_arclength: 5e-3,
-    ntst: cycleNtst,
-    ncol: cycleNcol,
-    caps: {
-      max_steps: 100,
-      max_points: 1000,
-      max_rings: 4,
-      max_vertices: 256,
-      max_time: 20,
-    },
-  }
+  hkoExtensionSettings
 );
 const extendedHkoBranch = hkoExtensionRunner.get_result();
 assert.deepEqual(

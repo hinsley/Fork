@@ -3530,6 +3530,26 @@ export function AppProvider({
           )
         }
 
+        dispatch({
+          type: 'SET_CONTINUATION_PROGRESS',
+          progress: {
+            label: 'Extend Invariant Manifold (1D)',
+            progress: {
+              done: false,
+              current_step: 0,
+              max_steps: Math.max(
+                1,
+                system.type === 'map'
+                  ? normalizedCaps.max_iterations ?? normalizedCaps.max_steps
+                  : normalizedCaps.max_steps
+              ),
+              points_computed: 0,
+              bifurcations_found: 0,
+              current_param: 0,
+            },
+          },
+        })
+
         const updatedData = await client.runEquilibriumManifold1DExtension(
           {
             system: runConfig,
@@ -3677,6 +3697,22 @@ export function AppProvider({
             'This manifold was computed for a different system or parameter state. Rebuild it before extending.'
           )
         }
+
+        dispatch({
+          type: 'SET_CONTINUATION_PROGRESS',
+          progress: {
+            label: 'Extend Invariant Manifold (2D)',
+            progress: {
+              done: false,
+              current_step: 0,
+              max_steps: Math.max(1, Math.ceil(request.targetArclength)),
+              points_computed: 0,
+              bifurcations_found: 0,
+              current_param: 0,
+              rings_computed: 0,
+            },
+          },
+        })
 
         const updatedData = await client.runManifold2DExtension(
           {

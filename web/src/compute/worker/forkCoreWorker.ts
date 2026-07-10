@@ -222,6 +222,11 @@ type WasmModule = {
       settings: Record<string, unknown>,
       onProgress: (progress: ContinuationProgress) => void
     ) => LimitCycleManifold2DResult
+    extend_manifold_2d_with_progress?: (
+      branchData: ContinuationBranchDataWire,
+      settings: Record<string, unknown>,
+      onProgress: (progress: ContinuationProgress) => void
+    ) => Manifold2DExtensionResult
     compute_limit_cycle_floquet_modes?: (
       cycleState: Float64Array,
       ntst: number,
@@ -938,6 +943,20 @@ async function runManifold2DExtension(
 ): Promise<Manifold2DExtensionResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
+  const system = createWasmSystem(wasm, request.system)
+  const extendWithProgress = system.extend_manifold_2d_with_progress
+  if (typeof extendWithProgress === 'function') {
+    return extendWithProgress.call(
+      system,
+      request.branchData,
+      { ...request.settings },
+      (progress: ContinuationProgress) => {
+        abortIfNeeded(signal)
+        onProgress(progress)
+      }
+    )
+  }
+
   const runner = new wasm.WasmManifold2DExtensionRunner(
     request.system.equations,
     new Float64Array(request.system.params),

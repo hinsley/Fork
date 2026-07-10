@@ -3510,26 +3510,33 @@ describe('appState equilibrium manifold actions', () => {
     const fixture = createStoredFlowManifold()
     const client = new MockForkCoreClient(0)
     let capturedPointCount = 0
-    client.runEquilibriumManifold1DExtension = async (request) => {
+    let finishExtension!: () => void
+    const { getContext } = setupApp(fixture.system, client)
+    client.runEquilibriumManifold1DExtension = (request) => {
       capturedPointCount = request.branchData.points.length
-      return normalizeBranchEigenvalues({
-        ...request.branchData,
-        points: [
-          ...request.branchData.points,
-          {
-            state: [0.151],
-            param_value: 0.15,
-            stability: 'None',
-            eigenvalues: [],
-          },
-        ],
-        indices: [...request.branchData.indices, 2],
+      return new Promise((resolve) => {
+        finishExtension = () =>
+          resolve(
+            normalizeBranchEigenvalues({
+              ...request.branchData,
+              points: [
+                ...request.branchData.points,
+                {
+                  state: [0.151],
+                  param_value: 0.15,
+                  stability: 'None',
+                  eigenvalues: [],
+                },
+              ],
+              indices: [...request.branchData.indices, 2],
+            })
+          )
       })
     }
-    const { getContext } = setupApp(fixture.system, client)
 
-    await act(async () => {
-      await getContext().actions.extendEquilibriumManifold1D({
+    let extensionPromise!: Promise<void>
+    act(() => {
+      extensionPromise = getContext().actions.extendEquilibriumManifold1D({
         branchId: fixture.nodeId,
         settings: {
           ...fixture.system.branches[fixture.nodeId].manifoldSettings!,
@@ -3542,6 +3549,16 @@ describe('appState equilibrium manifold actions', () => {
           caps: { ...manifoldCaps },
         },
       })
+    })
+
+    expect(getContext().state.continuationProgress).toEqual({
+      label: 'Extend Invariant Manifold (1D)',
+      progress: expect.objectContaining({ done: false, current_step: 0 }),
+    })
+
+    await act(async () => {
+      finishExtension()
+      await extensionPromise
     })
 
     await waitFor(() => {
@@ -3632,28 +3649,45 @@ describe('appState equilibrium manifold actions', () => {
     const fixture = createStoredSurfaceManifold()
     const client = new MockForkCoreClient(0)
     let capturedResumeType: string | undefined
-    client.runManifold2DExtension = async (request) => {
+    let finishExtension!: () => void
+    const { getContext } = setupApp(fixture.system, client)
+    client.runManifold2DExtension = (request) => {
       const geometry = request.branchData.manifold_geometry
       const surface = geometry?.type === 'Surface' && !('Surface' in geometry) ? geometry : null
       capturedResumeType = surface?.resume_state?.type
-      return normalizeBranchEigenvalues({
-        ...request.branchData,
-        points: [
-          ...request.branchData.points,
-          { state: [0.151], param_value: 2, stability: 'None', eigenvalues: [] },
-        ],
-        indices: [...request.branchData.indices, 2],
+      return new Promise((resolve) => {
+        finishExtension = () =>
+          resolve(
+            normalizeBranchEigenvalues({
+              ...request.branchData,
+              points: [
+                ...request.branchData.points,
+                { state: [0.151], param_value: 2, stability: 'None', eigenvalues: [] },
+              ],
+              indices: [...request.branchData.indices, 2],
+            })
+          )
       })
     }
-    const { getContext } = setupApp(fixture.system, client)
 
-    await act(async () => {
-      await getContext().actions.extendManifold2D({
+    let extensionPromise!: Promise<void>
+    act(() => {
+      extensionPromise = getContext().actions.extendManifold2D({
         branchId: fixture.nodeId,
         targetArclength: 0.05,
         integrationDt: 0.01,
         caps: { ...manifoldCaps },
       })
+    })
+
+    expect(getContext().state.continuationProgress).toEqual({
+      label: 'Extend Invariant Manifold (2D)',
+      progress: expect.objectContaining({ done: false, current_step: 0, rings_computed: 0 }),
+    })
+
+    await act(async () => {
+      finishExtension()
+      await extensionPromise
     })
 
     expect(capturedResumeType).toBe('GeodesicRings')
