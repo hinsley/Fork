@@ -2,15 +2,97 @@
 
 use fork_core::continuation::{
     ContinuationBranch, ContinuationPoint, ContinuationProblem, ContinuationRunner,
-    ContinuationSettings,
+    ContinuationSettings, StepResult,
 };
 use fork_core::equation_engine::EquationSystem;
 use serde::Serialize;
 use serde_wasm_bindgen::to_value;
+use std::fmt;
 use wasm_bindgen::prelude::JsValue;
 
-pub(crate) struct OwnedContinuationRunner<P: ContinuationProblem + 'static> {
+#[derive(Debug)]
+pub(crate) enum RunnerHandleError {
+    NotInitialized,
+    Step(anyhow::Error),
+}
+
+impl fmt::Display for RunnerHandleError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotInitialized => formatter.write_str("Runner not initialized"),
+            Self::Step(error) => write!(formatter, "Continuation step failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for RunnerHandleError {}
+
+pub(crate) struct RunnerHandle<P: ContinuationProblem> {
     runner: Option<ContinuationRunner<P>>,
+}
+
+impl<P: ContinuationProblem> RunnerHandle<P> {
+    pub(crate) fn new(runner: ContinuationRunner<P>) -> Self {
+        Self {
+            runner: Some(runner),
+        }
+    }
+
+    pub(crate) fn is_done(&self) -> bool {
+        self.runner.as_ref().map_or(true, |runner| runner.is_done())
+    }
+
+    pub(crate) fn run_steps(&mut self, batch_size: u32) -> Result<StepResult, RunnerHandleError> {
+        self.runner_mut()?
+            .run_steps(batch_size as usize)
+            .map_err(RunnerHandleError::Step)
+    }
+
+    pub(crate) fn get_progress(&self) -> Result<StepResult, RunnerHandleError> {
+        Ok(self.runner_ref()?.step_result())
+    }
+
+    pub(crate) fn take_result(&mut self) -> Result<ContinuationBranch, RunnerHandleError> {
+        let runner = self
+            .runner
+            .take()
+            .ok_or(RunnerHandleError::NotInitialized)?;
+        Ok(runner.take_result())
+    }
+
+    pub(crate) fn runner_mut(&mut self) -> Result<&mut ContinuationRunner<P>, RunnerHandleError> {
+        self.runner
+            .as_mut()
+            .ok_or(RunnerHandleError::NotInitialized)
+    }
+
+    pub(crate) fn run_steps_js(&mut self, batch_size: u32) -> Result<JsValue, JsValue> {
+        let result = self.run_steps(batch_size).map_err(runner_error_to_js)?;
+        serialize_js(&result)
+    }
+
+    pub(crate) fn get_progress_js(&self) -> Result<JsValue, JsValue> {
+        let progress = self.get_progress().map_err(runner_error_to_js)?;
+        serialize_js(&progress)
+    }
+
+    fn runner_ref(&self) -> Result<&ContinuationRunner<P>, RunnerHandleError> {
+        self.runner
+            .as_ref()
+            .ok_or(RunnerHandleError::NotInitialized)
+    }
+
+    fn clear(&mut self) {
+        let _ = self.runner.take();
+    }
+}
+
+pub(crate) fn runner_error_to_js(error: RunnerHandleError) -> JsValue {
+    JsValue::from_str(&error.to_string())
+}
+
+pub(crate) struct OwnedContinuationRunner<P: ContinuationProblem + 'static> {
+    runner: RunnerHandle<P>,
     #[allow(dead_code)]
     system: Box<EquationSystem>,
 }
@@ -35,49 +117,35 @@ impl<P: ContinuationProblem + 'static> OwnedContinuationRunner<P> {
             .map_err(|err| JsValue::from_str(&format!("Continuation init failed: {err}")))?;
 
         Ok(Self {
-            runner: Some(runner),
+            runner: RunnerHandle::new(runner),
             system,
         })
     }
 
     pub(crate) fn is_done(&self) -> bool {
-        self.runner.as_ref().map_or(true, |runner| runner.is_done())
+        self.runner.is_done()
     }
 
     pub(crate) fn run_steps(&mut self, batch_size: u32) -> Result<JsValue, JsValue> {
-        let result = self
-            .runner_mut()?
-            .run_steps(batch_size as usize)
-            .map_err(|err| JsValue::from_str(&format!("Continuation step failed: {err}")))?;
-        serialize_js(&result)
+        self.runner.run_steps_js(batch_size)
     }
 
     pub(crate) fn get_progress(&self) -> Result<JsValue, JsValue> {
-        let runner = self
-            .runner
-            .as_ref()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-        serialize_js(&runner.step_result())
+        self.runner.get_progress_js()
     }
 
     pub(crate) fn take_result(&mut self) -> Result<ContinuationBranch, JsValue> {
-        let runner = self
-            .runner
-            .take()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
-        Ok(runner.take_result())
+        self.runner.take_result().map_err(runner_error_to_js)
     }
 
     pub(crate) fn runner_mut(&mut self) -> Result<&mut ContinuationRunner<P>, JsValue> {
-        self.runner
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("Runner not initialized"))
+        self.runner.runner_mut().map_err(runner_error_to_js)
     }
 }
 
 impl<P: ContinuationProblem + 'static> Drop for OwnedContinuationRunner<P> {
     fn drop(&mut self) {
-        let _ = self.runner.take();
+        self.runner.clear();
     }
 }
 
@@ -88,7 +156,7 @@ pub(crate) fn serialize_js<T: Serialize + ?Sized>(value: &T) -> Result<JsValue, 
 pub(crate) fn static_system_ref(system: &mut Box<EquationSystem>) -> &'static mut EquationSystem {
     let system_ptr: *mut EquationSystem = system.as_mut();
     // SAFETY: OwnedContinuationRunner owns the boxed system allocation and the
-    // ContinuationRunner that stores this borrow. The runner is dropped before
+    // RunnerHandle that stores this borrow. The runner is dropped before
     // the system allocation, and no API exposes another mutable system borrow.
     unsafe { &mut *system_ptr }
 }
@@ -99,8 +167,7 @@ mod tests {
     use crate::continuation::shared::OwnedEquilibriumContinuationProblem;
     use crate::system::build_system;
     use fork_core::continuation::{
-        BifurcationType, BranchType, ContinuationPoint, ContinuationRunner,
-        ContinuationSettings,
+        BifurcationType, BranchType, ContinuationPoint, ContinuationRunner, ContinuationSettings,
     };
     use fork_core::equilibrium::SystemKind;
 
@@ -116,9 +183,7 @@ mod tests {
         }
     }
 
-    fn build_handle(
-        max_steps: usize,
-    ) -> RunnerHandle<OwnedEquilibriumContinuationProblem> {
+    fn build_handle(max_steps: usize) -> RunnerHandle<OwnedEquilibriumContinuationProblem> {
         let param_names = vec!["a".to_string()];
         let var_names = vec!["x".to_string()];
         let system = build_system(
@@ -128,8 +193,7 @@ mod tests {
             &var_names,
         )
         .expect("system");
-        let problem =
-            OwnedEquilibriumContinuationProblem::new(system, SystemKind::Flow, 0);
+        let problem = OwnedEquilibriumContinuationProblem::new(system, SystemKind::Flow, 0);
         let initial_point = ContinuationPoint {
             state: vec![0.0],
             param_value: 1.0,
@@ -137,13 +201,8 @@ mod tests {
             eigenvalues: Vec::new(),
             cycle_points: None,
         };
-        let runner = ContinuationRunner::new(
-            problem,
-            initial_point,
-            settings(max_steps),
-            true,
-        )
-        .expect("runner");
+        let runner = ContinuationRunner::new(problem, initial_point, settings(max_steps), true)
+            .expect("runner");
         RunnerHandle::new(runner)
     }
 
