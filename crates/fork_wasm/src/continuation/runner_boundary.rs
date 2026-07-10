@@ -92,3 +92,114 @@ pub(crate) fn static_system_ref(system: &mut Box<EquationSystem>) -> &'static mu
     // the system allocation, and no API exposes another mutable system borrow.
     unsafe { &mut *system_ptr }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{RunnerHandle, RunnerHandleError};
+    use crate::continuation::shared::OwnedEquilibriumContinuationProblem;
+    use crate::system::build_system;
+    use fork_core::continuation::{
+        BifurcationType, BranchType, ContinuationPoint, ContinuationRunner,
+        ContinuationSettings,
+    };
+    use fork_core::equilibrium::SystemKind;
+
+    fn settings(max_steps: usize) -> ContinuationSettings {
+        ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-6,
+            max_step_size: 1.0,
+            max_steps,
+            corrector_steps: 1,
+            corrector_tolerance: 1e-8,
+            step_tolerance: 1e-8,
+        }
+    }
+
+    fn build_handle(
+        max_steps: usize,
+    ) -> RunnerHandle<OwnedEquilibriumContinuationProblem> {
+        let param_names = vec!["a".to_string()];
+        let var_names = vec!["x".to_string()];
+        let system = build_system(
+            vec!["a * x".to_string()],
+            vec![1.0],
+            &param_names,
+            &var_names,
+        )
+        .expect("system");
+        let problem =
+            OwnedEquilibriumContinuationProblem::new(system, SystemKind::Flow, 0);
+        let initial_point = ContinuationPoint {
+            state: vec![0.0],
+            param_value: 1.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+        };
+        let runner = ContinuationRunner::new(
+            problem,
+            initial_point,
+            settings(max_steps),
+            true,
+        )
+        .expect("runner");
+        RunnerHandle::new(runner)
+    }
+
+    #[test]
+    fn runner_handle_drives_progress_and_consumes_result() {
+        let mut handle = build_handle(0);
+
+        assert!(!handle.is_done());
+        let initial = handle.get_progress().expect("initial progress");
+        assert_eq!(initial.current_step, 0);
+        assert!(!initial.done);
+
+        let completed = handle.run_steps(1).expect("run steps");
+        assert!(completed.done);
+        assert!(handle.is_done());
+
+        let branch = handle.take_result().expect("result");
+        assert_eq!(branch.points.len(), 1);
+    }
+
+    #[test]
+    fn runner_handle_exposes_mutable_runner_before_consumption() {
+        let mut handle = build_handle(0);
+        handle
+            .runner_mut()
+            .expect("runner")
+            .set_branch_type(BranchType::LimitCycle { ntst: 2, ncol: 1 });
+
+        let branch = handle.take_result().expect("result");
+        assert!(matches!(
+            branch.branch_type,
+            BranchType::LimitCycle { ntst: 2, ncol: 1 }
+        ));
+    }
+
+    #[test]
+    fn runner_handle_reports_consumed_state_consistently() {
+        let mut handle = build_handle(0);
+        handle.take_result().expect("result");
+
+        assert!(handle.is_done());
+        assert!(matches!(
+            handle.get_progress(),
+            Err(RunnerHandleError::NotInitialized)
+        ));
+        assert!(matches!(
+            handle.run_steps(1),
+            Err(RunnerHandleError::NotInitialized)
+        ));
+        assert!(matches!(
+            handle.runner_mut(),
+            Err(RunnerHandleError::NotInitialized)
+        ));
+        assert!(matches!(
+            handle.take_result(),
+            Err(RunnerHandleError::NotInitialized)
+        ));
+    }
+}
