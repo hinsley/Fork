@@ -86,9 +86,15 @@ jobs:
           } > /tmp/test-comment.md
           gh pr comment "$PR_NUMBER" --repo hinsley/Fork --body-file /tmp/test-comment.md
 
+      - name: Build web and WASM
+        id: build
+        if: steps.focused-tests.outcome == 'success'
+        working-directory: target/web
+        run: npm run build
+
       - name: Run worker integration tests
         id: worker-tests
-        if: steps.focused-tests.outcome == 'success'
+        if: steps.build.outcome == 'success'
         working-directory: target/web
         shell: bash
         run: |
@@ -133,11 +139,6 @@ jobs:
             echo '```'
           } > /tmp/test-comment.md
           gh pr comment "$PR_NUMBER" --repo hinsley/Fork --body-file /tmp/test-comment.md
-
-      - name: Build web
-        if: steps.unit-tests.outcome == 'success'
-        working-directory: target/web
-        run: npm run build
 
       - name: Commit tested refactor
         if: success()
