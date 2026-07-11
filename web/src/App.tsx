@@ -351,7 +351,7 @@ function App() {
             <p>Dynamical systems analysis and numerical bifurcation continuation toolkit</p>
             <div className="empty-card__actions">
               <button onClick={() => setDialogOpen(true)} data-testid="open-systems-empty">
-                Open systems
+                Systems menu
               </button>
               <span className="empty-card__resource-link" role="link" aria-disabled="true">
                 Documentation and tutorials

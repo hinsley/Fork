@@ -44,6 +44,7 @@ describe('App home', () => {
         'Dynamical systems analysis and numerical bifurcation continuation toolkit'
       )
     ).toBeInTheDocument()
+    expect(screen.getByTestId('open-systems-empty')).toHaveTextContent('Systems menu')
     expect(await store.list()).toHaveLength(1)
   })
 })
