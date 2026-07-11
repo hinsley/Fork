@@ -1120,6 +1120,11 @@
   fill: var(--plotly-text, var(--text)) !important;
 }
 
+/* Plotly renders trace names on a translucent white hover-label panel. */
+.js-plotly-plot .hovertext .name {
+  fill: var(--plotly-hover-name-text, #17202b) !important;
+}
+
 /* Keep muted informational labels legible without overwhelming the plot. */
 .js-plotly-plot .annotation text {
   fill: var(--plotly-text-muted, var(--text-muted)) !important;
