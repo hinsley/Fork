@@ -62,12 +62,6 @@ export function Toolbar({
   return (
     <header className="toolbar" data-testid="toolbar">
       <div className="toolbar__title">
-        <span className="toolbar__brand-mark" aria-hidden="true">
-          <span className="toolbar__brand-stem" />
-          <span className="toolbar__brand-node toolbar__brand-node--top" />
-          <span className="toolbar__brand-node toolbar__brand-node--middle" />
-          <span className="toolbar__brand-node toolbar__brand-node--bottom" />
-        </span>
         <span className="toolbar__brand-copy">
           <span className="toolbar__logo">Fork</span>
           <span className="toolbar__tagline">Dynamical systems workbench</span>

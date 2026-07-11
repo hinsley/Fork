@@ -339,7 +339,6 @@ function App() {
 
       {!system ? (
         <main className="empty-workspace">
-          <div className="empty-workspace__grid" aria-hidden="true" />
           <div className="empty-workspace__orb empty-workspace__orb--one" aria-hidden="true" />
           <div className="empty-workspace__orb empty-workspace__orb--two" aria-hidden="true" />
           <div className="empty-card">
@@ -387,7 +386,7 @@ function App() {
               actions={
                 <div className="panel-actions">
                   <button onClick={openCreateObjectMenu} data-testid="create-object-button">
-                    <span aria-hidden="true">＋</span> Create Object
+                    <span aria-hidden="true">＋</span> Object
                   </button>
                   <button
                     onClick={createRootFolder}
@@ -395,7 +394,7 @@ function App() {
                     aria-label="Create Folder"
                     data-testid="create-folder-button"
                   >
-                    <span aria-hidden="true">▱</span>
+                    <span aria-hidden="true">📁</span> Folder
                   </button>
                 </div>
               }

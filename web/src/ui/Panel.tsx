@@ -38,10 +38,7 @@ export function Panel({
               {open ? '▾' : '▸'}
             </button>
           ) : null}
-          <h2 className="panel__title">
-            <span className="panel__title-dot" aria-hidden="true" />
-            {title}
-          </h2>
+          <h2 className="panel__title">{title}</h2>
           <div className="panel__actions">{actions}</div>
         </header>
       )}
