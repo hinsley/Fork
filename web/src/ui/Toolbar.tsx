@@ -62,20 +62,40 @@ export function Toolbar({
   return (
     <header className="toolbar" data-testid="toolbar">
       <div className="toolbar__title">
-        <span className="toolbar__logo">Fork</span>
-        <span className="toolbar__system">{systemName ?? 'No System'}</span>
+        <span className="toolbar__brand-mark" aria-hidden="true">
+          <span className="toolbar__brand-stem" />
+          <span className="toolbar__brand-node toolbar__brand-node--top" />
+          <span className="toolbar__brand-node toolbar__brand-node--middle" />
+          <span className="toolbar__brand-node toolbar__brand-node--bottom" />
+        </span>
+        <span className="toolbar__brand-copy">
+          <span className="toolbar__logo">Fork</span>
+          <span className="toolbar__tagline">Dynamical systems workbench</span>
+        </span>
+        <span className="toolbar__divider" aria-hidden="true" />
+        <span className="toolbar__system">
+          <span className="toolbar__system-label">System</span>
+          <span className="toolbar__system-name">{systemName ?? 'None selected'}</span>
+        </span>
       </div>
       <div className="toolbar__actions">
-        <button onClick={onOpenSystems} data-testid="open-systems">
+        <button
+          className="toolbar__button toolbar__button--primary"
+          onClick={onOpenSystems}
+          data-testid="open-systems"
+        >
+          <span aria-hidden="true">⌘</span>
           Systems
         </button>
         <div className="toolbar__settings" ref={settingsRef}>
           <button
+            className="toolbar__button"
             onClick={() => setSettingsOpen((open) => !open)}
             aria-expanded={settingsOpen}
             aria-haspopup="menu"
             data-testid="open-settings"
           >
+            <span aria-hidden="true">◐</span>
             Settings
           </button>
           {settingsOpen ? (
@@ -122,6 +142,7 @@ export function Toolbar({
           ) : null}
         </div>
         <button
+          className="toolbar__button toolbar__button--support"
           onClick={() => {
             window.open('https://patreon.com/ForkDynamics', '_blank', 'noopener,noreferrer')
           }}
@@ -171,7 +192,10 @@ export function Toolbar({
             </div>
           </div>
         ) : (
-          <span>{busy ? 'Computing…' : 'Ready'}</span>
+          <span className={`toolbar__ready${busy ? ' toolbar__ready--busy' : ''}`}>
+            <span className="toolbar__ready-dot" aria-hidden="true" />
+            {busy ? 'Computing…' : 'Ready'}
+          </span>
         )}
       </div>
     </header>

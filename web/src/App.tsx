@@ -339,12 +339,34 @@ function App() {
 
       {!system ? (
         <main className="empty-workspace">
+          <div className="empty-workspace__grid" aria-hidden="true" />
+          <div className="empty-workspace__orb empty-workspace__orb--one" aria-hidden="true" />
+          <div className="empty-workspace__orb empty-workspace__orb--two" aria-hidden="true" />
           <div className="empty-card">
-            <h1>Fork</h1>
-            <p>Create or open a system to start exploring.</p>
-            <button onClick={() => setDialogOpen(true)} data-testid="open-systems-empty">
-              Open Systems
-            </button>
+            <div className="empty-card__eyebrow">
+              <span className="empty-card__eyebrow-dot" aria-hidden="true" />
+              Numerical dynamics, made explorable
+            </div>
+            <h1>Find the structure<br />inside the system.</h1>
+            <p>
+              Continue branches, inspect invariant geometry, and turn nonlinear models into
+              interactive scenes—all in one focused workspace.
+            </p>
+            <div className="empty-card__actions">
+              <button onClick={() => setDialogOpen(true)} data-testid="open-systems-empty">
+                Open a system <span aria-hidden="true">→</span>
+              </button>
+              <span>Your saved work stays on this device.</span>
+            </div>
+            <div className="empty-card__features" aria-label="Fork capabilities">
+              <span>Continuation</span>
+              <span>Invariant manifolds</span>
+              <span>Interactive scenes</span>
+            </div>
+          </div>
+          <div className="empty-workspace__footer">
+            <span>Fork Dynamics</span>
+            <span>Research-grade tools for nonlinear systems</span>
           </div>
         </main>
       ) : (
@@ -365,7 +387,7 @@ function App() {
               actions={
                 <div className="panel-actions">
                   <button onClick={openCreateObjectMenu} data-testid="create-object-button">
-                    Create Object
+                    <span aria-hidden="true">＋</span> Create Object
                   </button>
                   <button
                     onClick={createRootFolder}
@@ -373,7 +395,7 @@ function App() {
                     aria-label="Create Folder"
                     data-testid="create-folder-button"
                   >
-                    📁
+                    <span aria-hidden="true">▱</span>
                   </button>
                 </div>
               }
@@ -459,7 +481,7 @@ function App() {
               showToggle={false}
               actions={
                 <button onClick={openSystemSettings} data-testid="open-system-settings">
-                  System Settings
+                  <span aria-hidden="true">⚙</span> System Settings
                 </button>
               }
             >
