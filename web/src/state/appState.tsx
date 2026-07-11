@@ -1423,6 +1423,7 @@ type AppActions = {
   refreshSystems: () => Promise<void>
   createSystem: (name: string) => Promise<void>
   openSystem: (id: string) => Promise<void>
+  closeSystem: () => void
   saveSystem: () => Promise<void>
   exportSystem: (id: string) => Promise<void>
   deleteSystem: (id: string) => Promise<void>
@@ -1730,6 +1731,7 @@ export function AppProvider({
     refreshSystems,
     createSystem: createSystemAction,
     openSystem,
+    closeSystem,
     saveSystem,
     exportSystem,
     deleteSystem,
@@ -7104,6 +7106,7 @@ export function AppProvider({
       refreshSystems,
       createSystem: createSystemAction,
       openSystem,
+      closeSystem,
       saveSystem,
       exportSystem,
       deleteSystem,
@@ -7211,6 +7214,7 @@ export function AppProvider({
       deleteSystem,
       resetFork,
       openSystem,
+      closeSystem,
       refreshSystems,
       renameNodeAction,
       saveSystem,

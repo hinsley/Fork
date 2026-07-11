@@ -15,6 +15,7 @@ type ToolbarProps = {
     arclengthTarget?: number
     radius?: number
   } | null
+  onHome: () => void
   onOpenSystems: () => void
   theme: 'light' | 'dark'
   onThemeChange: (theme: 'light' | 'dark') => void
@@ -25,6 +26,7 @@ export function Toolbar({
   systemName,
   busy,
   progress,
+  onHome,
   onOpenSystems,
   theme,
   onThemeChange,
@@ -62,10 +64,16 @@ export function Toolbar({
   return (
     <header className="toolbar" data-testid="toolbar">
       <div className="toolbar__title">
-        <span className="toolbar__brand-copy">
+        <button
+          type="button"
+          className="toolbar__brand-copy toolbar__home"
+          onClick={onHome}
+          aria-label="Go to Fork home"
+          data-testid="go-home"
+        >
           <span className="toolbar__logo">Fork</span>
           <span className="toolbar__tagline">Dynamical systems workbench</span>
-        </span>
+        </button>
         <span className="toolbar__divider" aria-hidden="true" />
         <span className="toolbar__system">
           <span className="toolbar__system-label">System</span>

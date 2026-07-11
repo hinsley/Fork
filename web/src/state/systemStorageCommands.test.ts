@@ -117,6 +117,19 @@ describe('system storage commands', () => {
     })
   })
 
+  it('returns to the homepage without deleting the active system', async () => {
+    const system = createSystem({ name: 'Home_Command' })
+    const store = new MemorySystemStore()
+    await store.save(system)
+    const harness = setupStorageCommands({ store, initialSystem: system })
+
+    harness.commands.closeSystem()
+
+    expect(harness.getState().currentSystem).toBeNull()
+    expect(harness.getState().latestSystem).toBeNull()
+    expect(await store.list()).toHaveLength(1)
+  })
+
   it('exports archives through the injected browser download effect', async () => {
     const system = createSystem({ name: 'Export_Command' })
     const store = new MemorySystemStore()

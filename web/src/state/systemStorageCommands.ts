@@ -23,6 +23,7 @@ export type SystemStorageCommands = {
   refreshSystems: () => Promise<void>
   createSystem: (name: string) => Promise<void>
   openSystem: (id: string) => Promise<void>
+  closeSystem: () => void
   saveSystem: () => Promise<void>
   exportSystem: (id: string) => Promise<void>
   deleteSystem: (id: string) => Promise<void>
@@ -126,6 +127,11 @@ export function createSystemStorageCommands({
     }
   }
 
+  const closeSystem = () => {
+    setLatestSystem(null)
+    dispatch({ type: 'SET_SYSTEM', system: null })
+  }
+
   const saveSystem = async () => {
     const system = getCurrentSystem()
     if (!system) return
@@ -185,6 +191,7 @@ export function createSystemStorageCommands({
     refreshSystems,
     createSystem: createSystemAction,
     openSystem,
+    closeSystem,
     saveSystem,
     exportSystem,
     deleteSystem,

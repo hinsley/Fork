@@ -111,6 +111,12 @@ function App() {
     setSystemSettingsOpen(false)
   }
 
+  const goHome = () => {
+    setDialogOpen(false)
+    setSystemSettingsOpen(false)
+    actions.closeSystem()
+  }
+
   const selectNode = (nodeId: string) => {
     actions.selectNode(nodeId)
     if (system && !system.ui.layout.inspectorOpen) {
@@ -254,6 +260,7 @@ function App() {
               }
             : null
         }
+        onHome={goHome}
         onOpenSystems={openSystemsDialog}
         theme={theme}
         onThemeChange={setTheme}
@@ -339,33 +346,18 @@ function App() {
 
       {!system ? (
         <main className="empty-workspace">
-          <div className="empty-workspace__orb empty-workspace__orb--one" aria-hidden="true" />
-          <div className="empty-workspace__orb empty-workspace__orb--two" aria-hidden="true" />
           <div className="empty-card">
-            <div className="empty-card__eyebrow">
-              <span className="empty-card__eyebrow-dot" aria-hidden="true" />
-              Numerical dynamics, made explorable
-            </div>
-            <h1>Find the structure<br />inside the system.</h1>
-            <p>
-              Continue branches, inspect invariant geometry, and turn nonlinear models into
-              interactive scenes—all in one focused workspace.
-            </p>
+            <h1>Fork</h1>
+            <p>Dynamical systems analysis and numerical bifurcation continuation toolkit.</p>
             <div className="empty-card__actions">
               <button onClick={() => setDialogOpen(true)} data-testid="open-systems-empty">
-                Open a system <span aria-hidden="true">→</span>
+                Open systems
               </button>
-              <span>Your saved work stays on this device.</span>
+              <span className="empty-card__resource-link" role="link" aria-disabled="true">
+                Documentation and tutorials
+                <span>Coming soon</span>
+              </span>
             </div>
-            <div className="empty-card__features" aria-label="Fork capabilities">
-              <span>Continuation</span>
-              <span>Invariant manifolds</span>
-              <span>Interactive scenes</span>
-            </div>
-          </div>
-          <div className="empty-workspace__footer">
-            <span>Fork Dynamics</span>
-            <span>Research-grade tools for nonlinear systems</span>
           </div>
         </main>
       ) : (
