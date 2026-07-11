@@ -41,7 +41,7 @@ describe('App home', () => {
     expect(screen.queryByTestId('workspace')).toBeNull()
     expect(
       screen.getByText(
-        'Dynamical systems analysis and numerical bifurcation continuation toolkit.'
+        'Dynamical systems analysis and numerical bifurcation continuation toolkit'
       )
     ).toBeInTheDocument()
     expect(await store.list()).toHaveLength(1)

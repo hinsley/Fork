@@ -72,7 +72,6 @@ export function Toolbar({
           data-testid="go-home"
         >
           <span className="toolbar__logo">Fork</span>
-          <span className="toolbar__tagline">Dynamical systems workbench</span>
         </button>
         <span className="toolbar__divider" aria-hidden="true" />
         <span className="toolbar__system">

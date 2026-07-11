@@ -347,8 +347,8 @@ function App() {
       {!system ? (
         <main className="empty-workspace">
           <div className="empty-card">
-            <h1>Fork</h1>
-            <p>Dynamical systems analysis and numerical bifurcation continuation toolkit.</p>
+            <h1>Fork Dynamics</h1>
+            <p>Dynamical systems analysis and numerical bifurcation continuation toolkit</p>
             <div className="empty-card__actions">
               <button onClick={() => setDialogOpen(true)} data-testid="open-systems-empty">
                 Open systems

@@ -1547,16 +1547,6 @@
   text-transform: none;
 }
 
-.toolbar__tagline {
-  margin-top: 3px;
-  color: var(--text-faint);
-  font-size: 0.62rem;
-  font-weight: 520;
-  letter-spacing: 0.065em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
 .toolbar__divider {
   width: 1px;
   height: 30px;
@@ -2298,7 +2288,6 @@
 }
 
 @media (max-width: 1100px) {
-  .toolbar__tagline,
   .toolbar__divider,
   .toolbar__system-label {
     display: none !important;
