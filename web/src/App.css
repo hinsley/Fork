@@ -1940,7 +1940,7 @@
 
 .viewport-workspace {
   gap: 0;
-  background: var(--bg);
+  background: transparent;
 }
 
 .viewport-tile {
