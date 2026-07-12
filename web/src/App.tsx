@@ -257,7 +257,6 @@ function App() {
         }
         onHome={goHome}
         onOpenSystems={openSystemsDialog}
-        onOpenEmbed={system ? () => setEmbedDialogOpen(true) : undefined}
         theme={theme}
         onThemeChange={setTheme}
         onResetFork={actions.resetFork}
@@ -276,6 +275,11 @@ function App() {
           finishSystemsDialog()
         }}
         onExportSystem={(id) => void actions.exportSystem(id)}
+        onCreateEmbed={async (id) => {
+          await actions.openSystem(id)
+          finishSystemsDialog()
+          setEmbedDialogOpen(true)
+        }}
         onDeleteSystem={(id) => void actions.deleteSystem(id)}
         onImportSystem={async (file) => {
           await actions.importSystem(file)
