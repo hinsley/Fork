@@ -1326,11 +1326,12 @@ describe('InspectorDetailsPanel', () => {
     const nameInput = screen.getByTestId('system-name')
     await user.clear(nameInput)
     await user.type(nameInput, 'NewSystem')
+    await user.click(screen.getByTestId('system-type-map'))
 
     await user.click(screen.getByTestId('system-apply'))
 
     expect(onUpdateSystem).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'NewSystem' })
+      expect.objectContaining({ name: 'NewSystem', type: 'map', solver: 'discrete' })
     )
   })
 
