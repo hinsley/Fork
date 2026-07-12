@@ -709,6 +709,7 @@ function InspectorDisclosure({
   onOpenChange,
   children,
   testId,
+  actionOnly = false,
 }: {
   title: ReactNode
   defaultOpen?: boolean
@@ -716,6 +717,7 @@ function InspectorDisclosure({
   onOpenChange?: (nextOpen: boolean) => void
   children: ReactNode
   testId?: string
+  actionOnly?: boolean
 }) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen)
   const workflowFocus = useWorkflowFocus()
@@ -731,7 +733,7 @@ function InspectorDisclosure({
 
   return (
     <details
-      className="inspector-disclosure"
+      className={`inspector-disclosure${actionOnly ? ' inspector-disclosure--action-only' : ''}`}
       open={resolvedOpen}
       data-workflow-id={workflowId ?? undefined}
       data-workflow-active={workflowFocused ? 'true' : undefined}
@@ -4338,6 +4340,36 @@ function useInspectorSelectionController({
     limitCycleFloquetModeCount > 0
 
   const workflowActions: WorkflowActionEntry[] = []
+  if (paramOverrideTarget && !isocline) {
+    workflowActions.push(
+      {
+        id: 'frozen-variables-toggle',
+        group: 'Configure',
+        label: 'Frozen Variables',
+        description: 'Choose variables to hold constant for this object.',
+        tag: subsystemSnapshotMismatch ? 'mismatch' : undefined,
+      },
+      {
+        id: 'parameters-toggle',
+        group: 'Configure',
+        label: 'Parameters',
+        description: 'Override the system parameter values for this object.',
+        tag: hasCustomParamOverride ? 'custom' : undefined,
+      }
+    )
+  }
+  if (
+    showVisibilityToggle ||
+    selectionNode?.kind === 'object' ||
+    selectionNode?.kind === 'branch'
+  ) {
+    workflowActions.push({
+      id: 'appearance-toggle',
+      group: 'Configure',
+      label: 'Modify appearance',
+      description: 'Change visibility, color, line, and point styling.',
+    })
+  }
   if (orbit) {
     workflowActions.push({
       id: 'orbit-run-toggle',
@@ -4356,7 +4388,7 @@ function useInspectorSelectionController({
     if (!isDiscreteMap && orbit.data.length > 0) {
       workflowActions.push({
         id: 'limit-cycle-toggle',
-        group: 'Continue',
+        group: 'Continuation',
         label: 'Limit cycle from orbit',
         description: 'Initialize and continue a periodic orbit from this trajectory.',
       })
@@ -4373,7 +4405,7 @@ function useInspectorSelectionController({
       workflowActions.push(
         {
           id: 'equilibrium-continuation-toggle',
-          group: 'Continue',
+          group: 'Continuation',
           label: `Continue ${equilibriumLabel}`,
           description: 'Create a one-parameter continuation branch.',
         },
@@ -4421,7 +4453,7 @@ function useInspectorSelectionController({
   if (canExtendBranch) {
     workflowActions.push({
       id: 'branch-extend-toggle',
-      group: 'Continue',
+      group: 'Continuation',
       label: 'Extend branch',
       description: 'Continue the selected branch from an existing endpoint.',
     })
@@ -4429,7 +4461,7 @@ function useInspectorSelectionController({
   if (showBranchContinueFromPoint) {
     workflowActions.push({
       id: 'branch-continue-toggle',
-      group: 'Continue',
+      group: 'Continuation',
       label: 'Continue from point',
       description: 'Start another continuation branch from the selected point.',
     })

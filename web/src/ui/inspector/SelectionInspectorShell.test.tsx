@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { addObject, createSystem } from '../../system/model'
@@ -41,6 +41,29 @@ function requiredProps(system: System, selectedNodeId: string) {
 }
 
 describe('selection inspector workflow shell', () => {
+  it('groups configuration actions and labels continuation actions', () => {
+    const base = createSystem({ name: 'Workflow_Groups' })
+    const added = addObject(
+      base,
+      {
+        ...orbit('Orbit_A', base.name),
+        data: [
+          [0, 1],
+          [1, 2],
+        ],
+      }
+    )
+    render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
+
+    const actions = screen.getByTestId('inspector-actions')
+    expect(actions).toHaveTextContent('Configure')
+    expect(actions).toHaveTextContent('Frozen Variables')
+    expect(actions).toHaveTextContent('Parameters')
+    expect(actions).toHaveTextContent('Modify appearance')
+    expect(within(actions).getByRole('heading', { name: 'Continuation' })).toBeVisible()
+    expect(within(actions).queryByRole('heading', { name: 'Continue' })).toBeNull()
+  })
+
   it('focuses one action and retains its draft when returning to browse mode', async () => {
     const user = userEvent.setup()
     const base = createSystem({ name: 'Workflow_Shell' })

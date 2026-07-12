@@ -666,6 +666,8 @@ describe('InspectorDetailsPanel', () => {
     expect(onRename).toHaveBeenCalledTimes(1)
     expect(onRename).toHaveBeenLastCalledWith(objectNodeId, 'Orbit Q')
 
+    await user.click(screen.getByTestId('action-appearance-toggle'))
+    expect(screen.getByTestId('appearance-section')).toBeVisible()
     await user.click(screen.getByTestId('inspector-visibility'))
     expect(onToggleVisibility).toHaveBeenCalledWith(objectNodeId)
 
@@ -950,7 +952,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('parameters-toggle'))
+    await user.click(screen.getByTestId('action-parameters-toggle'))
     await user.clear(screen.getByTestId('param-override-0'))
     await user.type(screen.getByTestId('param-override-0'), '1.2')
     await user.clear(screen.getByTestId('param-override-1'))
@@ -1020,7 +1022,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('frozen-variables-toggle'))
+    await user.click(screen.getByTestId('action-frozen-variables-toggle'))
     const xFrozenValueInput = screen.getByTestId('frozen-variable-value-x')
     await user.clear(xFrozenValueInput)
     await user.type(xFrozenValueInput, '0.25')
@@ -1085,7 +1087,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    const header = screen.getByTestId('parameters-toggle')
+    const header = screen.getByTestId('action-parameters-toggle')
     expect(within(header).getByText('custom')).toBeInTheDocument()
   })
 
@@ -1143,7 +1145,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    const header = screen.getByTestId('parameters-toggle')
+    const header = screen.getByTestId('action-parameters-toggle')
     expect(within(header).queryByText('custom')).toBeNull()
   })
 

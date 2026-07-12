@@ -149,117 +149,136 @@ export function SelectionInspectorView({
             </div>
           ) : null}
 
-          {showVisibilityToggle ? (
-            <div className="inspector-section">
-              <button
-                onClick={() => onToggleVisibility(selectionNode.id)}
-                data-testid="inspector-visibility"
-              >
-                {nodeVisibility ? 'Visible' : 'Hidden'}
-              </button>
-            </div>
+          <WorkflowActionList entries={workflowActions} />
+
+          {showVisibilityToggle ||
+          selectionNode.kind === 'object' ||
+          selectionNode.kind === 'branch' ? (
+            <InspectorDisclosure
+              title="Modify appearance"
+              testId="appearance-toggle"
+              actionOnly
+            >
+              <div className="inspector-section" data-testid="appearance-section">
+                {showVisibilityToggle ? (
+                  <label>
+                    Visibility
+                    <button
+                      type="button"
+                      onClick={() => onToggleVisibility(selectionNode.id)}
+                      data-testid="inspector-visibility"
+                    >
+                      {nodeVisibility ? 'Visible' : 'Hidden'}
+                    </button>
+                  </label>
+                ) : null}
+                {selectionNode.kind === 'object' || selectionNode.kind === 'branch' ? (
+                  <>
+                    <label>
+                      Color
+                      <input
+                        type="color"
+                        value={nodeRender.color}
+                        onChange={(event) =>
+                          onUpdateRender(selectionNode.id, { color: event.target.value })
+                        }
+                        data-testid="inspector-color"
+                      />
+                    </label>
+                    <label>
+                      Line Width
+                      <input
+                        type="number"
+                        min={1}
+                        max={8}
+                        value={nodeRender.lineWidth}
+                        onChange={(event) =>
+                          onUpdateRender(selectionNode.id, {
+                            lineWidth: Number(event.target.value),
+                          })
+                        }
+                        data-testid="inspector-line-width"
+                      />
+                    </label>
+                  </>
+                ) : null}
+                {selectionNode.kind === 'branch' ? (
+                  <label>
+                    Line Style
+                    <select
+                      value={nodeRender.lineStyle}
+                      onChange={(event) =>
+                        onUpdateRender(selectionNode.id, {
+                          lineStyle: event.target.value as LineStyle,
+                        })
+                      }
+                      data-testid="inspector-line-style"
+                    >
+                      <option value="solid">Solid</option>
+                      <option value="dashed">Dashed</option>
+                      <option value="dotted">Dotted</option>
+                    </select>
+                  </label>
+                ) : null}
+                {selectionNode.kind === 'object' || selectionNode.kind === 'branch' ? (
+                  <label>
+                    Point Size
+                    <input
+                      type="number"
+                      min={2}
+                      max={12}
+                      value={nodeRender.pointSize}
+                      onChange={(event) =>
+                        onUpdateRender(selectionNode.id, {
+                          pointSize: Number(event.target.value),
+                        })
+                      }
+                      data-testid="inspector-point-size"
+                    />
+                  </label>
+                ) : null}
+                {supportsManifoldSurfaceToggle ? (
+                  <button
+                    type="button"
+                    className="inspector-inline-button inspector-toggle-button"
+                    aria-pressed={manifoldSurfaceVisible}
+                    onClick={() =>
+                      onUpdateRender(selectionNode.id, {
+                        manifoldSurfaceVisible: !manifoldSurfaceVisible,
+                      })
+                    }
+                    data-testid="inspector-manifold-surface-toggle"
+                  >
+                    {manifoldSurfaceVisible ? 'Hide surface' : 'Show surface'}
+                  </button>
+                ) : null}
+                {selectionNode.kind === 'branch' &&
+                supportsStateSpaceStride &&
+                systemDraft.type === 'flow' ? (
+                  <label>
+                    State space stride
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={nodeRender.stateSpaceStride ?? 1}
+                      onChange={(event) => {
+                        const parsed = parseInteger(event.target.value)
+                        const safeValue = parsed && parsed > 0 ? parsed : 1
+                        onUpdateRender(selectionNode.id, {
+                          stateSpaceStride: safeValue,
+                        })
+                      }}
+                      onFocus={(event) => event.currentTarget.select()}
+                      data-testid="inspector-state-space-stride"
+                    />
+                  </label>
+                ) : null}
+              </div>
+            </InspectorDisclosure>
           ) : null}
 
           <LimitCycleInspectorSections scope={scope} />
-
-          {selectionNode.kind === 'object' || selectionNode.kind === 'branch' ? (
-            <div className="inspector-section">
-              <label>
-                Color
-                <input
-                  type="color"
-                  value={nodeRender.color}
-                  onChange={(event) =>
-                    onUpdateRender(selectionNode.id, { color: event.target.value })
-                  }
-                  data-testid="inspector-color"
-                />
-              </label>
-              <label>
-                Line Width
-                <input
-                  type="number"
-                  min={1}
-                  max={8}
-                  value={nodeRender.lineWidth}
-                  onChange={(event) =>
-                    onUpdateRender(selectionNode.id, { lineWidth: Number(event.target.value) })
-                  }
-                  data-testid="inspector-line-width"
-                />
-              </label>
-              {selectionNode.kind === 'branch' ? (
-                <label>
-                  Line Style
-                  <select
-                    value={nodeRender.lineStyle}
-                    onChange={(event) =>
-                      onUpdateRender(selectionNode.id, {
-                        lineStyle: event.target.value as LineStyle,
-                      })
-                    }
-                    data-testid="inspector-line-style"
-                  >
-                    <option value="solid">Solid</option>
-                    <option value="dashed">Dashed</option>
-                    <option value="dotted">Dotted</option>
-                  </select>
-                </label>
-              ) : null}
-              <label>
-                Point Size
-                <input
-                  type="number"
-                  min={2}
-                  max={12}
-                  value={nodeRender.pointSize}
-                  onChange={(event) =>
-                    onUpdateRender(selectionNode.id, { pointSize: Number(event.target.value) })
-                  }
-                  data-testid="inspector-point-size"
-                />
-              </label>
-              {supportsManifoldSurfaceToggle ? (
-                <button
-                  type="button"
-                  className="inspector-inline-button inspector-toggle-button"
-                  aria-pressed={manifoldSurfaceVisible}
-                  onClick={() =>
-                    onUpdateRender(selectionNode.id, {
-                      manifoldSurfaceVisible: !manifoldSurfaceVisible,
-                    })
-                  }
-                  data-testid="inspector-manifold-surface-toggle"
-                >
-                  {manifoldSurfaceVisible ? 'Hide surface' : 'Show surface'}
-                </button>
-              ) : null}
-              {selectionNode.kind === 'branch' &&
-              supportsStateSpaceStride &&
-              systemDraft.type === 'flow' ? (
-                <label>
-                  State space stride
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={nodeRender.stateSpaceStride ?? 1}
-                    onChange={(event) => {
-                      const parsed = parseInteger(event.target.value)
-                      const safeValue = parsed && parsed > 0 ? parsed : 1
-                      onUpdateRender(selectionNode.id, {
-                        stateSpaceStride: safeValue,
-                      })
-                    }}
-                    onFocus={(event) => event.currentTarget.select()}
-                    data-testid="inspector-state-space-stride"
-                  />
-                </label>
-              ) : null}
-            </div>
-          ) : null}
-
-          <WorkflowActionList entries={workflowActions} />
 
           {paramOverrideTarget && !isocline ? (
             <InspectorDisclosure
@@ -277,6 +296,7 @@ export function SelectionInspectorView({
                 )
               }
               testId="frozen-variables-toggle"
+              actionOnly
             >
               <div className="inspector-section" data-testid="frozen-variables-section">
                 <div className="state-table__wrap" role="region" aria-label="Frozen variables">
@@ -351,6 +371,7 @@ export function SelectionInspectorView({
               key={`${selectionKey}-parameters`}
               title={paramOverrideTitle}
               testId="parameters-toggle"
+              actionOnly
             >
               <div className="inspector-section" data-testid="param-override-section">
                 <StateTable

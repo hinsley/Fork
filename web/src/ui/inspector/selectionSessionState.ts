@@ -1,4 +1,7 @@
 export const WORKFLOW_IDS = [
+  'frozen-variables-toggle',
+  'parameters-toggle',
+  'appearance-toggle',
   'orbit-run-toggle',
   'oseledets-toggle',
   'limit-cycle-toggle',
@@ -25,9 +28,10 @@ export type WorkflowId = (typeof WORKFLOW_IDS)[number]
 
 export type WorkflowActionEntry = {
   id: WorkflowId
-  group: 'Compute' | 'Continue' | 'Manifolds' | 'Bifurcations'
+  group: 'Configure' | 'Compute' | 'Continuation' | 'Manifolds' | 'Bifurcations'
   label: string
   description: string
+  tag?: string
 }
 
 export type SelectionSessionState = {

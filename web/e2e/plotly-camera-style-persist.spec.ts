@@ -334,6 +334,7 @@ test('3D camera persists across style updates', async ({ page }) => {
   expect(distance(rotatedCam, defaultCam)).toBeGreaterThan(0.2)
   await assertNoPlotlyErrors('camera rotate')
 
+  await page.getByTestId('action-appearance-toggle').click()
   const lineWidthInput = page.getByTestId('inspector-line-width')
   const perfBeforeFirst = await readPerf()
   await startAfterplotCapture(6)

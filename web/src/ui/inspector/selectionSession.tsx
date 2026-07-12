@@ -27,7 +27,7 @@ export function WorkflowActionList({ entries }: { entries: WorkflowActionEntry[]
   const focus = useWorkflowFocus()
   if (!focus || focus.activeWorkflow || entries.length === 0) return null
 
-  const groups = ['Compute', 'Continue', 'Manifolds', 'Bifurcations'] as const
+  const groups = ['Configure', 'Compute', 'Continuation', 'Manifolds', 'Bifurcations'] as const
   return (
     <section className="inspector-actions" data-testid="inspector-actions">
       <div className="inspector-actions__heading">
@@ -49,7 +49,10 @@ export function WorkflowActionList({ entries }: { entries: WorkflowActionEntry[]
                 key={entry.id}
               >
                 <span>
-                  <strong>{entry.label}</strong>
+                  <strong className="inspector-action-row__title">
+                    <span>{entry.label}</span>
+                    {entry.tag ? <span className="tree-node__tag">{entry.tag}</span> : null}
+                  </strong>
                   <small>{entry.description}</small>
                 </span>
                 <span aria-hidden="true">›</span>
@@ -79,14 +82,16 @@ export function WorkflowFocusToolbar({
         <span>{entry?.group ?? 'Action'}</span>
         <strong>{entry?.label ?? 'Workflow'}</strong>
       </div>
-      <button
-        type="button"
-        aria-expanded={focus.advancedOpen}
-        onClick={focus.toggleAdvanced}
-        data-testid="inspector-workflow-advanced"
-      >
-        Advanced
-      </button>
+      {entry?.group !== 'Configure' ? (
+        <button
+          type="button"
+          aria-expanded={focus.advancedOpen}
+          onClick={focus.toggleAdvanced}
+          data-testid="inspector-workflow-advanced"
+        >
+          Advanced
+        </button>
+      ) : null}
     </div>
   )
 }
