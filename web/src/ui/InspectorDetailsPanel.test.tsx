@@ -365,7 +365,9 @@ describe('InspectorDetailsPanel', () => {
 
     expect(screen.getByTestId('action-branch-summary-toggle')).toHaveTextContent('View Summary')
     expect(screen.getByTestId('action-branch-points-toggle')).toHaveTextContent('View Data')
+    expect(screen.getByTestId('inspector-name')).toBeVisible()
     await user.click(screen.getByTestId('action-branch-points-toggle'))
+    expect(screen.queryByTestId('inspector-name')).toBeNull()
 
     const navigatorToggle = screen.getByTestId('branch-points-toggle')
     const navigatorDetails = navigatorToggle.closest('details')

@@ -36,9 +36,8 @@ test('continue limit cycle from Hopf along a selected parameter', async ({ page 
 
   await page.getByTestId('action-equilibrium-solver-toggle').click()
   await page.getByTestId('equilibrium-solve-submit').click()
-  await expect(page.getByText(/^Solved$/)).toBeVisible()
-
   await page.getByTestId('inspector-workflow-back').click()
+  await expect(page.getByText(/^Solved$/)).toBeVisible()
   await page.getByTestId('action-equilibrium-continuation-toggle').click()
   await page.getByTestId('equilibrium-branch-name').fill('eq_hopf_mu')
   await page.getByTestId('equilibrium-branch-parameter').selectOption('mu')

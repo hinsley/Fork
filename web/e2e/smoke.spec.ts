@@ -22,6 +22,7 @@ test('system to viewport smoke', async ({ page }) => {
   await harness.selectTreeNode('Equilibrium_1')
   await expect(inspectorName).toHaveValue(/Equilibrium_1/i)
   await harness.solveEquilibrium()
+  await page.getByTestId('inspector-workflow-back').click()
   await expect(page.getByText(/^Solved$/)).toBeVisible()
 
   await page.getByTestId('open-system-settings').click()

@@ -32,9 +32,8 @@ test('lorenz 2D stable manifold adaptive defaults produce nontrivial growth', as
   ).toBeVisible()
   await harness.selectTreeNode('Equilibrium_1')
   await harness.solveEquilibrium()
-  await expect(page.getByText(/^Solved$/)).toBeVisible({ timeout: 20_000 })
-
   await page.getByTestId('inspector-workflow-back').click()
+  await expect(page.getByText(/^Solved$/)).toBeVisible({ timeout: 20_000 })
   await page.getByTestId('action-equilibrium-manifold-toggle').click()
   await page.getByTestId('equilibrium-manifold-name').fill('lorenz_eqm2d_e2e')
   await expect(page.getByTestId('equilibrium-manifold-mode')).toHaveValue('surface_2d')

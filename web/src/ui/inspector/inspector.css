@@ -92,7 +92,7 @@
 .inspector-workflow-toolbar {
   position: sticky;
   z-index: 3;
-  top: 92px;
+  top: 0;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;

@@ -190,8 +190,10 @@ describe('selection inspector workflow shell', () => {
     const added = addObject(base, orbit('Orbit_A', base.name))
     render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
 
+    expect(screen.getByTestId('inspector-name')).toBeVisible()
     await user.click(screen.getByTestId('action-orbit-run-toggle'))
     expect(screen.getByTestId('inspector-workflow-focus')).toBeVisible()
+    expect(screen.queryByTestId('inspector-name')).toBeNull()
     expect(screen.getByTestId('orbit-run-duration')).toBeVisible()
     expect(screen.queryByTestId('inspector-workflow-advanced')).toBeNull()
 
@@ -199,6 +201,7 @@ describe('selection inspector workflow shell', () => {
     await user.type(screen.getByTestId('orbit-run-duration'), '42')
     await user.click(screen.getByTestId('inspector-workflow-back'))
     expect(screen.getByTestId('inspector-actions')).toBeVisible()
+    expect(screen.getByTestId('inspector-name')).toBeVisible()
 
     await user.click(screen.getByTestId('action-orbit-run-toggle'))
     expect(screen.getByTestId('orbit-run-duration')).toHaveValue(42)

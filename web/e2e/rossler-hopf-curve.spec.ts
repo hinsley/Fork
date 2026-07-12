@@ -31,9 +31,8 @@ test('rossler hopf curve continuation', async ({ page }) => {
   await page.getByTestId('equilibrium-solve-steps').fill('50')
   await page.getByTestId('equilibrium-solve-damping').fill('1')
   await page.getByTestId('equilibrium-solve-submit').click()
-  await expect(page.getByText(/^Solved$/)).toBeVisible()
-
   await page.getByTestId('inspector-workflow-back').click()
+  await expect(page.getByText(/^Solved$/)).toBeVisible()
   await page.getByTestId('action-equilibrium-continuation-toggle').click()
   await page.getByTestId('equilibrium-branch-name').fill('eq_rossler_c')
   await page.getByTestId('equilibrium-branch-parameter').selectOption('c')

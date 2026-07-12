@@ -114,33 +114,35 @@ export function SelectionInspectorView({
       >
         {selectionNode ? (
           <div className="inspector-group">
-            <div className="inspector-section inspector-entity-header">
-              <label>
-                Name
-                <input
-                  value={selectionNameDraft}
-                  onChange={(event) => setSelectionNameDraft(event.target.value)}
-                  onBlur={commitSelectionName}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault()
-                      event.currentTarget.blur()
-                      return
-                    }
-                    if (event.key === 'Escape') {
-                      event.preventDefault()
-                      setSelectionNameDraft(selectionNode.name)
-                      event.currentTarget.blur()
-                    }
-                  }}
-                  data-testid="inspector-name"
-                />
-              </label>
-              <div className="inspector-meta">
-                <span>{selectionTypeLabel}</span>
-                {summary?.detail ? <span>{summary.detail}</span> : null}
+            {!workflowFocus?.activeWorkflow ? (
+              <div className="inspector-section inspector-entity-header">
+                <label>
+                  Name
+                  <input
+                    value={selectionNameDraft}
+                    onChange={(event) => setSelectionNameDraft(event.target.value)}
+                    onBlur={commitSelectionName}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        event.currentTarget.blur()
+                        return
+                      }
+                      if (event.key === 'Escape') {
+                        event.preventDefault()
+                        setSelectionNameDraft(selectionNode.name)
+                        event.currentTarget.blur()
+                      }
+                    }}
+                    data-testid="inspector-name"
+                  />
+                </label>
+                <div className="inspector-meta">
+                  <span>{selectionTypeLabel}</span>
+                  {summary?.detail ? <span>{summary.detail}</span> : null}
+                </div>
               </div>
-            </div>
+            ) : null}
 
             <WorkflowFocusToolbar entries={workflowActions} />
 
