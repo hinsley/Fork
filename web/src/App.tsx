@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
+import './ui/inspector/inspector.css'
 import { useAppContext } from './state/appContext'
 import { Panel } from './ui/Panel'
 import { ObjectsTree, type ObjectsTreeHandle } from './ui/ObjectsTree'
@@ -281,52 +282,8 @@ function App() {
       <SystemSettingsDialog
         open={isSystemSettingsOpen}
         system={system}
-        selectedNodeId={system?.ui.selectedNodeId ?? null}
-        theme={theme}
-        branchPointSelection={branchPointSelection}
-        orbitPointSelection={orbitPointSelection}
-        limitCyclePointSelection={limitCyclePointSelection}
-        onBranchPointSelect={setBranchPointSelection}
-        onOrbitPointSelect={setOrbitPointSelection}
-        onLimitCyclePointSelect={setLimitCyclePointSelection}
         onClose={closeSystemSettings}
-        onRename={actions.renameNode}
-        onToggleVisibility={actions.toggleVisibility}
-        onUpdateRender={actions.updateRender}
-        onUpdateObjectParams={actions.updateObjectParams}
-        onUpdateObjectFrozenVariables={actions.updateObjectFrozenVariables}
-        onUpdateScene={actions.updateScene}
-        onUpdateAnalysisViewport={actions.updateAnalysisViewport}
-        onValidateAnalysisExpression={actions.validateAnalysisExpression}
-        onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
-        onSetLimitCycleRenderTarget={actions.setLimitCycleRenderTarget}
-        onUpdateSystem={actions.updateSystem}
-        onValidateSystem={actions.validateSystem}
-        onRunOrbit={actions.runOrbit}
-        onComputeLyapunovExponents={actions.computeLyapunovExponents}
-        onComputeCovariantLyapunovVectors={actions.computeCovariantLyapunovVectors}
-        onSolveEquilibrium={actions.solveEquilibrium}
-        onCreateEquilibriumBranch={actions.createEquilibriumBranch}
-        onCreateEquilibriumManifold1D={actions.createEquilibriumManifold1D}
-        onExtendEquilibriumManifold1D={actions.extendEquilibriumManifold1D}
-        onExtendManifold2D={actions.extendManifold2D}
-        onCreateEquilibriumManifold2D={actions.createEquilibriumManifold2D}
-        onCreateBranchFromPoint={actions.createBranchFromPoint}
-        onExtendBranch={actions.extendBranch}
-        onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
-        onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
-        onCreateIsochroneCurveFromPoint={actions.createIsochroneCurveFromPoint}
-        onCreateNSCurveFromPoint={actions.createNSCurveFromPoint}
-        onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
-        onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
-        onCreateLimitCycleManifold2D={actions.createLimitCycleManifold2D}
-        onComputeLimitCycleFloquetModes={actions.computeLimitCycleFloquetModes}
-        onCreateCycleFromPD={actions.createCycleFromPD}
-        onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
-        onCreateHomoclinicFromLargeCycle={actions.createHomoclinicFromLargeCycle}
-        onCreateHomoclinicFromHomoclinic={actions.createHomoclinicFromHomoclinic}
-        onCreateHomotopySaddleFromEquilibrium={actions.createHomotopySaddleFromEquilibrium}
-        onCreateHomoclinicFromHomotopySaddle={actions.createHomoclinicFromHomotopySaddle}
+        actions={actions}
       />
 
       {error ? (
@@ -472,51 +429,21 @@ function App() {
                 system={system}
                 selectedNodeId={system.ui.selectedNodeId}
                 theme={theme}
-                branchPointSelection={branchPointSelection}
-                orbitPointSelection={orbitPointSelection}
-                limitCyclePointSelection={limitCyclePointSelection}
-                onBranchPointSelect={setBranchPointSelection}
-                onOrbitPointSelect={setOrbitPointSelection}
-                onLimitCyclePointSelect={setLimitCyclePointSelection}
-                onRename={actions.renameNode}
-                onToggleVisibility={actions.toggleVisibility}
-                onUpdateRender={actions.updateRender}
-                onUpdateObjectParams={actions.updateObjectParams}
-                onUpdateObjectFrozenVariables={actions.updateObjectFrozenVariables}
-                onUpdateIsoclineObject={actions.updateIsoclineObject}
-                onComputeIsocline={actions.computeIsocline}
-                onUpdateScene={actions.updateScene}
-                onUpdateAnalysisViewport={actions.updateAnalysisViewport}
-                onValidateAnalysisExpression={actions.validateAnalysisExpression}
-                onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
-                onSetLimitCycleRenderTarget={actions.setLimitCycleRenderTarget}
-                onUpdateSystem={actions.updateSystem}
-                onValidateSystem={actions.validateSystem}
-                onRunOrbit={actions.runOrbit}
-                onComputeLyapunovExponents={actions.computeLyapunovExponents}
-                onComputeCovariantLyapunovVectors={actions.computeCovariantLyapunovVectors}
-                onSolveEquilibrium={actions.solveEquilibrium}
-                onCreateEquilibriumBranch={actions.createEquilibriumBranch}
-                onCreateEquilibriumManifold1D={actions.createEquilibriumManifold1D}
-                onExtendEquilibriumManifold1D={actions.extendEquilibriumManifold1D}
-                onExtendManifold2D={actions.extendManifold2D}
-                onCreateEquilibriumManifold2D={actions.createEquilibriumManifold2D}
-                onCreateBranchFromPoint={actions.createBranchFromPoint}
-                onExtendBranch={actions.extendBranch}
-                onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
-                onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
-                onCreateIsochroneCurveFromPoint={actions.createIsochroneCurveFromPoint}
-                onCreateNSCurveFromPoint={actions.createNSCurveFromPoint}
-                onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
-                onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
-                onCreateLimitCycleManifold2D={actions.createLimitCycleManifold2D}
-                onComputeLimitCycleFloquetModes={actions.computeLimitCycleFloquetModes}
-                onCreateCycleFromPD={actions.createCycleFromPD}
-                onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
-                onCreateHomoclinicFromLargeCycle={actions.createHomoclinicFromLargeCycle}
-                onCreateHomoclinicFromHomoclinic={actions.createHomoclinicFromHomoclinic}
-                onCreateHomotopySaddleFromEquilibrium={actions.createHomotopySaddleFromEquilibrium}
-                onCreateHomoclinicFromHomotopySaddle={actions.createHomoclinicFromHomotopySaddle}
+                actions={actions}
+                pointSelections={{
+                  branch: {
+                    value: branchPointSelection,
+                    onSelect: setBranchPointSelection,
+                  },
+                  orbit: {
+                    value: orbitPointSelection,
+                    onSelect: setOrbitPointSelection,
+                  },
+                  limitCycle: {
+                    value: limitCyclePointSelection,
+                    onSelect: setLimitCyclePointSelection,
+                  },
+                }}
               />
             </Panel>
           </div>

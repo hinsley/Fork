@@ -1,0 +1,92 @@
+import { useMemo, useReducer, type ReactNode } from 'react'
+import {
+  selectionSessionReducer,
+  type WorkflowActionEntry,
+} from './selectionSessionState'
+import { WorkflowFocusContext, type WorkflowFocusValue } from './workflowFocusContext'
+import { useWorkflowFocus } from './useWorkflowFocus'
+
+export function WorkflowFocusProvider({ children }: { children: ReactNode }) {
+  const [state, dispatch] = useReducer(selectionSessionReducer, {
+    activeWorkflow: null,
+    advancedOpen: false,
+  })
+  const value = useMemo<WorkflowFocusValue>(
+    () => ({
+      ...state,
+      openWorkflow: (workflow) => dispatch({ type: 'open-workflow', workflow }),
+      closeWorkflow: () => dispatch({ type: 'close-workflow' }),
+      toggleAdvanced: () => dispatch({ type: 'toggle-advanced' }),
+    }),
+    [state]
+  )
+  return <WorkflowFocusContext.Provider value={value}>{children}</WorkflowFocusContext.Provider>
+}
+
+export function WorkflowActionList({ entries }: { entries: WorkflowActionEntry[] }) {
+  const focus = useWorkflowFocus()
+  if (!focus || focus.activeWorkflow || entries.length === 0) return null
+
+  const groups = ['Compute', 'Continue', 'Manifolds', 'Bifurcations'] as const
+  return (
+    <section className="inspector-actions" data-testid="inspector-actions">
+      <div className="inspector-actions__heading">
+        <span className="inspector-actions__eyebrow">Available for this selection</span>
+        <h3>Actions</h3>
+      </div>
+      {groups.map((group) => {
+        const groupEntries = entries.filter((entry) => entry.group === group)
+        if (groupEntries.length === 0) return null
+        return (
+          <div className="inspector-actions__group" key={group}>
+            <h4>{group}</h4>
+            {groupEntries.map((entry) => (
+              <button
+                type="button"
+                className="inspector-action-row"
+                onClick={() => focus.openWorkflow(entry.id)}
+                data-testid={`action-${entry.id}`}
+                key={entry.id}
+              >
+                <span>
+                  <strong>{entry.label}</strong>
+                  <small>{entry.description}</small>
+                </span>
+                <span aria-hidden="true">›</span>
+              </button>
+            ))}
+          </div>
+        )
+      })}
+    </section>
+  )
+}
+
+export function WorkflowFocusToolbar({
+  entries,
+}: {
+  entries: WorkflowActionEntry[]
+}) {
+  const focus = useWorkflowFocus()
+  if (!focus?.activeWorkflow) return null
+  const entry = entries.find((candidate) => candidate.id === focus.activeWorkflow)
+  return (
+    <div className="inspector-workflow-toolbar" data-testid="inspector-workflow-focus">
+      <button type="button" onClick={focus.closeWorkflow} data-testid="inspector-workflow-back">
+        ← Back
+      </button>
+      <div>
+        <span>{entry?.group ?? 'Action'}</span>
+        <strong>{entry?.label ?? 'Workflow'}</strong>
+      </div>
+      <button
+        type="button"
+        aria-expanded={focus.advancedOpen}
+        onClick={focus.toggleAdvanced}
+        data-testid="inspector-workflow-advanced"
+      >
+        Advanced
+      </button>
+    </div>
+  )
+}

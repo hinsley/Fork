@@ -1419,7 +1419,7 @@ function reducer(state: AppState, action: AppAction): AppState {
   }
 }
 
-type AppActions = {
+export type AppActions = {
   refreshSystems: () => Promise<void>
   createSystem: (name: string) => Promise<void>
   openSystem: (id: string) => Promise<void>
