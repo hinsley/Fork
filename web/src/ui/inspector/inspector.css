@@ -20,21 +20,10 @@
   background: var(--panel-raised);
 }
 
-.inspector-actions__heading {
-  display: grid;
-  gap: 2px;
-}
-
-.inspector-actions__heading h3,
 .inspector-actions__group h4 {
   margin: 0;
 }
 
-.inspector-actions__heading h3 {
-  font-size: 0.86rem;
-}
-
-.inspector-actions__eyebrow,
 .inspector-actions__group h4,
 .inspector-workflow-toolbar > div span {
   color: var(--text-faint);

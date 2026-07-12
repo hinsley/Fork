@@ -56,10 +56,6 @@ export function WorkflowActionList({ entries }: { entries: WorkflowActionEntry[]
   ] as const
   return (
     <section className="inspector-actions" data-testid="inspector-actions">
-      <div className="inspector-actions__heading">
-        <span className="inspector-actions__eyebrow">Available for this selection</span>
-        <h3>Actions</h3>
-      </div>
       {groups.map((group) => {
         const groupEntries = entries.filter((entry) => entry.group === group)
         if (groupEntries.length === 0) return null

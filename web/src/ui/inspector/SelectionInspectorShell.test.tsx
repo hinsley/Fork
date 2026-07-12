@@ -131,6 +131,8 @@ describe('selection inspector workflow shell', () => {
     render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
 
     const actions = screen.getByTestId('inspector-actions')
+    expect(within(actions).queryByText('Actions')).toBeNull()
+    expect(within(actions).queryByText('Available for this selection')).toBeNull()
     expect(actions).toHaveTextContent('Configure')
     expect(actions).toHaveTextContent('Frozen Variables')
     expect(actions).toHaveTextContent('Parameters')
