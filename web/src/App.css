@@ -2194,7 +2194,7 @@
   flex-direction: column;
 }
 
-.system-settings-dialog__header {
+.dialog--system-settings .system-settings-dialog__header {
   flex: 0 0 auto;
   margin: 0;
   padding: 18px 22px;
@@ -2224,6 +2224,7 @@
 .dialog--system-settings > .dialog__section--flush {
   flex: 1 1 auto;
   min-height: 0;
+  margin-bottom: 0;
   overflow: hidden;
 }
 
@@ -2238,7 +2239,7 @@
 .system-editor__scroll {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 18px 22px 20px;
+  padding: 12px 22px;
   overflow: auto;
 }
 
@@ -2856,7 +2857,7 @@
     border-radius: 0;
   }
 
-  .system-settings-dialog__header {
+  .dialog--system-settings .system-settings-dialog__header {
     padding: 14px 16px;
   }
 
