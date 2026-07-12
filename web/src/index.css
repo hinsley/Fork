@@ -138,6 +138,7 @@ html[data-embed='1'] #root {
   --panel-raised: #17212e;
   --panel-border: #263344;
   --panel-border-strong: #35465c;
+  --panel-header-bg: #131d28;
   --text: #e8edf5;
   --text-muted: #8f9caf;
   --text-faint: #657286;
@@ -156,6 +157,7 @@ html[data-embed='1'] #root {
   --panel-raised: #f8fafb;
   --panel-border: #d9e1e7;
   --panel-border-strong: #c3cfd8;
+  --panel-header-bg: #f7f9fa;
   --text: #17202b;
   --text-muted: #687687;
   --text-faint: #8d9aa8;
@@ -186,7 +188,7 @@ html[data-embed='1'] #root {
   position: absolute;
   z-index: 20;
   top: 10px;
-  right: 10px;
+  left: 10px;
   display: flex;
   gap: 6px;
 }

@@ -17,6 +17,26 @@ test('embed builder exposes selected viewports and export markup', async ({ page
   await expect(page.getByTestId('embed-source')).toHaveValue('./Demo_System.zip')
   await expect(page.getByTestId('embed-code')).toHaveValue(/forkdynamics\.com\/embed\/v1\.js/)
   await expect(page.getByTestId('embed-code')).toHaveValue(/viewports=/)
+
+  await page.getByLabel('Theme').selectOption('dark')
+  await page.getByLabel('Viewport headers').selectOption('show')
+  const headerBackground = await page
+    .locator('.embed-dialog__preview .viewport-tile__header')
+    .evaluate((header) => getComputedStyle(header).backgroundColor)
+  expect(headerBackground).toBe('rgb(19, 29, 40)')
+
+  const controlPosition = await page.getByLabel('Viewer controls').evaluate((controls) => {
+    const viewer = controls.closest('.embed-viewer')
+    if (!viewer) return null
+    const controlsRect = controls.getBoundingClientRect()
+    const viewerRect = viewer.getBoundingClientRect()
+    return {
+      left: controlsRect.left - viewerRect.left,
+      right: viewerRect.right - controlsRect.right,
+    }
+  })
+  expect(controlPosition).not.toBeNull()
+  expect(controlPosition?.left).toBeLessThan(controlPosition?.right ?? 0)
 })
 
 test('publisher-origin loader renders a ZIP without CORS headers', async ({ page }, testInfo) => {
