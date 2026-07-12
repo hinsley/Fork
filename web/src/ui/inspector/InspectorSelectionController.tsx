@@ -4340,6 +4340,18 @@ function useInspectorSelectionController({
     limitCycleFloquetModeCount > 0
 
   const workflowActions: WorkflowActionEntry[] = []
+  if (
+    showVisibilityToggle ||
+    selectionNode?.kind === 'object' ||
+    selectionNode?.kind === 'branch'
+  ) {
+    workflowActions.push({
+      id: 'appearance-toggle',
+      group: 'Configure',
+      label: 'Appearance',
+      description: 'Change visibility, color, line, and point styling.',
+    })
+  }
   if (paramOverrideTarget && !isocline) {
     workflowActions.push(
       {
@@ -4357,18 +4369,6 @@ function useInspectorSelectionController({
         tag: hasCustomParamOverride ? 'custom' : undefined,
       }
     )
-  }
-  if (
-    showVisibilityToggle ||
-    selectionNode?.kind === 'object' ||
-    selectionNode?.kind === 'branch'
-  ) {
-    workflowActions.push({
-      id: 'appearance-toggle',
-      group: 'Configure',
-      label: 'Modify appearance',
-      description: 'Change visibility, color, line, and point styling.',
-    })
   }
   if (orbit) {
     workflowActions.push({

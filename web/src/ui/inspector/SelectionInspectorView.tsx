@@ -155,7 +155,7 @@ export function SelectionInspectorView({
           selectionNode.kind === 'object' ||
           selectionNode.kind === 'branch' ? (
             <InspectorDisclosure
-              title="Modify appearance"
+              title="Appearance"
               testId="appearance-toggle"
               actionOnly
             >
