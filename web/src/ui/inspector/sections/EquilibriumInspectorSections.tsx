@@ -1,6 +1,7 @@
 import type { InspectorSelectionController } from '../../InspectorDetailsPanel'
 import type { ManifoldStability, ManifoldDirection } from '../../../system/types'
 import type { EquilibriumManifoldProfileDraft } from '../../manifoldProfileDrafts'
+import { InspectorSubDisclosure } from '../selectionSession'
 
 type EquilibriumManifoldMode = 'curve_1d' | 'surface_2d'
 
@@ -204,17 +205,12 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                 testId="equilibrium-data-toggle"
                 actionOnly
               >
-                <div className="inspector-section">
-                  <h4 className="inspector-subheading">Summary</h4>
-                  <InspectorMetrics
-                    rows={[
-                      { label: 'System', value: equilibrium.systemName },
-                    ]}
-                  />
-                </div>
-                <div className="inspector-section">
-                  <div className="inspector-subheading-row">
-                    <h4 className="inspector-subheading">Coordinates</h4>
+                <InspectorSubDisclosure
+                  title="Coordinates"
+                  testId="equilibrium-data-coordinates-toggle"
+                >
+                  <div className="inspector-section">
+                    <div className="inspector-inline-actions">
                     {equilibrium.solution ? (
                       <button
                         type="button"
@@ -228,22 +224,26 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                         Copy
                       </button>
                     ) : null}
+                    </div>
+                    {equilibrium.solution && equilibriumDisplayState ? (
+                      <InspectorMetrics
+                        rows={frozenVariableHeaderNames.map((name, index) => ({
+                          label: name,
+                          value: formatNumber(equilibriumDisplayState[index] ?? Number.NaN, 6),
+                        }))}
+                      />
+                    ) : (
+                      <p className="empty-state">{`No stored ${equilibriumLabelLower} solution yet.`}</p>
+                    )}
                   </div>
-                  {equilibrium.solution && equilibriumDisplayState ? (
-                    <InspectorMetrics
-                      rows={frozenVariableHeaderNames.map((name, index) => ({
-                        label: name,
-                        value: formatNumber(equilibriumDisplayState[index] ?? Number.NaN, 6),
-                      }))}
-                    />
-                  ) : (
-                    <p className="empty-state">{`No stored ${equilibriumLabelLower} solution yet.`}</p>
-                  )}
-                </div>
+                </InspectorSubDisclosure>
                 {isDiscreteMap ? (
-                  <div className="inspector-section">
-                    <div className="inspector-subheading-row">
-                      <h4 className="inspector-subheading">Cycle points</h4>
+                  <InspectorSubDisclosure
+                    title="Cycle points"
+                    testId="equilibrium-data-cycle-points-toggle"
+                  >
+                    <div className="inspector-section">
+                      <div className="inspector-inline-actions">
                       {equilibriumCyclePoints && equilibriumCyclePoints.length > 0 ? (
                         <button
                           type="button"
@@ -259,13 +259,13 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                           Copy
                         </button>
                       ) : null}
-                    </div>
-                    {equilibriumCyclePoints && equilibriumCyclePoints.length > 0 ? (
-                      <div
-                        className="orbit-preview__table"
-                        role="region"
-                        aria-label="Cycle point data"
-                      >
+                      </div>
+                      {equilibriumCyclePoints && equilibriumCyclePoints.length > 0 ? (
+                        <div
+                          className="orbit-preview__table"
+                          role="region"
+                          aria-label="Cycle point data"
+                        >
                         <table className="orbit-preview__table-grid">
                           <thead>
                             <tr>
@@ -292,15 +292,19 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                             ))}
                           </tbody>
                         </table>
-                      </div>
-                    ) : (
-                      <p className="empty-state">No cycle points stored yet.</p>
-                    )}
-                  </div>
+                        </div>
+                      ) : (
+                        <p className="empty-state">No cycle points stored yet.</p>
+                      )}
+                    </div>
+                  </InspectorSubDisclosure>
                 ) : null}
-                <div className="inspector-section">
-                  <div className="inspector-subheading-row">
-                    <h4 className="inspector-subheading">Parameters (last solve)</h4>
+                <InspectorSubDisclosure
+                  title="Parameters (last solve)"
+                  testId="equilibrium-data-parameters-toggle"
+                >
+                  <div className="inspector-section">
+                    <div className="inspector-inline-actions">
                     {equilibrium.parameters && equilibrium.parameters.length > 0 ? (
                       <button
                         type="button"
@@ -312,20 +316,24 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                         Copy
                       </button>
                     ) : null}
+                    </div>
+                    {equilibrium.parameters && equilibrium.parameters.length > 0 ? (
+                      <InspectorMetrics
+                        rows={equilibrium.parameters.map((value, index) => ({
+                          label: systemDraft.paramNames[index] || `p${index + 1}`,
+                          value: formatNumber(value, 6),
+                        }))}
+                      />
+                    ) : (
+                      <p className="empty-state">Parameters not recorded yet.</p>
+                    )}
                   </div>
-                  {equilibrium.parameters && equilibrium.parameters.length > 0 ? (
-                    <InspectorMetrics
-                      rows={equilibrium.parameters.map((value, index) => ({
-                        label: systemDraft.paramNames[index] || `p${index + 1}`,
-                        value: formatNumber(value, 6),
-                      }))}
-                    />
-                  ) : (
-                    <p className="empty-state">Parameters not recorded yet.</p>
-                  )}
-                </div>
-                <div className="inspector-section">
-                  <h4 className="inspector-subheading">Eigenpairs</h4>
+                </InspectorSubDisclosure>
+                <InspectorSubDisclosure
+                  title="Eigenpairs"
+                  testId="equilibrium-data-eigenpairs-toggle"
+                >
+                  <div className="inspector-section">
                   {equilibrium.solution && equilibrium.solution.eigenpairs.length > 0 ? (
                     <div className="inspector-list">
                       {showEquilibriumEigenvectorControls ? (
@@ -506,7 +514,8 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                   ) : (
                     <p className="empty-state">No eigenpairs available yet.</p>
                   )}
-                </div>
+                  </div>
+                </InspectorSubDisclosure>
                 </InspectorDisclosure>
               ) : null}
 

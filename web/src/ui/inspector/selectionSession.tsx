@@ -23,6 +23,25 @@ export function WorkflowFocusProvider({ children }: { children: ReactNode }) {
   return <WorkflowFocusContext.Provider value={value}>{children}</WorkflowFocusContext.Provider>
 }
 
+export function InspectorSubDisclosure({
+  title,
+  children,
+  testId,
+}: {
+  title: string
+  children: ReactNode
+  testId?: string
+}) {
+  return (
+    <details className="inspector-disclosure inspector-subdisclosure">
+      <summary className="inspector-disclosure__summary" data-testid={testId}>
+        {title}
+      </summary>
+      <div className="inspector-disclosure__content">{children}</div>
+    </details>
+  )
+}
+
 export function WorkflowActionList({ entries }: { entries: WorkflowActionEntry[] }) {
   const focus = useWorkflowFocus()
   if (!focus || focus.activeWorkflow || entries.length === 0) return null

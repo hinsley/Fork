@@ -1,4 +1,5 @@
 import type { InspectorSelectionController } from '../../InspectorDetailsPanel'
+import { InspectorSubDisclosure } from '../selectionSession'
 
 export function OrbitInspectorSections({
   scope,
@@ -138,34 +139,38 @@ export function OrbitInspectorSections({
                 title="Orbit Data"
                 testId="orbit-data-toggle"
               >
-                <div className="inspector-section">
-                  <h4 className="inspector-subheading">Summary</h4>
-                  <InspectorMetrics
-                    rows={[
-                      { label: 'System', value: orbit.systemName },
-                      { label: 'Data points', value: orbit.data.length.toLocaleString() },
-                      {
-                        label: 'Time range',
-                        value:
-                          orbit.data.length > 0
-                            ? `${formatFixed(orbit.t_start, 3)} to ${formatFixed(orbit.t_end, 3)}`
-                            : 'n/a',
-                      },
-                      { label: 'Step size (dt)', value: formatFixed(orbit.dt, 4) },
-                      ...(lyapunovDimension !== null
-                        ? [
-                            {
-                              label: 'Lyapunov dimension',
-                              value: formatNumber(lyapunovDimension, 6),
-                            },
-                          ]
-                        : []),
-                    ]}
-                  />
-                </div>
-                <div className="inspector-section">
-                  <div className="inspector-subheading-row">
-                    <h4 className="inspector-subheading">Parameters (last run)</h4>
+                <InspectorSubDisclosure title="Summary" testId="orbit-data-summary-toggle">
+                  <div className="inspector-section">
+                    <InspectorMetrics
+                      rows={[
+                        { label: 'System', value: orbit.systemName },
+                        { label: 'Data points', value: orbit.data.length.toLocaleString() },
+                        {
+                          label: 'Time range',
+                          value:
+                            orbit.data.length > 0
+                              ? `${formatFixed(orbit.t_start, 3)} to ${formatFixed(orbit.t_end, 3)}`
+                              : 'n/a',
+                        },
+                        { label: 'Step size (dt)', value: formatFixed(orbit.dt, 4) },
+                        ...(lyapunovDimension !== null
+                          ? [
+                              {
+                                label: 'Lyapunov dimension',
+                                value: formatNumber(lyapunovDimension, 6),
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
+                  </div>
+                </InspectorSubDisclosure>
+                <InspectorSubDisclosure
+                  title="Parameters (last run)"
+                  testId="orbit-data-parameters-toggle"
+                >
+                  <div className="inspector-section">
+                    <div className="inspector-inline-actions">
                     {orbit.parameters && orbit.parameters.length > 0 ? (
                       <button
                         type="button"
@@ -177,20 +182,21 @@ export function OrbitInspectorSections({
                         Copy
                       </button>
                     ) : null}
+                    </div>
+                    {orbit.parameters && orbit.parameters.length > 0 ? (
+                      <InspectorMetrics
+                        rows={orbit.parameters.map((value, index) => ({
+                          label: systemDraft.paramNames[index] || `p${index + 1}`,
+                          value: formatNumber(value, 6),
+                        }))}
+                      />
+                    ) : (
+                      <p className="empty-state">Parameters not recorded yet.</p>
+                    )}
                   </div>
-                  {orbit.parameters && orbit.parameters.length > 0 ? (
-                    <InspectorMetrics
-                      rows={orbit.parameters.map((value, index) => ({
-                        label: systemDraft.paramNames[index] || `p${index + 1}`,
-                        value: formatNumber(value, 6),
-                      }))}
-                    />
-                  ) : (
-                    <p className="empty-state">Parameters not recorded yet.</p>
-                  )}
-                </div>
-                <div className="inspector-section">
-                  <h4 className="inspector-subheading">Data preview</h4>
+                </InspectorSubDisclosure>
+                <InspectorSubDisclosure title="Data preview" testId="orbit-data-preview-toggle">
+                  <div className="inspector-section">
                   {orbit.data.length > 0 ? (
                     <div className="orbit-preview">
                       <div className="orbit-preview__controls">
@@ -333,7 +339,8 @@ export function OrbitInspectorSections({
                   ) : (
                     <p className="empty-state">No orbit samples stored yet.</p>
                   )}
-                </div>
+                  </div>
+                </InspectorSubDisclosure>
                 </InspectorDisclosure>
               ) : null}
 

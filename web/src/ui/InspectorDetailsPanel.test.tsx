@@ -1718,6 +1718,7 @@ describe('InspectorDetailsPanel', () => {
     if (orbitDataDetails && !orbitDataDetails.open) {
       await user.click(orbitDataToggle)
     }
+    await user.click(screen.getByTestId('orbit-data-preview-toggle'))
 
     expect(screen.getByText('Page 2 of 3')).toBeVisible()
     await user.click(screen.getByTestId('orbit-preview-next'))
@@ -1804,6 +1805,7 @@ describe('InspectorDetailsPanel', () => {
     if (limitCycleDataDetails && !limitCycleDataDetails.open) {
       await user.click(limitCycleDataToggle)
     }
+    await user.click(screen.getByTestId('limit-cycle-data-preview-toggle'))
 
     expect(screen.getByText('Page 2 of 3')).toBeVisible()
     await user.click(screen.getByTestId('limit-cycle-preview-next'))
@@ -3949,8 +3951,13 @@ describe('InspectorDetailsPanel', () => {
     )
 
     await user.click(screen.getByTestId('limit-cycle-data-toggle'))
+    const parametersToggle = screen.getByTestId('limit-cycle-data-parameters-toggle')
+    await user.click(parametersToggle)
+    await user.click(screen.getByTestId('limit-cycle-data-floquet-toggle'))
 
-    expect(screen.getAllByText('0.250000')[0]).toBeVisible()
+    expect(
+      within(parametersToggle.closest('details') as HTMLElement).getByText('0.250000')
+    ).toBeVisible()
     expect(screen.queryByText('9.00000')).toBeNull()
     expect(screen.getByText('-1.0000 + 0.0000i')).toBeVisible()
     expect(screen.queryByText('0.1000 + 0.2000i')).toBeNull()
@@ -4023,6 +4030,7 @@ describe('InspectorDetailsPanel', () => {
     )
 
     await user.click(screen.getByTestId('limit-cycle-data-toggle'))
+    await user.click(screen.getByTestId('limit-cycle-data-floquet-toggle'))
 
     expect(screen.getByText('0.3000 + 0.0000i')).toBeVisible()
     expect(screen.queryByText('-1.0000 + 0.0000i')).toBeNull()
@@ -4080,6 +4088,7 @@ describe('InspectorDetailsPanel', () => {
     )
 
     await user.click(screen.getByTestId('limit-cycle-data-toggle'))
+    await user.click(screen.getByTestId('limit-cycle-data-floquet-toggle'))
     expect(screen.getByText('Floquet multipliers not computed yet.')).toBeVisible()
 
     const computeButton = screen.getByTestId('limit-cycle-floquet-modes-compute')
@@ -4163,6 +4172,7 @@ describe('InspectorDetailsPanel', () => {
     )
 
     await user.click(screen.getByTestId('limit-cycle-data-toggle'))
+    await user.click(screen.getByTestId('limit-cycle-data-floquet-toggle'))
     expect(screen.getByTestId('limit-cycle-floquet-show-0')).toBeVisible()
   })
 
@@ -5250,6 +5260,7 @@ describe('InspectorDetailsPanel', () => {
     )
 
     await user.click(screen.getByTestId('action-equilibrium-data-toggle'))
+    await user.click(screen.getByTestId('equilibrium-data-eigenpairs-toggle'))
     await user.click(screen.getByTestId('equilibrium-eigenvector-enabled'))
 
     expect(onUpdateRender).toHaveBeenCalledWith(nodeId, {
@@ -5346,6 +5357,7 @@ describe('InspectorDetailsPanel', () => {
 
     render(<Wrapper />)
     await user.click(screen.getByTestId('action-equilibrium-data-toggle'))
+    await user.click(screen.getByTestId('equilibrium-data-eigenpairs-toggle'))
 
     fireEvent.change(screen.getByTestId('equilibrium-eigenvector-color-1'), {
       target: { value: '#ff0000' },

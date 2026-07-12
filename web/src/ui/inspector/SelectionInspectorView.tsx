@@ -9,6 +9,7 @@ import { AnalysisInspectorSections } from './sections/AnalysisInspectorSections'
 import { DiagramInspectorSections } from './sections/DiagramInspectorSections'
 import { BranchInspectorSections } from './sections/BranchInspectorSections'
 import type { LineStyle } from '../../system/types'
+import { InspectorSubDisclosure } from './selectionSession'
 
 export function SelectionInspectorView({
   scope,
@@ -413,29 +414,33 @@ export function SelectionInspectorView({
               title="Limit Cycle Data"
               testId="limit-cycle-data-toggle"
             >
-              <div className="inspector-section">
-                <h4 className="inspector-subheading">Summary</h4>
-                <InspectorMetrics
-                  rows={[
-                    { label: 'System', value: limitCycle.systemName },
-                    { label: 'Mesh', value: `${limitCycle.ntst} x ${limitCycle.ncol}` },
-                    { label: 'Period', value: formatNumber(limitCycle.period, 6) },
-                    { label: 'Continuation param', value: limitCycle.parameterName ?? 'n/a' },
-                    {
-                      label: 'Parameter value',
-                      value:
-                        limitCycleDisplayParamValue !== undefined
-                          ? formatNumber(limitCycleDisplayParamValue, 6)
-                          : 'n/a',
-                    },
-                    { label: 'Origin', value: formatLimitCycleOrigin(limitCycle.origin) },
-                    { label: 'Created', value: limitCycle.createdAt },
-                  ]}
-                />
-              </div>
-              <div className="inspector-section">
-                <div className="inspector-subheading-row">
-                  <h4 className="inspector-subheading">Parameters</h4>
+              <InspectorSubDisclosure title="Summary" testId="limit-cycle-data-summary-toggle">
+                <div className="inspector-section">
+                  <InspectorMetrics
+                    rows={[
+                      { label: 'System', value: limitCycle.systemName },
+                      { label: 'Mesh', value: `${limitCycle.ntst} x ${limitCycle.ncol}` },
+                      { label: 'Period', value: formatNumber(limitCycle.period, 6) },
+                      { label: 'Continuation param', value: limitCycle.parameterName ?? 'n/a' },
+                      {
+                        label: 'Parameter value',
+                        value:
+                          limitCycleDisplayParamValue !== undefined
+                            ? formatNumber(limitCycleDisplayParamValue, 6)
+                            : 'n/a',
+                      },
+                      { label: 'Origin', value: formatLimitCycleOrigin(limitCycle.origin) },
+                      { label: 'Created', value: limitCycle.createdAt },
+                    ]}
+                  />
+                </div>
+              </InspectorSubDisclosure>
+              <InspectorSubDisclosure
+                title="Parameters"
+                testId="limit-cycle-data-parameters-toggle"
+              >
+                <div className="inspector-section">
+                  <div className="inspector-inline-actions">
                   {limitCycleDisplayParams.length > 0 ? (
                     <button
                       type="button"
@@ -447,20 +452,24 @@ export function SelectionInspectorView({
                       Copy
                     </button>
                   ) : null}
+                  </div>
+                  {limitCycleDisplayParams.length > 0 ? (
+                    <InspectorMetrics
+                      rows={limitCycleDisplayParams.map((value, index) => ({
+                        label: systemDraft.paramNames[index] || `p${index + 1}`,
+                        value: formatNumber(value, 6),
+                      }))}
+                    />
+                  ) : (
+                    <p className="empty-state">Parameters not recorded yet.</p>
+                  )}
                 </div>
-                {limitCycleDisplayParams.length > 0 ? (
-                  <InspectorMetrics
-                    rows={limitCycleDisplayParams.map((value, index) => ({
-                      label: systemDraft.paramNames[index] || `p${index + 1}`,
-                      value: formatNumber(value, 6),
-                    }))}
-                  />
-                ) : (
-                  <p className="empty-state">Parameters not recorded yet.</p>
-                )}
-              </div>
-              <div className="inspector-section">
-                <h4 className="inspector-subheading">Data preview</h4>
+              </InspectorSubDisclosure>
+              <InspectorSubDisclosure
+                title="Data preview"
+                testId="limit-cycle-data-preview-toggle"
+              >
+                <div className="inspector-section">
                 {limitCycleProfilePoints.length > 0 ? (
                   <div className="orbit-preview">
                     <div className="orbit-preview__controls">
@@ -609,9 +618,13 @@ export function SelectionInspectorView({
                 ) : (
                   <p className="empty-state">No limit cycle profile points stored yet.</p>
                 )}
-              </div>
-              <div className="inspector-section">
-                <h4 className="inspector-subheading">Floquet multipliers</h4>
+                </div>
+              </InspectorSubDisclosure>
+              <InspectorSubDisclosure
+                title="Floquet multipliers and modes"
+                testId="limit-cycle-data-floquet-toggle"
+              >
+                <div className="inspector-section">
                 <div className="inspector-list">
                   {limitCycleModeMultipliers.length > 0 ? (
                     <>
@@ -819,7 +832,8 @@ export function SelectionInspectorView({
                     </p>
                   )}
                 </div>
-              </div>
+                </div>
+              </InspectorSubDisclosure>
             </InspectorDisclosure>
           ) : null}
 

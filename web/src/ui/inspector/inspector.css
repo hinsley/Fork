@@ -124,6 +124,15 @@
   display: none;
 }
 
+.inspector-subdisclosure {
+  margin: 0;
+  padding: 8px 0 0;
+}
+
+.inspector-subdisclosure .inspector-inline-actions {
+  justify-content: flex-end;
+}
+
 .inspector-browser--workflow .inspector-disclosure[data-workflow-active='true'] > summary {
   display: none;
 }
