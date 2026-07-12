@@ -119,6 +119,33 @@ describe('ViewportPanel view state wiring', () => {
     plotlyCalls.length = 0
   })
 
+  it('renders only requested viewports without editor affordances in viewer mode', () => {
+    let system = createSystem({ name: 'Embed_Viewer_System' })
+    const first = addScene(system, 'Scene 1')
+    system = first.system
+    const second = addScene(system, 'Scene 2')
+    system = second.system
+
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        mode="viewer"
+        viewportIds={[first.nodeId]}
+        showHeaders={false}
+        interaction="none"
+        theme="light"
+      />
+    )
+
+    expect(screen.getByTestId(`plotly-${first.nodeId}`)).toBeInTheDocument()
+    expect(screen.queryByTestId(`plotly-${second.nodeId}`)).toBeNull()
+    expect(screen.queryByTestId(`viewport-header-${first.nodeId}`)).toBeNull()
+    expect(screen.queryByTestId(`viewport-resize-${first.nodeId}`)).toBeNull()
+    expect(screen.queryByTestId(`viewport-insert-${first.nodeId}`)).toBeNull()
+    expect(plotlyCalls.find((entry) => entry.plotId === first.nodeId)?.onPointClick).toBeUndefined()
+  })
+
   it('opens a viewport context menu and duplicates a viewport', async () => {
     const user = userEvent.setup()
     let system = createSystem({ name: 'Viewport_Duplicate_System' })

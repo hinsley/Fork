@@ -9,6 +9,7 @@ import { SystemDialog } from './ui/SystemDialog'
 import { SystemSettingsDialog } from './ui/SystemSettingsDialog'
 import { Toolbar } from './ui/Toolbar'
 import { PerfOverlay } from './ui/PerfOverlay'
+import { EmbedDialog } from './ui/EmbedDialog'
 import { isDeterministicMode } from './utils/determinism'
 import { suggestDefaultName } from './utils/naming'
 import { formatEquilibriumLabel } from './system/labels'
@@ -28,6 +29,7 @@ function App() {
   const { system, systems, busy, error, continuationProgress } = state
   const [dialogOpen, setDialogOpen] = useState(false)
   const [systemSettingsOpen, setSystemSettingsOpen] = useState(false)
+  const [embedDialogOpen, setEmbedDialogOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined') return 'light'
     if (isDeterministicMode()) return 'light'
@@ -98,6 +100,7 @@ function App() {
 
   const closeSystemSettings = () => {
     setSystemSettingsOpen(false)
+    setEmbedDialogOpen(false)
   }
 
   const goHome = () => {
@@ -254,6 +257,7 @@ function App() {
         }
         onHome={goHome}
         onOpenSystems={openSystemsDialog}
+        onOpenEmbed={system ? () => setEmbedDialogOpen(true) : undefined}
         theme={theme}
         onThemeChange={setTheme}
         onResetFork={actions.resetFork}
@@ -327,6 +331,14 @@ function App() {
         onCreateHomoclinicFromHomoclinic={actions.createHomoclinicFromHomoclinic}
         onCreateHomotopySaddleFromEquilibrium={actions.createHomotopySaddleFromEquilibrium}
         onCreateHomoclinicFromHomotopySaddle={actions.createHomoclinicFromHomotopySaddle}
+      />
+      <EmbedDialog
+        open={embedDialogOpen && Boolean(system)}
+        system={system}
+        onClose={() => setEmbedDialogOpen(false)}
+        onExport={() => {
+          if (system) void actions.exportSystem(system.id)
+        }}
       />
 
       {error ? (

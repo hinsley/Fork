@@ -17,6 +17,7 @@ type ToolbarProps = {
   } | null
   onHome: () => void
   onOpenSystems: () => void
+  onOpenEmbed?: () => void
   theme: 'light' | 'dark'
   onThemeChange: (theme: 'light' | 'dark') => void
   onResetFork: () => void
@@ -28,6 +29,7 @@ export function Toolbar({
   progress,
   onHome,
   onOpenSystems,
+  onOpenEmbed,
   theme,
   onThemeChange,
   onResetFork,
@@ -80,6 +82,16 @@ export function Toolbar({
         </span>
       </div>
       <div className="toolbar__actions">
+        {systemName && onOpenEmbed ? (
+          <button
+            className="toolbar__button"
+            onClick={onOpenEmbed}
+            data-testid="open-embed"
+          >
+            <span aria-hidden="true">↗</span>
+            Embed
+          </button>
+        ) : null}
         <button
           className="toolbar__button toolbar__button--primary"
           onClick={onOpenSystems}

@@ -2,5 +2,16 @@
   "framework": "vite",
   "installCommand": "npm run vercel:install",
   "buildCommand": "npm run vercel:build",
-  "outputDirectory": "dist"
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/embed", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/embed",
+      "headers": [
+        { "key": "Content-Security-Policy", "value": "frame-ancestors *" }
+      ]
+    }
+  ]
 }
