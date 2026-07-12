@@ -104,6 +104,11 @@ export function SelectionInspectorView({
     writeClipboardText,
   } = scope
 
+    const navigationClass =
+      workflowFocus?.navigationPhase !== 'idle' && workflowFocus?.navigationDirection
+        ? ` inspector-navigation-page--${workflowFocus.navigationPhase}-${workflowFocus.navigationDirection}`
+        : ''
+
     return (
       <div
         className={`inspector-panel inspector-browser${
@@ -111,9 +116,14 @@ export function SelectionInspectorView({
         }`}
         data-testid="inspector-panel-body"
         data-active-workflow={workflowFocus?.activeWorkflow ?? undefined}
+        data-navigation-direction={workflowFocus?.navigationDirection ?? undefined}
+        data-navigation-phase={workflowFocus?.navigationPhase ?? 'idle'}
       >
         {selectionNode ? (
-          <div className="inspector-group">
+          <div
+            className={`inspector-group inspector-navigation-page${navigationClass}`}
+            key={workflowFocus?.activeWorkflow ?? 'selection-root'}
+          >
             {!workflowFocus?.activeWorkflow ? (
               <div className="inspector-section inspector-entity-header">
                 <label>

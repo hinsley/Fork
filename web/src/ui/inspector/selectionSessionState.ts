@@ -38,23 +38,62 @@ export type WorkflowActionEntry = {
   tag?: string
 }
 
+export type WorkflowNavigationDirection = 'forward' | 'backward'
+export type WorkflowNavigationPhase = 'idle' | 'exiting' | 'entering'
+
 export type SelectionSessionState = {
   activeWorkflow: WorkflowId | null
+  navigationDirection: WorkflowNavigationDirection | null
+  navigationPhase: WorkflowNavigationPhase
+  targetWorkflow: WorkflowId | null
 }
 
 export type SelectionSessionAction =
-  | { type: 'open-workflow'; workflow: WorkflowId }
-  | { type: 'close-workflow' }
+  | {
+      type: 'start-navigation'
+      direction: WorkflowNavigationDirection
+      targetWorkflow: WorkflowId | null
+    }
+  | { type: 'commit-navigation' }
+  | { type: 'finish-navigation' }
+  | {
+      type: 'navigate-immediately'
+      targetWorkflow: WorkflowId | null
+    }
 
 export function selectionSessionReducer(
-  _state: SelectionSessionState,
+  state: SelectionSessionState,
   action: SelectionSessionAction
 ): SelectionSessionState {
   switch (action.type) {
-    case 'open-workflow':
-      return { activeWorkflow: action.workflow }
-    case 'close-workflow':
-      return { activeWorkflow: null }
+    case 'start-navigation':
+      return {
+        ...state,
+        navigationDirection: action.direction,
+        navigationPhase: 'exiting',
+        targetWorkflow: action.targetWorkflow,
+      }
+    case 'commit-navigation':
+      if (state.navigationPhase !== 'exiting') return state
+      return {
+        ...state,
+        activeWorkflow: state.targetWorkflow,
+        navigationPhase: 'entering',
+      }
+    case 'finish-navigation':
+      return {
+        ...state,
+        navigationDirection: null,
+        navigationPhase: 'idle',
+        targetWorkflow: state.activeWorkflow,
+      }
+    case 'navigate-immediately':
+      return {
+        activeWorkflow: action.targetWorkflow,
+        navigationDirection: null,
+        navigationPhase: 'idle',
+        targetWorkflow: action.targetWorkflow,
+      }
   }
 }
 

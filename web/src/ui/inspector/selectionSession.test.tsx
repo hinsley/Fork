@@ -5,14 +5,54 @@ import { selectionSessionReducer } from './selectionSessionState'
 import { useWorkflowFocus } from './useWorkflowFocus'
 
 describe('selectionSessionReducer', () => {
-  it('opens, preserves, and closes focused workflows explicitly', () => {
-    const initial = { activeWorkflow: null } as const
-    const open = selectionSessionReducer(initial, {
-      type: 'open-workflow',
-      workflow: 'equilibrium-solver-toggle',
+  it('moves forward and backward through directional navigation phases', () => {
+    const initial = {
+      activeWorkflow: null,
+      navigationDirection: null,
+      navigationPhase: 'idle',
+      targetWorkflow: null,
+    } as const
+    const exitingForward = selectionSessionReducer(initial, {
+      type: 'start-navigation',
+      direction: 'forward',
+      targetWorkflow: 'equilibrium-solver-toggle',
     })
-    expect(open).toEqual({ activeWorkflow: 'equilibrium-solver-toggle' })
-    expect(selectionSessionReducer(open, { type: 'close-workflow' })).toEqual(initial)
+    expect(exitingForward).toMatchObject({
+      activeWorkflow: null,
+      navigationDirection: 'forward',
+      navigationPhase: 'exiting',
+    })
+    const enteringForward = selectionSessionReducer(exitingForward, {
+      type: 'commit-navigation',
+    })
+    expect(enteringForward).toMatchObject({
+      activeWorkflow: 'equilibrium-solver-toggle',
+      navigationDirection: 'forward',
+      navigationPhase: 'entering',
+    })
+    const open = selectionSessionReducer(enteringForward, { type: 'finish-navigation' })
+    expect(open).toMatchObject({
+      activeWorkflow: 'equilibrium-solver-toggle',
+      navigationDirection: null,
+      navigationPhase: 'idle',
+    })
+
+    const exitingBackward = selectionSessionReducer(open, {
+      type: 'start-navigation',
+      direction: 'backward',
+      targetWorkflow: null,
+    })
+    const enteringBackward = selectionSessionReducer(exitingBackward, {
+      type: 'commit-navigation',
+    })
+    expect(enteringBackward).toMatchObject({
+      activeWorkflow: null,
+      navigationDirection: 'backward',
+      navigationPhase: 'entering',
+    })
+    expect(
+      selectionSessionReducer(enteringBackward, { type: 'finish-navigation' })
+    ).toEqual(initial)
   })
 
   it('provides focus controls to a keyed inspector session', () => {

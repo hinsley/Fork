@@ -1,22 +1,64 @@
-import { useMemo, useReducer, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, type ReactNode } from 'react'
+import { isDeterministicMode } from '../../utils/determinism'
 import {
   selectionSessionReducer,
   type WorkflowActionEntry,
+  type WorkflowId,
 } from './selectionSessionState'
 import { WorkflowFocusContext, type WorkflowFocusValue } from './workflowFocusContext'
 import { useWorkflowFocus } from './useWorkflowFocus'
 
+const NAVIGATION_EXIT_MS = 150
+const NAVIGATION_ENTER_MS = 200
+
+function shouldAnimateNavigation() {
+  if (isDeterministicMode() || typeof window === 'undefined') return false
+  return !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+}
+
 export function WorkflowFocusProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(selectionSessionReducer, {
     activeWorkflow: null,
+    navigationDirection: null,
+    navigationPhase: 'idle',
+    targetWorkflow: null,
   })
+  const navigate = useCallback(
+    (targetWorkflow: WorkflowId | null) => {
+      if (state.navigationPhase !== 'idle' || targetWorkflow === state.activeWorkflow) return
+      if (!shouldAnimateNavigation()) {
+        dispatch({ type: 'navigate-immediately', targetWorkflow })
+        return
+      }
+      dispatch({
+        type: 'start-navigation',
+        direction: targetWorkflow ? 'forward' : 'backward',
+        targetWorkflow,
+      })
+    },
+    [state.activeWorkflow, state.navigationPhase]
+  )
+  useEffect(() => {
+    if (state.navigationPhase === 'idle') return
+    const timeout = window.setTimeout(
+      () =>
+        dispatch({
+          type:
+            state.navigationPhase === 'exiting'
+              ? 'commit-navigation'
+              : 'finish-navigation',
+        }),
+      state.navigationPhase === 'exiting' ? NAVIGATION_EXIT_MS : NAVIGATION_ENTER_MS
+    )
+    return () => window.clearTimeout(timeout)
+  }, [state.navigationPhase])
   const value = useMemo<WorkflowFocusValue>(
     () => ({
       ...state,
-      openWorkflow: (workflow) => dispatch({ type: 'open-workflow', workflow }),
-      closeWorkflow: () => dispatch({ type: 'close-workflow' }),
+      openWorkflow: (workflow) => navigate(workflow),
+      closeWorkflow: () => navigate(null),
     }),
-    [state]
+    [navigate, state]
   )
   return <WorkflowFocusContext.Provider value={value}>{children}</WorkflowFocusContext.Provider>
 }
