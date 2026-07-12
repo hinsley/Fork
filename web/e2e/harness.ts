@@ -94,7 +94,7 @@ export class ForkHarness {
   }
 
   async solveEquilibrium() {
-    await this.page.getByTestId('equilibrium-solver-toggle').click()
+    await this.page.getByTestId('action-equilibrium-solver-toggle').click()
     await this.page.getByTestId('equilibrium-solve-submit').click()
   }
 

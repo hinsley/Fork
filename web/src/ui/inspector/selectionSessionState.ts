@@ -6,6 +6,7 @@ export const WORKFLOW_IDS = [
   'oseledets-toggle',
   'limit-cycle-toggle',
   'equilibrium-solver-toggle',
+  'equilibrium-data-toggle',
   'equilibrium-continuation-toggle',
   'equilibrium-manifold-toggle',
   'limit-cycle-data-toggle',
@@ -28,7 +29,7 @@ export type WorkflowId = (typeof WORKFLOW_IDS)[number]
 
 export type WorkflowActionEntry = {
   id: WorkflowId
-  group: 'Configure' | 'Compute' | 'Continuation' | 'Manifolds' | 'Bifurcations'
+  group: 'Configure' | 'Inspect' | 'Compute' | 'Continuation' | 'Manifolds' | 'Bifurcations'
   label: string
   description: string
   tag?: string

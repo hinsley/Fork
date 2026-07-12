@@ -268,13 +268,13 @@ describe('InspectorDetailsPanel', () => {
 
     renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
 
-    expect(screen.getByTestId('equilibrium-solver-toggle')).toBeVisible()
-    expect(screen.queryByTestId('equilibrium-data-toggle')).toBeNull()
-    expect(screen.queryByTestId('equilibrium-continuation-toggle')).toBeNull()
-    expect(screen.queryByTestId('equilibrium-manifold-toggle')).toBeNull()
+    expect(screen.getByTestId('action-equilibrium-solver-toggle')).toBeVisible()
+    expect(screen.queryByTestId('action-equilibrium-data-toggle')).toBeNull()
+    expect(screen.queryByTestId('action-equilibrium-continuation-toggle')).toBeNull()
+    expect(screen.queryByTestId('action-equilibrium-manifold-toggle')).toBeNull()
   })
 
-  it('orders the equilibrium solver before every solution-dependent menu', () => {
+  it('routes equilibrium panels through the Actions menu', () => {
     const baseSystem = createSystem({
       name: 'Solved_Equilibrium_Inspector',
       config: {
@@ -304,16 +304,23 @@ describe('InspectorDetailsPanel', () => {
 
     renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
 
-    const solver = screen.getByTestId('equilibrium-solver-toggle')
-    for (const dependentTestId of [
+    for (const actionTestId of [
+      'action-equilibrium-solver-toggle',
+      'action-equilibrium-data-toggle',
+      'action-equilibrium-continuation-toggle',
+      'action-equilibrium-manifold-toggle',
+    ]) {
+      expect(screen.getByTestId(actionTestId)).toBeVisible()
+    }
+    for (const panelTestId of [
+      'equilibrium-solver-toggle',
       'equilibrium-data-toggle',
       'equilibrium-continuation-toggle',
       'equilibrium-manifold-toggle',
     ]) {
-      const dependent = screen.getByTestId(dependentTestId)
-      expect(
-        solver.compareDocumentPosition(dependent) & Node.DOCUMENT_POSITION_FOLLOWING
-      ).not.toBe(0)
+      expect(screen.getByTestId(panelTestId).closest('details')).toHaveClass(
+        'inspector-disclosure--action-only'
+      )
     }
   })
 
@@ -2138,7 +2145,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('equilibrium-continuation-toggle'))
+    await user.click(screen.getByTestId('action-equilibrium-continuation-toggle'))
     const branchInput = screen.getByTestId('equilibrium-branch-name')
 
     await waitFor(() => {
@@ -2210,7 +2217,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('equilibrium-continuation-toggle'))
+    await user.click(screen.getByTestId('action-equilibrium-continuation-toggle'))
     const branchInput = screen.getByTestId('equilibrium-branch-name')
     const paramSelect = screen.getByTestId('equilibrium-branch-parameter')
 
@@ -2281,7 +2288,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('equilibrium-continuation-toggle'))
+    await user.click(screen.getByTestId('action-equilibrium-continuation-toggle'))
     const branchInput = screen.getByTestId('equilibrium-branch-name')
     const paramSelect = screen.getByTestId('equilibrium-branch-parameter')
 
@@ -2352,7 +2359,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('equilibrium-continuation-toggle'))
+    await user.click(screen.getByTestId('action-equilibrium-continuation-toggle'))
     const branchInput = screen.getByTestId('equilibrium-branch-name')
     const paramSelect = screen.getByTestId('equilibrium-branch-parameter')
 
@@ -5083,7 +5090,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('equilibrium-solver-toggle'))
+    await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
     await user.clear(screen.getByTestId('equilibrium-solve-steps'))
     await user.type(screen.getByTestId('equilibrium-solve-steps'), '10')
     await user.clear(screen.getByTestId('equilibrium-solve-damping'))
@@ -5167,7 +5174,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('equilibrium-data-toggle'))
+    await user.click(screen.getByTestId('action-equilibrium-data-toggle'))
 
     expect(screen.queryByTestId('equilibrium-eigenvector-enabled')).toBeNull()
     expect(screen.queryByTestId('equilibrium-eigenvector-line-length')).toBeNull()
@@ -5242,7 +5249,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('equilibrium-data-toggle'))
+    await user.click(screen.getByTestId('action-equilibrium-data-toggle'))
     await user.click(screen.getByTestId('equilibrium-eigenvector-enabled'))
 
     expect(onUpdateRender).toHaveBeenCalledWith(nodeId, {
@@ -5338,7 +5345,7 @@ describe('InspectorDetailsPanel', () => {
     }
 
     render(<Wrapper />)
-    await user.click(screen.getByTestId('equilibrium-data-toggle'))
+    await user.click(screen.getByTestId('action-equilibrium-data-toggle'))
 
     fireEvent.change(screen.getByTestId('equilibrium-eigenvector-color-1'), {
       target: { value: '#ff0000' },
@@ -5430,7 +5437,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('equilibrium-manifold-toggle'))
+    await user.click(screen.getByTestId('action-equilibrium-manifold-toggle'))
 
     const profile = screen.getByTestId('equilibrium-manifold2d-profile') as HTMLSelectElement
     expect(profile.value).toBe('adaptive_global')
@@ -5531,7 +5538,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('equilibrium-manifold-toggle'))
+    await user.click(screen.getByTestId('action-equilibrium-manifold-toggle'))
 
     const modeSelect = screen.getByTestId('equilibrium-manifold-mode') as HTMLSelectElement
     expect(modeSelect.value).toBe('surface_2d')
@@ -5632,7 +5639,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('equilibrium-manifold-toggle'))
+    await user.click(screen.getByTestId('action-equilibrium-manifold-toggle'))
 
     expect(
       screen.getByText('Map systems currently support 1D equilibrium manifolds only.')
@@ -5714,7 +5721,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('equilibrium-manifold-toggle'))
+    await user.click(screen.getByTestId('action-equilibrium-manifold-toggle'))
     const eigIndex = screen.getByTestId('equilibrium-manifold-eig-index') as HTMLSelectElement
     expect(Array.from(eigIndex.options).map((option) => option.textContent)).toEqual(['1', '3'])
 
@@ -5798,7 +5805,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
-    await user.click(screen.getByTestId('equilibrium-manifold-toggle'))
+    await user.click(screen.getByTestId('action-equilibrium-manifold-toggle'))
     expect(screen.queryByTestId('equilibrium-manifold-integration-dt')).toBeNull()
     const maxIterationsInput = screen.getByTestId(
       'equilibrium-manifold-caps-max-iterations'

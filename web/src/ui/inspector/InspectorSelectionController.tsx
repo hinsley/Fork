@@ -4395,6 +4395,14 @@ function useInspectorSelectionController({
     }
   }
   if (equilibrium) {
+    if (equilibrium.solution) {
+      workflowActions.push({
+        id: 'equilibrium-data-toggle',
+        group: 'Inspect',
+        label: 'View Data',
+        description: `Inspect the stored ${equilibriumLabelLower} solution and spectrum.`,
+      })
+    }
     workflowActions.push({
       id: 'equilibrium-solver-toggle',
       group: 'Compute',

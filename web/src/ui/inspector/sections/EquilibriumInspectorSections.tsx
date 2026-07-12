@@ -71,6 +71,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                 title={`${equilibriumLabel} Solver`}
                 testId="equilibrium-solver-toggle"
                 defaultOpen={false}
+                actionOnly
               >
                 <div className="inspector-section">
                   {runDisabled ? (
@@ -150,6 +151,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                 key={`${selectionKey}-equilibrium-data`}
                 title={`${equilibriumLabel} Data`}
                 testId="equilibrium-data-toggle"
+                actionOnly
               >
                 <div className="inspector-section">
                   <h4 className="inspector-subheading">Summary</h4>
@@ -572,6 +574,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                 title={`${equilibriumLabel} Continuation`}
                 testId="equilibrium-continuation-toggle"
                 defaultOpen={false}
+                actionOnly
               >
                 <div className="inspector-section">
                   {runDisabled ? (
@@ -774,6 +777,7 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                 title="Invariant Manifolds"
                 testId="equilibrium-manifold-toggle"
                 defaultOpen={false}
+                actionOnly
               >
                 <div className="inspector-section">
                   {runDisabled ? (

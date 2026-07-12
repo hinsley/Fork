@@ -27,7 +27,14 @@ export function WorkflowActionList({ entries }: { entries: WorkflowActionEntry[]
   const focus = useWorkflowFocus()
   if (!focus || focus.activeWorkflow || entries.length === 0) return null
 
-  const groups = ['Configure', 'Compute', 'Continuation', 'Manifolds', 'Bifurcations'] as const
+  const groups = [
+    'Configure',
+    'Inspect',
+    'Compute',
+    'Continuation',
+    'Manifolds',
+    'Bifurcations',
+  ] as const
   return (
     <section className="inspector-actions" data-testid="inspector-actions">
       <div className="inspector-actions__heading">
@@ -82,7 +89,7 @@ export function WorkflowFocusToolbar({
         <span>{entry?.group ?? 'Action'}</span>
         <strong>{entry?.label ?? 'Workflow'}</strong>
       </div>
-      {entry?.group !== 'Configure' ? (
+      {entry?.group !== 'Configure' && entry?.group !== 'Inspect' ? (
         <button
           type="button"
           aria-expanded={focus.advancedOpen}

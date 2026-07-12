@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { addObject, createSystem } from '../../system/model'
-import type { OrbitObject, System } from '../../system/types'
+import type { EquilibriumObject, OrbitObject, System } from '../../system/types'
 import { InspectorDetailsPanel } from '../InspectorDetailsPanel'
 
 function orbit(name: string, systemName: string): OrbitObject {
@@ -41,6 +41,36 @@ function requiredProps(system: System, selectedNodeId: string) {
 }
 
 describe('selection inspector workflow shell', () => {
+  it('opens solved equilibrium data from the Inspect action', async () => {
+    const user = userEvent.setup()
+    const base = createSystem({ name: 'Workflow_Inspect' })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Equilibrium_A',
+      systemName: base.name,
+      solution: {
+        state: base.config.varNames.map(() => 0),
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [],
+      },
+      parameters: [...base.config.params],
+    }
+    const added = addObject(base, equilibrium)
+    render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
+
+    const actions = screen.getByTestId('inspector-actions')
+    expect(within(actions).getByRole('heading', { name: 'Inspect' })).toBeVisible()
+    expect(screen.getByTestId('action-equilibrium-data-toggle')).toHaveTextContent('View Data')
+
+    await user.click(screen.getByTestId('action-equilibrium-data-toggle'))
+
+    expect(screen.getByTestId('inspector-workflow-focus')).toHaveTextContent('Inspect')
+    expect(screen.getByRole('heading', { name: 'Coordinates' })).toBeVisible()
+    expect(screen.queryByTestId('inspector-workflow-advanced')).toBeNull()
+  })
+
   it('groups configuration actions and labels continuation actions', () => {
     const base = createSystem({ name: 'Workflow_Groups' })
     const added = addObject(

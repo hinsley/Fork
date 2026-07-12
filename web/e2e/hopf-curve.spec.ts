@@ -34,11 +34,12 @@ test('continue hopf curve from detected hopf point', async ({ page }) => {
   ).toBeVisible()
   await harness.selectTreeNode('Equilibrium_1')
 
-  await page.getByTestId('equilibrium-solver-toggle').click()
+  await page.getByTestId('action-equilibrium-solver-toggle').click()
   await page.getByTestId('equilibrium-solve-submit').click()
   await expect(page.getByText(/^Solved$/)).toBeVisible()
 
-  await page.getByTestId('equilibrium-continuation-toggle').click()
+  await page.getByTestId('inspector-workflow-back').click()
+  await page.getByTestId('action-equilibrium-continuation-toggle').click()
   await page.getByTestId('equilibrium-branch-name').fill('eq_hopf_branch')
   await page.getByTestId('equilibrium-branch-parameter').selectOption('p1')
   await page.getByTestId('equilibrium-branch-step-size').fill('0.05')
