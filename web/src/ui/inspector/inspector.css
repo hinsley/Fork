@@ -42,10 +42,23 @@
   display: flex;
   min-height: 48px;
   padding: 8px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--button-bg);
+  color: var(--text);
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.inspector-action-row:hover {
+  border-color: var(--panel-border-strong);
+  background: var(--button-bg-hover);
 }
 
 .inspector-action-row > span:first-child {
