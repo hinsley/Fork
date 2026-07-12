@@ -9,7 +9,7 @@ async function setupAnalysisViewport(page: Page) {
   await harness.openSystem('Lorenz')
   await harness.createOrbit()
   await harness.selectTreeNode('Orbit_1')
-  await page.getByTestId('orbit-run-toggle').waitFor({ state: 'visible' })
+  await page.getByTestId('action-orbit-run-toggle').waitFor({ state: 'visible' })
   await harness.runOrbit()
   await page.getByTestId('viewport-insert-empty').waitFor({ state: 'visible' })
   await page.getByTestId('viewport-insert-empty').click()

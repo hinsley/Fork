@@ -144,12 +144,14 @@ behavior.
   override text contrast without touching Plotly layout code. Trace names in
   hover labels use `--plotly-hover-name-text` to remain readable on Plotly's
   translucent white name panel.
-- `web/src/ui/InspectorDetailsPanel.tsx`: eigenvalue/multiplier plots set
-  `dragmode: 'pan'`, compute fixed `xaxis.range`/`yaxis.range` values for the
-  complex plane, and add unit circle/disc overlays for multiplier/eigenvalue
-  views. Equilibrium eigenvalue markers are color-mapped from the corresponding
-  eigenvector/eigendisc render colors (no relayout persistence is wired for
-  these mini plots).
+- `web/src/ui/inspector/InspectorSelectionController.tsx` constructs the shared
+  eigenvalue/multiplier mini-plot data and layouts; the selection shell,
+  equilibrium section, and branch-data section render those layouts through
+  `PlotlyViewport`. These plots set `dragmode: 'pan'`, compute fixed
+  `xaxis.range`/`yaxis.range` values for the complex plane, and add unit
+  circle/disc overlays for multiplier/eigenvalue views. Equilibrium eigenvalue
+  markers are color-mapped from the corresponding eigenvector/eigendisc render
+  colors (no relayout persistence is wired for these mini plots).
 
 ### Plot styling driven by app theme
 

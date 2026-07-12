@@ -31,11 +31,12 @@ test('continue limit cycle from a Hopf bifurcation', async ({ page }) => {
   ).toBeVisible()
   await harness.selectTreeNode('Equilibrium_1')
 
-  await page.getByTestId('equilibrium-solver-toggle').click()
+  await page.getByTestId('action-equilibrium-solver-toggle').click()
   await page.getByTestId('equilibrium-solve-submit').click()
   await expect(page.getByText(/^Solved$/)).toBeVisible()
 
-  await page.getByTestId('equilibrium-continuation-toggle').click()
+  await page.getByTestId('inspector-workflow-back').click()
+  await page.getByTestId('action-equilibrium-continuation-toggle').click()
   await page.getByTestId('equilibrium-branch-name').fill('eq_hopf_mu')
   await page.getByTestId('equilibrium-branch-parameter').selectOption('mu')
   await page.getByTestId('equilibrium-branch-step-size').fill('0.02')
@@ -67,7 +68,8 @@ test('continue limit cycle from a Hopf bifurcation', async ({ page }) => {
   }
   expect(hopfFound).toBeTruthy()
 
-  await page.getByTestId('limit-cycle-from-hopf-toggle').click()
+  await page.getByTestId('inspector-workflow-back').click()
+  await page.getByTestId('action-limit-cycle-from-hopf-toggle').click()
   await page.getByTestId('limit-cycle-from-hopf-name').fill('lc_hopf_mu')
   await page.getByTestId('limit-cycle-from-hopf-branch-name').fill('lc_hopf_branch')
   await page.getByTestId('limit-cycle-from-hopf-amplitude').fill('0.1')

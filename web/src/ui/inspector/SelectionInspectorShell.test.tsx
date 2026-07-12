@@ -1,0 +1,228 @@
+import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it, vi } from 'vitest'
+import { addObject, createSystem } from '../../system/model'
+import type { EquilibriumObject, OrbitObject, System } from '../../system/types'
+import { InspectorDetailsPanel } from '../InspectorDetailsPanel'
+
+function orbit(name: string, systemName: string): OrbitObject {
+  return { type: 'orbit', name, systemName, data: [], t_start: 0, t_end: 10, dt: 0.01 }
+}
+
+function requiredProps(system: System, selectedNodeId: string) {
+  const resolved = Promise.resolve()
+  return {
+    system,
+    selectedNodeId,
+    view: 'selection' as const,
+    theme: 'light' as const,
+    onRename: vi.fn(),
+    onToggleVisibility: vi.fn(),
+    onUpdateRender: vi.fn(),
+    onUpdateScene: vi.fn(),
+    onUpdateBifurcationDiagram: vi.fn(),
+    onUpdateSystem: vi.fn(() => resolved),
+    onValidateSystem: vi.fn(() => Promise.resolve({ ok: true, equationErrors: [] })),
+    onRunOrbit: vi.fn(() => resolved),
+    onComputeLyapunovExponents: vi.fn(() => resolved),
+    onComputeCovariantLyapunovVectors: vi.fn(() => resolved),
+    onSolveEquilibrium: vi.fn(() => resolved),
+    onCreateEquilibriumBranch: vi.fn(() => resolved),
+    onCreateBranchFromPoint: vi.fn(() => resolved),
+    onExtendBranch: vi.fn(() => resolved),
+    onCreateFoldCurveFromPoint: vi.fn(() => resolved),
+    onCreateHopfCurveFromPoint: vi.fn(() => resolved),
+    onCreateNSCurveFromPoint: vi.fn(() => resolved),
+    onCreateLimitCycleFromHopf: vi.fn(() => resolved),
+    onCreateLimitCycleFromOrbit: vi.fn(() => resolved),
+    onCreateLimitCycleFromPD: vi.fn(() => resolved),
+    onCreateCycleFromPD: vi.fn(() => resolved),
+  }
+}
+
+describe('selection inspector workflow shell', () => {
+  it('opens solved equilibrium data from the Inspect action', async () => {
+    const user = userEvent.setup()
+    const base = createSystem({
+      name: 'Workflow_Inspect',
+      config: {
+        name: 'Workflow_Inspect',
+        equations: ['-x'],
+        params: [1],
+        paramNames: ['a'],
+        varNames: ['x'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Equilibrium_A',
+      systemName: base.name,
+      solution: {
+        state: base.config.varNames.map(() => 0),
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [],
+      },
+      parameters: [...base.config.params],
+    }
+    const added = addObject(base, equilibrium)
+    render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
+
+    const actions = screen.getByTestId('inspector-actions')
+    expect(within(actions).getByRole('heading', { name: 'Inspect' })).toBeVisible()
+    expect(screen.getByTestId('action-equilibrium-data-toggle')).toHaveTextContent('View Data')
+
+    await user.click(screen.getByTestId('action-equilibrium-data-toggle'))
+
+    expect(screen.getByTestId('inspector-workflow-focus')).toHaveTextContent('Inspect')
+    expect(screen.getByTestId('equilibrium-data-coordinates-toggle')).toBeVisible()
+    expect(screen.getByTestId('equilibrium-data-parameters-toggle')).toBeVisible()
+    expect(screen.getByTestId('equilibrium-data-eigenpairs-toggle')).toBeVisible()
+    expect(screen.queryByTestId('equilibrium-data-summary-toggle')).toBeNull()
+    const coordinatesToggle = screen.getByTestId('equilibrium-data-coordinates-toggle')
+    await user.click(coordinatesToggle)
+    const coordinatesDetails = coordinatesToggle.closest('details')
+    expect(coordinatesDetails).not.toBeNull()
+    const coordinates = within(coordinatesDetails as HTMLElement)
+    const coordinateLabel = coordinates.getByText(base.config.varNames[0])
+    const coordinateCopy = coordinates.getByRole('button', { name: 'Copy' })
+    expect(coordinateLabel).toBeVisible()
+    expect(
+      coordinateLabel.compareDocumentPosition(coordinateCopy) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).not.toBe(0)
+
+    const parametersToggle = screen.getByTestId('equilibrium-data-parameters-toggle')
+    await user.click(parametersToggle)
+    const parametersDetails = parametersToggle.closest('details')
+    expect(parametersDetails).not.toBeNull()
+    const parameters = within(parametersDetails as HTMLElement)
+    const parameterLabel = parameters.getByText(base.config.paramNames[0])
+    const parameterCopy = parameters.getByRole('button', { name: 'Copy' })
+    expect(
+      parameterLabel.compareDocumentPosition(parameterCopy) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).not.toBe(0)
+    expect(screen.getByRole('heading', { name: 'Residual and iterations' })).not.toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Last solver attempt' })).not.toBeVisible()
+    expect(screen.queryByTestId('inspector-workflow-advanced')).toBeNull()
+
+    await user.click(screen.getByTestId('inspector-workflow-back'))
+    await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
+
+    expect(screen.getByRole('heading', { name: 'Residual and iterations' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Last solver attempt' })).toBeVisible()
+    expect(screen.queryByText('Cached solver parameters')).toBeNull()
+  })
+
+  it('groups configuration actions and labels continuation actions', () => {
+    const base = createSystem({ name: 'Workflow_Groups' })
+    const added = addObject(
+      base,
+      {
+        ...orbit('Orbit_A', base.name),
+        data: [
+          [0, 1],
+          [1, 2],
+        ],
+      }
+    )
+    render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
+
+    const actions = screen.getByTestId('inspector-actions')
+    expect(within(actions).queryByText('Actions')).toBeNull()
+    expect(within(actions).queryByText('Available for this selection')).toBeNull()
+    expect(actions).toHaveTextContent('Configure')
+    expect(actions).toHaveTextContent('Frozen Variables')
+    expect(actions).toHaveTextContent('Parameters')
+    expect(within(actions).getAllByRole('button')[0]).toHaveTextContent('Appearance')
+    expect(actions).not.toHaveTextContent('Modify appearance')
+    expect(within(actions).getByRole('heading', { name: 'Continuation' })).toBeVisible()
+    expect(within(actions).queryByRole('heading', { name: 'Continue' })).toBeNull()
+  })
+
+  it('routes discrete-map orbit data and workflows exclusively through Actions', async () => {
+    const user = userEvent.setup()
+    const base = createSystem({
+      name: 'Workflow_Map',
+      config: {
+        name: 'Workflow_Map',
+        equations: ['r * x * (1 - x)'],
+        params: [3.7],
+        paramNames: ['r'],
+        varNames: ['x'],
+        solver: 'discrete',
+        type: 'map',
+      },
+    })
+    const added = addObject(base, {
+      ...orbit('Orbit_Map', base.name),
+      data: [
+        [0, 0.2],
+        [1, 0.592],
+      ],
+      parameters: [...base.config.params],
+    })
+    render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
+
+    const actions = screen.getByTestId('inspector-actions')
+    expect(within(actions).getByRole('heading', { name: 'Inspect' })).toBeVisible()
+    expect(screen.getByTestId('action-orbit-data-toggle')).toHaveTextContent('View Data')
+    expect(screen.getByTestId('action-orbit-run-toggle')).toBeVisible()
+    expect(screen.getByTestId('action-oseledets-toggle')).toBeVisible()
+    expect(screen.queryByTestId('action-limit-cycle-toggle')).toBeNull()
+
+    for (const testId of ['orbit-data-toggle', 'orbit-run-toggle', 'oseledets-toggle']) {
+      expect(screen.getByTestId(testId).closest('details')).toHaveClass(
+        'inspector-disclosure--action-only'
+      )
+    }
+
+    await user.click(screen.getByTestId('action-orbit-data-toggle'))
+    expect(screen.getByTestId('inspector-workflow-focus')).toHaveTextContent('View Data')
+    expect(screen.getByTestId('orbit-data-summary-toggle')).toBeVisible()
+  })
+
+  it('focuses one action and retains its draft when returning to browse mode', async () => {
+    const user = userEvent.setup()
+    const base = createSystem({ name: 'Workflow_Shell' })
+    const added = addObject(base, orbit('Orbit_A', base.name))
+    render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
+
+    await user.click(screen.getByTestId('action-orbit-run-toggle'))
+    expect(screen.getByTestId('inspector-workflow-focus')).toBeVisible()
+    expect(screen.getByTestId('orbit-run-duration')).toBeVisible()
+    expect(screen.getByTestId('inspector-workflow-advanced')).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+
+    await user.clear(screen.getByTestId('orbit-run-duration'))
+    await user.type(screen.getByTestId('orbit-run-duration'), '42')
+    await user.click(screen.getByTestId('inspector-workflow-back'))
+    expect(screen.getByTestId('inspector-actions')).toBeVisible()
+
+    await user.click(screen.getByTestId('action-orbit-run-toggle'))
+    expect(screen.getByTestId('orbit-run-duration')).toHaveValue(42)
+  })
+
+  it('creates a fresh keyed session when the selected node changes', async () => {
+    const user = userEvent.setup()
+    const base = createSystem({ name: 'Workflow_Reset' })
+    const first = addObject(base, orbit('Orbit_A', base.name))
+    const second = addObject(first.system, orbit('Orbit_B', base.name))
+    const { rerender } = render(
+      <InspectorDetailsPanel {...requiredProps(second.system, first.nodeId)} />
+    )
+
+    await user.click(screen.getByTestId('action-orbit-run-toggle'))
+    await user.clear(screen.getByTestId('orbit-run-duration'))
+    await user.type(screen.getByTestId('orbit-run-duration'), '42')
+
+    rerender(<InspectorDetailsPanel {...requiredProps(second.system, second.nodeId)} />)
+    expect(screen.queryByTestId('inspector-workflow-focus')).not.toBeInTheDocument()
+    await user.click(screen.getByTestId('action-orbit-run-toggle'))
+    expect(screen.getByTestId('orbit-run-duration')).not.toHaveValue(42)
+  })
+})

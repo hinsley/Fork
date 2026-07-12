@@ -14,14 +14,15 @@ test('rossler hopf to limit cycle continuation rejects neutral saddle', async ({
   ).toBeVisible()
   await harness.selectTreeNode('Equilibrium_1')
 
-  await page.getByTestId('equilibrium-solver-toggle').click()
+  await page.getByTestId('action-equilibrium-solver-toggle').click()
   await page.getByTestId('equilibrium-solve-guess-0').fill('0')
   await page.getByTestId('equilibrium-solve-guess-1').fill('0')
   await page.getByTestId('equilibrium-solve-guess-2').fill('0')
   await page.getByTestId('equilibrium-solve-submit').click()
   await expect(page.getByText(/^Solved$/)).toBeVisible()
 
-  await page.getByTestId('equilibrium-continuation-toggle').click()
+  await page.getByTestId('inspector-workflow-back').click()
+  await page.getByTestId('action-equilibrium-continuation-toggle').click()
   await page.getByTestId('equilibrium-branch-name').fill('eq_rossler_a')
   await page.getByTestId('equilibrium-branch-parameter').selectOption('a')
   await page.getByTestId('equilibrium-branch-submit').click()
@@ -37,7 +38,7 @@ test('rossler hopf to limit cycle continuation rejects neutral saddle', async ({
   await page.getByTestId('branch-point-jump').click()
   await expect(page.getByText('Stability: NeutralSaddle')).toBeVisible({ timeout: 20_000 })
 
-  await expect(page.getByTestId('limit-cycle-from-hopf-toggle')).toHaveCount(0)
+  await expect(page.getByTestId('action-limit-cycle-from-hopf-toggle')).toHaveCount(0)
   await expect(
     page.getByText('Select a Hopf bifurcation point to continue a limit cycle.')
   ).toHaveCount(0)

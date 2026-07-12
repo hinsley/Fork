@@ -40,4 +40,20 @@ test('objects tree wraps long names without horizontal overflow', async ({ page 
   }))
 
   expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+
+  const visibility = page.locator('[data-testid^="node-visibility-"]').first()
+  const indicatorSpacing = await visibility.evaluate((button) => {
+    const label = button.parentElement?.querySelector('.tree-node__label')
+    if (!(label instanceof HTMLElement)) throw new Error('Object label not found')
+    const buttonRect = button.getBoundingClientRect()
+    const labelRect = label.getBoundingClientRect()
+    const indicatorStyle = getComputedStyle(button, '::before')
+    return {
+      indicatorWidth: Number.parseFloat(indicatorStyle.width),
+      labelGap: labelRect.left - buttonRect.right,
+    }
+  })
+
+  expect(indicatorSpacing.indicatorWidth).toBe(11)
+  expect(indicatorSpacing.labelGap).toBeGreaterThanOrEqual(3)
 })

@@ -1,0 +1,143 @@
+/* Inspector session and workflow navigation */
+.inspector-entity-header {
+  position: sticky;
+  z-index: 4;
+  top: 0;
+  padding: 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 9px;
+  background: var(--panel-raised);
+  box-shadow: var(--shadow-soft);
+}
+
+.inspector-actions {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 11px;
+  border: 1px solid var(--panel-border);
+  border-radius: 9px;
+  background: var(--panel-raised);
+}
+
+.inspector-actions__group h4 {
+  margin: 0;
+}
+
+.inspector-actions__group h4,
+.inspector-workflow-toolbar > div span {
+  color: var(--text-faint);
+  font-size: 0.58rem;
+  font-weight: 720;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.inspector-actions__group {
+  display: grid;
+  gap: 5px;
+}
+
+.inspector-action-row {
+  display: flex;
+  min-height: 48px;
+  padding: 8px 10px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+}
+
+.inspector-action-row > span:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.inspector-action-row strong {
+  color: var(--text);
+  font-size: 0.72rem;
+}
+
+.inspector-action-row__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inspector-action-row small {
+  color: var(--text-muted);
+  font-size: 0.63rem;
+  font-weight: 450;
+  line-height: 1.35;
+}
+
+.inspector-action-row > span:last-child {
+  color: var(--accent);
+  font-size: 1.15rem;
+}
+
+.inspector-workflow-toolbar {
+  position: sticky;
+  z-index: 3;
+  top: 92px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px;
+  border: 1px solid var(--panel-border-strong);
+  border-radius: 9px;
+  background: var(--panel);
+  box-shadow: var(--shadow-soft);
+}
+
+.inspector-workflow-toolbar > div {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.inspector-workflow-toolbar > div strong {
+  overflow: hidden;
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-browser--workflow .inspector-group > :not(.inspector-entity-header):not(.inspector-workflow-toolbar):not(.inspector-disclosure[data-workflow-active='true']) {
+  display: none;
+}
+
+.inspector-disclosure--action-only:not([data-workflow-active='true']) {
+  display: none;
+}
+
+.inspector-subdisclosure {
+  margin: 0;
+  padding: 8px 0 0;
+}
+
+.inspector-subdisclosure .inspector-inline-actions {
+  justify-content: flex-end;
+}
+
+.inspector-browser--workflow .inspector-disclosure[data-workflow-active='true'] > summary {
+  display: none;
+}
+
+.inspector-browser--workflow .inspector-disclosure[data-workflow-active='true'] {
+  border-color: var(--panel-border-strong);
+  background: var(--panel-raised);
+}
+
+.inspector-browser--workflow:not(.inspector-browser--advanced) .inspector-disclosure[data-workflow-active='true'] .inspector-divider,
+.inspector-browser--workflow:not(.inspector-browser--advanced) .inspector-disclosure[data-workflow-active='true'] .inspector-divider ~ * {
+  display: none;
+}
+
+.inspector-browser--workflow:not(.inspector-browser--advanced) .inspector-disclosure[data-workflow-active='true'] .inspector-divider ~ [data-testid$='-submit'],
+.inspector-browser--workflow:not(.inspector-browser--advanced) .inspector-disclosure[data-workflow-active='true'] .inspector-divider ~ .field-error,
+.inspector-browser--workflow:not(.inspector-browser--advanced) .inspector-disclosure[data-workflow-active='true'] .inspector-divider ~ .field-warning {
+  display: block;
+}

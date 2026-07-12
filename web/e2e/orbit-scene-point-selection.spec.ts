@@ -24,6 +24,7 @@ test('clicking a scene orbit point jumps Orbit Data preview to the matching row'
   await harness.runOrbit()
 
   await harness.openDisclosure('orbit-data-toggle')
+  await page.getByTestId('orbit-data-preview-toggle').click()
   await expect(page.getByText(/Selected point #/)).toHaveCount(0)
 
   await page.waitForFunction(() => {

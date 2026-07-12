@@ -13,9 +13,11 @@ test('branch to a period-doubled limit cycle', async ({ page }) => {
   await harness.openDisclosure('branch-points-toggle')
   await page.getByTestId('branch-bifurcation-1').click()
 
-  await page.getByTestId('limit-cycle-from-pd-toggle').click()
+  await page.getByTestId('inspector-workflow-back').click()
+  await page.getByTestId('action-limit-cycle-from-pd-toggle').click()
   await page.getByTestId('limit-cycle-from-pd-name').fill('lc_pd_branch_obj')
   await page.getByTestId('limit-cycle-from-pd-branch-name').fill('lc_pd_branch')
+  await page.getByTestId('inspector-workflow-advanced').click()
   await page.getByTestId('limit-cycle-from-pd-amplitude').fill('0.01')
   await page.getByTestId('limit-cycle-from-pd-step-size').fill('0.01')
   await page.getByTestId('limit-cycle-from-pd-max-steps').fill('20')

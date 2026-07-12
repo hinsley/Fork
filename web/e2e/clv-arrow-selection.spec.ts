@@ -24,7 +24,7 @@ test('clicking a CLV arrow selects the orbit', async ({ page }) => {
 
   await expect(page.getByText('No orbit samples stored yet.')).toHaveCount(0)
 
-  await page.getByTestId('oseledets-toggle').click()
+  await page.getByTestId('action-oseledets-toggle').click()
   await page.getByTestId('clv-submit').click()
   await expect(page.getByText('Covariant Lyapunov vectors not computed yet.')).toHaveCount(0)
 

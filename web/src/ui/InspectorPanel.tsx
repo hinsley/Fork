@@ -1,197 +1,21 @@
 import { InspectorDetailsPanel } from './InspectorDetailsPanel'
-import type {
-  AnalysisViewport,
-  BifurcationDiagram,
-  IsoclineObject,
-  LimitCycleRenderTarget,
-  Scene,
-  System,
-  SystemConfig,
-  TreeNode,
-} from '../system/types'
-import type {
-  BranchContinuationRequest,
-  BranchExtensionRequest,
-  EquilibriumContinuationRequest,
-  EquilibriumManifold1DExtensionRequest,
-  Manifold2DExtensionRequest,
-  EquilibriumManifold1DRequest,
-  EquilibriumManifold2DRequest,
-  EquilibriumSolveRequest,
-  FoldCurveContinuationRequest,
-  HomoclinicFromHomoclinicRequest,
-  HomoclinicFromHomotopySaddleRequest,
-  HomoclinicFromLargeCycleRequest,
-  HopfCurveContinuationRequest,
-  HomotopySaddleFromEquilibriumRequest,
-  IsochroneCurveContinuationRequest,
-  IsoclineComputeRequest,
-  LimitCycleFloquetModesRequest,
-  LimitCycleManifold2DRequest,
-  MapNSCurveContinuationRequest,
-  LimitCycleHopfContinuationRequest,
-  LimitCycleOrbitContinuationRequest,
-  LimitCyclePDContinuationRequest,
-  MapCyclePDContinuationRequest,
-  OrbitCovariantLyapunovRequest,
-  OrbitLyapunovRequest,
-  OrbitRunRequest,
-} from '../state/appState'
-import type {
-  BranchPointSelection,
-  LimitCyclePointSelection,
-  OrbitPointSelection,
-} from './branchPointSelection'
+import type { System } from '../system/types'
+import type { InspectorActions, InspectorPointSelections } from './inspector/types'
 
 type InspectorPanelProps = {
   system: System
   selectedNodeId: string | null
   theme: 'light' | 'dark'
-  branchPointSelection?: BranchPointSelection
-  orbitPointSelection?: OrbitPointSelection
-  limitCyclePointSelection?: LimitCyclePointSelection
-  onBranchPointSelect?: (selection: BranchPointSelection) => void
-  onOrbitPointSelect?: (selection: OrbitPointSelection) => void
-  onLimitCyclePointSelect?: (selection: LimitCyclePointSelection) => void
-  onRename: (id: string, name: string) => void
-  onToggleVisibility: (id: string) => void
-  onUpdateRender: (id: string, render: Partial<TreeNode['render']>) => void
-  onUpdateObjectParams: (id: string, params: number[] | null) => void
-  onUpdateObjectFrozenVariables: (
-    id: string,
-    frozenValuesByVarName: Record<string, number>
-  ) => void
-  onUpdateIsoclineObject?: (
-    id: string,
-    update: Partial<Omit<IsoclineObject, 'type' | 'name' | 'systemName'>>
-  ) => void
-  onComputeIsocline?: (
-    request: IsoclineComputeRequest,
-    opts?: { signal?: AbortSignal; silent?: boolean }
-  ) => Promise<unknown>
-  onUpdateScene: (id: string, update: Partial<Omit<Scene, 'id' | 'name'>>) => void
-  onUpdateAnalysisViewport: (
-    id: string,
-    update: Partial<Omit<AnalysisViewport, 'id' | 'name'>>
-  ) => void
-  onValidateAnalysisExpression?: (
-    request: {
-      system: SystemConfig
-      expression: string
-      role: 'event' | 'observable'
-    },
-    opts?: { signal?: AbortSignal }
-  ) => Promise<void>
-  onUpdateBifurcationDiagram: (
-    id: string,
-    update: Partial<Omit<BifurcationDiagram, 'id' | 'name'>>
-  ) => void
-  onSetLimitCycleRenderTarget?: (
-    objectId: string,
-    target: LimitCycleRenderTarget | null
-  ) => void
-  onUpdateSystem: (system: SystemConfig) => Promise<void>
-  onValidateSystem: (system: SystemConfig, opts?: { signal?: AbortSignal }) => Promise<{
-    ok: boolean
-    equationErrors: Array<string | null>
-    message?: string
-  }>
-  onRunOrbit: (request: OrbitRunRequest) => Promise<void>
-  onComputeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
-  onComputeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
-  onSolveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
-  onCreateEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
-  onCreateEquilibriumManifold1D?: (
-    request: EquilibriumManifold1DRequest
-  ) => Promise<void>
-  onExtendEquilibriumManifold1D?: (
-    request: EquilibriumManifold1DExtensionRequest
-  ) => Promise<void>
-  onExtendManifold2D?: (request: Manifold2DExtensionRequest) => Promise<void>
-  onCreateEquilibriumManifold2D?: (
-    request: EquilibriumManifold2DRequest
-  ) => Promise<void>
-  onCreateBranchFromPoint: (request: BranchContinuationRequest) => Promise<void>
-  onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
-  onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
-  onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
-  onCreateIsochroneCurveFromPoint?: (
-    request: IsochroneCurveContinuationRequest
-  ) => Promise<void>
-  onCreateNSCurveFromPoint: (request: MapNSCurveContinuationRequest) => Promise<void>
-  onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
-  onCreateLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
-  onCreateLimitCycleManifold2D?: (
-    request: LimitCycleManifold2DRequest
-  ) => Promise<void>
-  onComputeLimitCycleFloquetModes?: (
-    request: LimitCycleFloquetModesRequest
-  ) => Promise<void>
-  onCreateCycleFromPD: (request: MapCyclePDContinuationRequest) => Promise<void>
-  onCreateLimitCycleFromPD: (request: LimitCyclePDContinuationRequest) => Promise<void>
-  onCreateHomoclinicFromLargeCycle?: (
-    request: HomoclinicFromLargeCycleRequest
-  ) => Promise<void>
-  onCreateHomoclinicFromHomoclinic?: (
-    request: HomoclinicFromHomoclinicRequest
-  ) => Promise<void>
-  onCreateHomotopySaddleFromEquilibrium?: (
-    request: HomotopySaddleFromEquilibriumRequest
-  ) => Promise<void>
-  onCreateHomoclinicFromHomotopySaddle?: (
-    request: HomoclinicFromHomotopySaddleRequest
-  ) => Promise<void>
+  actions: InspectorActions
+  pointSelections: InspectorPointSelections
 }
 
 export function InspectorPanel({
   system,
   selectedNodeId,
   theme,
-  branchPointSelection,
-  orbitPointSelection,
-  limitCyclePointSelection,
-  onBranchPointSelect,
-  onOrbitPointSelect,
-  onLimitCyclePointSelect,
-  onRename,
-  onToggleVisibility,
-  onUpdateRender,
-  onUpdateObjectParams,
-  onUpdateObjectFrozenVariables,
-  onUpdateIsoclineObject,
-  onComputeIsocline,
-  onUpdateScene,
-  onUpdateAnalysisViewport,
-  onValidateAnalysisExpression,
-  onUpdateBifurcationDiagram,
-  onSetLimitCycleRenderTarget,
-  onUpdateSystem,
-  onValidateSystem,
-  onRunOrbit,
-  onComputeLyapunovExponents,
-  onComputeCovariantLyapunovVectors,
-  onSolveEquilibrium,
-  onCreateEquilibriumBranch,
-  onCreateEquilibriumManifold1D,
-  onExtendEquilibriumManifold1D,
-  onExtendManifold2D,
-  onCreateEquilibriumManifold2D,
-  onCreateBranchFromPoint,
-  onExtendBranch,
-  onCreateFoldCurveFromPoint,
-  onCreateHopfCurveFromPoint,
-  onCreateIsochroneCurveFromPoint,
-  onCreateNSCurveFromPoint,
-  onCreateLimitCycleFromHopf,
-  onCreateLimitCycleFromOrbit,
-  onCreateLimitCycleManifold2D,
-  onComputeLimitCycleFloquetModes,
-  onCreateCycleFromPD,
-  onCreateLimitCycleFromPD,
-  onCreateHomoclinicFromLargeCycle,
-  onCreateHomoclinicFromHomoclinic,
-  onCreateHomotopySaddleFromEquilibrium,
-  onCreateHomoclinicFromHomotopySaddle,
+  actions,
+  pointSelections,
 }: InspectorPanelProps) {
   return (
     <div className="inspector">
@@ -201,51 +25,51 @@ export function InspectorPanel({
           selectedNodeId={selectedNodeId}
           theme={theme}
           view="selection"
-          branchPointSelection={branchPointSelection}
-          orbitPointSelection={orbitPointSelection}
-          limitCyclePointSelection={limitCyclePointSelection}
-          onBranchPointSelect={onBranchPointSelect}
-          onOrbitPointSelect={onOrbitPointSelect}
-          onLimitCyclePointSelect={onLimitCyclePointSelect}
-          onRename={onRename}
-          onToggleVisibility={onToggleVisibility}
-          onUpdateRender={onUpdateRender}
-          onUpdateObjectParams={onUpdateObjectParams}
-          onUpdateObjectFrozenVariables={onUpdateObjectFrozenVariables}
-          onUpdateIsoclineObject={onUpdateIsoclineObject}
-          onComputeIsocline={onComputeIsocline}
-          onUpdateScene={onUpdateScene}
-          onUpdateAnalysisViewport={onUpdateAnalysisViewport}
-          onValidateAnalysisExpression={onValidateAnalysisExpression}
-          onUpdateBifurcationDiagram={onUpdateBifurcationDiagram}
-          onSetLimitCycleRenderTarget={onSetLimitCycleRenderTarget}
-          onUpdateSystem={onUpdateSystem}
-          onValidateSystem={onValidateSystem}
-          onRunOrbit={onRunOrbit}
-          onComputeLyapunovExponents={onComputeLyapunovExponents}
-          onComputeCovariantLyapunovVectors={onComputeCovariantLyapunovVectors}
-          onSolveEquilibrium={onSolveEquilibrium}
-          onCreateEquilibriumBranch={onCreateEquilibriumBranch}
-          onCreateEquilibriumManifold1D={onCreateEquilibriumManifold1D}
-          onExtendEquilibriumManifold1D={onExtendEquilibriumManifold1D}
-          onExtendManifold2D={onExtendManifold2D}
-          onCreateEquilibriumManifold2D={onCreateEquilibriumManifold2D}
-          onCreateBranchFromPoint={onCreateBranchFromPoint}
-          onExtendBranch={onExtendBranch}
-          onCreateFoldCurveFromPoint={onCreateFoldCurveFromPoint}
-          onCreateHopfCurveFromPoint={onCreateHopfCurveFromPoint}
-          onCreateIsochroneCurveFromPoint={onCreateIsochroneCurveFromPoint}
-          onCreateNSCurveFromPoint={onCreateNSCurveFromPoint}
-          onCreateLimitCycleFromHopf={onCreateLimitCycleFromHopf}
-          onCreateLimitCycleFromOrbit={onCreateLimitCycleFromOrbit}
-          onCreateLimitCycleManifold2D={onCreateLimitCycleManifold2D}
-          onComputeLimitCycleFloquetModes={onComputeLimitCycleFloquetModes}
-          onCreateCycleFromPD={onCreateCycleFromPD}
-          onCreateLimitCycleFromPD={onCreateLimitCycleFromPD}
-          onCreateHomoclinicFromLargeCycle={onCreateHomoclinicFromLargeCycle}
-          onCreateHomoclinicFromHomoclinic={onCreateHomoclinicFromHomoclinic}
-          onCreateHomotopySaddleFromEquilibrium={onCreateHomotopySaddleFromEquilibrium}
-          onCreateHomoclinicFromHomotopySaddle={onCreateHomoclinicFromHomotopySaddle}
+          branchPointSelection={pointSelections.branch.value}
+          orbitPointSelection={pointSelections.orbit.value}
+          limitCyclePointSelection={pointSelections.limitCycle.value}
+          onBranchPointSelect={pointSelections.branch.onSelect}
+          onOrbitPointSelect={pointSelections.orbit.onSelect}
+          onLimitCyclePointSelect={pointSelections.limitCycle.onSelect}
+          onRename={actions.renameNode}
+          onToggleVisibility={actions.toggleVisibility}
+          onUpdateRender={actions.updateRender}
+          onUpdateObjectParams={actions.updateObjectParams}
+          onUpdateObjectFrozenVariables={actions.updateObjectFrozenVariables}
+          onUpdateIsoclineObject={actions.updateIsoclineObject}
+          onComputeIsocline={actions.computeIsocline}
+          onUpdateScene={actions.updateScene}
+          onUpdateAnalysisViewport={actions.updateAnalysisViewport}
+          onValidateAnalysisExpression={actions.validateAnalysisExpression}
+          onUpdateBifurcationDiagram={actions.updateBifurcationDiagram}
+          onSetLimitCycleRenderTarget={actions.setLimitCycleRenderTarget}
+          onUpdateSystem={actions.updateSystem}
+          onValidateSystem={actions.validateSystem}
+          onRunOrbit={actions.runOrbit}
+          onComputeLyapunovExponents={actions.computeLyapunovExponents}
+          onComputeCovariantLyapunovVectors={actions.computeCovariantLyapunovVectors}
+          onSolveEquilibrium={actions.solveEquilibrium}
+          onCreateEquilibriumBranch={actions.createEquilibriumBranch}
+          onCreateEquilibriumManifold1D={actions.createEquilibriumManifold1D}
+          onExtendEquilibriumManifold1D={actions.extendEquilibriumManifold1D}
+          onExtendManifold2D={actions.extendManifold2D}
+          onCreateEquilibriumManifold2D={actions.createEquilibriumManifold2D}
+          onCreateBranchFromPoint={actions.createBranchFromPoint}
+          onExtendBranch={actions.extendBranch}
+          onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
+          onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
+          onCreateIsochroneCurveFromPoint={actions.createIsochroneCurveFromPoint}
+          onCreateNSCurveFromPoint={actions.createNSCurveFromPoint}
+          onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
+          onCreateLimitCycleFromOrbit={actions.createLimitCycleFromOrbit}
+          onCreateLimitCycleManifold2D={actions.createLimitCycleManifold2D}
+          onComputeLimitCycleFloquetModes={actions.computeLimitCycleFloquetModes}
+          onCreateCycleFromPD={actions.createCycleFromPD}
+          onCreateLimitCycleFromPD={actions.createLimitCycleFromPD}
+          onCreateHomoclinicFromLargeCycle={actions.createHomoclinicFromLargeCycle}
+          onCreateHomoclinicFromHomoclinic={actions.createHomoclinicFromHomoclinic}
+          onCreateHomotopySaddleFromEquilibrium={actions.createHomotopySaddleFromEquilibrium}
+          onCreateHomoclinicFromHomotopySaddle={actions.createHomoclinicFromHomotopySaddle}
         />
       </div>
     </div>

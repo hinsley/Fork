@@ -12,7 +12,7 @@ test('lyapunov inputs persist after compute', async ({ page }) => {
 
   await expect(page.getByText('No orbit samples stored yet.')).toHaveCount(0)
 
-  await page.getByTestId('oseledets-toggle').click()
+  await page.getByTestId('action-oseledets-toggle').click()
 
   const lyapunovTransient = page.getByTestId('lyapunov-transient')
   const lyapunovQr = page.getByTestId('lyapunov-qr')
@@ -60,7 +60,7 @@ test('clv plotting menu appears only after computation', async ({ page }) => {
 
   await expect(page.getByText('No orbit samples stored yet.')).toHaveCount(0)
 
-  await page.getByTestId('oseledets-toggle').click()
+  await page.getByTestId('action-oseledets-toggle').click()
   await expect(page.getByTestId('clv-plot-toggle')).toHaveCount(0)
 
   await page.getByTestId('clv-submit').click()
