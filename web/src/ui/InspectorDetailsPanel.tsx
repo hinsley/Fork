@@ -2240,6 +2240,11 @@ export function InspectorDetailsPanel({
   const [systemDraft, setSystemDraft] = useState<SystemDraft>(() =>
     makeSystemDraft(system.config)
   )
+  const [systemEditorSections, setSystemEditorSections] = useState({
+    model: true,
+    variables: true,
+    parameters: true,
+  })
   const [systemTouched, setSystemTouched] = useState(false)
   const [wasmEquationErrors, setWasmEquationErrors] = useState<Array<string | null>>([])
   const [wasmMessage, setWasmMessage] = useState<string | null>(null)
@@ -6739,24 +6744,50 @@ export function InspectorDetailsPanel({
     })
   }
 
+  const toggleSystemEditorSection = (
+    section: 'model' | 'variables' | 'parameters'
+  ) => {
+    setSystemEditorSections((prev) => ({ ...prev, [section]: !prev[section] }))
+  }
+
   const renderSystemView = () => (
     <div className="inspector-panel system-editor" data-testid="inspector-panel-body">
       <div className="system-editor__scroll">
-        <section className="inspector-section system-editor__card system-editor__model">
+        <section
+          className={`inspector-section system-editor__card system-editor__model${
+            systemEditorSections.model ? '' : ' is-collapsed'
+          }`}
+        >
           <header className="system-editor__card-header">
-            <div>
-              <span className="system-editor__eyebrow">Definition</span>
-              <h3>Model</h3>
-            </div>
+            <button
+              type="button"
+              className="system-editor__section-toggle"
+              aria-expanded={systemEditorSections.model}
+              aria-controls="system-editor-model-body"
+              onClick={() => toggleSystemEditorSection('model')}
+              data-testid="system-toggle-model"
+            >
+              <span className="system-editor__section-chevron" aria-hidden="true">
+                {systemEditorSections.model ? '▾' : '▸'}
+              </span>
+              <span className="system-editor__section-copy">
+                <span className="system-editor__eyebrow">Definition</span>
+                <span className="system-editor__section-title" role="heading" aria-level={3}>
+                  Model
+                </span>
+              </span>
+            </button>
             <div className="system-editor__counts" aria-label="System dimensions">
               <span>{systemDraft.varNames.length} variables</span>
               <span>{systemDraft.paramNames.length} parameters</span>
             </div>
           </header>
 
-          <div
-            className={`system-editor__model-grid system-editor__model-grid--${systemDraft.type}`}
-          >
+          {systemEditorSections.model ? (
+            <div id="system-editor-model-body" className="system-editor__card-body">
+              <div
+                className={`system-editor__model-grid system-editor__model-grid--${systemDraft.type}`}
+              >
             <label className="system-editor__field system-editor__field--name">
               <span>System name</span>
               <input
@@ -6823,29 +6854,49 @@ export function InspectorDetailsPanel({
                 ) : null}
               </label>
             ) : null}
-          </div>
+              </div>
 
-          {systemValidation.warnings.length > 0 ? (
-            <div className="field-warning system-editor__message">
-              {systemValidation.warnings.map((warning) => (
-                <span key={warning}>{warning}</span>
-              ))}
+              {systemValidation.warnings.length > 0 ? (
+                <div className="field-warning system-editor__message">
+                  {systemValidation.warnings.map((warning) => (
+                    <span key={warning}>{warning}</span>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </section>
 
         <div className="system-editor__workspace">
-          <section className="inspector-section system-editor__card system-editor__variables">
+          <section
+            className={`inspector-section system-editor__card system-editor__variables${
+              systemEditorSections.variables ? '' : ' is-collapsed'
+            }`}
+          >
             <header className="system-editor__card-header">
-              <div>
-                <span className="system-editor__eyebrow">State space</span>
-                <h3>Variables and equations</h3>
-                <p>
-                  {systemDraft.type === 'map'
-                    ? 'Define each variable at the next iteration.'
-                    : 'Define the time derivative for each state variable.'}
-                </p>
-              </div>
+              <button
+                type="button"
+                className="system-editor__section-toggle"
+                aria-expanded={systemEditorSections.variables}
+                aria-controls="system-editor-variables-body"
+                onClick={() => toggleSystemEditorSection('variables')}
+                data-testid="system-toggle-variables"
+              >
+                <span className="system-editor__section-chevron" aria-hidden="true">
+                  {systemEditorSections.variables ? '▾' : '▸'}
+                </span>
+                <span className="system-editor__section-copy">
+                  <span className="system-editor__eyebrow">State space</span>
+                  <span className="system-editor__section-title" role="heading" aria-level={3}>
+                    Variables and equations
+                  </span>
+                  <span className="system-editor__section-description">
+                    {systemDraft.type === 'map'
+                      ? 'Define each variable at the next iteration.'
+                      : 'Define the time derivative for each state variable.'}
+                  </span>
+                </span>
+              </button>
               <button
                 type="button"
                 className="system-editor__add-button"
@@ -6866,6 +6917,8 @@ export function InspectorDetailsPanel({
               </button>
             </header>
 
+            {systemEditorSections.variables ? (
+              <div id="system-editor-variables-body" className="system-editor__card-body">
             {showSystemErrors && systemValidation.errors.varNames ? (
               <div className="field-error">{systemValidation.errors.varNames}</div>
             ) : null}
@@ -7030,15 +7083,37 @@ export function InspectorDetailsPanel({
                   .join(' ')}
               </div>
             ) : null}
+              </div>
+            ) : null}
           </section>
 
-          <section className="inspector-section system-editor__card system-editor__parameters">
+          <section
+            className={`inspector-section system-editor__card system-editor__parameters${
+              systemEditorSections.parameters ? '' : ' is-collapsed'
+            }`}
+          >
             <header className="system-editor__card-header">
-              <div>
-                <span className="system-editor__eyebrow">Constants</span>
-                <h3>Parameters</h3>
-                <p>Named values shared by the system equations.</p>
-              </div>
+              <button
+                type="button"
+                className="system-editor__section-toggle"
+                aria-expanded={systemEditorSections.parameters}
+                aria-controls="system-editor-parameters-body"
+                onClick={() => toggleSystemEditorSection('parameters')}
+                data-testid="system-toggle-parameters"
+              >
+                <span className="system-editor__section-chevron" aria-hidden="true">
+                  {systemEditorSections.parameters ? '▾' : '▸'}
+                </span>
+                <span className="system-editor__section-copy">
+                  <span className="system-editor__eyebrow">Constants</span>
+                  <span className="system-editor__section-title" role="heading" aria-level={3}>
+                    Parameters
+                  </span>
+                  <span className="system-editor__section-description">
+                    Named values shared by the system equations.
+                  </span>
+                </span>
+              </button>
               <button
                 type="button"
                 className="system-editor__add-button"
@@ -7055,6 +7130,8 @@ export function InspectorDetailsPanel({
               </button>
             </header>
 
+            {systemEditorSections.parameters ? (
+              <div id="system-editor-parameters-body" className="system-editor__card-body">
             {showSystemErrors && systemValidation.errors.paramNames ? (
               <div className="field-error">{systemValidation.errors.paramNames}</div>
             ) : null}
@@ -7155,6 +7232,8 @@ export function InspectorDetailsPanel({
                   ?.map((error, idx) => (error ? `Param ${idx + 1}: ${error}` : null))
                   .filter(Boolean)
                   .join(' ')}
+              </div>
+            ) : null}
               </div>
             ) : null}
           </section>

@@ -2264,7 +2264,8 @@
   gap: 3px;
 }
 
-.system-editor__card-header h3 {
+.system-editor__card-header h3,
+.system-editor__section-title {
   margin: 0;
   color: var(--text);
   font-size: 0.94rem;
@@ -2273,11 +2274,69 @@
   text-transform: none;
 }
 
-.system-editor__card-header p {
+.system-editor__card-header p,
+.system-editor__section-description {
   margin: 0;
   color: var(--text-muted);
   font-size: 0.69rem;
   line-height: 1.45;
+}
+
+.system-editor .system-editor__section-toggle {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text);
+  text-align: left;
+}
+
+.system-editor .system-editor__section-toggle:hover {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.system-editor .system-editor__section-toggle:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.system-editor__section-chevron {
+  display: inline-flex;
+  width: 15px;
+  min-height: 17px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  line-height: 1;
+}
+
+.system-editor__section-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.system-editor__card-body {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.system-editor__card.is-collapsed {
+  gap: 0;
+}
+
+.system-editor__card.is-collapsed .system-editor__card-header {
+  align-items: center;
 }
 
 .system-editor__counts {
