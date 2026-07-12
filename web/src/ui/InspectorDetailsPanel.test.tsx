@@ -1323,14 +1323,32 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
+    const modelToggle = screen.getByTestId('system-toggle-model')
+    await user.click(modelToggle)
+    expect(modelToggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByTestId('system-name')).toBeNull()
+    await user.click(modelToggle)
+
+    const variablesToggle = screen.getByTestId('system-toggle-variables')
+    await user.click(variablesToggle)
+    expect(screen.queryByTestId('system-var-0')).toBeNull()
+    await user.click(variablesToggle)
+
+    const parametersToggle = screen.getByTestId('system-toggle-parameters')
+    await user.click(parametersToggle)
+    expect(screen.queryByTestId('system-param-0')).toBeNull()
+    await user.click(parametersToggle)
+
     const nameInput = screen.getByTestId('system-name')
     await user.clear(nameInput)
     await user.type(nameInput, 'NewSystem')
+    await user.click(screen.getByTestId('system-type-map'))
+    expect(screen.queryByTestId('system-solver')).toBeNull()
 
     await user.click(screen.getByTestId('system-apply'))
 
     expect(onUpdateSystem).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'NewSystem' })
+      expect.objectContaining({ name: 'NewSystem', type: 'map', solver: 'discrete' })
     )
   })
 

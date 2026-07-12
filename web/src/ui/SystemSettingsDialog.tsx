@@ -196,8 +196,12 @@ export function SystemSettingsDialog({
       data-testid="system-settings-dialog"
     >
       <div className="dialog dialog--system-settings">
-        <header className="dialog__header">
-          <h2 id="system-settings-title">System Settings</h2>
+        <header className="dialog__header system-settings-dialog__header">
+          <div className="system-settings-dialog__heading">
+            <span className="system-settings-dialog__eyebrow">Model configuration</span>
+            <h2 id="system-settings-title">System settings: {system.config.name}</h2>
+            <p>Define the dynamics, parameters, and numerical method for this system.</p>
+          </div>
           <button
             onClick={onClose}
             aria-label="Close system settings"

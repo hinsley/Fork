@@ -8,14 +8,14 @@ export type PlotlyThemeTokens = {
 
 const FALLBACK_TOKENS: Record<PlotlyThemeMode, PlotlyThemeTokens> = {
   dark: {
-    background: '#353535',
-    text: '#e1e1e1',
-    muted: '#b1b1b1',
+    background: '#111923',
+    text: '#dbe4f0',
+    muted: '#8f9caf',
   },
   light: {
     background: '#ffffff',
-    text: '#1a1a1a',
-    muted: '#5c5c5c',
+    text: '#17202b',
+    muted: '#687687',
   },
 }
 

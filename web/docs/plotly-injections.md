@@ -141,7 +141,9 @@ behavior.
   diagrams.
 - `web/src/App.css`: Plotly SVG text colors are forced via the
   `--plotly-text`/`--plotly-text-muted` CSS variables so new themes can
-  override text contrast without touching Plotly layout code.
+  override text contrast without touching Plotly layout code. Trace names in
+  hover labels use `--plotly-hover-name-text` to remain readable on Plotly's
+  translucent white name panel.
 - `web/src/ui/InspectorDetailsPanel.tsx`: eigenvalue/multiplier plots set
   `dragmode: 'pan'`, compute fixed `xaxis.range`/`yaxis.range` values for the
   complex plane, and add unit circle/disc overlays for multiplier/eigenvalue

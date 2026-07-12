@@ -111,6 +111,12 @@ function App() {
     setSystemSettingsOpen(false)
   }
 
+  const goHome = () => {
+    setDialogOpen(false)
+    setSystemSettingsOpen(false)
+    actions.closeSystem()
+  }
+
   const selectNode = (nodeId: string) => {
     actions.selectNode(nodeId)
     if (system && !system.ui.layout.inspectorOpen) {
@@ -254,6 +260,7 @@ function App() {
               }
             : null
         }
+        onHome={goHome}
         onOpenSystems={openSystemsDialog}
         theme={theme}
         onThemeChange={setTheme}
@@ -340,11 +347,17 @@ function App() {
       {!system ? (
         <main className="empty-workspace">
           <div className="empty-card">
-            <h1>Fork</h1>
-            <p>Create or open a system to start exploring.</p>
-            <button onClick={() => setDialogOpen(true)} data-testid="open-systems-empty">
-              Open Systems
-            </button>
+            <h1>Fork Dynamics</h1>
+            <p>Dynamical systems analysis and numerical bifurcation continuation toolkit</p>
+            <div className="empty-card__actions">
+              <button onClick={() => setDialogOpen(true)} data-testid="open-systems-empty">
+                Systems menu
+              </button>
+              <span className="empty-card__resource-link" role="link" aria-disabled="true">
+                Documentation and tutorials
+                <span>Coming soon</span>
+              </span>
+            </div>
           </div>
         </main>
       ) : (
@@ -365,7 +378,7 @@ function App() {
               actions={
                 <div className="panel-actions">
                   <button onClick={openCreateObjectMenu} data-testid="create-object-button">
-                    Create Object
+                    <span aria-hidden="true">＋</span> Object
                   </button>
                   <button
                     onClick={createRootFolder}
@@ -373,7 +386,7 @@ function App() {
                     aria-label="Create Folder"
                     data-testid="create-folder-button"
                   >
-                    📁
+                    <span aria-hidden="true">📁</span> Folder
                   </button>
                 </div>
               }
@@ -459,7 +472,7 @@ function App() {
               showToggle={false}
               actions={
                 <button onClick={openSystemSettings} data-testid="open-system-settings">
-                  System Settings
+                  <span aria-hidden="true">⚙</span> System Settings
                 </button>
               }
             >

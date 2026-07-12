@@ -2240,6 +2240,11 @@ export function InspectorDetailsPanel({
   const [systemDraft, setSystemDraft] = useState<SystemDraft>(() =>
     makeSystemDraft(system.config)
   )
+  const [systemEditorSections, setSystemEditorSections] = useState({
+    model: true,
+    variables: true,
+    parameters: true,
+  })
   const [systemTouched, setSystemTouched] = useState(false)
   const [wasmEquationErrors, setWasmEquationErrors] = useState<Array<string | null>>([])
   const [wasmMessage, setWasmMessage] = useState<string | null>(null)
@@ -6726,325 +6731,532 @@ export function InspectorDetailsPanel({
   }
 
   const mapEquationLabel = (varName: string) =>
-    systemDraft.type === 'map' ? `${varName}_{n+1}` : `d${varName}/dt`
+    systemDraft.type === 'map' ? `${varName}[n+1]` : `d${varName}/dt`
+
+  const setSystemType = (type: 'flow' | 'map') => {
+    setSystemDraft((prev) => {
+      const solvers = type === 'map' ? MAP_SOLVERS : FLOW_SOLVERS
+      return {
+        ...prev,
+        type,
+        solver: solvers.includes(prev.solver) ? prev.solver : solvers[0],
+      }
+    })
+  }
+
+  const toggleSystemEditorSection = (
+    section: 'model' | 'variables' | 'parameters'
+  ) => {
+    setSystemEditorSections((prev) => ({ ...prev, [section]: !prev[section] }))
+  }
 
   const renderSystemView = () => (
-    <div className="inspector-panel" data-testid="inspector-panel-body">
-      <div className="inspector-group">
-        <div className="inspector-group__summary">System</div>
-        <div className="inspector-section">
-          <label>
-            System Name
-            <input
-              value={systemDraft.name}
-              onChange={(event) =>
-                setSystemDraft((prev) => ({ ...prev, name: event.target.value }))
-              }
-              data-testid="system-name"
-            />
-            {showSystemErrors && systemValidation.errors.name ? (
-              <span className="field-error">{systemValidation.errors.name}</span>
+    <div className="inspector-panel system-editor" data-testid="inspector-panel-body">
+      <div className="system-editor__scroll">
+        <section
+          className={`inspector-section system-editor__card system-editor__model${
+            systemEditorSections.model ? '' : ' is-collapsed'
+          }`}
+        >
+          <header className="system-editor__card-header">
+            <button
+              type="button"
+              className="system-editor__section-toggle"
+              aria-expanded={systemEditorSections.model}
+              aria-controls="system-editor-model-body"
+              onClick={() => toggleSystemEditorSection('model')}
+              data-testid="system-toggle-model"
+            >
+              <span className="system-editor__section-chevron" aria-hidden="true">
+                {systemEditorSections.model ? '▾' : '▸'}
+              </span>
+              <span className="system-editor__section-copy">
+                <span className="system-editor__eyebrow">Definition</span>
+                <span className="system-editor__section-title" role="heading" aria-level={3}>
+                  Model
+                </span>
+              </span>
+            </button>
+            <div className="system-editor__counts" aria-label="System dimensions">
+              <span>{systemDraft.varNames.length} variables</span>
+              <span>{systemDraft.paramNames.length} parameters</span>
+            </div>
+          </header>
+
+          {systemEditorSections.model ? (
+            <div id="system-editor-model-body" className="system-editor__card-body">
+              <div
+                className={`system-editor__model-grid system-editor__model-grid--${systemDraft.type}`}
+              >
+            <label className="system-editor__field system-editor__field--name">
+              <span>System name</span>
+              <input
+                value={systemDraft.name}
+                onChange={(event) =>
+                  setSystemDraft((prev) => ({ ...prev, name: event.target.value }))
+                }
+                data-testid="system-name"
+              />
+              {showSystemErrors && systemValidation.errors.name ? (
+                <span className="field-error">{systemValidation.errors.name}</span>
+              ) : null}
+            </label>
+
+            <div className="system-editor__field system-editor__field--type">
+              <span>System type</span>
+              <div
+                className="system-type-switch"
+                role="group"
+                aria-label="System type"
+                data-testid="system-type"
+              >
+                <button
+                  type="button"
+                  className={systemDraft.type === 'flow' ? 'is-active' : undefined}
+                  aria-pressed={systemDraft.type === 'flow'}
+                  onClick={() => setSystemType('flow')}
+                  data-testid="system-type-flow"
+                >
+                  <strong>Flow</strong>
+                  <span>ODE · continuous time</span>
+                </button>
+                <button
+                  type="button"
+                  className={systemDraft.type === 'map' ? 'is-active' : undefined}
+                  aria-pressed={systemDraft.type === 'map'}
+                  onClick={() => setSystemType('map')}
+                  data-testid="system-type-map"
+                >
+                  <strong>Discrete map</strong>
+                  <span>Iterated update</span>
+                </button>
+              </div>
+            </div>
+
+            {systemDraft.type === 'flow' ? (
+              <label className="system-editor__field system-editor__field--solver">
+                <span>Integrator</span>
+                <select
+                  value={systemDraft.solver}
+                  onChange={(event) =>
+                    setSystemDraft((prev) => ({ ...prev, solver: event.target.value }))
+                  }
+                  data-testid="system-solver"
+                >
+                  {FLOW_SOLVERS.map((solver) => (
+                    <option key={solver} value={solver}>
+                      {solver}
+                    </option>
+                  ))}
+                </select>
+                {showSystemErrors && systemValidation.errors.solver ? (
+                  <span className="field-error">{systemValidation.errors.solver}</span>
+                ) : null}
+              </label>
             ) : null}
-          </label>
-          {systemValidation.warnings.length > 0 ? (
-            <div className="field-warning">
-              {systemValidation.warnings.map((warning) => (
-                <span key={warning}>{warning}</span>
-              ))}
+              </div>
+
+              {systemValidation.warnings.length > 0 ? (
+                <div className="field-warning system-editor__message">
+                  {systemValidation.warnings.map((warning) => (
+                    <span key={warning}>{warning}</span>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
-          <label>
-            System Type
-            <select
-              value={systemDraft.type}
-              onChange={(event) =>
-                setSystemDraft((prev) => ({
-                  ...prev,
-                  type: event.target.value === 'map' ? 'map' : 'flow',
-                }))
-              }
-              data-testid="system-type"
-            >
-              <option value="flow">Flow (ODE)</option>
-              <option value="map">Map (Iterated)</option>
-            </select>
-          </label>
-          <label>
-            Solver
-            <select
-              value={systemDraft.solver}
-              onChange={(event) =>
-                setSystemDraft((prev) => ({ ...prev, solver: event.target.value }))
-              }
-              data-testid="system-solver"
-            >
-              {(systemDraft.type === 'map' ? MAP_SOLVERS : FLOW_SOLVERS).map((solver) => (
-                <option key={solver} value={solver}>
-                  {solver}
-                </option>
-              ))}
-            </select>
-            {showSystemErrors && systemValidation.errors.solver ? (
-              <span className="field-error">{systemValidation.errors.solver}</span>
-            ) : null}
-          </label>
-        </div>
+        </section>
 
-        <div className="inspector-section">
-          <div className="inspector-group__header">
-            <h3>Variables + Equations</h3>
-            <button
-              onClick={() =>
-                setSystemDraft((prev) => ({
-                  ...prev,
-                  varNames: [...prev.varNames, `x${prev.varNames.length + 1}`],
-                  equations: [...prev.equations, ''],
-                  periodicVariables: [
-                    ...prev.periodicVariables,
-                    { enabled: false, period: DEFAULT_VARIABLE_PERIOD.toString() },
-                  ],
-                }))
-              }
-              data-testid="system-add-variable"
-            >
-              Add Variable
-            </button>
-          </div>
-          {showSystemErrors && systemValidation.errors.varNames ? (
-            <div className="field-error">{systemValidation.errors.varNames}</div>
-          ) : null}
-          <div className="inspector-list">
-            {systemDraft.varNames.map((varName, index) => (
-              <div className="inspector-row" key={`var-${index}`}>
-                <input
-                  value={varName}
-                  onChange={(event) =>
-                    setSystemDraft((prev) => {
-                      const nextVarNames = [...prev.varNames]
-                      nextVarNames[index] = event.target.value
-                      return { ...prev, varNames: nextVarNames }
-                    })
-                  }
-                  data-testid={`system-var-${index}`}
-                />
-                <div className="inspector-row__stack">
-                  <textarea
-                    value={systemDraft.equations[index] ?? ''}
-                    onChange={(event) =>
-                      setSystemDraft((prev) => {
-                        const nextEquations = adjustArray(
-                          prev.equations,
-                          prev.varNames.length,
-                          () => ''
-                        )
-                        nextEquations[index] = event.target.value
-                        return { ...prev, equations: nextEquations }
-                      })
-                    }
-                    placeholder={`${mapEquationLabel(varName)} = ...`}
-                    data-testid={`system-eq-${index}`}
-                  />
-                  {wasmEquationErrors[index] ? (
-                    <span className="field-error" data-testid={`system-eq-error-${index}`}>
-                      {wasmEquationErrors[index]}
+        <div className="system-editor__workspace">
+          <section
+            className={`inspector-section system-editor__card system-editor__variables${
+              systemEditorSections.variables ? '' : ' is-collapsed'
+            }`}
+          >
+            <header className="system-editor__card-header">
+              <button
+                type="button"
+                className="system-editor__section-toggle"
+                aria-expanded={systemEditorSections.variables}
+                aria-controls="system-editor-variables-body"
+                onClick={() => toggleSystemEditorSection('variables')}
+                data-testid="system-toggle-variables"
+              >
+                <span className="system-editor__section-chevron" aria-hidden="true">
+                  {systemEditorSections.variables ? '▾' : '▸'}
+                </span>
+                <span className="system-editor__section-copy">
+                  <span className="system-editor__eyebrow">State space</span>
+                  <span className="system-editor__section-title" role="heading" aria-level={3}>
+                    Variables and equations
+                  </span>
+                  <span className="system-editor__section-description">
+                    {systemDraft.type === 'map'
+                      ? 'Define each variable at the next iteration.'
+                      : 'Define the time derivative for each state variable.'}
+                  </span>
+                </span>
+              </button>
+              <button
+                type="button"
+                className="system-editor__add-button"
+                onClick={() =>
+                  setSystemDraft((prev) => ({
+                    ...prev,
+                    varNames: [...prev.varNames, `x${prev.varNames.length + 1}`],
+                    equations: [...prev.equations, ''],
+                    periodicVariables: [
+                      ...prev.periodicVariables,
+                      { enabled: false, period: DEFAULT_VARIABLE_PERIOD.toString() },
+                    ],
+                  }))
+                }
+                data-testid="system-add-variable"
+              >
+                + Variable
+              </button>
+            </header>
+
+            {systemEditorSections.variables ? (
+              <div id="system-editor-variables-body" className="system-editor__card-body">
+            {showSystemErrors && systemValidation.errors.varNames ? (
+              <div className="field-error">{systemValidation.errors.varNames}</div>
+            ) : null}
+
+            <div className="system-editor__table-head system-editor__table-head--variables" aria-hidden="true">
+              <span>Name</span>
+              <span>{systemDraft.type === 'map' ? 'Next-state expression' : 'Derivative'}</span>
+              <span>Domain</span>
+              <span />
+            </div>
+            <div className="inspector-list system-editor__variable-list">
+              {systemDraft.varNames.map((varName, index) => (
+                <div className="system-editor__variable-row" key={`var-${index}`}>
+                  <label className="system-editor__compact-field">
+                    <span className="system-editor__mobile-label">Variable</span>
+                    <input
+                      value={varName}
+                      aria-label={`Variable ${index + 1} name`}
+                      onChange={(event) =>
+                        setSystemDraft((prev) => {
+                          const nextVarNames = [...prev.varNames]
+                          nextVarNames[index] = event.target.value
+                          return { ...prev, varNames: nextVarNames }
+                        })
+                      }
+                      data-testid={`system-var-${index}`}
+                    />
+                  </label>
+
+                  <div className="system-editor__equation-field">
+                    <span className="system-editor__mobile-label">
+                      {systemDraft.type === 'map' ? 'Next-state expression' : 'Derivative'}
                     </span>
-                  ) : null}
-                  <div className="periodic-control">
-                    <label className="periodic-control__toggle">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(systemDraft.periodicVariables[index]?.enabled)}
+                    <div className="system-editor__equation-input">
+                      <span>{mapEquationLabel(varName)} =</span>
+                      <textarea
+                        value={systemDraft.equations[index] ?? ''}
+                        aria-label={`${mapEquationLabel(varName)} equation`}
                         onChange={(event) =>
                           setSystemDraft((prev) => {
-                            const nextPeriodic = adjustArray(
-                              prev.periodicVariables,
+                            const nextEquations = adjustArray(
+                              prev.equations,
                               prev.varNames.length,
-                              () => ({
-                                enabled: false,
-                                period: DEFAULT_VARIABLE_PERIOD.toString(),
-                              })
+                              () => ''
                             )
-                            nextPeriodic[index] = {
-                              ...nextPeriodic[index],
-                              enabled: event.target.checked,
-                            }
-                            return { ...prev, periodicVariables: nextPeriodic }
+                            nextEquations[index] = event.target.value
+                            return { ...prev, equations: nextEquations }
                           })
                         }
-                        data-testid={`system-periodic-enabled-${index}`}
+                        placeholder="Expression"
+                        data-testid={`system-eq-${index}`}
                       />
-                      Periodic
-                    </label>
-                    {systemDraft.periodicVariables[index]?.enabled ? (
-                      <input
-                        className="periodic-control__period"
-                        value={
-                          systemDraft.periodicVariables[index]?.period ??
-                          DEFAULT_VARIABLE_PERIOD.toString()
-                        }
-                        onChange={(event) =>
-                          setSystemDraft((prev) => {
-                            const nextPeriodic = adjustArray(
-                              prev.periodicVariables,
-                              prev.varNames.length,
-                              () => ({
-                                enabled: false,
-                                period: DEFAULT_VARIABLE_PERIOD.toString(),
-                              })
-                            )
-                            nextPeriodic[index] = {
-                              ...nextPeriodic[index],
-                              period: event.target.value,
-                            }
-                            return { ...prev, periodicVariables: nextPeriodic }
-                          })
-                        }
-                        placeholder="2pi"
-                        data-testid={`system-periodic-period-${index}`}
-                      />
+                    </div>
+                    {wasmEquationErrors[index] ? (
+                      <span className="field-error" data-testid={`system-eq-error-${index}`}>
+                        {wasmEquationErrors[index]}
+                      </span>
                     ) : null}
                   </div>
-                  {systemDraft.periodicVariables[index]?.enabled &&
-                  showSystemErrors &&
-                  systemValidation.errors.periodicVariables?.[index] ? (
-                    <span
-                      className="field-error"
-                      data-testid={`system-periodic-error-${index}`}
-                    >
-                      {systemValidation.errors.periodicVariables[index]}
-                    </span>
-                  ) : null}
+
+                  <div className="system-editor__domain-field">
+                    <span className="system-editor__mobile-label">Domain</span>
+                    <div className="periodic-control">
+                      <label className="periodic-control__toggle">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(systemDraft.periodicVariables[index]?.enabled)}
+                          onChange={(event) =>
+                            setSystemDraft((prev) => {
+                              const nextPeriodic = adjustArray(
+                                prev.periodicVariables,
+                                prev.varNames.length,
+                                () => ({
+                                  enabled: false,
+                                  period: DEFAULT_VARIABLE_PERIOD.toString(),
+                                })
+                              )
+                              nextPeriodic[index] = {
+                                ...nextPeriodic[index],
+                                enabled: event.target.checked,
+                              }
+                              return { ...prev, periodicVariables: nextPeriodic }
+                            })
+                          }
+                          data-testid={`system-periodic-enabled-${index}`}
+                        />
+                        Periodic
+                      </label>
+                      {systemDraft.periodicVariables[index]?.enabled ? (
+                        <input
+                          className="periodic-control__period"
+                          value={
+                            systemDraft.periodicVariables[index]?.period ??
+                            DEFAULT_VARIABLE_PERIOD.toString()
+                          }
+                          aria-label={`${varName} period`}
+                          onChange={(event) =>
+                            setSystemDraft((prev) => {
+                              const nextPeriodic = adjustArray(
+                                prev.periodicVariables,
+                                prev.varNames.length,
+                                () => ({
+                                  enabled: false,
+                                  period: DEFAULT_VARIABLE_PERIOD.toString(),
+                                })
+                              )
+                              nextPeriodic[index] = {
+                                ...nextPeriodic[index],
+                                period: event.target.value,
+                              }
+                              return { ...prev, periodicVariables: nextPeriodic }
+                            })
+                          }
+                          placeholder="Period"
+                          data-testid={`system-periodic-period-${index}`}
+                        />
+                      ) : null}
+                    </div>
+                    {systemDraft.periodicVariables[index]?.enabled &&
+                    showSystemErrors &&
+                    systemValidation.errors.periodicVariables?.[index] ? (
+                      <span
+                        className="field-error"
+                        data-testid={`system-periodic-error-${index}`}
+                      >
+                        {systemValidation.errors.periodicVariables[index]}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="system-editor__remove-button"
+                    onClick={() =>
+                      setSystemDraft((prev) => {
+                        const nextVarNames = prev.varNames.filter((_, i) => i !== index)
+                        const nextEquations = prev.equations.filter((_, i) => i !== index)
+                        const nextPeriodic = prev.periodicVariables.filter((_, i) => i !== index)
+                        return {
+                          ...prev,
+                          varNames: nextVarNames,
+                          equations: nextEquations,
+                          periodicVariables: nextPeriodic,
+                        }
+                      })
+                    }
+                    aria-label={`Remove variable ${varName || index + 1}`}
+                    title="Remove variable"
+                    data-testid={`system-remove-var-${index}`}
+                  >
+                    Remove
+                  </button>
                 </div>
-                <button
-                  onClick={() =>
-                    setSystemDraft((prev) => {
-                      const nextVarNames = prev.varNames.filter((_, i) => i !== index)
-                      const nextEquations = prev.equations.filter((_, i) => i !== index)
-                      const nextPeriodic = prev.periodicVariables.filter((_, i) => i !== index)
-                      return {
-                        ...prev,
-                        varNames: nextVarNames,
-                        equations: nextEquations,
-                        periodicVariables: nextPeriodic,
-                      }
-                    })
-                  }
-                  aria-label="Remove variable"
-                  data-testid={`system-remove-var-${index}`}
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-          </div>
-          {showSystemErrors && systemValidation.errors.equations ? (
-            <div className="field-error">
-              {systemValidation.errors.equations
-                ?.map((error, idx) => (error ? `Eq ${idx + 1}: ${error}` : null))
-                .filter(Boolean)
-                .join(' ')}
+              ))}
             </div>
-          ) : null}
-        </div>
 
-        <div className="inspector-section">
-          <div className="inspector-group__header">
-            <h3>Parameters</h3>
-            <button
-              onClick={() =>
-                setSystemDraft((prev) => ({
-                  ...prev,
-                  paramNames: [...prev.paramNames, `p${prev.paramNames.length + 1}`],
-                  params: [...prev.params, '0'],
-                }))
-              }
-              data-testid="system-add-parameter"
-            >
-              Add Parameter
-            </button>
-          </div>
-          {showSystemErrors && systemValidation.errors.paramNames ? (
-            <div className="field-error">{systemValidation.errors.paramNames}</div>
-          ) : null}
-          <div className="inspector-inline-actions">
-            <button
-              type="button"
-              className="inspector-inline-button"
-              onClick={() => void writeClipboardText(formatPointValues(systemDraft.params))}
-              disabled={systemDraft.paramNames.length === 0}
-            >
-              Copy values
-            </button>
-            <button
-              type="button"
-              className="inspector-inline-button"
-              onClick={handlePasteSystemParams}
-              disabled={systemDraft.paramNames.length === 0}
-            >
-              Paste values
-            </button>
-          </div>
-          <div className="inspector-list">
-            {systemDraft.paramNames.map((paramName, index) => (
-              <div className="inspector-row inspector-row--param" key={`param-${index}`}>
-                <input
-                  value={paramName}
-                  onChange={(event) =>
-                    setSystemDraft((prev) => {
-                      const nextParamNames = [...prev.paramNames]
-                      nextParamNames[index] = event.target.value
-                      return { ...prev, paramNames: nextParamNames }
-                    })
-                  }
-                  data-testid={`system-param-${index}`}
-                />
-                <input
-                  type="number"
-                  value={systemDraft.params[index] ?? ''}
-                  onChange={(event) =>
-                    setSystemDraft((prev) => {
-                      const nextParams = adjustArray(prev.params, prev.paramNames.length, () => '0')
-                      nextParams[index] = event.target.value
-                      return { ...prev, params: nextParams }
-                    })
-                  }
-                  data-testid={`system-param-value-${index}`}
-                />
-                <button
-                  onClick={() =>
-                    setSystemDraft((prev) => {
-                      const nextParamNames = prev.paramNames.filter((_, i) => i !== index)
-                      const nextParams = prev.params.filter((_, i) => i !== index)
-                      return { ...prev, paramNames: nextParamNames, params: nextParams }
-                    })
-                  }
-                  aria-label="Remove parameter"
-                  data-testid={`system-remove-param-${index}`}
-                >
-                  Remove
-                </button>
+            {showSystemErrors && systemValidation.errors.equations ? (
+              <div className="field-error">
+                {systemValidation.errors.equations
+                  ?.map((error, idx) => (error ? `Eq ${idx + 1}: ${error}` : null))
+                  .filter(Boolean)
+                  .join(' ')}
               </div>
-            ))}
-          </div>
-          {showSystemErrors && systemValidation.errors.params ? (
-            <div className="field-error">
-              {systemValidation.errors.params
-                ?.map((error, idx) => (error ? `Param ${idx + 1}: ${error}` : null))
-                .filter(Boolean)
-                .join(' ')}
-            </div>
-          ) : null}
-        </div>
+            ) : null}
+              </div>
+            ) : null}
+          </section>
 
-        {renderSystemErrors()}
-        {wasmMessage ? <div className="field-error">{wasmMessage}</div> : null}
-        {isValidating ? <div className="field-warning">Validating equations…</div> : null}
-        <div className="inspector-section">
-          <button onClick={handleApplySystem} data-testid="system-apply">
-            Apply System Changes
-          </button>
+          <section
+            className={`inspector-section system-editor__card system-editor__parameters${
+              systemEditorSections.parameters ? '' : ' is-collapsed'
+            }`}
+          >
+            <header className="system-editor__card-header">
+              <button
+                type="button"
+                className="system-editor__section-toggle"
+                aria-expanded={systemEditorSections.parameters}
+                aria-controls="system-editor-parameters-body"
+                onClick={() => toggleSystemEditorSection('parameters')}
+                data-testid="system-toggle-parameters"
+              >
+                <span className="system-editor__section-chevron" aria-hidden="true">
+                  {systemEditorSections.parameters ? '▾' : '▸'}
+                </span>
+                <span className="system-editor__section-copy">
+                  <span className="system-editor__eyebrow">Constants</span>
+                  <span className="system-editor__section-title" role="heading" aria-level={3}>
+                    Parameters
+                  </span>
+                  <span className="system-editor__section-description">
+                    Named values shared by the system equations.
+                  </span>
+                </span>
+              </button>
+              <button
+                type="button"
+                className="system-editor__add-button"
+                onClick={() =>
+                  setSystemDraft((prev) => ({
+                    ...prev,
+                    paramNames: [...prev.paramNames, `p${prev.paramNames.length + 1}`],
+                    params: [...prev.params, '0'],
+                  }))
+                }
+                data-testid="system-add-parameter"
+              >
+                + Parameter
+              </button>
+            </header>
+
+            {systemEditorSections.parameters ? (
+              <div id="system-editor-parameters-body" className="system-editor__card-body">
+            {showSystemErrors && systemValidation.errors.paramNames ? (
+              <div className="field-error">{systemValidation.errors.paramNames}</div>
+            ) : null}
+
+            <div className="system-editor__parameter-tools">
+              <button
+                type="button"
+                className="inspector-inline-button"
+                onClick={() => void writeClipboardText(formatPointValues(systemDraft.params))}
+                disabled={systemDraft.paramNames.length === 0}
+              >
+                Copy values
+              </button>
+              <button
+                type="button"
+                className="inspector-inline-button"
+                onClick={handlePasteSystemParams}
+                disabled={systemDraft.paramNames.length === 0}
+              >
+                Paste values
+              </button>
+            </div>
+
+            {systemDraft.paramNames.length > 0 ? (
+              <>
+                <div className="system-editor__table-head system-editor__table-head--parameters" aria-hidden="true">
+                  <span>Name</span>
+                  <span>Value</span>
+                  <span />
+                </div>
+                <div className="inspector-list system-editor__parameter-list">
+                  {systemDraft.paramNames.map((paramName, index) => (
+                    <div className="system-editor__parameter-row" key={`param-${index}`}>
+                      <label className="system-editor__compact-field">
+                        <span className="system-editor__mobile-label">Parameter</span>
+                        <input
+                          value={paramName}
+                          aria-label={`Parameter ${index + 1} name`}
+                          onChange={(event) =>
+                            setSystemDraft((prev) => {
+                              const nextParamNames = [...prev.paramNames]
+                              nextParamNames[index] = event.target.value
+                              return { ...prev, paramNames: nextParamNames }
+                            })
+                          }
+                          data-testid={`system-param-${index}`}
+                        />
+                      </label>
+                      <label className="system-editor__compact-field">
+                        <span className="system-editor__mobile-label">Value</span>
+                        <input
+                          type="number"
+                          value={systemDraft.params[index] ?? ''}
+                          aria-label={`${paramName || `Parameter ${index + 1}`} value`}
+                          onChange={(event) =>
+                            setSystemDraft((prev) => {
+                              const nextParams = adjustArray(
+                                prev.params,
+                                prev.paramNames.length,
+                                () => '0'
+                              )
+                              nextParams[index] = event.target.value
+                              return { ...prev, params: nextParams }
+                            })
+                          }
+                          data-testid={`system-param-value-${index}`}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="system-editor__remove-button"
+                        onClick={() =>
+                          setSystemDraft((prev) => {
+                            const nextParamNames = prev.paramNames.filter((_, i) => i !== index)
+                            const nextParams = prev.params.filter((_, i) => i !== index)
+                            return { ...prev, paramNames: nextParamNames, params: nextParams }
+                          })
+                        }
+                        aria-label={`Remove parameter ${paramName || index + 1}`}
+                        title="Remove parameter"
+                        data-testid={`system-remove-param-${index}`}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="system-editor__empty">
+                No parameters defined. Add one when an equation needs a named constant.
+              </div>
+            )}
+
+            {showSystemErrors && systemValidation.errors.params ? (
+              <div className="field-error">
+                {systemValidation.errors.params
+                  ?.map((error, idx) => (error ? `Param ${idx + 1}: ${error}` : null))
+                  .filter(Boolean)
+                  .join(' ')}
+              </div>
+            ) : null}
+              </div>
+            ) : null}
+          </section>
         </div>
       </div>
+
+      <footer className="system-editor__footer">
+        <div className="system-editor__status" aria-live="polite">
+          {renderSystemErrors()}
+          {wasmMessage ? <div className="field-error">{wasmMessage}</div> : null}
+          {isValidating ? <div className="field-warning">Validating equations…</div> : null}
+          {!showSystemErrors && !wasmMessage && !isValidating ? (
+            <span>Changes take effect after they are applied.</span>
+          ) : null}
+        </div>
+        <button
+          className="system-editor__apply"
+          onClick={handleApplySystem}
+          data-testid="system-apply"
+        >
+          Apply changes
+        </button>
+      </footer>
     </div>
   )
 
