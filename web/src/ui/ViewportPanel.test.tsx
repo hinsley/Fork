@@ -42,6 +42,7 @@ type PlotlyProps = {
   layout: Partial<Layout>
   viewRevision: number | string
   initialView: Record<string, unknown> | null
+  captureEnabled?: boolean
   onPointClick?: (point: {
     uid?: string
     pointIndex?: number
@@ -117,6 +118,93 @@ function buildIsoclineSignature(object: IsoclineObject): string {
 describe('ViewportPanel view state wiring', () => {
   beforeEach(() => {
     plotlyCalls.length = 0
+  })
+
+  it('renders only requested viewports without editor affordances in viewer mode', () => {
+    let system = createSystem({ name: 'Embed_Viewer_System' })
+    const first = addScene(system, 'Scene 1')
+    system = first.system
+    const second = addScene(system, 'Scene 2')
+    system = second.system
+
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        mode="viewer"
+        viewportIds={[first.nodeId]}
+        showHeaders={false}
+        interaction="none"
+        theme="light"
+      />
+    )
+
+    expect(screen.getByTestId(`plotly-${first.nodeId}`)).toBeInTheDocument()
+    expect(screen.queryByTestId(`plotly-${second.nodeId}`)).toBeNull()
+    expect(screen.queryByTestId(`viewport-header-${first.nodeId}`)).toBeNull()
+    expect(screen.queryByTestId(`viewport-resize-${first.nodeId}`)).toBeNull()
+    expect(screen.queryByTestId(`viewport-insert-${first.nodeId}`)).toBeNull()
+    expect(plotlyCalls.find((entry) => entry.plotId === first.nodeId)?.onPointClick).toBeUndefined()
+  })
+
+  it('keeps 1D map figure capture pending until function sampling settles', async () => {
+    const config: SystemConfig = {
+      name: 'Map_Export',
+      equations: ['r * x * (1 - x)'],
+      params: [2.5],
+      paramNames: ['r'],
+      varNames: ['x'],
+      solver: 'discrete',
+      type: 'map'
+    }
+    let system = createSystem({ name: 'Map_Export', config })
+    const scene = addScene(system, 'Map Scene')
+    system = scene.system
+    system = addObject(system, {
+      type: 'equilibrium',
+      name: 'Fixed Point',
+      systemName: config.name,
+      solution: {
+        state: [0.3],
+        residual_norm: 0,
+        iterations: 0,
+        jacobian: [1],
+        eigenpairs: [],
+        cycle_points: [[0.3]]
+      }
+    }).system
+    let resolveSamples!: (value: { x: number[]; y: number[] }) => void
+    const onSampleMap1DFunction = vi.fn(
+      () =>
+        new Promise<{ x: number[]; y: number[] }>((resolve) => {
+          resolveSamples = resolve
+        })
+    )
+
+    render(
+      <ViewportPanel
+        system={system}
+        selectedNodeId={null}
+        mode="viewer"
+        viewportIds={[scene.nodeId]}
+        theme="light"
+        onSampleMap1DFunction={onSampleMap1DFunction}
+        onFigureCapture={vi.fn()}
+      />
+    )
+
+    await waitFor(() => expect(onSampleMap1DFunction).toHaveBeenCalledTimes(1))
+    expect(
+      plotlyCalls.filter((entry) => entry.plotId === scene.nodeId).at(-1)?.captureEnabled
+    ).toBe(false)
+
+    resolveSamples({ x: [0, 1], y: [0, 0] })
+
+    await waitFor(() => {
+      expect(
+        plotlyCalls.filter((entry) => entry.plotId === scene.nodeId).at(-1)?.captureEnabled
+      ).toBe(true)
+    })
   })
 
   it('opens a viewport context menu and duplicates a viewport', async () => {
@@ -4587,6 +4675,7 @@ describe('ViewportPanel view state wiring', () => {
         }
       ]
     })
+    const onFigureCapture = vi.fn()
 
     function Wrapper() {
       const [state, setState] = useState(system)
@@ -4607,6 +4696,7 @@ describe('ViewportPanel view state wiring', () => {
             onRenameViewport={vi.fn()}
             onDeleteViewport={vi.fn()}
             onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
+            onFigureCapture={onFigureCapture}
           />
           <button
             data-testid="update-analysis-render"
@@ -4643,6 +4733,9 @@ describe('ViewportPanel view state wiring', () => {
         | undefined
       expect(trace?.marker?.size).toBe(5)
       expect(trace?.line?.width).toBe(2)
+      const calls = plotlyCalls.filter((entry) => entry.plotId === analysisResult.nodeId)
+      expect(calls.some((entry) => entry.captureEnabled === false)).toBe(true)
+      expect(calls.at(-1)?.captureEnabled).toBe(true)
     })
 
     fireEvent.click(screen.getByTestId('update-analysis-render'))

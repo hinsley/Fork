@@ -30,6 +30,7 @@ import {
   type PlotlyPointClick
 } from '../viewports/plotly/PlotlyViewport'
 import type { PlotlyRelayoutEvent } from '../viewports/plotly/usePlotViewport'
+import type { PlotlyFigureCaptureState } from '../viewports/plotly/figureCapture'
 import type { PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
 import {
   normalizeAnalysisExpressionError,
@@ -69,6 +70,7 @@ type AnalysisViewportPlotProps = {
     request: ComputeEventSeriesFromSamplesRequest,
     opts?: { signal?: AbortSignal }
   ) => Promise<{ hits: EventSeriesHit[] }>
+  onFigureCapture?: (state: PlotlyFigureCaptureState) => void
 }
 
 type ComputedTraceState = {
@@ -608,7 +610,8 @@ export function AnalysisViewportPlot({
   onSelectSource,
   onSelectOrbitPoint,
   onComputeEventSeriesFromOrbit,
-  onComputeEventSeriesFromSamples
+  onComputeEventSeriesFromSamples,
+  onFigureCapture
 }: AnalysisViewportPlotProps) {
   const eventExpression = useMemo(
     () => resolveAnalysisEventExpression(system.config, viewport.event),
@@ -867,6 +870,10 @@ export function AnalysisViewportPlot({
       initialView={initialView}
       testId={`plotly-viewport-${viewport.id}`}
       onPointClick={traceState.traces.length > 0 ? handlePointClick : undefined}
+      captureEnabled={
+        Boolean(onFigureCapture) && traceState.message !== 'Computing event map…'
+      }
+      onFigureCapture={onFigureCapture}
     />
   )
 }

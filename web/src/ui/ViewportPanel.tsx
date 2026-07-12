@@ -64,6 +64,7 @@ import {
 } from '../system/subsystemGateway'
 import { normalizeFloquetMultipliersForRendering } from '../system/floquetModes'
 import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/PlotlyViewport'
+import type { PlotlyFigureCaptureState } from '../viewports/plotly/figureCapture'
 import { AnalysisViewportPlot } from '../analysis/AnalysisViewportPlot'
 import type { PlotlyRelayoutEvent } from '../viewports/plotly/usePlotViewport'
 import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
@@ -83,12 +84,16 @@ import type {
 type ViewportPanelProps = {
   system: System
   selectedNodeId: string | null
+  mode?: 'editor' | 'viewer'
+  viewportIds?: string[]
+  showHeaders?: boolean
+  interaction?: 'plot' | 'none'
   branchPointSelection?: BranchPointSelection
   orbitPointSelection?: OrbitPointSelection
   limitCyclePointSelection?: LimitCyclePointSelection
   theme: 'light' | 'dark'
-  onSelectViewport: (id: string) => void
-  onSelectObject: (id: string) => void
+  onSelectViewport?: (id: string) => void
+  onSelectObject?: (id: string) => void
   onSelectBranchPoint?: (selection: BranchPointSelection) => void
   onSelectOrbitPoint?: (selection: OrbitPointSelection) => void
   onSelectLimitCyclePoint?: (selection: LimitCyclePointSelection) => void
@@ -100,15 +105,15 @@ type ViewportPanelProps = {
     request: ComputeEventSeriesFromSamplesRequest,
     opts?: { signal?: AbortSignal }
   ) => Promise<EventSeriesResult>
-  onReorderViewport: (nodeId: string, targetId: string) => void
-  onResizeViewport: (id: string, height: number) => void
-  onToggleViewport: (id: string) => void
-  onCreateScene: (targetId?: string | null) => void
+  onReorderViewport?: (nodeId: string, targetId: string) => void
+  onResizeViewport?: (id: string, height: number) => void
+  onToggleViewport?: (id: string) => void
+  onCreateScene?: (targetId?: string | null) => void
   onCreateAnalysis?: (targetId?: string | null) => void
-  onCreateBifurcation: (targetId?: string | null) => void
-  onRenameViewport: (id: string, name: string) => void
+  onCreateBifurcation?: (targetId?: string | null) => void
+  onRenameViewport?: (id: string, name: string) => void
   onDuplicateViewport?: (id: string) => void | Promise<void>
-  onDeleteViewport: (id: string) => void
+  onDeleteViewport?: (id: string) => void
   onSampleMap1DFunction?: (
     request: SampleMap1DFunctionRequest,
     opts?: { signal?: AbortSignal }
@@ -120,6 +125,7 @@ type ViewportPanelProps = {
       geometry: ComputeIsoclineResult
     }
   >
+  onFigureCapture?: (state: PlotlyFigureCaptureState) => void
 }
 
 type ViewportEntry = {
@@ -172,6 +178,11 @@ type ViewportTileProps = {
       geometry: ComputeIsoclineResult
     }
   >
+  mode: 'editor' | 'viewer'
+  showHeader: boolean
+  interaction: 'plot' | 'none'
+  captureEnabled: boolean
+  onFigureCapture?: (state: PlotlyFigureCaptureState) => void
 }
 
 function resolveNumericPointIndex(value: unknown): number | null {
@@ -6567,6 +6578,11 @@ function ViewportTile({
   onCancelRename,
   plotlyTheme,
   isoclineGeometryCache,
+  mode,
+  showHeader,
+  interaction,
+  captureEnabled,
+  onFigureCapture,
 }: ViewportTileProps) {
   const { node, scene, analysis, diagram } = entry
   const systemId = system.id
@@ -6641,7 +6657,7 @@ function ViewportTile({
   const isSelected = node.id === selectedViewportId
   const isDragging = draggingId === node.id
   const isDropTarget = dragOverId === node.id && draggingId !== node.id
-  const isCollapsed = !node.expanded
+  const isCollapsed = mode === 'editor' && !node.expanded
   const [timeSeriesState, setTimeSeriesState] = useState<{
     sceneId: string | null
     range: [number, number] | null
@@ -6860,37 +6876,47 @@ function ViewportTile({
     <section
       className={`viewport-tile ${isCollapsed ? 'viewport-tile--collapsed' : ''} ${
         isSelected ? 'viewport-tile--selected' : ''
-      } ${isDropTarget ? 'viewport-tile--drop' : ''} ${viewportTypeClass}`}
+      } ${isDropTarget ? 'viewport-tile--drop' : ''} ${viewportTypeClass}${
+        interaction === 'none' ? ' viewport-tile--noninteractive' : ''
+      }`}
       data-testid={`viewport-tile-${node.id}`}
-      onDragOver={(event) => {
-        event.preventDefault()
-        setDragOverId(node.id)
-      }}
-      onDrop={(event) => {
-        event.preventDefault()
-        const sourceId = event.dataTransfer.getData('text/plain') || draggingId
-        if (sourceId && sourceId !== node.id) {
-          onReorderViewport(sourceId, node.id)
-        }
-        setDragOverId(null)
-        setDraggingId(null)
-      }}
+      onDragOver={
+        mode === 'editor'
+          ? (event) => {
+              event.preventDefault()
+              setDragOverId(node.id)
+            }
+          : undefined
+      }
+      onDrop={
+        mode === 'editor'
+          ? (event) => {
+              event.preventDefault()
+              const sourceId = event.dataTransfer.getData('text/plain') || draggingId
+              if (sourceId && sourceId !== node.id) {
+                onReorderViewport(sourceId, node.id)
+              }
+              setDragOverId(null)
+              setDraggingId(null)
+            }
+          : undefined
+      }
     >
-      <header
+      {showHeader ? <header
         className={`viewport-tile__header ${isDragging ? 'is-dragging' : ''}`}
-        onClick={() => onSelectViewport(node.id)}
-        onContextMenu={(event) => onContextMenu(event, node.id)}
-        onKeyDown={(event) => {
+        onClick={mode === 'editor' ? () => onSelectViewport(node.id) : undefined}
+        onContextMenu={mode === 'editor' ? (event) => onContextMenu(event, node.id) : undefined}
+        onKeyDown={mode === 'editor' ? (event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
             onSelectViewport(node.id)
           }
-        }}
-        role="button"
-        tabIndex={0}
+        } : undefined}
+        role={mode === 'editor' ? 'button' : undefined}
+        tabIndex={mode === 'editor' ? 0 : undefined}
         data-testid={`viewport-header-${node.id}`}
       >
-        <button
+        {mode === 'editor' ? <button
           className="viewport-tile__toggle"
           onClick={(event) => {
             event.stopPropagation()
@@ -6900,8 +6926,8 @@ function ViewportTile({
           data-testid={`viewport-toggle-${node.id}`}
         >
           {isCollapsed ? '▸' : '▾'}
-        </button>
-        <button
+        </button> : null}
+        {mode === 'editor' ? <button
           className="viewport-tile__handle"
           draggable
           onClick={(event) => event.stopPropagation()}
@@ -6918,8 +6944,8 @@ function ViewportTile({
           data-testid={`viewport-drag-${node.id}`}
         >
           ::
-        </button>
-        {isEditing ? (
+        </button> : null}
+        {mode === 'editor' && isEditing ? (
           <input
             className="viewport-tile__rename"
             value={draftName}
@@ -6939,7 +6965,7 @@ function ViewportTile({
             <span className="viewport-tile__meta">{label}</span>
           </div>
         )}
-      </header>
+      </header> : null}
       {isCollapsed ? null : (
         <>
           <div className="viewport-tile__body">
@@ -6953,6 +6979,7 @@ function ViewportTile({
                 onSelectOrbitPoint={onSelectOrbitPoint}
                 onComputeEventSeriesFromOrbit={onComputeEventSeriesFromOrbit}
                 onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
+                onFigureCapture={onFigureCapture}
               />
             ) : (
               <PlotlyViewport
@@ -6963,16 +6990,20 @@ function ViewportTile({
                 persistView
                 initialView={initialView}
                 testId={`plotly-viewport-${node.id}`}
-                onPointClick={scene || diagram ? handlePointClick : undefined}
+                onPointClick={
+                  interaction === 'plot' && (scene || diagram) ? handlePointClick : undefined
+                }
                 onResize={scene ? handleResize : undefined}
+                captureEnabled={captureEnabled}
+                onFigureCapture={onFigureCapture}
               />
             )}
           </div>
-          <div
+          {mode === 'editor' ? <div
             className="viewport-resize-handle"
             onPointerDown={(event) => onResizeStart(node.id, event)}
             data-testid={`viewport-resize-${node.id}`}
-          />
+          /> : null}
         </>
       )}
     </section>
@@ -6982,28 +7013,33 @@ function ViewportTile({
 export function ViewportPanel({
   system,
   selectedNodeId,
+  mode = 'editor',
+  viewportIds,
+  showHeaders,
+  interaction = 'plot',
   branchPointSelection,
   orbitPointSelection,
   limitCyclePointSelection,
   theme,
-  onSelectViewport,
-  onSelectObject,
+  onSelectViewport = () => {},
+  onSelectObject = () => {},
   onSelectBranchPoint,
   onSelectOrbitPoint,
   onSelectLimitCyclePoint,
-  onReorderViewport,
-  onResizeViewport,
-  onToggleViewport,
-  onCreateScene,
+  onReorderViewport = () => {},
+  onResizeViewport = () => {},
+  onToggleViewport = () => {},
+  onCreateScene = () => {},
   onCreateAnalysis,
-  onCreateBifurcation,
-  onRenameViewport,
+  onCreateBifurcation = () => {},
+  onRenameViewport = () => {},
   onDuplicateViewport = () => {},
-  onDeleteViewport,
+  onDeleteViewport = () => {},
   onSampleMap1DFunction,
   onComputeEventSeriesFromOrbit,
   onComputeEventSeriesFromSamples,
   isoclineGeometryCache,
+  onFigureCapture,
 }: ViewportPanelProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -7050,7 +7086,9 @@ export function ViewportPanel({
 
   const viewports = useMemo(() => {
     const entries: ViewportEntry[] = []
+    const requested = viewportIds && viewportIds.length > 0 ? new Set(viewportIds) : null
     for (const nodeId of systemRootIds) {
+      if (requested && !requested.has(nodeId)) continue
       const node = systemNodes[nodeId]
       if (!node) continue
       if (node.kind === 'scene') {
@@ -7068,7 +7106,7 @@ export function ViewportPanel({
       }
     }
     return entries
-  }, [systemAnalysisViewports, systemDiagrams, systemNodes, systemRootIds, systemScenes])
+  }, [systemAnalysisViewports, systemDiagrams, systemNodes, systemRootIds, systemScenes, viewportIds])
 
   const hasMapCobwebScene = useMemo(() => {
     return viewports.some((entry) => {
@@ -7159,6 +7197,15 @@ export function ViewportPanel({
         if (disposed) return
         if (mapKeyRef.current !== requestKey) return
         setMapFunctionSamples(null)
+        if (onFigureCapture) {
+          const message = err instanceof Error ? err.message : String(err)
+          for (const entry of viewports) {
+            if (!entry.scene) continue
+            const projection = resolveSceneProjection(systemConfig, entry.scene.axisVariables)
+            if (projection?.kind !== 'map_cobweb_1d') continue
+            onFigureCapture({ plotId: entry.node.id, status: 'error', message })
+          }
+        }
       })
       .finally(() => {
         if (mapRequestKeyRef.current === requestKey) {
@@ -7180,10 +7227,12 @@ export function ViewportPanel({
     mapKey,
     mapRangeValues,
     onSampleMap1DFunction,
+    onFigureCapture,
     systemConfig,
     systemNodes,
     systemObjects,
     systemRootIds,
+    viewports,
   ])
 
   useEffect(() => {
@@ -7296,7 +7345,7 @@ export function ViewportPanel({
     window.addEventListener('pointerup', handleUp)
   }
 
-  const createMenuNode = createMenu ? (
+  const createMenuNode = mode === 'editor' && createMenu ? (
     <div
       className="context-menu"
       style={{ left: createMenu.x, top: createMenu.y }}
@@ -7338,6 +7387,9 @@ export function ViewportPanel({
   ) : null
 
   if (viewports.length === 0) {
+    if (mode === 'viewer') {
+      return <div className="empty-state viewport-empty">No matching viewports are available.</div>
+    }
     return (
       <>
         <div className="empty-state viewport-empty">
@@ -7362,7 +7414,7 @@ export function ViewportPanel({
     <div className="viewport-workspace" data-testid="viewport-workspace">
       {viewports.map((entry, index) => {
         const height = viewportHeights[entry.node.id]
-        const isCollapsed = !entry.node.expanded
+        const isCollapsed = mode === 'editor' && !entry.node.expanded
         const targetId = viewports[index + 1]?.node.id ?? null
         const isEditing = editingId === entry.node.id
 
@@ -7406,9 +7458,22 @@ export function ViewportPanel({
                 onCancelRename={cancelRename}
                 plotlyTheme={plotlyTheme}
                 isoclineGeometryCache={isoclineGeometryCache}
+                mode={mode}
+                showHeader={showHeaders ?? (mode === 'editor' || viewports.length > 1)}
+                interaction={interaction}
+                captureEnabled={
+                  Boolean(onFigureCapture) &&
+                  !(
+                    entry.scene &&
+                    resolveSceneProjection(systemConfig, entry.scene.axisVariables)?.kind ===
+                      'map_cobweb_1d' &&
+                    !hasMapSamples
+                  )
+                }
+                onFigureCapture={onFigureCapture}
               />
             </div>
-            <div className="viewport-insert" data-testid={`viewport-insert-${entry.node.id}`}>
+            {mode === 'editor' ? <div className="viewport-insert" data-testid={`viewport-insert-${entry.node.id}`}>
               <button
                 className="viewport-insert__button"
                 onClick={(event) => openCreateMenu(event, targetId)}
@@ -7416,12 +7481,12 @@ export function ViewportPanel({
               >
                 +
               </button>
-            </div>
+            </div> : null}
           </Fragment>
         )
       })}
       {createMenuNode}
-      {nodeContextMenu ? (
+      {mode === 'editor' && nodeContextMenu ? (
         <div
           className="context-menu"
           style={{ left: nodeContextMenu.x, top: nodeContextMenu.y }}

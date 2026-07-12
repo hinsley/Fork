@@ -15,7 +15,7 @@ type PlotViewportOptions = {
 type PlotViewportState = {
   uirevision: string
   onRelayout?: (event: PlotlyRelayoutEvent) => void
-  onPlotReady?: (node: HTMLDivElement) => void
+  onPlotReady?: (node: HTMLDivElement) => Promise<void>
 }
 
 const SNAPSHOT_STORE = new Map<string, PlotlyRelayoutEvent>()
@@ -158,14 +158,14 @@ export function usePlotViewport(plotId: string, options: PlotViewportOptions): P
   )
 
   const handlePlotReady = useCallback(
-    (node: HTMLDivElement) => {
+    async (node: HTMLDivElement) => {
       if (restoredRef.current) return
       restoredRef.current = true
       restorePendingRef.current = false
       if (!persistView) return
       const snapshot = SNAPSHOT_STORE.get(snapshotKey) ?? initialViewRef.current
       if (!hasSnapshot(snapshot)) return
-      void relayoutPlot(node, snapshot)
+      await relayoutPlot(node, snapshot)
     },
     [persistView, snapshotKey]
   )

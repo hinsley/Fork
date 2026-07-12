@@ -36,7 +36,10 @@ Object.defineProperty(globalThis, 'localStorage', {
 enableDeterministicMode()
 
 vi.mock('../viewports/plotly/plotlyAdapter', () => ({
-  renderPlot: vi.fn(() => Promise.resolve()),
+  renderPlot: vi.fn((container: HTMLElement, data: unknown[], layout: object) => {
+    Object.assign(container, { data, layout })
+    return Promise.resolve()
+  }),
   purgePlot: vi.fn(),
   preloadPlotly: vi.fn(),
   isPlotlyLoaded: vi.fn(() => true),

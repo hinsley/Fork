@@ -13,6 +13,7 @@ describe('SystemDialog', () => {
     const user = userEvent.setup()
     const onOpenSystem = vi.fn()
     const onExportSystem = vi.fn()
+    const onCreateEmbed = vi.fn()
     const onCreateSystem = vi.fn()
     const onDeleteSystem = vi.fn()
     const onImportSystem = vi.fn()
@@ -33,6 +34,7 @@ describe('SystemDialog', () => {
         ]}
         onOpenSystem={onOpenSystem}
         onExportSystem={onExportSystem}
+        onCreateEmbed={onCreateEmbed}
         onCreateSystem={onCreateSystem}
         onDeleteSystem={onDeleteSystem}
         onImportSystem={onImportSystem}
@@ -50,6 +52,10 @@ describe('SystemDialog', () => {
     expect(onOpenSystem).toHaveBeenCalledWith('sys-1')
 
     await user.click(screen.getByRole('button', { name: 'Export' }))
+    expect(onExportSystem).not.toHaveBeenCalled()
+    expect(screen.getByRole('heading', { name: 'Export System A' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Download ZIP archive' }))
     expect(onExportSystem).toHaveBeenCalledWith('sys-1')
 
     await user.click(screen.getByRole('button', { name: 'Delete' }))
@@ -62,6 +68,38 @@ describe('SystemDialog', () => {
     expect(onImportSystem).toHaveBeenCalledWith(file)
   })
 
+  it('opens the embed creator from the export choice', async () => {
+    const user = userEvent.setup()
+    const onCreateEmbed = vi.fn()
+
+    render(
+      <SystemDialog
+        open
+        systems={[
+          {
+            id: 'sys-1',
+            name: 'System A',
+            updatedAt: '2024-01-01T00:00:00Z',
+            type: 'flow',
+          },
+        ]}
+        onOpenSystem={vi.fn()}
+        onExportSystem={vi.fn()}
+        onCreateEmbed={onCreateEmbed}
+        onCreateSystem={vi.fn()}
+        onDeleteSystem={vi.fn()}
+        onImportSystem={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Export' }))
+    await user.click(screen.getByRole('button', { name: 'Create embed' }))
+
+    expect(onCreateEmbed).toHaveBeenCalledWith('sys-1')
+    expect(screen.queryByRole('heading', { name: 'Export System A' })).not.toBeInTheDocument()
+  })
+
   it('shows empty state and uses the default name for create', async () => {
     const user = userEvent.setup()
     const onCreateSystem = vi.fn()
@@ -72,6 +110,7 @@ describe('SystemDialog', () => {
         systems={[]}
         onOpenSystem={vi.fn()}
         onExportSystem={vi.fn()}
+        onCreateEmbed={vi.fn()}
         onCreateSystem={onCreateSystem}
         onDeleteSystem={vi.fn()}
         onImportSystem={vi.fn()}
@@ -95,6 +134,7 @@ describe('SystemDialog', () => {
         systems={[]}
         onOpenSystem={vi.fn()}
         onExportSystem={vi.fn()}
+        onCreateEmbed={vi.fn()}
         onCreateSystem={onCreateSystem}
         onDeleteSystem={vi.fn()}
         onImportSystem={vi.fn()}
@@ -137,6 +177,7 @@ describe('SystemDialog', () => {
         ]}
         onOpenSystem={vi.fn()}
         onExportSystem={vi.fn()}
+        onCreateEmbed={vi.fn()}
         onCreateSystem={vi.fn()}
         onDeleteSystem={onDeleteSystem}
         onImportSystem={vi.fn()}
@@ -172,6 +213,7 @@ describe('SystemDialog', () => {
         ]}
         onOpenSystem={vi.fn()}
         onExportSystem={vi.fn()}
+        onCreateEmbed={vi.fn()}
         onCreateSystem={vi.fn()}
         onDeleteSystem={vi.fn()}
         onImportSystem={vi.fn()}
@@ -193,6 +235,7 @@ describe('SystemDialog', () => {
         systems={[]}
         onOpenSystem={vi.fn()}
         onExportSystem={vi.fn()}
+        onCreateEmbed={vi.fn()}
         onCreateSystem={vi.fn()}
         onDeleteSystem={vi.fn()}
         onImportSystem={vi.fn()}

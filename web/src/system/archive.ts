@@ -176,6 +176,9 @@ export function parseSystemArchiveBytes(raw: Uint8Array): System {
   }
   const meta = decodeJson<ArchiveSystemMeta>(entries, 'system.json')
   const ui = decodeJson<SystemUiSnapshot>(entries, 'ui.json')
+  if (manifest.systemId !== meta.id || manifest.systemId !== ui.systemId) {
+    throw new Error('Archive system identifiers do not match.')
+  }
   const index: SystemIndex = {
     objects: decodeJson<Record<string, ObjectIndexEntry>>(entries, 'index/objects.json'),
     branches: decodeJson<Record<string, BranchIndexEntry>>(entries, 'index/branches.json'),

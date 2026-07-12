@@ -8,6 +8,7 @@ type SystemDialogProps = {
   systems: SystemSummary[]
   onOpenSystem: (id: string) => void
   onExportSystem: (id: string) => void
+  onCreateEmbed: (id: string) => void
   onCreateSystem: (name: string) => void
   onDeleteSystem: (id: string) => void
   onImportSystem: (file: File) => void
@@ -19,6 +20,7 @@ export function SystemDialog({
   systems,
   onOpenSystem,
   onExportSystem,
+  onCreateEmbed,
   onCreateSystem,
   onDeleteSystem,
   onImportSystem,
@@ -26,6 +28,8 @@ export function SystemDialog({
 }: SystemDialogProps) {
   const [name, setName] = useState('NewSystem')
   const [nameError, setNameError] = useState<string | null>(null)
+  const [exportTargetId, setExportTargetId] = useState<string | null>(null)
+  const exportTarget = systems.find((system) => system.id === exportTargetId) ?? null
 
   const handleCreate = () => {
     const error = validateSystemName(name)
@@ -81,7 +85,7 @@ export function SystemDialog({
                     </span>
                   </div>
                   <div className="dialog__list-actions">
-                    <button onClick={() => onExportSystem(system.id)}>Export</button>
+                    <button onClick={() => setExportTargetId(system.id)}>Export</button>
                     <button
                       onClick={() => {
                         if (confirmDelete({ name: system.name, kind: 'System' })) {
@@ -111,6 +115,45 @@ export function SystemDialog({
           />
         </section>
       </div>
+      {exportTarget ? (
+        <div className="dialog-backdrop export-choice-backdrop" role="dialog" aria-modal="true">
+          <div className="dialog export-choice-dialog" data-testid="export-choice-dialog">
+            <header className="dialog__header">
+              <div>
+                <h2>Export {exportTarget.name}</h2>
+                <p>Choose how you want to share this system.</p>
+              </div>
+              <button onClick={() => setExportTargetId(null)} aria-label="Close export choices">
+                ✕
+              </button>
+            </header>
+            <div className="export-choice-dialog__options">
+              <button
+                className="export-choice-dialog__option"
+                aria-label="Create embed"
+                onClick={() => {
+                  setExportTargetId(null)
+                  onCreateEmbed(exportTarget.id)
+                }}
+              >
+                <span className="export-choice-dialog__option-title">Create embed</span>
+                <span>Export selected viewports as a standalone, CDN-backed Plotly page.</span>
+              </button>
+              <button
+                className="export-choice-dialog__option"
+                aria-label="Download ZIP archive"
+                onClick={() => {
+                  setExportTargetId(null)
+                  onExportSystem(exportTarget.id)
+                }}
+              >
+                <span className="export-choice-dialog__option-title">Download ZIP archive</span>
+                <span>Save the complete system for backup or import into Fork.</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

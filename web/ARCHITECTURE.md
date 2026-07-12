@@ -100,6 +100,15 @@ existing CLI surface area and the Rust/WASM core.
   - Plotly scene adapter (camera, axes, selection linking).
   - Render mapping from objects/branches to Plotly traces.
 
+### Static embeds
+- `src/embed/` owns the read-only embed bootstrap, versioned message contract, bounded archive
+  worker, and viewer stack.
+- `public/embed/v1.js` defines the publisher-facing `<fork-embed>` element. It fetches the exported
+  ZIP from the publisher's origin and transfers the bytes to `/embed` through a dedicated message
+  channel.
+- Embed systems use `MemorySystemStore`; they do not select or write OPFS/IndexedDB storage.
+- The viewer reuses viewport rendering but structurally omits editor chrome and mutation actions.
+
 ### Panels + Layout
 - `src/ui/`:
   - DCC-style panel layout (split panes, collapsible panels).
