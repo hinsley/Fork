@@ -43,7 +43,18 @@ function requiredProps(system: System, selectedNodeId: string) {
 describe('selection inspector workflow shell', () => {
   it('opens solved equilibrium data from the Inspect action', async () => {
     const user = userEvent.setup()
-    const base = createSystem({ name: 'Workflow_Inspect' })
+    const base = createSystem({
+      name: 'Workflow_Inspect',
+      config: {
+        name: 'Workflow_Inspect',
+        equations: ['-x'],
+        params: [1],
+        paramNames: ['a'],
+        varNames: ['x'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
     const equilibrium: EquilibriumObject = {
       type: 'equilibrium',
       name: 'Equilibrium_A',
@@ -75,7 +86,24 @@ describe('selection inspector workflow shell', () => {
     await user.click(coordinatesToggle)
     const coordinatesDetails = coordinatesToggle.closest('details')
     expect(coordinatesDetails).not.toBeNull()
-    expect(within(coordinatesDetails as HTMLElement).getByText(base.config.varNames[0])).toBeVisible()
+    const coordinates = within(coordinatesDetails as HTMLElement)
+    const coordinateLabel = coordinates.getByText(base.config.varNames[0])
+    const coordinateCopy = coordinates.getByRole('button', { name: 'Copy' })
+    expect(coordinateLabel).toBeVisible()
+    expect(
+      coordinateLabel.compareDocumentPosition(coordinateCopy) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).not.toBe(0)
+
+    const parametersToggle = screen.getByTestId('equilibrium-data-parameters-toggle')
+    await user.click(parametersToggle)
+    const parametersDetails = parametersToggle.closest('details')
+    expect(parametersDetails).not.toBeNull()
+    const parameters = within(parametersDetails as HTMLElement)
+    const parameterLabel = parameters.getByText(base.config.paramNames[0])
+    const parameterCopy = parameters.getByRole('button', { name: 'Copy' })
+    expect(
+      parameterLabel.compareDocumentPosition(parameterCopy) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).not.toBe(0)
     expect(screen.getByRole('heading', { name: 'Residual and iterations' })).not.toBeVisible()
     expect(screen.getByRole('heading', { name: 'Last solver attempt' })).not.toBeVisible()
     expect(screen.queryByTestId('inspector-workflow-advanced')).toBeNull()

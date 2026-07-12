@@ -210,21 +210,6 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                   testId="equilibrium-data-coordinates-toggle"
                 >
                   <div className="inspector-section">
-                    <div className="inspector-inline-actions">
-                    {equilibrium.solution ? (
-                      <button
-                        type="button"
-                        className="inspector-inline-button"
-                        onClick={() =>
-                          void writeClipboardText(
-                            formatPointValues(equilibriumDisplayState ?? [])
-                          )
-                        }
-                      >
-                        Copy
-                      </button>
-                    ) : null}
-                    </div>
                     {equilibrium.solution && equilibriumDisplayState ? (
                       <InspectorMetrics
                         rows={frozenVariableHeaderNames.map((name, index) => ({
@@ -235,6 +220,21 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                     ) : (
                       <p className="empty-state">{`No stored ${equilibriumLabelLower} solution yet.`}</p>
                     )}
+                    {equilibrium.solution ? (
+                      <div className="inspector-inline-actions">
+                        <button
+                          type="button"
+                          className="inspector-inline-button"
+                          onClick={() =>
+                            void writeClipboardText(
+                              formatPointValues(equilibriumDisplayState ?? [])
+                            )
+                          }
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </InspectorSubDisclosure>
                 {isDiscreteMap ? (
@@ -243,23 +243,6 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                     testId="equilibrium-data-cycle-points-toggle"
                   >
                     <div className="inspector-section">
-                      <div className="inspector-inline-actions">
-                      {equilibriumCyclePoints && equilibriumCyclePoints.length > 0 ? (
-                        <button
-                          type="button"
-                          className="inspector-inline-button"
-                          onClick={() =>
-                            void writeClipboardText(
-                              equilibriumCyclePoints
-                                .map((point) => formatPointValues(point))
-                                .join('\n')
-                            )
-                          }
-                        >
-                          Copy
-                        </button>
-                      ) : null}
-                      </div>
                       {equilibriumCyclePoints && equilibriumCyclePoints.length > 0 ? (
                         <div
                           className="orbit-preview__table"
@@ -296,6 +279,23 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                       ) : (
                         <p className="empty-state">No cycle points stored yet.</p>
                       )}
+                      {equilibriumCyclePoints && equilibriumCyclePoints.length > 0 ? (
+                        <div className="inspector-inline-actions">
+                          <button
+                            type="button"
+                            className="inspector-inline-button"
+                            onClick={() =>
+                              void writeClipboardText(
+                                equilibriumCyclePoints
+                                  .map((point) => formatPointValues(point))
+                                  .join('\n')
+                              )
+                            }
+                          >
+                            Copy
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   </InspectorSubDisclosure>
                 ) : null}
@@ -304,19 +304,6 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                   testId="equilibrium-data-parameters-toggle"
                 >
                   <div className="inspector-section">
-                    <div className="inspector-inline-actions">
-                    {equilibrium.parameters && equilibrium.parameters.length > 0 ? (
-                      <button
-                        type="button"
-                        className="inspector-inline-button"
-                        onClick={() =>
-                          void writeClipboardText(formatPointValues(equilibrium.parameters ?? []))
-                        }
-                      >
-                        Copy
-                      </button>
-                    ) : null}
-                    </div>
                     {equilibrium.parameters && equilibrium.parameters.length > 0 ? (
                       <InspectorMetrics
                         rows={equilibrium.parameters.map((value, index) => ({
@@ -327,6 +314,19 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                     ) : (
                       <p className="empty-state">Parameters not recorded yet.</p>
                     )}
+                    {equilibrium.parameters && equilibrium.parameters.length > 0 ? (
+                      <div className="inspector-inline-actions">
+                        <button
+                          type="button"
+                          className="inspector-inline-button"
+                          onClick={() =>
+                            void writeClipboardText(formatPointValues(equilibrium.parameters ?? []))
+                          }
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </InspectorSubDisclosure>
                 <InspectorSubDisclosure

@@ -170,19 +170,6 @@ export function OrbitInspectorSections({
                   testId="orbit-data-parameters-toggle"
                 >
                   <div className="inspector-section">
-                    <div className="inspector-inline-actions">
-                    {orbit.parameters && orbit.parameters.length > 0 ? (
-                      <button
-                        type="button"
-                        className="inspector-inline-button"
-                        onClick={() =>
-                          void writeClipboardText(formatPointValues(orbit.parameters ?? []))
-                        }
-                      >
-                        Copy
-                      </button>
-                    ) : null}
-                    </div>
                     {orbit.parameters && orbit.parameters.length > 0 ? (
                       <InspectorMetrics
                         rows={orbit.parameters.map((value, index) => ({
@@ -193,6 +180,19 @@ export function OrbitInspectorSections({
                     ) : (
                       <p className="empty-state">Parameters not recorded yet.</p>
                     )}
+                    {orbit.parameters && orbit.parameters.length > 0 ? (
+                      <div className="inspector-inline-actions">
+                        <button
+                          type="button"
+                          className="inspector-inline-button"
+                          onClick={() =>
+                            void writeClipboardText(formatPointValues(orbit.parameters ?? []))
+                          }
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </InspectorSubDisclosure>
                 <InspectorSubDisclosure title="Data preview" testId="orbit-data-preview-toggle">

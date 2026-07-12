@@ -440,19 +440,6 @@ export function SelectionInspectorView({
                 testId="limit-cycle-data-parameters-toggle"
               >
                 <div className="inspector-section">
-                  <div className="inspector-inline-actions">
-                  {limitCycleDisplayParams.length > 0 ? (
-                    <button
-                      type="button"
-                      className="inspector-inline-button"
-                      onClick={() =>
-                        void writeClipboardText(formatPointValues(limitCycleDisplayParams))
-                      }
-                    >
-                      Copy
-                    </button>
-                  ) : null}
-                  </div>
                   {limitCycleDisplayParams.length > 0 ? (
                     <InspectorMetrics
                       rows={limitCycleDisplayParams.map((value, index) => ({
@@ -463,6 +450,19 @@ export function SelectionInspectorView({
                   ) : (
                     <p className="empty-state">Parameters not recorded yet.</p>
                   )}
+                  {limitCycleDisplayParams.length > 0 ? (
+                    <div className="inspector-inline-actions">
+                      <button
+                        type="button"
+                        className="inspector-inline-button"
+                        onClick={() =>
+                          void writeClipboardText(formatPointValues(limitCycleDisplayParams))
+                        }
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               </InspectorSubDisclosure>
               <InspectorSubDisclosure
