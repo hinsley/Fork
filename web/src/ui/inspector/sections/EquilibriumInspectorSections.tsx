@@ -144,6 +144,57 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                     Solve {equilibriumLabel}
                   </button>
                 </div>
+                <div className="inspector-section">
+                  <h4 className="inspector-subheading">Residual and iterations</h4>
+                  {equilibrium.solution ? (
+                    <InspectorMetrics
+                      rows={[
+                        {
+                          label: 'Residual',
+                          value: formatScientific(equilibrium.solution.residual_norm, 6),
+                        },
+                        {
+                          label: 'Iterations',
+                          value: equilibrium.solution.iterations,
+                        },
+                      ]}
+                    />
+                  ) : (
+                    <p className="empty-state">No residual available until solved.</p>
+                  )}
+                </div>
+                <div className="inspector-section">
+                  <h4 className="inspector-subheading">Last solver attempt</h4>
+                  {equilibrium.lastRun ? (
+                    <InspectorMetrics
+                      rows={[
+                        { label: 'Timestamp', value: equilibrium.lastRun.timestamp },
+                        {
+                          label: 'Result',
+                          value: equilibrium.lastRun.success ? 'Success' : 'Failed',
+                        },
+                        ...(equilibrium.lastRun.residual_norm !== undefined
+                          ? [
+                              {
+                                label: 'Residual',
+                                value: formatScientific(equilibrium.lastRun.residual_norm, 6),
+                              },
+                            ]
+                          : []),
+                        ...(equilibrium.lastRun.iterations !== undefined
+                          ? [
+                              {
+                                label: 'Iterations',
+                                value: equilibrium.lastRun.iterations,
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
+                  ) : (
+                    <p className="empty-state">Solver has not been run yet.</p>
+                  )}
+                </div>
               </InspectorDisclosure>
 
               {equilibrium.solution ? (
@@ -271,25 +322,6 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                     />
                   ) : (
                     <p className="empty-state">Parameters not recorded yet.</p>
-                  )}
-                </div>
-                <div className="inspector-section">
-                  <h4 className="inspector-subheading">Residual and iterations</h4>
-                  {equilibrium.solution ? (
-                    <InspectorMetrics
-                      rows={[
-                        {
-                          label: 'Residual',
-                          value: formatScientific(equilibrium.solution.residual_norm, 6),
-                        },
-                        {
-                          label: 'Iterations',
-                          value: equilibrium.solution.iterations,
-                        },
-                      ]}
-                    />
-                  ) : (
-                    <p className="empty-state">No residual available until solved.</p>
                   )}
                 </div>
                 <div className="inspector-section">
@@ -473,96 +505,6 @@ export function EquilibriumInspectorSections({ scope }: { scope: InspectorSelect
                     </div>
                   ) : (
                     <p className="empty-state">No eigenpairs available yet.</p>
-                  )}
-                </div>
-                <div className="inspector-section">
-                  <h4 className="inspector-subheading">Last solver attempt</h4>
-                  {equilibrium.lastRun ? (
-                    <InspectorMetrics
-                      rows={[
-                        { label: 'Timestamp', value: equilibrium.lastRun.timestamp },
-                        {
-                          label: 'Result',
-                          value: equilibrium.lastRun.success ? 'Success' : 'Failed',
-                        },
-                        ...(equilibrium.lastRun.residual_norm !== undefined
-                          ? [
-                              {
-                                label: 'Residual',
-                                value: formatScientific(equilibrium.lastRun.residual_norm, 6),
-                              },
-                            ]
-                          : []),
-                        ...(equilibrium.lastRun.iterations !== undefined
-                          ? [
-                              {
-                                label: 'Iterations',
-                                value: equilibrium.lastRun.iterations,
-                              },
-                            ]
-                          : []),
-                      ]}
-                    />
-                  ) : (
-                    <p className="empty-state">Solver has not been run yet.</p>
-                  )}
-                </div>
-                <div className="inspector-section">
-                  <div className="inspector-subheading-row">
-                    <h4 className="inspector-subheading">Cached solver parameters</h4>
-                    {equilibrium.lastSolverParams ? (
-                      <button
-                        type="button"
-                        className="inspector-inline-button"
-                        onClick={() =>
-                          void writeClipboardText(
-                            formatPointValues(
-                              equilibrium.lastSolverParams?.initialGuess ?? []
-                            )
-                          )
-                        }
-                      >
-                        Copy state
-                      </button>
-                    ) : null}
-                  </div>
-                  {equilibrium.lastSolverParams ? (
-                    <>
-                      <InspectorMetrics
-                        rows={[
-                          ...(systemDraft.type === 'map'
-                            ? [
-                                {
-                                  label: 'Cycle length',
-                                  value: equilibrium.lastSolverParams.mapIterations ?? 1,
-                                },
-                              ]
-                            : []),
-                          {
-                            label: 'Max steps',
-                            value: equilibrium.lastSolverParams.maxSteps,
-                          },
-                          {
-                            label: 'Damping',
-                            value: formatNumber(
-                              equilibrium.lastSolverParams.dampingFactor,
-                              4
-                            ),
-                          },
-                        ]}
-                      />
-                      <InspectorMetrics
-                        rows={frozenVariableHeaderNames.map((name, index) => ({
-                          label: name,
-                          value: formatNumber(
-                            equilibrium.lastSolverParams?.initialGuess[index] ?? Number.NaN,
-                            6
-                          ),
-                        }))}
-                      />
-                    </>
-                  ) : (
-                    <p className="empty-state">No cached solver parameters yet.</p>
                   )}
                 </div>
                 </InspectorDisclosure>

@@ -68,7 +68,16 @@ describe('selection inspector workflow shell', () => {
 
     expect(screen.getByTestId('inspector-workflow-focus')).toHaveTextContent('Inspect')
     expect(screen.getByRole('heading', { name: 'Coordinates' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Residual and iterations' })).not.toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Last solver attempt' })).not.toBeVisible()
     expect(screen.queryByTestId('inspector-workflow-advanced')).toBeNull()
+
+    await user.click(screen.getByTestId('inspector-workflow-back'))
+    await user.click(screen.getByTestId('action-equilibrium-solver-toggle'))
+
+    expect(screen.getByRole('heading', { name: 'Residual and iterations' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Last solver attempt' })).toBeVisible()
+    expect(screen.queryByText('Cached solver parameters')).toBeNull()
   })
 
   it('groups configuration actions and labels continuation actions', () => {
