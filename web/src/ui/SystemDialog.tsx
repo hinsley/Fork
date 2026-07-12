@@ -137,7 +137,7 @@ export function SystemDialog({
                 }}
               >
                 <span className="export-choice-dialog__option-title">Create embed</span>
-                <span>Export selected viewports as a standalone, CDN-backed Plotly page.</span>
+                <span>Export selected viewports as a standalone Plotly page.</span>
               </button>
               <button
                 className="export-choice-dialog__option"

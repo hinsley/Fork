@@ -51,11 +51,19 @@ behavior.
   drops non-finite numbers, and removes Fork-only `uid`/`uirevision` values.
 - `web/src/viewports/plotly/plotlyAdapter.ts`: the loaded Plotly module is
   assigned to `window.Plotly` so browser tests can invoke `Plotly.relayout`.
-- `web/src/embed/standaloneHtml.ts`: downloaded embed pages load the pinned
-  Plotly.js 2.32.0 CDN build and call `Plotly.newPlot()` once per exported
-  figure. Interactive exports enable the native modebar, responsiveness, and
-  scroll zoom; static-presentation exports set `staticPlot: true` and hide the
+- `web/src/embed/standaloneHtml.ts`: downloaded embed pages call
+  `Plotly.newPlot()` once per exported figure. The default format loads the
+  pinned Plotly.js 2.32.0 CDN build. The experimental bundled format
+  decompresses the installed Plotly build from an inline gzip/base64 payload
+  and installs it with a script element, without `eval` or network requests.
+  Interactive exports enable the native modebar, responsiveness, and scroll
+  zoom; static-presentation exports set `staticPlot: true` and hide the
   modebar. These pages contain no Fork runtime.
+- `web/vite.config.ts` and `web/src/embed/standaloneDependencies.ts`: a lazy
+  virtual module gzip-compresses the installed Plotly and MathJax sources at
+  build time. It is fetched by the Fork UI only when bundled export is
+  requested, so the normal application startup and CDN-backed export path do
+  not load the additional source payload.
 
 ### Plotly event listeners
 

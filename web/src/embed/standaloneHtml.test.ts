@@ -1,8 +1,10 @@
+import { gzipSync, gunzipSync, strFromU8, strToU8 } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import type { StandaloneEmbed } from './types'
 import {
   MATHJAX_CDN_URL,
   PLOTLY_CDN_URL,
+  buildBundledStandaloneHtml,
   buildStandaloneHtml,
   standaloneEmbedFilename,
 } from './standaloneHtml'
@@ -27,6 +29,20 @@ function fixture(overrides: Partial<StandaloneEmbed> = {}): StandaloneEmbed {
     ],
     ...overrides,
   }
+}
+
+function gzipBase64(value: unknown): string {
+  return Buffer.from(gzipSync(strToU8(JSON.stringify(value)), { level: 9 })).toString('base64')
+}
+
+function decodeGzipJson(value: string): unknown {
+  return JSON.parse(strFromU8(gunzipSync(new Uint8Array(Buffer.from(value, 'base64')))))
+}
+
+function scriptData(html: string, id: string): string {
+  const match = html.match(new RegExp(`<script id="${id}"[^>]*>([^<]+)</script>`))
+  if (!match?.[1]) throw new Error(`Missing ${id}`)
+  return match[1]
 }
 
 describe('standalone Plotly HTML', () => {
@@ -54,6 +70,41 @@ describe('standalone Plotly HTML', () => {
     expect(html).toContain("staticPlot: payload.interaction === 'none'")
     expect(html).toContain('"interaction":"none"')
     expect(html).toContain('"height":420')
+  })
+
+  it('compresses dependencies and figure data without CDN or injectable markup', () => {
+    const dependencyPackage = {
+      plotlySource: 'window.Plotly={newPlot(){}};// </script><script>alert(1)</script>',
+      mathJaxSource: 'window.MathJax={startup:{promise:Promise.resolve()}};',
+    }
+    const html = buildBundledStandaloneHtml(fixture(), {
+      dependenciesGzipBase64: gzipBase64(dependencyPackage),
+    })
+
+    expect(html).not.toContain(PLOTLY_CDN_URL)
+    expect(html).not.toContain(MATHJAX_CDN_URL)
+    expect(html).not.toContain('"x":[1,2]')
+    expect(html).not.toContain('</script><script>alert(1)</script>')
+    expect(html).toContain("new DecompressionStream('gzip')")
+    expect(html).toContain('license texts are preserved')
+    expect(html).toContain('installScript(dependencies.plotlySource')
+    expect(html).toContain("staticPlot: payload.interaction === 'none'")
+    expect(html).not.toContain('scene-secret-id')
+    expect(html).not.toContain('fork_wasm')
+
+    expect(decodeGzipJson(scriptData(html, 'bundled-dependencies'))).toEqual(
+      dependencyPackage
+    )
+    expect(decodeGzipJson(scriptData(html, 'plot-data'))).toMatchObject({
+      interaction: 'plot',
+      viewports: [
+        {
+          name: 'Scene </script><script>alert(1)</script>',
+          height: 420,
+          figure: { data: [{ x: [1, 2], y: [3, 4] }] },
+        },
+      ],
+    })
   })
 
   it('uses a stable HTML filename', () => {

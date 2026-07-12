@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { gunzipSync } from 'node:zlib'
 import { expect, test } from '@playwright/test'
 import { createHarness } from './harness'
 
@@ -106,4 +107,83 @@ test('generated static presentation disables Plotly interaction', async ({ page 
   expect(html).toContain('"interaction":"none"')
   expect(html).toContain("staticPlot: payload.interaction === 'none'")
   expect(html).toContain("displayModeBar: payload.interaction === 'plot'")
+})
+
+test('bundled export renders under restrictive CSP without network dependencies', async ({
+  page,
+}) => {
+  const port = Number(process.env.PLAYWRIGHT_PORT ?? 4173)
+  const publisherUrl = `http://localhost:${port}/Bundled_Demo_embed.html`
+  const harness = createHarness(page)
+  await harness.goto({ fixture: 'demo' })
+  await harness.openSystem('Demo_System')
+  await page.getByTestId('viewport-insert-empty').click()
+  await page.getByTestId('viewport-create-scene').click()
+  await page.getByTestId('open-systems').click()
+  await page.getByRole('button', { name: 'Export' }).click()
+  await page.getByRole('button', { name: 'Create embed' }).click()
+  await page.getByRole('checkbox', {
+    name: 'Bundle dependencies (Experimental)',
+  }).check()
+
+  const downloadButton = page.getByTestId('download-embed-html')
+  await expect(downloadButton).toBeEnabled({ timeout: 15_000 })
+  const downloadPromise = page.waitForEvent('download')
+  await downloadButton.click()
+  const download = await downloadPromise
+  const downloadPath = await download.path()
+  expect(downloadPath).not.toBeNull()
+  const html = await readFile(downloadPath!, 'utf8')
+
+  expect(html).not.toContain(PLOTLY_CDN_URL)
+  expect(html).not.toContain(MATHJAX_CDN_URL)
+  expect(html).toContain('id="bundled-dependencies"')
+  expect(html).toContain("new DecompressionStream('gzip')")
+  expect(Buffer.byteLength(html, 'utf8')).toBeLessThan(5 * 1024 * 1024)
+  const dependencyMatch = html.match(
+    /<script id="bundled-dependencies"[^>]*>([^<]+)<\/script>/
+  )
+  expect(dependencyMatch?.[1]).toBeTruthy()
+  const dependencyPackage = JSON.parse(
+    gunzipSync(Buffer.from(dependencyMatch![1], 'base64')).toString('utf8')
+  ) as { plotlyLicense: string; mathJaxLicense: string }
+  expect(dependencyPackage.plotlyLicense).toContain('MIT License')
+  expect(dependencyPackage.mathJaxLicense).toContain('Apache License')
+
+  const requests: string[] = []
+  page.on('request', (request) => requests.push(request.url()))
+  await page.route(publisherUrl, (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      headers: {
+        'Content-Security-Policy': [
+          "default-src 'none'",
+          "script-src 'unsafe-inline'",
+          "style-src 'unsafe-inline'",
+          'img-src data: blob:',
+          'font-src data:',
+          "connect-src 'none'",
+          'worker-src blob:',
+        ].join('; '),
+      },
+      body: html,
+    })
+  )
+
+  await page.goto(publisherUrl)
+  await expect(page.locator('.plot-card')).toHaveCount(1)
+  await expect(page.locator('.js-plotly-plot')).toHaveCount(1, { timeout: 15_000 })
+  await expect(page.locator('.modebar')).toHaveCount(1)
+  await expect(page.locator('#error')).toBeHidden()
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          Boolean(
+            (window as typeof window & { MathJax?: { version?: string } }).MathJax?.version
+          )
+      )
+    )
+    .toBe(true)
+  expect(requests).toEqual([publisherUrl])
 })

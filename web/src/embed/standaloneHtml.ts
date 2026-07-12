@@ -1,3 +1,5 @@
+import { gzipSync, strToU8 } from 'fflate'
+import type { BundledDependencyPayload } from './standaloneDependencies'
 import type { StandaloneEmbed } from './types'
 
 export const PLOTLY_CDN_URL = 'https://cdn.plot.ly/plotly-2.32.0.min.js'
@@ -50,12 +52,8 @@ export function standaloneEmbedFilename(systemName: string): string {
   return `${base}_embed.html`
 }
 
-export function buildStandaloneHtml(embed: StandaloneEmbed): string {
-  const theme = THEMES[embed.theme]
-  const showHeaders =
-    embed.headers === 'show' ||
-    (embed.headers === 'auto' && embed.viewports.length > 1)
-  const payload = {
+function buildPlotPayload(embed: StandaloneEmbed) {
+  return {
     interaction: embed.interaction,
     viewports: embed.viewports.map((viewport) => ({
       name: viewport.name,
@@ -64,6 +62,72 @@ export function buildStandaloneHtml(embed: StandaloneEmbed): string {
       figure: viewport.figure,
     })),
   }
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
+  }
+  return btoa(binary)
+}
+
+function gzipJsonToBase64(value: unknown): string {
+  return bytesToBase64(gzipSync(strToU8(JSON.stringify(value)), { level: 9 }))
+}
+
+const RENDER_PAYLOAD_SOURCE = `
+    async function renderPayload(payload) {
+      const root = document.getElementById('plots');
+      for (let index = 0; index < payload.viewports.length; index += 1) {
+        const viewport = payload.viewports[index];
+        const card = document.createElement('section');
+        card.className = 'plot-card';
+        card.style.height = viewport.height + 'px';
+        const header = document.createElement('header');
+        header.className = 'plot-header';
+        const name = document.createElement('span');
+        name.className = 'plot-title';
+        name.textContent = viewport.name;
+        const type = document.createElement('span');
+        type.className = 'plot-type';
+        type.textContent = viewport.type;
+        header.append(name, type);
+        const plot = document.createElement('div');
+        plot.className = 'plot';
+        plot.id = 'plot-' + index;
+        card.append(header, plot);
+        root.append(card);
+        const config = {
+          displaylogo: false,
+          displayModeBar: payload.interaction === 'plot',
+          responsive: true,
+          scrollZoom: payload.interaction === 'plot',
+          doubleClick: false,
+          staticPlot: payload.interaction === 'none',
+          typesetMath: true
+        };
+        await window.Plotly.newPlot(plot, viewport.figure.data, viewport.figure.layout, config);
+      }
+    }
+`
+
+function buildHtmlDocument({
+  embed,
+  headScripts,
+  dataScripts,
+  runtime,
+}: {
+  embed: StandaloneEmbed
+  headScripts: string
+  dataScripts: string
+  runtime: string
+}): string {
+  const theme = THEMES[embed.theme]
+  const showHeaders =
+    embed.headers === 'show' ||
+    (embed.headers === 'auto' && embed.viewports.length > 1)
   const title = escapeHtml(embed.title)
 
   return `<!doctype html>
@@ -84,7 +148,22 @@ export function buildStandaloneHtml(embed: StandaloneEmbed): string {
     .plot { flex: 1 1 auto; min-height: 0; width: 100%; }
     #error { display: none; margin: 16px; padding: 12px; border-radius: 6px; color: ${theme.errorText}; background: ${theme.errorBackground}; white-space: pre-wrap; }
   </style>
+${headScripts}
+</head>
+<body>
+  <main id="plots" aria-label="${title}"></main>
+  <div id="error" role="alert"></div>
+${dataScripts}
   <script>
+${runtime}
+  </script>
+</body>
+</html>`
+}
+
+export function buildStandaloneHtml(embed: StandaloneEmbed): string {
+  const payload = buildPlotPayload(embed)
+  const headScripts = `  <script>
     window.MathJax = {
       tex: { inlineMath: [['$', '$'], ['\\\\(', '\\\\)']], displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']] },
       svg: { fontCache: 'local' },
@@ -92,13 +171,9 @@ export function buildStandaloneHtml(embed: StandaloneEmbed): string {
     };
   </script>
   <script src="${MATHJAX_CDN_URL}" onerror="window.__plotExportDependencyError='MathJax failed to load.'"></script>
-  <script src="${PLOTLY_CDN_URL}" onerror="window.__plotExportDependencyError='Plotly.js failed to load.'"></script>
-</head>
-<body>
-  <main id="plots" aria-label="${title}"></main>
-  <div id="error" role="alert"></div>
-  <script id="plot-data" type="application/json">${safeJson(payload)}</script>
-  <script>
+  <script src="${PLOTLY_CDN_URL}" onerror="window.__plotExportDependencyError='Plotly.js failed to load.'"></script>`
+  const dataScripts = `  <script id="plot-data" type="application/json">${safeJson(payload)}</script>`
+  const runtime = `
     (async function () {
       const errorNode = document.getElementById('error');
       function fail(message) {
@@ -118,44 +193,87 @@ export function buildStandaloneHtml(embed: StandaloneEmbed): string {
           await window.MathJax.startup.promise;
         }
         const payload = JSON.parse(document.getElementById('plot-data').textContent);
-        const root = document.getElementById('plots');
-        for (let index = 0; index < payload.viewports.length; index += 1) {
-          const viewport = payload.viewports[index];
-          const card = document.createElement('section');
-          card.className = 'plot-card';
-          card.style.height = viewport.height + 'px';
-          const header = document.createElement('header');
-          header.className = 'plot-header';
-          const name = document.createElement('span');
-          name.className = 'plot-title';
-          name.textContent = viewport.name;
-          const type = document.createElement('span');
-          type.className = 'plot-type';
-          type.textContent = viewport.type;
-          header.append(name, type);
-          const plot = document.createElement('div');
-          plot.className = 'plot';
-          plot.id = 'plot-' + index;
-          card.append(header, plot);
-          root.append(card);
-          const config = {
-            displaylogo: false,
-            displayModeBar: payload.interaction === 'plot',
-            responsive: true,
-            scrollZoom: payload.interaction === 'plot',
-            doubleClick: false,
-            staticPlot: payload.interaction === 'none',
-            typesetMath: true
-          };
-          await window.Plotly.newPlot(plot, viewport.figure.data, viewport.figure.layout, config);
-        }
+        await renderPayload(payload);
       } catch (error) {
         fail(error instanceof Error ? error.message : String(error));
       }
     })();
-  </script>
-</body>
-</html>`
+${RENDER_PAYLOAD_SOURCE}`
+
+  return buildHtmlDocument({ embed, headScripts, dataScripts, runtime })
+}
+
+export function buildBundledStandaloneHtml(
+  embed: StandaloneEmbed,
+  dependencies: BundledDependencyPayload
+): string {
+  const payloadGzipBase64 = gzipJsonToBase64(buildPlotPayload(embed))
+  const dataScripts = `  <!-- Bundled Plotly.js and MathJax license texts are preserved in the dependency payload. -->
+  <script id="bundled-dependencies" type="application/octet-stream">${dependencies.dependenciesGzipBase64}</script>
+  <script id="plot-data" type="application/octet-stream">${payloadGzipBase64}</script>`
+  const runtime = `
+    const errorNode = document.getElementById('error');
+    function fail(message) {
+      errorNode.textContent = message;
+      errorNode.style.display = 'block';
+    }
+
+    function decodeBase64(value) {
+      const binary = atob(value.trim());
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      return bytes;
+    }
+
+    async function decompressJson(elementId) {
+      if (typeof DecompressionStream !== 'function') {
+        throw new Error('This bundled embed requires a browser with gzip decompression support.');
+      }
+      const source = document.getElementById(elementId);
+      if (!source) throw new Error('Bundled embed data is missing.');
+      const compressed = decodeBase64(source.textContent || '');
+      const stream = new Blob([compressed])
+        .stream()
+        .pipeThrough(new DecompressionStream('gzip'));
+      return JSON.parse(await new Response(stream).text());
+    }
+
+    function installScript(source, label) {
+      const script = document.createElement('script');
+      script.textContent = source + '\\n//# sourceURL=fork-embed-' + label + '.js';
+      document.head.appendChild(script);
+      script.remove();
+    }
+
+    (async function () {
+      try {
+        const [dependencies, payload] = await Promise.all([
+          decompressJson('bundled-dependencies'),
+          decompressJson('plot-data')
+        ]);
+        window.MathJax = {
+          tex: { inlineMath: [['$', '$'], ['\\\\(', '\\\\)']], displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']] },
+          svg: { fontCache: 'local' },
+          startup: { typeset: false }
+        };
+        installScript(dependencies.mathJaxSource, 'mathjax');
+        installScript(dependencies.plotlySource, 'plotly');
+        if (!window.Plotly) {
+          throw new Error('Bundled Plotly.js failed to initialize. The host may block inline scripts.');
+        }
+        if (window.MathJax && window.MathJax.startup && window.MathJax.startup.promise) {
+          await window.MathJax.startup.promise;
+        }
+        await renderPayload(payload);
+      } catch (error) {
+        fail(error instanceof Error ? error.message : String(error));
+      }
+    })();
+${RENDER_PAYLOAD_SOURCE}`
+
+  return buildHtmlDocument({ embed, headScripts: '', dataScripts, runtime })
 }
 
 export function downloadStandaloneHtml(html: string, filename: string): void {

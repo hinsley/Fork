@@ -30,6 +30,12 @@ describe('EmbedDialog', () => {
     expect(markup).not.toContain('fork-embed')
     expect(screen.queryByText('Reset view')).not.toBeInTheDocument()
     expect(screen.queryByText('Fullscreen')).not.toBeInTheDocument()
+    const bundleDependencies = screen.getByRole('checkbox', {
+      name: 'Bundle dependencies (Experimental)',
+    })
+    expect(bundleDependencies).not.toBeChecked()
+    fireEvent.click(bundleDependencies)
+    expect(bundleDependencies).toBeChecked()
     expect(screen.getByRole('button', { name: 'Download embed HTML' })).toBeDisabled()
     fireEvent.change(screen.getByLabelText('Theme'), { target: { value: 'dark' } })
     expect(screen.getByLabelText('Theme')).toHaveValue('dark')

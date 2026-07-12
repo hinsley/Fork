@@ -101,13 +101,13 @@ existing CLI surface area and the Rust/WASM core.
   - Render mapping from objects/branches to Plotly traces.
 
 ### Static embeds
-- `src/embed/` owns the read-only embed bootstrap, versioned message contract, bounded archive
-  worker, and viewer stack.
-- `public/embed/v1.js` defines the publisher-facing `<fork-embed>` element. It fetches the exported
-  ZIP from the publisher's origin and transfers the bytes to `/embed` through a dedicated message
-  channel.
-- Embed systems use `MemorySystemStore`; they do not select or write OPFS/IndexedDB storage.
-- The viewer reuses viewport rendering but structurally omits editor chrome and mutation actions.
+- `src/embed/` owns viewport capture previews, iframe markup, and standalone Plotly HTML
+  generation. Exports contain resolved public Plotly `data`/`layout` figures and presentation
+  metadata, not a system archive or Fork runtime.
+- CDN-backed HTML is the default. An experimental bundled mode gzip-compresses Plotly, MathJax,
+  and figure data into the same file for restrictive uploaded-HTML previews.
+- `vite.config.ts` exposes the installed Plotly and MathJax sources through a lazy virtual module;
+  bundled dependency data is not loaded during normal application startup.
 
 ### Panels + Layout
 - `src/ui/`:

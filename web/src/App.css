@@ -2648,6 +2648,38 @@
   gap: 0 10px;
 }
 
+.embed-dialog__bundle-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 8px;
+  margin: 2px 0 16px;
+  padding: 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--panel-raised);
+}
+
+.embed-dialog__bundle-option input {
+  margin-top: 2px;
+}
+
+.embed-dialog__bundle-option span {
+  display: grid;
+  gap: 3px;
+}
+
+.embed-dialog__bundle-option strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.embed-dialog__bundle-option small {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .embed-dialog__actions {
   display: flex;
   gap: 8px;

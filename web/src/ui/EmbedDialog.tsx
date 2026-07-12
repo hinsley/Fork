@@ -8,7 +8,9 @@ import type {
   StandaloneEmbed,
 } from '../embed/types'
 import { buildIframeMarkup } from '../embed/markup'
+import { loadBundledDependencyPayload } from '../embed/standaloneDependencies'
 import {
+  buildBundledStandaloneHtml,
   buildStandaloneHtml,
   downloadStandaloneHtml,
   standaloneEmbedFilename,
@@ -72,6 +74,9 @@ function EmbedDialogContent({
   const [interaction, setInteraction] = useState<EmbedInteraction>('plot')
   const [width, setWidth] = useState('100%')
   const [height, setHeight] = useState(560)
+  const [bundleDependencies, setBundleDependencies] = useState(false)
+  const [isBundling, setIsBundling] = useState(false)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
   const [copyStatus, setCopyStatus] = useState<string | null>(null)
   const [captures, setCaptures] = useState<Record<string, PlotlyFigureCaptureState>>({})
   const markupRef = useRef<HTMLTextAreaElement | null>(null)
@@ -121,10 +126,28 @@ function EmbedDialogContent({
     }
   }
 
-  const downloadHtml = () => {
+  const downloadHtml = async () => {
     const exported = buildExport()
     if (!exported) return
-    downloadStandaloneHtml(buildStandaloneHtml(exported), filename)
+    setDownloadError(null)
+    if (!bundleDependencies) {
+      downloadStandaloneHtml(buildStandaloneHtml(exported), filename)
+      return
+    }
+    setIsBundling(true)
+    try {
+      const dependencies = await loadBundledDependencyPayload()
+      downloadStandaloneHtml(
+        buildBundledStandaloneHtml(exported, dependencies),
+        filename
+      )
+    } catch (error) {
+      setDownloadError(
+        error instanceof Error ? error.message : 'Unable to bundle embed dependencies.'
+      )
+    } finally {
+      setIsBundling(false)
+    }
   }
 
   const copyMarkup = async () => {
@@ -147,7 +170,7 @@ function EmbedDialogContent({
         <header className="dialog__header">
           <div>
             <h2>Embed {system.name}</h2>
-            <p>Export selected viewports as a standalone, CDN-backed Plotly HTML page.</p>
+            <p>Export selected viewports as a standalone Plotly HTML page.</p>
           </div>
           <button onClick={onClose} aria-label="Close embed dialog">✕</button>
         </header>
@@ -239,6 +262,24 @@ function EmbedDialogContent({
               </label>
             </div>
 
+            <label className="embed-dialog__bundle-option">
+              <input
+                type="checkbox"
+                aria-label="Bundle dependencies (Experimental)"
+                checked={bundleDependencies}
+                onChange={(event) => {
+                  setBundleDependencies(event.target.checked)
+                  setDownloadError(null)
+                }}
+              />
+              <span>
+                <strong>Bundle dependencies (Experimental)</strong>
+                <small>
+                  Compress Plotly, MathJax, and figure data into the HTML for restrictive hosts.
+                </small>
+              </span>
+            </label>
+
             <h3>Embed code</h3>
             <textarea
               ref={markupRef}
@@ -248,8 +289,12 @@ function EmbedDialogContent({
               data-testid="embed-code"
             />
             <div className="embed-dialog__actions">
-              <button onClick={downloadHtml} disabled={!allReady} data-testid="download-embed-html">
-                Download embed HTML
+              <button
+                onClick={() => void downloadHtml()}
+                disabled={!allReady || isBundling}
+                data-testid="download-embed-html"
+              >
+                {isBundling ? 'Bundling dependencies…' : 'Download embed HTML'}
               </button>
               <button
                 className="toolbar__button toolbar__button--primary"
@@ -265,6 +310,9 @@ function EmbedDialogContent({
               </p>
             ) : selectedIds.length > 0 && !allReady ? (
               <p role="status">Preparing selected viewports…</p>
+            ) : null}
+            {downloadError ? (
+              <p className="field-error" role="alert">{downloadError}</p>
             ) : null}
             {copyStatus ? <p role="status">{copyStatus}</p> : null}
           </section>
