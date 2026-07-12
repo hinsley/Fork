@@ -7701,6 +7701,67 @@ export function InspectorDetailsPanel({
           {orbit ? (
             <>
               <InspectorDisclosure
+                key={`${selectionKey}-orbit-run`}
+                title="Orbit Simulation"
+                testId="orbit-run-toggle"
+                defaultOpen={false}
+              >
+                <div className="inspector-section">
+                  {runDisabled ? (
+                    <div className="field-warning">
+                      Apply valid system changes before running orbits.
+                    </div>
+                  ) : null}
+                  <StateTable
+                    title="Initial state"
+                    varNames={frozenVariableHeaderNames}
+                    values={orbitDraft.initialState}
+                    onChange={(next) =>
+                      setOrbitDraft((prev) => ({ ...prev, initialState: next }))
+                    }
+                    onCopy={() =>
+                      void writeClipboardText(formatPointValues(orbitDraft.initialState))
+                    }
+                    onPaste={handlePasteOrbitState}
+                    testIdPrefix="orbit-run-ic"
+                  />
+                  <label>
+                    {systemDraft.type === 'map' ? 'Iterations' : 'Duration'}
+                    <input
+                      type="number"
+                      value={orbitDraft.duration}
+                      onChange={(event) =>
+                        setOrbitDraft((prev) => ({ ...prev, duration: event.target.value }))
+                      }
+                      data-testid="orbit-run-duration"
+                    />
+                  </label>
+                  {systemDraft.type === 'flow' ? (
+                    <label>
+                      Step size (dt)
+                      <input
+                        type="number"
+                        value={orbitDraft.dt}
+                        onChange={(event) =>
+                          setOrbitDraft((prev) => ({ ...prev, dt: event.target.value }))
+                        }
+                        data-testid="orbit-run-dt"
+                      />
+                    </label>
+                  ) : null}
+                  {orbitError ? <div className="field-error">{orbitError}</div> : null}
+                  <button
+                    onClick={handleRunOrbit}
+                    disabled={runDisabled}
+                    data-testid="orbit-run-submit"
+                  >
+                    Run Orbit
+                  </button>
+                </div>
+              </InspectorDisclosure>
+
+              {orbit.data.length > 0 ? (
+                <InspectorDisclosure
                 key={`${selectionKey}-orbit-data`}
                 title="Orbit Data"
                 testId="orbit-data-toggle"
@@ -7901,9 +7962,11 @@ export function InspectorDetailsPanel({
                     <p className="empty-state">No orbit samples stored yet.</p>
                   )}
                 </div>
-              </InspectorDisclosure>
+                </InspectorDisclosure>
+              ) : null}
 
-              <InspectorDisclosure
+              {orbit.data.length >= 2 ? (
+                <InspectorDisclosure
                 key={`${selectionKey}-oseledets`}
                 title="Lyapunov Analysis"
                 testId="oseledets-toggle"
@@ -8202,69 +8265,10 @@ export function InspectorDetailsPanel({
                     </div>
                   </InspectorDisclosure>
                 ) : null}
-              </InspectorDisclosure>
+                </InspectorDisclosure>
+              ) : null}
 
-              <InspectorDisclosure
-                key={`${selectionKey}-orbit-run`}
-                title="Orbit Simulation"
-                testId="orbit-run-toggle"
-                defaultOpen={false}
-              >
-                <div className="inspector-section">
-                  {runDisabled ? (
-                    <div className="field-warning">
-                      Apply valid system changes before running orbits.
-                    </div>
-                  ) : null}
-                  <StateTable
-                    title="Initial state"
-                    varNames={frozenVariableHeaderNames}
-                    values={orbitDraft.initialState}
-                    onChange={(next) =>
-                      setOrbitDraft((prev) => ({ ...prev, initialState: next }))
-                    }
-                    onCopy={() =>
-                      void writeClipboardText(formatPointValues(orbitDraft.initialState))
-                    }
-                    onPaste={handlePasteOrbitState}
-                    testIdPrefix="orbit-run-ic"
-                  />
-                  <label>
-                    {systemDraft.type === 'map' ? 'Iterations' : 'Duration'}
-                    <input
-                      type="number"
-                      value={orbitDraft.duration}
-                      onChange={(event) =>
-                        setOrbitDraft((prev) => ({ ...prev, duration: event.target.value }))
-                      }
-                      data-testid="orbit-run-duration"
-                    />
-                  </label>
-                  {systemDraft.type === 'flow' ? (
-                    <label>
-                      Step size (dt)
-                      <input
-                        type="number"
-                        value={orbitDraft.dt}
-                        onChange={(event) =>
-                          setOrbitDraft((prev) => ({ ...prev, dt: event.target.value }))
-                        }
-                        data-testid="orbit-run-dt"
-                      />
-                    </label>
-                  ) : null}
-                  {orbitError ? <div className="field-error">{orbitError}</div> : null}
-                  <button
-                    onClick={handleRunOrbit}
-                    disabled={runDisabled}
-                    data-testid="orbit-run-submit"
-                  >
-                    Run Orbit
-                  </button>
-                </div>
-              </InspectorDisclosure>
-
-              {!isDiscreteMap ? (
+              {!isDiscreteMap && orbit.data.length > 0 ? (
                 <InspectorDisclosure
                   key={`${selectionKey}-limit-cycle`}
                   title="Limit Cycle"
@@ -8535,6 +8539,86 @@ export function InspectorDetailsPanel({
           {equilibrium ? (
             <>
               <InspectorDisclosure
+                key={`${selectionKey}-equilibrium-solver`}
+                title={`${equilibriumLabel} Solver`}
+                testId="equilibrium-solver-toggle"
+                defaultOpen={false}
+              >
+                <div className="inspector-section">
+                  {runDisabled ? (
+                    <div className="field-warning">
+                      {`Apply valid system changes before solving ${equilibriumLabelPluralLower}.`}
+                    </div>
+                  ) : null}
+                  <StateTable
+                    title="Initial state"
+                    varNames={frozenVariableHeaderNames}
+                    values={equilibriumDraft.initialGuess}
+                    onChange={(next) =>
+                      setEquilibriumDraft((prev) => ({ ...prev, initialGuess: next }))
+                    }
+                    onCopy={() =>
+                      void writeClipboardText(
+                        formatPointValues(equilibriumDraft.initialGuess)
+                      )
+                    }
+                    onPaste={handlePasteEquilibriumGuess}
+                    testIdPrefix="equilibrium-solve-guess"
+                  />
+                  <label>
+                    Max steps
+                    <input
+                      type="number"
+                      value={equilibriumDraft.maxSteps}
+                      onChange={(event) =>
+                        setEquilibriumDraft((prev) => ({ ...prev, maxSteps: event.target.value }))
+                      }
+                      data-testid="equilibrium-solve-steps"
+                    />
+                  </label>
+                  <label>
+                    Damping
+                    <input
+                      type="number"
+                      value={equilibriumDraft.dampingFactor}
+                      onChange={(event) =>
+                        setEquilibriumDraft((prev) => ({
+                          ...prev,
+                          dampingFactor: event.target.value,
+                        }))
+                      }
+                      data-testid="equilibrium-solve-damping"
+                    />
+                  </label>
+                  {systemDraft.type === 'map' ? (
+                    <label>
+                      Cycle length
+                      <input
+                        type="number"
+                        value={equilibriumDraft.mapIterations}
+                        onChange={(event) =>
+                          setEquilibriumDraft((prev) => ({
+                            ...prev,
+                            mapIterations: event.target.value,
+                          }))
+                        }
+                        data-testid="equilibrium-solve-cycle-length"
+                      />
+                    </label>
+                  ) : null}
+                  {equilibriumError ? <div className="field-error">{equilibriumError}</div> : null}
+                  <button
+                    onClick={handleSolveEquilibrium}
+                    disabled={runDisabled}
+                    data-testid="equilibrium-solve-submit"
+                  >
+                    Solve {equilibriumLabel}
+                  </button>
+                </div>
+              </InspectorDisclosure>
+
+              {equilibrium.solution ? (
+                <InspectorDisclosure
                 key={`${selectionKey}-equilibrium-data`}
                 title={`${equilibriumLabel} Data`}
                 testId="equilibrium-data-toggle"
@@ -8951,88 +9035,11 @@ export function InspectorDetailsPanel({
                     <p className="empty-state">No cached solver parameters yet.</p>
                   )}
                 </div>
-              </InspectorDisclosure>
+                </InspectorDisclosure>
+              ) : null}
 
-              <InspectorDisclosure
-                key={`${selectionKey}-equilibrium-solver`}
-                title={`${equilibriumLabel} Solver`}
-                testId="equilibrium-solver-toggle"
-                defaultOpen={false}
-              >
-                <div className="inspector-section">
-                  {runDisabled ? (
-                    <div className="field-warning">
-                      {`Apply valid system changes before solving ${equilibriumLabelPluralLower}.`}
-                    </div>
-                  ) : null}
-                  <StateTable
-                    title="Initial state"
-                    varNames={frozenVariableHeaderNames}
-                    values={equilibriumDraft.initialGuess}
-                    onChange={(next) =>
-                      setEquilibriumDraft((prev) => ({ ...prev, initialGuess: next }))
-                    }
-                    onCopy={() =>
-                      void writeClipboardText(
-                        formatPointValues(equilibriumDraft.initialGuess)
-                      )
-                    }
-                    onPaste={handlePasteEquilibriumGuess}
-                    testIdPrefix="equilibrium-solve-guess"
-                  />
-                  <label>
-                    Max steps
-                    <input
-                      type="number"
-                      value={equilibriumDraft.maxSteps}
-                      onChange={(event) =>
-                        setEquilibriumDraft((prev) => ({ ...prev, maxSteps: event.target.value }))
-                      }
-                      data-testid="equilibrium-solve-steps"
-                    />
-                  </label>
-                  <label>
-                    Damping
-                    <input
-                      type="number"
-                      value={equilibriumDraft.dampingFactor}
-                      onChange={(event) =>
-                        setEquilibriumDraft((prev) => ({
-                          ...prev,
-                          dampingFactor: event.target.value,
-                        }))
-                      }
-                      data-testid="equilibrium-solve-damping"
-                    />
-                  </label>
-                  {systemDraft.type === 'map' ? (
-                    <label>
-                      Cycle length
-                      <input
-                        type="number"
-                        value={equilibriumDraft.mapIterations}
-                        onChange={(event) =>
-                          setEquilibriumDraft((prev) => ({
-                            ...prev,
-                            mapIterations: event.target.value,
-                          }))
-                        }
-                        data-testid="equilibrium-solve-cycle-length"
-                      />
-                    </label>
-                  ) : null}
-                  {equilibriumError ? <div className="field-error">{equilibriumError}</div> : null}
-                  <button
-                    onClick={handleSolveEquilibrium}
-                    disabled={runDisabled}
-                    data-testid="equilibrium-solve-submit"
-                  >
-                    Solve {equilibriumLabel}
-                  </button>
-                </div>
-              </InspectorDisclosure>
-
-              <InspectorDisclosure
+              {equilibrium.solution ? (
+                <InspectorDisclosure
                 key={`${selectionKey}-equilibrium-continuation`}
                 title={`${equilibriumLabel} Continuation`}
                 testId="equilibrium-continuation-toggle"
@@ -9227,9 +9234,11 @@ export function InspectorDetailsPanel({
                     </>
                   )}
                 </div>
-              </InspectorDisclosure>
+                </InspectorDisclosure>
+              ) : null}
 
-              <InspectorDisclosure
+              {equilibrium.solution ? (
+                <InspectorDisclosure
                 key={`${selectionKey}-equilibrium-manifold`}
                 title="Invariant Manifolds"
                 testId="equilibrium-manifold-toggle"
@@ -9736,7 +9745,8 @@ export function InspectorDetailsPanel({
                     </>
                   )}
                 </div>
-              </InspectorDisclosure>
+                </InspectorDisclosure>
+              ) : null}
             </>
           ) : null}
 
@@ -10156,7 +10166,7 @@ export function InspectorDetailsPanel({
             </InspectorDisclosure>
           ) : null}
 
-          {limitCycle ? (
+          {limitCycle && limitCycleDisplayMultipliers.length > 0 ? (
             <InspectorDisclosure
               key={`${selectionKey}-limit-cycle-manifold`}
               title="Invariant Manifolds"
@@ -11232,15 +11242,12 @@ export function InspectorDetailsPanel({
                               : undefined
                           }
                         />
-                      </div>
-                    </InspectorDisclosure>
-
-                    <InspectorDisclosure
-                      key={`${selectionKey}-branch-point-details`}
-                      title="Point Details"
-                      testId="branch-point-details-toggle"
-                    >
-                      <div className="inspector-section">
+                        <InspectorDisclosure
+                          key={`${selectionKey}-branch-point-details`}
+                          title="Point Details"
+                          testId="branch-point-details-toggle"
+                        >
+                          <div className="inspector-section">
                         {selectedBranchPoint ? (
                           <>
                             <InspectorMetrics
@@ -11391,6 +11398,8 @@ export function InspectorDetailsPanel({
                         ) : (
                           <p className="empty-state">Select a point to inspect.</p>
                         )}
+                          </div>
+                        </InspectorDisclosure>
                       </div>
                     </InspectorDisclosure>
                   </>
@@ -11756,15 +11765,12 @@ export function InspectorDetailsPanel({
                               : undefined
                           }
                         />
-                      </div>
-                    </InspectorDisclosure>
-
-                    <InspectorDisclosure
-                      key={`${selectionKey}-branch-point-details`}
-                      title="Point Details"
-                      testId="branch-point-details-toggle"
-                    >
-                      <div className="inspector-section">
+                        <InspectorDisclosure
+                          key={`${selectionKey}-branch-point-details`}
+                          title="Point Details"
+                          testId="branch-point-details-toggle"
+                        >
+                          <div className="inspector-section">
                         {selectedBranchPoint ? (
                           <>
                             <InspectorMetrics
@@ -11916,6 +11922,8 @@ export function InspectorDetailsPanel({
                         ) : (
                           <p className="empty-state">Select a point to inspect.</p>
                         )}
+                          </div>
+                        </InspectorDisclosure>
                       </div>
                     </InspectorDisclosure>
                   </>

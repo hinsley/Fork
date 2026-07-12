@@ -169,6 +169,206 @@ function renderInspectorForStateSpaceStride(
 }
 
 describe('InspectorDetailsPanel', () => {
+  it('hides orbit result menus until an orbit has been run', () => {
+    const baseSystem = createSystem({
+      name: 'Empty_Orbit_Inspector',
+      config: {
+        name: 'Empty_Orbit_Inspector',
+        equations: ['y', '-x'],
+        params: [0.2],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Empty',
+      systemName: baseSystem.config.name,
+      data: [],
+      t_start: 0,
+      t_end: 0,
+      dt: 0.01,
+      parameters: [...baseSystem.config.params],
+    }
+    const added = addObject(baseSystem, orbit)
+
+    renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
+
+    expect(screen.getByTestId('orbit-run-toggle')).toBeVisible()
+    expect(screen.queryByTestId('orbit-data-toggle')).toBeNull()
+    expect(screen.queryByTestId('oseledets-toggle')).toBeNull()
+    expect(screen.queryByTestId('limit-cycle-toggle')).toBeNull()
+  })
+
+  it('orders Orbit Simulation before every orbit-dependent menu', () => {
+    const baseSystem = createSystem({
+      name: 'Populated_Orbit_Inspector',
+      config: {
+        name: 'Populated_Orbit_Inspector',
+        equations: ['y', '-x'],
+        params: [0.2],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Populated',
+      systemName: baseSystem.config.name,
+      data: [
+        [0, 1, 0],
+        [0.01, 0.99, -0.01],
+      ],
+      t_start: 0,
+      t_end: 0.01,
+      dt: 0.01,
+      parameters: [...baseSystem.config.params],
+    }
+    const added = addObject(baseSystem, orbit)
+
+    renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
+
+    const simulation = screen.getByTestId('orbit-run-toggle')
+    for (const dependentTestId of [
+      'orbit-data-toggle',
+      'oseledets-toggle',
+      'limit-cycle-toggle',
+    ]) {
+      const dependent = screen.getByTestId(dependentTestId)
+      expect(
+        simulation.compareDocumentPosition(dependent) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).not.toBe(0)
+    }
+  })
+
+  it('hides equilibrium result menus until the equilibrium has been solved', () => {
+    const baseSystem = createSystem({
+      name: 'Empty_Equilibrium_Inspector',
+      config: {
+        name: 'Empty_Equilibrium_Inspector',
+        equations: ['y', '-x'],
+        params: [0.2],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Equilibrium_Empty',
+      systemName: baseSystem.config.name,
+      parameters: [...baseSystem.config.params],
+    }
+    const added = addObject(baseSystem, equilibrium)
+
+    renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
+
+    expect(screen.getByTestId('equilibrium-solver-toggle')).toBeVisible()
+    expect(screen.queryByTestId('equilibrium-data-toggle')).toBeNull()
+    expect(screen.queryByTestId('equilibrium-continuation-toggle')).toBeNull()
+    expect(screen.queryByTestId('equilibrium-manifold-toggle')).toBeNull()
+  })
+
+  it('orders the equilibrium solver before every solution-dependent menu', () => {
+    const baseSystem = createSystem({
+      name: 'Solved_Equilibrium_Inspector',
+      config: {
+        name: 'Solved_Equilibrium_Inspector',
+        equations: ['y', '-x'],
+        params: [0.2],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Equilibrium_Solved',
+      systemName: baseSystem.config.name,
+      solution: {
+        state: [0, 0],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [],
+      },
+      parameters: [...baseSystem.config.params],
+    }
+    const added = addObject(baseSystem, equilibrium)
+
+    renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
+
+    const solver = screen.getByTestId('equilibrium-solver-toggle')
+    for (const dependentTestId of [
+      'equilibrium-data-toggle',
+      'equilibrium-continuation-toggle',
+      'equilibrium-manifold-toggle',
+    ]) {
+      const dependent = screen.getByTestId(dependentTestId)
+      expect(
+        solver.compareDocumentPosition(dependent) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).not.toBe(0)
+    }
+  })
+
+  it('hides limit-cycle manifolds until Floquet multipliers exist', () => {
+    const baseSystem = createSystem({
+      name: 'Empty_Limit_Cycle_Inspector',
+      config: {
+        name: 'Empty_Limit_Cycle_Inspector',
+        equations: ['y', '-x'],
+        params: [0.2],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'Limit_Cycle_Empty',
+      systemName: baseSystem.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_Seed' },
+      ntst: 1,
+      ncol: 1,
+      period: 1,
+      state: [1, 0, 1],
+      parameters: [...baseSystem.config.params],
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(baseSystem, limitCycle)
+
+    renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
+
+    expect(screen.getByTestId('limit-cycle-data-toggle')).toBeVisible()
+    expect(screen.queryByTestId('limit-cycle-manifold-toggle')).toBeNull()
+  })
+
+  it('nests Point Details inside Branch Navigator', async () => {
+    const user = userEvent.setup()
+    const branchResult = createStateSpaceStrideBranchFixture('homoclinic_curve')
+
+    renderInspectorForStateSpaceStride(branchResult.system, branchResult.nodeId, vi.fn())
+
+    const navigatorToggle = screen.getByTestId('branch-points-toggle')
+    const navigatorDetails = navigatorToggle.closest('details')
+    expect(navigatorDetails).toBeTruthy()
+
+    await user.click(navigatorToggle)
+
+    const pointToggle = screen.getByTestId('branch-point-details-toggle')
+    const pointDetails = pointToggle.closest('details')
+    expect(pointDetails).toBeTruthy()
+    expect(pointDetails).not.toBe(navigatorDetails)
+    expect(navigatorDetails?.contains(pointDetails)).toBe(true)
+  })
+
   it('shows selected two-parameter continuation values in the branch navigator', async () => {
     const user = userEvent.setup()
     const branchResult = createStateSpaceStrideBranchFixture('homoclinic_curve')
@@ -2757,9 +2957,9 @@ describe('InspectorDetailsPanel', () => {
 
     expect(screen.getByText('Branch Summary')).toBeVisible()
     expect(screen.getByText('Branch Navigator')).toBeVisible()
-    expect(screen.getByText('Point Details')).toBeVisible()
 
     await user.click(screen.getByTestId('branch-points-toggle'))
+    expect(screen.getByText('Point Details')).toBeVisible()
     await user.click(screen.getByTestId('branch-point-details-toggle'))
 
     expect(screen.getByText('Amplitude (min to max)')).toBeVisible()
@@ -3505,6 +3705,7 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
+    await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-point-details-toggle'))
 
     const cycleTable = screen.getByRole('region', { name: 'Cycle point data' })
