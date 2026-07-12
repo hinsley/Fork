@@ -2304,6 +2304,10 @@
   align-items: end;
 }
 
+.system-editor__model-grid--map {
+  grid-template-columns: minmax(180px, 0.7fr) minmax(360px, 1.5fr);
+}
+
 .system-editor__field {
   display: grid;
   min-width: 0;

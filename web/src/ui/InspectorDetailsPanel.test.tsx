@@ -1327,6 +1327,7 @@ describe('InspectorDetailsPanel', () => {
     await user.clear(nameInput)
     await user.type(nameInput, 'NewSystem')
     await user.click(screen.getByTestId('system-type-map'))
+    expect(screen.queryByTestId('system-solver')).toBeNull()
 
     await user.click(screen.getByTestId('system-apply'))
 

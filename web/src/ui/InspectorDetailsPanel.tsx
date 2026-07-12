@@ -6754,7 +6754,9 @@ export function InspectorDetailsPanel({
             </div>
           </header>
 
-          <div className="system-editor__model-grid">
+          <div
+            className={`system-editor__model-grid system-editor__model-grid--${systemDraft.type}`}
+          >
             <label className="system-editor__field system-editor__field--name">
               <span>System name</span>
               <input
@@ -6800,25 +6802,27 @@ export function InspectorDetailsPanel({
               </div>
             </div>
 
-            <label className="system-editor__field system-editor__field--solver">
-              <span>{systemDraft.type === 'map' ? 'Update method' : 'Integrator'}</span>
-              <select
-                value={systemDraft.solver}
-                onChange={(event) =>
-                  setSystemDraft((prev) => ({ ...prev, solver: event.target.value }))
-                }
-                data-testid="system-solver"
-              >
-                {(systemDraft.type === 'map' ? MAP_SOLVERS : FLOW_SOLVERS).map((solver) => (
-                  <option key={solver} value={solver}>
-                    {solver}
-                  </option>
-                ))}
-              </select>
-              {showSystemErrors && systemValidation.errors.solver ? (
-                <span className="field-error">{systemValidation.errors.solver}</span>
-              ) : null}
-            </label>
+            {systemDraft.type === 'flow' ? (
+              <label className="system-editor__field system-editor__field--solver">
+                <span>Integrator</span>
+                <select
+                  value={systemDraft.solver}
+                  onChange={(event) =>
+                    setSystemDraft((prev) => ({ ...prev, solver: event.target.value }))
+                  }
+                  data-testid="system-solver"
+                >
+                  {FLOW_SOLVERS.map((solver) => (
+                    <option key={solver} value={solver}>
+                      {solver}
+                    </option>
+                  ))}
+                </select>
+                {showSystemErrors && systemValidation.errors.solver ? (
+                  <span className="field-error">{systemValidation.errors.solver}</span>
+                ) : null}
+              </label>
+            ) : null}
           </div>
 
           {systemValidation.warnings.length > 0 ? (
