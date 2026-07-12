@@ -9,7 +9,6 @@ import { ViewportPanel } from './ui/ViewportPanel'
 import { SystemDialog } from './ui/SystemDialog'
 import { SystemSettingsDialog } from './ui/SystemSettingsDialog'
 import { Toolbar } from './ui/Toolbar'
-import { PerfOverlay } from './ui/PerfOverlay'
 import { isDeterministicMode } from './utils/determinism'
 import { suggestDefaultName } from './utils/naming'
 import { formatEquilibriumLabel } from './system/labels'
@@ -456,7 +455,6 @@ function App() {
           ) : null}
         </main>
       )}
-      {import.meta.env.DEV ? <PerfOverlay /> : null}
     </div>
   )
 }
