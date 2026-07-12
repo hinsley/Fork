@@ -1,10 +1,89 @@
+import { readFile } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
-import { buildSystemArchiveBytes } from '../src/system/archive'
-import { createDemoSystem } from '../src/system/fixtures'
-import { addScene } from '../src/system/model'
 import { createHarness } from './harness'
 
-test('embed builder exposes selected viewports and export markup', async ({ page }) => {
+const PLOTLY_CDN_URL = 'https://cdn.plot.ly/plotly-2.32.0.min.js'
+const MATHJAX_CDN_URL = 'https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg.js'
+
+test('builder downloads a standalone stacked Plotly HTML page', async ({ page }) => {
+  const port = Number(process.env.PLAYWRIGHT_PORT ?? 4173)
+  const publisherUrl = `http://localhost:${port}/Demo_System_embed.html`
+  const harness = createHarness(page)
+  await harness.goto({ fixture: 'demo' })
+  await harness.openSystem('Demo_System')
+  await page.getByTestId('viewport-insert-empty').click()
+  await page.getByTestId('viewport-create-scene').click()
+  await page.getByRole('button', { name: 'Add viewport' }).click()
+  await page.getByTestId('viewport-create-bifurcation').click()
+
+  await page.getByTestId('open-systems').click()
+  await page.getByRole('button', { name: 'Export' }).click()
+  await page.getByRole('button', { name: 'Create embed' }).click()
+  await expect(page.getByTestId('embed-dialog')).toBeVisible()
+  await expect(page.getByTestId('embed-source')).toHaveValue('./Demo_System_embed.html')
+  await expect(page.getByTestId('embed-code')).toHaveValue(/<iframe/)
+  await expect(page.getByTestId('embed-code')).not.toHaveValue(/fork-embed/)
+
+  const viewportChecks = page.locator('.embed-dialog__viewport-list input[type="checkbox"]')
+  await expect(viewportChecks).toHaveCount(2)
+  for (let index = 0; index < 2; index += 1) {
+    await viewportChecks.nth(index).check()
+  }
+  await page.getByLabel('Theme').selectOption('dark')
+  await page.getByLabel('Viewport headers').selectOption('show')
+
+  const downloadButton = page.getByTestId('download-embed-html')
+  await expect(downloadButton).toBeEnabled({ timeout: 15_000 })
+  const downloadPromise = page.waitForEvent('download')
+  await downloadButton.click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe('Demo_System_embed.html')
+  const downloadPath = await download.path()
+  expect(downloadPath).not.toBeNull()
+  const html = await readFile(downloadPath!, 'utf8')
+
+  expect(html).toContain(PLOTLY_CDN_URL)
+  expect(html).toContain(MATHJAX_CDN_URL)
+  expect(html).toContain('window.Plotly.newPlot')
+  expect(html).toContain('Scene_1')
+  expect(html).toContain('Bifurcation_Diagram_1')
+  expect(html).not.toContain('fork-embed')
+  expect(html).not.toContain('forkdynamics.com')
+  expect(html).not.toContain('manifest.json')
+  expect(html).not.toContain('fork_wasm')
+
+  const plotlyBundle = await readFile(
+    new URL('../node_modules/plotly.js-dist-min/plotly.min.js', import.meta.url)
+  )
+  const mathJaxBundle = await readFile(
+    new URL('../node_modules/mathjax/es5/tex-svg.js', import.meta.url)
+  )
+  const requests: string[] = []
+  page.on('request', (request) => requests.push(request.url()))
+  await page.route(PLOTLY_CDN_URL, (route) =>
+    route.fulfill({ contentType: 'application/javascript', body: plotlyBundle })
+  )
+  await page.route(MATHJAX_CDN_URL, (route) =>
+    route.fulfill({ contentType: 'application/javascript', body: mathJaxBundle })
+  )
+  await page.route(publisherUrl, (route) =>
+    route.fulfill({ contentType: 'text/html', body: html })
+  )
+
+  await page.goto(publisherUrl)
+  await expect(page.locator('.plot-card')).toHaveCount(2)
+  await expect(page.locator('.js-plotly-plot')).toHaveCount(2, { timeout: 15_000 })
+  await expect(page.locator('.plot-header')).toHaveCount(2)
+  await expect(page.locator('.modebar')).toHaveCount(2)
+  await expect(page.locator('#error')).toBeHidden()
+
+  expect(requests.some((url) => url.includes('/embed/v1.js'))).toBe(false)
+  expect(requests.some((url) => url.endsWith('/embed'))).toBe(false)
+  expect(requests.some((url) => url.endsWith('.zip'))).toBe(false)
+  expect(requests.some((url) => url.includes('fork_wasm'))).toBe(false)
+})
+
+test('generated static presentation disables Plotly interaction', async ({ page }) => {
   const harness = createHarness(page)
   await harness.goto({ fixture: 'demo' })
   await harness.openSystem('Demo_System')
@@ -13,68 +92,17 @@ test('embed builder exposes selected viewports and export markup', async ({ page
   await page.getByTestId('open-systems').click()
   await page.getByRole('button', { name: 'Export' }).click()
   await page.getByRole('button', { name: 'Create embed' }).click()
-  await expect(page.getByTestId('embed-dialog')).toBeVisible()
-  await expect(page.getByTestId('embed-source')).toHaveValue('./Demo_System.zip')
-  await expect(page.getByTestId('embed-code')).toHaveValue(/forkdynamics\.com\/embed\/v1\.js/)
-  await expect(page.getByTestId('embed-code')).toHaveValue(/viewports=/)
+  await page.getByLabel('Interaction').selectOption('none')
 
-  await page.getByLabel('Theme').selectOption('dark')
-  await page.getByLabel('Viewport headers').selectOption('show')
-  const headerBackground = await page
-    .locator('.embed-dialog__preview .viewport-tile__header')
-    .evaluate((header) => getComputedStyle(header).backgroundColor)
-  expect(headerBackground).toBe('rgb(19, 29, 40)')
+  const downloadButton = page.getByTestId('download-embed-html')
+  await expect(downloadButton).toBeEnabled({ timeout: 15_000 })
+  const downloadPromise = page.waitForEvent('download')
+  await downloadButton.click()
+  const download = await downloadPromise
+  const downloadPath = await download.path()
+  const html = await readFile(downloadPath!, 'utf8')
 
-  await expect(page.getByText('Reset view')).toHaveCount(0)
-  await expect(page.getByText('Fullscreen')).toHaveCount(0)
-  await expect(page.getByTestId('embed-code')).not.toHaveValue(/controls=/)
-})
-
-test('publisher-origin loader renders a ZIP without CORS headers', async ({ page }, testInfo) => {
-  const port = Number(process.env.PLAYWRIGHT_PORT ?? 4173)
-  const publisherOrigin = `http://localhost:${port}`
-  const viewerOrigin = `http://127.0.0.1:${port}`
-  const base = createDemoSystem().system
-  const scene = addScene(base, 'Embedded Scene')
-  const system = scene.system
-  const sceneId = scene.nodeId
-  const archive = buildSystemArchiveBytes(system)
-
-  await page.route(`${publisherOrigin}/system.zip`, async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/zip',
-      body: Buffer.from(archive),
-      headers: {},
-    })
-  })
-
-  await page.goto(`${publisherOrigin}/?publisher=1`)
-  await page.setContent(`
-    <!doctype html>
-    <html>
-      <body>
-        <script defer src="${viewerOrigin}/embed/v1.js"></script>
-        <fork-embed
-          src="/system.zip"
-          viewports="${sceneId}"
-          controls="reset fullscreen"
-          style="display:block;width:800px;height:520px"
-        ></fork-embed>
-      </body>
-    </html>
-  `)
-
-  const frame = page.frameLocator('fork-embed iframe')
-  await expect(frame.getByTestId('embed-viewer')).toBeVisible({ timeout: 15_000 })
-  await expect(frame.locator('[data-testid^="plotly-viewport-"]')).toBeVisible()
-  await expect(frame.getByTestId('toolbar')).toHaveCount(0)
-  await expect(frame.getByTestId('objects-panel')).toHaveCount(0)
-  await expect(frame.getByText('Reset view')).toHaveCount(0)
-  await expect(frame.getByText('Fullscreen')).toHaveCount(0)
-
-  await testInfo.attach('embed-origins', {
-    body: `${publisherOrigin} -> ${viewerOrigin}`,
-    contentType: 'text/plain',
-  })
+  expect(html).toContain('"interaction":"none"')
+  expect(html).toContain("staticPlot: payload.interaction === 'none'")
+  expect(html).toContain("displayModeBar: payload.interaction === 'plot'")
 })

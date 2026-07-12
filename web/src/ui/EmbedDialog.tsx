@@ -1,41 +1,52 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { System } from '../system/types'
-import { EmbedViewportStack } from '../embed/EmbedViewportStack'
+import { EmbedCapturePreview } from '../embed/EmbedCapturePreview'
 import type {
   EmbedHeaders,
   EmbedInteraction,
-  EmbedSpecV1,
   EmbedTheme,
+  StandaloneEmbed,
 } from '../embed/types'
-import { buildEmbedMarkup } from '../embed/markup'
+import { buildIframeMarkup } from '../embed/markup'
+import {
+  buildStandaloneHtml,
+  downloadStandaloneHtml,
+  standaloneEmbedFilename,
+} from '../embed/standaloneHtml'
+import type { PlotlyFigureCaptureState } from '../viewports/plotly/figureCapture'
 
-function exportFilename(system: System): string {
-  return `${system.name.replace(/\s+/g, '_') || 'fork_system'}.zip`
-}
+const DEFAULT_EXPORTED_VIEWPORT_HEIGHT = 360
 
 export function EmbedDialog({
   open,
   system,
+  appTheme,
   onClose,
-  onExport,
 }: {
   open: boolean
   system: System | null
+  appTheme: EmbedTheme
   onClose: () => void
-  onExport: () => void
 }) {
   if (!open || !system) return null
-  return <EmbedDialogContent system={system} onClose={onClose} onExport={onExport} />
+  return (
+    <EmbedDialogContent
+      key={system.id}
+      system={system}
+      appTheme={appTheme}
+      onClose={onClose}
+    />
+  )
 }
 
 function EmbedDialogContent({
   system,
+  appTheme,
   onClose,
-  onExport,
 }: {
   system: System
+  appTheme: EmbedTheme
   onClose: () => void
-  onExport: () => void
 }) {
   const viewportEntries = useMemo(() => {
     return system.rootIds.flatMap((id) => {
@@ -53,24 +64,68 @@ function EmbedDialogContent({
     selected && viewportEntries.some((entry) => entry.id === selected)
       ? selected
       : viewportEntries[0]?.id
-  const [source, setSource] = useState(`./${exportFilename(system)}`)
+  const filename = standaloneEmbedFilename(system.name)
+  const [source, setSource] = useState(`./${filename}`)
   const [selectedIds, setSelectedIds] = useState<string[]>(defaultId ? [defaultId] : [])
-  const [theme, setTheme] = useState<EmbedTheme>('auto')
+  const [theme, setTheme] = useState<EmbedTheme>(appTheme)
   const [headers, setHeaders] = useState<EmbedHeaders>('auto')
   const [interaction, setInteraction] = useState<EmbedInteraction>('plot')
   const [width, setWidth] = useState('100%')
   const [height, setHeight] = useState(560)
   const [copyStatus, setCopyStatus] = useState<string | null>(null)
+  const [captures, setCaptures] = useState<Record<string, PlotlyFigureCaptureState>>({})
   const markupRef = useRef<HTMLTextAreaElement | null>(null)
 
-  const spec: EmbedSpecV1 = {
-    version: 1,
-    viewportIds: selectedIds,
-    theme,
-    headers,
-    interaction,
+  const markup = buildIframeMarkup({
+    source,
+    title: `${system.name} visualization`,
+    width,
+    height,
+  })
+
+  const handleFigureCapture = useCallback((state: PlotlyFigureCaptureState) => {
+    setCaptures((current) => ({ ...current, [state.plotId]: state }))
+  }, [])
+
+  const selectedCaptures = selectedIds.map((id) => captures[id])
+  const allReady =
+    selectedIds.length > 0 &&
+    selectedCaptures.every((capture) => capture?.status === 'ready')
+  const captureErrors = selectedCaptures.filter(
+    (capture): capture is Extract<PlotlyFigureCaptureState, { status: 'error' }> =>
+      capture?.status === 'error'
+  )
+
+  const resetCaptures = () => setCaptures({})
+
+  const buildExport = (): StandaloneEmbed | null => {
+    if (!allReady) return null
+    const byId = new Map(viewportEntries.map((entry) => [entry.id, entry]))
+    return {
+      title: `${system.name} visualization`,
+      theme,
+      headers,
+      interaction,
+      viewports: selectedIds.flatMap((id) => {
+        const entry = byId.get(id)
+        const capture = captures[id]
+        if (!entry || capture?.status !== 'ready') return []
+        return [
+          {
+            ...entry,
+            height: system.ui.viewportHeights[id] ?? DEFAULT_EXPORTED_VIEWPORT_HEIGHT,
+            figure: capture.figure,
+          },
+        ]
+      }),
+    }
   }
-  const markup = buildEmbedMarkup({ source, spec, width, height })
+
+  const downloadHtml = () => {
+    const exported = buildExport()
+    if (!exported) return
+    downloadStandaloneHtml(buildStandaloneHtml(exported), filename)
+  }
 
   const copyMarkup = async () => {
     try {
@@ -92,7 +147,7 @@ function EmbedDialogContent({
         <header className="dialog__header">
           <div>
             <h2>Embed {system.name}</h2>
-            <p>Create a read-only visualization backed by the exported system ZIP.</p>
+            <p>Export selected viewports as a standalone, CDN-backed Plotly HTML page.</p>
           </div>
           <button onClick={onClose} aria-label="Close embed dialog">✕</button>
         </header>
@@ -125,7 +180,7 @@ function EmbedDialogContent({
             )}
 
             <label className="embed-dialog__field">
-              <span>Hosted ZIP path</span>
+              <span>Hosted HTML path</span>
               <input
                 value={source}
                 onChange={(event) => setSource(event.target.value)}
@@ -136,8 +191,13 @@ function EmbedDialogContent({
             <div className="embed-dialog__grid">
               <label className="embed-dialog__field">
                 <span>Theme</span>
-                <select value={theme} onChange={(event) => setTheme(event.target.value as EmbedTheme)}>
-                  <option value="auto">Automatic</option>
+                <select
+                  value={theme}
+                  onChange={(event) => {
+                    setTheme(event.target.value as EmbedTheme)
+                    resetCaptures()
+                  }}
+                >
                   <option value="light">Light</option>
                   <option value="dark">Dark</option>
                 </select>
@@ -184,11 +244,13 @@ function EmbedDialogContent({
               ref={markupRef}
               readOnly
               value={markup}
-              rows={10}
+              rows={8}
               data-testid="embed-code"
             />
             <div className="embed-dialog__actions">
-              <button onClick={onExport}>Download system ZIP</button>
+              <button onClick={downloadHtml} disabled={!allReady} data-testid="download-embed-html">
+                Download embed HTML
+              </button>
               <button
                 className="toolbar__button toolbar__button--primary"
                 onClick={() => void copyMarkup()}
@@ -197,6 +259,15 @@ function EmbedDialogContent({
                 Copy embed code
               </button>
             </div>
+            {captureErrors.length > 0 ? (
+              <p className="field-error" role="alert">
+                {captureErrors.map((error) => error.message).join(' ')}
+              </p>
+            ) : selectedIds.length > 0 && !allReady ? (
+              <p role="status">Preparing selected viewports…</p>
+            ) : allReady ? (
+              <p role="status">Ready to download.</p>
+            ) : null}
             {copyStatus ? <p role="status">{copyStatus}</p> : null}
           </section>
 
@@ -204,7 +275,13 @@ function EmbedDialogContent({
             <h3>Preview</h3>
             <div className="embed-dialog__preview-frame" style={{ height }}>
               {selectedIds.length > 0 ? (
-                <EmbedViewportStack spec={spec} />
+                <EmbedCapturePreview
+                  viewportIds={selectedIds}
+                  theme={theme}
+                  headers={headers}
+                  interaction={interaction}
+                  onFigureCapture={handleFigureCapture}
+                />
               ) : (
                 <div className="embed-status">Select at least one viewport.</div>
               )}

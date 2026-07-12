@@ -13,25 +13,6 @@ import type {
 
 const ARCHIVE_SCHEMA_VERSION = 1
 
-export type ArchiveParseLimits = {
-  maxCompressedBytes: number
-  maxExpandedBytes: number
-  maxEntries: number
-  maxCompressionRatio: number
-}
-
-export type ArchiveParseOptions = {
-  limits?: ArchiveParseLimits
-  strict?: boolean
-}
-
-export const EMBED_ARCHIVE_LIMITS: ArchiveParseLimits = {
-  maxCompressedBytes: 64 * 1024 * 1024,
-  maxExpandedBytes: 256 * 1024 * 1024,
-  maxEntries: 10_000,
-  maxCompressionRatio: 100,
-}
-
 type ArchiveManifest = {
   schemaVersion: number
   systemId: string
@@ -63,138 +44,6 @@ function decodeJson<T>(entries: ArchiveFileMap, path: string): T {
     throw new Error(`Archive is missing "${path}".`)
   }
   return JSON.parse(strFromU8(encoded)) as T
-}
-
-const SAFE_ARCHIVE_ENTRY = /^(manifest\.json|system\.json|ui\.json|index\/(objects|branches)\.json|(objects|branches)\/[a-f0-9]{2}\/[A-Za-z0-9._:-]+\.json)$/
-const SAFE_ID = /^[A-Za-z0-9._:-]{1,200}$/
-const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
-}
-
-function assertSafeJsonTree(value: unknown, path = 'archive', depth = 0): void {
-  if (depth > 128) {
-    throw new Error(`Archive data is nested too deeply at ${path}.`)
-  }
-  if (Array.isArray(value)) {
-    value.forEach((entry, index) => assertSafeJsonTree(entry, `${path}[${index}]`, depth + 1))
-    return
-  }
-  if (!isRecord(value)) return
-  Object.entries(value).forEach(([key, entry]) => {
-    if (FORBIDDEN_KEYS.has(key)) {
-      throw new Error(`Archive contains a forbidden key at ${path}.`)
-    }
-    assertSafeJsonTree(entry, `${path}.${key}`, depth + 1)
-  })
-}
-
-function assertSafeId(id: unknown, label: string): asserts id is string {
-  if (typeof id !== 'string' || !SAFE_ID.test(id) || FORBIDDEN_KEYS.has(id)) {
-    throw new Error(`Archive contains an invalid ${label}.`)
-  }
-}
-
-function validateSurfaceGeometry(value: unknown, label: string): void {
-  if (!isRecord(value)) return
-  const geometry = value.type === 'Surface' && isRecord(value.Surface) ? value.Surface : value
-  if (value.type !== 'Surface' && !('vertices_flat' in geometry)) return
-  const dim = geometry.dim
-  const vertices = geometry.vertices_flat
-  const triangles = geometry.triangles
-  if (!Number.isInteger(dim) || (dim as number) <= 0 || !Array.isArray(vertices)) {
-    throw new Error(`${label} contains invalid surface geometry.`)
-  }
-  if (!Array.isArray(triangles) || vertices.length % (dim as number) !== 0) {
-    throw new Error(`${label} contains inconsistent surface geometry.`)
-  }
-  const vertexCount = vertices.length / (dim as number)
-  if (
-    triangles.some(
-      (index) => !Number.isInteger(index) || (index as number) < 0 || (index as number) >= vertexCount
-    )
-  ) {
-    throw new Error(`${label} contains an invalid surface triangle index.`)
-  }
-}
-
-function validateEmbeddedSystem(system: System): void {
-  assertSafeId(system.id, 'system ID')
-  if (!system.config || !Array.isArray(system.config.varNames) || !Array.isArray(system.config.equations)) {
-    throw new Error('Archive contains an invalid system configuration.')
-  }
-  if (!isRecord(system.nodes) || !Array.isArray(system.rootIds)) {
-    throw new Error('Archive contains an invalid object tree.')
-  }
-  Object.entries(system.nodes).forEach(([id, node]) => {
-    assertSafeId(id, 'node ID')
-    if (!node || node.id !== id || !Array.isArray(node.children)) {
-      throw new Error(`Archive contains an invalid node for ${id}.`)
-    }
-    node.children.forEach((childId) => {
-      if (!system.nodes[childId]) throw new Error(`Archive node ${id} references a missing child.`)
-    })
-    if (node.parentId !== null && !system.nodes[node.parentId]) {
-      throw new Error(`Archive node ${id} references a missing parent.`)
-    }
-  })
-  system.rootIds.forEach((id) => {
-    if (!system.nodes[id]) throw new Error('Archive object tree contains a missing root node.')
-  })
-  Object.entries(system.index.objects).forEach(([id, entry]) => {
-    assertSafeId(id, 'object ID')
-    if (entry.id !== id || !system.objects[id]) {
-      throw new Error(`Archive object index is inconsistent for ${id}.`)
-    }
-  })
-  Object.entries(system.index.branches).forEach(([id, entry]) => {
-    assertSafeId(id, 'branch ID')
-    if (entry.id !== id || !system.branches[id]) {
-      throw new Error(`Archive branch index is inconsistent for ${id}.`)
-    }
-  })
-  system.scenes.forEach((scene) => {
-    if (!system.nodes[scene.id]) throw new Error(`Archive scene ${scene.id} has no matching node.`)
-  })
-  system.bifurcationDiagrams.forEach((diagram) => {
-    if (!system.nodes[diagram.id]) throw new Error(`Archive diagram ${diagram.id} has no matching node.`)
-  })
-  system.analysisViewports.forEach((viewport) => {
-    if (!system.nodes[viewport.id]) throw new Error(`Archive analysis ${viewport.id} has no matching node.`)
-  })
-  Object.entries(system.branches).forEach(([id, branch]) => {
-    validateSurfaceGeometry(branch.data.manifold_geometry, `Archive branch ${id}`)
-  })
-}
-
-function unzipArchive(raw: Uint8Array, options?: ArchiveParseOptions): ArchiveFileMap {
-  const limits = options?.limits
-  if (limits && raw.byteLength > limits.maxCompressedBytes) {
-    throw new Error('System archive is larger than the 64 MiB embed limit.')
-  }
-  let entriesSeen = 0
-  let expandedBytes = 0
-  return unzipSync(raw, {
-    filter: (file) => {
-      entriesSeen += 1
-      expandedBytes += file.originalSize
-      if (limits) {
-        if (entriesSeen > limits.maxEntries) throw new Error('System archive contains too many files.')
-        if (expandedBytes > limits.maxExpandedBytes) {
-          throw new Error('System archive expands beyond the 256 MiB embed limit.')
-        }
-        const ratio = file.originalSize / Math.max(1, file.size)
-        if (ratio > limits.maxCompressionRatio) {
-          throw new Error('System archive contains an unsafe compression ratio.')
-        }
-      }
-      if (options?.strict && !SAFE_ARCHIVE_ENTRY.test(file.name)) {
-        throw new Error(`System archive contains an unsupported entry: ${file.name}`)
-      }
-      return true
-    },
-  })
 }
 
 function buildArchiveEntries(system: System): ArchiveFileMap {
@@ -319,8 +168,8 @@ export async function parseSystemArchiveFile(file: File): Promise<System> {
   return parseSystemArchiveBytes(raw)
 }
 
-export function parseSystemArchiveBytes(raw: Uint8Array, options?: ArchiveParseOptions): System {
-  const entries = unzipArchive(raw, options)
+export function parseSystemArchiveBytes(raw: Uint8Array): System {
+  const entries = unzipSync(raw)
   const manifest = decodeJson<ArchiveManifest>(entries, 'manifest.json')
   if (manifest.schemaVersion !== ARCHIVE_SCHEMA_VERSION) {
     throw new Error(`Unsupported archive schema version: ${manifest.schemaVersion}`)
@@ -333,10 +182,6 @@ export function parseSystemArchiveBytes(raw: Uint8Array, options?: ArchiveParseO
   const index: SystemIndex = {
     objects: decodeJson<Record<string, ObjectIndexEntry>>(entries, 'index/objects.json'),
     branches: decodeJson<Record<string, BranchIndexEntry>>(entries, 'index/branches.json'),
-  }
-  if (options?.strict) {
-    Object.keys(index.objects).forEach((id) => assertSafeId(id, 'object ID'))
-    Object.keys(index.branches).forEach((id) => assertSafeId(id, 'branch ID'))
   }
   const objects = parseObjectPayloads(entries, index.objects)
   const branches = parseBranchPayloads(entries, index.branches)
@@ -355,8 +200,5 @@ export function parseSystemArchiveBytes(raw: Uint8Array, options?: ArchiveParseO
     ui: structuredClone(ui.ui),
     updatedAt: meta.updatedAt,
   }
-  if (options?.strict) assertSafeJsonTree(system)
-  const normalized = normalizeSystem(system)
-  if (options?.strict) validateEmbeddedSystem(normalized)
-  return normalized
+  return normalizeSystem(system)
 }

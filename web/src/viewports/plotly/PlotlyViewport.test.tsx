@@ -127,4 +127,36 @@ describe('PlotlyViewport', () => {
     expect(nextNode).toBe(node)
     expect(purgePlot).not.toHaveBeenCalled()
   })
+
+  it('reports rendering and ready snapshots after Plotly completes', async () => {
+    vi.clearAllMocks()
+    const onFigureCapture = vi.fn()
+
+    render(
+      <PlotlyViewport
+        plotId="plot-export"
+        data={[{ type: 'scatter', x: [1], y: [2] }]}
+        layout={{ title: { text: 'Exported' } }}
+        captureEnabled
+        onFigureCapture={onFigureCapture}
+      />
+    )
+
+    await waitFor(() => {
+      expect(onFigureCapture).toHaveBeenCalledWith(
+        expect.objectContaining({ plotId: 'plot-export', status: 'ready' })
+      )
+    })
+    expect(onFigureCapture.mock.calls[0]?.[0]).toEqual({
+      plotId: 'plot-export',
+      status: 'rendering',
+    })
+    expect(onFigureCapture.mock.calls[1]?.[0]).toMatchObject({
+      plotId: 'plot-export',
+      status: 'ready',
+      figure: {
+        data: [{ type: 'scatter', x: [1], y: [2] }],
+      },
+    })
+  })
 })

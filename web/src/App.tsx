@@ -339,10 +339,8 @@ function App() {
       <EmbedDialog
         open={embedDialogOpen && Boolean(system)}
         system={system}
+        appTheme={theme}
         onClose={() => setEmbedDialogOpen(false)}
-        onExport={() => {
-          if (system) void actions.exportSystem(system.id)
-        }}
       />
 
       {error ? (

@@ -44,8 +44,18 @@ behavior.
   mount to kick off dynamic import.
 - `web/src/viewports/plotly/PlotlyViewport.tsx`: `purgePlot()` is called on
   unmount to clear the plot via `Plotly.purge()`.
+- `web/src/viewports/plotly/PlotlyViewport.tsx`: when the embed builder requests
+  a figure capture, it waits for rendering and one-time view restoration, then
+  snapshots only Plotly's public `graphDiv.data` and `graphDiv.layout` fields.
+  `web/src/viewports/plotly/figureCapture.ts` converts typed arrays to JSON,
+  drops non-finite numbers, and removes Fork-only `uid`/`uirevision` values.
 - `web/src/viewports/plotly/plotlyAdapter.ts`: the loaded Plotly module is
   assigned to `window.Plotly` so browser tests can invoke `Plotly.relayout`.
+- `web/src/embed/standaloneHtml.ts`: downloaded embed pages load the pinned
+  Plotly.js 2.32.0 CDN build and call `Plotly.newPlot()` once per exported
+  figure. Interactive exports enable the native modebar, responsiveness, and
+  scroll zoom; static-presentation exports set `staticPlot: true` and hide the
+  modebar. These pages contain no Fork runtime.
 
 ### Plotly event listeners
 
@@ -104,6 +114,9 @@ behavior.
 - `web/src/ui/ViewportPanel.tsx`: map function sampling requests are limited to
   true 1D map systems (`varNames.length === 1`) and only when at least one
   visible scene is currently in `map_cobweb_1d` mode.
+- `web/src/ui/ViewportPanel.tsx`: embed figure capture remains pending until
+  required 1D-map sampling settles and reports sampling failures to the embed
+  builder instead of exporting an incomplete function plot.
 - `web/src/ui/ViewportPanel.tsx`: `buildDiagramBaseLayout()` disables legend
   item click/double-click toggles (`legend.itemclick`/`legend.itemdoubleclick`)
   so bifurcation visibility is managed only via the object tree.

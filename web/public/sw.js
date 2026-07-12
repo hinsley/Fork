@@ -32,7 +32,6 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(event.request.url)
   if (url.origin !== self.location.origin) return
-  if (url.pathname === '/embed' || url.pathname.startsWith('/embed/')) return
 
   if (event.request.mode === 'navigate') {
     event.respondWith(

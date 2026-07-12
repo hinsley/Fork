@@ -97,15 +97,6 @@ body {
   overflow: hidden;
 }
 
-html[data-embed='1'],
-html[data-embed='1'] body,
-html[data-embed='1'] #root {
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  overflow: hidden;
-}
-
 .embed-status {
   width: 100%;
   height: 100%;

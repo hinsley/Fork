@@ -64,6 +64,7 @@ import {
 } from '../system/subsystemGateway'
 import { normalizeFloquetMultipliersForRendering } from '../system/floquetModes'
 import { PlotlyViewport, type PlotlyPointClick } from '../viewports/plotly/PlotlyViewport'
+import type { PlotlyFigureCaptureState } from '../viewports/plotly/figureCapture'
 import { AnalysisViewportPlot } from '../analysis/AnalysisViewportPlot'
 import type { PlotlyRelayoutEvent } from '../viewports/plotly/usePlotViewport'
 import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../viewports/plotly/plotlyTheme'
@@ -124,6 +125,7 @@ type ViewportPanelProps = {
       geometry: ComputeIsoclineResult
     }
   >
+  onFigureCapture?: (state: PlotlyFigureCaptureState) => void
 }
 
 type ViewportEntry = {
@@ -179,6 +181,8 @@ type ViewportTileProps = {
   mode: 'editor' | 'viewer'
   showHeader: boolean
   interaction: 'plot' | 'none'
+  captureEnabled: boolean
+  onFigureCapture?: (state: PlotlyFigureCaptureState) => void
 }
 
 function resolveNumericPointIndex(value: unknown): number | null {
@@ -6577,6 +6581,8 @@ function ViewportTile({
   mode,
   showHeader,
   interaction,
+  captureEnabled,
+  onFigureCapture,
 }: ViewportTileProps) {
   const { node, scene, analysis, diagram } = entry
   const systemId = system.id
@@ -6973,6 +6979,7 @@ function ViewportTile({
                 onSelectOrbitPoint={onSelectOrbitPoint}
                 onComputeEventSeriesFromOrbit={onComputeEventSeriesFromOrbit}
                 onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
+                onFigureCapture={onFigureCapture}
               />
             ) : (
               <PlotlyViewport
@@ -6987,6 +6994,8 @@ function ViewportTile({
                   interaction === 'plot' && (scene || diagram) ? handlePointClick : undefined
                 }
                 onResize={scene ? handleResize : undefined}
+                captureEnabled={captureEnabled}
+                onFigureCapture={onFigureCapture}
               />
             )}
           </div>
@@ -7030,6 +7039,7 @@ export function ViewportPanel({
   onComputeEventSeriesFromOrbit,
   onComputeEventSeriesFromSamples,
   isoclineGeometryCache,
+  onFigureCapture,
 }: ViewportPanelProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -7187,6 +7197,15 @@ export function ViewportPanel({
         if (disposed) return
         if (mapKeyRef.current !== requestKey) return
         setMapFunctionSamples(null)
+        if (onFigureCapture) {
+          const message = err instanceof Error ? err.message : String(err)
+          for (const entry of viewports) {
+            if (!entry.scene) continue
+            const projection = resolveSceneProjection(systemConfig, entry.scene.axisVariables)
+            if (projection?.kind !== 'map_cobweb_1d') continue
+            onFigureCapture({ plotId: entry.node.id, status: 'error', message })
+          }
+        }
       })
       .finally(() => {
         if (mapRequestKeyRef.current === requestKey) {
@@ -7208,10 +7227,12 @@ export function ViewportPanel({
     mapKey,
     mapRangeValues,
     onSampleMap1DFunction,
+    onFigureCapture,
     systemConfig,
     systemNodes,
     systemObjects,
     systemRootIds,
+    viewports,
   ])
 
   useEffect(() => {
@@ -7440,6 +7461,16 @@ export function ViewportPanel({
                 mode={mode}
                 showHeader={showHeaders ?? (mode === 'editor' || viewports.length > 1)}
                 interaction={interaction}
+                captureEnabled={
+                  Boolean(onFigureCapture) &&
+                  !(
+                    entry.scene &&
+                    resolveSceneProjection(systemConfig, entry.scene.axisVariables)?.kind ===
+                      'map_cobweb_1d' &&
+                    !hasMapSamples
+                  )
+                }
+                onFigureCapture={onFigureCapture}
               />
             </div>
             {mode === 'editor' ? <div className="viewport-insert" data-testid={`viewport-insert-${entry.node.id}`}>

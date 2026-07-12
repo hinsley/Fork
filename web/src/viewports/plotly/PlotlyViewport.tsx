@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'rea
 import type { Layout, Data } from 'plotly.js'
 import { isPlotlyLoaded, preloadPlotly, purgePlot, renderPlot } from './plotlyAdapter'
 import { usePlotViewport, type PlotlyRelayoutEvent } from './usePlotViewport'
+import {
+  capturePlotlyFigure,
+  type PlotlyFigureCaptureState,
+} from './figureCapture'
 
 type PlotlyClickEvent = {
   points?: Array<{
@@ -127,6 +131,8 @@ export function PlotlyViewport({
   testId = 'plotly-viewport',
   onPointClick,
   onResize,
+  captureEnabled = false,
+  onFigureCapture,
 }: {
   plotId: string
   data: Data[]
@@ -137,13 +143,16 @@ export function PlotlyViewport({
   testId?: string
   onPointClick?: (point: PlotlyPointClick) => void
   onResize?: (size: { width: number; height: number }) => void
+  captureEnabled?: boolean
+  onFigureCapture?: (state: PlotlyFigureCaptureState) => void
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [loading, setLoading] = useState(!isPlotlyLoaded())
   const [error, setError] = useState<string | null>(null)
   const onPointClickRef = useRef(onPointClick)
   const onRelayoutRef = useRef<((event: PlotlyRelayoutEvent) => void) | undefined>(undefined)
-  const onPlotReadyRef = useRef<((node: HTMLDivElement) => void) | undefined>(undefined)
+  const onPlotReadyRef = useRef<((node: HTMLDivElement) => Promise<void>) | undefined>(undefined)
+  const onFigureCaptureRef = useRef(onFigureCapture)
   const clickHandlerRef = useRef<((event: PlotlyClickEvent) => void) | null>(null)
   const relayoutHandlerRef = useRef<((event: PlotlyRelayoutEvent) => void) | null>(null)
   const renderInFlightRef = useRef(false)
@@ -170,6 +179,10 @@ export function PlotlyViewport({
   }, [onPointClick])
 
   useEffect(() => {
+    onFigureCaptureRef.current = onFigureCapture
+  }, [onFigureCapture])
+
+  useEffect(() => {
     onRelayoutRef.current = onRelayout
   }, [onRelayout])
 
@@ -188,6 +201,9 @@ export function PlotlyViewport({
     const runRender = async () => {
       if (controller.signal.aborted) return
       renderInFlightRef.current = true
+      if (captureEnabled) {
+        onFigureCaptureRef.current?.({ plotId, status: 'rendering' })
+      }
       setError(null)
       setLoading(!isPlotlyLoaded())
       try {
@@ -196,12 +212,23 @@ export function PlotlyViewport({
         setLoading(false)
         bindPlotlyClick(node, onPointClickRef, clickHandlerRef)
         bindPlotlyRelayout(node, onRelayoutRef, relayoutHandlerRef, renderInFlightRef)
-        onPlotReadyRef.current?.(node)
+        await onPlotReadyRef.current?.(node)
+        if (controller.signal.aborted) return
+        if (captureEnabled) {
+          onFigureCaptureRef.current?.({
+            plotId,
+            status: 'ready',
+            figure: capturePlotlyFigure(node),
+          })
+        }
       } catch (err) {
         if (controller.signal.aborted) return
         const message = err instanceof Error ? err.message : String(err)
         setError(message)
         setLoading(false)
+        if (captureEnabled) {
+          onFigureCaptureRef.current?.({ plotId, status: 'error', message })
+        }
       } finally {
         renderInFlightRef.current = false
       }
@@ -210,7 +237,7 @@ export function PlotlyViewport({
     return () => {
       controller.abort()
     }
-  }, [data, layoutWithUirevision])
+  }, [captureEnabled, data, layoutWithUirevision, plotId])
 
   useEffect(() => {
     const node = containerRef.current
