@@ -265,8 +265,6 @@ function EmbedDialogContent({
               </p>
             ) : selectedIds.length > 0 && !allReady ? (
               <p role="status">Preparing selected viewports…</p>
-            ) : allReady ? (
-              <p role="status">Ready to download.</p>
             ) : null}
             {copyStatus ? <p role="status">{copyStatus}</p> : null}
           </section>

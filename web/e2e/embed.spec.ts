@@ -34,6 +34,7 @@ test('builder downloads a standalone stacked Plotly HTML page', async ({ page })
 
   const downloadButton = page.getByTestId('download-embed-html')
   await expect(downloadButton).toBeEnabled({ timeout: 15_000 })
+  await expect(page.getByText('Ready to download.')).toHaveCount(0)
   const downloadPromise = page.waitForEvent('download')
   await downloadButton.click()
   const download = await downloadPromise
