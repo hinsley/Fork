@@ -202,6 +202,49 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.queryByTestId('limit-cycle-toggle')).toBeNull()
   })
 
+  it('orders Orbit Simulation before every orbit-dependent menu', () => {
+    const baseSystem = createSystem({
+      name: 'Populated_Orbit_Inspector',
+      config: {
+        name: 'Populated_Orbit_Inspector',
+        equations: ['y', '-x'],
+        params: [0.2],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const orbit: OrbitObject = {
+      type: 'orbit',
+      name: 'Orbit_Populated',
+      systemName: baseSystem.config.name,
+      data: [
+        [0, 1, 0],
+        [0.01, 0.99, -0.01],
+      ],
+      t_start: 0,
+      t_end: 0.01,
+      dt: 0.01,
+      parameters: [...baseSystem.config.params],
+    }
+    const added = addObject(baseSystem, orbit)
+
+    renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
+
+    const simulation = screen.getByTestId('orbit-run-toggle')
+    for (const dependentTestId of [
+      'orbit-data-toggle',
+      'oseledets-toggle',
+      'limit-cycle-toggle',
+    ]) {
+      const dependent = screen.getByTestId(dependentTestId)
+      expect(
+        simulation.compareDocumentPosition(dependent) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).not.toBe(0)
+    }
+  })
+
   it('hides equilibrium result menus until the equilibrium has been solved', () => {
     const baseSystem = createSystem({
       name: 'Empty_Equilibrium_Inspector',
@@ -229,6 +272,49 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.queryByTestId('equilibrium-data-toggle')).toBeNull()
     expect(screen.queryByTestId('equilibrium-continuation-toggle')).toBeNull()
     expect(screen.queryByTestId('equilibrium-manifold-toggle')).toBeNull()
+  })
+
+  it('orders the equilibrium solver before every solution-dependent menu', () => {
+    const baseSystem = createSystem({
+      name: 'Solved_Equilibrium_Inspector',
+      config: {
+        name: 'Solved_Equilibrium_Inspector',
+        equations: ['y', '-x'],
+        params: [0.2],
+        paramNames: ['mu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'Equilibrium_Solved',
+      systemName: baseSystem.config.name,
+      solution: {
+        state: [0, 0],
+        residual_norm: 0,
+        iterations: 1,
+        jacobian: [],
+        eigenpairs: [],
+      },
+      parameters: [...baseSystem.config.params],
+    }
+    const added = addObject(baseSystem, equilibrium)
+
+    renderInspectorForStateSpaceStride(added.system, added.nodeId, vi.fn())
+
+    const solver = screen.getByTestId('equilibrium-solver-toggle')
+    for (const dependentTestId of [
+      'equilibrium-data-toggle',
+      'equilibrium-continuation-toggle',
+      'equilibrium-manifold-toggle',
+    ]) {
+      const dependent = screen.getByTestId(dependentTestId)
+      expect(
+        solver.compareDocumentPosition(dependent) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).not.toBe(0)
+    }
   })
 
   it('hides limit-cycle manifolds until Floquet multipliers exist', () => {
