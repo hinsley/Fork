@@ -63,7 +63,8 @@ test('continue hopf curve from detected hopf point', async ({ page }) => {
   await bifurcationButton.click()
   await expect(page.getByText('Stability: Hopf')).toBeVisible()
 
-  await page.getByTestId('codim1-curve-toggle').click()
+  await page.getByTestId('inspector-workflow-back').click()
+  await page.getByTestId('action-codim1-curve-toggle').click()
   await page.getByTestId('hopf-curve-name').fill('hopf_curve_e2e')
   await page.getByTestId('hopf-curve-param2').selectOption('p2')
   await page.getByTestId('hopf-curve-step-size').fill('0.02')

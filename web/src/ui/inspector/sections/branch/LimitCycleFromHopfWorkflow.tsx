@@ -29,6 +29,7 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                     title="Limit Cycle from Hopf"
                     testId="limit-cycle-from-hopf-toggle"
                     defaultOpen={false}
+                    actionOnly
                   >
                     <div className="inspector-section">
                       {!isHopfSourceBranch ? (

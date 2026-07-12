@@ -26,6 +26,7 @@ export function LimitCycleManifoldSection({
               title="Invariant Manifolds"
               testId="limit-cycle-manifold-toggle"
               defaultOpen={false}
+              actionOnly
             >
               <div className="inspector-section">
                 {runDisabled ? (

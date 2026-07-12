@@ -1,4 +1,5 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import { InspectorSubDisclosure } from '../../selectionSession'
 
 export function BranchDataSections({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -63,6 +64,7 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                       key={`${selectionKey}-lc-summary`}
                       title="Branch Summary"
                       testId="branch-summary-toggle"
+                      actionOnly
                     >
                       <div className="inspector-section">
                         <InspectorMetrics
@@ -164,6 +166,7 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                       title="Branch Navigator"
                       testId="branch-points-toggle"
                       defaultOpen={false}
+                      actionOnly
                       open={branchNavigatorOpen}
                       onOpenChange={setBranchNavigatorOpen}
                     >
@@ -211,8 +214,7 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                               : undefined
                           }
                         />
-                        <InspectorDisclosure
-                          key={`${selectionKey}-branch-point-details`}
+                        <InspectorSubDisclosure
                           title="Point Details"
                           testId="branch-point-details-toggle"
                         >
@@ -368,7 +370,7 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                           <p className="empty-state">Select a point to inspect.</p>
                         )}
                           </div>
-                        </InspectorDisclosure>
+                        </InspectorSubDisclosure>
                       </div>
                     </InspectorDisclosure>
                   </>
@@ -378,6 +380,7 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                       key={`${selectionKey}-branch-summary`}
                       title="Branch Summary"
                       testId="branch-summary-toggle"
+                      actionOnly
                     >
                       <div className="inspector-section">
                         <InspectorMetrics
@@ -698,6 +701,7 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                       title="Branch Navigator"
                       testId="branch-points-toggle"
                       defaultOpen={false}
+                      actionOnly
                       open={branchNavigatorOpen}
                       onOpenChange={setBranchNavigatorOpen}
                     >
@@ -734,8 +738,7 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                               : undefined
                           }
                         />
-                        <InspectorDisclosure
-                          key={`${selectionKey}-branch-point-details`}
+                        <InspectorSubDisclosure
                           title="Point Details"
                           testId="branch-point-details-toggle"
                         >
@@ -892,7 +895,7 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                           <p className="empty-state">Select a point to inspect.</p>
                         )}
                           </div>
-                        </InspectorDisclosure>
+                        </InspectorSubDisclosure>
                       </div>
                     </InspectorDisclosure>
                   </>

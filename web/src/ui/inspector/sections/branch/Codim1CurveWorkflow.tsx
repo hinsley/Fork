@@ -43,6 +43,7 @@ export function Codim1CurveWorkflow({ scope }: { scope: InspectorSelectionContro
                     title="Codim-1 Curve Continuations"
                     testId="codim1-curve-toggle"
                     defaultOpen={false}
+                    actionOnly
                   >
                     <div className="inspector-section">
                       {runDisabled ? (

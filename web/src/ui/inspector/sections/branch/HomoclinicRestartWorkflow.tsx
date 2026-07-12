@@ -25,6 +25,7 @@ export function HomoclinicRestartWorkflow({ scope }: { scope: InspectorSelection
                     title="Continue from Point"
                     testId="homoclinic-from-homoclinic-toggle"
                     defaultOpen={false}
+                    actionOnly
                   >
                     <div className="inspector-section">
                       {runDisabled ? (

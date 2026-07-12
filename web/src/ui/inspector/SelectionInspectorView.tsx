@@ -413,6 +413,7 @@ export function SelectionInspectorView({
               key={`${selectionKey}-limit-cycle-data`}
               title="Limit Cycle Data"
               testId="limit-cycle-data-toggle"
+              actionOnly
             >
               <InspectorSubDisclosure title="Summary" testId="limit-cycle-data-summary-toggle">
                 <div className="inspector-section">

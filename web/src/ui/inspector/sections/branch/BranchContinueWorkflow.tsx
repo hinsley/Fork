@@ -27,6 +27,7 @@ export function BranchContinueWorkflow({ scope }: { scope: InspectorSelectionCon
                     title="Continue from Point"
                     testId="branch-continue-toggle"
                     defaultOpen={false}
+                    actionOnly
                   >
                     <div className="inspector-section">
                       {runDisabled ? (

@@ -68,6 +68,12 @@ export class ForkHarness {
 
   async openDisclosure(testId: string) {
     const summary = this.page.getByTestId(testId)
+    const action = this.page.getByTestId(`action-${testId}`)
+    if (await action.isVisible()) {
+      await action.click()
+      await expect(summary.locator('..')).toHaveJSProperty('open', true)
+      return
+    }
     await summary.waitFor({ state: 'visible' })
     const details = summary.locator('..')
     const isOpen = await details.evaluate((node) => (node as HTMLDetailsElement).open)
@@ -89,8 +95,9 @@ export class ForkHarness {
   }
 
   async runOrbit() {
-    await this.page.getByTestId('orbit-run-toggle').click()
+    await this.page.getByTestId('action-orbit-run-toggle').click()
     await this.page.getByTestId('orbit-run-submit').click()
+    await this.page.getByTestId('inspector-workflow-back').click()
   }
 
   async solveEquilibrium() {

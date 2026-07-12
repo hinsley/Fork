@@ -26,6 +26,7 @@ export function HomotopySaddleWorkflow({ scope }: { scope: InspectorSelectionCon
                     title="Homotopy-Saddle from Equilibrium"
                     testId="homotopy-saddle-from-equilibrium-toggle"
                     defaultOpen={false}
+                    actionOnly
                   >
                     <div className="inspector-section">
                       {systemDraft.type === 'map' ? (

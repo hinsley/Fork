@@ -4371,6 +4371,14 @@ function useInspectorSelectionController({
     )
   }
   if (orbit) {
+    if (orbit.data.length > 0) {
+      workflowActions.push({
+        id: 'orbit-data-toggle',
+        group: 'Inspect',
+        label: 'View Data',
+        description: 'Inspect stored orbit samples, parameters, and run metadata.',
+      })
+    }
     workflowActions.push({
       id: 'orbit-run-toggle',
       group: 'Compute',
@@ -4429,9 +4437,9 @@ function useInspectorSelectionController({
   if (limitCycle) {
     workflowActions.push({
       id: 'limit-cycle-data-toggle',
-      group: 'Compute',
-      label: 'Floquet analysis',
-      description: 'Inspect multipliers and compute Floquet mode vectors.',
+      group: 'Inspect',
+      label: 'View Data',
+      description: 'Inspect the cycle profile, parameters, and Floquet data.',
     })
     if (limitCycleDisplayMultipliers.length > 0) {
       workflowActions.push({
@@ -4449,6 +4457,22 @@ function useInspectorSelectionController({
       label: 'Configure and compute isocline',
       description: 'Choose active axes, frozen values, and recompute the geometry.',
     })
+  }
+  if (branch) {
+    workflowActions.push(
+      {
+        id: 'branch-summary-toggle',
+        group: 'Inspect',
+        label: 'View Summary',
+        description: 'Inspect branch metadata, settings, and solver diagnostics.',
+      },
+      {
+        id: 'branch-points-toggle',
+        group: 'Inspect',
+        label: 'View Data',
+        description: 'Navigate branch points and inspect the selected point.',
+      }
+    )
   }
   if (canExtendInvariantManifold) {
     workflowActions.push({

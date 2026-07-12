@@ -31,6 +31,7 @@ export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionC
                     title={limitCycleFromPDLabel}
                     testId="limit-cycle-from-pd-toggle"
                     defaultOpen={false}
+                    actionOnly
                   >
                     <div className="inspector-section">
                     {systemDraft.type === 'map' ? (

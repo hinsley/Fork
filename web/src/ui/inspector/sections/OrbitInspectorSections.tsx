@@ -78,6 +78,7 @@ export function OrbitInspectorSections({
                 title="Orbit Simulation"
                 testId="orbit-run-toggle"
                 defaultOpen={false}
+                actionOnly
               >
                 <div className="inspector-section">
                   {runDisabled ? (
@@ -138,6 +139,7 @@ export function OrbitInspectorSections({
                 key={`${selectionKey}-orbit-data`}
                 title="Orbit Data"
                 testId="orbit-data-toggle"
+                actionOnly
               >
                 <InspectorSubDisclosure title="Summary" testId="orbit-data-summary-toggle">
                   <div className="inspector-section">
@@ -350,6 +352,7 @@ export function OrbitInspectorSections({
                 title="Lyapunov Analysis"
                 testId="oseledets-toggle"
                 defaultOpen={false}
+                actionOnly
               >
                 <div className="inspector-section">
                   {runDisabled ? (
@@ -531,11 +534,9 @@ export function OrbitInspectorSections({
                   </button>
                 </div>
                 {clvHasData ? (
-                  <InspectorDisclosure
-                    key={`${selectionKey}-clv-plot`}
+                  <InspectorSubDisclosure
                     title="CLV Plotting"
                     testId="clv-plot-toggle"
-                    defaultOpen={false}
                   >
                     <div className="inspector-section">
                       {clvNeeds2d ? (
@@ -642,7 +643,7 @@ export function OrbitInspectorSections({
                         <p className="empty-state">Covariant vectors not computed yet.</p>
                       )}
                     </div>
-                  </InspectorDisclosure>
+                  </InspectorSubDisclosure>
                 ) : null}
                 </InspectorDisclosure>
               ) : null}
@@ -653,6 +654,7 @@ export function OrbitInspectorSections({
                   title="Limit Cycle"
                   testId="limit-cycle-toggle"
                   defaultOpen={false}
+                  actionOnly
                 >
                   <div className="inspector-section">
                     <h4 className="inspector-subheading">Continue from Orbit</h4>

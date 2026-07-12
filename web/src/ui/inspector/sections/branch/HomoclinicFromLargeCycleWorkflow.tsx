@@ -26,6 +26,7 @@ export function HomoclinicFromLargeCycleWorkflow({ scope }: { scope: InspectorSe
                     title="Homoclinic from Large Cycle"
                     testId="homoclinic-from-large-cycle-toggle"
                     defaultOpen={false}
+                    actionOnly
                   >
                     <div className="inspector-section">
                       {systemDraft.type === 'map' ? (

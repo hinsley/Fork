@@ -71,7 +71,8 @@ test('continue limit cycle from Hopf along a selected parameter', async ({ page 
   }
   expect(hopfFound).toBeTruthy()
 
-  await page.getByTestId('limit-cycle-from-hopf-toggle').click()
+  await page.getByTestId('inspector-workflow-back').click()
+  await page.getByTestId('action-limit-cycle-from-hopf-toggle').click()
   await page.getByTestId('limit-cycle-from-hopf-name').fill('lc_hopf_beta')
   await page.getByTestId('limit-cycle-from-hopf-branch-name').fill('lc_hopf_beta_branch')
   await page.getByTestId('limit-cycle-from-hopf-parameter').selectOption('beta')

@@ -68,7 +68,8 @@ test('continue limit cycle from a Hopf bifurcation', async ({ page }) => {
   }
   expect(hopfFound).toBeTruthy()
 
-  await page.getByTestId('limit-cycle-from-hopf-toggle').click()
+  await page.getByTestId('inspector-workflow-back').click()
+  await page.getByTestId('action-limit-cycle-from-hopf-toggle').click()
   await page.getByTestId('limit-cycle-from-hopf-name').fill('lc_hopf_mu')
   await page.getByTestId('limit-cycle-from-hopf-branch-name').fill('lc_hopf_branch')
   await page.getByTestId('limit-cycle-from-hopf-amplitude').fill('0.1')

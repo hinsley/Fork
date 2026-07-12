@@ -363,11 +363,13 @@ describe('InspectorDetailsPanel', () => {
 
     renderInspectorForStateSpaceStride(branchResult.system, branchResult.nodeId, vi.fn())
 
+    expect(screen.getByTestId('action-branch-summary-toggle')).toHaveTextContent('View Summary')
+    expect(screen.getByTestId('action-branch-points-toggle')).toHaveTextContent('View Data')
+    await user.click(screen.getByTestId('action-branch-points-toggle'))
+
     const navigatorToggle = screen.getByTestId('branch-points-toggle')
     const navigatorDetails = navigatorToggle.closest('details')
-    expect(navigatorDetails).toBeTruthy()
-
-    await user.click(navigatorToggle)
+    expect(navigatorDetails).toHaveClass('inspector-disclosure--action-only')
 
     const pointToggle = screen.getByTestId('branch-point-details-toggle')
     const pointDetails = pointToggle.closest('details')

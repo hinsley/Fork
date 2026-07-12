@@ -142,6 +142,48 @@ describe('selection inspector workflow shell', () => {
     expect(within(actions).queryByRole('heading', { name: 'Continue' })).toBeNull()
   })
 
+  it('routes discrete-map orbit data and workflows exclusively through Actions', async () => {
+    const user = userEvent.setup()
+    const base = createSystem({
+      name: 'Workflow_Map',
+      config: {
+        name: 'Workflow_Map',
+        equations: ['r * x * (1 - x)'],
+        params: [3.7],
+        paramNames: ['r'],
+        varNames: ['x'],
+        solver: 'discrete',
+        type: 'map',
+      },
+    })
+    const added = addObject(base, {
+      ...orbit('Orbit_Map', base.name),
+      data: [
+        [0, 0.2],
+        [1, 0.592],
+      ],
+      parameters: [...base.config.params],
+    })
+    render(<InspectorDetailsPanel {...requiredProps(added.system, added.nodeId)} />)
+
+    const actions = screen.getByTestId('inspector-actions')
+    expect(within(actions).getByRole('heading', { name: 'Inspect' })).toBeVisible()
+    expect(screen.getByTestId('action-orbit-data-toggle')).toHaveTextContent('View Data')
+    expect(screen.getByTestId('action-orbit-run-toggle')).toBeVisible()
+    expect(screen.getByTestId('action-oseledets-toggle')).toBeVisible()
+    expect(screen.queryByTestId('action-limit-cycle-toggle')).toBeNull()
+
+    for (const testId of ['orbit-data-toggle', 'orbit-run-toggle', 'oseledets-toggle']) {
+      expect(screen.getByTestId(testId).closest('details')).toHaveClass(
+        'inspector-disclosure--action-only'
+      )
+    }
+
+    await user.click(screen.getByTestId('action-orbit-data-toggle'))
+    expect(screen.getByTestId('inspector-workflow-focus')).toHaveTextContent('View Data')
+    expect(screen.getByTestId('orbit-data-summary-toggle')).toBeVisible()
+  })
+
   it('focuses one action and retains its draft when returning to browse mode', async () => {
     const user = userEvent.setup()
     const base = createSystem({ name: 'Workflow_Shell' })

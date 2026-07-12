@@ -48,6 +48,7 @@ export function IsoclineInspectorSections({
               key={`${selectionKey}-isocline`}
               title="Isocline"
               testId="isocline-toggle"
+              actionOnly
             >
               <div className="inspector-section">
                 <label>

@@ -32,6 +32,7 @@ export function IsochroneCurveWorkflow({ scope }: { scope: InspectorSelectionCon
                     title={branch.branchType === 'isochrone_curve' ? 'Continue from Point' : 'Continue Isochrone'}
                     testId="isochrone-curve-toggle"
                     defaultOpen={false}
+                    actionOnly
                   >
                     <div className="inspector-section">
                       {runDisabled ? (

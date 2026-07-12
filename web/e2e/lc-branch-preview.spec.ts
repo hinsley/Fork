@@ -87,6 +87,7 @@ test('limit cycle rendering uses the limit cycle object color', async ({ page })
   await harness.selectTreeNode('Branch: lc_pd_mu')
   await harness.openDisclosure('branch-points-toggle')
   await page.getByTestId('branch-point-render-lc').click()
+  await page.getByTestId('inspector-workflow-back').click()
   await page.getByTestId('action-appearance-toggle').click()
   await page.getByTestId('inspector-color').fill('#0000ff')
 

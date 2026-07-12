@@ -25,6 +25,7 @@ export function HomoclinicFromHomotopySaddleWorkflow({ scope }: { scope: Inspect
                     title="Homoclinic from Homotopy-Saddle"
                     testId="homoclinic-from-homotopy-saddle-toggle"
                     defaultOpen={false}
+                    actionOnly
                   >
                     <div className="inspector-section">
                       <div className="field-help">{`Current stage: ${homotopyBranchStage ?? 'Unknown'}`}</div>

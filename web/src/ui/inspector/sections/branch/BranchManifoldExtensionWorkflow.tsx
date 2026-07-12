@@ -21,6 +21,7 @@ export function BranchManifoldExtensionWorkflow({ scope }: { scope: InspectorSel
                     title="Extend Manifold"
                     testId="manifold-extend-toggle"
                     defaultOpen={false}
+                    actionOnly
                   >
                     <div className="inspector-section">
                       {runDisabled ? (

@@ -18,6 +18,7 @@ export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionCo
                     title="Extend Branch"
                     testId="branch-extend-toggle"
                     defaultOpen={false}
+                    actionOnly
                   >
                     <div className="inspector-section">
                       {runDisabled ? (
