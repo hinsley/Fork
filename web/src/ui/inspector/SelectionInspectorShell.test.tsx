@@ -193,10 +193,7 @@ describe('selection inspector workflow shell', () => {
     await user.click(screen.getByTestId('action-orbit-run-toggle'))
     expect(screen.getByTestId('inspector-workflow-focus')).toBeVisible()
     expect(screen.getByTestId('orbit-run-duration')).toBeVisible()
-    expect(screen.getByTestId('inspector-workflow-advanced')).toHaveAttribute(
-      'aria-expanded',
-      'false'
-    )
+    expect(screen.queryByTestId('inspector-workflow-advanced')).toBeNull()
 
     await user.clear(screen.getByTestId('orbit-run-duration'))
     await user.type(screen.getByTestId('orbit-run-duration'), '42')

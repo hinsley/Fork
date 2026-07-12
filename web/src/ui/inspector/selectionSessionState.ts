@@ -40,25 +40,21 @@ export type WorkflowActionEntry = {
 
 export type SelectionSessionState = {
   activeWorkflow: WorkflowId | null
-  advancedOpen: boolean
 }
 
 export type SelectionSessionAction =
   | { type: 'open-workflow'; workflow: WorkflowId }
   | { type: 'close-workflow' }
-  | { type: 'toggle-advanced' }
 
 export function selectionSessionReducer(
-  state: SelectionSessionState,
+  _state: SelectionSessionState,
   action: SelectionSessionAction
 ): SelectionSessionState {
   switch (action.type) {
     case 'open-workflow':
-      return { activeWorkflow: action.workflow, advancedOpen: false }
+      return { activeWorkflow: action.workflow }
     case 'close-workflow':
-      return { activeWorkflow: null, advancedOpen: false }
-    case 'toggle-advanced':
-      return { ...state, advancedOpen: !state.advancedOpen }
+      return { activeWorkflow: null }
   }
 }
 

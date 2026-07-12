@@ -9,14 +9,12 @@ import { useWorkflowFocus } from './useWorkflowFocus'
 export function WorkflowFocusProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(selectionSessionReducer, {
     activeWorkflow: null,
-    advancedOpen: false,
   })
   const value = useMemo<WorkflowFocusValue>(
     () => ({
       ...state,
       openWorkflow: (workflow) => dispatch({ type: 'open-workflow', workflow }),
       closeWorkflow: () => dispatch({ type: 'close-workflow' }),
-      toggleAdvanced: () => dispatch({ type: 'toggle-advanced' }),
     }),
     [state]
   )
@@ -104,16 +102,6 @@ export function WorkflowFocusToolbar({
         <span>{entry?.group ?? 'Action'}</span>
         <strong>{entry?.label ?? 'Workflow'}</strong>
       </div>
-      {entry?.group !== 'Configure' && entry?.group !== 'Inspect' ? (
-        <button
-          type="button"
-          aria-expanded={focus.advancedOpen}
-          onClick={focus.toggleAdvanced}
-          data-testid="inspector-workflow-advanced"
-        >
-          Advanced
-        </button>
-      ) : null}
     </div>
   )
 }

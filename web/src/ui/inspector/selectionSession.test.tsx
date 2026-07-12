@@ -6,13 +6,12 @@ import { useWorkflowFocus } from './useWorkflowFocus'
 
 describe('selectionSessionReducer', () => {
   it('opens, preserves, and closes focused workflows explicitly', () => {
-    const initial = { activeWorkflow: null, advancedOpen: false } as const
+    const initial = { activeWorkflow: null } as const
     const open = selectionSessionReducer(initial, {
       type: 'open-workflow',
       workflow: 'equilibrium-solver-toggle',
     })
-    expect(open).toEqual({ activeWorkflow: 'equilibrium-solver-toggle', advancedOpen: false })
-    expect(selectionSessionReducer(open, { type: 'toggle-advanced' }).advancedOpen).toBe(true)
+    expect(open).toEqual({ activeWorkflow: 'equilibrium-solver-toggle' })
     expect(selectionSessionReducer(open, { type: 'close-workflow' })).toEqual(initial)
   })
 

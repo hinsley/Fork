@@ -94,7 +94,7 @@
   z-index: 3;
   top: 92px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
@@ -142,15 +142,4 @@
 .inspector-browser--workflow .inspector-disclosure[data-workflow-active='true'] {
   border-color: var(--panel-border-strong);
   background: var(--panel-raised);
-}
-
-.inspector-browser--workflow:not(.inspector-browser--advanced) .inspector-disclosure[data-workflow-active='true'] .inspector-divider,
-.inspector-browser--workflow:not(.inspector-browser--advanced) .inspector-disclosure[data-workflow-active='true'] .inspector-divider ~ * {
-  display: none;
-}
-
-.inspector-browser--workflow:not(.inspector-browser--advanced) .inspector-disclosure[data-workflow-active='true'] .inspector-divider ~ [data-testid$='-submit'],
-.inspector-browser--workflow:not(.inspector-browser--advanced) .inspector-disclosure[data-workflow-active='true'] .inspector-divider ~ .field-error,
-.inspector-browser--workflow:not(.inspector-browser--advanced) .inspector-disclosure[data-workflow-active='true'] .inspector-divider ~ .field-warning {
-  display: block;
 }

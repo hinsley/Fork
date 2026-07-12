@@ -41,7 +41,6 @@ test('lorenz 2D stable manifold adaptive defaults produce nontrivial growth', as
   await expect(page.getByTestId('equilibrium-manifold2d-profile')).toHaveValue('adaptive_global')
   await page.getByTestId('equilibrium-manifold2d-target-radius').fill('8')
   await page.getByTestId('equilibrium-manifold2d-target-arclength').fill('20')
-  await page.getByTestId('inspector-workflow-advanced').click()
   await page.getByTestId('equilibrium-manifold-caps-max-steps').fill('1500')
   await page.getByTestId('equilibrium-manifold-caps-max-rings').fill('60')
   await page.getByTestId('equilibrium-manifold-caps-max-vertices').fill('100000')

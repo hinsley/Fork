@@ -108,7 +108,7 @@ export function SelectionInspectorView({
       <div
         className={`inspector-panel inspector-browser${
           workflowFocus?.activeWorkflow ? ' inspector-browser--workflow' : ''
-        }${workflowFocus?.advancedOpen ? ' inspector-browser--advanced' : ''}`}
+        }`}
         data-testid="inspector-panel-body"
         data-active-workflow={workflowFocus?.activeWorkflow ?? undefined}
       >
