@@ -58,6 +58,9 @@ describe('SystemSettingsDialog', () => {
 
     expect(screen.getByTestId('system-settings-dialog')).toBeInTheDocument()
     expect(screen.getByTestId('inspector-details-panel')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'System settings: Test_System', level: 2 })
+    ).toBeInTheDocument()
 
     await user.click(screen.getByTestId('close-system-settings'))
     expect(onClose).toHaveBeenCalled()

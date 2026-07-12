@@ -199,7 +199,7 @@ export function SystemSettingsDialog({
         <header className="dialog__header system-settings-dialog__header">
           <div className="system-settings-dialog__heading">
             <span className="system-settings-dialog__eyebrow">Model configuration</span>
-            <h2 id="system-settings-title">System Settings</h2>
+            <h2 id="system-settings-title">System settings: {system.config.name}</h2>
             <p>Define the dynamics, parameters, and numerical method for this system.</p>
           </div>
           <button
