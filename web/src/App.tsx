@@ -10,7 +10,7 @@ import { SystemSettingsDialog } from './ui/SystemSettingsDialog'
 import { Toolbar } from './ui/Toolbar'
 import { PerfOverlay } from './ui/PerfOverlay'
 import { isDeterministicMode } from './utils/determinism'
-import { toCliSafeName } from './utils/naming'
+import { suggestDefaultName } from './utils/naming'
 import { formatEquilibriumLabel } from './system/labels'
 import type {
   BranchPointSelection,
@@ -22,17 +22,6 @@ const MIN_LEFT_WIDTH = 220
 const MIN_RIGHT_WIDTH = 240
 const MAX_PANEL_WIDTH = 520
 const SPLITTER_WIDTH = 2
-
-function nextObjectName(prefix: string, existing: string[]) {
-  const base = toCliSafeName(prefix)
-  let index = 1
-  let name = `${base}_${index}`
-  while (existing.includes(name)) {
-    index += 1
-    name = `${base}_${index}`
-  }
-  return name
-}
 
 function App() {
   const { state, actions } = useAppContext()
@@ -127,21 +116,24 @@ function App() {
   const createOrbit = async () => {
     if (!system) return
     const names = Object.values(system.objects).map((obj) => obj.name)
-    const name = nextObjectName('Orbit', names)
+    const name = suggestDefaultName('orbit', { existingNames: names })
     await actions.createOrbitObject(name)
   }
 
   const createEquilibrium = async () => {
     if (!system) return
     const names = Object.values(system.objects).map((obj) => obj.name)
-    const name = nextObjectName(formatEquilibriumLabel(system.config.type), names)
+    const name = suggestDefaultName('equilibrium', {
+      entityLabel: formatEquilibriumLabel(system.config.type),
+      existingNames: names,
+    })
     await actions.createEquilibriumObject(name)
   }
 
   const createIsocline = async () => {
     if (!system) return
     const names = Object.values(system.objects).map((obj) => obj.name)
-    const name = nextObjectName('Isocline', names)
+    const name = suggestDefaultName('isocline', { existingNames: names })
     await actions.createIsoclineObject(name)
   }
 
@@ -156,21 +148,21 @@ function App() {
   const createScene = async (targetId?: string | null) => {
     if (!system) return
     const names = system.scenes.map((scene) => scene.name)
-    const name = nextObjectName('Scene', names)
+    const name = suggestDefaultName('scene', { existingNames: names })
     await actions.addScene(name, targetId)
   }
 
   const createBifurcation = async (targetId?: string | null) => {
     if (!system) return
     const names = system.bifurcationDiagrams.map((diagram) => diagram.name)
-    const name = nextObjectName('Bifurcation', names)
+    const name = suggestDefaultName('bifurcationDiagram', { existingNames: names })
     await actions.addBifurcationDiagram(name, targetId)
   }
 
   const createAnalysis = async (targetId?: string | null) => {
     if (!system) return
     const names = system.analysisViewports.map((viewport) => viewport.name)
-    const name = nextObjectName('Event_Map', names)
+    const name = suggestDefaultName('analysisViewport', { existingNames: names })
     await actions.addAnalysisViewport(name, targetId)
   }
 

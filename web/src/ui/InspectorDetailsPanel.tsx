@@ -90,7 +90,7 @@ import {
   resolveContinuationPointEquilibriumState,
   resolveContinuationPointParam2Value,
 } from '../system/continuation'
-import { isCliSafeName, toCliSafeName } from '../utils/naming'
+import { isCliSafeName, suggestDefaultName } from '../utils/naming'
 import {
   buildSubsystemSnapshot,
   continuationParameterOptions,
@@ -1260,9 +1260,11 @@ function makeEquilibriumManifoldDraft(
     ? 'adaptive_global'
     : 'local_preview'
   const profileDefaults = makeSurfaceProfileDefaults(profile)
-  const baseName = equilibrium ? toCliSafeName(equilibrium.name) : 'equilibrium'
+  const baseName = equilibrium?.name ?? 'equilibrium'
   return {
-    name: mode === 'surface_2d' ? `manifold_${baseName}_2d` : `manifold_${baseName}_1d`,
+    name: suggestDefaultName(mode === 'surface_2d' ? 'manifold2d' : 'manifold1d', {
+      sourceName: baseName,
+    }),
     mode,
     profile,
     stability: surfaceDefaults ? 'Stable' : 'Unstable',
@@ -1317,9 +1319,9 @@ function makeEquilibriumManifoldExtensionDraft(
 function makeLimitCycleManifoldDraft(
   limitCycle?: LimitCycleObject | null
 ): LimitCycleManifoldDraft {
-  const baseName = limitCycle ? toCliSafeName(limitCycle.name) : 'limit_cycle'
+  const baseName = limitCycle?.name ?? 'limit_cycle'
   return {
-    name: `manifold_${baseName}_2d`,
+    name: suggestDefaultName('manifold2d', { sourceName: baseName }),
     stability: 'Unstable',
     direction: 'Plus',
     algorithm: 'GeodesicRings',
@@ -1413,10 +1415,16 @@ function makeContinuationDraft(system: SystemConfig): ContinuationDraft {
   }
 }
 
-function buildSuggestedBranchName(baseName: string, parameterName: string): string {
-  const safeBaseName = toCliSafeName(baseName)
-  const safeParamName = parameterName ? toCliSafeName(parameterName) : ''
-  return safeParamName ? `${safeBaseName}_${safeParamName}` : safeBaseName
+function buildSuggestedBranchName(
+  baseName: string,
+  parameterName: string,
+  existingNames?: Iterable<string>
+): string {
+  return suggestDefaultName('continuationBranch', {
+    sourceName: baseName,
+    parameterName,
+    existingNames,
+  })
 }
 
 function resolveEquilibriumContinuationBaseName(
@@ -1961,6 +1969,24 @@ export function InspectorDetailsPanel({
   const equilibriumName = equilibrium?.name ?? ''
   const branchName = branch?.name ?? ''
   const branchParameterName = branch?.parameterName ?? ''
+  const existingObjectNames = useMemo(
+    () => Object.values(system.objects).map((entry) => entry.name),
+    [system.objects]
+  )
+  const parentObjectId = object ? selectedNodeId : branch?.parentObjectId ?? null
+  const parentObjectName = object?.name ?? branch?.parentObject ?? null
+  const existingBranchNames = useMemo(
+    () =>
+      Object.values(system.branches)
+        .filter((entry) => {
+          if (parentObjectId && entry.parentObjectId) {
+            return entry.parentObjectId === parentObjectId
+          }
+          return Boolean(parentObjectName) && entry.parentObject === parentObjectName
+        })
+        .map((entry) => entry.name),
+    [parentObjectId, parentObjectName, system.branches]
+  )
   const canExtendBranch = Boolean(
     branch &&
       [
@@ -2747,18 +2773,21 @@ export function InspectorDetailsPanel({
   ])
 
   const limitCycleFromPDNameSuggestion = useMemo(() => {
-    if (!branch) return 'lc_pd'
-    const safeBranchName = toCliSafeName(branch.name)
-    const pointIndex = branchPointIndex ?? 0
-    return `lc_pd_${safeBranchName}_idx${pointIndex}`
-  }, [branch, branchPointIndex])
+    return suggestDefaultName('periodDoubledCycle', {
+      entityLabel: systemDraft.type === 'map' ? 'Cycle' : 'LC',
+      sourceName: branch?.name ?? 'source',
+      pointIndex: branchPointIndex ?? 0,
+      existingNames: existingObjectNames,
+    })
+  }, [branch?.name, branchPointIndex, existingObjectNames, systemDraft.type])
 
   const limitCycleFromPDBranchSuggestion = useMemo(() => {
     const baseName =
       limitCycleFromPDDraft.limitCycleName.trim() || limitCycleFromPDNameSuggestion
-    const safeBaseName = toCliSafeName(baseName)
-    const safeParamName = branchParameterName ? toCliSafeName(branchParameterName) : ''
-    return safeParamName ? `${safeBaseName}_${safeParamName}` : safeBaseName
+    return suggestDefaultName('continuationBranch', {
+      sourceName: baseName,
+      parameterName: branchParameterName,
+    })
   }, [
     branchParameterName,
     limitCycleFromPDDraft.limitCycleName,
@@ -3143,10 +3172,11 @@ export function InspectorDetailsPanel({
       const paramName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
         : firstContinuationParameter
-      const suggestedName = buildSuggestedBranchName(
-        equilibriumContinuationBaseName,
-        paramName
-      )
+      const suggestedName = suggestDefaultName('equilibriumContinuation', {
+        sourceName: equilibriumContinuationBaseName,
+        parameterName: paramName,
+        existingNames: existingBranchNames,
+      })
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, parameterName: paramName, name: nextName }
     })
@@ -3155,19 +3185,27 @@ export function InspectorDetailsPanel({
     equilibriumName,
     firstContinuationParameter,
     continuationParameterSet,
+    existingBranchNames,
   ])
 
   useEffect(() => {
     if (!equilibrium) return
     setEquilibriumManifoldDraft((prev) => {
-      const defaults = makeEquilibriumManifoldDraft(system.config, equilibrium)
       const supportsSurface = systemDraft.type !== 'map' && systemDraft.varNames.length >= 3
       const mode = supportsSurface ? prev.mode : 'curve_1d'
-      const defaultName = mode === 'surface_2d' ? defaults.name : `manifold_${toCliSafeName(equilibrium.name)}_1d`
+      const defaultName = suggestDefaultName(
+        mode === 'surface_2d' ? 'manifold2d' : 'manifold1d',
+        { sourceName: equilibrium.name, existingNames: existingBranchNames }
+      )
       const name = prev.name.trim().length > 0 ? prev.name : defaultName
       return { ...prev, mode, name }
     })
-  }, [equilibrium, system.config, systemDraft.type, systemDraft.varNames.length])
+  }, [
+    equilibrium,
+    existingBranchNames,
+    systemDraft.type,
+    systemDraft.varNames.length,
+  ])
 
   useEffect(() => {
     setEquilibriumManifoldDraft((prev) => {
@@ -3248,10 +3286,16 @@ export function InspectorDetailsPanel({
       return {
         ...defaults,
         ...prev,
-        name: prev.name.trim().length > 0 ? prev.name : defaults.name,
+        name:
+          prev.name.trim().length > 0
+            ? prev.name
+            : suggestDefaultName('manifold2d', {
+                sourceName: limitCycle.name,
+                existingNames: existingBranchNames,
+              }),
       }
     })
-  }, [limitCycle])
+  }, [existingBranchNames, limitCycle])
 
   useEffect(() => {
     setLimitCycleFloquetModesError(null)
@@ -3260,22 +3304,29 @@ export function InspectorDetailsPanel({
   useEffect(() => {
     if (!orbit) return
     setLimitCycleFromOrbitDraft((prev) => {
-      const suggestedLimitCycleName = `lc_${toCliSafeName(orbit.name)}`
+      const suggestedLimitCycleName = suggestDefaultName('limitCycle', {
+        sourceName: orbit.name,
+        existingNames: existingObjectNames,
+      })
       const limitCycleName =
         prev.limitCycleName.trim().length > 0 ? prev.limitCycleName : suggestedLimitCycleName
       const paramName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
         : firstContinuationParameter
-      const safeLimitCycleName = toCliSafeName(limitCycleName)
-      const safeParamName = paramName ? toCliSafeName(paramName) : ''
-      const suggestedBranchName = safeParamName
-        ? `${safeLimitCycleName}_${safeParamName}`
-        : safeLimitCycleName
+      const suggestedBranchName = suggestDefaultName('continuationBranch', {
+        sourceName: limitCycleName,
+        parameterName: paramName,
+      })
       const branchName =
         prev.branchName.trim().length > 0 ? prev.branchName : suggestedBranchName
       return { ...prev, limitCycleName, branchName, parameterName: paramName }
     })
-  }, [orbit, firstContinuationParameter, continuationParameterSet])
+  }, [
+    continuationParameterSet,
+    existingObjectNames,
+    firstContinuationParameter,
+    orbit,
+  ])
 
   useEffect(() => {
     if (!branchName) return
@@ -3301,11 +3352,11 @@ export function InspectorDetailsPanel({
       const paramName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
         : fallbackParam
-      const safeBranchName = toCliSafeName(branchName)
-      const safeParamName = paramName ? toCliSafeName(paramName) : ''
-      const suggestedName = safeParamName
-        ? `${safeBranchName}_${safeParamName}`
-        : safeBranchName
+      const suggestedName = suggestDefaultName('branchContinuation', {
+        sourceName: branchName,
+        parameterName: paramName,
+        existingNames: existingBranchNames,
+      })
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, parameterName: paramName, name: nextName }
     })
@@ -3315,8 +3366,10 @@ export function InspectorDetailsPanel({
         prev.param2Name !== branchParameterName
           ? prev.param2Name
           : fallbackParam
-      const safeBranchName = toCliSafeName(branchName)
-      const suggestedName = `fold_curve_${safeBranchName}`
+      const suggestedName = suggestDefaultName('foldCurve', {
+        sourceName: branchName,
+        existingNames: existingBranchNames,
+      })
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, param2Name, name: nextName }
     })
@@ -3326,8 +3379,10 @@ export function InspectorDetailsPanel({
         prev.param2Name !== branchParameterName
           ? prev.param2Name
           : fallbackParam
-      const safeBranchName = toCliSafeName(branchName)
-      const suggestedName = `hopf_curve_${safeBranchName}`
+      const suggestedName = suggestDefaultName('hopfCurve', {
+        sourceName: branchName,
+        existingNames: existingBranchNames,
+      })
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, param2Name, name: nextName }
     })
@@ -3353,8 +3408,10 @@ export function InspectorDetailsPanel({
         prev.param2Name !== parameterName
           ? prev.param2Name
           : fallbackParam2
-      const safeBranchName = toCliSafeName(branchName)
-      const suggestedName = `isochrone_curve_${safeBranchName}`
+      const suggestedName = suggestDefaultName('isochroneCurve', {
+        sourceName: branchName,
+        existingNames: existingBranchNames,
+      })
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, parameterName, param2Name, name: nextName }
     })
@@ -3364,24 +3421,27 @@ export function InspectorDetailsPanel({
         prev.param2Name !== branchParameterName
           ? prev.param2Name
           : fallbackParam
-      const safeBranchName = toCliSafeName(branchName)
-      const suggestedName = `ns_curve_${safeBranchName}`
+      const suggestedName = suggestDefaultName('nsCurve', {
+        sourceName: branchName,
+        existingNames: existingBranchNames,
+      })
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, param2Name, name: nextName }
     })
     setLimitCycleFromHopfDraft((prev) => {
-      const safeBranchName = toCliSafeName(branchName)
-      const suggestedLimitCycleName = `lc_hopf_${safeBranchName}`
+      const suggestedLimitCycleName = suggestDefaultName('limitCycle', {
+        sourceName: branchName,
+        existingNames: existingObjectNames,
+      })
       const limitCycleName =
         prev.limitCycleName.trim().length > 0 ? prev.limitCycleName : suggestedLimitCycleName
       const paramName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
         : hopfDefaultParam
-      const safeLimitCycleName = toCliSafeName(limitCycleName)
-      const safeParamName = paramName ? toCliSafeName(paramName) : ''
-      const suggestedBranchName = safeParamName
-        ? `${safeLimitCycleName}_${safeParamName}`
-        : safeLimitCycleName
+      const suggestedBranchName = suggestDefaultName('continuationBranch', {
+        sourceName: limitCycleName,
+        parameterName: paramName,
+      })
       const branchNameValue =
         prev.branchName.trim().length > 0 ? prev.branchName : suggestedBranchName
       return {
@@ -3392,8 +3452,10 @@ export function InspectorDetailsPanel({
       }
     })
     setHomoclinicFromLargeCycleDraft((prev) => {
-      const safeBranchName = toCliSafeName(branchName)
-      const suggestedName = `homoc_${safeBranchName}`
+      const suggestedName = suggestDefaultName('homoclinic', {
+        sourceName: branchName,
+        existingNames: existingBranchNames,
+      })
       const parameterName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
         : continuationParameterSet.has(branchParameterName)
@@ -3411,8 +3473,10 @@ export function InspectorDetailsPanel({
       return { ...prev, name, parameterName, param2Name }
     })
     setHomoclinicFromHomoclinicDraft((prev) => {
-      const safeBranchName = toCliSafeName(branchName)
-      const suggestedName = `homoc_${safeBranchName}_from_homoc`
+      const suggestedName = suggestDefaultName('homoclinicRestart', {
+        sourceName: branchName,
+        existingNames: existingBranchNames,
+      })
       const name = prev.name.trim().length > 0 ? prev.name : suggestedName
       const sourceType = branch?.data.branch_type
       const sourceParam1 =
@@ -3467,8 +3531,10 @@ export function InspectorDetailsPanel({
       return { ...prev, name, parameterName, param2Name, freeTime, freeEps0, freeEps1 }
     })
     setHomotopySaddleFromEquilibriumDraft((prev) => {
-      const safeBranchName = toCliSafeName(branchName)
-      const suggestedName = `homotopy_saddle_${safeBranchName}`
+      const suggestedName = suggestDefaultName('homotopySaddle', {
+        sourceName: branchName,
+        existingNames: existingBranchNames,
+      })
       const parameterName = continuationParameterSet.has(prev.parameterName)
         ? prev.parameterName
         : continuationParameterSet.has(branchParameterName)
@@ -3486,8 +3552,10 @@ export function InspectorDetailsPanel({
       return { ...prev, name, parameterName, param2Name }
     })
     setHomoclinicFromHomotopySaddleDraft((prev) => {
-      const safeBranchName = toCliSafeName(branchName)
-      const suggestedName = `homoc_${safeBranchName}_stage_d`
+      const suggestedName = suggestDefaultName('homoclinicStageD', {
+        sourceName: branchName,
+        existingNames: existingBranchNames,
+      })
       const name = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, name }
     })
@@ -3512,6 +3580,8 @@ export function InspectorDetailsPanel({
     branchParameterName,
     continuationParameterLabels,
     continuationParameterSet,
+    existingBranchNames,
+    existingObjectNames,
     firstContinuationParameter,
   ])
 
@@ -3887,17 +3957,20 @@ export function InspectorDetailsPanel({
   )
 
   const limitCycleFromOrbitNameSuggestion = useMemo(() => {
-    if (!orbit) return 'lc_orbit'
-    return `lc_${toCliSafeName(orbit.name)}`
-  }, [orbit])
+    return suggestDefaultName('limitCycle', {
+      sourceName: orbit?.name ?? 'orbit',
+      existingNames: existingObjectNames,
+    })
+  }, [existingObjectNames, orbit?.name])
 
   const limitCycleFromOrbitBranchSuggestion = useMemo(() => {
     const baseName =
       limitCycleFromOrbitDraft.limitCycleName.trim() || limitCycleFromOrbitNameSuggestion
     const paramName = limitCycleFromOrbitDraft.parameterName
-    const safeBaseName = toCliSafeName(baseName)
-    const safeParamName = paramName ? toCliSafeName(paramName) : ''
-    return safeParamName ? `${safeBaseName}_${safeParamName}` : safeBaseName
+    return suggestDefaultName('continuationBranch', {
+      sourceName: baseName,
+      parameterName: paramName,
+    })
   }, [
     limitCycleFromOrbitDraft.limitCycleName,
     limitCycleFromOrbitDraft.parameterName,
@@ -3907,13 +3980,19 @@ export function InspectorDetailsPanel({
   const limitCycleFromHopfBranchSuggestion = useMemo(() => {
     if (!branch) return ''
     const baseName =
-      limitCycleFromHopfDraft.limitCycleName.trim() || `lc_hopf_${toCliSafeName(branch.name)}`
+      limitCycleFromHopfDraft.limitCycleName.trim() ||
+      suggestDefaultName('limitCycle', {
+        sourceName: branch.name,
+        existingNames: existingObjectNames,
+      })
     const paramName = limitCycleFromHopfDraft.parameterName
-    const safeBaseName = toCliSafeName(baseName)
-    const safeParamName = paramName ? toCliSafeName(paramName) : ''
-    return safeParamName ? `${safeBaseName}_${safeParamName}` : safeBaseName
+    return suggestDefaultName('continuationBranch', {
+      sourceName: baseName,
+      parameterName: paramName,
+    })
   }, [
     branch,
+    existingObjectNames,
     limitCycleFromHopfDraft.limitCycleName,
     limitCycleFromHopfDraft.parameterName,
   ])
@@ -4927,7 +5006,8 @@ export function InspectorDetailsPanel({
 
     const suggestedName = buildSuggestedBranchName(
       equilibriumContinuationBaseName,
-      continuationDraft.parameterName
+      continuationDraft.parameterName,
+      existingBranchNames
     )
     const name = continuationDraft.name.trim() || suggestedName
     if (!name.trim()) {
@@ -5400,13 +5480,11 @@ export function InspectorDetailsPanel({
       return
     }
 
-    const safeBranchName = toCliSafeName(branch.name)
-    const safeParamName = branchContinuationDraft.parameterName
-      ? toCliSafeName(branchContinuationDraft.parameterName)
-      : ''
-    const suggestedName = safeParamName
-      ? `${safeBranchName}_${safeParamName}`
-      : safeBranchName
+    const suggestedName = suggestDefaultName('branchContinuation', {
+      sourceName: branch.name,
+      parameterName: branchContinuationDraft.parameterName,
+      existingNames: existingBranchNames,
+    })
     const name = branchContinuationDraft.name.trim() || suggestedName
     if (!name.trim()) {
       setBranchContinuationError('Branch name is required.')
@@ -5618,8 +5696,10 @@ export function InspectorDetailsPanel({
       return
     }
 
-    const safeBranchName = toCliSafeName(branch.name)
-    const suggestedName = `fold_curve_${safeBranchName}`
+    const suggestedName = suggestDefaultName('foldCurve', {
+      sourceName: branch.name,
+      existingNames: existingBranchNames,
+    })
     const name = foldCurveDraft.name.trim() || suggestedName
     if (!name.trim()) {
       setFoldCurveError('Curve name is required.')
@@ -5687,8 +5767,10 @@ export function InspectorDetailsPanel({
       return
     }
 
-    const safeBranchName = toCliSafeName(branch.name)
-    const suggestedName = `hopf_curve_${safeBranchName}`
+    const suggestedName = suggestDefaultName('hopfCurve', {
+      sourceName: branch.name,
+      existingNames: existingBranchNames,
+    })
     const name = hopfCurveDraft.name.trim() || suggestedName
     if (!name.trim()) {
       setHopfCurveError('Curve name is required.')
@@ -5769,8 +5851,10 @@ export function InspectorDetailsPanel({
       return
     }
 
-    const safeBranchName = toCliSafeName(branch.name)
-    const suggestedName = `isochrone_curve_${safeBranchName}`
+    const suggestedName = suggestDefaultName('isochroneCurve', {
+      sourceName: branch.name,
+      existingNames: existingBranchNames,
+    })
     const name = isochroneCurveDraft.name.trim() || suggestedName
     if (!name.trim()) {
       setIsochroneCurveError('Curve name is required.')
@@ -5839,8 +5923,10 @@ export function InspectorDetailsPanel({
       return
     }
 
-    const safeBranchName = toCliSafeName(branch.name)
-    const suggestedName = `ns_curve_${safeBranchName}`
+    const suggestedName = suggestDefaultName('nsCurve', {
+      sourceName: branch.name,
+      existingNames: existingBranchNames,
+    })
     const name = nsCurveDraft.name.trim() || suggestedName
     if (!name.trim()) {
       setNSCurveError('Curve name is required.')
@@ -5902,7 +5988,10 @@ export function InspectorDetailsPanel({
 
     const limitCycleName =
       limitCycleFromHopfDraft.limitCycleName.trim() ||
-      `lc_hopf_${toCliSafeName(branch.name)}`
+      suggestDefaultName('limitCycle', {
+        sourceName: branch.name,
+        existingNames: existingObjectNames,
+      })
     if (!limitCycleName) {
       setLimitCycleFromHopfError('Limit cycle name is required.')
       return
@@ -6208,7 +6297,11 @@ export function InspectorDetailsPanel({
     }
 
     const name =
-      homoclinicFromLargeCycleDraft.name.trim() || `homoc_${toCliSafeName(branch.name)}`
+      homoclinicFromLargeCycleDraft.name.trim() ||
+      suggestDefaultName('homoclinic', {
+        sourceName: branch.name,
+        existingNames: existingBranchNames,
+      })
     if (!name) {
       setHomoclinicFromLargeCycleError('Branch name is required.')
       return
@@ -6326,7 +6419,10 @@ export function InspectorDetailsPanel({
 
     const name =
       homoclinicFromHomoclinicDraft.name.trim() ||
-      `homoc_${toCliSafeName(branch.name)}_from_homoc`
+      suggestDefaultName('homoclinicRestart', {
+        sourceName: branch.name,
+        existingNames: existingBranchNames,
+      })
     if (!name) {
       setHomoclinicFromHomoclinicError('Branch name is required.')
       return
@@ -6440,7 +6536,10 @@ export function InspectorDetailsPanel({
 
     const name =
       homotopySaddleFromEquilibriumDraft.name.trim() ||
-      `homotopy_saddle_${toCliSafeName(branch.name)}`
+      suggestDefaultName('homotopySaddle', {
+        sourceName: branch.name,
+        existingNames: existingBranchNames,
+      })
     if (!name) {
       setHomotopySaddleFromEquilibriumError('Branch name is required.')
       return
@@ -6559,7 +6658,10 @@ export function InspectorDetailsPanel({
 
     const name =
       homoclinicFromHomotopySaddleDraft.name.trim() ||
-      `homoc_${toCliSafeName(branch.name)}_stage_d`
+      suggestDefaultName('homoclinicStageD', {
+        sourceName: branch.name,
+        existingNames: existingBranchNames,
+      })
     if (!name) {
       setHomoclinicFromHomotopySaddleError('Branch name is required.')
       return
@@ -9070,7 +9172,8 @@ export function InspectorDetailsPanel({
                           }
                           placeholder={buildSuggestedBranchName(
                             equilibriumContinuationBaseName,
-                            continuationDraft.parameterName
+                            continuationDraft.parameterName,
+                            existingBranchNames
                           )}
                           data-testid="equilibrium-branch-name"
                         />
@@ -9084,11 +9187,13 @@ export function InspectorDetailsPanel({
                             setContinuationDraft((prev) => {
                               const prevSuggestedName = buildSuggestedBranchName(
                                 equilibriumContinuationBaseName,
-                                prev.parameterName
+                                prev.parameterName,
+                                existingBranchNames
                               )
                               const nextSuggestedName = buildSuggestedBranchName(
                                 equilibriumContinuationBaseName,
-                                nextParameterName
+                                nextParameterName,
+                                existingBranchNames
                               )
                               const shouldUpdateName = prev.name === prevSuggestedName
                               return {
@@ -12263,9 +12368,11 @@ export function InspectorDetailsPanel({
                             }))
                           }
                           placeholder={
-                            branchContinuationDraft.parameterName
-                              ? `${toCliSafeName(branch.name)}_${toCliSafeName(branchContinuationDraft.parameterName)}`
-                              : toCliSafeName(branch.name)
+                            suggestDefaultName('branchContinuation', {
+                              sourceName: branch.name,
+                              parameterName: branchContinuationDraft.parameterName,
+                              existingNames: existingBranchNames,
+                            })
                           }
                           data-testid="branch-from-point-name"
                         />
@@ -12280,11 +12387,13 @@ export function InspectorDetailsPanel({
                             setBranchContinuationDraft((prev) => {
                               const prevSuggestedName = buildSuggestedBranchName(
                                 branch.name,
-                                prev.parameterName
+                                prev.parameterName,
+                                existingBranchNames
                               )
                               const nextSuggestedName = buildSuggestedBranchName(
                                 branch.name,
-                                nextParameterName
+                                nextParameterName,
+                                existingBranchNames
                               )
                               const shouldUpdateName = prev.name === prevSuggestedName
                               return {
@@ -12469,7 +12578,10 @@ export function InspectorDetailsPanel({
                                   name: event.target.value,
                                 }))
                               }
-                              placeholder={`fold_curve_${toCliSafeName(branch.name)}`}
+                              placeholder={suggestDefaultName('foldCurve', {
+                                sourceName: branch.name,
+                                existingNames: existingBranchNames,
+                              })}
                               data-testid="fold-curve-name"
                             />
                           </label>
@@ -12648,7 +12760,10 @@ export function InspectorDetailsPanel({
                                   name: event.target.value,
                                 }))
                               }
-                              placeholder={`hopf_curve_${toCliSafeName(branch.name)}`}
+                              placeholder={suggestDefaultName('hopfCurve', {
+                                sourceName: branch.name,
+                                existingNames: existingBranchNames,
+                              })}
                               data-testid="hopf-curve-name"
                             />
                           </label>
@@ -12835,7 +12950,10 @@ export function InspectorDetailsPanel({
                                   name: event.target.value,
                                 }))
                               }
-                              placeholder={`ns_curve_${toCliSafeName(branch.name)}`}
+                              placeholder={suggestDefaultName('nsCurve', {
+                                sourceName: branch.name,
+                                existingNames: existingBranchNames,
+                              })}
                               data-testid="ns-curve-name"
                             />
                           </label>
@@ -13042,7 +13160,10 @@ export function InspectorDetailsPanel({
                               name: event.target.value,
                             }))
                           }
-                          placeholder={`isochrone_curve_${toCliSafeName(branch.name)}`}
+                          placeholder={suggestDefaultName('isochroneCurve', {
+                            sourceName: branch.name,
+                            existingNames: existingBranchNames,
+                          })}
                           data-testid="isochrone-curve-name"
                         />
                       </label>
@@ -13295,7 +13416,10 @@ export function InspectorDetailsPanel({
                                     limitCycleName: event.target.value,
                                   }))
                                 }
-                                placeholder={`lc_hopf_${toCliSafeName(branch.name)}`}
+                                placeholder={suggestDefaultName('limitCycle', {
+                                  sourceName: branch.name,
+                                  existingNames: existingObjectNames,
+                                })}
                                 data-testid="limit-cycle-from-hopf-name"
                               />
                             </label>
@@ -13322,7 +13446,10 @@ export function InspectorDetailsPanel({
                                   setLimitCycleFromHopfDraft((prev) => {
                                     const baseName =
                                       prev.limitCycleName.trim() ||
-                                      `lc_hopf_${toCliSafeName(branch.name)}`
+                                      suggestDefaultName('limitCycle', {
+                                        sourceName: branch.name,
+                                        existingNames: existingObjectNames,
+                                      })
                                     const prevSuggestedName = buildSuggestedBranchName(
                                       baseName,
                                       prev.parameterName
@@ -13828,7 +13955,10 @@ export function InspectorDetailsPanel({
                                   name: event.target.value,
                                 }))
                               }
-                              placeholder={`homoc_${toCliSafeName(branch.name)}`}
+                              placeholder={suggestDefaultName('homoclinic', {
+                                sourceName: branch.name,
+                                existingNames: existingBranchNames,
+                              })}
                               data-testid="homoclinic-from-large-cycle-name"
                             />
                           </label>
@@ -14114,7 +14244,10 @@ export function InspectorDetailsPanel({
                                   name: event.target.value,
                                 }))
                               }
-                              placeholder={`homoc_${toCliSafeName(branch.name)}_from_homoc`}
+                              placeholder={suggestDefaultName('homoclinicRestart', {
+                                sourceName: branch.name,
+                                existingNames: existingBranchNames,
+                              })}
                               data-testid="homoclinic-from-homoclinic-name"
                             />
                           </label>
@@ -14415,7 +14548,10 @@ export function InspectorDetailsPanel({
                                   name: event.target.value,
                                 }))
                               }
-                              placeholder={`homotopy_saddle_${toCliSafeName(branch.name)}`}
+                              placeholder={suggestDefaultName('homotopySaddle', {
+                                sourceName: branch.name,
+                                existingNames: existingBranchNames,
+                              })}
                               data-testid="homotopy-saddle-from-equilibrium-name"
                             />
                           </label>
@@ -14722,7 +14858,10 @@ export function InspectorDetailsPanel({
                                   name: event.target.value,
                                 }))
                               }
-                              placeholder={`homoc_${toCliSafeName(branch.name)}_stage_d`}
+                              placeholder={suggestDefaultName('homoclinicStageD', {
+                                sourceName: branch.name,
+                                existingNames: existingBranchNames,
+                              })}
                               data-testid="homoclinic-from-homotopy-saddle-name"
                             />
                           </label>

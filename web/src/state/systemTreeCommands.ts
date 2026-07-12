@@ -14,7 +14,7 @@ import {
 import { formatEquilibriumLabel } from '../system/labels'
 import type { System, SystemConfig, TreeNode } from '../system/types'
 import type { ReorderPlacement } from '../system/model'
-import { isCliSafeName } from '../utils/naming'
+import { isCliSafeName, suggestDefaultName } from '../utils/naming'
 
 type SystemTreeAction =
   | { type: 'SET_SYSTEM'; system: System | null }
@@ -170,18 +170,12 @@ export function createSystemTreeCommands({
     const parent = parentId ? current.nodes[parentId] : null
     if (parentId && !parent) return null
     const siblingIds = parent ? parent.children : current.rootIds
-    const siblingNames = new Set(
+    const siblingNames =
       siblingIds
         .map((id) => current.nodes[id])
         .filter((node): node is TreeNode => Boolean(node))
         .map((node) => node.name)
-    )
-    let index = 1
-    let name = 'Folder_1'
-    while (siblingNames.has(name)) {
-      index += 1
-      name = `Folder_${index}`
-    }
+    const name = suggestDefaultName('folder', { existingNames: siblingNames })
     const created = addSystemFolder(current, name, parentId)
     if (!created.nodeId) return null
     const selected = selectSystemNode(created.system, created.nodeId)

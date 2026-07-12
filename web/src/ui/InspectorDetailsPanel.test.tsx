@@ -2076,7 +2076,7 @@ describe('InspectorDetailsPanel', () => {
 
     const branchInput = screen.getByTestId('limit-cycle-from-pd-branch-name')
     await waitFor(() => {
-      expect(branchInput).toHaveAttribute('placeholder', 'lc_pd_lc_pd_idx1_mu_beta')
+      expect(branchInput).toHaveAttribute('placeholder', 'LC_PD_pt1_mu_beta')
     })
   })
 
