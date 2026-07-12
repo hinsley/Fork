@@ -11,7 +11,6 @@ describe('embed markup', () => {
         theme: 'dark',
         headers: 'show',
         interaction: 'plot',
-        controls: ['reset'],
       },
       width: '100%',
       height: 640,
@@ -20,7 +19,7 @@ describe('embed markup', () => {
     expect(markup).toContain('https://www.forkdynamics.com/embed/v1.js')
     expect(markup).toContain('src="./A&amp;B&quot;.zip"')
     expect(markup).toContain('viewports="scene-a,diagram-b"')
-    expect(markup).toContain('controls="reset"')
+    expect(markup).not.toContain('controls=')
     expect(markup).toContain('height:640px')
   })
 })

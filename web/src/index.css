@@ -184,38 +184,6 @@ html[data-embed='1'] #root {
   flex: 1 1 0;
 }
 
-.embed-viewer__controls {
-  position: absolute;
-  z-index: 20;
-  top: 10px;
-  left: 10px;
-  display: flex;
-  gap: 6px;
-}
-
-.embed-viewer__controls button {
-  border: 1px solid rgba(100, 110, 125, 0.35);
-  border-radius: 6px;
-  padding: 6px 9px;
-  color: inherit;
-  background: color-mix(in srgb, var(--panel) 90%, transparent);
-  box-shadow: 0 2px 8px rgba(20, 28, 40, 0.12);
-  cursor: pointer;
-}
-
-.embed-viewer__notice {
-  position: absolute;
-  z-index: 21;
-  top: 48px;
-  right: 10px;
-  max-width: 280px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  color: #8e2424;
-  background: #fff0f0;
-  font-size: 12px;
-}
-
 .viewport-tile--noninteractive .plotly-viewport__canvas {
   pointer-events: none;
 }

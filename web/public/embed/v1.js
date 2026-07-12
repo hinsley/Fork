@@ -57,7 +57,7 @@
 
   class ForkEmbedElement extends HTMLElement {
     static get observedAttributes() {
-      return ['src', 'viewports', 'theme', 'headers', 'interaction', 'controls']
+      return ['src', 'viewports', 'theme', 'headers', 'interaction']
     }
 
     constructor() {
@@ -85,17 +85,12 @@
       const theme = this.getAttribute('theme')
       const headers = this.getAttribute('headers')
       const interaction = this.getAttribute('interaction')
-      const controlsAttribute = this.getAttribute('controls')
-      const controls = list(controlsAttribute).filter(
-        (entry) => entry === 'reset' || entry === 'fullscreen'
-      )
       return {
         version: VERSION,
         viewportIds: list(this.getAttribute('viewports')),
         theme: theme === 'light' || theme === 'dark' ? theme : 'auto',
         headers: headers === 'show' || headers === 'hide' ? headers : 'auto',
         interaction: interaction === 'none' ? 'none' : 'plot',
-        controls: controlsAttribute === null ? ['reset', 'fullscreen'] : controls,
       }
     }
 

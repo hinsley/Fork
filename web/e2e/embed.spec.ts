@@ -25,18 +25,9 @@ test('embed builder exposes selected viewports and export markup', async ({ page
     .evaluate((header) => getComputedStyle(header).backgroundColor)
   expect(headerBackground).toBe('rgb(19, 29, 40)')
 
-  const controlPosition = await page.getByLabel('Viewer controls').evaluate((controls) => {
-    const viewer = controls.closest('.embed-viewer')
-    if (!viewer) return null
-    const controlsRect = controls.getBoundingClientRect()
-    const viewerRect = viewer.getBoundingClientRect()
-    return {
-      left: controlsRect.left - viewerRect.left,
-      right: viewerRect.right - controlsRect.right,
-    }
-  })
-  expect(controlPosition).not.toBeNull()
-  expect(controlPosition?.left).toBeLessThan(controlPosition?.right ?? 0)
+  await expect(page.getByText('Reset view')).toHaveCount(0)
+  await expect(page.getByText('Fullscreen')).toHaveCount(0)
+  await expect(page.getByTestId('embed-code')).not.toHaveValue(/controls=/)
 })
 
 test('publisher-origin loader renders a ZIP without CORS headers', async ({ page }, testInfo) => {
@@ -67,7 +58,7 @@ test('publisher-origin loader renders a ZIP without CORS headers', async ({ page
         <fork-embed
           src="/system.zip"
           viewports="${sceneId}"
-          controls="reset"
+          controls="reset fullscreen"
           style="display:block;width:800px;height:520px"
         ></fork-embed>
       </body>
@@ -79,6 +70,8 @@ test('publisher-origin loader renders a ZIP without CORS headers', async ({ page
   await expect(frame.locator('[data-testid^="plotly-viewport-"]')).toBeVisible()
   await expect(frame.getByTestId('toolbar')).toHaveCount(0)
   await expect(frame.getByTestId('objects-panel')).toHaveCount(0)
+  await expect(frame.getByText('Reset view')).toHaveCount(0)
+  await expect(frame.getByText('Fullscreen')).toHaveCount(0)
 
   await testInfo.attach('embed-origins', {
     body: `${publisherOrigin} -> ${viewerOrigin}`,

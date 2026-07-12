@@ -9,10 +9,6 @@ describe('embed specification', () => {
     })
   })
 
-  it('preserves an explicit empty controls list', () => {
-    expect(normalizeEmbedSpec({ controls: [] }).controls).toEqual([])
-  })
-
   it('drops unsupported public options', () => {
     expect(
       normalizeEmbedSpec({
@@ -25,7 +21,7 @@ describe('embed specification', () => {
       theme: 'auto',
       headers: 'auto',
       interaction: 'plot',
-      controls: ['reset', 'fullscreen'],
     })
+    expect(normalizeEmbedSpec({ controls: ['reset', 'fullscreen'] })).not.toHaveProperty('controls')
   })
 })

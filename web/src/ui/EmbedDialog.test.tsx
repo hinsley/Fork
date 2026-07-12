@@ -29,6 +29,11 @@ describe('EmbedDialog', () => {
     expect((screen.getByDisplayValue(/viewports=/) as HTMLTextAreaElement).value).toContain(
       result.nodeId
     )
+    expect(screen.queryByText('Reset view')).not.toBeInTheDocument()
+    expect(screen.queryByText('Fullscreen')).not.toBeInTheDocument()
+    expect((screen.getByTestId('embed-code') as HTMLTextAreaElement).value).not.toContain(
+      'controls='
+    )
 
     fireEvent.click(screen.getByText('Download system ZIP'))
     expect(onExport).toHaveBeenCalledTimes(1)

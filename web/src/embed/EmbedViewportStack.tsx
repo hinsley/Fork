@@ -16,19 +16,19 @@ export function EmbedViewportStack({
   applyDocumentTheme?: boolean
 }) {
   const { state, actions } = useAppContext()
-  const [resetRevision, setResetRevision] = useState(0)
-  const [fullscreenError, setFullscreenError] = useState<string | null>(null)
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => resolveTheme(spec.theme))
+  const [preferredTheme, setPreferredTheme] = useState<'light' | 'dark'>(() =>
+    resolveTheme('auto')
+  )
+  const theme = spec.theme === 'auto' ? preferredTheme : spec.theme
   const system = state.system
 
   useEffect(() => {
-    setTheme(resolveTheme(spec.theme))
-    if (spec.theme !== 'auto' || !window.matchMedia) return
+    if (!window.matchMedia) return
     const media = window.matchMedia('(prefers-color-scheme: dark)')
-    const update = () => setTheme(media.matches ? 'dark' : 'light')
+    const update = () => setPreferredTheme(media.matches ? 'dark' : 'light')
     media.addEventListener?.('change', update)
     return () => media.removeEventListener?.('change', update)
-  }, [spec.theme])
+  }, [])
 
   useEffect(() => {
     if (!applyDocumentTheme) return
@@ -63,34 +63,9 @@ export function EmbedViewportStack({
   const showHeaders =
     spec.headers === 'show' || (spec.headers === 'auto' && viewportState.ids.length > 1)
 
-  const enterFullscreen = async () => {
-    setFullscreenError(null)
-    try {
-      if (!document.documentElement.requestFullscreen) {
-        throw new Error('Fullscreen is not available in this browser.')
-      }
-      await document.documentElement.requestFullscreen()
-    } catch (error) {
-      setFullscreenError(error instanceof Error ? error.message : String(error))
-    }
-  }
-
   return (
     <div className="embed-viewer" data-theme={theme} data-testid="embed-viewer">
-      {spec.controls.length > 0 ? (
-        <div className="embed-viewer__controls" aria-label="Viewer controls">
-          {spec.controls.includes('reset') ? (
-            <button onClick={() => setResetRevision((value) => value + 1)}>Reset view</button>
-          ) : null}
-          {spec.controls.includes('fullscreen') ? (
-            <button onClick={() => void enterFullscreen()}>Fullscreen</button>
-          ) : null}
-        </div>
-      ) : null}
-      {fullscreenError ? (
-        <div className="embed-viewer__notice" role="status">{fullscreenError}</div>
-      ) : null}
-      <div className="embed-viewer__content" key={resetRevision}>
+      <div className="embed-viewer__content">
         <ViewportPanel
           system={system}
           selectedNodeId={null}

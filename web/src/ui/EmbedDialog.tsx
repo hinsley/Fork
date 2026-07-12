@@ -2,7 +2,6 @@ import { useMemo, useRef, useState } from 'react'
 import type { System } from '../system/types'
 import { EmbedViewportStack } from '../embed/EmbedViewportStack'
 import type {
-  EmbedControl,
   EmbedHeaders,
   EmbedInteraction,
   EmbedSpecV1,
@@ -59,24 +58,17 @@ function EmbedDialogContent({
   const [theme, setTheme] = useState<EmbedTheme>('auto')
   const [headers, setHeaders] = useState<EmbedHeaders>('auto')
   const [interaction, setInteraction] = useState<EmbedInteraction>('plot')
-  const [resetEnabled, setResetEnabled] = useState(true)
-  const [fullscreenEnabled, setFullscreenEnabled] = useState(true)
   const [width, setWidth] = useState('100%')
   const [height, setHeight] = useState(560)
   const [copyStatus, setCopyStatus] = useState<string | null>(null)
   const markupRef = useRef<HTMLTextAreaElement | null>(null)
 
-  const controls: EmbedControl[] = [
-    ...(resetEnabled ? (['reset'] as EmbedControl[]) : []),
-    ...(fullscreenEnabled ? (['fullscreen'] as EmbedControl[]) : []),
-  ]
   const spec: EmbedSpecV1 = {
     version: 1,
     viewportIds: selectedIds,
     theme,
     headers,
     interaction,
-    controls,
   }
   const markup = buildEmbedMarkup({ source, spec, width, height })
 
@@ -185,11 +177,6 @@ function EmbedDialogContent({
                   onChange={(event) => setHeight(Math.max(240, Number(event.target.value) || 240))}
                 />
               </label>
-            </div>
-
-            <div className="embed-dialog__checks">
-              <label><input type="checkbox" checked={resetEnabled} onChange={(event) => setResetEnabled(event.target.checked)} /> Reset view</label>
-              <label><input type="checkbox" checked={fullscreenEnabled} onChange={(event) => setFullscreenEnabled(event.target.checked)} /> Fullscreen</label>
             </div>
 
             <h3>Embed code</h3>

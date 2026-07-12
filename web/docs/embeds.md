@@ -6,7 +6,7 @@ No system data is uploaded to Fork Dynamics.
 
 ## Create an embed
 
-1. Open the system in Fork and select **Embed** in the toolbar.
+1. Open the **Systems** dialog, select **Export** for the system, then choose **Create embed**.
 2. Choose one or more state-space scenes, event maps, or bifurcation diagrams.
 3. Set the hosted ZIP path and viewer options.
 4. Download the system ZIP and copy the generated embed code.
@@ -23,7 +23,6 @@ The generated markup has this form:
   theme="auto"
   headers="auto"
   interaction="plot"
-  controls="reset fullscreen"
   style="display:block;width:100%;height:560px"
 ></fork-embed>
 ```
@@ -40,8 +39,6 @@ that file host permits the publisher page to read it with CORS.
 - `theme`: `auto`, `light`, or `dark`.
 - `headers`: `auto`, `show`, or `hide`.
 - `interaction`: `plot` for rotate/pan/zoom/hover, or `none` for a static presentation.
-- `controls`: any combination of `reset` and `fullscreen`; an empty value hides both.
-
 Size the custom element with normal CSS. If several viewports are selected, they retain their
 saved order and form a vertical stack inside the element.
 
@@ -57,5 +54,4 @@ unsupported, or inconsistent archives show an error inside the embed instead of 
 application.
 
 Websites with a restrictive Content Security Policy must allow `https://www.forkdynamics.com` in
-both `script-src` and `frame-src`. Fullscreen also depends on the embedding page allowing the
-fullscreen permission.
+both `script-src` and `frame-src`.

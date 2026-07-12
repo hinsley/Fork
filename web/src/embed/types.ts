@@ -3,7 +3,6 @@ export const EMBED_PROTOCOL_VERSION = 1 as const
 export type EmbedTheme = 'auto' | 'light' | 'dark'
 export type EmbedHeaders = 'auto' | 'show' | 'hide'
 export type EmbedInteraction = 'plot' | 'none'
-export type EmbedControl = 'reset' | 'fullscreen'
 
 export type EmbedSpecV1 = {
   version: typeof EMBED_PROTOCOL_VERSION
@@ -11,7 +10,6 @@ export type EmbedSpecV1 = {
   theme: EmbedTheme
   headers: EmbedHeaders
   interaction: EmbedInteraction
-  controls: EmbedControl[]
 }
 
 export const DEFAULT_EMBED_SPEC: EmbedSpecV1 = {
@@ -20,7 +18,6 @@ export const DEFAULT_EMBED_SPEC: EmbedSpecV1 = {
   theme: 'auto',
   headers: 'auto',
   interaction: 'plot',
-  controls: ['reset', 'fullscreen'],
 }
 
 function stringArray(value: unknown): string[] {
@@ -35,9 +32,6 @@ export function normalizeEmbedSpec(value: unknown): EmbedSpecV1 {
   const headers: EmbedHeaders =
     record.headers === 'show' || record.headers === 'hide' ? record.headers : 'auto'
   const interaction: EmbedInteraction = record.interaction === 'none' ? 'none' : 'plot'
-  const controls = stringArray(record.controls).filter(
-    (control): control is EmbedControl => control === 'reset' || control === 'fullscreen'
-  )
 
   return {
     version: EMBED_PROTOCOL_VERSION,
@@ -45,7 +39,6 @@ export function normalizeEmbedSpec(value: unknown): EmbedSpecV1 {
     theme,
     headers,
     interaction,
-    controls: 'controls' in record ? controls : [...DEFAULT_EMBED_SPEC.controls],
   }
 }
 

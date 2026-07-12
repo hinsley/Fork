@@ -137,7 +137,7 @@ export function SystemDialog({
                 }}
               >
                 <span className="export-choice-dialog__option-title">Create embed</span>
-                <span>Open the embed creator to choose viewports, controls, and appearance.</span>
+                <span>Open the embed creator to choose viewports and appearance.</span>
               </button>
               <button
                 className="export-choice-dialog__option"
