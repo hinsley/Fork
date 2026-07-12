@@ -1871,6 +1871,11 @@
 }
 
 .tree-node__row-motion {
+  grid-template-columns:
+    calc(var(--tree-node-depth, 0) * 14px)
+    23px
+    23px
+    minmax(0, 1fr);
   min-height: 30px;
   padding: 5px 6px;
   border-radius: 7px;
@@ -1884,8 +1889,8 @@
 }
 
 .tree-node__visibility::before {
-  width: 15px;
-  height: 15px;
+  width: 11px;
+  height: 11px;
 }
 
 .tree-node__row-motion:hover {
