@@ -3260,8 +3260,7 @@ pub fn compute_limit_cycle_floquet_modes_on_mesh_with_backend(
             .collect(),
     );
 
-    for interval in 0..ntst {
-        let ds_dx = &stage_sensitivities[interval];
+    for (interval, ds_dx) in stage_sensitivities.iter().enumerate() {
         let mesh_mode_vectors = &computation.mesh_vectors[interval];
 
         for stage in 0..ncol {
@@ -3287,7 +3286,7 @@ pub fn compute_limit_cycle_floquet_modes_on_mesh_with_backend(
                 .zip(&computation.multipliers)
                 .map(|(first, multiplier)| {
                     first
-                        .into_iter()
+                        .iter()
                         .map(|value| *value * *multiplier)
                         .collect::<Vec<_>>()
                 })
