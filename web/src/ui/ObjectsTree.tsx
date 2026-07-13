@@ -66,7 +66,9 @@ function getBranchTypeLabel(branch: ContinuationObject, system: System): string 
   if (branch.branchType === 'homoclinic_curve') return 'homoclinic curve'
   if (branch.branchType === 'homotopy_saddle_curve') return 'homotopy saddle curve'
   if (branch.branchType === 'fold_curve') return 'fold curve'
-  if (branch.branchType === 'hopf_curve') return 'hopf curve'
+  if (branch.branchType === 'hopf_curve') {
+    return system.config.type === 'map' ? 'neimark-sacker curve' : 'hopf curve'
+  }
   if (branch.branchType === 'lpc_curve') return 'lpc curve'
   if (branch.branchType === 'isoperiodic_curve') return 'isoperiodic curve'
   if (branch.branchType === 'pd_curve') return 'pd curve'

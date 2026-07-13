@@ -3,18 +3,33 @@
 use super::runner_boundary::{serialize_js, OwnedContinuationRunner};
 use crate::system::build_system;
 use fork_core::continuation::codim1_curves::{
-    estimate_hopf_kappa_from_jacobian, refine_codim2_points,
+    estimate_hopf_kappa_from_jacobian, estimate_map_ns_cosine_from_jacobian, refine_codim2_points,
 };
+use fork_core::continuation::uniform_normalized_mesh;
 use fork_core::continuation::{
     Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType, Codim2Bifurcation, Codim2BifurcationType,
-    ContinuationPoint, ContinuationSettings, FoldCurveProblem, HopfCurveProblem,
-    IsoperiodicCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
+    CollocationAdaptationReport, CollocationAdaptivitySettings, ContinuationPoint,
+    ContinuationSettings, FoldCurveProblem, HopfCurveProblem, IsoperiodicCurveProblem,
+    LPCCurveProblem, NSCurveProblem, PDCurveProblem,
 };
-use fork_core::equilibrium::{compute_jacobian, SystemKind};
+use fork_core::equilibrium::{compute_jacobian, compute_system_jacobian, SystemKind};
 use nalgebra::DMatrix;
+use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::from_value;
 use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
+
+#[derive(Debug, Clone, Copy, Deserialize, Default)]
+struct CurveRunnerOptions {
+    #[serde(default)]
+    collocation_adaptivity: CollocationAdaptivitySettings,
+}
+
+#[derive(Serialize)]
+struct AdaptiveCodim1CurveResult {
+    branch: Codim1CurveBranch,
+    collocation_adaptation: CollocationAdaptationReport,
+}
 
 pub(crate) fn normalize_lc_seed_for_stage_first_explicit(
     lc_state: &[f64],
@@ -303,19 +318,28 @@ impl WasmFoldCurveRunner {
             settings.corrector_tolerance.clamp(1e-10, 1e-6),
         )
         .map_err(|error| JsValue::from_str(&format!("Codim-2 refinement failed: {error}")))?;
-        let mut events_by_index: BTreeMap<usize, _> = events
-            .into_iter()
-            .map(|event| (event.replace_index, event))
-            .collect();
+        let mut events_by_index: BTreeMap<usize, Vec<_>> = BTreeMap::new();
+        for event in events {
+            events_by_index
+                .entry(event.replace_index)
+                .or_default()
+                .push(event);
+        }
         let n = self.fold_state.len();
 
         let mut codim1_points = Vec::with_capacity(branch.points.len());
         let mut codim2_bifurcations = Vec::new();
         for (index, original_point) in branch.points.iter().enumerate() {
-            let (pt, codim2) = match events_by_index.remove(&index) {
-                Some(event) => (event.point, Some(event.data)),
-                None => (original_point.clone(), None),
-            };
+            let refined_events = events_by_index.remove(&index).unwrap_or_default();
+            let pt = refined_events
+                .first()
+                .map(|event| event.point.clone())
+                .unwrap_or_else(|| original_point.clone());
+            let codim2_events = refined_events
+                .into_iter()
+                .map(|event| event.data)
+                .collect::<Vec<_>>();
+            let codim2 = codim2_events.first().cloned();
             let p2 = if !pt.state.is_empty() {
                 pt.state[0]
             } else {
@@ -331,10 +355,10 @@ impl WasmFoldCurveRunner {
                 .as_ref()
                 .map(|data| data.bifurcation_type)
                 .unwrap_or(Codim2BifurcationType::None);
-            if codim2_type != Codim2BifurcationType::None {
+            for data in &codim2_events {
                 codim2_bifurcations.push(Codim2Bifurcation {
                     index,
-                    bifurcation_type: codim2_type,
+                    bifurcation_type: data.bifurcation_type,
                 });
             }
             codim1_points.push(Codim1CurvePoint {
@@ -344,6 +368,7 @@ impl WasmFoldCurveRunner {
                 codim2_type,
                 auxiliary: None,
                 eigenvalues: pt.eigenvalues.clone(),
+                codim2_events,
                 codim2,
             });
         }
@@ -352,6 +377,9 @@ impl WasmFoldCurveRunner {
             curve_type: Codim1CurveType::Fold,
             param1_index: self.param1_index,
             param2_index: self.param2_index,
+            ntst: 0,
+            ncol: 0,
+            normalized_mesh: Vec::new(),
             points: codim1_points,
             codim2_bifurcations,
             indices: branch.indices.clone(),
@@ -384,6 +412,19 @@ mod tests {
             step_tolerance: 1e-6,
         };
         to_value(&settings).expect("settings")
+    }
+
+    fn map_ns_settings_value(max_steps: usize) -> wasm_bindgen::JsValue {
+        let settings = ContinuationSettings {
+            step_size: 0.02,
+            min_step_size: 1e-7,
+            max_step_size: 0.04,
+            max_steps,
+            corrector_steps: 10,
+            corrector_tolerance: 1e-10,
+            step_tolerance: 1e-10,
+        };
+        to_value(&settings).expect("map NS settings")
     }
 
     #[wasm_bindgen_test]
@@ -588,6 +629,45 @@ mod tests {
         assert_eq!(point.param2_value, 2.0);
         assert_eq!(point.auxiliary, Some(hopf_omega * hopf_omega));
     }
+
+    #[wasm_bindgen_test]
+    fn map_ns_curve_runner_follows_unit_circle_locus() {
+        let mut runner = WasmHopfCurveRunner::new(
+            vec![
+                "(1+p1+p2)*(0.5*x-0.8660254037844386*y)".to_string(),
+                "(1+p1+p2)*(0.8660254037844386*x+0.5*y)".to_string(),
+            ],
+            vec![-0.2, 0.2],
+            vec!["p1".to_string(), "p2".to_string()],
+            vec!["x".to_string(), "y".to_string()],
+            "map",
+            1,
+            vec![0.0, 0.0],
+            0.8660254037844386,
+            "p1",
+            -0.2,
+            "p2",
+            0.2,
+            map_ns_settings_value(4),
+            true,
+        )
+        .expect("map NS runner");
+
+        runner.run_steps(4).expect("map NS steps");
+        let branch_val = runner.get_result().expect("map NS result");
+        let branch: Codim1CurveBranch = from_value(branch_val).expect("map NS branch");
+
+        assert_eq!(branch.curve_type, Codim1CurveType::NeimarkSacker);
+        assert!(branch.points.len() >= 3);
+        for point in &branch.points {
+            assert!((point.param1_value + point.param2_value).abs() < 1.0e-4);
+            assert!((point.auxiliary.expect("cosine") - 0.5).abs() < 3.0e-4);
+            assert!(point
+                .eigenvalues
+                .iter()
+                .all(|multiplier| (multiplier.norm() - 1.0).abs() < 1.0e-4));
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -598,6 +678,7 @@ pub struct WasmHopfCurveRunner {
     hopf_state: Vec<f64>,
     hopf_kappa: f64,
     param2_value: f64,
+    kind: SystemKind,
 }
 
 #[wasm_bindgen]
@@ -645,16 +726,27 @@ impl WasmHopfCurveRunner {
         system.params[param2_index] = param2_value;
 
         let n = hopf_state.len();
-        let jac = compute_jacobian(&system, kind, &hopf_state)
-            .map_err(|e| JsValue::from_str(&format!("Failed to compute Jacobian: {}", e)))?;
+        let jac = match kind {
+            SystemKind::Flow => compute_jacobian(&system, kind, &hopf_state),
+            SystemKind::Map { .. } => compute_system_jacobian(&system, kind, &hopf_state),
+        }
+        .map_err(|e| JsValue::from_str(&format!("Failed to compute Jacobian: {}", e)))?;
         let jac_mat = DMatrix::from_row_slice(n, n, &jac);
-        let kappa_seed =
-            estimate_hopf_kappa_from_jacobian(&jac_mat).unwrap_or(hopf_omega * hopf_omega);
-        let hopf_kappa = if kappa_seed.is_finite() && kappa_seed > 0.0 {
-            kappa_seed
-        } else {
-            hopf_omega * hopf_omega
+        let hopf_kappa = match kind {
+            SystemKind::Flow => {
+                estimate_hopf_kappa_from_jacobian(&jac_mat).unwrap_or(hopf_omega * hopf_omega)
+            }
+            SystemKind::Map { .. } => estimate_map_ns_cosine_from_jacobian(&jac_mat)
+                .unwrap_or_else(|| (1.0 - hopf_omega * hopf_omega).max(0.0).sqrt()),
         };
+        if !hopf_kappa.is_finite()
+            || (kind.is_flow() && hopf_kappa <= 0.0)
+            || (kind.is_map() && hopf_kappa.abs() > 1.0 + 1.0e-8)
+        {
+            return Err(JsValue::from_str(
+                "Invalid Hopf/Neimark-Sacker spectral seed",
+            ));
+        }
 
         let mut augmented_state = Vec::with_capacity(n + 2);
         augmented_state.push(param2_value);
@@ -664,7 +756,11 @@ impl WasmHopfCurveRunner {
         let initial_point = ContinuationPoint {
             state: augmented_state,
             param_value: param1_value,
-            stability: fork_core::continuation::BifurcationType::Hopf,
+            stability: if kind.is_map() {
+                fork_core::continuation::BifurcationType::NeimarkSacker
+            } else {
+                fork_core::continuation::BifurcationType::Hopf
+            },
             eigenvalues: vec![],
             cycle_points: None,
         };
@@ -676,7 +772,11 @@ impl WasmHopfCurveRunner {
                     system,
                     kind,
                     &hopf_state,
-                    hopf_omega,
+                    if kind.is_map() {
+                        hopf_kappa
+                    } else {
+                        hopf_omega
+                    },
                     param1_index,
                     param2_index,
                 )
@@ -684,7 +784,11 @@ impl WasmHopfCurveRunner {
             initial_point,
             settings,
             forward,
-            "Hopf",
+            if kind.is_map() {
+                "Neimark-Sacker"
+            } else {
+                "Hopf"
+            },
         )?;
 
         Ok(WasmHopfCurveRunner {
@@ -694,6 +798,7 @@ impl WasmHopfCurveRunner {
             hopf_state,
             hopf_kappa,
             param2_value,
+            kind,
         })
     }
 
@@ -719,20 +824,29 @@ impl WasmHopfCurveRunner {
             settings.corrector_tolerance.clamp(1e-10, 1e-6),
         )
         .map_err(|error| JsValue::from_str(&format!("Codim-2 refinement failed: {error}")))?;
-        let mut events_by_index: BTreeMap<usize, _> = events
-            .into_iter()
-            .map(|event| (event.replace_index, event))
-            .collect();
+        let mut events_by_index: BTreeMap<usize, Vec<_>> = BTreeMap::new();
+        for event in events {
+            events_by_index
+                .entry(event.replace_index)
+                .or_default()
+                .push(event);
+        }
         let n = self.hopf_state.len();
         let kappa_default = self.hopf_kappa;
 
         let mut codim1_points = Vec::with_capacity(branch.points.len());
         let mut codim2_bifurcations = Vec::new();
         for (index, original_point) in branch.points.iter().enumerate() {
-            let (pt, codim2) = match events_by_index.remove(&index) {
-                Some(event) => (event.point, Some(event.data)),
-                None => (original_point.clone(), None),
-            };
+            let refined_events = events_by_index.remove(&index).unwrap_or_default();
+            let pt = refined_events
+                .first()
+                .map(|event| event.point.clone())
+                .unwrap_or_else(|| original_point.clone());
+            let codim2_events = refined_events
+                .into_iter()
+                .map(|event| event.data)
+                .collect::<Vec<_>>();
+            let codim2 = codim2_events.first().cloned();
             let p2 = if !pt.state.is_empty() {
                 pt.state[0]
             } else {
@@ -753,10 +867,10 @@ impl WasmHopfCurveRunner {
                 .as_ref()
                 .map(|data| data.bifurcation_type)
                 .unwrap_or(Codim2BifurcationType::None);
-            if codim2_type != Codim2BifurcationType::None {
+            for data in &codim2_events {
                 codim2_bifurcations.push(Codim2Bifurcation {
                     index,
-                    bifurcation_type: codim2_type,
+                    bifurcation_type: data.bifurcation_type,
                 });
             }
             codim1_points.push(Codim1CurvePoint {
@@ -766,14 +880,22 @@ impl WasmHopfCurveRunner {
                 codim2_type,
                 auxiliary: Some(kappa),
                 eigenvalues: pt.eigenvalues.clone(),
+                codim2_events,
                 codim2,
             });
         }
 
         let codim1_branch = Codim1CurveBranch {
-            curve_type: Codim1CurveType::Hopf,
+            curve_type: if self.kind.is_map() {
+                Codim1CurveType::NeimarkSacker
+            } else {
+                Codim1CurveType::Hopf
+            },
             param1_index: self.param1_index,
             param2_index: self.param2_index,
+            ntst: 0,
+            ncol: 0,
+            normalized_mesh: Vec::new(),
             points: codim1_points,
             codim2_bifurcations,
             indices: branch.indices.clone(),
@@ -791,6 +913,7 @@ pub struct WasmLPCCurveRunner {
     lc_state: Vec<f64>,
     full_lc_state: Vec<f64>,
     param2_value: f64,
+    ncol: usize,
 }
 
 #[wasm_bindgen]
@@ -809,11 +932,15 @@ impl WasmLPCCurveRunner {
         param2_value: f64,
         ntst: usize,
         ncol: usize,
+        normalized_mesh: Vec<f64>,
         settings_val: JsValue,
         forward: bool,
     ) -> Result<WasmLPCCurveRunner, JsValue> {
         console_error_panic_hook::set_once();
 
+        let options: CurveRunnerOptions = from_value(settings_val.clone())
+            .map_err(|e| JsValue::from_str(&format!("Invalid LPC curve options: {}", e)))?;
+        let adaptivity = options.collocation_adaptivity;
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
@@ -831,6 +958,11 @@ impl WasmLPCCurveRunner {
         system.params[param2_index] = param2_value;
 
         let dim = system.equations.len();
+        let normalized_mesh = if normalized_mesh.is_empty() {
+            uniform_normalized_mesh(ntst)
+        } else {
+            normalized_mesh
+        };
         let expected_ncoords = ntst * ncol * dim + (ntst + 1) * dim;
         let implicit_ncoords = ntst * ncol * dim + ntst * dim;
 
@@ -877,7 +1009,7 @@ impl WasmLPCCurveRunner {
         let runner = OwnedContinuationRunner::new(
             system,
             |system| {
-                LPCCurveProblem::new(
+                let mut problem = LPCCurveProblem::new_on_mesh(
                     system,
                     full_lc_state.clone(),
                     period,
@@ -887,7 +1019,10 @@ impl WasmLPCCurveRunner {
                     param2_value,
                     ntst,
                     ncol,
-                )
+                    normalized_mesh.clone(),
+                )?;
+                problem.set_collocation_adaptivity(adaptivity)?;
+                Ok(problem)
             },
             initial_point,
             settings,
@@ -902,6 +1037,7 @@ impl WasmLPCCurveRunner {
             lc_state,
             full_lc_state,
             param2_value,
+            ncol,
         })
     }
 
@@ -917,43 +1053,99 @@ impl WasmLPCCurveRunner {
         self.runner.get_progress()
     }
 
+    pub fn get_adaptation_report(&self) -> Result<JsValue, JsValue> {
+        serialize_js(self.runner.problem()?.adaptation_report())
+    }
+
+    pub fn get_result_with_report(&mut self) -> Result<JsValue, JsValue> {
+        let collocation_adaptation = self.runner.problem()?.adaptation_report().clone();
+        let branch: Codim1CurveBranch = from_value(self.get_result()?)
+            .map_err(|error| JsValue::from_str(&format!("Invalid LPC curve result: {error}")))?;
+        serialize_js(&AdaptiveCodim1CurveResult {
+            branch,
+            collocation_adaptation,
+        })
+    }
+
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let branch = self.runner.take_result()?;
-        let n_lc = self.full_lc_state.len();
-
-        let codim1_points: Vec<Codim1CurvePoint> = branch
+        let settings = self.runner.settings()?;
+        let (branch, mut problem) = self.runner.take_result_with_problem()?;
+        let events = refine_codim2_points(
+            &mut problem,
+            &branch.points,
+            settings.corrector_steps.max(8),
+            settings.corrector_tolerance.clamp(1e-10, 1e-6),
+        )
+        .map_err(|error| JsValue::from_str(&format!("LPC codim-2 refinement failed: {error}")))?;
+        let mut events_by_index: BTreeMap<usize, Vec<_>> = BTreeMap::new();
+        for event in events {
+            events_by_index
+                .entry(event.replace_index)
+                .or_default()
+                .push(event);
+        }
+        let normalized_mesh = problem.normalized_mesh().to_vec();
+        let ntst = normalized_mesh.len().saturating_sub(1);
+        let n_lc = branch
             .points
-            .iter()
-            .map(|pt| {
-                let p2 = if pt.state.len() >= n_lc + 2 {
-                    pt.state[n_lc + 1]
-                } else {
-                    self.param2_value
-                };
-                let physical_state: Vec<f64> = if pt.state.len() >= n_lc + 1 {
-                    pt.state[..(n_lc + 1)].to_vec()
-                } else {
-                    self.lc_state.clone()
-                };
+            .first()
+            .and_then(|point| point.state.len().checked_sub(2))
+            .unwrap_or(self.full_lc_state.len());
 
-                Codim1CurvePoint {
-                    state: physical_state,
-                    param1_value: pt.param_value,
-                    param2_value: p2,
-                    codim2_type: Codim2BifurcationType::None,
-                    auxiliary: None,
-                    eigenvalues: pt.eigenvalues.clone(),
-                    codim2: None,
-                }
-            })
-            .collect();
+        let mut codim1_points = Vec::with_capacity(branch.points.len());
+        let mut codim2_bifurcations = Vec::new();
+        for (index, original_point) in branch.points.iter().enumerate() {
+            let refined_events = events_by_index.remove(&index).unwrap_or_default();
+            let pt = refined_events
+                .first()
+                .map(|event| &event.point)
+                .unwrap_or(original_point);
+            let codim2_events = refined_events
+                .iter()
+                .map(|event| event.data.clone())
+                .collect::<Vec<_>>();
+            let codim2 = codim2_events.first().cloned();
+            let p2 = if pt.state.len() >= n_lc + 2 {
+                pt.state[n_lc + 1]
+            } else {
+                self.param2_value
+            };
+            let physical_state: Vec<f64> = if pt.state.len() >= n_lc + 1 {
+                pt.state[..(n_lc + 1)].to_vec()
+            } else {
+                self.lc_state.clone()
+            };
+
+            for data in &codim2_events {
+                codim2_bifurcations.push(Codim2Bifurcation {
+                    index,
+                    bifurcation_type: data.bifurcation_type,
+                });
+            }
+            codim1_points.push(Codim1CurvePoint {
+                state: physical_state,
+                param1_value: pt.param_value,
+                param2_value: p2,
+                codim2_type: codim2
+                    .as_ref()
+                    .map(|data| data.bifurcation_type)
+                    .unwrap_or(Codim2BifurcationType::None),
+                auxiliary: None,
+                eigenvalues: pt.eigenvalues.clone(),
+                codim2,
+                codim2_events,
+            });
+        }
 
         let codim1_branch = Codim1CurveBranch {
             curve_type: Codim1CurveType::LimitPointCycle,
             param1_index: self.param1_index,
             param2_index: self.param2_index,
+            ntst,
+            ncol: self.ncol,
+            normalized_mesh,
             points: codim1_points,
-            codim2_bifurcations: vec![],
+            codim2_bifurcations,
             indices: branch.indices.clone(),
         };
 
@@ -969,6 +1161,7 @@ pub struct WasmIsoperiodicCurveRunner {
     lc_state: Vec<f64>,
     full_lc_state: Vec<f64>,
     param2_value: f64,
+    ncol: usize,
 }
 
 #[wasm_bindgen]
@@ -987,11 +1180,15 @@ impl WasmIsoperiodicCurveRunner {
         param2_value: f64,
         ntst: usize,
         ncol: usize,
+        normalized_mesh: Vec<f64>,
         settings_val: JsValue,
         forward: bool,
     ) -> Result<WasmIsoperiodicCurveRunner, JsValue> {
         console_error_panic_hook::set_once();
 
+        let options: CurveRunnerOptions = from_value(settings_val.clone())
+            .map_err(|e| JsValue::from_str(&format!("Invalid isoperiodic curve options: {}", e)))?;
+        let adaptivity = options.collocation_adaptivity;
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
@@ -1009,6 +1206,11 @@ impl WasmIsoperiodicCurveRunner {
         system.params[param2_index] = param2_value;
 
         let dim = system.equations.len();
+        let normalized_mesh = if normalized_mesh.is_empty() {
+            uniform_normalized_mesh(ntst)
+        } else {
+            normalized_mesh
+        };
         let full_lc_state = normalize_lc_seed_for_stage_first_explicit(&lc_state, ntst, ncol, dim)
             .map_err(|message| JsValue::from_str(&message))?;
 
@@ -1028,7 +1230,7 @@ impl WasmIsoperiodicCurveRunner {
         let runner = OwnedContinuationRunner::new(
             system,
             |system| {
-                IsoperiodicCurveProblem::new(
+                let mut problem = IsoperiodicCurveProblem::new_on_mesh(
                     system,
                     full_lc_state.clone(),
                     period,
@@ -1036,9 +1238,11 @@ impl WasmIsoperiodicCurveRunner {
                     param2_index,
                     param1_value,
                     param2_value,
-                    ntst,
                     ncol,
-                )
+                    normalized_mesh.clone(),
+                )?;
+                problem.set_collocation_adaptivity(adaptivity)?;
+                Ok(problem)
             },
             initial_point,
             settings,
@@ -1053,6 +1257,7 @@ impl WasmIsoperiodicCurveRunner {
             lc_state,
             full_lc_state,
             param2_value,
+            ncol,
         })
     }
 
@@ -1068,9 +1273,30 @@ impl WasmIsoperiodicCurveRunner {
         self.runner.get_progress()
     }
 
+    pub fn get_adaptation_report(&self) -> Result<JsValue, JsValue> {
+        serialize_js(self.runner.problem()?.adaptation_report())
+    }
+
+    pub fn get_result_with_report(&mut self) -> Result<JsValue, JsValue> {
+        let collocation_adaptation = self.runner.problem()?.adaptation_report().clone();
+        let branch: Codim1CurveBranch = from_value(self.get_result()?).map_err(|error| {
+            JsValue::from_str(&format!("Invalid isoperiodic curve result: {error}"))
+        })?;
+        serialize_js(&AdaptiveCodim1CurveResult {
+            branch,
+            collocation_adaptation,
+        })
+    }
+
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let branch = self.runner.take_result()?;
-        let n_lc = self.full_lc_state.len();
+        let (branch, problem) = self.runner.take_result_with_problem()?;
+        let normalized_mesh = problem.normalized_mesh().to_vec();
+        let ntst = normalized_mesh.len().saturating_sub(1);
+        let n_lc = branch
+            .points
+            .first()
+            .and_then(|point| point.state.len().checked_sub(2))
+            .unwrap_or(self.full_lc_state.len());
 
         let codim1_points: Vec<Codim1CurvePoint> = branch
             .points
@@ -1095,6 +1321,7 @@ impl WasmIsoperiodicCurveRunner {
                     auxiliary: None,
                     eigenvalues: pt.eigenvalues.clone(),
                     codim2: None,
+                    codim2_events: Vec::new(),
                 }
             })
             .collect();
@@ -1103,6 +1330,9 @@ impl WasmIsoperiodicCurveRunner {
             curve_type: Codim1CurveType::Isoperiodic,
             param1_index: self.param1_index,
             param2_index: self.param2_index,
+            ntst,
+            ncol: self.ncol,
+            normalized_mesh,
             points: codim1_points,
             codim2_bifurcations: vec![],
             indices: branch.indices.clone(),
@@ -1120,6 +1350,7 @@ pub struct WasmPDCurveRunner {
     full_lc_state: Vec<f64>,
     period: f64,
     param2_value: f64,
+    ncol: usize,
 }
 
 #[wasm_bindgen]
@@ -1138,11 +1369,15 @@ impl WasmPDCurveRunner {
         param2_value: f64,
         ntst: usize,
         ncol: usize,
+        normalized_mesh: Vec<f64>,
         settings_val: JsValue,
         forward: bool,
     ) -> Result<WasmPDCurveRunner, JsValue> {
         console_error_panic_hook::set_once();
 
+        let options: CurveRunnerOptions = from_value(settings_val.clone())
+            .map_err(|e| JsValue::from_str(&format!("Invalid PD curve options: {}", e)))?;
+        let adaptivity = options.collocation_adaptivity;
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
@@ -1160,6 +1395,11 @@ impl WasmPDCurveRunner {
         system.params[param2_index] = param2_value;
 
         let dim = system.equations.len();
+        let normalized_mesh = if normalized_mesh.is_empty() {
+            uniform_normalized_mesh(ntst)
+        } else {
+            normalized_mesh
+        };
         let full_lc_state =
             normalize_pd_lc_seed_for_mesh_first_explicit(&lc_state, ntst, ncol, dim)
                 .map_err(|message| JsValue::from_str(&message))?;
@@ -1180,7 +1420,7 @@ impl WasmPDCurveRunner {
         let runner = OwnedContinuationRunner::new(
             system,
             |system| {
-                PDCurveProblem::new(
+                let mut problem = PDCurveProblem::new_on_mesh(
                     system,
                     full_lc_state.clone(),
                     period,
@@ -1190,7 +1430,10 @@ impl WasmPDCurveRunner {
                     param2_value,
                     ntst,
                     ncol,
-                )
+                    normalized_mesh.clone(),
+                )?;
+                problem.set_collocation_adaptivity(adaptivity)?;
+                Ok(problem)
             },
             initial_point,
             settings,
@@ -1205,6 +1448,7 @@ impl WasmPDCurveRunner {
             full_lc_state,
             period,
             param2_value,
+            ncol,
         })
     }
 
@@ -1220,37 +1464,93 @@ impl WasmPDCurveRunner {
         self.runner.get_progress()
     }
 
+    pub fn get_adaptation_report(&self) -> Result<JsValue, JsValue> {
+        serialize_js(self.runner.problem()?.adaptation_report())
+    }
+
+    pub fn get_result_with_report(&mut self) -> Result<JsValue, JsValue> {
+        let collocation_adaptation = self.runner.problem()?.adaptation_report().clone();
+        let branch: Codim1CurveBranch = from_value(self.get_result()?)
+            .map_err(|error| JsValue::from_str(&format!("Invalid PD curve result: {error}")))?;
+        serialize_js(&AdaptiveCodim1CurveResult {
+            branch,
+            collocation_adaptation,
+        })
+    }
+
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let branch = self.runner.take_result()?;
-        let n_lc = self.full_lc_state.len();
+        let settings = self.runner.settings()?;
+        let (branch, mut problem) = self.runner.take_result_with_problem()?;
+        let events = refine_codim2_points(
+            &mut problem,
+            &branch.points,
+            settings.corrector_steps.max(8),
+            settings.corrector_tolerance.clamp(1e-10, 1e-6),
+        )
+        .map_err(|error| JsValue::from_str(&format!("PD codim-2 refinement failed: {error}")))?;
+        let mut events_by_index: BTreeMap<usize, Vec<_>> = BTreeMap::new();
+        for event in events {
+            events_by_index
+                .entry(event.replace_index)
+                .or_default()
+                .push(event);
+        }
+        let normalized_mesh = problem.normalized_mesh().to_vec();
+        let ntst = normalized_mesh.len().saturating_sub(1);
+        let n_lc = branch
+            .points
+            .first()
+            .and_then(|point| point.state.len().checked_sub(2))
+            .unwrap_or(self.full_lc_state.len());
         let mut fallback_physical_state = self.full_lc_state.clone();
         fallback_physical_state.push(self.period);
 
-        let codim1_points: Vec<Codim1CurvePoint> = branch
-            .points
-            .iter()
-            .map(|pt| {
-                let (physical_state, p2) = split_pd_curve_output_state(&pt.state, n_lc)
-                    .unwrap_or_else(|| (fallback_physical_state.clone(), self.param2_value));
+        let mut codim1_points = Vec::with_capacity(branch.points.len());
+        let mut codim2_bifurcations = Vec::new();
+        for (index, original_point) in branch.points.iter().enumerate() {
+            let refined_events = events_by_index.remove(&index).unwrap_or_default();
+            let pt = refined_events
+                .first()
+                .map(|event| &event.point)
+                .unwrap_or(original_point);
+            let codim2_events = refined_events
+                .iter()
+                .map(|event| event.data.clone())
+                .collect::<Vec<_>>();
+            let codim2 = codim2_events.first().cloned();
+            let (physical_state, p2) = split_pd_curve_output_state(&pt.state, n_lc)
+                .unwrap_or_else(|| (fallback_physical_state.clone(), self.param2_value));
 
-                Codim1CurvePoint {
-                    state: physical_state,
-                    param1_value: pt.param_value,
-                    param2_value: p2,
-                    codim2_type: Codim2BifurcationType::None,
-                    auxiliary: None,
-                    eigenvalues: pt.eigenvalues.clone(),
-                    codim2: None,
-                }
-            })
-            .collect();
+            for data in &codim2_events {
+                codim2_bifurcations.push(Codim2Bifurcation {
+                    index,
+                    bifurcation_type: data.bifurcation_type,
+                });
+            }
+            codim1_points.push(Codim1CurvePoint {
+                state: physical_state,
+                param1_value: pt.param_value,
+                param2_value: p2,
+                codim2_type: codim2
+                    .as_ref()
+                    .map(|data| data.bifurcation_type)
+                    .unwrap_or(Codim2BifurcationType::None),
+                auxiliary: None,
+                eigenvalues: pt.eigenvalues.clone(),
+                codim2,
+                codim2_events,
+            });
+        }
 
         let codim1_branch = Codim1CurveBranch {
             curve_type: Codim1CurveType::PeriodDoubling,
             param1_index: self.param1_index,
             param2_index: self.param2_index,
+            ntst,
+            ncol: self.ncol,
+            normalized_mesh,
             points: codim1_points,
-            codim2_bifurcations: vec![],
+            codim2_bifurcations,
             indices: branch.indices.clone(),
         };
 
@@ -1267,6 +1567,7 @@ pub struct WasmNSCurveRunner {
     full_lc_state: Vec<f64>,
     param2_value: f64,
     initial_k: f64,
+    ncol: usize,
 }
 
 #[wasm_bindgen]
@@ -1286,11 +1587,15 @@ impl WasmNSCurveRunner {
         initial_k: f64,
         ntst: usize,
         ncol: usize,
+        normalized_mesh: Vec<f64>,
         settings_val: JsValue,
         forward: bool,
     ) -> Result<WasmNSCurveRunner, JsValue> {
         console_error_panic_hook::set_once();
 
+        let options: CurveRunnerOptions = from_value(settings_val.clone())
+            .map_err(|e| JsValue::from_str(&format!("Invalid NS curve options: {}", e)))?;
+        let adaptivity = options.collocation_adaptivity;
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
@@ -1308,6 +1613,11 @@ impl WasmNSCurveRunner {
         system.params[param2_index] = param2_value;
 
         let dim = system.equations.len();
+        let normalized_mesh = if normalized_mesh.is_empty() {
+            uniform_normalized_mesh(ntst)
+        } else {
+            normalized_mesh
+        };
         let full_lc_state = normalize_lc_seed_for_stage_first_explicit(&lc_state, ntst, ncol, dim)
             .map_err(|message| JsValue::from_str(&message))?;
 
@@ -1328,7 +1638,7 @@ impl WasmNSCurveRunner {
         let runner = OwnedContinuationRunner::new(
             system,
             |system| {
-                NSCurveProblem::new(
+                let mut problem = NSCurveProblem::new_on_mesh(
                     system,
                     full_lc_state.clone(),
                     period,
@@ -1339,7 +1649,10 @@ impl WasmNSCurveRunner {
                     initial_k,
                     ntst,
                     ncol,
-                )
+                    normalized_mesh.clone(),
+                )?;
+                problem.set_collocation_adaptivity(adaptivity)?;
+                Ok(problem)
             },
             initial_point,
             settings,
@@ -1355,6 +1668,7 @@ impl WasmNSCurveRunner {
             full_lc_state,
             param2_value,
             initial_k,
+            ncol,
         })
     }
 
@@ -1370,48 +1684,104 @@ impl WasmNSCurveRunner {
         self.runner.get_progress()
     }
 
+    pub fn get_adaptation_report(&self) -> Result<JsValue, JsValue> {
+        serialize_js(self.runner.problem()?.adaptation_report())
+    }
+
+    pub fn get_result_with_report(&mut self) -> Result<JsValue, JsValue> {
+        let collocation_adaptation = self.runner.problem()?.adaptation_report().clone();
+        let branch: Codim1CurveBranch = from_value(self.get_result()?)
+            .map_err(|error| JsValue::from_str(&format!("Invalid NS curve result: {error}")))?;
+        serialize_js(&AdaptiveCodim1CurveResult {
+            branch,
+            collocation_adaptation,
+        })
+    }
+
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let branch = self.runner.take_result()?;
-        let n_lc = self.full_lc_state.len();
-
-        let codim1_points: Vec<Codim1CurvePoint> = branch
+        let settings = self.runner.settings()?;
+        let (branch, mut problem) = self.runner.take_result_with_problem()?;
+        let events = refine_codim2_points(
+            &mut problem,
+            &branch.points,
+            settings.corrector_steps.max(8),
+            settings.corrector_tolerance.clamp(1e-10, 1e-6),
+        )
+        .map_err(|error| JsValue::from_str(&format!("NS codim-2 refinement failed: {error}")))?;
+        let mut events_by_index: BTreeMap<usize, Vec<_>> = BTreeMap::new();
+        for event in events {
+            events_by_index
+                .entry(event.replace_index)
+                .or_default()
+                .push(event);
+        }
+        let normalized_mesh = problem.normalized_mesh().to_vec();
+        let ntst = normalized_mesh.len().saturating_sub(1);
+        let n_lc = branch
             .points
-            .iter()
-            .map(|pt| {
-                let p2 = if pt.state.len() >= n_lc + 2 {
-                    pt.state[n_lc + 1]
-                } else {
-                    self.param2_value
-                };
-                let k_value = if pt.state.len() >= n_lc + 3 {
-                    pt.state[n_lc + 2]
-                } else {
-                    self.initial_k
-                };
-                let physical_state: Vec<f64> = if pt.state.len() >= n_lc + 1 {
-                    pt.state[..(n_lc + 1)].to_vec()
-                } else {
-                    self.lc_state.clone()
-                };
+            .first()
+            .and_then(|point| point.state.len().checked_sub(3))
+            .unwrap_or(self.full_lc_state.len());
 
-                Codim1CurvePoint {
-                    state: physical_state,
-                    param1_value: pt.param_value,
-                    param2_value: p2,
-                    codim2_type: Codim2BifurcationType::None,
-                    auxiliary: Some(k_value),
-                    eigenvalues: pt.eigenvalues.clone(),
-                    codim2: None,
-                }
-            })
-            .collect();
+        let mut codim1_points = Vec::with_capacity(branch.points.len());
+        let mut codim2_bifurcations = Vec::new();
+        for (index, original_point) in branch.points.iter().enumerate() {
+            let refined_events = events_by_index.remove(&index).unwrap_or_default();
+            let pt = refined_events
+                .first()
+                .map(|event| &event.point)
+                .unwrap_or(original_point);
+            let codim2_events = refined_events
+                .iter()
+                .map(|event| event.data.clone())
+                .collect::<Vec<_>>();
+            let codim2 = codim2_events.first().cloned();
+            let p2 = if pt.state.len() >= n_lc + 2 {
+                pt.state[n_lc + 1]
+            } else {
+                self.param2_value
+            };
+            let k_value = if pt.state.len() >= n_lc + 3 {
+                pt.state[n_lc + 2]
+            } else {
+                self.initial_k
+            };
+            let physical_state: Vec<f64> = if pt.state.len() >= n_lc + 1 {
+                pt.state[..(n_lc + 1)].to_vec()
+            } else {
+                self.lc_state.clone()
+            };
+
+            for data in &codim2_events {
+                codim2_bifurcations.push(Codim2Bifurcation {
+                    index,
+                    bifurcation_type: data.bifurcation_type,
+                });
+            }
+            codim1_points.push(Codim1CurvePoint {
+                state: physical_state,
+                param1_value: pt.param_value,
+                param2_value: p2,
+                codim2_type: codim2
+                    .as_ref()
+                    .map(|data| data.bifurcation_type)
+                    .unwrap_or(Codim2BifurcationType::None),
+                auxiliary: Some(k_value),
+                eigenvalues: pt.eigenvalues.clone(),
+                codim2,
+                codim2_events,
+            });
+        }
 
         let codim1_branch = Codim1CurveBranch {
             curve_type: Codim1CurveType::NeimarkSacker,
             param1_index: self.param1_index,
             param2_index: self.param2_index,
+            ntst,
+            ncol: self.ncol,
+            normalized_mesh,
             points: codim1_points,
-            codim2_bifurcations: vec![],
+            codim2_bifurcations,
             indices: branch.indices.clone(),
         };
 

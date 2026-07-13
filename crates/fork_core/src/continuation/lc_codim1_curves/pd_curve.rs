@@ -9,14 +9,25 @@
 //! bordered system (u(0) + u(T) = 0 instead of u(0) - u(T) = 0).
 
 use super::{
-    collocation_profile_is_acceptable, explicit_profile_palc_weights, FullProfilePhaseGauge,
-    LCBorders,
+    codim2::{
+        append_return_map_conditioning, curve_normal_form_settings, limit_cycle_setup_from_profile,
+        secondary_cycle_tests, secondary_spectral_coefficients, TrackedCycleMultiplier,
+    },
+    collocation_defect_estimate_on_mesh, explicit_profile_palc_weights_on_mesh,
+    transfer_explicit_mesh_first_curve_aug, transfer_explicit_mesh_first_curve_state,
+    CurveCollocationAdaptation, CurveMeshAdaptationDecision, FullProfilePhaseGauge, LCBorders,
 };
 use crate::continuation::codim1_curves::Codim2TestFunctions;
 use crate::continuation::periodic::{
-    cycle_tests_from_multipliers, extract_multipliers_collocation, CollocationCoefficients,
+    extract_multipliers_collocation, uniform_normalized_mesh, validated_normalized_mesh,
+    CollocationAdaptationReport, CollocationAdaptivitySettings, CollocationCoefficients,
+    LimitCycleSetup,
 };
-use crate::continuation::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
+use crate::continuation::periodic_normal_forms::periodic_period_doubling_normal_form_with_settings;
+use crate::continuation::problem::{
+    ContinuationProblem, PointDiagnostics, StepRejectionAction, TestFunctionValues,
+};
+use crate::continuation::{Codim2BifurcationType, Codim2Coefficient};
 use crate::equation_engine::EquationSystem;
 use crate::equilibrium::{compute_jacobian, SystemKind};
 use crate::traits::DynamicalSystem;
@@ -38,12 +49,16 @@ pub struct PDCurveProblem<'a> {
     dim: usize,
     /// Number of mesh intervals
     ntst: usize,
+    /// Persistent normalized collocation boundaries, including 0 and 1.
+    normalized_mesh: Vec<f64>,
     /// Collocation degree
     ncol: usize,
     /// Collocation coefficients
     coeffs: CollocationCoefficients,
     /// Integral phase condition on the complete Gauss collocation profile.
     phase_gauge: FullProfilePhaseGauge,
+    /// Bounded a-posteriori mesh adaptation and provenance.
+    adaptation: CurveCollocationAdaptation,
     /// Border vectors for antiperiodic singularity (for G computation only)
     borders: LCBorders,
     /// Work arrays for function evaluations
@@ -66,6 +81,34 @@ impl<'a> PDCurveProblem<'a> {
         param2_value: f64,
         ntst: usize,
         ncol: usize,
+    ) -> Result<Self> {
+        Self::new_on_mesh(
+            system,
+            lc_state,
+            period,
+            param1_index,
+            param2_index,
+            param1_value,
+            param2_value,
+            ntst,
+            ncol,
+            uniform_normalized_mesh(ntst),
+        )
+    }
+
+    /// Create a PD curve problem on explicit normalized mesh boundaries.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_on_mesh(
+        system: &'a mut EquationSystem,
+        lc_state: Vec<f64>,
+        period: f64,
+        param1_index: usize,
+        param2_index: usize,
+        param1_value: f64,
+        param2_value: f64,
+        ntst: usize,
+        ncol: usize,
+        normalized_mesh: Vec<f64>,
     ) -> Result<Self> {
         let dim = system.equations.len();
         if dim == 0 {
@@ -94,6 +137,7 @@ impl<'a> PDCurveProblem<'a> {
                 dim
             );
         }
+        let normalized_mesh = validated_normalized_mesh(ntst, &normalized_mesh)?;
         let coeffs = CollocationCoefficients::new(ncol)?;
 
         let stage_count = ntst * ncol;
@@ -101,7 +145,8 @@ impl<'a> PDCurveProblem<'a> {
         let work_f = vec![0.0; stage_count * dim];
         let work_j = vec![0.0; stage_count * dim * dim];
 
-        let mut phase_gauge = FullProfilePhaseGauge::new(ntst, ncol, dim, &coeffs.b)?;
+        let mut phase_gauge =
+            FullProfilePhaseGauge::new_on_mesh(&normalized_mesh, ncol, dim, &coeffs.b)?;
         let stage_start = (ntst + 1) * dim;
         phase_gauge.set_reference(
             system,
@@ -112,6 +157,7 @@ impl<'a> PDCurveProblem<'a> {
             period,
             &lc_state[stage_start..],
         )?;
+        let adaptation = CurveCollocationAdaptation::new(&normalized_mesh, ncol)?;
 
         // Initialize borders for antiperiodic G computation
         // The flip singularity acts on state variations only: collocation
@@ -128,14 +174,36 @@ impl<'a> PDCurveProblem<'a> {
             param2_index,
             dim,
             ntst,
+            normalized_mesh,
             ncol,
             coeffs,
             phase_gauge,
+            adaptation,
             borders,
             work_f,
             work_j,
             codim2_tests: Codim2TestFunctions::default(),
         })
+    }
+
+    pub fn normalized_mesh(&self) -> &[f64] {
+        &self.normalized_mesh
+    }
+
+    pub fn set_collocation_adaptivity(
+        &mut self,
+        settings: CollocationAdaptivitySettings,
+    ) -> Result<()> {
+        self.adaptation.configure(settings)
+    }
+
+    pub fn adaptation_report(&self) -> &CollocationAdaptationReport {
+        self.adaptation.report()
+    }
+
+    pub fn seed_adaptation_report(&mut self, report: CollocationAdaptationReport) -> Result<()> {
+        self.adaptation
+            .seed_report(report, &self.normalized_mesh, self.ncol)
     }
 
     /// Number of LC coords (stages + mesh states)
@@ -218,6 +286,76 @@ impl<'a> PDCurveProblem<'a> {
         &aug.as_slice()[start..end]
     }
 
+    fn defect_estimate(
+        &mut self,
+        aug: &DVector<f64>,
+    ) -> Result<crate::continuation::periodic::CollocationDefectEstimate> {
+        let aug_slice = aug.as_slice();
+        let mesh_states = (0..=self.ntst)
+            .map(|mesh| self.mesh_slice(aug_slice, mesh).to_vec())
+            .collect::<Vec<_>>();
+        let stage_states = (0..self.ntst)
+            .flat_map(|interval| {
+                (0..self.ncol)
+                    .map(|stage| self.stage_slice(aug_slice, interval, stage).to_vec())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        collocation_defect_estimate_on_mesh(
+            self.system,
+            self.param1_index,
+            self.param2_index,
+            self.get_p1(aug),
+            self.get_p2(aug)?,
+            &mesh_states,
+            &stage_states,
+            self.get_period(aug),
+            &self.normalized_mesh,
+            self.ncol,
+            &self.coeffs.nodes,
+        )
+    }
+
+    fn replace_mesh(
+        &mut self,
+        normalized_mesh: Vec<f64>,
+        accepted_aug: &DVector<f64>,
+    ) -> Result<()> {
+        let ntst = normalized_mesh.len().saturating_sub(1);
+        let normalized_mesh = validated_normalized_mesh(ntst, &normalized_mesh)?;
+        let mut phase_gauge = FullProfilePhaseGauge::new_on_mesh(
+            &normalized_mesh,
+            self.ncol,
+            self.dim,
+            &self.coeffs.b,
+        )?;
+        let mesh_len = (ntst + 1) * self.dim;
+        let stage_len = ntst * self.ncol * self.dim;
+        let profile_end = 1 + mesh_len + stage_len;
+        if accepted_aug.len() != profile_end + 2 {
+            bail!("Transferred PD state has an invalid collocation layout");
+        }
+        phase_gauge.set_reference(
+            self.system,
+            self.param1_index,
+            self.param2_index,
+            accepted_aug[0],
+            accepted_aug[profile_end + 1],
+            accepted_aug[profile_end],
+            &accepted_aug.as_slice()[1 + mesh_len..1 + mesh_len + stage_len],
+        )?;
+        let border_dim = ntst * self.ncol * self.dim + ntst * self.dim;
+        let phi = DVector::from_element(border_dim, 1.0 / (border_dim as f64).sqrt());
+        self.ntst = ntst;
+        self.normalized_mesh = normalized_mesh;
+        self.phase_gauge = phase_gauge;
+        self.borders = LCBorders::new(phi.clone(), phi);
+        self.work_f.resize(ntst * self.ncol * self.dim, 0.0);
+        self.work_j
+            .resize(ntst * self.ncol * self.dim * self.dim, 0.0);
+        Ok(())
+    }
+
     fn set_phase_reference(&mut self, aug: &DVector<f64>) -> Result<()> {
         let stages = self.stage_profile(aug);
         self.phase_gauge.set_reference(
@@ -236,6 +374,78 @@ impl<'a> PDCurveProblem<'a> {
             self.set_phase_reference(aug)?;
         }
         Ok(())
+    }
+
+    fn normal_form_setup(&mut self, aug: &DVector<f64>) -> Result<LimitCycleSetup> {
+        let mesh_states = (0..self.ntst)
+            .map(|mesh| self.mesh_slice(aug.as_slice(), mesh).to_vec())
+            .collect();
+        let stage_states = (0..self.ntst)
+            .map(|interval| {
+                (0..self.ncol)
+                    .map(|stage| self.stage_slice(aug.as_slice(), interval, stage).to_vec())
+                    .collect()
+            })
+            .collect();
+        limit_cycle_setup_from_profile(
+            self.system,
+            self.param1_index,
+            self.param2_index,
+            self.get_p1(aug),
+            self.get_p2(aug)?,
+            self.get_period(aug),
+            mesh_states,
+            stage_states,
+            self.ncol,
+            &self.normalized_mesh,
+        )
+    }
+
+    pub(crate) fn codim2_coefficients_at(
+        &mut self,
+        aug: &DVector<f64>,
+        bifurcation_type: Codim2BifurcationType,
+        test_value: f64,
+    ) -> Result<Vec<Codim2Coefficient>> {
+        match bifurcation_type {
+            Codim2BifurcationType::GeneralizedPeriodDoubling => {
+                let setup = self.normal_form_setup(aug)?;
+                let normal_form = periodic_period_doubling_normal_form_with_settings(
+                    self.system,
+                    &setup,
+                    self.param1_index,
+                    curve_normal_form_settings(self.ntst, self.ncol),
+                )?;
+                let mut coefficients = vec![
+                    Codim2Coefficient {
+                        name: "cubic_coefficient".to_string(),
+                        value: normal_form.cubic_coefficient,
+                    },
+                    Codim2Coefficient {
+                        name: "parameter_coefficient".to_string(),
+                        value: normal_form.parameter_coefficient,
+                    },
+                    Codim2Coefficient {
+                        name: "critical_multiplier".to_string(),
+                        value: normal_form.multiplier,
+                    },
+                ];
+                append_return_map_conditioning(&mut coefficients, normal_form.conditioning);
+                Ok(coefficients)
+            }
+            Codim2BifurcationType::FoldFlip | Codim2BifurcationType::FlipNeimarkSacker => {
+                let jac = self.build_periodic_jac(aug)?;
+                let multipliers =
+                    extract_multipliers_collocation(&jac, self.dim, self.ntst, self.ncol)?;
+                let secondary =
+                    secondary_cycle_tests(&multipliers, TrackedCycleMultiplier::MinusOne)?;
+                Ok(secondary_spectral_coefficients(&secondary))
+            }
+            _ => Ok(vec![Codim2Coefficient {
+                name: "test_value".to_string(),
+                value: test_value,
+            }]),
+        }
     }
 
     fn eval_f(&mut self, state: &[f64], p1: f64, p2: f64) -> Vec<f64> {
@@ -302,7 +512,6 @@ impl<'a> PDCurveProblem<'a> {
         let p1 = self.get_p1(aug);
         let p2 = self.get_p2(aug)?;
         let period = self.get_period(aug);
-        let h = period / self.ntst as f64;
         let aug_slice = aug.as_slice();
 
         let n_stages = self.ntst * self.ncol;
@@ -327,6 +536,7 @@ impl<'a> PDCurveProblem<'a> {
 
         // Linearized collocation equations.
         for interval in 0..self.ntst {
+            let h = period * (self.normalized_mesh[interval + 1] - self.normalized_mesh[interval]);
             for stage in 0..self.ncol {
                 let stage_idx = interval * self.ncol + stage;
                 let row = stage_idx * self.dim;
@@ -361,6 +571,7 @@ impl<'a> PDCurveProblem<'a> {
         // exactly once, at the wrap from the final interval back to mesh 0.
         let cont_row = stage_dim;
         for interval in 0..self.ntst {
+            let h = period * (self.normalized_mesh[interval + 1] - self.normalized_mesh[interval]);
             let row = cont_row + interval * self.dim;
             let mesh_col = stage_dim + interval * self.dim;
             let is_wrap = interval + 1 == self.ntst;
@@ -434,9 +645,9 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
 
     fn palc_metric_weights(&self, _aug: &DVector<f64>) -> Result<DVector<f64>> {
         let mesh_dim = (self.ntst + 1) * self.dim;
-        explicit_profile_palc_weights(
+        explicit_profile_palc_weights_on_mesh(
             self.dimension() + 1,
-            self.ntst,
+            &self.normalized_mesh,
             self.ncol,
             self.dim,
             &self.coeffs.nodes,
@@ -473,7 +684,6 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
         }
         self.ensure_phase_reference(aug)?;
 
-        let h = period / self.ntst as f64;
         let aug_slice = aug.as_slice();
         let n_stages = self.ntst * self.ncol;
 
@@ -489,6 +699,7 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
 
         // Collocation equations (same as LPC)
         for interval in 0..self.ntst {
+            let h = period * (self.normalized_mesh[interval + 1] - self.normalized_mesh[interval]);
             let mesh = self.mesh_slice(aug_slice, interval);
             for stage in 0..self.ncol {
                 let z = self.stage_slice(aug_slice, interval, stage);
@@ -508,6 +719,7 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
         // Continuity equations (same as LPC - using periodic BC for the orbit itself)
         let cont_row = n_stages * self.dim;
         for interval in 0..self.ntst {
+            let h = period * (self.normalized_mesh[interval + 1] - self.normalized_mesh[interval]);
             let mesh_i = self.mesh_slice(aug_slice, interval);
             let mesh_next = self.mesh_slice(aug_slice, interval + 1);
             let row = cont_row + interval * self.dim;
@@ -578,17 +790,29 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
     fn diagnostics(&mut self, aug: &DVector<f64>) -> Result<PointDiagnostics> {
         let jac = self.build_periodic_jac(aug)?;
         let multipliers = extract_multipliers_collocation(&jac, self.dim, self.ntst, self.ncol)?;
-        let (cycle_fold, _period_doubling, neimark_sacker, eigenvalues) =
-            cycle_tests_from_multipliers(&multipliers);
-
-        // Along a flip curve, a simultaneous +1 multiplier is a fold-flip
-        // point and a simultaneous complex unit pair is a flip-NS point.  GPD
-        // needs a nonlinear normal-form coefficient and cannot be inferred
-        // from the spectrum alone.
         let mut tests = Codim2TestFunctions::default();
-        tests.fold_flip = cycle_fold;
-        tests.flip_ns = neimark_sacker;
-        tests.gpd = f64::NAN;
+        match secondary_cycle_tests(&multipliers, TrackedCycleMultiplier::MinusOne) {
+            Ok(secondary) => {
+                tests.fold_flip = secondary.plus_one;
+                tests.flip_ns = secondary.unit_pair;
+            }
+            Err(_) => {
+                tests.fold_flip = f64::NAN;
+                tests.flip_ns = f64::NAN;
+            }
+        }
+        tests.gpd = self
+            .normal_form_setup(aug)
+            .and_then(|setup| {
+                periodic_period_doubling_normal_form_with_settings(
+                    self.system,
+                    &setup,
+                    self.param1_index,
+                    curve_normal_form_settings(self.ntst, self.ncol),
+                )
+            })
+            .map(|normal_form| normal_form.cubic_coefficient)
+            .unwrap_or(f64::NAN);
         self.codim2_tests = tests;
 
         Ok(PointDiagnostics {
@@ -598,36 +822,109 @@ impl<'a> ContinuationProblem for PDCurveProblem<'a> {
             // roundoff sign changes.  Simultaneous LPC/NS crossings are
             // exposed through `codim2_tests` above instead.
             test_values: TestFunctionValues::limit_cycle(1.0, 1.0, 1.0),
-            eigenvalues,
+            eigenvalues: multipliers,
             cycle_points: None,
         })
     }
 
     fn is_step_acceptable(&mut self, aug: &DVector<f64>) -> Result<bool> {
-        let aug_slice = aug.as_slice();
-        let mesh_states = (0..=self.ntst)
-            .map(|mesh| self.mesh_slice(aug_slice, mesh).to_vec())
-            .collect::<Vec<_>>();
-        let stage_states = (0..self.ntst)
-            .flat_map(|interval| {
-                (0..self.ncol)
-                    .map(|stage| self.stage_slice(aug_slice, interval, stage).to_vec())
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-        collocation_profile_is_acceptable(
-            self.system,
-            self.param1_index,
-            self.param2_index,
-            self.get_p1(aug),
-            self.get_p2(aug)?,
-            &mesh_states,
-            &stage_states,
-            self.get_period(aug),
-            self.ntst,
+        Ok(self.defect_estimate(aug)?.max_scaled_defect
+            <= self.adaptation.settings().defect_tolerance)
+    }
+
+    fn handle_step_rejection(
+        &mut self,
+        accepted_aug: &DVector<f64>,
+        accepted_tangent: &DVector<f64>,
+        rejected_aug: &DVector<f64>,
+        branch_states: &[Vec<f64>],
+    ) -> Result<StepRejectionAction> {
+        let estimate = self.defect_estimate(rejected_aug)?;
+        if estimate.max_scaled_defect <= self.adaptation.settings().defect_tolerance {
+            return Ok(StepRejectionAction::ReduceStep);
+        }
+        let old_mesh = self.normalized_mesh.clone();
+        let CurveMeshAdaptationDecision::Adapt(new_mesh) =
+            self.adaptation.decide(&estimate, &old_mesh, self.ncol)?
+        else {
+            return Ok(StepRejectionAction::Terminate);
+        };
+        let transferred_aug = transfer_explicit_mesh_first_curve_aug(
+            accepted_aug,
+            &old_mesh,
+            &new_mesh,
             self.ncol,
+            self.dim,
             &self.coeffs.nodes,
-        )
+            2,
+        )?;
+        let transferred_tangent = transfer_explicit_mesh_first_curve_aug(
+            accepted_tangent,
+            &old_mesh,
+            &new_mesh,
+            self.ncol,
+            self.dim,
+            &self.coeffs.nodes,
+            2,
+        )?;
+        let transferred_branch_states = branch_states
+            .iter()
+            .map(|state| {
+                transfer_explicit_mesh_first_curve_state(
+                    state,
+                    &old_mesh,
+                    &new_mesh,
+                    self.ncol,
+                    self.dim,
+                    &self.coeffs.nodes,
+                    2,
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.replace_mesh(new_mesh, &transferred_aug)?;
+        Ok(StepRejectionAction::Refined {
+            accepted_aug: transferred_aug,
+            accepted_tangent: transferred_tangent,
+            branch_states: transferred_branch_states,
+            branch_type: None,
+        })
+    }
+
+    fn transfer_branch_states_to_current_discretization(
+        &self,
+        branch_states: &[Vec<f64>],
+    ) -> Result<Vec<Vec<f64>>> {
+        if self.adaptation.report().attempts.is_empty()
+            && branch_states
+                .iter()
+                .all(|state| state.len() == self.dimension())
+        {
+            return Ok(branch_states.to_vec());
+        }
+        let mut transferred = branch_states.to_vec();
+        for attempt in self.adaptation.transfer_attempts() {
+            transferred = transferred
+                .iter()
+                .map(|state| {
+                    transfer_explicit_mesh_first_curve_state(
+                        state,
+                        &attempt.old_normalized_mesh,
+                        &attempt.new_normalized_mesh,
+                        self.ncol,
+                        self.dim,
+                        &self.coeffs.nodes,
+                        2,
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+        }
+        if transferred
+            .iter()
+            .any(|state| state.len() != self.dimension())
+        {
+            bail!("Adaptive PD continuation failed to transfer branch history");
+        }
+        Ok(transferred)
     }
 
     fn update_after_step(&mut self, aug: &DVector<f64>) -> Result<()> {
@@ -785,6 +1082,46 @@ mod tests {
         let last_mesh_col = mesh_col + (ntst - 1) * dim;
         assert_eq!(jac[(last_row, last_mesh_col)], -1.0);
         assert_eq!(jac[(last_row, mesh_col)], -1.0);
+    }
+
+    #[test]
+    fn nonuniform_variational_jacobian_and_residual_use_each_interval_width() {
+        let mut system = two_oscillator_system(1.0, 0.5);
+        let ntst = 2;
+        let ncol = 1;
+        let dim = 4;
+        let normalized_mesh = vec![0.0, 0.2, 1.0];
+        let lc_state = nonstationary_mesh_first_state(ntst, ncol, dim);
+        let mut problem = PDCurveProblem::new_on_mesh(
+            &mut system,
+            lc_state.clone(),
+            1.0,
+            0,
+            1,
+            0.0,
+            0.0,
+            ntst,
+            ncol,
+            normalized_mesh.clone(),
+        )
+        .expect("nonuniform PD problem");
+        assert_eq!(problem.normalized_mesh(), normalized_mesh);
+        let aug = augmented_state(&lc_state, 1.0, 0.0, 0.0);
+
+        let jac = problem
+            .build_state_variational_jac(&aug, false)
+            .expect("nonuniform state-variational Jacobian");
+        let first_interval_entry = jac[(0, 1)];
+        let second_interval_entry = jac[(dim, dim + 1)];
+        assert!(first_interval_entry.abs() > 1e-12);
+        assert!((second_interval_entry / first_interval_entry - 4.0).abs() < 1e-12);
+
+        let mut residual = DVector::zeros(problem.dimension());
+        problem
+            .residual(&aug, &mut residual)
+            .expect("nonuniform PD residual");
+        assert!(residual[1].abs() > 1e-12);
+        assert!((residual[dim + 1] / residual[1] - 4.0).abs() < 1e-12);
     }
 
     #[test]

@@ -1,4 +1,5 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
 
 export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -257,6 +258,15 @@ export function LimitCycleFromPDWorkflow({ scope }: { scope: InspectorSelectionC
                             data-testid="limit-cycle-from-pd-step-tolerance"
                           />
                         </label>
+                        {systemDraft.type === 'flow' ? (
+                          <CollocationAdaptivityFields
+                            draft={limitCycleFromPDDraft}
+                            onChange={(patch) =>
+                              setLimitCycleFromPDDraft((prev) => ({ ...prev, ...patch }))
+                            }
+                            testIdPrefix="limit-cycle-from-pd"
+                          />
+                        ) : null}
                         {limitCycleFromPDError ? (
                           <div className="field-error">{limitCycleFromPDError}</div>
                         ) : null}

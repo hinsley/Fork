@@ -31,6 +31,7 @@ import type {
   HomotopySaddleContinuationResult,
   HomotopySaddleFromEquilibriumRequest,
   LimitCycleContinuationFromHopfRequest,
+  LimitCycleCodim1CurveContinuationRequest,
   LimitCycleContinuationFromOrbitRequest,
   LimitCycleContinuationFromPDRequest,
   LimitCycleContinuationResult,
@@ -41,6 +42,10 @@ import type {
   Manifold2DExtensionRequest,
   Manifold2DExtensionResult,
   MapCycleContinuationFromPDRequest,
+  NormalFormComputationRequest,
+  NormalFormComputationResult,
+  PeriodicBranchPointSwitchRequest,
+  PeriodicBranchPointSwitchResult,
   LyapunovExponentsRequest,
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
@@ -302,6 +307,31 @@ export class WasmForkCoreClient implements ForkCoreClient {
     return await job.promise
   }
 
+  async computeNormalForm(
+    request: NormalFormComputationRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<NormalFormComputationResult> {
+    const job = this.queue.enqueue(
+      'computeNormalForm',
+      (signal) => this.runWorker('computeNormalForm', request, signal),
+      opts
+    )
+    return await job.promise
+  }
+
+  async runPeriodicBranchPointSwitch(
+    request: PeriodicBranchPointSwitchRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<PeriodicBranchPointSwitchResult> {
+    const job = this.queue.enqueue(
+      'runPeriodicBranchPointSwitch',
+      (signal) =>
+        this.runWorker('runPeriodicBranchPointSwitch', request, signal, opts?.onProgress),
+      opts
+    )
+    return await job.promise
+  }
+
   async runFoldCurveContinuation(
     request: FoldCurveContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
@@ -350,6 +380,24 @@ export class WasmForkCoreClient implements ForkCoreClient {
       (signal) =>
         this.runWorker(
           'runIsoperiodicCurveContinuation',
+          request,
+          signal,
+          opts?.onProgress
+        ),
+      opts
+    )
+    return await job.promise
+  }
+
+  async runLimitCycleCodim1CurveContinuation(
+    request: LimitCycleCodim1CurveContinuationRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<Codim1CurveBranch> {
+    const job = this.queue.enqueue(
+      'runLimitCycleCodim1CurveContinuation',
+      (signal) =>
+        this.runWorker(
+          'runLimitCycleCodim1CurveContinuation',
           request,
           signal,
           opts?.onProgress

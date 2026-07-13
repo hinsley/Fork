@@ -94,17 +94,35 @@ export interface Codim2PointData {
     bordered_condition_number?: number;
     jacobian_condition_number?: number;
   };
+  branch_switches?: Codim2BranchSwitch[];
+  certification?: Codim2Certification;
+}
+
+export interface Codim2BranchSwitch {
+  target: string;
+  available: boolean;
+  target_auxiliary?: number;
+  reason?: string;
+}
+
+export interface Codim2Certification {
+  defining_conditions_verified: boolean;
+  nondegeneracy_evaluated: boolean;
+  nondegenerate?: boolean;
+  reason?: string;
 }
 
 export interface ContinuationPoint {
   state: number[];
   param_value: number;
   param2_value?: number;  // Second parameter value for 2-param branches
-  stability: "None" | "Fold" | "Hopf" | "NeutralSaddle" | "CycleFold" | "PeriodDoubling" | "NeimarkSacker" | string;
+  stability: "None" | "Fold" | "BranchPoint" | "Hopf" | "NeutralSaddle" | "CycleFold" | "PeriodDoubling" | "NeimarkSacker" | string;
   eigenvalues?: ContinuationEigenvalue[];
   cycle_points?: number[][];
   auxiliary?: number;  // Extra data like κ for Hopf curves
   codim2?: Codim2PointData;
+  codim2_events?: Codim2PointData[];
+  normal_form?: NormalFormProvenance;
 }
 
 export type ManifoldStability = 'Stable' | 'Unstable';
@@ -371,7 +389,7 @@ export interface HomoclinicResumeContext {
 
 export type BranchType =
   | { type: 'Equilibrium' }
-  | { type: 'LimitCycle'; ntst: number; ncol: number }
+  | { type: 'LimitCycle'; ntst: number; ncol: number; normalized_mesh?: number[] }
   | {
       type: 'HomoclinicCurve'
       ntst: number
@@ -392,10 +410,10 @@ export type BranchType =
     }
   | { type: 'FoldCurve'; param1_name: string; param2_name: string }
   | { type: 'HopfCurve'; param1_name: string; param2_name: string }
-  | { type: 'LPCCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
-  | { type: 'IsoperiodicCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
-  | { type: 'PDCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
-  | { type: 'NSCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number }
+  | { type: 'LPCCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number; normalized_mesh?: number[] }
+  | { type: 'IsoperiodicCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number; normalized_mesh?: number[] }
+  | { type: 'PDCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number; normalized_mesh?: number[] }
+  | { type: 'NSCurve'; param1_name: string; param2_name: string; ntst: number; ncol: number; normalized_mesh?: number[] }
   | {
       type: 'ManifoldEq1D';
       stability: ManifoldStability;
@@ -435,15 +453,51 @@ export interface ContinuationBranchData {
   homoc_context?: HomoclinicResumeContext;
   resume_state?: ContinuationResumeState;
   manifold_geometry?: ManifoldGeometry;
+  collocation_adaptation?: CollocationAdaptationReport;
+  normal_form_provenance?: NormalFormProvenance;
   codim2_seed?: {
-    source_type: 'GeneralizedHopf' | 'BogdanovTakens';
+    source_type: 'GeneralizedHopf' | 'BogdanovTakens' | 'ZeroHopf' | 'DoubleHopf';
     source_branch: string;
     source_point_index: number;
-    target: 'Fold' | 'Hopf' | 'LimitPointCycle' | 'Homoclinic';
+    target: 'Fold' | 'Hopf' | 'LimitPointCycle' | 'NeimarkSacker' | 'Homoclinic';
     perturbation: number;
     predictor_residual: number;
     corrected_residual: number;
     correction_iterations?: number;
+  };
+}
+
+export interface CollocationAdaptationReport {
+  initial_mesh_points: number;
+  current_mesh_points: number;
+  degree: number;
+  defect_tolerance: number;
+  refinement_budget: number;
+  max_mesh_points: number;
+  initial_normalized_mesh: number[];
+  current_normalized_mesh: number[];
+  attempts: Array<{
+    sequence: number;
+    kind: 'redistribution' | 'refinement';
+    old_mesh_points: number;
+    new_mesh_points: number;
+    degree: number;
+    trigger_defect: number;
+    tolerance: number;
+    interval_scaled_defects: number[];
+    old_normalized_mesh: number[];
+    new_normalized_mesh: number[];
+  }>;
+  termination?: {
+    reason: string;
+    measured_defect: number;
+    tolerance: number;
+    mesh_points: number;
+    degree: number;
+    refinements_attempted: number;
+    refinement_budget: number;
+    max_mesh_points: number;
+    normalized_mesh: number[];
   };
 }
 
@@ -497,6 +551,7 @@ export interface LimitCycleObject {
   origin: LimitCycleOrigin;
   ntst: number;
   ncol: number;
+  normalized_mesh?: number[];
   period: number;
   state: number[]; // Flattened collocation state: [mesh, stages, period].
   parameters?: number[]; // Full parameter snapshot at creation.
@@ -550,3 +605,5 @@ export interface EquilibriumSolveProgress {
   max_steps: number;
   residual_norm: number;
 }
+import type { NormalFormProvenance } from './normal-form-types';
+export type { NormalFormProvenance } from './normal-form-types';

@@ -106,7 +106,7 @@ export class ForkHarness {
   }
 
   async selectTreeNode(label: string) {
-    const pattern = new RegExp(`^${escapeRegex(label)}`, 'i')
+    const pattern = new RegExp(`^${escapeRegex(label)}(?:\\s|\\(|$)`, 'i')
     await this.page
       .locator('[data-testid^="object-tree-node-"]')
       .filter({ hasText: pattern })

@@ -15,6 +15,7 @@ import { printError, printInfo, printSuccess } from '../format';
 import { normalizeBranchEigenvalues } from './serialization';
 import { getBranchParams, isValidName } from './utils';
 import { runHomoclinicContinuationWithProgress } from './progress';
+import { isUniformNormalizedCollocationMesh } from './collocation-adaptivity';
 
 type HomoclinicBranchTypeData = {
   type: 'HomoclinicCurve';
@@ -227,15 +228,26 @@ function ensureHomoclinicBranchType(
   };
 }
 
-function resolveLimitCycleMesh(branch: ContinuationObject): { ntst: number; ncol: number } {
+function resolveLimitCycleMesh(
+  branch: ContinuationObject
+): { ntst: number; ncol: number; normalizedMesh: number[] } {
   const branchType = branch.data.branch_type as any;
   if (branchType?.type === 'LimitCycle') {
+    const ntst = Math.max(2, Number(branchType.ntst) || 20);
     return {
-      ntst: Math.max(2, Number(branchType.ntst) || 20),
-      ncol: Math.max(1, Number(branchType.ncol) || 4)
+      ntst,
+      ncol: Math.max(1, Number(branchType.ncol) || 4),
+      normalizedMesh:
+        Array.isArray(branchType.normalized_mesh) && branchType.normalized_mesh.length === ntst + 1
+          ? [...branchType.normalized_mesh]
+          : Array.from({ length: ntst + 1 }, (_, index) => index / ntst)
     };
   }
-  return { ntst: 20, ncol: 4 };
+  return {
+    ntst: 20,
+    ncol: 4,
+    normalizedMesh: Array.from({ length: 21 }, (_, index) => index / 20)
+  };
 }
 
 function resolveHomoclinicPointParam2Value(
@@ -310,6 +322,12 @@ export async function initiateHomoclinicFromLargeCycle(
   }
 
   const mesh = resolveLimitCycleMesh(branch);
+  if (!isUniformNormalizedCollocationMesh(mesh.normalizedMesh)) {
+    printError(
+      'Homoclinic initialization from a large cycle does not yet support a nonuniform collocation mesh. Recontinue the source cycle on a uniform mesh first.'
+    );
+    return null;
+  }
   const branchParams = getBranchParams(sysName, branch, sysConfig);
 
   let curveName = `homoc_${branch.name}`;

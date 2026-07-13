@@ -11,11 +11,13 @@ use super::{
     PDCurveProblem,
 };
 use crate::continuation::periodic::{
-    compute_limit_cycle_floquet_modes, correct_limit_cycle_setup, CollocationCoefficients,
+    compute_limit_cycle_floquet_modes, correct_limit_cycle_setup, prepare_limit_cycle_setup,
+    uniform_normalized_mesh, CollocationCoefficients,
 };
 use crate::continuation::{
-    generalized_hopf_lpc_seed, BifurcationType, ContinuationPoint, ContinuationProblem,
-    ContinuationRunner, ContinuationSettings, LimitCycleGuess, LimitCycleSetup,
+    generalized_hopf_lpc_seed, refine_codim2_points, BifurcationType, Codim2BifurcationType,
+    ContinuationPoint, ContinuationProblem, ContinuationRunner, ContinuationSettings,
+    LimitCycleGuess, LimitCycleSetup,
 };
 use crate::equation_engine::{parse, Compiler, EquationSystem};
 use nalgebra::DVector;
@@ -24,6 +26,7 @@ use std::f64::consts::TAU;
 
 const NTST: usize = 4;
 const NCOL: usize = 3;
+const CODIM2_NTST: usize = 4;
 const TRANSVERSE_DIM: usize = 4;
 const ACCEPTED_STEPS: usize = 8;
 
@@ -123,21 +126,41 @@ fn isoperiodic_stuart_landau_system(mu: f64, beta: f64) -> EquationSystem {
 }
 
 fn sampled_unit_cycle_setup(param_value: f64) -> LimitCycleSetup {
-    let coefficients = CollocationCoefficients::new(NCOL).expect("collocation coefficients");
-    let mesh_states = (0..NTST)
+    sampled_cycle_setup(4, param_value)
+}
+
+fn sampled_cycle_setup(dim: usize, param_value: f64) -> LimitCycleSetup {
+    sampled_cycle_setup_on_grid(dim, param_value, NTST, NCOL)
+}
+
+fn sampled_cycle_setup_on_grid(
+    dim: usize,
+    param_value: f64,
+    ntst: usize,
+    ncol: usize,
+) -> LimitCycleSetup {
+    assert!(dim >= 2);
+    let coefficients = CollocationCoefficients::new(ncol).expect("collocation coefficients");
+    let mesh_states = (0..ntst)
         .map(|mesh| {
-            let angle = TAU * mesh as f64 / NTST as f64;
-            vec![angle.cos(), angle.sin(), 0.0, 0.0]
+            let angle = TAU * mesh as f64 / ntst as f64;
+            let mut state = vec![0.0; dim];
+            state[0] = angle.cos();
+            state[1] = angle.sin();
+            state
         })
         .collect::<Vec<_>>();
-    let stage_states = (0..NTST)
+    let stage_states = (0..ntst)
         .map(|interval| {
             coefficients
                 .nodes
                 .iter()
                 .map(|node| {
-                    let angle = TAU * (interval as f64 + node) / NTST as f64;
-                    vec![angle.cos(), angle.sin(), 0.0, 0.0]
+                    let angle = TAU * (interval as f64 + node) / ntst as f64;
+                    let mut state = vec![0.0; dim];
+                    state[0] = angle.cos();
+                    state[1] = angle.sin();
+                    state
                 })
                 .collect::<Vec<_>>()
         })
@@ -150,11 +173,30 @@ fn sampled_unit_cycle_setup(param_value: f64) -> LimitCycleSetup {
             stage_states,
             requires_fixed_parameter_correction: true,
         },
-        phase_anchor: vec![1.0, 0.0, 0.0, 0.0],
-        phase_direction: vec![0.0, 1.0, 0.0, 0.0],
-        mesh_points: NTST,
-        collocation_degree: NCOL,
+        phase_anchor: {
+            let mut anchor = vec![0.0; dim];
+            anchor[0] = 1.0;
+            anchor
+        },
+        phase_direction: {
+            let mut direction = vec![0.0; dim];
+            direction[1] = 1.0;
+            direction
+        },
+        mesh_points: ntst,
+        collocation_degree: ncol,
+        normalized_mesh: uniform_normalized_mesh(ntst),
     }
+}
+
+fn coefficient<'a>(event: &'a crate::continuation::RefinedCodim2Event, name: &str) -> &'a f64 {
+    &event
+        .data
+        .coefficients
+        .iter()
+        .find(|coefficient| coefficient.name == name)
+        .unwrap_or_else(|| panic!("missing {name} coefficient in {:?}", event.data))
+        .value
 }
 
 fn sampled_planar_unit_cycle_setup(param_value: f64) -> LimitCycleSetup {
@@ -189,7 +231,38 @@ fn sampled_planar_unit_cycle_setup(param_value: f64) -> LimitCycleSetup {
         phase_direction: vec![0.0, 1.0],
         mesh_points: NTST,
         collocation_degree: NCOL,
+        normalized_mesh: uniform_normalized_mesh(NTST),
     }
+}
+
+fn corrected_unit_cycle_setup(dim: usize, param_value: f64, ntst: usize) -> LimitCycleSetup {
+    assert!(dim >= 2);
+    let mut base = compiled_system(
+        &["-y+x*(1-x^2-y^2)+0*dummy", "x+y*(1-x^2-y^2)+0*dummy"],
+        &["x", "y"],
+        &["dummy"],
+        vec![param_value],
+    );
+    let (mut corrected, _) = correct_limit_cycle_setup(
+        &mut base,
+        0,
+        sampled_cycle_setup_on_grid(2, param_value, ntst, NCOL),
+        1.0e-10,
+        12,
+    )
+    .expect("correct the shared unit-cycle profile");
+    let pad = |state: &mut Vec<f64>| state.resize(dim, 0.0);
+    for state in &mut corrected.guess.mesh_states {
+        pad(state);
+    }
+    for interval in &mut corrected.guess.stage_states {
+        for state in interval {
+            pad(state);
+        }
+    }
+    pad(&mut corrected.phase_anchor);
+    pad(&mut corrected.phase_direction);
+    corrected
 }
 
 fn explicit_state(setup: &LimitCycleSetup, layout: ExplicitLayout) -> Vec<f64> {
@@ -417,6 +490,49 @@ fn bautin_lpc_curve_accepts_multiple_collocation_steps() {
 }
 
 #[test]
+fn lpc_curve_refines_cpc_with_a_signed_coefficient_bracket() {
+    let mut system = compiled_system(
+        &["-y+x*(1-x^2-y^2)", "x+y*(1-x^2-y^2)", "p+q*z^2+z^3"],
+        &["x", "y", "z"],
+        &["p", "q"],
+        vec![0.0, -0.05],
+    );
+    let corrected = corrected_unit_cycle_setup(3, 0.0, CODIM2_NTST);
+    let coords = explicit_state(&corrected, ExplicitLayout::StageFirst);
+    let period = corrected.guess.period;
+    let mut problem = LPCCurveProblem::new(
+        &mut system,
+        coords.clone(),
+        period,
+        0,
+        1,
+        0.0,
+        -0.05,
+        CODIM2_NTST,
+        NCOL,
+    )
+    .expect("LPC cusp problem");
+    let endpoint =
+        |beta| initial_point(&coords, period, 0.0, beta, BifurcationType::CycleFold, None);
+
+    let events = refine_codim2_points(&mut problem, &[endpoint(-0.05), endpoint(0.05)], 12, 2.0e-4)
+        .expect("refine CPC");
+    let cpc = events
+        .iter()
+        .find(|event| event.data.bifurcation_type == Codim2BifurcationType::CuspOfCycles)
+        .expect("CPC event");
+    assert!(cpc.data.refined, "event={:?}", cpc.data);
+    assert!(!cpc.data.candidate, "event={:?}", cpc.data);
+    assert_eq!(cpc.data.certification.nondegenerate, Some(true));
+    assert!(cpc.data.source_test_values[0] < 0.0);
+    assert!(cpc.data.source_test_values[1] > 0.0);
+    assert!(cpc.data.test_function_value.abs() < 2.0e-4);
+    assert!(cpc.data.residual_norm < 2.0e-3);
+    assert!(coefficient(cpc, "quadratic_coefficient").abs() < 2.0e-4);
+    assert!(coefficient(cpc, "cubic_coefficient").abs() > 1.0);
+}
+
+#[test]
 fn nonorientable_suspension_pd_curve_accepts_multiple_collocation_steps() {
     let beta = 0.25;
     let mu = beta * beta;
@@ -489,6 +605,71 @@ fn nonorientable_suspension_pd_curve_accepts_multiple_collocation_steps() {
         ExplicitLayout::MeshFirst,
         TRANSVERSE_DIM,
     );
+}
+
+#[test]
+fn pd_curve_refines_gpd_with_a_signed_cubic_bracket() {
+    let mut system = compiled_system(
+        &[
+            "-y+x*(1-x^2-y^2)",
+            "x+y*(1-x^2-y^2)",
+            "((p-0.2)/2+(p+0.2)*x/2)*u+((p+0.2)*y/2-0.5)*v+q*((1+2*x+x^2)*u^3+3*y*(1+x)*u^2*v+3*y^2*u*v^2+y*(1-x)*v^3)/4",
+            "((p+0.2)*y/2+0.5)*u+((p-0.2)/2-(p+0.2)*x/2)*v+q*(y*(1+x)*u^3+3*y^2*u^2*v+3*y*(1-x)*u*v^2+(1-2*x+x^2)*v^3)/4",
+        ],
+        &["x", "y", "u", "v"],
+        &["p", "q"],
+        vec![0.0, -0.05],
+    );
+    let corrected = corrected_unit_cycle_setup(4, 0.0, CODIM2_NTST);
+    let coords = explicit_state(&corrected, ExplicitLayout::MeshFirst);
+    let period = corrected.guess.period;
+    let mut problem = PDCurveProblem::new(
+        &mut system,
+        coords.clone(),
+        period,
+        0,
+        1,
+        0.0,
+        -0.05,
+        CODIM2_NTST,
+        NCOL,
+    )
+    .expect("PD interaction problem");
+    let endpoint = |q| {
+        initial_point(
+            &coords,
+            period,
+            0.0,
+            q,
+            BifurcationType::PeriodDoubling,
+            None,
+        )
+    };
+    let events = refine_codim2_points(&mut problem, &[endpoint(-0.05), endpoint(0.05)], 12, 2.0e-4)
+        .expect("refine GPD");
+    let gpd = events
+        .iter()
+        .find(|event| {
+            event.data.bifurcation_type == Codim2BifurcationType::GeneralizedPeriodDoubling
+        })
+        .expect("GPD event");
+    assert!(gpd.data.refined, "event={:?}", gpd.data);
+    assert!(!gpd.data.candidate, "event={:?}", gpd.data);
+    assert!(gpd.data.certification.defining_conditions_verified);
+    assert!(!gpd.data.certification.nondegeneracy_evaluated);
+    assert_eq!(gpd.data.certification.nondegenerate, None);
+    assert!(gpd
+        .data
+        .certification
+        .reason
+        .as_deref()
+        .is_some_and(|reason| {
+            reason.contains("BifurcationKit") && reason.contains("metadata-only")
+        }));
+    assert!(gpd.data.source_test_values[0] * gpd.data.source_test_values[1] < 0.0);
+    assert!(gpd.data.test_function_value.abs() < 2.0e-4);
+    assert!(gpd.data.residual_norm < 2.0e-3);
+    assert!(coefficient(gpd, "cubic_coefficient").abs() < 2.0e-4);
 }
 
 #[test]
@@ -582,6 +763,87 @@ fn transverse_pair_ns_curve_accepts_multiple_collocation_steps() {
         ExplicitLayout::StageFirst,
         TRANSVERSE_DIM,
     );
+}
+
+#[test]
+#[ignore = "the full NS curve-corrected CH locator is a slow validation target; the bounded locator matrix and periodic NS normal-form tests run in regular CI"]
+fn ns_curve_refines_chenciner_with_a_signed_cubic_bracket() {
+    let mut system = compiled_system(
+        &[
+            "-y+x*(1-x^2-y^2)",
+            "x+y*(1-x^2-y^2)",
+            "p*u-(0.37/6.283185307179586)*v+q*(u^2+v^2)*u",
+            "(0.37/6.283185307179586)*u+p*v+q*(u^2+v^2)*v",
+        ],
+        &["x", "y", "u", "v"],
+        &["p", "q"],
+        vec![0.0, -0.05],
+    );
+    let corrected = corrected_unit_cycle_setup(4, 0.0, CODIM2_NTST);
+    let (_, canonical_state) =
+        prepare_limit_cycle_setup(corrected.clone(), 4).expect("pack corrected NS profile");
+    let modes =
+        compute_limit_cycle_floquet_modes(&mut system, 0, &canonical_state, CODIM2_NTST, NCOL)
+            .expect("CH seed Floquet modes");
+    let defining_multiplier = modes
+        .multipliers
+        .iter()
+        .filter(|value| value.im > 0.05)
+        .min_by(|left, right| {
+            (left.re.hypot(left.im) - 1.0)
+                .abs()
+                .total_cmp(&(right.re.hypot(right.im) - 1.0).abs())
+        })
+        .expect("CH defining multiplier");
+    let defining_k = defining_multiplier.re / defining_multiplier.re.hypot(defining_multiplier.im);
+    let coords = explicit_state(&corrected, ExplicitLayout::StageFirst);
+    let period = corrected.guess.period;
+    let mut problem = NSCurveProblem::new(
+        &mut system,
+        coords.clone(),
+        period,
+        0,
+        1,
+        0.0,
+        -0.05,
+        defining_k,
+        CODIM2_NTST,
+        NCOL,
+    )
+    .expect("NS interaction problem");
+    let endpoint = |q: f64| {
+        initial_point(
+            &coords,
+            period,
+            0.0,
+            q,
+            BifurcationType::NeimarkSacker,
+            Some(defining_k),
+        )
+    };
+    let events = refine_codim2_points(&mut problem, &[endpoint(-0.05), endpoint(0.05)], 12, 3.0e-4)
+        .expect("refine Chenciner point");
+    let ch = events
+        .iter()
+        .find(|event| event.data.bifurcation_type == Codim2BifurcationType::Chenciner)
+        .expect("Chenciner event");
+    assert!(ch.data.refined, "event={:?}", ch.data);
+    assert!(!ch.data.candidate, "event={:?}", ch.data);
+    assert!(ch.data.certification.defining_conditions_verified);
+    assert!(!ch.data.certification.nondegeneracy_evaluated);
+    assert_eq!(ch.data.certification.nondegenerate, None);
+    assert!(ch
+        .data
+        .certification
+        .reason
+        .as_deref()
+        .is_some_and(|reason| {
+            reason.contains("BifurcationKit") && reason.contains("metadata-only")
+        }));
+    assert!(ch.data.source_test_values[0] * ch.data.source_test_values[1] < 0.0);
+    assert!(ch.data.test_function_value.abs() < 3.0e-4);
+    assert!(ch.data.residual_norm < 3.0e-3);
+    assert!(coefficient(ch, "first_lyapunov_coefficient").abs() < 3.0e-4);
 }
 
 #[test]

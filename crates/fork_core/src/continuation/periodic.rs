@@ -1,4 +1,9 @@
-use super::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
+use super::periodic_normal_forms::{
+    periodic_branch_point_normal_form, periodic_plus_one_bifurcation_type,
+};
+use super::problem::{
+    ContinuationProblem, PointDiagnostics, StepRejectionAction, TestFunctionValues,
+};
 use super::{
     continue_with_problem, extend_branch_with_problem, BifurcationType, BranchType,
     ContinuationBranch, ContinuationPoint, ContinuationSettings,
@@ -60,12 +65,243 @@ fn normalize_phase_data(
     Ok((anchor, normalized_direction))
 }
 
+pub fn uniform_normalized_mesh(mesh_points: usize) -> Vec<f64> {
+    if mesh_points == 0 {
+        return Vec::new();
+    }
+    (0..=mesh_points)
+        .map(|index| index as f64 / mesh_points as f64)
+        .collect()
+}
+
+pub(crate) fn validated_normalized_mesh(mesh_points: usize, mesh: &[f64]) -> Result<Vec<f64>> {
+    if mesh_points < 2 {
+        bail!("Collocation mesh must have at least 2 intervals");
+    }
+    let mut normalized = if mesh.is_empty() {
+        uniform_normalized_mesh(mesh_points)
+    } else {
+        mesh.to_vec()
+    };
+    if normalized.len() != mesh_points + 1 {
+        bail!(
+            "Normalized collocation mesh has {} coordinates; expected {}",
+            normalized.len(),
+            mesh_points + 1
+        );
+    }
+    if normalized.iter().any(|value| !value.is_finite()) {
+        bail!("Normalized collocation mesh must contain only finite coordinates");
+    }
+    let endpoint_tolerance = 64.0 * f64::EPSILON;
+    if normalized[0].abs() > endpoint_tolerance
+        || (normalized[mesh_points] - 1.0).abs() > endpoint_tolerance
+    {
+        bail!("Normalized collocation mesh must start at 0 and end at 1");
+    }
+    normalized[0] = 0.0;
+    normalized[mesh_points] = 1.0;
+    if normalized
+        .windows(2)
+        .any(|pair| pair[1] <= pair[0] || pair[1] - pair[0] <= 1e-12)
+    {
+        bail!("Normalized collocation mesh coordinates must be strictly increasing");
+    }
+    Ok(normalized)
+}
+
+/// Equidistribute interval-local collocation defects on a normalized mesh.
+///
+/// The monitor exponent follows the local collocation order.  A small monitor
+/// floor prevents nearly defect-free intervals from collapsing, while the
+/// cumulative-mass inversion works for both redistribution at fixed NTST and
+/// bounded NTST growth.
+pub fn defect_weighted_normalized_mesh(
+    source_mesh: &[f64],
+    interval_scaled_defects: &[f64],
+    degree: usize,
+    target_intervals: usize,
+) -> Result<Vec<f64>> {
+    if degree == 0 {
+        bail!("Defect-weighted collocation redistribution requires positive NCOL");
+    }
+    if target_intervals < 2 {
+        bail!("Defect-weighted collocation redistribution requires at least 2 intervals");
+    }
+    let source_intervals = interval_scaled_defects.len();
+    let source_mesh = validated_normalized_mesh(source_intervals, source_mesh)?;
+    if interval_scaled_defects
+        .iter()
+        .any(|defect| !defect.is_finite() || *defect < 0.0)
+    {
+        bail!("Collocation defect indicators must be finite and nonnegative");
+    }
+
+    let maximum = interval_scaled_defects
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
+    if maximum <= f64::MIN_POSITIVE {
+        return Ok(uniform_normalized_mesh(target_intervals));
+    }
+
+    let exponent = 1.0 / (degree as f64 + 1.0);
+    let monitor = interval_scaled_defects
+        .iter()
+        .map(|defect| ((*defect / maximum).max(0.02)).powf(exponent))
+        .collect::<Vec<_>>();
+    let mut cumulative_mass = Vec::with_capacity(source_intervals + 1);
+    cumulative_mass.push(0.0);
+    for interval in 0..source_intervals {
+        let width = source_mesh[interval + 1] - source_mesh[interval];
+        cumulative_mass.push(cumulative_mass[interval] + width * monitor[interval]);
+    }
+    let total_mass = *cumulative_mass
+        .last()
+        .ok_or_else(|| anyhow!("Defect monitor is empty"))?;
+    if !total_mass.is_finite() || total_mass <= 0.0 {
+        bail!("Defect-weighted collocation monitor has nonpositive mass");
+    }
+
+    let mut redistributed = Vec::with_capacity(target_intervals + 1);
+    redistributed.push(0.0);
+    let mut source_interval = 0usize;
+    for target_index in 1..target_intervals {
+        let desired_mass = total_mass * target_index as f64 / target_intervals as f64;
+        while source_interval + 1 < source_intervals
+            && cumulative_mass[source_interval + 1] < desired_mass
+        {
+            source_interval += 1;
+        }
+        let local_mass = desired_mass - cumulative_mass[source_interval];
+        let coordinate = source_mesh[source_interval] + local_mass / monitor[source_interval];
+        redistributed.push(coordinate);
+    }
+    redistributed.push(1.0);
+    validated_normalized_mesh(target_intervals, &redistributed)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollocationConfig {
     pub mesh_points: usize,
     pub degree: usize,
     pub phase_anchor: Vec<f64>,
     pub phase_direction: Vec<f64>,
+    /// Strictly increasing normalized interval boundaries.  An empty vector
+    /// is the backwards-compatible encoding of a uniform mesh.
+    #[serde(default)]
+    pub normalized_mesh: Vec<f64>,
+}
+
+/// A-posteriori defect data for a periodic collocation profile.
+///
+/// The maximum retains the existing scalar acceptance contract, while the
+/// interval-local values drive deterministic mesh refinement.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CollocationDefectEstimate {
+    pub max_scaled_defect: f64,
+    pub interval_scaled_defects: Vec<f64>,
+}
+
+/// Core-only controls for dimension-changing periodic-orbit mesh refinement.
+///
+/// These defaults intentionally bound both retry count and state growth.  The
+/// type is public so WASM/web settings can be wired without changing the core
+/// refinement contract later.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CollocationAdaptivitySettings {
+    pub enabled: bool,
+    pub redistribution_enabled: bool,
+    pub defect_tolerance: f64,
+    pub max_refinements: usize,
+    pub max_mesh_points: usize,
+}
+
+impl Default for CollocationAdaptivitySettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            redistribution_enabled: true,
+            defect_tolerance: MAX_SCALED_COLLOCATION_DEFECT,
+            max_refinements: 3,
+            max_mesh_points: 512,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CollocationDefectTerminationReason {
+    AdaptivityDisabled,
+    RefinementBudgetExhausted,
+    MeshPointLimitReached,
+    RefinementStalled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CollocationDefectTermination {
+    pub reason: CollocationDefectTerminationReason,
+    pub measured_defect: f64,
+    pub tolerance: f64,
+    pub mesh_points: usize,
+    pub degree: usize,
+    /// Number of adaptations attempted in the continuation invocation that
+    /// produced this termination. The enclosing report retains cumulative
+    /// attempts across restarts.
+    pub refinements_attempted: usize,
+    pub refinement_budget: usize,
+    pub max_mesh_points: usize,
+    pub normalized_mesh: Vec<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CollocationMeshAdaptationKind {
+    Redistribution,
+    Refinement,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CollocationRefinementAttempt {
+    pub sequence: usize,
+    pub kind: CollocationMeshAdaptationKind,
+    pub old_mesh_points: usize,
+    pub new_mesh_points: usize,
+    pub degree: usize,
+    pub trigger_defect: f64,
+    pub tolerance: f64,
+    pub interval_scaled_defects: Vec<f64>,
+    pub old_normalized_mesh: Vec<f64>,
+    pub new_normalized_mesh: Vec<f64>,
+}
+
+/// Structured refinement/termination provenance for one collocation run.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CollocationAdaptationReport {
+    pub initial_mesh_points: usize,
+    pub current_mesh_points: usize,
+    pub degree: usize,
+    pub defect_tolerance: f64,
+    pub refinement_budget: usize,
+    pub max_mesh_points: usize,
+    pub initial_normalized_mesh: Vec<f64>,
+    pub current_normalized_mesh: Vec<f64>,
+    pub attempts: Vec<CollocationRefinementAttempt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub termination: Option<CollocationDefectTermination>,
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("limit-cycle collocation mesh remained under-resolved: {termination:?}")]
+pub struct CollocationDefectTerminationError {
+    pub termination: CollocationDefectTermination,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LimitCycleContinuationResult {
+    pub branch: ContinuationBranch,
+    pub collocation_adaptation: CollocationAdaptationReport,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,12 +336,18 @@ pub struct LimitCycleSetup {
     pub phase_direction: Vec<f64>,
     pub mesh_points: usize,
     pub collocation_degree: usize,
+    /// Normalized interval boundaries for this profile.  Empty is accepted
+    /// only as a legacy serialized uniform mesh.
+    #[serde(default)]
+    pub normalized_mesh: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FloquetModeVectors {
     pub ntst: usize,
     pub ncol: usize,
+    #[serde(default)]
+    pub normalized_mesh: Vec<f64>,
     pub multipliers: Vec<ComplexNumber>,
     pub vectors: Vec<Vec<Vec<ComplexNumber>>>,
 }
@@ -117,12 +359,21 @@ pub enum OrbitTimeMode {
 }
 
 impl LimitCycleSetup {
+    pub fn resolved_normalized_mesh(&self) -> Result<Vec<f64>> {
+        validated_normalized_mesh(self.mesh_points, &self.normalized_mesh)
+    }
+
     pub fn collocation_config(&self) -> CollocationConfig {
         CollocationConfig {
             mesh_points: self.mesh_points,
             degree: self.collocation_degree,
             phase_anchor: self.phase_anchor.clone(),
             phase_direction: self.phase_direction.clone(),
+            normalized_mesh: if self.normalized_mesh.is_empty() {
+                uniform_normalized_mesh(self.mesh_points)
+            } else {
+                self.normalized_mesh.clone()
+            },
         }
     }
 
@@ -131,13 +382,13 @@ impl LimitCycleSetup {
         system: &'a mut EquationSystem,
         param_index: usize,
     ) -> Result<PeriodicOrbitCollocationProblem<'a>> {
-        PeriodicOrbitCollocationProblem::new(
+        PeriodicOrbitCollocationProblem::new_on_mesh(
             system,
             param_index,
-            self.mesh_points,
             self.collocation_degree,
             self.phase_anchor.clone(),
             self.phase_direction.clone(),
+            self.resolved_normalized_mesh()?,
         )
     }
 }
@@ -299,6 +550,7 @@ pub fn limit_cycle_setup_from_hopf(
         phase_direction,
         mesh_points,
         collocation_degree: degree,
+        normalized_mesh: uniform_normalized_mesh(mesh_points),
     })
 }
 
@@ -480,6 +732,7 @@ pub fn limit_cycle_setup_from_orbit(
         phase_direction,
         mesh_points,
         collocation_degree: degree,
+        normalized_mesh: uniform_normalized_mesh(mesh_points),
     })
 }
 
@@ -612,6 +865,28 @@ pub fn limit_cycle_setup_from_pd(
     ncol: usize,
     amplitude: f64,
 ) -> Result<LimitCycleSetup> {
+    limit_cycle_setup_from_pd_on_mesh(
+        system,
+        param_index,
+        lc_state,
+        param_value,
+        ncol,
+        uniform_normalized_mesh(ntst),
+        amplitude,
+    )
+}
+
+pub fn limit_cycle_setup_from_pd_on_mesh(
+    system: &mut EquationSystem,
+    param_index: usize,
+    lc_state: &[f64],
+    param_value: f64,
+    ncol: usize,
+    normalized_mesh: Vec<f64>,
+    amplitude: f64,
+) -> Result<LimitCycleSetup> {
+    let ntst = normalized_mesh.len().saturating_sub(1);
+    let normalized_mesh = validated_normalized_mesh(ntst, &normalized_mesh)?;
     let dim = system.equations.len();
     if ntst < 2 {
         bail!("Period-doubling setup requires at least 2 mesh intervals");
@@ -673,13 +948,13 @@ pub fn limit_cycle_setup_from_pd(
     }
 
     // Create the collocation problem
-    let mut problem = PeriodicOrbitCollocationProblem::new(
+    let mut problem = PeriodicOrbitCollocationProblem::new_on_mesh(
         system,
         param_index,
-        ntst,
         ncol,
         phase_anchor.clone(),
         phase_direction.clone(),
+        normalized_mesh.clone(),
     )?;
 
     // Build the augmented state vector [param, mesh, stages, period]
@@ -879,6 +1154,16 @@ pub fn limit_cycle_setup_from_pd(
 
     // New period is double the original
     let new_period = 2.0 * period;
+    let mut doubled_normalized_mesh = normalized_mesh
+        .iter()
+        .map(|coordinate| 0.5 * coordinate)
+        .collect::<Vec<_>>();
+    doubled_normalized_mesh.extend(
+        normalized_mesh
+            .iter()
+            .skip(1)
+            .map(|coordinate| 0.5 + 0.5 * coordinate),
+    );
 
     // Phase condition from first point of new cycle
     let new_phase_anchor = new_mesh_states[0].clone();
@@ -909,12 +1194,14 @@ pub fn limit_cycle_setup_from_pd(
         phase_direction: new_phase_direction,
         mesh_points: new_ntst,
         collocation_degree: ncol,
+        normalized_mesh: doubled_normalized_mesh,
     })
 }
 
 pub struct PeriodicOrbitCollocationProblem<'a> {
     context: FlowContext<'a>,
     mesh_points: usize,
+    normalized_mesh: Vec<f64>,
     degree: usize,
     coeffs: CollocationCoefficients,
     /// Stage profile used by the integral phase condition.  It is initialized
@@ -927,6 +1214,11 @@ pub struct PeriodicOrbitCollocationProblem<'a> {
     work_stage_f: Vec<f64>,
     work_stage_jac: Vec<f64>,
     work_stage_param: Vec<f64>,
+    adaptivity: CollocationAdaptivitySettings,
+    adaptation_report: CollocationAdaptationReport,
+    /// Attempts before this offset were already reflected in a restarted
+    /// branch's persisted states and must not be replayed during extension.
+    adaptation_transfer_start_index: usize,
 }
 
 const MAX_SCALED_COLLOCATION_DEFECT: f64 = 2.5e-2;
@@ -941,6 +1233,65 @@ impl<'a> PeriodicOrbitCollocationProblem<'a> {
         phase_anchor: Vec<f64>,
         phase_direction: Vec<f64>,
     ) -> Result<Self> {
+        Self::new_with_adaptivity(
+            system,
+            param_index,
+            mesh_points,
+            degree,
+            phase_anchor,
+            phase_direction,
+            CollocationAdaptivitySettings::default(),
+        )
+    }
+
+    pub fn new_with_adaptivity(
+        system: &'a mut EquationSystem,
+        param_index: usize,
+        mesh_points: usize,
+        degree: usize,
+        phase_anchor: Vec<f64>,
+        phase_direction: Vec<f64>,
+        adaptivity: CollocationAdaptivitySettings,
+    ) -> Result<Self> {
+        Self::new_on_mesh_with_adaptivity(
+            system,
+            param_index,
+            degree,
+            phase_anchor,
+            phase_direction,
+            uniform_normalized_mesh(mesh_points),
+            adaptivity,
+        )
+    }
+
+    pub fn new_on_mesh(
+        system: &'a mut EquationSystem,
+        param_index: usize,
+        degree: usize,
+        phase_anchor: Vec<f64>,
+        phase_direction: Vec<f64>,
+        normalized_mesh: Vec<f64>,
+    ) -> Result<Self> {
+        Self::new_on_mesh_with_adaptivity(
+            system,
+            param_index,
+            degree,
+            phase_anchor,
+            phase_direction,
+            normalized_mesh,
+            CollocationAdaptivitySettings::default(),
+        )
+    }
+
+    pub fn new_on_mesh_with_adaptivity(
+        system: &'a mut EquationSystem,
+        param_index: usize,
+        degree: usize,
+        phase_anchor: Vec<f64>,
+        phase_direction: Vec<f64>,
+        normalized_mesh: Vec<f64>,
+        adaptivity: CollocationAdaptivitySettings,
+    ) -> Result<Self> {
         if param_index >= system.params.len() {
             bail!(
                 "Continuation parameter index {} is out of bounds for {} parameters",
@@ -948,8 +1299,20 @@ impl<'a> PeriodicOrbitCollocationProblem<'a> {
                 system.params.len()
             );
         }
-        if mesh_points < 2 {
-            bail!("Collocation mesh must have at least 2 points");
+        let mesh_points = normalized_mesh.len().saturating_sub(1);
+        let normalized_mesh = validated_normalized_mesh(mesh_points, &normalized_mesh)?;
+        if !adaptivity.defect_tolerance.is_finite() || adaptivity.defect_tolerance <= 0.0 {
+            bail!("Collocation defect tolerance must be finite and positive");
+        }
+        if adaptivity.max_mesh_points < 2 {
+            bail!("Adaptive collocation requires a mesh-point cap of at least 2");
+        }
+        if adaptivity.max_mesh_points < mesh_points {
+            bail!(
+                "Adaptive collocation mesh-point cap {} is below the active mesh size {}",
+                adaptivity.max_mesh_points,
+                mesh_points
+            );
         }
         let dim = system.equations.len();
         // Keep validating the serialized seed data for backwards compatibility.
@@ -958,9 +1321,11 @@ impl<'a> PeriodicOrbitCollocationProblem<'a> {
         let _ = normalize_phase_data(dim, phase_anchor, phase_direction)?;
         let coeffs = CollocationCoefficients::new(degree)?;
         let stage_count = mesh_points * degree;
+        let initial_normalized_mesh = normalized_mesh.clone();
         Ok(Self {
             context: FlowContext::new(system, param_index),
             mesh_points,
+            normalized_mesh,
             degree,
             coeffs,
             phase_reference_stages: None,
@@ -968,7 +1333,51 @@ impl<'a> PeriodicOrbitCollocationProblem<'a> {
             work_stage_f: vec![0.0; stage_count * dim],
             work_stage_jac: vec![0.0; stage_count * dim * dim],
             work_stage_param: vec![0.0; stage_count * dim],
+            adaptivity,
+            adaptation_report: CollocationAdaptationReport {
+                initial_mesh_points: mesh_points,
+                current_mesh_points: mesh_points,
+                degree,
+                defect_tolerance: adaptivity.defect_tolerance,
+                refinement_budget: adaptivity.max_refinements,
+                max_mesh_points: adaptivity.max_mesh_points,
+                initial_normalized_mesh: initial_normalized_mesh.clone(),
+                current_normalized_mesh: initial_normalized_mesh,
+                attempts: Vec::new(),
+                termination: None,
+            },
+            adaptation_transfer_start_index: 0,
         })
+    }
+
+    pub fn adaptation_report(&self) -> &CollocationAdaptationReport {
+        &self.adaptation_report
+    }
+
+    pub fn seed_adaptation_report(
+        &mut self,
+        mut report: CollocationAdaptationReport,
+    ) -> Result<()> {
+        if report.current_mesh_points != self.mesh_points
+            || meshes_materially_different(&report.current_normalized_mesh, &self.normalized_mesh)
+        {
+            bail!("Collocation adaptation report does not match the active mesh");
+        }
+        self.adaptation_transfer_start_index = report.attempts.len();
+        report.defect_tolerance = self.adaptivity.defect_tolerance;
+        report.refinement_budget = self.adaptivity.max_refinements;
+        report.max_mesh_points = self.adaptivity.max_mesh_points;
+        report.termination = None;
+        self.adaptation_report = report;
+        Ok(())
+    }
+
+    pub fn normalized_mesh(&self) -> &[f64] {
+        &self.normalized_mesh
+    }
+
+    fn interval_width(&self, interval: usize) -> f64 {
+        self.normalized_mesh[interval + 1] - self.normalized_mesh[interval]
     }
 
     fn state_dim(&self) -> usize {
@@ -1084,6 +1493,60 @@ impl<'a> PeriodicOrbitCollocationProblem<'a> {
         &self.work_stage_param[start..start + dim]
     }
 
+    fn normal_form_setup(&mut self, aug_state: &DVector<f64>) -> Result<LimitCycleSetup> {
+        if aug_state.len() != self.dimension() + 1 {
+            bail!("Periodic normal-form state has the wrong collocation dimension");
+        }
+        let dim = self.state_dim();
+        let mesh_states = self
+            .mesh_states(aug_state)
+            .into_iter()
+            .map(|state| state.to_vec())
+            .collect::<Vec<_>>();
+        let mut stage_states = vec![vec![vec![0.0; dim]; self.degree]; self.mesh_points];
+        for (interval, stages) in stage_states.iter_mut().enumerate() {
+            for (stage, state) in stages.iter_mut().enumerate() {
+                state.copy_from_slice(self.stage_state_slice(aug_state, interval, stage));
+            }
+        }
+        let period = aug_state[self.period_index()];
+        if !period.is_finite() || period <= 0.0 {
+            bail!("Periodic normal-form source period must be positive and finite");
+        }
+        let parameter = aug_state[0];
+        let phase_anchor = mesh_states[0].clone();
+        let mut phase_direction = vec![0.0; dim];
+        self.context.with_param(parameter, |system| {
+            system.apply(0.0, &phase_anchor, &mut phase_direction);
+            Ok(())
+        })?;
+        let phase_norm = phase_direction
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt();
+        if !phase_norm.is_finite() || phase_norm <= 1e-12 {
+            bail!("Periodic normal-form phase direction is singular");
+        }
+        for value in &mut phase_direction {
+            *value /= phase_norm;
+        }
+        Ok(LimitCycleSetup {
+            guess: LimitCycleGuess {
+                param_value: parameter,
+                period,
+                mesh_states,
+                stage_states,
+                requires_fixed_parameter_correction: false,
+            },
+            phase_anchor,
+            phase_direction,
+            mesh_points: self.mesh_points,
+            collocation_degree: self.degree,
+            normalized_mesh: self.normalized_mesh.clone(),
+        })
+    }
+
     fn set_phase_reference(&mut self, aug_state: &DVector<f64>) -> Result<()> {
         if aug_state.len() != self.dimension() + 1 {
             bail!(
@@ -1150,7 +1613,7 @@ impl<'a> PeriodicOrbitCollocationProblem<'a> {
             for stage in 0..self.degree {
                 let stage_index = interval * self.degree + stage;
                 let current = self.stage_state_slice(aug_state, interval, stage);
-                let weight = self.coeffs.b[stage] / self.mesh_points as f64;
+                let weight = self.interval_width(interval) * self.coeffs.b[stage];
                 for component in 0..dim {
                     let index = stage_index * dim + component;
                     phase += weight * (current[component] - reference[index]) * derivative[index];
@@ -1161,22 +1624,27 @@ impl<'a> PeriodicOrbitCollocationProblem<'a> {
     }
 
     fn profile_metric_node_weights(&self) -> Result<Vec<f64>> {
-        let mut positions = Vec::with_capacity(self.degree + 1);
-        positions.push(0.0);
-        positions.extend(self.coeffs.nodes.iter().copied());
-        let mut weights = Vec::with_capacity(positions.len());
-        for index in 0..positions.len() {
+        let node_count = self.mesh_points * (self.degree + 1);
+        let mut positions = Vec::with_capacity(node_count);
+        for interval in 0..self.mesh_points {
+            let left = self.normalized_mesh[interval];
+            let width = self.interval_width(interval);
+            positions.push(left);
+            positions.extend(self.coeffs.nodes.iter().map(|node| left + width * node));
+        }
+        let mut weights = Vec::with_capacity(node_count);
+        for index in 0..node_count {
             let previous = if index == 0 {
-                positions[positions.len() - 1] - 1.0
+                positions[node_count - 1] - 1.0
             } else {
                 positions[index - 1]
             };
-            let next = if index + 1 == positions.len() {
-                1.0
+            let next = if index + 1 == node_count {
+                positions[0] + 1.0
             } else {
                 positions[index + 1]
             };
-            let weight = 0.5 * (next - previous) / self.mesh_points as f64;
+            let weight = 0.5 * (next - previous);
             if !weight.is_finite() || weight <= 0.0 {
                 bail!("Collocation nodes do not define a positive PALC quadrature metric");
             }
@@ -1191,14 +1659,16 @@ impl<'a> PeriodicOrbitCollocationProblem<'a> {
     /// residual-only convergence check can miss an under-resolved orbit.  This
     /// evaluates the collocation polynomial and its derivative at independent
     /// check points and compares the latter with the vector field.
-    pub fn scaled_collocation_defect(&mut self, aug_state: &DVector<f64>) -> Result<f64> {
+    pub fn scaled_collocation_defect_estimate(
+        &mut self,
+        aug_state: &DVector<f64>,
+    ) -> Result<CollocationDefectEstimate> {
         let dim = self.state_dim();
         let param = aug_state[0];
         let period = aug_state[self.period_index()];
         if !period.is_finite() || period <= 0.0 {
             bail!("Cannot estimate collocation defect for a nonpositive period");
         }
-        let h = period / self.mesh_points as f64;
         let mesh_states = self
             .mesh_states(aug_state)
             .into_iter()
@@ -1214,12 +1684,18 @@ impl<'a> PeriodicOrbitCollocationProblem<'a> {
         let stage_flows = self.work_stage_f.clone();
         let lagrange = lagrange_coefficients(&self.coeffs.nodes)?;
         let check_count = self.degree + 1;
-        let mut max_defect = 0.0_f64;
+        let mut interval_scaled_defects = vec![0.0_f64; self.mesh_points];
+        let interval_widths = self
+            .normalized_mesh
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .collect::<Vec<_>>();
 
         self.context.with_param(param, |system| {
             let mut state = vec![0.0; dim];
             let mut actual_flow = vec![0.0; dim];
             for interval in 0..self.mesh_points {
+                let h = period * interval_widths[interval];
                 for check in 0..check_count {
                     // Midpoints of an independent, uniformly spaced check grid
                     // avoid evaluating at either endpoints or Gauss nodes.
@@ -1251,29 +1727,85 @@ impl<'a> PeriodicOrbitCollocationProblem<'a> {
                             polynomial_flow += basis[stage] * stage_flows[index];
                         }
                         let scale = 1.0 + actual_flow[component].abs().max(polynomial_flow.abs());
-                        max_defect = max_defect
+                        interval_scaled_defects[interval] = interval_scaled_defects[interval]
                             .max((polynomial_flow - actual_flow[component]).abs() / scale);
                     }
                 }
             }
             Ok(())
         })?;
-        if !max_defect.is_finite() {
+        let max_scaled_defect = interval_scaled_defects
+            .iter()
+            .copied()
+            .fold(0.0_f64, f64::max);
+        if !max_scaled_defect.is_finite()
+            || interval_scaled_defects
+                .iter()
+                .any(|defect| !defect.is_finite())
+        {
             bail!("Collocation defect estimate is non-finite");
         }
-        Ok(max_defect)
+        Ok(CollocationDefectEstimate {
+            max_scaled_defect,
+            interval_scaled_defects,
+        })
+    }
+
+    pub fn scaled_collocation_defect(&mut self, aug_state: &DVector<f64>) -> Result<f64> {
+        Ok(self
+            .scaled_collocation_defect_estimate(aug_state)?
+            .max_scaled_defect)
     }
 
     fn validate_collocation_defect(&mut self, aug_state: &DVector<f64>) -> Result<f64> {
         let defect = self.scaled_collocation_defect(aug_state)?;
-        if defect > MAX_SCALED_COLLOCATION_DEFECT {
+        if defect > self.adaptivity.defect_tolerance {
             bail!(
                 "Limit-cycle collocation mesh is under-resolved (scaled defect {:.3e} > {:.3e}); increase NTST or NCOL",
                 defect,
-                MAX_SCALED_COLLOCATION_DEFECT
+                self.adaptivity.defect_tolerance
             );
         }
         Ok(defect)
+    }
+
+    fn record_defect_termination(
+        &mut self,
+        reason: CollocationDefectTerminationReason,
+        measured_defect: f64,
+    ) {
+        self.adaptation_report.termination = Some(CollocationDefectTermination {
+            reason,
+            measured_defect,
+            tolerance: self.adaptivity.defect_tolerance,
+            mesh_points: self.mesh_points,
+            degree: self.degree,
+            refinements_attempted: self
+                .adaptation_report
+                .attempts
+                .len()
+                .saturating_sub(self.adaptation_transfer_start_index),
+            refinement_budget: self.adaptivity.max_refinements,
+            max_mesh_points: self.adaptivity.max_mesh_points,
+            normalized_mesh: self.normalized_mesh.clone(),
+        });
+    }
+
+    fn replace_mesh(&mut self, normalized_mesh: Vec<f64>) -> Result<()> {
+        let mesh_points = normalized_mesh.len().saturating_sub(1);
+        self.normalized_mesh = validated_normalized_mesh(mesh_points, &normalized_mesh)?;
+        self.mesh_points = mesh_points;
+        let stage_count = self.stage_count();
+        let dim = self.state_dim();
+        self.phase_reference_stages = None;
+        self.phase_reference_derivative = None;
+        self.work_stage_f = vec![0.0; stage_count * dim];
+        self.work_stage_jac = vec![0.0; stage_count * dim * dim];
+        self.work_stage_param = vec![0.0; stage_count * dim];
+        self.adaptation_report.current_mesh_points = mesh_points;
+        self.adaptation_report.current_normalized_mesh = self.normalized_mesh.clone();
+        self.adaptation_report.termination = None;
+        Ok(())
     }
 }
 
@@ -1290,8 +1822,8 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
         // Parameter and period retain unit weights.  Profile entries use a
         // periodic Voronoi quadrature over mesh and Gauss nodes, normalized so
         // a constant profile has the same norm for every NTST/NCOL.
-        let mesh_weight = node_weights[0];
         for interval in 0..self.mesh_points {
+            let mesh_weight = node_weights[interval * (self.degree + 1)];
             for component in 0..dim {
                 weights[1 + interval * dim + component] = mesh_weight;
             }
@@ -1299,7 +1831,7 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
         let stage_start = self.stage_offset();
         for interval in 0..self.mesh_points {
             for stage in 0..self.degree {
-                let weight = node_weights[stage + 1];
+                let weight = node_weights[interval * (self.degree + 1) + stage + 1];
                 let stage_index = interval * self.degree + stage;
                 for component in 0..dim {
                     weights[stage_start + stage_index * dim + component] = weight;
@@ -1321,13 +1853,13 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
         let mesh_states = self.mesh_states(aug_state);
         let stage_states = self.stage_states(aug_state);
         self.evaluate_stages(param, &stage_states)?;
-        let h = period / self.mesh_points as f64;
         let out_slice = out.as_mut_slice();
         let stage_len = self.stage_count() * dim;
         let continuity_offset = stage_len;
         let phase_index = continuity_offset + self.mesh_points * dim;
 
         for interval in 0..self.mesh_points {
+            let h = period * self.interval_width(interval);
             let base = mesh_states[interval];
             for stage in 0..self.degree {
                 let stage_idx = interval * self.degree + stage;
@@ -1345,6 +1877,7 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
         }
 
         for interval in 0..self.mesh_points {
+            let h = period * self.interval_width(interval);
             let base = mesh_states[interval];
             let next = if interval + 1 == self.mesh_points {
                 mesh_states[0]
@@ -1388,10 +1921,10 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
         let stage_col_start = mesh_col_start + mesh_var_count;
         let stage_var_count = self.stage_count() * dim_state;
         let period_col = stage_col_start + stage_var_count;
-        let h = period / self.mesh_points as f64;
-
         // Stage residuals
         for interval in 0..self.mesh_points {
+            let interval_width = self.interval_width(interval);
+            let h = period * interval_width;
             for stage in 0..self.degree {
                 let stage_idx = interval * self.degree + stage;
                 let row_base = stage_idx * dim_state;
@@ -1431,7 +1964,7 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
                         let stage_k_idx = interval * self.degree + k;
                         period_sum += self.coeffs.a[stage][k] * self.stage_function(stage_k_idx)[r];
                     }
-                    jac[(row_base + r, period_col)] = -(period_sum) / (self.mesh_points as f64);
+                    jac[(row_base + r, period_col)] = -interval_width * period_sum;
                 }
             }
         }
@@ -1439,6 +1972,8 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
         // Continuity rows
         let continuity_offset = self.stage_count() * dim_state;
         for interval in 0..self.mesh_points {
+            let interval_width = self.interval_width(interval);
+            let h = period * interval_width;
             let row_base = continuity_offset + interval * dim_state;
             for r in 0..dim_state {
                 let mut param_sum = 0.0;
@@ -1473,7 +2008,7 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
                     let stage_idx = interval * self.degree + k;
                     period_sum += self.coeffs.b[k] * self.stage_function(stage_idx)[r];
                 }
-                jac[(row_base + r, period_col)] = -(period_sum) / (self.mesh_points as f64);
+                jac[(row_base + r, period_col)] = -interval_width * period_sum;
             }
         }
 
@@ -1488,7 +2023,7 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
             for stage in 0..self.degree {
                 let stage_index = interval * self.degree + stage;
                 let col_start = stage_col_start + stage_index * dim_state;
-                let weight = self.coeffs.b[stage] / self.mesh_points as f64;
+                let weight = self.interval_width(interval) * self.coeffs.b[stage];
                 for component in 0..dim_state {
                     jac[(phase_row, col_start + component)] =
                         weight * phase_derivative[stage_index * dim_state + component];
@@ -1499,8 +2034,196 @@ impl<'a> ContinuationProblem for PeriodicOrbitCollocationProblem<'a> {
         Ok(jac)
     }
 
+    fn classify_bifurcation(
+        &mut self,
+        aug_state: &DVector<f64>,
+        detected: BifurcationType,
+    ) -> Result<BifurcationType> {
+        if detected != BifurcationType::CycleFold {
+            return Ok(detected);
+        }
+        let setup = self.normal_form_setup(aug_state)?;
+        let param_index = self.context.param_index;
+        let normal_form =
+            periodic_branch_point_normal_form(self.context.system, &setup, param_index)?;
+        Ok(periodic_plus_one_bifurcation_type(&normal_form))
+    }
+
     fn is_step_acceptable(&mut self, aug_state: &DVector<f64>) -> Result<bool> {
-        Ok(self.scaled_collocation_defect(aug_state)? <= MAX_SCALED_COLLOCATION_DEFECT)
+        Ok(self.scaled_collocation_defect(aug_state)? <= self.adaptivity.defect_tolerance)
+    }
+
+    fn handle_step_rejection(
+        &mut self,
+        accepted_aug: &DVector<f64>,
+        accepted_tangent: &DVector<f64>,
+        rejected_aug: &DVector<f64>,
+        branch_states: &[Vec<f64>],
+    ) -> Result<StepRejectionAction> {
+        let estimate = self.scaled_collocation_defect_estimate(rejected_aug)?;
+        if estimate.max_scaled_defect <= self.adaptivity.defect_tolerance {
+            return Ok(StepRejectionAction::ReduceStep);
+        }
+        if !self.adaptivity.enabled {
+            self.record_defect_termination(
+                CollocationDefectTerminationReason::AdaptivityDisabled,
+                estimate.max_scaled_defect,
+            );
+            return Ok(StepRejectionAction::Terminate);
+        }
+        let current_run_attempts = &self.adaptation_report.attempts[self
+            .adaptation_transfer_start_index
+            .min(self.adaptation_report.attempts.len())..];
+        if current_run_attempts.len() >= self.adaptivity.max_refinements {
+            self.record_defect_termination(
+                CollocationDefectTerminationReason::RefinementBudgetExhausted,
+                estimate.max_scaled_defect,
+            );
+            return Ok(StepRejectionAction::Terminate);
+        }
+
+        let old_mesh_points = self.mesh_points;
+        let old_normalized_mesh = self.normalized_mesh.clone();
+        let already_redistributed = current_run_attempts
+            .iter()
+            .any(|attempt| attempt.kind == CollocationMeshAdaptationKind::Redistribution);
+        let redistribution = if self.adaptivity.redistribution_enabled && !already_redistributed {
+            let candidate = defect_weighted_normalized_mesh(
+                &old_normalized_mesh,
+                &estimate.interval_scaled_defects,
+                self.degree,
+                old_mesh_points,
+            )?;
+            meshes_materially_different(&candidate, &old_normalized_mesh).then_some(candidate)
+        } else {
+            None
+        };
+        let (kind, new_normalized_mesh) = if let Some(candidate) = redistribution {
+            (CollocationMeshAdaptationKind::Redistribution, candidate)
+        } else {
+            if old_mesh_points >= self.adaptivity.max_mesh_points {
+                self.record_defect_termination(
+                    CollocationDefectTerminationReason::MeshPointLimitReached,
+                    estimate.max_scaled_defect,
+                );
+                return Ok(StepRejectionAction::Terminate);
+            }
+            let Some(new_mesh_points) = propose_uniform_mesh_refinement(
+                &estimate.interval_scaled_defects,
+                self.degree,
+                self.adaptivity.defect_tolerance,
+                self.adaptivity.max_mesh_points,
+            ) else {
+                self.record_defect_termination(
+                    CollocationDefectTerminationReason::RefinementStalled,
+                    estimate.max_scaled_defect,
+                );
+                return Ok(StepRejectionAction::Terminate);
+            };
+            (
+                CollocationMeshAdaptationKind::Refinement,
+                defect_weighted_normalized_mesh(
+                    &old_normalized_mesh,
+                    &estimate.interval_scaled_defects,
+                    self.degree,
+                    new_mesh_points,
+                )?,
+            )
+        };
+        let new_mesh_points = new_normalized_mesh.len() - 1;
+
+        let dim = self.state_dim();
+        let nodes = self.coeffs.nodes.clone();
+        let transferred_aug = transfer_collocation_aug(
+            accepted_aug,
+            &old_normalized_mesh,
+            &new_normalized_mesh,
+            self.degree,
+            dim,
+            &nodes,
+        )?;
+        let transferred_tangent = transfer_collocation_aug(
+            accepted_tangent,
+            &old_normalized_mesh,
+            &new_normalized_mesh,
+            self.degree,
+            dim,
+            &nodes,
+        )?;
+        let transferred_branch_states = branch_states
+            .iter()
+            .map(|state| {
+                transfer_collocation_state(
+                    state,
+                    &old_normalized_mesh,
+                    &new_normalized_mesh,
+                    self.degree,
+                    dim,
+                    &nodes,
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        self.adaptation_report
+            .attempts
+            .push(CollocationRefinementAttempt {
+                sequence: self.adaptation_report.attempts.len() + 1,
+                kind,
+                old_mesh_points,
+                new_mesh_points,
+                degree: self.degree,
+                trigger_defect: estimate.max_scaled_defect,
+                tolerance: self.adaptivity.defect_tolerance,
+                interval_scaled_defects: estimate.interval_scaled_defects,
+                old_normalized_mesh,
+                new_normalized_mesh: new_normalized_mesh.clone(),
+            });
+        self.replace_mesh(new_normalized_mesh)?;
+
+        Ok(StepRejectionAction::Refined {
+            accepted_aug: transferred_aug,
+            accepted_tangent: transferred_tangent,
+            branch_states: transferred_branch_states,
+            branch_type: Some(BranchType::LimitCycle {
+                ntst: new_mesh_points,
+                ncol: self.degree,
+                normalized_mesh: self.normalized_mesh.clone(),
+            }),
+        })
+    }
+
+    fn transfer_branch_states_to_current_discretization(
+        &self,
+        branch_states: &[Vec<f64>],
+    ) -> Result<Vec<Vec<f64>>> {
+        let dim = self.state_dim();
+        let nodes = &self.coeffs.nodes;
+        let mut transferred = branch_states.to_vec();
+        for attempt in &self.adaptation_report.attempts[self
+            .adaptation_transfer_start_index
+            .min(self.adaptation_report.attempts.len())..]
+        {
+            transferred = transferred
+                .iter()
+                .map(|state| {
+                    transfer_collocation_state(
+                        state,
+                        &attempt.old_normalized_mesh,
+                        &attempt.new_normalized_mesh,
+                        self.degree,
+                        dim,
+                        nodes,
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+        }
+        if transferred
+            .iter()
+            .any(|state| state.len() != self.dimension())
+        {
+            bail!("Adaptive collocation failed to transfer an external branch to the final mesh");
+        }
+        Ok(transferred)
     }
 
     fn update_after_step(&mut self, aug_state: &DVector<f64>) -> Result<()> {
@@ -2224,6 +2947,24 @@ pub(crate) fn compute_cycle_monodromy_data(
     ntst: usize,
     ncol: usize,
 ) -> Result<MonodromyData> {
+    compute_cycle_monodromy_data_on_mesh(
+        system,
+        param_index,
+        cycle_state,
+        ncol,
+        uniform_normalized_mesh(ntst),
+    )
+}
+
+pub(crate) fn compute_cycle_monodromy_data_on_mesh(
+    system: &mut EquationSystem,
+    param_index: usize,
+    cycle_state: &[f64],
+    ncol: usize,
+    normalized_mesh: Vec<f64>,
+) -> Result<MonodromyData> {
+    let ntst = normalized_mesh.len().saturating_sub(1);
+    let normalized_mesh = validated_normalized_mesh(ntst, &normalized_mesh)?;
     let dim = system.equations.len();
     if dim == 0 {
         bail!("System has zero dimension.");
@@ -2244,13 +2985,13 @@ pub(crate) fn compute_cycle_monodromy_data(
     let phase_direction = build_cycle_phase_direction(&mesh_states, dim);
 
     let param_value = system.params[param_index];
-    let mut problem = PeriodicOrbitCollocationProblem::new(
+    let mut problem = PeriodicOrbitCollocationProblem::new_on_mesh(
         system,
         param_index,
-        ntst,
         ncol,
         phase_anchor,
         phase_direction,
+        normalized_mesh,
     )?;
 
     let mut aug_state = DVector::zeros(1 + packed_implicit.len());
@@ -2269,6 +3010,24 @@ pub fn compute_limit_cycle_floquet_modes(
     ntst: usize,
     ncol: usize,
 ) -> Result<FloquetModeVectors> {
+    compute_limit_cycle_floquet_modes_on_mesh(
+        system,
+        param_index,
+        cycle_state,
+        ncol,
+        uniform_normalized_mesh(ntst),
+    )
+}
+
+pub fn compute_limit_cycle_floquet_modes_on_mesh(
+    system: &mut EquationSystem,
+    param_index: usize,
+    cycle_state: &[f64],
+    ncol: usize,
+    normalized_mesh: Vec<f64>,
+) -> Result<FloquetModeVectors> {
+    let ntst = normalized_mesh.len().saturating_sub(1);
+    let normalized_mesh = validated_normalized_mesh(ntst, &normalized_mesh)?;
     let dim = system.equations.len();
     if dim == 0 {
         bail!("System has zero dimension.");
@@ -2289,13 +3048,13 @@ pub fn compute_limit_cycle_floquet_modes(
     let phase_direction = build_cycle_phase_direction(&mesh_states, dim);
 
     let param_value = system.params[param_index];
-    let mut problem = PeriodicOrbitCollocationProblem::new(
+    let mut problem = PeriodicOrbitCollocationProblem::new_on_mesh(
         system,
         param_index,
-        ntst,
         ncol,
         phase_anchor,
         phase_direction,
+        normalized_mesh.clone(),
     )?;
 
     let mut aug_state = DVector::zeros(1 + packed_implicit.len());
@@ -2378,6 +3137,7 @@ pub fn compute_limit_cycle_floquet_modes(
     Ok(FloquetModeVectors {
         ntst,
         ncol,
+        normalized_mesh,
         multipliers: modes
             .iter()
             .map(|mode| ComplexNumber::from(mode.multiplier))
@@ -2515,6 +3275,205 @@ pub(crate) fn cycle_tests_from_multipliers(
     };
 
     (cf_test, pd_test, ns_test, values)
+}
+
+pub(crate) fn propose_uniform_mesh_refinement(
+    interval_scaled_defects: &[f64],
+    degree: usize,
+    tolerance: f64,
+    max_mesh_points: usize,
+) -> Option<usize> {
+    let current_mesh_points = interval_scaled_defects.len();
+    if current_mesh_points == 0
+        || degree == 0
+        || !tolerance.is_finite()
+        || tolerance <= 0.0
+        || max_mesh_points <= current_mesh_points
+    {
+        return None;
+    }
+
+    // Estimate the number of uniform subintervals represented by each old
+    // interval.  The target is deliberately below the hard tolerance so one
+    // remesh has room for interpolation and Newton-correction error.
+    let target = 0.5 * tolerance;
+    let convergence_order = (degree + 1) as f64;
+    let requested = interval_scaled_defects
+        .iter()
+        .map(|defect| {
+            if !defect.is_finite() || *defect <= target {
+                1usize
+            } else {
+                ((*defect / target).powf(1.0 / convergence_order).ceil() as usize).max(1)
+            }
+        })
+        .sum::<usize>();
+
+    // Bound a single dimension change to 2x.  Repeated refinements are
+    // controlled separately by the retry budget.  A 1.5x floor prevents a
+    // nearly-threshold hot interval from causing a sequence of ineffective
+    // one-point global refinements when the storage mesh is uniform.
+    let minimum_growth = current_mesh_points.saturating_mul(3).saturating_add(1) / 2;
+    let growth_cap = current_mesh_points.saturating_mul(2);
+    let proposed = requested
+        .max(minimum_growth)
+        .min(growth_cap)
+        .min(max_mesh_points);
+    (proposed > current_mesh_points).then_some(proposed)
+}
+
+pub(crate) fn meshes_materially_different(left: &[f64], right: &[f64]) -> bool {
+    left.len() != right.len()
+        || left
+            .iter()
+            .zip(right)
+            .any(|(lhs, rhs)| (lhs - rhs).abs() > 1e-8)
+}
+
+fn interpolate_local_profile(local_nodes: &[f64], local_values: &[f64], tau: f64) -> Result<f64> {
+    if local_nodes.len() != local_values.len() || local_nodes.is_empty() {
+        bail!("Collocation profile interpolation layout mismatch");
+    }
+    for (node, value) in local_nodes.iter().zip(local_values) {
+        if (tau - node).abs() <= 8.0 * f64::EPSILON {
+            return Ok(*value);
+        }
+    }
+    let mut result = 0.0;
+    for (index, node) in local_nodes.iter().enumerate() {
+        let mut basis = 1.0;
+        for (other_index, other_node) in local_nodes.iter().enumerate() {
+            if index == other_index {
+                continue;
+            }
+            let denominator = node - other_node;
+            if denominator.abs() <= f64::EPSILON {
+                bail!("Collocation interpolation nodes must be distinct");
+            }
+            basis *= (tau - other_node) / denominator;
+        }
+        result += basis * local_values[index];
+    }
+    Ok(result)
+}
+
+fn sample_collocation_component(
+    aug: &DVector<f64>,
+    normalized_mesh: &[f64],
+    degree: usize,
+    dim: usize,
+    nodes: &[f64],
+    normalized_time: f64,
+    component: usize,
+) -> Result<f64> {
+    let mesh_points = normalized_mesh.len().saturating_sub(1);
+    let expected_len = 1 + mesh_points * (degree + 1) * dim + 1;
+    if aug.len() != expected_len || nodes.len() != degree || component >= dim {
+        bail!("Collocation profile transfer layout mismatch");
+    }
+    let wrapped = normalized_time.rem_euclid(1.0);
+    let interval = normalized_mesh
+        .partition_point(|coordinate| *coordinate <= wrapped)
+        .saturating_sub(1)
+        .min(mesh_points - 1);
+    let width = normalized_mesh[interval + 1] - normalized_mesh[interval];
+    let tau = (wrapped - normalized_mesh[interval]) / width;
+    let stage_offset = 1 + mesh_points * dim;
+    let mut local_nodes = Vec::with_capacity(degree + 1);
+    let mut local_values = Vec::with_capacity(degree + 1);
+    local_nodes.push(0.0);
+    local_values.push(aug[1 + interval * dim + component]);
+    for (stage, node) in nodes.iter().enumerate() {
+        local_nodes.push(*node);
+        let stage_index = interval * degree + stage;
+        local_values.push(aug[stage_offset + stage_index * dim + component]);
+    }
+    interpolate_local_profile(&local_nodes, &local_values, tau)
+}
+
+pub(crate) fn transfer_collocation_aug(
+    aug: &DVector<f64>,
+    source_mesh: &[f64],
+    destination_mesh: &[f64],
+    degree: usize,
+    dim: usize,
+    nodes: &[f64],
+) -> Result<DVector<f64>> {
+    let old_mesh_points = source_mesh.len().saturating_sub(1);
+    let new_mesh_points = destination_mesh.len().saturating_sub(1);
+    let source_mesh = validated_normalized_mesh(old_mesh_points, source_mesh)?;
+    let destination_mesh = validated_normalized_mesh(new_mesh_points, destination_mesh)?;
+    let expected_old_len = 1 + old_mesh_points * (degree + 1) * dim + 1;
+    if aug.len() != expected_old_len {
+        bail!(
+            "Cannot transfer collocation vector of length {}; expected {}",
+            aug.len(),
+            expected_old_len
+        );
+    }
+    if new_mesh_points < 2 {
+        bail!("Refined collocation mesh must have at least 2 points");
+    }
+    let new_len = 1 + new_mesh_points * (degree + 1) * dim + 1;
+    let mut transferred = DVector::zeros(new_len);
+    transferred[0] = aug[0];
+    for interval in 0..new_mesh_points {
+        let mesh_time = destination_mesh[interval];
+        for component in 0..dim {
+            transferred[1 + interval * dim + component] = sample_collocation_component(
+                aug,
+                &source_mesh,
+                degree,
+                dim,
+                nodes,
+                mesh_time,
+                component,
+            )?;
+        }
+    }
+    let new_stage_offset = 1 + new_mesh_points * dim;
+    for interval in 0..new_mesh_points {
+        let left = destination_mesh[interval];
+        let width = destination_mesh[interval + 1] - left;
+        for (stage, node) in nodes.iter().enumerate() {
+            let stage_time = left + width * node;
+            let stage_index = interval * degree + stage;
+            for component in 0..dim {
+                transferred[new_stage_offset + stage_index * dim + component] =
+                    sample_collocation_component(
+                        aug,
+                        &source_mesh,
+                        degree,
+                        dim,
+                        nodes,
+                        stage_time,
+                        component,
+                    )?;
+            }
+        }
+    }
+    transferred[new_len - 1] = aug[expected_old_len - 1];
+    if transferred.iter().any(|value| !value.is_finite()) {
+        bail!("Collocation profile transfer produced a non-finite value");
+    }
+    Ok(transferred)
+}
+
+fn transfer_collocation_state(
+    state: &[f64],
+    source_mesh: &[f64],
+    destination_mesh: &[f64],
+    degree: usize,
+    dim: usize,
+    nodes: &[f64],
+) -> Result<Vec<f64>> {
+    let mut aug = DVector::zeros(state.len() + 1);
+    aug.as_mut_slice()[1..].copy_from_slice(state);
+    Ok(
+        transfer_collocation_aug(&aug, source_mesh, destination_mesh, degree, dim, nodes)?
+            .as_slice()[1..]
+            .to_vec(),
+    )
 }
 
 fn validate_mesh_states(state_dim: usize, mesh_points: usize, states: &[Vec<f64>]) -> Result<()> {
@@ -2660,6 +3619,7 @@ pub fn prepare_limit_cycle_setup(
     if !setup.guess.period.is_finite() || setup.guess.period <= 0.0 {
         bail!("Initial period must be finite and positive");
     }
+    setup.normalized_mesh = setup.resolved_normalized_mesh()?;
     validate_mesh_states(state_dim, setup.mesh_points, &setup.guess.mesh_states)?;
     if setup.guess.stage_states.is_empty() {
         let coeffs = CollocationCoefficients::new(setup.collocation_degree)?;
@@ -2704,14 +3664,13 @@ fn validate_nontrivial_cycle_profile(
     aug: &DVector<f64>,
 ) -> Result<()> {
     let dim = problem.state_dim();
-    let interval_weight = 1.0 / problem.mesh_points as f64;
     let mut mean = vec![0.0; dim];
     let mut mean_square_norm = 0.0;
 
     // Gauss weights give a mesh-independent L2 measure over normalized time.
     for interval in 0..problem.mesh_points {
         for stage in 0..problem.degree {
-            let weight = interval_weight * problem.coeffs.b[stage];
+            let weight = problem.interval_width(interval) * problem.coeffs.b[stage];
             let state = problem.stage_state_slice(aug, interval, stage);
             for component in 0..dim {
                 mean[component] += weight * state[component];
@@ -2723,7 +3682,7 @@ fn validate_nontrivial_cycle_profile(
     let mut variation_squared = 0.0;
     for interval in 0..problem.mesh_points {
         for stage in 0..problem.degree {
-            let weight = interval_weight * problem.coeffs.b[stage];
+            let weight = problem.interval_width(interval) * problem.coeffs.b[stage];
             let state = problem.stage_state_slice(aug, interval, stage);
             for component in 0..dim {
                 let centered = state[component] - mean[component];
@@ -2758,6 +3717,26 @@ pub fn correct_limit_cycle_setup(
     tolerance: f64,
     max_iterations: usize,
 ) -> Result<(LimitCycleSetup, Vec<f64>)> {
+    correct_limit_cycle_setup_impl(
+        system,
+        param_index,
+        setup,
+        tolerance,
+        max_iterations,
+        true,
+        None,
+    )
+}
+
+fn correct_limit_cycle_setup_impl(
+    system: &mut EquationSystem,
+    param_index: usize,
+    setup: LimitCycleSetup,
+    tolerance: f64,
+    max_iterations: usize,
+    validate_defect: bool,
+    normalized_mesh: Option<&[f64]>,
+) -> Result<(LimitCycleSetup, Vec<f64>)> {
     if !tolerance.is_finite() || tolerance <= 0.0 {
         bail!("Fixed-parameter correction tolerance must be finite and positive");
     }
@@ -2773,7 +3752,18 @@ pub fn correct_limit_cycle_setup(
     current[0] = setup.guess.param_value;
     current.as_mut_slice()[1..].copy_from_slice(&flat_state);
 
-    let mut problem = setup.to_problem(system, param_index)?;
+    let problem_mesh = normalized_mesh
+        .map(ToOwned::to_owned)
+        .map(Ok)
+        .unwrap_or_else(|| setup.resolved_normalized_mesh())?;
+    let mut problem = PeriodicOrbitCollocationProblem::new_on_mesh(
+        system,
+        param_index,
+        setup.collocation_degree,
+        setup.phase_anchor.clone(),
+        setup.phase_direction.clone(),
+        problem_mesh,
+    )?;
     let unknown_count = problem.dimension();
     if flat_state.len() != unknown_count {
         bail!(
@@ -2805,11 +3795,13 @@ pub fn correct_limit_cycle_setup(
     for iteration in 0..=max_iterations {
         if residual_norm <= tolerance {
             validate_nontrivial_cycle_profile(&problem, &current)?;
-            problem.validate_collocation_defect(&current).map_err(|error| {
-                anyhow!(
-                    "Fixed-parameter limit-cycle correction converged algebraically but failed mesh validation: {error}"
-                )
-            })?;
+            if validate_defect {
+                problem.validate_collocation_defect(&current).map_err(|error| {
+                    anyhow!(
+                        "Fixed-parameter limit-cycle correction converged algebraically but failed mesh validation: {error}"
+                    )
+                })?;
+            }
             let corrected_flat = current.as_slice()[1..].to_vec();
             drop(problem);
             write_flat_state_to_setup(&mut setup, state_dim, &corrected_flat)?;
@@ -2889,6 +3881,198 @@ pub fn correct_limit_cycle_setup(
         initial_norm,
         tolerance
     )
+}
+
+fn correction_termination(
+    report: &CollocationAdaptationReport,
+    reason: CollocationDefectTerminationReason,
+    measured_defect: f64,
+) -> CollocationDefectTermination {
+    CollocationDefectTermination {
+        reason,
+        measured_defect,
+        tolerance: report.defect_tolerance,
+        mesh_points: report.current_mesh_points,
+        degree: report.degree,
+        refinements_attempted: report.attempts.len(),
+        refinement_budget: report.refinement_budget,
+        max_mesh_points: report.max_mesh_points,
+        normalized_mesh: report.current_normalized_mesh.clone(),
+    }
+}
+
+/// Correct a sampled cycle and adapt its collocation mesh until the
+/// independent defect check passes or the explicit refinement budget is
+/// exhausted.
+pub fn correct_limit_cycle_setup_adaptive(
+    system: &mut EquationSystem,
+    param_index: usize,
+    setup: LimitCycleSetup,
+    tolerance: f64,
+    max_iterations: usize,
+    adaptivity: CollocationAdaptivitySettings,
+) -> Result<(LimitCycleSetup, Vec<f64>, CollocationAdaptationReport)> {
+    if !adaptivity.defect_tolerance.is_finite() || adaptivity.defect_tolerance <= 0.0 {
+        bail!("Collocation defect tolerance must be finite and positive");
+    }
+    if adaptivity.max_mesh_points < 2 {
+        bail!("Adaptive collocation requires a mesh-point cap of at least 2");
+    }
+
+    let state_dim = system.equations.len();
+    let initial_mesh_points = setup.mesh_points;
+    let initial_normalized_mesh = setup.resolved_normalized_mesh()?;
+    let degree = setup.collocation_degree;
+    let mut report = CollocationAdaptationReport {
+        initial_mesh_points,
+        current_mesh_points: initial_mesh_points,
+        degree,
+        defect_tolerance: adaptivity.defect_tolerance,
+        refinement_budget: adaptivity.max_refinements,
+        max_mesh_points: adaptivity.max_mesh_points,
+        initial_normalized_mesh: initial_normalized_mesh.clone(),
+        current_normalized_mesh: initial_normalized_mesh.clone(),
+        attempts: Vec::new(),
+        termination: None,
+    };
+    let mut current_setup = setup;
+    let mut current_normalized_mesh = initial_normalized_mesh;
+
+    loop {
+        let (mut corrected_setup, corrected_state) = correct_limit_cycle_setup_impl(
+            system,
+            param_index,
+            current_setup,
+            tolerance,
+            max_iterations,
+            false,
+            Some(&current_normalized_mesh),
+        )?;
+        let mut problem = PeriodicOrbitCollocationProblem::new_on_mesh_with_adaptivity(
+            system,
+            param_index,
+            corrected_setup.collocation_degree,
+            corrected_setup.phase_anchor.clone(),
+            corrected_setup.phase_direction.clone(),
+            current_normalized_mesh.clone(),
+            adaptivity,
+        )?;
+        let mut corrected_aug = DVector::zeros(corrected_state.len() + 1);
+        corrected_aug[0] = corrected_setup.guess.param_value;
+        corrected_aug.as_mut_slice()[1..].copy_from_slice(&corrected_state);
+        let estimate = problem.scaled_collocation_defect_estimate(&corrected_aug)?;
+        drop(problem);
+        if estimate.max_scaled_defect <= adaptivity.defect_tolerance {
+            report.current_mesh_points = corrected_setup.mesh_points;
+            report.current_normalized_mesh = current_normalized_mesh;
+            return Ok((corrected_setup, corrected_state, report));
+        }
+
+        if !adaptivity.enabled {
+            let termination = correction_termination(
+                &report,
+                CollocationDefectTerminationReason::AdaptivityDisabled,
+                estimate.max_scaled_defect,
+            );
+            report.termination = Some(termination.clone());
+            return Err(CollocationDefectTerminationError { termination }.into());
+        }
+
+        if report.attempts.len() >= adaptivity.max_refinements {
+            let termination = correction_termination(
+                &report,
+                CollocationDefectTerminationReason::RefinementBudgetExhausted,
+                estimate.max_scaled_defect,
+            );
+            report.termination = Some(termination.clone());
+            return Err(CollocationDefectTerminationError { termination }.into());
+        }
+        let old_mesh_points = corrected_setup.mesh_points;
+        let old_normalized_mesh = current_normalized_mesh.clone();
+        let already_redistributed = report
+            .attempts
+            .iter()
+            .any(|attempt| attempt.kind == CollocationMeshAdaptationKind::Redistribution);
+        let redistribution = if adaptivity.redistribution_enabled && !already_redistributed {
+            let candidate = defect_weighted_normalized_mesh(
+                &old_normalized_mesh,
+                &estimate.interval_scaled_defects,
+                degree,
+                old_mesh_points,
+            )?;
+            meshes_materially_different(&candidate, &old_normalized_mesh).then_some(candidate)
+        } else {
+            None
+        };
+        let (kind, new_normalized_mesh) = if let Some(candidate) = redistribution {
+            (CollocationMeshAdaptationKind::Redistribution, candidate)
+        } else {
+            let Some(new_mesh_points) = propose_uniform_mesh_refinement(
+                &estimate.interval_scaled_defects,
+                degree,
+                adaptivity.defect_tolerance,
+                adaptivity.max_mesh_points,
+            ) else {
+                let reason = if old_mesh_points >= adaptivity.max_mesh_points {
+                    CollocationDefectTerminationReason::MeshPointLimitReached
+                } else {
+                    CollocationDefectTerminationReason::RefinementStalled
+                };
+                let termination =
+                    correction_termination(&report, reason, estimate.max_scaled_defect);
+                report.termination = Some(termination.clone());
+                return Err(CollocationDefectTerminationError { termination }.into());
+            };
+            (
+                CollocationMeshAdaptationKind::Refinement,
+                defect_weighted_normalized_mesh(
+                    &old_normalized_mesh,
+                    &estimate.interval_scaled_defects,
+                    degree,
+                    new_mesh_points,
+                )?,
+            )
+        };
+        let new_mesh_points = new_normalized_mesh.len() - 1;
+
+        let coeffs = CollocationCoefficients::new(degree)?;
+        let transferred = transfer_collocation_aug(
+            &corrected_aug,
+            &old_normalized_mesh,
+            &new_normalized_mesh,
+            degree,
+            state_dim,
+            &coeffs.nodes,
+        )?;
+        report.attempts.push(CollocationRefinementAttempt {
+            sequence: report.attempts.len() + 1,
+            kind,
+            old_mesh_points,
+            new_mesh_points,
+            degree,
+            trigger_defect: estimate.max_scaled_defect,
+            tolerance: adaptivity.defect_tolerance,
+            interval_scaled_defects: estimate.interval_scaled_defects,
+            old_normalized_mesh,
+            new_normalized_mesh: new_normalized_mesh.clone(),
+        });
+        report.current_mesh_points = new_mesh_points;
+        report.current_normalized_mesh = new_normalized_mesh.clone();
+        current_normalized_mesh = new_normalized_mesh;
+
+        corrected_setup.mesh_points = new_mesh_points;
+        corrected_setup.normalized_mesh = current_normalized_mesh.clone();
+        corrected_setup.guess.mesh_states = vec![vec![0.0; state_dim]; new_mesh_points];
+        corrected_setup.guess.stage_states =
+            vec![vec![vec![0.0; state_dim]; degree]; new_mesh_points];
+        write_flat_state_to_setup(
+            &mut corrected_setup,
+            state_dim,
+            &transferred.as_slice()[1..],
+        )?;
+        corrected_setup.guess.requires_fixed_parameter_correction = true;
+        current_setup = corrected_setup;
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -3075,6 +4259,27 @@ pub fn continue_limit_cycle_collocation(
     settings: ContinuationSettings,
     forward: bool,
 ) -> Result<ContinuationBranch> {
+    Ok(continue_limit_cycle_collocation_with_report(
+        system,
+        param_index,
+        config,
+        guess,
+        settings,
+        forward,
+        CollocationAdaptivitySettings::default(),
+    )?
+    .branch)
+}
+
+pub fn continue_limit_cycle_collocation_with_report(
+    system: &mut EquationSystem,
+    param_index: usize,
+    config: CollocationConfig,
+    guess: LimitCycleGuess,
+    settings: ContinuationSettings,
+    forward: bool,
+    adaptivity: CollocationAdaptivitySettings,
+) -> Result<LimitCycleContinuationResult> {
     if guess.period <= 0.0 {
         bail!("Initial period must be positive");
     }
@@ -3084,20 +4289,51 @@ pub fn continue_limit_cycle_collocation(
         phase_direction: config.phase_direction,
         mesh_points: config.mesh_points,
         collocation_degree: config.degree,
+        normalized_mesh: config.normalized_mesh,
     };
-    let (setup, flat_state) = if setup.guess.requires_fixed_parameter_correction {
+    let (setup, flat_state, correction_report) = if setup.guess.requires_fixed_parameter_correction
+    {
         let correction_iterations = settings.corrector_steps.max(8);
-        correct_limit_cycle_setup(
+        correct_limit_cycle_setup_adaptive(
             system,
             param_index,
             setup,
             settings.corrector_tolerance,
             correction_iterations,
+            adaptivity,
         )?
     } else {
-        prepare_limit_cycle_setup(setup, system.equations.len())?
+        let initial_mesh_points = setup.mesh_points;
+        let degree = setup.collocation_degree;
+        let (setup, flat_state) = prepare_limit_cycle_setup(setup, system.equations.len())?;
+        let initial_normalized_mesh = setup.resolved_normalized_mesh()?;
+        (
+            setup,
+            flat_state,
+            CollocationAdaptationReport {
+                initial_mesh_points,
+                current_mesh_points: initial_mesh_points,
+                degree,
+                defect_tolerance: adaptivity.defect_tolerance,
+                refinement_budget: adaptivity.max_refinements,
+                max_mesh_points: adaptivity.max_mesh_points,
+                initial_normalized_mesh: initial_normalized_mesh.clone(),
+                current_normalized_mesh: initial_normalized_mesh,
+                attempts: Vec::new(),
+                termination: None,
+            },
+        )
     };
-    let mut problem = setup.to_problem(system, param_index)?;
+    let mut problem = PeriodicOrbitCollocationProblem::new_on_mesh_with_adaptivity(
+        system,
+        param_index,
+        setup.collocation_degree,
+        setup.phase_anchor.clone(),
+        setup.phase_direction.clone(),
+        setup.resolved_normalized_mesh()?,
+        adaptivity,
+    )?;
+    problem.adaptation_report = correction_report;
     let point = ContinuationPoint {
         state: flat_state,
         param_value: setup.guess.param_value,
@@ -3108,10 +4344,14 @@ pub fn continue_limit_cycle_collocation(
 
     let mut branch = continue_with_problem(&mut problem, point, settings, forward)?;
     branch.branch_type = BranchType::LimitCycle {
-        ntst: setup.mesh_points,
-        ncol: setup.collocation_degree,
+        ntst: problem.mesh_points,
+        ncol: problem.degree,
+        normalized_mesh: problem.normalized_mesh.clone(),
     };
-    Ok(branch)
+    Ok(LimitCycleContinuationResult {
+        branch,
+        collocation_adaptation: problem.adaptation_report().clone(),
+    })
 }
 
 pub fn extend_limit_cycle_collocation(
@@ -3122,20 +4362,47 @@ pub fn extend_limit_cycle_collocation(
     settings: ContinuationSettings,
     forward: bool,
 ) -> Result<ContinuationBranch> {
-    let mut problem = PeriodicOrbitCollocationProblem::new(
+    Ok(extend_limit_cycle_collocation_with_report(
         system,
         param_index,
-        config.mesh_points,
+        config,
+        branch,
+        settings,
+        forward,
+        CollocationAdaptivitySettings::default(),
+    )?
+    .branch)
+}
+
+pub fn extend_limit_cycle_collocation_with_report(
+    system: &mut EquationSystem,
+    param_index: usize,
+    config: CollocationConfig,
+    branch: ContinuationBranch,
+    settings: ContinuationSettings,
+    forward: bool,
+    adaptivity: CollocationAdaptivitySettings,
+) -> Result<LimitCycleContinuationResult> {
+    let normalized_mesh = validated_normalized_mesh(config.mesh_points, &config.normalized_mesh)?;
+    let mut problem = PeriodicOrbitCollocationProblem::new_on_mesh_with_adaptivity(
+        system,
+        param_index,
         config.degree,
         config.phase_anchor,
         config.phase_direction,
+        normalized_mesh,
+        adaptivity,
     )?;
     let mut result = extend_branch_with_problem(&mut problem, branch, settings, forward)?;
     result.branch_type = BranchType::LimitCycle {
-        ntst: config.mesh_points,
-        ncol: config.degree,
+        ntst: problem.mesh_points,
+        ncol: problem.degree,
+        normalized_mesh: problem.normalized_mesh.clone(),
     };
-    Ok(result)
+    Ok(LimitCycleContinuationResult {
+        branch: result,
+        collocation_adaptation: problem.adaptation_report().clone(),
+    })
 }
 
 #[cfg(test)]
@@ -3441,6 +4708,114 @@ mod tests {
     }
 
     #[test]
+    fn nonuniform_collocation_jacobian_matches_finite_differences() {
+        let equation = Bytecode {
+            ops: vec![
+                OpCode::LoadConst(1.0),
+                OpCode::LoadParam(0),
+                OpCode::LoadVar(0),
+                OpCode::Mul,
+                OpCode::Add,
+                OpCode::LoadVar(0),
+                OpCode::LoadVar(0),
+                OpCode::Mul,
+                OpCode::Add,
+            ],
+        };
+        let normalized_mesh = vec![0.0, 0.12, 0.58, 1.0];
+        let mut system = EquationSystem::new(vec![equation], vec![0.3]);
+        let mut problem = PeriodicOrbitCollocationProblem::new_on_mesh(
+            &mut system,
+            0,
+            2,
+            vec![0.0],
+            vec![1.0],
+            normalized_mesh,
+        )
+        .expect("nonuniform problem");
+        let mut aug = DVector::zeros(problem.dimension() + 1);
+        aug[0] = 0.3;
+        aug[1] = -0.2;
+        aug[2] = 0.4;
+        aug[3] = 0.1;
+        for (slot, value) in [-0.1, 0.05, 0.2, 0.3, 0.15, -0.05].into_iter().enumerate() {
+            aug[problem.stage_offset() + slot] = value;
+        }
+        aug[problem.period_index()] = 1.7;
+
+        let analytic = problem.extended_jacobian(&aug).expect("analytic Jacobian");
+        for column in 0..analytic.ncols() {
+            let epsilon = 1e-7 * (1.0 + aug[column].abs());
+            let mut plus = aug.clone();
+            let mut minus = aug.clone();
+            plus[column] += epsilon;
+            minus[column] -= epsilon;
+            let mut plus_residual = DVector::zeros(problem.dimension());
+            let mut minus_residual = DVector::zeros(problem.dimension());
+            problem.residual(&plus, &mut plus_residual).expect("plus");
+            problem
+                .residual(&minus, &mut minus_residual)
+                .expect("minus");
+            let finite_difference = (plus_residual - minus_residual) / (2.0 * epsilon);
+            let analytic_column = analytic.column(column).into_owned();
+            let scale = 1.0_f64
+                .max(finite_difference.norm())
+                .max(analytic_column.norm());
+            let relative_error = (&finite_difference - analytic_column).norm() / scale;
+            assert!(
+                relative_error < 2e-7,
+                "column {column} relative error {relative_error:.3e}"
+            );
+        }
+    }
+
+    #[test]
+    fn nonuniform_palc_metric_integrates_a_constant_profile_to_one() {
+        let normalized_mesh = vec![0.0, 0.05, 0.2, 0.7, 1.0];
+        let mut system = constant_flow_system();
+        let problem = PeriodicOrbitCollocationProblem::new_on_mesh(
+            &mut system,
+            0,
+            3,
+            vec![0.0],
+            vec![1.0],
+            normalized_mesh,
+        )
+        .expect("nonuniform problem");
+        let aug = DVector::zeros(problem.dimension() + 1);
+        let weights = problem.palc_metric_weights(&aug).expect("metric");
+        let mut profile = DVector::zeros(problem.dimension() + 1);
+        for interval in 0..problem.mesh_points {
+            profile[1 + interval] = 1.0;
+        }
+        for stage_index in 0..problem.stage_count() {
+            profile[problem.stage_offset() + stage_index] = 1.0;
+        }
+        let norm = profile.dot(&weights.component_mul(&profile)).sqrt();
+        assert!((norm - 1.0).abs() < 1e-12, "constant-profile norm={norm}");
+    }
+
+    #[test]
+    fn defect_weighted_mesh_concentrates_intervals_at_the_hot_spot() {
+        let source_mesh = uniform_normalized_mesh(6);
+        let indicators = vec![1e-4, 1e-4, 2e-1, 4e-1, 1e-4, 1e-4];
+        let redistributed = defect_weighted_normalized_mesh(&source_mesh, &indicators, 3, 6)
+            .expect("redistributed mesh");
+        assert_eq!(redistributed.len(), source_mesh.len());
+        assert_eq!(redistributed[0], 0.0);
+        assert_eq!(redistributed[6], 1.0);
+        let widths = redistributed
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .collect::<Vec<_>>();
+        assert!(
+            widths.iter().copied().fold(f64::INFINITY, f64::min)
+                < 0.6 * widths.iter().copied().fold(0.0_f64, f64::max)
+        );
+        assert!(redistributed.windows(2).all(|pair| pair[1] > pair[0]));
+    }
+
+    #[test]
     fn collocation_defect_detects_an_underresolved_profile() {
         let equation = Bytecode {
             ops: vec![
@@ -3474,6 +4849,931 @@ mod tests {
     }
 
     #[test]
+    fn collocation_defect_estimate_identifies_the_hot_interval() {
+        let equation = Bytecode {
+            ops: vec![
+                OpCode::LoadVar(0),
+                OpCode::LoadVar(0),
+                OpCode::Mul,
+                OpCode::LoadConst(1.0),
+                OpCode::Add,
+            ],
+        };
+        let mut system = EquationSystem::new(vec![equation], vec![0.0]);
+        let mut problem =
+            PeriodicOrbitCollocationProblem::new(&mut system, 0, 3, 1, vec![1.0], vec![1.0])
+                .expect("problem");
+        let mut aug = DVector::zeros(problem.dimension() + 1);
+        for interval in 0..3 {
+            aug[1 + interval] = 1.0;
+            aug[problem.stage_offset() + interval] = 1.0;
+        }
+        aug[problem.stage_offset() + 1] = 12.0;
+        aug[problem.period_index()] = 3.0;
+
+        let estimate = problem
+            .scaled_collocation_defect_estimate(&aug)
+            .expect("defect estimate");
+        assert_eq!(estimate.interval_scaled_defects.len(), 3);
+        assert_eq!(
+            estimate
+                .interval_scaled_defects
+                .iter()
+                .enumerate()
+                .max_by(|(_, left), (_, right)| left.total_cmp(right))
+                .map(|(index, _)| index),
+            Some(1)
+        );
+        assert_eq!(
+            estimate.max_scaled_defect,
+            estimate.interval_scaled_defects[1]
+        );
+    }
+
+    #[test]
+    fn refinement_target_is_deterministic_and_uses_local_defects() {
+        let localized = propose_uniform_mesh_refinement(
+            &[1.0e-3, 2.0e-1, 1.0e-3, 1.0e-3],
+            3,
+            MAX_SCALED_COLLOCATION_DEFECT,
+            32,
+        )
+        .expect("localized refinement");
+        let uniform =
+            propose_uniform_mesh_refinement(&[2.0e-1; 4], 3, MAX_SCALED_COLLOCATION_DEFECT, 32)
+                .expect("uniform refinement");
+        assert!(localized > 4);
+        assert!(uniform > localized);
+        assert_eq!(
+            localized,
+            propose_uniform_mesh_refinement(
+                &[1.0e-3, 2.0e-1, 1.0e-3, 1.0e-3],
+                3,
+                MAX_SCALED_COLLOCATION_DEFECT,
+                32,
+            )
+            .expect("repeat refinement")
+        );
+    }
+
+    #[test]
+    fn rejected_trial_redistributes_and_transfers_the_accepted_frontier() {
+        use crate::continuation::problem::StepRejectionAction;
+
+        let equation = Bytecode {
+            ops: vec![
+                OpCode::LoadVar(0),
+                OpCode::LoadVar(0),
+                OpCode::Mul,
+                OpCode::LoadConst(1.0),
+                OpCode::Add,
+            ],
+        };
+        let mut system = EquationSystem::new(vec![equation], vec![0.0]);
+        let adaptivity = CollocationAdaptivitySettings {
+            max_refinements: 2,
+            max_mesh_points: 16,
+            ..CollocationAdaptivitySettings::default()
+        };
+        let mut problem = PeriodicOrbitCollocationProblem::new_with_adaptivity(
+            &mut system,
+            0,
+            2,
+            1,
+            vec![1.0],
+            vec![1.0],
+            adaptivity,
+        )
+        .expect("problem");
+        let mut accepted = DVector::zeros(problem.dimension() + 1);
+        accepted[0] = 0.25;
+        accepted[1] = 1.0;
+        accepted[2] = 1.0;
+        accepted[problem.stage_offset()] = 1.0;
+        accepted[problem.stage_offset() + 1] = 1.0;
+        accepted[problem.period_index()] = 5.0;
+        let accepted_state = accepted.as_slice()[1..].to_vec();
+        let mut rejected = accepted.clone();
+        rejected[1] = 1.0;
+        rejected[2] = 2.0;
+        rejected[problem.stage_offset()] = 8.0;
+        rejected[problem.stage_offset() + 1] = 0.25;
+        let mut tangent = DVector::zeros(problem.dimension() + 1);
+        tangent[0] = 1.0;
+
+        let action = problem
+            .handle_step_rejection(&accepted, &tangent, &rejected, &[accepted_state])
+            .expect("adaptive rejection handler");
+        let StepRejectionAction::Refined {
+            accepted_aug,
+            accepted_tangent,
+            branch_states,
+            branch_type,
+        } = action
+        else {
+            panic!("under-resolved trial should trigger refinement");
+        };
+        let report = problem.adaptation_report();
+        assert_eq!(report.attempts.len(), 1);
+        assert_eq!(report.attempts[0].old_mesh_points, 2);
+        assert_eq!(
+            report.attempts[0].kind,
+            CollocationMeshAdaptationKind::Redistribution
+        );
+        assert_eq!(report.attempts[0].new_mesh_points, 2);
+        assert!(meshes_materially_different(
+            &report.attempts[0].old_normalized_mesh,
+            &report.attempts[0].new_normalized_mesh
+        ));
+        assert_eq!(
+            report.current_mesh_points,
+            report.attempts[0].new_mesh_points
+        );
+        assert!(report.termination.is_none());
+        assert_eq!(accepted_aug.len(), problem.dimension() + 1);
+        assert_eq!(accepted_tangent.len(), problem.dimension() + 1);
+        assert_eq!(branch_states, vec![accepted_aug.as_slice()[1..].to_vec()]);
+        assert_eq!(
+            branch_type,
+            Some(BranchType::LimitCycle {
+                ntst: report.current_mesh_points,
+                ncol: 1,
+                normalized_mesh: report.current_normalized_mesh.clone(),
+            })
+        );
+        assert_eq!(accepted_aug[0], 0.25);
+        assert_eq!(accepted_aug[problem.period_index()], 5.0);
+        assert!(accepted_aug.as_slice()[1..problem.period_index()]
+            .iter()
+            .all(|value| (*value - 1.0).abs() < 1e-12));
+    }
+
+    #[test]
+    fn restarted_extension_transfers_only_attempts_appended_after_seed_report() {
+        use crate::continuation::problem::StepRejectionAction;
+
+        let equation = Bytecode {
+            ops: vec![
+                OpCode::LoadVar(0),
+                OpCode::LoadVar(0),
+                OpCode::Mul,
+                OpCode::LoadConst(1.0),
+                OpCode::Add,
+            ],
+        };
+        let mut system = EquationSystem::new(vec![equation], vec![0.0]);
+        let previous_mesh = vec![0.0, 0.5, 1.0];
+        let current_mesh = vec![0.0, 0.2, 1.0];
+        let adaptivity = CollocationAdaptivitySettings {
+            enabled: true,
+            redistribution_enabled: false,
+            defect_tolerance: 1.0e-12,
+            max_refinements: 3,
+            max_mesh_points: 8,
+        };
+        let mut problem = PeriodicOrbitCollocationProblem::new_on_mesh_with_adaptivity(
+            &mut system,
+            0,
+            1,
+            vec![1.0],
+            vec![1.0],
+            current_mesh.clone(),
+            adaptivity,
+        )
+        .expect("restarted periodic problem");
+        problem
+            .seed_adaptation_report(CollocationAdaptationReport {
+                initial_mesh_points: 2,
+                current_mesh_points: 2,
+                degree: 1,
+                defect_tolerance: 0.5,
+                refinement_budget: 99,
+                max_mesh_points: 128,
+                initial_normalized_mesh: previous_mesh.clone(),
+                current_normalized_mesh: current_mesh.clone(),
+                attempts: (1..=3)
+                    .map(|sequence| CollocationRefinementAttempt {
+                        sequence,
+                        kind: CollocationMeshAdaptationKind::Redistribution,
+                        old_mesh_points: 2,
+                        new_mesh_points: 2,
+                        degree: 1,
+                        trigger_defect: 0.25,
+                        tolerance: 0.5,
+                        interval_scaled_defects: vec![0.25, 0.1],
+                        old_normalized_mesh: previous_mesh.clone(),
+                        new_normalized_mesh: current_mesh.clone(),
+                    })
+                    .collect(),
+                termination: Some(CollocationDefectTermination {
+                    reason: CollocationDefectTerminationReason::RefinementBudgetExhausted,
+                    measured_defect: 0.5,
+                    tolerance: 0.5,
+                    mesh_points: 2,
+                    degree: 1,
+                    refinements_attempted: 3,
+                    refinement_budget: 99,
+                    max_mesh_points: 128,
+                    normalized_mesh: current_mesh.clone(),
+                }),
+            })
+            .expect("seed historical adaptation report");
+        assert_eq!(problem.adaptation_report().defect_tolerance, 1.0e-12);
+        assert_eq!(problem.adaptation_report().refinement_budget, 3);
+        assert_eq!(problem.adaptation_report().max_mesh_points, 8);
+        assert!(problem.adaptation_report().termination.is_none());
+
+        let mut accepted = DVector::zeros(problem.dimension() + 1);
+        accepted[0] = 0.1;
+        accepted[1] = 1.0;
+        accepted[2] = 3.0;
+        accepted[problem.stage_offset()] = 1.5;
+        accepted[problem.stage_offset() + 1] = -0.75;
+        accepted[problem.period_index()] = 4.0;
+        let persisted_before_extension = accepted.as_slice()[1..].to_vec();
+        let mut rejected = accepted.clone();
+        rejected[1] = 1.0;
+        rejected[2] = 12.0;
+        rejected[problem.stage_offset()] = -9.0;
+        rejected[problem.stage_offset() + 1] = 7.0;
+        let mut tangent = DVector::zeros(problem.dimension() + 1);
+        tangent[0] = 1.0;
+
+        let action = problem
+            .handle_step_rejection(&accepted, &tangent, &rejected, &[])
+            .expect("new adaptive retry");
+        assert!(matches!(action, StepRejectionAction::Refined { .. }));
+        assert_eq!(problem.adaptation_report().attempts.len(), 4);
+        let new_attempt = problem
+            .adaptation_report()
+            .attempts
+            .last()
+            .expect("new attempt");
+        let expected = transfer_collocation_state(
+            &persisted_before_extension,
+            &current_mesh,
+            &new_attempt.new_normalized_mesh,
+            1,
+            1,
+            &problem.coeffs.nodes,
+        )
+        .expect("single current-to-final transfer");
+        let transferred = problem
+            .transfer_branch_states_to_current_discretization(&[persisted_before_extension])
+            .expect("extension history transfer");
+
+        assert_eq!(transferred.len(), 1);
+        assert_eq!(transferred[0].len(), expected.len());
+        for (actual, expected) in transferred[0].iter().zip(expected) {
+            assert!((actual - expected).abs() < 1.0e-12);
+        }
+    }
+
+    #[test]
+    fn exhausted_refinement_budget_returns_structured_termination() {
+        use crate::continuation::problem::StepRejectionAction;
+
+        let equation = Bytecode {
+            ops: vec![
+                OpCode::LoadVar(0),
+                OpCode::LoadVar(0),
+                OpCode::Mul,
+                OpCode::LoadConst(1.0),
+                OpCode::Add,
+            ],
+        };
+        let mut system = EquationSystem::new(vec![equation], vec![0.0]);
+        let adaptivity = CollocationAdaptivitySettings {
+            max_refinements: 0,
+            max_mesh_points: 8,
+            ..CollocationAdaptivitySettings::default()
+        };
+        let mut problem = PeriodicOrbitCollocationProblem::new_with_adaptivity(
+            &mut system,
+            0,
+            2,
+            1,
+            vec![1.0],
+            vec![1.0],
+            adaptivity,
+        )
+        .expect("problem");
+        let mut accepted = DVector::zeros(problem.dimension() + 1);
+        accepted[problem.period_index()] = 5.0;
+        let mut rejected = accepted.clone();
+        rejected[1] = 1.0;
+        rejected[2] = 2.0;
+        rejected[problem.stage_offset()] = 8.0;
+        rejected[problem.stage_offset() + 1] = 0.25;
+        let tangent = DVector::from_element(problem.dimension() + 1, 1.0);
+
+        let action = problem
+            .handle_step_rejection(&accepted, &tangent, &rejected, &[])
+            .expect("adaptive rejection handler");
+        assert!(matches!(action, StepRejectionAction::Terminate));
+        let termination = problem
+            .adaptation_report()
+            .termination
+            .as_ref()
+            .expect("structured termination");
+        assert_eq!(
+            termination.reason,
+            CollocationDefectTerminationReason::RefinementBudgetExhausted
+        );
+        assert!(termination.measured_defect > termination.tolerance);
+        assert_eq!(termination.mesh_points, 2);
+        assert_eq!(termination.degree, 1);
+        assert_eq!(termination.refinements_attempted, 0);
+        assert_eq!(termination.refinement_budget, 0);
+    }
+
+    #[test]
+    fn coarse_analytic_cycle_is_corrected_refined_and_revalidated() {
+        let mesh_points = 4;
+        let degree = 2;
+        let period = 2.0 * PI;
+        let mesh_states = (0..mesh_points)
+            .map(|index| {
+                let theta = period * index as f64 / mesh_points as f64;
+                vec![theta.cos(), theta.sin()]
+            })
+            .collect::<Vec<_>>();
+        let coeffs = CollocationCoefficients::new(degree).expect("coefficients");
+        let stage_states =
+            build_stage_states_from_mesh(2, mesh_points, degree, &coeffs.nodes, &mesh_states);
+        let setup = LimitCycleSetup {
+            guess: LimitCycleGuess {
+                param_value: 0.0,
+                period,
+                mesh_states,
+                stage_states,
+                requires_fixed_parameter_correction: true,
+            },
+            phase_anchor: vec![1.0, 0.0],
+            phase_direction: vec![0.0, 1.0],
+            mesh_points,
+            collocation_degree: degree,
+            normalized_mesh: uniform_normalized_mesh(mesh_points),
+        };
+        let adaptivity = CollocationAdaptivitySettings {
+            max_refinements: 4,
+            max_mesh_points: 64,
+            ..CollocationAdaptivitySettings::default()
+        };
+        let mut system = stuart_landau_system();
+        let (corrected, flat_state, report) =
+            correct_limit_cycle_setup_adaptive(&mut system, 0, setup, 1e-10, 14, adaptivity)
+                .expect("adaptive fixed-parameter correction");
+
+        assert!(!report.attempts.is_empty(), "coarse mesh should refine");
+        assert!(corrected.mesh_points > mesh_points);
+        assert_eq!(report.current_mesh_points, corrected.mesh_points);
+        assert!(report.termination.is_none());
+        let mut problem = corrected
+            .to_problem(&mut system, 0)
+            .expect("refined problem");
+        let mut aug = DVector::zeros(flat_state.len() + 1);
+        aug[0] = corrected.guess.param_value;
+        aug.as_mut_slice()[1..].copy_from_slice(&flat_state);
+        let defect = problem
+            .scaled_collocation_defect(&aug)
+            .expect("refined defect");
+        assert!(
+            defect <= adaptivity.defect_tolerance,
+            "refined defect {defect:.3e} exceeds {:.3e}",
+            adaptivity.defect_tolerance
+        );
+        let mut residual = DVector::zeros(problem.dimension());
+        problem.residual(&aug, &mut residual).expect("residual");
+        assert!(
+            residual.norm() / (residual.len() as f64).sqrt() <= 1e-10,
+            "refined algebraic residual={:.3e}",
+            residual.norm() / (residual.len() as f64).sqrt()
+        );
+    }
+
+    #[test]
+    fn analytic_slow_fast_cycle_refines_from_a_coarse_temporal_mesh() {
+        // The unit circle is invariant while theta' = a + b cos(theta), with
+        // a=(1+eps)/2 and b=(1-eps)/2.  Small eps creates a long slow passage
+        // near (-1, 0) and a sharp transition elsewhere, but the exact period
+        // and normalized-time profile remain available analytically.
+        let epsilon: f64 = 0.02;
+        let a = 0.5 * (1.0 + epsilon);
+        let b = 0.5 * (1.0 - epsilon);
+        let x_equation = Bytecode {
+            ops: vec![
+                OpCode::LoadConst(1.0),
+                OpCode::LoadVar(0),
+                OpCode::LoadVar(0),
+                OpCode::Mul,
+                OpCode::LoadVar(1),
+                OpCode::LoadVar(1),
+                OpCode::Mul,
+                OpCode::Add,
+                OpCode::Sub,
+                OpCode::LoadVar(0),
+                OpCode::Mul,
+                OpCode::LoadConst(a),
+                OpCode::LoadConst(b),
+                OpCode::LoadVar(0),
+                OpCode::Mul,
+                OpCode::Add,
+                OpCode::LoadVar(1),
+                OpCode::Mul,
+                OpCode::Sub,
+            ],
+        };
+        let y_equation = Bytecode {
+            ops: vec![
+                OpCode::LoadConst(1.0),
+                OpCode::LoadVar(0),
+                OpCode::LoadVar(0),
+                OpCode::Mul,
+                OpCode::LoadVar(1),
+                OpCode::LoadVar(1),
+                OpCode::Mul,
+                OpCode::Add,
+                OpCode::Sub,
+                OpCode::LoadVar(1),
+                OpCode::Mul,
+                OpCode::LoadConst(a),
+                OpCode::LoadConst(b),
+                OpCode::LoadVar(0),
+                OpCode::Mul,
+                OpCode::Add,
+                OpCode::LoadVar(0),
+                OpCode::Mul,
+                OpCode::Add,
+            ],
+        };
+        let mut system = EquationSystem::new(vec![x_equation, y_equation], vec![0.0]);
+        let period = 2.0 * PI / epsilon.sqrt();
+        let profile = |normalized_time: f64| {
+            let half_phase = PI * normalized_time;
+            let theta = 2.0 * ((half_phase.sin() / epsilon.sqrt()).atan2(half_phase.cos()));
+            vec![theta.cos(), theta.sin()]
+        };
+        let mesh_points = 6;
+        let degree = 3;
+        let coeffs = CollocationCoefficients::new(degree).expect("coefficients");
+        let mesh_states = (0..mesh_points)
+            .map(|interval| profile(interval as f64 / mesh_points as f64))
+            .collect::<Vec<_>>();
+        let stage_states = (0..mesh_points)
+            .map(|interval| {
+                coeffs
+                    .nodes
+                    .iter()
+                    .map(|node| profile((interval as f64 + node) / mesh_points as f64))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let setup = LimitCycleSetup {
+            guess: LimitCycleGuess {
+                param_value: 0.0,
+                period,
+                mesh_states,
+                stage_states,
+                requires_fixed_parameter_correction: true,
+            },
+            phase_anchor: vec![1.0, 0.0],
+            phase_direction: vec![0.0, 1.0],
+            mesh_points,
+            collocation_degree: degree,
+            normalized_mesh: uniform_normalized_mesh(mesh_points),
+        };
+        let (uniform_setup, uniform_flat) =
+            prepare_limit_cycle_setup(setup.clone(), 2).expect("uniform analytic setup");
+        let mut uniform_problem = uniform_setup
+            .to_problem(&mut system, 0)
+            .expect("uniform analytic problem");
+        let mut uniform_aug = DVector::zeros(uniform_flat.len() + 1);
+        uniform_aug[0] = uniform_setup.guess.param_value;
+        uniform_aug.as_mut_slice()[1..].copy_from_slice(&uniform_flat);
+        let uniform_estimate = uniform_problem
+            .scaled_collocation_defect_estimate(&uniform_aug)
+            .expect("uniform analytic defect");
+        drop(uniform_problem);
+
+        let redistributed_mesh = defect_weighted_normalized_mesh(
+            &uniform_setup.normalized_mesh,
+            &uniform_estimate.interval_scaled_defects,
+            degree,
+            mesh_points,
+        )
+        .expect("redistributed analytic mesh");
+        let redistributed_widths = redistributed_mesh
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .collect::<Vec<_>>();
+        let minimum_width = redistributed_widths
+            .iter()
+            .copied()
+            .fold(f64::INFINITY, f64::min);
+        let maximum_width = redistributed_widths.iter().copied().fold(0.0_f64, f64::max);
+        assert!(minimum_width < 0.75 * maximum_width);
+
+        let redistributed_mesh_states = redistributed_mesh[..mesh_points]
+            .iter()
+            .map(|time| profile(*time))
+            .collect::<Vec<_>>();
+        let redistributed_stage_states = (0..mesh_points)
+            .map(|interval| {
+                let left = redistributed_mesh[interval];
+                let width = redistributed_mesh[interval + 1] - left;
+                coeffs
+                    .nodes
+                    .iter()
+                    .map(|node| profile(left + width * node))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let redistributed_setup = LimitCycleSetup {
+            guess: LimitCycleGuess {
+                param_value: 0.0,
+                period,
+                mesh_states: redistributed_mesh_states,
+                stage_states: redistributed_stage_states,
+                requires_fixed_parameter_correction: false,
+            },
+            phase_anchor: vec![1.0, 0.0],
+            phase_direction: vec![0.0, 1.0],
+            mesh_points,
+            collocation_degree: degree,
+            normalized_mesh: redistributed_mesh,
+        };
+        let (redistributed_setup, redistributed_flat) =
+            prepare_limit_cycle_setup(redistributed_setup, 2).expect("redistributed setup");
+        let mut redistributed_problem = redistributed_setup
+            .to_problem(&mut system, 0)
+            .expect("redistributed analytic problem");
+        let mut redistributed_aug = DVector::zeros(redistributed_flat.len() + 1);
+        redistributed_aug[0] = redistributed_setup.guess.param_value;
+        redistributed_aug.as_mut_slice()[1..].copy_from_slice(&redistributed_flat);
+        let redistributed_defect = redistributed_problem
+            .scaled_collocation_defect(&redistributed_aug)
+            .expect("redistributed analytic defect");
+        assert!(
+            redistributed_defect < uniform_estimate.max_scaled_defect,
+            "same-size redistributed defect {redistributed_defect:.3e} did not improve uniform defect {:.3e}",
+            uniform_estimate.max_scaled_defect
+        );
+        drop(redistributed_problem);
+
+        let adaptivity = CollocationAdaptivitySettings {
+            max_refinements: 3,
+            max_mesh_points: 96,
+            ..CollocationAdaptivitySettings::default()
+        };
+        let (corrected, flat_state, report) =
+            correct_limit_cycle_setup_adaptive(&mut system, 0, setup, 1e-9, 18, adaptivity)
+                .expect("slow-fast cycle refinement");
+        assert!(!report.attempts.is_empty());
+        assert_eq!(
+            report.attempts[0].kind,
+            CollocationMeshAdaptationKind::Redistribution
+        );
+        assert_eq!(
+            report.attempts[0].old_mesh_points,
+            report.attempts[0].new_mesh_points
+        );
+        assert!(corrected.mesh_points > mesh_points);
+        let relative_period_error = (corrected.guess.period - period).abs() / period;
+        assert!(
+            relative_period_error < 2e-2,
+            "relative period error={relative_period_error:.3e}"
+        );
+        let maximum_radius_error = corrected
+            .guess
+            .mesh_states
+            .iter()
+            .map(|state| (state[0].hypot(state[1]) - 1.0).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            maximum_radius_error < 1e-2,
+            "radius error={maximum_radius_error:.3e}"
+        );
+        let mut problem = corrected.to_problem(&mut system, 0).expect("problem");
+        let mut aug = DVector::zeros(flat_state.len() + 1);
+        aug[0] = corrected.guess.param_value;
+        aug.as_mut_slice()[1..].copy_from_slice(&flat_state);
+        let estimate = problem
+            .scaled_collocation_defect_estimate(&aug)
+            .expect("defect estimate");
+        assert!(estimate.max_scaled_defect <= adaptivity.defect_tolerance);
+        assert!(
+            report.attempts[0]
+                .interval_scaled_defects
+                .iter()
+                .copied()
+                .fold(0.0_f64, f64::max)
+                > adaptivity.defect_tolerance
+        );
+    }
+
+    #[test]
+    fn underresolved_continuation_trial_refines_without_consuming_the_step() {
+        let mesh_points = 4;
+        let degree = 2;
+        let period = 2.0 * PI;
+        let mesh_states = (0..mesh_points)
+            .map(|index| {
+                let theta = period * index as f64 / mesh_points as f64;
+                vec![theta.cos(), theta.sin()]
+            })
+            .collect::<Vec<_>>();
+        let coeffs = CollocationCoefficients::new(degree).expect("coefficients");
+        let stage_states =
+            build_stage_states_from_mesh(2, mesh_points, degree, &coeffs.nodes, &mesh_states);
+        let setup = LimitCycleSetup {
+            guess: LimitCycleGuess {
+                param_value: 1.0,
+                period,
+                mesh_states,
+                stage_states,
+                requires_fixed_parameter_correction: true,
+            },
+            phase_anchor: vec![1.0, 0.0],
+            phase_direction: vec![0.0, 1.0],
+            mesh_points,
+            collocation_degree: degree,
+            normalized_mesh: uniform_normalized_mesh(mesh_points),
+        };
+        let mut system = parameterized_stuart_landau_system(1.0);
+        let (mut coarse, _) =
+            correct_limit_cycle_setup_impl(&mut system, 0, setup, 1e-10, 14, false, None)
+                .expect("algebraic coarse correction");
+        coarse.guess.requires_fixed_parameter_correction = false;
+        let coarse_guess = coarse.guess.clone();
+        let config = coarse.collocation_config();
+        let settings = ContinuationSettings {
+            step_size: 0.01,
+            min_step_size: 1e-5,
+            max_step_size: 0.01,
+            max_steps: 1,
+            corrector_steps: 12,
+            corrector_tolerance: 1e-10,
+            step_tolerance: 1e-10,
+        };
+        let adaptivity = CollocationAdaptivitySettings {
+            max_refinements: 4,
+            max_mesh_points: 64,
+            ..CollocationAdaptivitySettings::default()
+        };
+        let result = continue_limit_cycle_collocation_with_report(
+            &mut system,
+            0,
+            config.clone(),
+            coarse_guess.clone(),
+            settings,
+            true,
+            adaptivity,
+        )
+        .expect("adaptive continuation");
+
+        assert_eq!(result.branch.points.len(), 2);
+        assert!(!result.collocation_adaptation.attempts.is_empty());
+        assert!(result.collocation_adaptation.termination.is_none());
+        let final_ntst = result.collocation_adaptation.current_mesh_points;
+        assert!(final_ntst > mesh_points);
+        assert_eq!(
+            result.branch.branch_type,
+            BranchType::LimitCycle {
+                ntst: final_ntst,
+                ncol: degree,
+                normalized_mesh: result
+                    .collocation_adaptation
+                    .current_normalized_mesh
+                    .clone(),
+            }
+        );
+        let expected_state_len = final_ntst * (degree + 1) * 2 + 1;
+        assert!(result
+            .branch
+            .points
+            .iter()
+            .all(|point| point.state.len() == expected_state_len));
+        let final_point = result.branch.points.last().expect("accepted point");
+        let mut problem = PeriodicOrbitCollocationProblem::new_on_mesh(
+            &mut system,
+            0,
+            degree,
+            vec![1.0, 0.0],
+            vec![0.0, 1.0],
+            result
+                .collocation_adaptation
+                .current_normalized_mesh
+                .clone(),
+        )
+        .expect("final problem");
+        let mut aug = DVector::zeros(final_point.state.len() + 1);
+        aug[0] = final_point.param_value;
+        aug.as_mut_slice()[1..].copy_from_slice(&final_point.state);
+        let defect = problem
+            .scaled_collocation_defect(&aug)
+            .expect("final defect");
+        assert!(defect <= adaptivity.defect_tolerance);
+
+        drop(problem);
+        let mut capped_system = parameterized_stuart_landau_system(1.0);
+        let capped = continue_limit_cycle_collocation_with_report(
+            &mut capped_system,
+            0,
+            config,
+            coarse_guess,
+            settings,
+            true,
+            CollocationAdaptivitySettings {
+                max_refinements: 0,
+                max_mesh_points: 64,
+                ..CollocationAdaptivitySettings::default()
+            },
+        )
+        .expect("structured partial result");
+        assert_eq!(capped.branch.points.len(), 1);
+        let termination = capped
+            .collocation_adaptation
+            .termination
+            .expect("defect termination");
+        assert_eq!(
+            termination.reason,
+            CollocationDefectTerminationReason::RefinementBudgetExhausted
+        );
+        assert!(termination.measured_defect > termination.tolerance);
+    }
+
+    #[test]
+    fn adaptive_extension_transfers_the_preexisting_branch_before_merge() {
+        let mesh_points = 4;
+        let degree = 2;
+        let period = 2.0 * PI;
+        let coeffs = CollocationCoefficients::new(degree).expect("coefficients");
+        let mut system = parameterized_stuart_landau_system(1.0);
+        let corrected_point = |system: &mut EquationSystem, parameter: f64| {
+            let radius = parameter.sqrt();
+            let mesh_states = (0..mesh_points)
+                .map(|index| {
+                    let theta = period * index as f64 / mesh_points as f64;
+                    vec![radius * theta.cos(), radius * theta.sin()]
+                })
+                .collect::<Vec<_>>();
+            let stage_states = (0..mesh_points)
+                .map(|interval| {
+                    coeffs
+                        .nodes
+                        .iter()
+                        .map(|node| {
+                            let theta = period * (interval as f64 + node) / mesh_points as f64;
+                            vec![radius * theta.cos(), radius * theta.sin()]
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            let setup = LimitCycleSetup {
+                guess: LimitCycleGuess {
+                    param_value: parameter,
+                    period,
+                    mesh_states,
+                    stage_states,
+                    requires_fixed_parameter_correction: true,
+                },
+                phase_anchor: vec![radius, 0.0],
+                phase_direction: vec![0.0, 1.0],
+                mesh_points,
+                collocation_degree: degree,
+                normalized_mesh: uniform_normalized_mesh(mesh_points),
+            };
+            let (_, state) =
+                correct_limit_cycle_setup_impl(system, 0, setup, 1e-10, 14, false, None)
+                    .expect("coarse algebraic point");
+            ContinuationPoint {
+                state,
+                param_value: parameter,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            }
+        };
+        let branch = ContinuationBranch {
+            points: vec![
+                corrected_point(&mut system, 1.0),
+                corrected_point(&mut system, 1.01),
+            ],
+            bifurcations: Vec::new(),
+            indices: vec![0, 1],
+            branch_type: BranchType::LimitCycle {
+                ntst: mesh_points,
+                ncol: degree,
+                normalized_mesh: uniform_normalized_mesh(mesh_points),
+            },
+            upoldp: Some(vec![vec![0.0, 1.0]]),
+            homoc_context: None,
+            resume_state: None,
+            manifold_geometry: None,
+        };
+        let config = CollocationConfig {
+            mesh_points,
+            degree,
+            phase_anchor: vec![1.0, 0.0],
+            phase_direction: vec![0.0, 1.0],
+            normalized_mesh: uniform_normalized_mesh(mesh_points),
+        };
+        let settings = ContinuationSettings {
+            step_size: 0.005,
+            min_step_size: 1e-5,
+            max_step_size: 0.005,
+            max_steps: 1,
+            corrector_steps: 12,
+            corrector_tolerance: 1e-10,
+            step_tolerance: 1e-10,
+        };
+        let result = extend_limit_cycle_collocation_with_report(
+            &mut system,
+            0,
+            config,
+            branch,
+            settings,
+            true,
+            CollocationAdaptivitySettings {
+                max_refinements: 3,
+                max_mesh_points: 64,
+                ..CollocationAdaptivitySettings::default()
+            },
+        )
+        .expect("adaptive extension");
+        assert_eq!(result.branch.points.len(), 3);
+        assert!(!result.collocation_adaptation.attempts.is_empty());
+        let final_ntst = result.collocation_adaptation.current_mesh_points;
+        let expected_state_len = final_ntst * (degree + 1) * 2 + 1;
+        assert!(result
+            .branch
+            .points
+            .iter()
+            .all(|point| point.state.len() == expected_state_len));
+        assert_eq!(
+            result.branch.branch_type,
+            BranchType::LimitCycle {
+                ntst: final_ntst,
+                ncol: degree,
+                normalized_mesh: result
+                    .collocation_adaptation
+                    .current_normalized_mesh
+                    .clone(),
+            }
+        );
+
+        let serialized = serde_json::to_string(&result.branch).expect("serialize adapted branch");
+        let reloaded: ContinuationBranch =
+            serde_json::from_str(&serialized).expect("reload adapted branch");
+        let (reloaded_ntst, reloaded_ncol, reloaded_mesh) = match &reloaded.branch_type {
+            BranchType::LimitCycle {
+                ntst,
+                ncol,
+                normalized_mesh,
+            } => (*ntst, *ncol, normalized_mesh.clone()),
+            other => panic!("expected reloaded limit-cycle branch, got {other:?}"),
+        };
+        assert!(!meshes_materially_different(
+            &reloaded_mesh,
+            &result.collocation_adaptation.current_normalized_mesh
+        ));
+        let reloaded_point_count = reloaded.points.len();
+        let reload_anchor = reloaded.points.last().expect("reloaded endpoint").state[..2].to_vec();
+        let resumed = extend_limit_cycle_collocation_with_report(
+            &mut system,
+            0,
+            CollocationConfig {
+                mesh_points: reloaded_ntst,
+                degree: reloaded_ncol,
+                phase_anchor: reload_anchor,
+                phase_direction: vec![0.0, 1.0],
+                normalized_mesh: reloaded_mesh.clone(),
+            },
+            reloaded,
+            settings,
+            true,
+            CollocationAdaptivitySettings {
+                max_refinements: 3,
+                max_mesh_points: 64,
+                ..CollocationAdaptivitySettings::default()
+            },
+        )
+        .expect("extend reloaded adapted branch");
+        assert!(resumed.branch.points.len() > reloaded_point_count);
+        let resumed_mesh = match &resumed.branch.branch_type {
+            BranchType::LimitCycle {
+                normalized_mesh, ..
+            } => normalized_mesh,
+            _ => panic!("expected resumed limit-cycle branch"),
+        };
+        assert!(!meshes_materially_different(
+            resumed_mesh,
+            &resumed.collocation_adaptation.current_normalized_mesh
+        ));
+    }
+
+    #[test]
     fn fixed_parameter_correction_solves_sampled_stuart_landau_cycle() {
         let mesh_points = 20;
         let degree = 4;
@@ -3499,6 +5799,7 @@ mod tests {
             phase_direction: vec![0.0, 1.0],
             mesh_points,
             collocation_degree: degree,
+            normalized_mesh: uniform_normalized_mesh(mesh_points),
         };
         let mut system = stuart_landau_system();
         let initial_residual = setup_residual_norm(&mut system, 0, &setup);
@@ -3560,6 +5861,67 @@ mod tests {
     }
 
     #[test]
+    fn public_fixed_parameter_correction_preserves_a_nonuniform_mesh() {
+        let mesh_points = 20;
+        let degree = 4;
+        let period = 2.0 * PI;
+        let normalized_mesh = (0..=mesh_points)
+            .map(|index| (index as f64 / mesh_points as f64).powf(1.35))
+            .collect::<Vec<_>>();
+        let coeffs = CollocationCoefficients::new(degree).expect("coefficients");
+        let mesh_states = normalized_mesh[..mesh_points]
+            .iter()
+            .map(|time| {
+                let theta = period * time;
+                vec![theta.cos(), theta.sin()]
+            })
+            .collect::<Vec<_>>();
+        let stage_states = (0..mesh_points)
+            .map(|interval| {
+                let left = normalized_mesh[interval];
+                let width = normalized_mesh[interval + 1] - left;
+                coeffs
+                    .nodes
+                    .iter()
+                    .map(|node| {
+                        let theta = period * (left + width * node);
+                        vec![theta.cos(), theta.sin()]
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let setup = LimitCycleSetup {
+            guess: LimitCycleGuess {
+                param_value: 0.0,
+                period,
+                mesh_states,
+                stage_states,
+                requires_fixed_parameter_correction: true,
+            },
+            phase_anchor: vec![1.0, 0.0],
+            phase_direction: vec![0.0, 1.0],
+            mesh_points,
+            collocation_degree: degree,
+            normalized_mesh: normalized_mesh.clone(),
+        };
+        let mut system = stuart_landau_system();
+        let (corrected, flat_state) = correct_limit_cycle_setup(&mut system, 0, setup, 1e-10, 12)
+            .expect("nonuniform fixed-parameter correction");
+        assert_eq!(corrected.normalized_mesh, normalized_mesh);
+        let mut problem = corrected
+            .to_problem(&mut system, 0)
+            .expect("corrected problem");
+        let mut aug = DVector::zeros(flat_state.len() + 1);
+        aug[0] = corrected.guess.param_value;
+        aug.as_mut_slice()[1..].copy_from_slice(&flat_state);
+        let mut residual = DVector::zeros(problem.dimension());
+        problem
+            .residual(&aug, &mut residual)
+            .expect("corrected residual");
+        assert!(residual.norm() / (residual.len() as f64).sqrt() <= 1e-10);
+    }
+
+    #[test]
     fn fixed_parameter_correction_rejects_an_equilibrium_profile() {
         let mut system = EquationSystem::new(
             vec![Bytecode {
@@ -3579,6 +5941,7 @@ mod tests {
             phase_direction: vec![1.0],
             mesh_points: 4,
             collocation_degree: 2,
+            normalized_mesh: uniform_normalized_mesh(4),
         };
 
         let error = correct_limit_cycle_setup(&mut system, 0, setup, 1e-10, 8)
@@ -3610,6 +5973,7 @@ mod tests {
             phase_direction: vec![1.0],
             mesh_points: 4,
             collocation_degree: 2,
+            normalized_mesh: uniform_normalized_mesh(4),
         };
 
         let config = setup.collocation_config();
@@ -4145,6 +6509,7 @@ mod tests {
             phase_direction: vec![0.0, 1.0, 0.0, 0.0],
             mesh_points: ntst,
             collocation_degree: ncol,
+            normalized_mesh: uniform_normalized_mesh(ntst),
         };
         let mut system = stuart_landau_with_transverse_pair(decay, frequency);
         let (_, cycle_state) = correct_limit_cycle_setup(&mut system, 0, setup, 1e-11, 12)
@@ -4229,6 +6594,7 @@ mod tests {
             phase_direction: vec![0.0, 1.0],
             mesh_points: ntst,
             collocation_degree: ncol,
+            normalized_mesh: uniform_normalized_mesh(ntst),
         };
         let mut system = stuart_landau_system();
         let (_corrected, cycle_state) = correct_limit_cycle_setup(&mut system, 0, setup, 1e-11, 12)
@@ -4789,7 +7155,7 @@ mod tests {
         );
 
         let (mesh_points, collocation_degree) = match branch.branch_type {
-            BranchType::LimitCycle { ntst, ncol } => (ntst, ncol),
+            BranchType::LimitCycle { ntst, ncol, .. } => (ntst, ncol),
             _ => panic!("Expected limit cycle branch"),
         };
         assert_eq!(

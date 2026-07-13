@@ -34,6 +34,11 @@ import {
   runEquilibriumManifold1DExtensionWithProgress,
   runManifold2DExtensionWithProgress
 } from './progress';
+import {
+  buildCollocationAdaptivitySettings,
+  collocationAdaptivityEntries,
+  defaultCollocationAdaptivityInputs,
+} from './collocation-adaptivity';
 
 type ManifoldEq1DBranchMetadata = {
   type: 'ManifoldEq1D';
@@ -446,6 +451,26 @@ export async function extendBranch(
   let directionForward = true;
   let maxStepsInput = '300';
   let stepSizeInput = defaults.step_size?.toString() || '0.01';
+  const supportsAdaptiveCollocation = [
+    'limit_cycle',
+    'lpc_curve',
+    'isoperiodic_curve',
+    'pd_curve',
+    'ns_curve',
+  ].includes(branch.branchType);
+  const adaptivityInputs = defaultCollocationAdaptivityInputs();
+  const storedAdaptivity = defaults.collocation_adaptivity;
+  if (storedAdaptivity && typeof storedAdaptivity === 'object') {
+    adaptivityInputs.enabled = storedAdaptivity.enabled ?? adaptivityInputs.enabled;
+    adaptivityInputs.redistributionEnabled =
+      storedAdaptivity.redistribution_enabled ?? adaptivityInputs.redistributionEnabled;
+    adaptivityInputs.defectTolerance =
+      storedAdaptivity.defect_tolerance?.toString() ?? adaptivityInputs.defectTolerance;
+    adaptivityInputs.maxRefinements =
+      storedAdaptivity.max_refinements?.toString() ?? adaptivityInputs.maxRefinements;
+    adaptivityInputs.maxMeshPoints =
+      storedAdaptivity.max_mesh_points?.toString() ?? adaptivityInputs.maxMeshPoints;
+  }
 
   const directionLabel = (forward: boolean) =>
     forward ? 'Forward (Append)' : 'Backward (Prepend)';
@@ -501,6 +526,10 @@ export async function extendBranch(
     }
   ];
 
+  if (supportsAdaptiveCollocation) {
+    entries.push(...collocationAdaptivityEntries(adaptivityInputs));
+  }
+
   const result = await runConfigMenu(`Extend Branch: ${branch.name}`, entries);
   if (result === 'back') {
     return;
@@ -514,7 +543,10 @@ export async function extendBranch(
     corrector_steps:
       branch.branchType === 'homoclinic_curve' ? 32 : defaults.corrector_steps || 4,
     corrector_tolerance: defaults.corrector_tolerance || 1e-6,
-    step_tolerance: defaults.step_tolerance || 1e-6
+    step_tolerance: defaults.step_tolerance || 1e-6,
+    ...(supportsAdaptiveCollocation
+      ? { collocation_adaptivity: buildCollocationAdaptivitySettings(adaptivityInputs) }
+      : {}),
   };
 
   console.log(chalk.cyan(`Extending branch ${directionForward ? 'forward' : 'backward'} (max ${continuationSettings.max_steps} points)...`));
@@ -542,21 +574,29 @@ export async function extendBranch(
       // Get ntst/ncol from the existing branch_type data
       let ntst = 20;
       let ncol = 4;
+      let normalizedMesh: number[] | undefined;
       const branchTypeData = branch.data.branch_type as any;
 
       // Handle stored format: {"LimitCycle":{"ntst":20,"ncol":4}}
       if (branchTypeData?.LimitCycle) {
         ntst = branchTypeData.LimitCycle.ntst ?? 20;
         ncol = branchTypeData.LimitCycle.ncol ?? 4;
+        normalizedMesh = branchTypeData.LimitCycle.normalized_mesh;
       }
       // Handle serde tagged format: {"type":"LimitCycle","ntst":20,"ncol":4}
       else if (branchTypeData?.type === 'LimitCycle') {
         ntst = branchTypeData.ntst ?? 20;
         ncol = branchTypeData.ncol ?? 4;
+        normalizedMesh = branchTypeData.normalized_mesh;
       }
 
       // Set in serde tagged enum format (Rust expects this)
-      branchDataToPass.branch_type = { type: 'LimitCycle', ntst, ncol };
+      branchDataToPass.branch_type = {
+        type: 'LimitCycle',
+        ntst,
+        ncol,
+        normalized_mesh: normalizedMesh
+      };
     }
 
     const branchTypeMeta = branch.data.branch_type as

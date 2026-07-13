@@ -1,8 +1,10 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
 
 export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
     InspectorDisclosure,
+    branch,
     branchExtensionDraft,
     branchExtensionError,
     canExtendBranch,
@@ -148,6 +150,20 @@ export function BranchExtensionWorkflow({ scope }: { scope: InspectorSelectionCo
                           data-testid="branch-extend-step-tolerance"
                         />
                       </label>
+                      {branch &&
+                      (branch.branchType === 'limit_cycle' ||
+                        branch.branchType === 'isoperiodic_curve' ||
+                        branch.branchType === 'lpc_curve' ||
+                        branch.branchType === 'pd_curve' ||
+                        branch.branchType === 'ns_curve') ? (
+                        <CollocationAdaptivityFields
+                          draft={branchExtensionDraft}
+                          onChange={(patch) =>
+                            setBranchExtensionDraft((prev) => ({ ...prev, ...patch }))
+                          }
+                          testIdPrefix="branch-extend"
+                        />
+                      ) : null}
                       {branchExtensionError ? (
                         <div className="field-error">{branchExtensionError}</div>
                       ) : null}

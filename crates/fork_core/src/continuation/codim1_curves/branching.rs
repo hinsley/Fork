@@ -1,3 +1,4 @@
+use super::equilibrium_codim2::{HopfHopfNormalForm, ZeroHopfNormalForm};
 use super::normal_forms::{bogdanov_takens_normal_form, BogdanovTakensNormalForm};
 use super::{FoldCurveProblem, HopfCurveProblem};
 use crate::continuation::homoclinic::HomoclinicProblem;
@@ -6,18 +7,23 @@ use crate::continuation::homoclinic_init::{
     HomoclinicExtraFlags, HomoclinicGuess, HomoclinicSetup,
 };
 use crate::continuation::periodic::{limit_cycle_setup_from_hopf, CollocationCoefficients};
-use crate::continuation::{ContinuationProblem, LPCCurveProblem};
+use crate::continuation::{
+    compute_nullspace_tangent, ContinuationProblem, LPCCurveProblem, NSCurveProblem,
+};
 use crate::equation_engine::EquationSystem;
 use crate::equilibrium::{compute_jacobian, compute_param_jacobian, SystemKind};
 use anyhow::{anyhow, bail, Result};
 use nalgebra::{DMatrix, DVector};
+use num_complex::Complex;
 use serde::{Deserialize, Serialize};
+use std::f64::consts::PI;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Codim2BranchTarget {
     Fold,
     Hopf,
     LimitPointCycle,
+    NeimarkSacker,
     Homoclinic,
 }
 
@@ -571,6 +577,479 @@ pub fn bogdanov_takens_homoclinic_seed(
         corrected_residual,
         correction_iterations,
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn curve_tangent_seeds<P: ContinuationProblem>(
+    problem: &mut P,
+    source: &DVector<f64>,
+    target: Codim2BranchTarget,
+    state_range: std::ops::Range<usize>,
+    param2_index: usize,
+    auxiliary_index: Option<usize>,
+    perturbation: f64,
+    tolerance: f64,
+) -> Result<Vec<Codim2BranchSeed>> {
+    if !perturbation.is_finite() || perturbation <= 0.0 {
+        bail!("Equilibrium codimension-two branch perturbation must be positive and finite");
+    }
+    let residual = residual_norm(problem, source)?;
+    if !residual.is_finite() || residual > tolerance.max(1e-7) * 100.0 {
+        bail!("Refined codimension-two source is not on the target curve (residual {residual})");
+    }
+    let tangent = compute_nullspace_tangent(&problem.extended_jacobian(source)?)?;
+    let tangent_norm = tangent.norm();
+    if !tangent_norm.is_finite() || tangent_norm <= 1e-14 {
+        bail!("Codimension-two target-curve tangent is degenerate");
+    }
+    let tangent = tangent / tangent_norm;
+    let mut seeds = Vec::with_capacity(2);
+    for direction in [-1.0, 1.0] {
+        let mut predictor = source + tangent.clone() * (direction * perturbation);
+        let (predictor_residual, corrected_residual, correction_iterations) =
+            correct_to_curve(problem, &mut predictor, tolerance, 12)?;
+        if corrected_residual > tolerance.max(1e-8) * 100.0 {
+            bail!(
+                "Codimension-two target-curve correction did not converge (residual {corrected_residual})"
+            );
+        }
+        seeds.push(Codim2BranchSeed {
+            target,
+            state: predictor
+                .rows(state_range.start, state_range.len())
+                .iter()
+                .copied()
+                .collect(),
+            param1_value: predictor[0],
+            param2_value: predictor[param2_index],
+            auxiliary: auxiliary_index.map(|index| predictor[index]),
+            period: None,
+            ntst: None,
+            ncol: None,
+            perturbation: direction * perturbation,
+            predictor_residual,
+            corrected_residual,
+            correction_iterations,
+        });
+    }
+    Ok(seeds)
+}
+
+/// Switch from a refined Zero-Hopf point to both orientations of its
+/// equilibrium fold and Hopf curves.
+pub fn zero_hopf_equilibrium_curve_seeds(
+    system: &mut EquationSystem,
+    normal_form: &ZeroHopfNormalForm,
+    perturbation: f64,
+    tolerance: f64,
+) -> Result<Vec<Codim2BranchSeed>> {
+    let old_params = system.params.clone();
+    system.params[normal_form.param1_index] = normal_form.param1_value;
+    system.params[normal_form.param2_index] = normal_form.param2_value;
+    let n = normal_form.state.len();
+
+    let fold_result = (|| {
+        let mut problem = FoldCurveProblem::new(
+            system,
+            SystemKind::Flow,
+            &normal_form.state,
+            normal_form.param1_index,
+            normal_form.param2_index,
+        )?;
+        let source = DVector::from_iterator(
+            n + 2,
+            [normal_form.param1_value, normal_form.param2_value]
+                .into_iter()
+                .chain(normal_form.state.iter().copied()),
+        );
+        curve_tangent_seeds(
+            &mut problem,
+            &source,
+            Codim2BranchTarget::Fold,
+            2..2 + n,
+            1,
+            None,
+            perturbation,
+            tolerance,
+        )
+    })();
+    let mut seeds = match fold_result {
+        Ok(seeds) => seeds,
+        Err(error) => {
+            system.params = old_params;
+            return Err(error);
+        }
+    };
+
+    system.params[normal_form.param1_index] = normal_form.param1_value;
+    system.params[normal_form.param2_index] = normal_form.param2_value;
+    let hopf_result = (|| {
+        let mut problem = HopfCurveProblem::new(
+            system,
+            SystemKind::Flow,
+            &normal_form.state,
+            normal_form.frequency,
+            normal_form.param1_index,
+            normal_form.param2_index,
+        )?;
+        let source = DVector::from_iterator(
+            n + 3,
+            [normal_form.param1_value, normal_form.param2_value]
+                .into_iter()
+                .chain(normal_form.state.iter().copied())
+                .chain(std::iter::once(normal_form.frequency.powi(2))),
+        );
+        curve_tangent_seeds(
+            &mut problem,
+            &source,
+            Codim2BranchTarget::Hopf,
+            2..2 + n,
+            1,
+            Some(n + 2),
+            perturbation,
+            tolerance,
+        )
+    })();
+    system.params = old_params;
+    seeds.extend(hopf_result?);
+    Ok(seeds)
+}
+
+/// Switch from a refined Hopf-Hopf point to both orientations of both Hopf
+/// modes.  The returned seeds are ordered `(mode 1 -, mode 1 +, mode 2 -,
+/// mode 2 +)`; the retained auxiliary `kappa` distinguishes the modes.
+pub fn hopf_hopf_equilibrium_curve_seeds(
+    system: &mut EquationSystem,
+    normal_form: &HopfHopfNormalForm,
+    perturbation: f64,
+    tolerance: f64,
+) -> Result<Vec<Codim2BranchSeed>> {
+    let old_params = system.params.clone();
+    let n = normal_form.state.len();
+    let mut seeds = Vec::with_capacity(4);
+    for frequency in [normal_form.frequency1, normal_form.frequency2] {
+        system.params[normal_form.param1_index] = normal_form.param1_value;
+        system.params[normal_form.param2_index] = normal_form.param2_value;
+        let mode_result = (|| {
+            let mut problem = HopfCurveProblem::new(
+                system,
+                SystemKind::Flow,
+                &normal_form.state,
+                frequency,
+                normal_form.param1_index,
+                normal_form.param2_index,
+            )?;
+            let source = DVector::from_iterator(
+                n + 3,
+                [normal_form.param1_value, normal_form.param2_value]
+                    .into_iter()
+                    .chain(normal_form.state.iter().copied())
+                    .chain(std::iter::once(frequency.powi(2))),
+            );
+            curve_tangent_seeds(
+                &mut problem,
+                &source,
+                Codim2BranchTarget::Hopf,
+                2..2 + n,
+                1,
+                Some(n + 2),
+                perturbation,
+                tolerance,
+            )
+        })();
+        match mode_result {
+            Ok(mode_seeds) => seeds.extend(mode_seeds),
+            Err(error) => {
+                system.params = old_params;
+                return Err(error);
+            }
+        }
+    }
+    system.params = old_params;
+    Ok(seeds)
+}
+
+fn collocation_coordinates<F>(
+    dim: usize,
+    ntst: usize,
+    ncol: usize,
+    mut orbit: F,
+) -> Result<Vec<f64>>
+where
+    F: FnMut(f64) -> Vec<f64>,
+{
+    if ntst < 3 || ncol == 0 {
+        bail!("Codimension-two NS predictor requires at least three mesh intervals and one stage");
+    }
+    let coefficients = CollocationCoefficients::new(ncol)?;
+    let mut stages = Vec::with_capacity(ntst * ncol * dim);
+    let mut meshes = Vec::with_capacity((ntst + 1) * dim);
+    for interval in 0..ntst {
+        for &node in &coefficients.nodes {
+            let state = orbit((interval as f64 + node) / ntst as f64);
+            if state.len() != dim {
+                bail!("Codimension-two NS orbit predictor returned the wrong state dimension");
+            }
+            stages.extend(state);
+        }
+    }
+    for mesh in 0..=ntst {
+        let state = orbit(mesh as f64 / ntst as f64);
+        if state.len() != dim {
+            bail!("Codimension-two NS orbit predictor returned the wrong state dimension");
+        }
+        meshes.extend(state);
+    }
+    stages.extend(meshes);
+    Ok(stages)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn correct_ns_curve_seed<F>(
+    system: &mut EquationSystem,
+    param1_index: usize,
+    param2_index: usize,
+    predicted_param1: f64,
+    predicted_param2: f64,
+    period: f64,
+    k: f64,
+    ntst: usize,
+    ncol: usize,
+    perturbation: f64,
+    tolerance: f64,
+    orbit: F,
+) -> Result<Codim2BranchSeed>
+where
+    F: FnMut(f64) -> Vec<f64>,
+{
+    if !period.is_finite() || period <= 0.0 || !k.is_finite() || k.abs() > 1.0 {
+        bail!("Codimension-two NS predictor produced invalid period or multiplier cosine");
+    }
+    let dim = system.equations.len();
+    let coords = collocation_coordinates(dim, ntst, ncol, orbit)?;
+    system.params[param1_index] = predicted_param1;
+    system.params[param2_index] = predicted_param2;
+    let mut problem = NSCurveProblem::new(
+        system,
+        coords.clone(),
+        period,
+        param1_index,
+        param2_index,
+        predicted_param1,
+        predicted_param2,
+        k,
+        ntst,
+        ncol,
+    )?;
+    let mut aug = DVector::from_iterator(
+        coords.len() + 4,
+        std::iter::once(predicted_param1)
+            .chain(coords.iter().copied())
+            .chain([period, predicted_param2, k]),
+    );
+    let (predictor_residual, corrected_residual, correction_iterations) =
+        correct_to_curve(&mut problem, &mut aug, tolerance, 12)?;
+    if corrected_residual > tolerance.max(1e-7) * 100.0 {
+        bail!(
+            "Codimension-two NS predictor correction did not converge (residual {corrected_residual})"
+        );
+    }
+    let corrected_coords = aug.rows(1, coords.len()).iter().copied().collect();
+    Ok(Codim2BranchSeed {
+        target: Codim2BranchTarget::NeimarkSacker,
+        state: corrected_coords,
+        param1_value: aug[0],
+        param2_value: aug[coords.len() + 2],
+        auxiliary: Some(aug[coords.len() + 3]),
+        period: Some(aug[coords.len() + 1]),
+        ntst: Some(ntst),
+        ncol: Some(ncol),
+        perturbation,
+        predictor_residual,
+        corrected_residual,
+        correction_iterations,
+    })
+}
+
+/// Predict and correct the NS-of-periodic-orbits curve emitted by a generic
+/// Zero-Hopf point.  Returns `None` when the coefficient sign test proves that
+/// this branch does not exist.
+pub fn zero_hopf_neimark_sacker_seed(
+    system: &mut EquationSystem,
+    normal_form: &ZeroHopfNormalForm,
+    amplitude: f64,
+    ntst: usize,
+    ncol: usize,
+    tolerance: f64,
+) -> Result<Option<Codim2BranchSeed>> {
+    if !normal_form.has_neimark_sacker {
+        return Ok(None);
+    }
+    if !amplitude.is_finite() || amplitude <= 0.0 {
+        bail!("Zero-Hopf NS amplitude must be positive and finite");
+    }
+    let epsilon_squared = amplitude.powi(2);
+    let parameter_direction = [
+        normal_form.ns_beta1 * normal_form.v10[0] + normal_form.ns_beta2 * normal_form.v01[0],
+        normal_form.ns_beta1 * normal_form.v10[1] + normal_form.ns_beta2 * normal_form.v01[1],
+    ];
+    let predicted_param1 = normal_form.param1_value + parameter_direction[0] * epsilon_squared;
+    let predicted_param2 = normal_form.param2_value + parameter_direction[1] * epsilon_squared;
+    let q0 = DVector::from_vec(normal_form.q0.clone());
+    let q1 = DVector::from_vec(normal_form.q1.clone());
+    let h020 = DVector::from_vec(normal_form.h020.clone());
+    let h011 = DVector::from_vec(normal_form.h011.clone());
+    let h00010 = DVector::from_vec(normal_form.h00010.clone());
+    let h00001 = DVector::from_vec(normal_form.h00001.clone());
+    let base = DVector::from_vec(normal_form.state.clone());
+    let center_complex = h00010 * Complex::new(normal_form.ns_beta1, 0.0)
+        + h00001 * Complex::new(normal_form.ns_beta2, 0.0);
+    let center = base
+        + (center_complex.map(|value| value.re) + q0 * normal_form.ns_center_coefficient + h011)
+            * epsilon_squared;
+    let transverse_frequency =
+        (2.0 * (normal_form.g110.re * normal_form.f011).abs()).sqrt() * amplitude;
+    let k = (2.0 * PI * transverse_frequency / normal_form.frequency).cos();
+    let period = 2.0 * PI / normal_form.frequency;
+    let old_params = system.params.clone();
+    let result = correct_ns_curve_seed(
+        system,
+        normal_form.param1_index,
+        normal_form.param2_index,
+        predicted_param1,
+        predicted_param2,
+        period,
+        k,
+        ntst,
+        ncol,
+        amplitude,
+        tolerance,
+        |tau| {
+            let phase = 2.0 * PI * tau;
+            let harmonic = Complex::from_polar(1.0, phase);
+            let second = harmonic * harmonic;
+            (0..center.len())
+                .map(|index| {
+                    center[index]
+                        + 2.0 * amplitude * (q1[index] * harmonic).re
+                        + 2.0 * epsilon_squared * (h020[index] * second).re
+                })
+                .collect()
+        },
+    );
+    system.params = old_params;
+    result.map(Some)
+}
+
+/// Predict and correct both NS-of-periodic-orbits branches emitted by a
+/// nonresonant Hopf-Hopf point.
+pub fn hopf_hopf_neimark_sacker_seeds(
+    system: &mut EquationSystem,
+    normal_form: &HopfHopfNormalForm,
+    amplitude: f64,
+    ntst: usize,
+    ncol: usize,
+    tolerance: f64,
+) -> Result<Vec<Codim2BranchSeed>> {
+    if !amplitude.is_finite() || amplitude <= 0.0 {
+        bail!("Hopf-Hopf NS amplitude must be positive and finite");
+    }
+    let epsilon_squared = amplitude.powi(2);
+    let old_params = system.params.clone();
+    let mut seeds = Vec::with_capacity(2);
+    for predictor in &normal_form.neimark_sacker_predictors {
+        let predicted_param1 =
+            normal_form.param1_value - predictor.parameter_quadratic[0] * epsilon_squared;
+        let predicted_param2 =
+            normal_form.param2_value - predictor.parameter_quadratic[1] * epsilon_squared;
+        let parameter_center: Vec<f64> = normal_form
+            .parameter_state1
+            .iter()
+            .zip(normal_form.parameter_state2.iter())
+            .map(|(&first, &second)| {
+                first * predictor.parameter_quadratic[0] + second * predictor.parameter_quadratic[1]
+            })
+            .collect();
+        let (q, h2, h11, base_frequency, other_frequency, base_correction, other_correction) =
+            if predictor.periodic_mode == 1 {
+                (
+                    &normal_form.q1,
+                    &normal_form.h2000,
+                    &normal_form.h1100,
+                    normal_form.frequency1,
+                    normal_form.frequency2,
+                    predictor.frequency1_quadratic,
+                    predictor.frequency2_quadratic,
+                )
+            } else {
+                (
+                    &normal_form.q2,
+                    &normal_form.h0020,
+                    &normal_form.h0011,
+                    normal_form.frequency2,
+                    normal_form.frequency1,
+                    predictor.frequency2_quadratic,
+                    predictor.frequency1_quadratic,
+                )
+            };
+        let corrected_frequency = base_frequency + base_correction * epsilon_squared;
+        let corrected_other = other_frequency + other_correction * epsilon_squared;
+        if corrected_frequency <= 0.0 || corrected_other <= 0.0 {
+            system.params = old_params;
+            bail!("Hopf-Hopf NS frequency correction became nonpositive");
+        }
+        let center: Vec<f64> = normal_form
+            .state
+            .iter()
+            .zip(h11.iter())
+            .zip(parameter_center.iter())
+            .map(|((&base, &mean), &parameter)| base + epsilon_squared * (mean.re - parameter))
+            .collect();
+        let q = q.clone();
+        let h2 = h2.clone();
+        let period = 2.0 * PI / corrected_frequency;
+        let k = (2.0 * PI * corrected_other / corrected_frequency).cos();
+        system.params[normal_form.param1_index] = predicted_param1;
+        system.params[normal_form.param2_index] = predicted_param2;
+        let result = correct_ns_curve_seed(
+            system,
+            normal_form.param1_index,
+            normal_form.param2_index,
+            predicted_param1,
+            predicted_param2,
+            period,
+            k,
+            ntst,
+            ncol,
+            if predictor.periodic_mode == 1 {
+                amplitude
+            } else {
+                -amplitude
+            },
+            tolerance,
+            |tau| {
+                let phase = 2.0 * PI * tau;
+                let harmonic = Complex::from_polar(1.0, phase);
+                let second = harmonic * harmonic;
+                (0..center.len())
+                    .map(|index| {
+                        center[index]
+                            + 2.0 * amplitude * (q[index] * harmonic).re
+                            + 2.0 * epsilon_squared * (h2[index] * second).re
+                    })
+                    .collect()
+            },
+        );
+        match result {
+            Ok(seed) => seeds.push(seed),
+            Err(error) => {
+                system.params = old_params;
+                return Err(error);
+            }
+        }
+    }
+    system.params = old_params;
+    Ok(seeds)
 }
 
 #[cfg(test)]

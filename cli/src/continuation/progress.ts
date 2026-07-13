@@ -27,6 +27,7 @@ function computeBatchSize(maxSteps: number): number {
 type ContinuationRunner<T> = {
   run_steps(batchSize: number): ContinuationProgress;
   get_progress(): ContinuationProgress;
+  get_adaptation_report?(): import('../types').CollocationAdaptationReport;
   get_result(): T;
 };
 
@@ -49,7 +50,19 @@ function runContinuationRunnerWithProgress<T>(
 
   printProgressComplete(label);
 
-  return runner.get_result();
+  // Reports must be captured before `get_result()`, which consumes the Rust
+  // runner handle. Preserve them on the same branch payload used by storage.
+  const collocationAdaptation = runner.get_adaptation_report?.();
+  const result = runner.get_result();
+  if (
+    collocationAdaptation &&
+    typeof result === 'object' &&
+    result !== null
+  ) {
+    (result as { collocation_adaptation?: import('../types').CollocationAdaptationReport })
+      .collocation_adaptation = collocationAdaptation;
+  }
+  return result;
 }
 
 /**
@@ -230,6 +243,7 @@ export function runLPCCurveWithProgress(
   param2Value: number,
   ntst: number,
   ncol: number,
+  normalizedMesh: number[],
   settings: any,
   forward: boolean,
   label: string
@@ -243,6 +257,7 @@ export function runLPCCurveWithProgress(
     param2Value,
     ntst,
     ncol,
+    normalizedMesh,
     settings,
     forward
   );
@@ -263,6 +278,7 @@ export function runIsoperiodicCurveWithProgress(
   param2Value: number,
   ntst: number,
   ncol: number,
+  normalizedMesh: number[],
   settings: any,
   forward: boolean,
   label: string
@@ -277,6 +293,7 @@ export function runIsoperiodicCurveWithProgress(
       param2Value,
       ntst,
       ncol,
+      normalizedMesh,
       settings,
       forward
     );
@@ -327,6 +344,7 @@ export function runPDCurveWithProgress(
   param2Value: number,
   ntst: number,
   ncol: number,
+  normalizedMesh: number[],
   settings: any,
   forward: boolean,
   label: string
@@ -340,6 +358,7 @@ export function runPDCurveWithProgress(
     param2Value,
     ntst,
     ncol,
+    normalizedMesh,
     settings,
     forward
   );
@@ -361,6 +380,7 @@ export function runNSCurveWithProgress(
   initialK: number,
   ntst: number,
   ncol: number,
+  normalizedMesh: number[],
   settings: any,
   forward: boolean,
   label: string
@@ -375,6 +395,7 @@ export function runNSCurveWithProgress(
     initialK,
     ntst,
     ncol,
+    normalizedMesh,
     settings,
     forward
   );

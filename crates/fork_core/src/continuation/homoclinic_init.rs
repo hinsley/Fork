@@ -8,6 +8,12 @@ use nalgebra::{DMatrix, DVector};
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
 
+const HOMOTOPY_SADDLE_EXTRAS: HomoclinicExtraFlags = HomoclinicExtraFlags {
+    free_time: true,
+    free_eps0: false,
+    free_eps1: true,
+};
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HomoclinicExtraFlags {
     pub free_time: bool,
@@ -584,11 +590,7 @@ pub fn homotopy_saddle_setup_from_equilibrium(
         param1_name: param1_name.to_string(),
         param2_name: param2_name.to_string(),
         base_params: params,
-        extras: HomoclinicExtraFlags {
-            free_time: true,
-            free_eps0: false,
-            free_eps1: true,
-        },
+        extras: HOMOTOPY_SADDLE_EXTRAS,
         basis,
     };
 
@@ -616,7 +618,7 @@ pub fn homoclinic_setup_from_homotopy_saddle_point(
     param2_name: &str,
     extras: HomoclinicExtraFlags,
 ) -> Result<HomoclinicSetup> {
-    homoclinic_setup_from_homoclinic_point(
+    homoclinic_setup_from_homoclinic_point_with_source_extras(
         system,
         stage_d_state,
         source_ntst,
@@ -629,6 +631,8 @@ pub fn homoclinic_setup_from_homotopy_saddle_point(
         param1_name,
         param2_name,
         extras,
+        HOMOTOPY_SADDLE_EXTRAS,
+        None,
     )
 }
 
@@ -1526,6 +1530,61 @@ mod tests {
         assert!(
             restarted.extras.free_time,
             "target extras should be applied"
+        );
+    }
+
+    #[test]
+    fn homotopy_saddle_conversion_decodes_source_extras_before_applying_target() {
+        let mut system = linear_system();
+        let source = homotopy_saddle_setup_from_equilibrium(
+            &mut system,
+            &[0.0, 0.1],
+            &[0.2, 0.1],
+            0,
+            1,
+            "mu",
+            "nu",
+            6,
+            2,
+            0.01,
+            0.2,
+            5.0,
+            1e-3,
+        )
+        .expect("homotopy-saddle setup");
+        let point_state = pack_homoclinic_state(&source.setup);
+
+        let converted = homoclinic_setup_from_homotopy_saddle_point(
+            &mut system,
+            &point_state,
+            source.setup.ntst,
+            source.setup.ncol,
+            source.setup.ntst,
+            source.setup.ncol,
+            &source.setup.base_params,
+            source.setup.param1_index,
+            source.setup.param2_index,
+            &source.setup.param1_name,
+            &source.setup.param2_name,
+            HomoclinicExtraFlags {
+                free_time: false,
+                free_eps0: true,
+                free_eps1: true,
+            },
+        )
+        .expect("StageD conversion");
+
+        assert!(
+            (converted.guess.time - source.setup.guess.time).abs() < 1e-12,
+            "StageD conversion must decode the source free-time value before applying target flags"
+        );
+        assert_eq!(
+            converted.extras,
+            HomoclinicExtraFlags {
+                free_time: false,
+                free_eps0: true,
+                free_eps1: true,
+            }
         );
     }
 }

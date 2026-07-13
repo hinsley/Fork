@@ -5,12 +5,14 @@ import { BranchExtensionWorkflow } from './branch/BranchExtensionWorkflow'
 import { BranchContinueWorkflow } from './branch/BranchContinueWorkflow'
 import { Codim1CurveWorkflow } from './branch/Codim1CurveWorkflow'
 import { IsoperiodicCurveWorkflow } from './branch/IsoperiodicCurveWorkflow'
+import { LimitCycleCodim1CurveWorkflow } from './branch/LimitCycleCodim1CurveWorkflow'
 import { LimitCycleFromHopfWorkflow } from './branch/LimitCycleFromHopfWorkflow'
 import { LimitCycleFromPDWorkflow } from './branch/LimitCycleFromPDWorkflow'
 import { HomoclinicFromLargeCycleWorkflow } from './branch/HomoclinicFromLargeCycleWorkflow'
 import { HomoclinicRestartWorkflow } from './branch/HomoclinicRestartWorkflow'
 import { HomotopySaddleWorkflow } from './branch/HomotopySaddleWorkflow'
 import { HomoclinicFromHomotopySaddleWorkflow } from './branch/HomoclinicFromHomotopySaddleWorkflow'
+import { NormalFormWorkflow } from './branch/NormalFormWorkflow'
 
 export function BranchInspectorSections({
   scope,
@@ -25,6 +27,8 @@ export function BranchInspectorSections({
               <>
                 <BranchDataSections scope={scope} />
 
+                <NormalFormWorkflow scope={scope} />
+
                 <BranchManifoldExtensionWorkflow scope={scope} />
 
                 <BranchExtensionWorkflow scope={scope} />
@@ -32,6 +36,8 @@ export function BranchInspectorSections({
                 <BranchContinueWorkflow scope={scope} />
 
                 <Codim1CurveWorkflow scope={scope} />
+
+                <LimitCycleCodim1CurveWorkflow scope={scope} />
 
                 <IsoperiodicCurveWorkflow scope={scope} />
 

@@ -33,6 +33,7 @@ import type {
   HomotopySaddleContinuationResult,
   HomotopySaddleFromEquilibriumRequest,
   LimitCycleContinuationFromHopfRequest,
+  LimitCycleCodim1CurveContinuationRequest,
   LimitCycleContinuationFromOrbitRequest,
   LimitCycleContinuationFromPDRequest,
   LimitCycleContinuationResult,
@@ -43,6 +44,10 @@ import type {
   Manifold2DExtensionRequest,
   Manifold2DExtensionResult,
   MapCycleContinuationFromPDRequest,
+  NormalFormComputationRequest,
+  NormalFormComputationResult,
+  PeriodicBranchPointSwitchRequest,
+  PeriodicBranchPointSwitchResult,
   LyapunovExponentsRequest,
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
@@ -977,6 +982,245 @@ export class MockForkCoreClient implements ForkCoreClient {
     return await job.promise
   }
 
+  async computeNormalForm(
+    request: NormalFormComputationRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<NormalFormComputationResult> {
+    const job = this.queue.enqueue(
+      'computeNormalForm',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+        const basicConditioning = {
+          eigenvector_pairing: 1,
+          right_residual: 1e-10,
+          left_residual: 1e-10,
+          homological_residual: 1e-9,
+        }
+        if (request.sourceType === 'Map') {
+          const normalForm = request.normalFormType === 'BranchPoint'
+            ? {
+                type: 'BranchPoint' as const,
+                kind: 'Transcritical' as const,
+                constant_parameter_coefficient: 0,
+                linear_parameter_coefficient: 1,
+                quadratic_coefficient: -1,
+                cubic_coefficient: 0,
+                conditioning: basicConditioning,
+              }
+            : request.normalFormType === 'PeriodDoubling'
+              ? {
+                  type: 'PeriodDoubling' as const,
+                  parameter_coefficient: 1,
+                  cubic_coefficient: -1,
+                  criticality: 'Supercritical' as const,
+                  conditioning: basicConditioning,
+                }
+              : {
+                  type: 'NeimarkSacker' as const,
+                  angle: Math.PI / 3,
+                  multiplier: { re: 0.5, im: Math.sqrt(3) / 2 },
+                  parameter_coefficient: { re: 1, im: 0 },
+                  cubic_coefficient: { re: -1, im: 0 },
+                  criticality: 'Supercritical' as const,
+                  conditioning: basicConditioning,
+                }
+          return { normalForm }
+        }
+        if (request.sourceType === 'PeriodicOrbit') {
+          const conditioning = {
+            ...basicConditioning,
+            return_map_residual: 1e-10,
+            section_residual: 1e-10,
+            return_time_correction: 1e-10,
+            section_transversality: 1,
+          }
+          const normalForm = request.normalFormType === 'BranchPoint'
+            ? {
+                type: 'BranchPoint' as const,
+                kind: 'Transcritical' as const,
+                constant_parameter_coefficient: 0,
+                linear_parameter_coefficient: 1,
+                quadratic_coefficient: -1,
+                cubic_coefficient: 0,
+                critical_mode: request.state.slice(0, request.system.varNames.length).map((_, index) => index === 0 ? 1 : 0),
+                conditioning,
+              }
+            : request.normalFormType === 'PeriodDoubling'
+              ? {
+                  type: 'PeriodDoubling' as const,
+                  multiplier: -1,
+                  parameter_coefficient: 1,
+                  cubic_coefficient: -1,
+                  criticality: 'Supercritical' as const,
+                  critical_mode: request.state.slice(0, request.system.varNames.length).map((_, index) => index === 0 ? 1 : 0),
+                  conditioning,
+                }
+              : {
+                  type: 'NeimarkSacker' as const,
+                  angle: Math.PI / 3,
+                  multiplier: { re: 0.5, im: Math.sqrt(3) / 2 },
+                  parameter_coefficient: { re: 1, im: 0 },
+                  cubic_coefficient: { re: -1, im: 0 },
+                  criticality: 'Supercritical' as const,
+                  conditioning,
+                }
+          return { normalForm }
+        }
+        const diagnostics = {
+          jacobian_condition_number: 2,
+          unfolding_condition_number: 3,
+          minimum_eigenvector_pairing: 0.9,
+          max_eigen_residual: 1e-10,
+          max_homological_residual: 1e-9,
+          resonance_distance: 0.4,
+        }
+        if (request.sourceType === 'ZeroHopf') {
+          return {
+            normalForm: {
+              type: 'ZeroHopf',
+              state: [...request.state],
+              param1_index: request.system.paramNames.indexOf(request.param1Name),
+              param2_index: request.system.paramNames.indexOf(request.param2Name),
+              param1_value: request.param1Value,
+              param2_value: request.param2Value,
+              frequency: request.sourceFrequency,
+              zero_eigenvalue: 0,
+              g200: 2,
+              g011: -2,
+              g110: { re: 1, im: 0 },
+              g111: { re: 0, im: 0 },
+              g021: { re: -1, im: 0 },
+              f200: 2,
+              f011: -2,
+              f111: 0,
+              reduced_g021: { re: -1, im: 0 },
+              ns_center_coefficient: 1,
+              ns_beta1: 1,
+              ns_beta2: 0,
+              has_neimark_sacker: true,
+              diagnostics,
+            } as NormalFormComputationResult['normalForm'],
+          }
+        }
+        return {
+          normalForm: {
+            type: 'HopfHopf',
+            state: [...request.state],
+            param1_index: request.system.paramNames.indexOf(request.param1Name),
+            param2_index: request.system.paramNames.indexOf(request.param2Name),
+            param1_value: request.param1Value,
+            param2_value: request.param2Value,
+            frequency1: request.sourceFrequency,
+            frequency2: request.sourceFrequency * 0.7,
+            g2100: { re: -1, im: 0 },
+            g0021: { re: -1, im: 0 },
+            g1110: { re: -2, im: 0 },
+            g1011: { re: -2, im: 0 },
+            gamma: [
+              [{ re: 1, im: 0 }, { re: 0, im: 0 }],
+              [{ re: 0, im: 0 }, { re: 1, im: 0 }],
+            ],
+            neimark_sacker_predictors: [
+              { periodic_mode: 1, parameter_quadratic: [-2, -3], frequency1_quadratic: 0, frequency2_quadratic: 0 },
+              { periodic_mode: 2, parameter_quadratic: [-3, -2], frequency1_quadratic: 0, frequency2_quadratic: 0 },
+            ],
+            diagnostics,
+          } as NormalFormComputationResult['normalForm'],
+        }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runPeriodicBranchPointSwitch(
+    request: PeriodicBranchPointSwitchRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<PeriodicBranchPointSwitchResult> {
+    const job = this.queue.enqueue(
+      'runPeriodicBranchPointSwitch',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+        const dim = request.system.varNames.length
+        const normalForm: PeriodicBranchPointSwitchResult['normalForm'] = {
+          type: 'BranchPoint',
+          kind: 'Transcritical',
+          constant_parameter_coefficient: 0,
+          linear_parameter_coefficient: 1,
+          quadratic_coefficient: -1,
+          cubic_coefficient: 0,
+          critical_mode: new Array(dim).fill(0).map((_, index) => index === 0 ? 1 : 0),
+          conditioning: {
+            eigenvector_pairing: 1,
+            right_residual: 1e-10,
+            left_residual: 1e-10,
+            homological_residual: 1e-9,
+            return_map_residual: 1e-10,
+            section_residual: 1e-10,
+            return_time_correction: 1e-10,
+            section_transversality: 1,
+          },
+        }
+        const meshPoints = request.normalizedMesh.length - 1
+        const setup = {
+          guess: {
+            param_value: request.paramValue + request.amplitude,
+            period: request.state[request.state.length - 1],
+            mesh_states: Array.from({ length: meshPoints }, (_, index) =>
+              request.state.slice(index * dim, (index + 1) * dim)
+            ),
+            stage_states: Array.from({ length: meshPoints }, () =>
+              Array.from({ length: request.collocationDegree }, () => new Array(dim).fill(0))
+            ),
+            requires_fixed_parameter_correction: true,
+          },
+          phase_anchor: request.state.slice(0, dim),
+          phase_direction: new Array(dim).fill(0).map((_, index) => index === 0 ? 1 : 0),
+          mesh_points: meshPoints,
+          collocation_degree: request.collocationDegree,
+          normalized_mesh: [...request.normalizedMesh],
+        }
+        const branch = {
+          points: [0, 1].map((index) => ({
+            state: [...request.state],
+            param_value: setup.guess.param_value + index * request.settings.step_size,
+            stability: 'None' as const,
+            eigenvalues: [],
+          })),
+          bifurcations: [],
+          indices: [0, 1],
+          branch_type: {
+            type: 'LimitCycle' as const,
+            ntst: meshPoints,
+            ncol: request.collocationDegree,
+            normalized_mesh: [...request.normalizedMesh],
+          },
+        }
+        opts?.onProgress?.({
+          done: true,
+          current_step: 1,
+          max_steps: request.settings.max_steps,
+          points_computed: 2,
+          bifurcations_found: 0,
+          current_param: branch.points[1].param_value,
+        })
+        return { normalForm, setup, branch }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
   async runFoldCurveContinuation(
     request: FoldCurveContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
@@ -1182,6 +1426,69 @@ export class MockForkCoreClient implements ForkCoreClient {
           ],
           codim2_bifurcations: [],
           indices: [0],
+        }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runLimitCycleCodim1CurveContinuation(
+    request: LimitCycleCodim1CurveContinuationRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<Codim1CurveBranch> {
+    const job = this.queue.enqueue(
+      'runLimitCycleCodim1CurveContinuation',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+
+        opts?.onProgress?.({
+          done: false,
+          current_step: 0,
+          max_steps: request.settings.max_steps,
+          points_computed: 0,
+          bifurcations_found: 0,
+          current_param: request.param1Value,
+        })
+        opts?.onProgress?.({
+          done: true,
+          current_step: 1,
+          max_steps: request.settings.max_steps,
+          points_computed: 2,
+          bifurcations_found: 0,
+          current_param: request.param1Value + request.settings.step_size,
+        })
+
+        const state = [...request.lcState, request.period]
+        return {
+          curve_type: request.curveType,
+          points: [
+            {
+              state,
+              param1_value: request.param1Value,
+              param2_value: request.param2Value,
+              codim2_type: 'None',
+              eigenvalues: [],
+              auxiliary:
+                request.curveType === 'NeimarkSacker' ? request.initialK : undefined,
+            },
+            {
+              state,
+              param1_value: request.param1Value + request.settings.step_size,
+              param2_value: request.param2Value + request.settings.step_size,
+              codim2_type: 'None',
+              eigenvalues: [],
+              auxiliary:
+                request.curveType === 'NeimarkSacker' ? request.initialK : undefined,
+            },
+          ],
+          codim2_bifurcations: [],
+          indices: [0, 1],
         }
       },
       opts

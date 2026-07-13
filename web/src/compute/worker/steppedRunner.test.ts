@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ContinuationProgress } from '../ForkCoreClient'
-import { runSteppedRunnerToCompletion } from './steppedRunner'
+import {
+  runAdaptiveSteppedRunnerToCompletion,
+  runSteppedRunnerToCompletion,
+} from './steppedRunner'
 
 function makeProgress(
   currentStep: number,
@@ -112,5 +115,59 @@ describe('runSteppedRunnerToCompletion', () => {
     expect((thrown as Error).name).toBe('AbortError')
     expect(runSteps).not.toHaveBeenCalled()
     expect(getResult).not.toHaveBeenCalled()
+  })
+
+  it('captures the adaptation report before a consuming legacy get_result call', () => {
+    let consumed = false
+    const callOrder: string[] = []
+    const runner = {
+      get_progress: () => makeProgress(0, 0, true),
+      run_steps: vi.fn(),
+      get_adaptation_report: () => {
+        callOrder.push('report')
+        if (consumed) throw new Error('runner already consumed')
+        return { current_mesh_points: 8 }
+      },
+      get_result: () => {
+        callOrder.push('result')
+        consumed = true
+        return { points: [1, 2] }
+      },
+    }
+
+    expect(runAdaptiveSteppedRunnerToCompletion(
+      runner,
+      new AbortController().signal,
+      vi.fn()
+    )).toEqual({
+      points: [1, 2],
+      collocation_adaptation: { current_mesh_points: 8 },
+    })
+    expect(callOrder).toEqual(['report', 'result'])
+  })
+
+  it('uses the atomic result-with-report getter when available', () => {
+    const runner = {
+      get_progress: () => makeProgress(0, 0, true),
+      run_steps: vi.fn(),
+      get_result: vi.fn(() => ({ points: [] })),
+      get_adaptation_report: vi.fn(() => ({ current_mesh_points: 4 })),
+      get_result_with_report: vi.fn(() => ({
+        branch: { points: [1, 2, 3] },
+        collocation_adaptation: { current_mesh_points: 12 },
+      })),
+    }
+
+    expect(runAdaptiveSteppedRunnerToCompletion(
+      runner,
+      new AbortController().signal,
+      vi.fn()
+    )).toEqual({
+      points: [1, 2, 3],
+      collocation_adaptation: { current_mesh_points: 12 },
+    })
+    expect(runner.get_result_with_report).toHaveBeenCalledTimes(1)
+    expect(runner.get_adaptation_report).not.toHaveBeenCalled()
+    expect(runner.get_result).not.toHaveBeenCalled()
   })
 })

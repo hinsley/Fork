@@ -264,6 +264,69 @@ export function extractLimitCycleProfile(
   return { profilePoints, period, closurePoint }
 }
 
+function legendreValueAndDerivative(degree: number, x: number): [number, number] {
+  if (degree === 1) return [x, 1]
+  let p0 = 1
+  let p1 = x
+  for (let k = 2; k <= degree; k += 1) {
+    const pn = ((2 * k - 1) * x * p1 - (k - 1) * p0) / k
+    p0 = p1
+    p1 = pn
+  }
+  return [p1, degree * (x * p1 - p0) / (x * x - 1)]
+}
+
+export function gaussLegendreNormalizedNodes(degree: number): number[] {
+  if (!Number.isInteger(degree) || degree < 1) return []
+  const nodes = Array.from({ length: degree }, () => 0)
+  const half = Math.ceil(degree / 2)
+  for (let index = 0; index < half; index += 1) {
+    let root = Math.cos(Math.PI * (index + 0.75) / (degree + 0.5))
+    for (let iteration = 0; iteration < 50; iteration += 1) {
+      const [value, derivative] = legendreValueAndDerivative(degree, root)
+      const correction = -value / derivative
+      root += correction
+      if (Math.abs(correction) < 1e-14) break
+    }
+    const node = 0.5 * (root + 1)
+    nodes[index] = node
+    nodes[degree - index - 1] = 1 - node
+  }
+  return nodes.sort((left, right) => left - right)
+}
+
+/** Coordinates matching extractLimitCycleProfile's mesh/stage interleaving. */
+export function limitCycleProfileNormalizedCoordinates(
+  ntst: number,
+  ncol: number,
+  normalizedMesh?: number[]
+): number[] | null {
+  if (!Number.isInteger(ntst) || ntst < 1 || !Number.isInteger(ncol) || ncol < 1) {
+    return null
+  }
+  const mesh = normalizedMesh === undefined || normalizedMesh.length === 0
+    ? Array.from({ length: ntst + 1 }, (_, index) => index / ntst)
+    : [...normalizedMesh]
+  if (
+    mesh.length !== ntst + 1 ||
+    Math.abs(mesh[0]) > 1e-12 ||
+    Math.abs(mesh[mesh.length - 1] - 1) > 1e-12 ||
+    mesh.some((value, index) => !Number.isFinite(value) || (index > 0 && value <= mesh[index - 1]))
+  ) {
+    return null
+  }
+  const nodes = gaussLegendreNormalizedNodes(ncol)
+  if (nodes.length !== ncol) return null
+  const coordinates = [mesh[0]]
+  for (let interval = 0; interval < ntst; interval += 1) {
+    const start = mesh[interval]
+    const width = mesh[interval + 1] - start
+    nodes.forEach((node) => coordinates.push(start + width * node))
+    coordinates.push(mesh[interval + 1])
+  }
+  return coordinates
+}
+
 function readPackedEndpoint(
   rawState: number[],
   dim: number,
@@ -444,9 +507,40 @@ function serializeEigenvalueArray(raw: EigenvalueInput[] | undefined): Eigenvalu
   })
 }
 
+export function resolveNormalizedCollocationMesh(
+  ntst: number,
+  rawMesh: number[] | undefined
+): number[] {
+  const normalizedMesh =
+    rawMesh === undefined || rawMesh.length === 0
+      ? Array.from({ length: ntst + 1 }, (_, index) => index / ntst)
+      : [...rawMesh]
+  if (
+    normalizedMesh.length !== ntst + 1 ||
+    normalizedMesh.some((coordinate) => !Number.isFinite(coordinate)) ||
+    Math.abs(normalizedMesh[0]) > 1e-12 ||
+    Math.abs(normalizedMesh[ntst] - 1) > 1e-12 ||
+    normalizedMesh.slice(1).some((coordinate, index) => coordinate <= normalizedMesh[index])
+  ) {
+    throw new Error('Limit cycle branch has invalid normalized mesh coordinates.')
+  }
+  normalizedMesh[0] = 0
+  normalizedMesh[ntst] = 1
+
+  return normalizedMesh
+}
+
+export function isUniformNormalizedCollocationMesh(mesh: number[]): boolean {
+  const intervals = mesh.length - 1
+  if (intervals < 1) return false
+  return mesh.every(
+    (coordinate, index) => Math.abs(coordinate - index / intervals) <= 1e-12
+  )
+}
+
 function requireLimitCycleBranchType(
   branchType: ContinuationBranchData['branch_type'] | undefined
-): { type: 'LimitCycle'; ntst: number; ncol: number } {
+): { type: 'LimitCycle'; ntst: number; ncol: number; normalized_mesh: number[] } {
   if (
     !branchType ||
     typeof branchType !== 'object' ||
@@ -461,7 +555,9 @@ function requireLimitCycleBranchType(
     throw new Error('Limit cycle branch has invalid mesh settings.')
   }
 
-  return { type: 'LimitCycle', ntst, ncol }
+  const normalizedMesh = resolveNormalizedCollocationMesh(ntst, branchType.normalized_mesh)
+
+  return { type: 'LimitCycle', ntst, ncol, normalized_mesh: normalizedMesh }
 }
 
 export function serializeBranchDataForWasm(
@@ -728,6 +824,7 @@ export function getBranchParams(
 
 const BIFURCATION_TYPE_LABELS: Record<string, string> = {
   Fold: 'Fold',
+  BranchPoint: 'Branch Point',
   Hopf: 'Hopf',
   NeutralSaddle: 'Neutral Saddle',
   CycleFold: 'Cycle Fold',

@@ -18,7 +18,8 @@ import type {
 } from '../compute/ForkCoreClient'
 import {
   extractLimitCycleProfile,
-  getBranchParams
+  getBranchParams,
+  limitCycleProfileNormalizedCoordinates
 } from '../system/continuation'
 import {
   isSubsystemSnapshotCompatible,
@@ -253,9 +254,14 @@ function buildSamplesFromLimitCycle(
   if (mappedPoints[0]?.length !== systemConfig.varNames.length) {
     return null
   }
-  const denominator = Math.max(mappedPoints.length - 1, 1)
+  const coordinates = limitCycleProfileNormalizedCoordinates(
+    limitCycle.ntst,
+    limitCycle.ncol,
+    limitCycle.normalized_mesh
+  )
+  if (!coordinates || coordinates.length !== mappedPoints.length) return null
   return mappedPoints.map((state, index) => ({
-    time: Number.isFinite(period) ? (period * index) / denominator : index,
+    time: Number.isFinite(period) ? period * coordinates[index] : coordinates[index],
     state
   }))
 }

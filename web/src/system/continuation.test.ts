@@ -5,11 +5,14 @@ import {
   computeLimitCycleMetrics,
   ensureBranchIndices,
   extractLimitCycleProfile,
+  gaussLegendreNormalizedNodes,
+  limitCycleProfileNormalizedCoordinates,
   extractHopfOmega,
   formatBifurcationLabel,
   formatBifurcationType,
   getBranchParams,
   interpretLimitCycleStability,
+  isUniformNormalizedCollocationMesh,
   normalizeBranchEigenvalues,
   normalizeEigenvalueArray,
   resolveContinuationPointEquilibriumState,
@@ -287,7 +290,12 @@ describe('continuation helpers', () => {
     const serialized = serializeBranchDataForWasm(branch)
 
     expect(serialized.indices).toEqual([0, 1])
-    expect(serialized.branch_type).toEqual({ type: 'LimitCycle', ntst: 10, ncol: 4 })
+    expect(serialized.branch_type).toEqual({
+      type: 'LimitCycle',
+      ntst: 10,
+      ncol: 4,
+      normalized_mesh: Array.from({ length: 11 }, (_, index) => index / 10),
+    })
     expect(serialized.points[1].eigenvalues).toEqual([[3, 4]])
   })
 
@@ -380,13 +388,48 @@ describe('continuation helpers', () => {
       branchType: 'limit_cycle',
       data: {
         ...baseBranch.data,
-        branch_type: { type: 'LimitCycle', ntst: 12, ncol: 5 },
+        branch_type: {
+          type: 'LimitCycle',
+          ntst: 3,
+          ncol: 5,
+          normalized_mesh: [0, 0.08, 0.41, 1],
+        },
       },
     }
 
     const serialized = serializeBranchDataForWasm(branch)
 
-    expect(serialized.branch_type).toEqual({ type: 'LimitCycle', ntst: 12, ncol: 5 })
+    expect(serialized.branch_type).toEqual({
+      type: 'LimitCycle',
+      ntst: 3,
+      ncol: 5,
+      normalized_mesh: [0, 0.08, 0.41, 1],
+    })
+  })
+
+  it('distinguishes uniform and nonuniform normalized collocation meshes', () => {
+    expect(isUniformNormalizedCollocationMesh([0, 0.25, 0.5, 0.75, 1])).toBe(true)
+    expect(isUniformNormalizedCollocationMesh([0, 0.1, 0.5, 0.75, 1])).toBe(false)
+  })
+
+  it('rejects malformed normalized limit-cycle meshes at the WASM boundary', () => {
+    const branch: ContinuationObject = {
+      ...baseBranch,
+      branchType: 'limit_cycle',
+      data: {
+        ...baseBranch.data,
+        branch_type: {
+          type: 'LimitCycle',
+          ntst: 3,
+          ncol: 2,
+          normalized_mesh: [0, 0.4, 0.3, 1],
+        },
+      },
+    }
+
+    expect(() => serializeBranchDataForWasm(branch)).toThrow(
+      'Limit cycle branch has invalid normalized mesh coordinates.'
+    )
   })
 
   it('preserves provided indices and sorts by logical order', () => {
@@ -467,6 +510,21 @@ describe('continuation helpers', () => {
 
     expect(result.profilePoints).toEqual([[0], [1], [2], [10], [11], [12], [0]])
     expect(result.period).toBe(5)
+  })
+
+  it('assigns exact nonuniform mesh and Gauss-stage coordinates to the profile', () => {
+    const nodes = gaussLegendreNormalizedNodes(2)
+    const coordinates = limitCycleProfileNormalizedCoordinates(2, 2, [0, 0.2, 1])
+    expect(coordinates).not.toBeNull()
+    expect(coordinates).toHaveLength(7)
+    expect(coordinates?.[0]).toBe(0)
+    expect(coordinates?.[1]).toBeCloseTo(0.2 * nodes[0], 14)
+    expect(coordinates?.[2]).toBeCloseTo(0.2 * nodes[1], 14)
+    expect(coordinates?.[3]).toBeCloseTo(0.2, 14)
+    expect(coordinates?.[4]).toBeCloseTo(0.2 + 0.8 * nodes[0], 14)
+    expect(coordinates?.[5]).toBeCloseTo(0.2 + 0.8 * nodes[1], 14)
+    expect(coordinates?.[6]).toBe(1)
+    expect(limitCycleProfileNormalizedCoordinates(2, 2, [0, 0.4, 0.3])).toBeNull()
   })
 
   it('extracts a stage-first collocation profile', () => {

@@ -20,6 +20,11 @@ const wasmState = {
   lastRunStepsArg: null as number | null,
   lastSystemType: null as string | null,
   lastLimitCycleRunnerSystemType: null as string | null,
+  lastCycleCurveRunner: null as string | null,
+  lastCycleCurveInitialK: null as number | null,
+  lastFloquetMesh: null as number[] | null,
+  lastPdMesh: null as number[] | null,
+  lastNsSeedState: null as number[] | null,
   lastEqManifoldPeriods: null as number[] | null,
   lastEqManifoldExtensionPeriods: null as number[] | null,
   lastEqManifoldExtensionPointCount: null as number | null,
@@ -152,6 +157,50 @@ beforeAll(async () => {
       }
       init_lc_from_pd() {
         return {}
+      }
+      init_lc_from_pd_on_mesh(...args: unknown[]) {
+        wasmState.lastPdMesh = Array.from(args[4] as Float64Array)
+        return {}
+      }
+      compute_limit_cycle_floquet_modes_on_mesh(...args: unknown[]) {
+        wasmState.lastFloquetMesh = Array.from(args[2] as Float64Array)
+        return {
+          ntst: 2,
+          ncol: 2,
+          multipliers: [{ re: 1, im: 0 }],
+          vectors: [],
+        }
+      }
+      switch_from_hopf_hopf() {
+        return {
+          normalForm: { frequency1: 1, frequency2: 2 },
+          equilibriumCurveSeeds: [],
+          hopfCurveSeeds: [],
+          neimarkSackerSeeds: [
+            {
+              target: 'NeimarkSacker',
+              state: [1],
+              param1_value: 0.1,
+              param2_value: 0.2,
+              perturbation: 0.01,
+              auxiliary: 0.25,
+              period: 6,
+              ntst: 2,
+              ncol: 2,
+            },
+            {
+              target: 'NeimarkSacker',
+              state: [-2],
+              param1_value: -0.1,
+              param2_value: -0.2,
+              perturbation: -0.01,
+              auxiliary: 0.5,
+              period: 3,
+              ntst: 2,
+              ncol: 2,
+            },
+          ],
+        }
       }
       init_homoclinic_from_large_cycle() {
         return {}
@@ -294,6 +343,29 @@ beforeAll(async () => {
       }
       get_result(): MockRunnerResult {
         return { points: [] }
+      }
+    }
+
+    class MockLPCCurveRunner extends MockContinuationRunner {
+      constructor() {
+        super()
+        wasmState.lastCycleCurveRunner = 'LimitPointCycle'
+      }
+    }
+
+    class MockPDCurveRunner extends MockContinuationRunner {
+      constructor() {
+        super()
+        wasmState.lastCycleCurveRunner = 'PeriodDoubling'
+      }
+    }
+
+    class MockNSCurveRunner extends MockContinuationRunner {
+      constructor(...args: unknown[]) {
+        super()
+        wasmState.lastCycleCurveRunner = 'NeimarkSacker'
+        wasmState.lastCycleCurveInitialK = args[10] as number
+        wasmState.lastNsSeedState = Array.from(args[4] as Float64Array)
       }
     }
 
@@ -469,6 +541,9 @@ beforeAll(async () => {
       WasmManifold2DExtensionRunner: MockManifold2DExtensionRunner,
       WasmFoldCurveRunner: MockContinuationRunner,
       WasmHopfCurveRunner: MockContinuationRunner,
+      WasmLPCCurveRunner: MockLPCCurveRunner,
+      WasmPDCurveRunner: MockPDCurveRunner,
+      WasmNSCurveRunner: MockNSCurveRunner,
       get WasmIsoperiodicCurveRunner() {
         return wasmState.disableIsoperiodicRunner ? undefined : MockContinuationRunner
       },
@@ -497,6 +572,11 @@ beforeEach(() => {
   wasmState.lastRunStepsArg = null
   wasmState.lastSystemType = null
   wasmState.lastLimitCycleRunnerSystemType = null
+  wasmState.lastCycleCurveRunner = null
+  wasmState.lastCycleCurveInitialK = null
+  wasmState.lastFloquetMesh = null
+  wasmState.lastPdMesh = null
+  wasmState.lastNsSeedState = null
   wasmState.lastEqManifoldPeriods = null
   wasmState.lastEqManifoldExtensionPeriods = null
   wasmState.lastEqManifoldExtensionPointCount = null
@@ -585,6 +665,129 @@ describe('forkCoreWorker', () => {
       throw new Error('Expected a continuation result payload.')
     }
     expect(response.result.points).toEqual([])
+  })
+
+  it('passes an exact nonuniform mesh to Floquet-mode computation', async () => {
+    const handler = requireHandler()
+    const normalizedMesh = [0, 0.2, 1]
+
+    await handler({
+      data: {
+        id: 'job-floquet-exact-mesh',
+        kind: 'computeLimitCycleFloquetModes',
+        payload: {
+          system: { ...baseSystem, params: [0], paramNames: ['mu'] },
+          cycleState: [0, 1, 0, 1],
+          ntst: 2,
+          ncol: 2,
+          normalizedMesh,
+          parameterName: 'mu',
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(wasmState.lastFloquetMesh).toEqual(normalizedMesh)
+    expect(workerScope.postMessage.mock.calls.at(-1)?.[0]).toMatchObject({
+      id: 'job-floquet-exact-mesh',
+      ok: true,
+      result: { ntst: 2, ncol: 2 },
+    })
+  })
+
+  it('passes an exact nonuniform source mesh to period-doubled cycle initialization', async () => {
+    const handler = requireHandler()
+    const normalizedMesh = [0, 0.15, 1]
+
+    await handler({
+      data: {
+        id: 'job-pd-exact-mesh',
+        kind: 'runLimitCycleContinuationFromPD',
+        payload: {
+          system: { ...baseSystem, params: [0], paramNames: ['mu'] },
+          lcState: [0, 1, 0, 1],
+          parameterName: 'mu',
+          paramValue: 0,
+          ntst: 2,
+          ncol: 2,
+          normalizedMesh,
+          amplitude: 0.01,
+          settings: continuationSettings,
+          forward: true,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(wasmState.lastPdMesh).toEqual(normalizedMesh)
+    expect(workerScope.postMessage.mock.calls.at(-1)?.[0]).toMatchObject({
+      id: 'job-pd-exact-mesh',
+      ok: true,
+    })
+  })
+
+  it('rejects a nonuniform mesh instead of silently uniformizing cycle manifolds', async () => {
+    const handler = requireHandler()
+
+    await handler({
+      data: {
+        id: 'job-cycle-manifold-nonuniform',
+        kind: 'runLimitCycleManifold2D',
+        payload: {
+          system: { ...baseSystem, params: [0], paramNames: ['mu'] },
+          cycleState: [0, 1, 0, 1],
+          ntst: 2,
+          ncol: 2,
+          normalizedMesh: [0, 0.2, 1],
+          floquetMultipliers: [{ re: 2, im: 0 }],
+          settings: {},
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(workerScope.postMessage.mock.calls.at(-1)?.[0]).toMatchObject({
+      id: 'job-cycle-manifold-nonuniform',
+      ok: false,
+      error: expect.stringContaining('does not yet support an explicit nonuniform'),
+    })
+  })
+
+  it('selects the requested Hopf-Hopf NS mode before constructing the curve runner', async () => {
+    const handler = requireHandler()
+
+    await handler({
+      data: {
+        id: 'job-hh-ns-mode-2',
+        kind: 'runCodim2BranchSwitch',
+        payload: {
+          system: { ...baseSystem, params: [0, 0], paramNames: ['mu', 'nu'] },
+          sourceType: 'DoubleHopf',
+          target: 'NeimarkSacker',
+          state: [0],
+          param1Name: 'mu',
+          param1Value: 0,
+          param2Name: 'nu',
+          param2Value: 0,
+          frequency: 1,
+          perturbation: 0.01,
+          cycleAmplitude: 0.01,
+          mode: 2,
+          ntst: 2,
+          ncol: 2,
+          tolerance: 1e-8,
+          settings: continuationSettings,
+          forward: true,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(wasmState.lastNsSeedState).toEqual([-2])
+    expect(workerScope.postMessage.mock.calls.at(-1)?.[0]).toMatchObject({
+      id: 'job-hh-ns-mode-2',
+      ok: true,
+      result: {
+        target: 'NeimarkSacker',
+        seed: { perturbation: -0.01, state: [-2] },
+      },
+    })
   })
 
   it('runs homoclinic and homotopy continuation handlers', async () => {
@@ -1292,6 +1495,50 @@ describe('forkCoreWorker', () => {
     })
     expect(workerScope.postMessage.mock.calls[1][0]).toMatchObject({
       id: 'job-isoperiodic',
+      ok: true,
+      result: { points: [] },
+    })
+  })
+
+  it.each([
+    ['LimitPointCycle', undefined],
+    ['PeriodDoubling', undefined],
+    ['NeimarkSacker', 0.25],
+  ] as const)('runs the existing %s limit-cycle curve runner', async (curveType, initialK) => {
+    const handler = requireHandler()
+
+    await handler({
+      data: {
+        id: `job-cycle-curve-${curveType}`,
+        kind: 'runLimitCycleCodim1CurveContinuation',
+        payload: {
+          system: {
+            ...baseSystem,
+            params: [0.1, 0.2],
+            paramNames: ['mu', 'nu'],
+          },
+          curveType,
+          lcState: [0, 1, 1, 0],
+          period: 6,
+          param1Name: 'mu',
+          param1Value: 0.1,
+          param2Name: 'nu',
+          param2Value: 0.2,
+          initialK,
+          ntst: 2,
+          ncol: 2,
+          settings: continuationSettings,
+          forward: true,
+        },
+      },
+    } as unknown as MessageEvent<Record<string, unknown>>)
+
+    expect(wasmState.lastCycleCurveRunner).toBe(curveType)
+    if (curveType === 'NeimarkSacker') {
+      expect(wasmState.lastCycleCurveInitialK).toBe(initialK)
+    }
+    expect(workerScope.postMessage.mock.calls.at(-1)?.[0]).toMatchObject({
+      id: `job-cycle-curve-${curveType}`,
       ok: true,
       result: { points: [] },
     })

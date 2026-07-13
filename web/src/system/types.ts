@@ -1,3 +1,5 @@
+import type { NormalFormProvenance } from '../compute/normalFormTypes'
+
 export interface PeriodicVariableConfig {
   enabled: boolean
   period: number
@@ -115,6 +117,57 @@ export interface ContinuationSettings {
   corrector_steps: number
   corrector_tolerance: number
   step_tolerance: number
+  collocation_adaptivity?: CollocationAdaptivitySettings
+}
+
+export interface CollocationAdaptivitySettings {
+  enabled: boolean
+  redistribution_enabled: boolean
+  defect_tolerance: number
+  max_refinements: number
+  max_mesh_points: number
+}
+
+export type CollocationMeshAdaptationKind = 'redistribution' | 'refinement'
+
+export interface CollocationRefinementAttempt {
+  sequence: number
+  kind: CollocationMeshAdaptationKind
+  old_mesh_points: number
+  new_mesh_points: number
+  degree: number
+  trigger_defect: number
+  tolerance: number
+  interval_scaled_defects: number[]
+  old_normalized_mesh: number[]
+  new_normalized_mesh: number[]
+}
+
+export interface CollocationAdaptationReport {
+  initial_mesh_points: number
+  current_mesh_points: number
+  degree: number
+  defect_tolerance: number
+  refinement_budget: number
+  max_mesh_points: number
+  initial_normalized_mesh: number[]
+  current_normalized_mesh: number[]
+  attempts: CollocationRefinementAttempt[]
+  termination?: {
+    reason:
+      | 'adaptivity_disabled'
+      | 'refinement_budget_exhausted'
+      | 'mesh_point_limit_reached'
+      | 'refinement_stalled'
+    measured_defect: number
+    tolerance: number
+    mesh_points: number
+    degree: number
+    refinements_attempted: number
+    refinement_budget: number
+    max_mesh_points: number
+    normalized_mesh: number[]
+  }
 }
 
 export interface Codim2PointData {
@@ -134,6 +187,22 @@ export interface Codim2PointData {
     bordered_condition_number?: number
     jacobian_condition_number?: number
   }
+  branch_switches?: Codim2BranchSwitch[]
+  certification?: Codim2Certification
+}
+
+export interface Codim2BranchSwitch {
+  target: string
+  available: boolean
+  target_auxiliary?: number
+  reason?: string
+}
+
+export interface Codim2Certification {
+  defining_conditions_verified: boolean
+  nondegeneracy_evaluated: boolean
+  nondegenerate?: boolean
+  reason?: string
 }
 
 export interface ContinuationPoint {
@@ -143,6 +212,7 @@ export interface ContinuationPoint {
   stability:
     | 'None'
     | 'Fold'
+    | 'BranchPoint'
     | 'Hopf'
     | 'NeutralSaddle'
     | 'CycleFold'
@@ -153,6 +223,8 @@ export interface ContinuationPoint {
   cycle_points?: number[][]
   auxiliary?: number
   codim2?: Codim2PointData
+  codim2_events?: Codim2PointData[]
+  normal_form?: NormalFormProvenance
 }
 
 export type ManifoldStability = 'Stable' | 'Unstable'
@@ -425,7 +497,7 @@ export interface HomoclinicResumeContext {
 
 export type BranchType =
   | { type: 'Equilibrium' }
-  | { type: 'LimitCycle'; ntst: number; ncol: number }
+  | { type: 'LimitCycle'; ntst: number; ncol: number; normalized_mesh?: number[] }
   | {
       type: 'HomoclinicCurve'
       ntst: number
@@ -470,6 +542,7 @@ export type BranchType =
       param2_ref?: ParameterRef
       ntst: number
       ncol: number
+      normalized_mesh?: number[]
     }
   | {
       type: 'IsoperiodicCurve'
@@ -479,6 +552,7 @@ export type BranchType =
       param2_ref?: ParameterRef
       ntst: number
       ncol: number
+      normalized_mesh?: number[]
     }
   | {
       type: 'PDCurve'
@@ -488,6 +562,7 @@ export type BranchType =
       param2_ref?: ParameterRef
       ntst: number
       ncol: number
+      normalized_mesh?: number[]
     }
   | {
       type: 'NSCurve'
@@ -497,6 +572,7 @@ export type BranchType =
       param2_ref?: ParameterRef
       ntst: number
       ncol: number
+      normalized_mesh?: number[]
     }
   | {
       type: 'ManifoldEq1D'
@@ -537,11 +613,13 @@ export interface ContinuationBranchData {
   homoc_context?: HomoclinicResumeContext
   resume_state?: ContinuationResumeState
   manifold_geometry?: ManifoldGeometry
+  collocation_adaptation?: CollocationAdaptationReport
+  normal_form_provenance?: NormalFormProvenance
   codim2_seed?: {
-    source_type: 'GeneralizedHopf' | 'BogdanovTakens'
+    source_type: 'GeneralizedHopf' | 'BogdanovTakens' | 'ZeroHopf' | 'DoubleHopf'
     source_branch_id: string
     source_point_index: number
-    target: 'Fold' | 'Hopf' | 'LimitPointCycle' | 'Homoclinic'
+    target: 'Fold' | 'Hopf' | 'LimitPointCycle' | 'NeimarkSacker' | 'Homoclinic'
     perturbation: number
     predictor_residual: number
     corrected_residual: number
@@ -615,6 +693,7 @@ export interface LimitCycleObject {
   origin: LimitCycleOrigin
   ntst: number
   ncol: number
+  normalized_mesh?: number[]
   period: number
   state: number[]
   parameters?: number[]

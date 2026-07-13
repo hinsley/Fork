@@ -80,6 +80,10 @@ impl<P: ContinuationProblem> RunnerHandle<P> {
             .ok_or(RunnerHandleError::NotInitialized)
     }
 
+    pub(crate) fn problem(&self) -> Result<&P, RunnerHandleError> {
+        Ok(self.runner_ref()?.problem())
+    }
+
     pub(crate) fn run_steps_js(&mut self, batch_size: u32) -> Result<JsValue, JsValue> {
         let result = self.run_steps(batch_size).map_err(runner_error_to_js)?;
         serialize_js(&result)
@@ -164,6 +168,10 @@ impl<P: ContinuationProblem + 'static> OwnedContinuationRunner<P> {
 
     pub(crate) fn runner_mut(&mut self) -> Result<&mut ContinuationRunner<P>, JsValue> {
         self.runner.runner_mut().map_err(runner_error_to_js)
+    }
+
+    pub(crate) fn problem(&self) -> Result<&P, JsValue> {
+        self.runner.problem().map_err(runner_error_to_js)
     }
 }
 
@@ -253,12 +261,20 @@ mod tests {
         handle
             .runner_mut()
             .expect("runner")
-            .set_branch_type(BranchType::LimitCycle { ntst: 2, ncol: 1 });
+            .set_branch_type(BranchType::LimitCycle {
+                ntst: 2,
+                ncol: 1,
+                normalized_mesh: vec![0.0, 0.5, 1.0],
+            });
 
         let branch = handle.take_result().expect("result");
         assert!(matches!(
             branch.branch_type,
-            BranchType::LimitCycle { ntst: 2, ncol: 1 }
+            BranchType::LimitCycle {
+                ntst: 2,
+                ncol: 1,
+                ..
+            }
         ));
     }
 

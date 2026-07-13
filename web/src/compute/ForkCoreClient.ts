@@ -3,6 +3,7 @@ import type {
   ContinuationSettings,
   ContinuationPoint,
   Codim2PointData,
+  CollocationAdaptationReport,
   Manifold2DProfile,
   ManifoldCycle2DAlgorithm,
   ManifoldStability,
@@ -10,6 +11,24 @@ import type {
   EventSeriesMode,
   SystemConfig,
 } from '../system/types'
+import type {
+  ComputedNormalForm,
+  HopfHopfNormalForm,
+  LimitCycleSetupWire,
+  PeriodicOrbitNormalForm,
+  ZeroHopfNormalForm,
+} from './normalFormTypes'
+
+export type {
+  ComputedNormalForm,
+  EquilibriumCodim2NormalFormDiagnostics,
+  HopfHopfNormalForm,
+  LimitCycleSetupWire,
+  MapNormalForm,
+  NormalFormProvenance,
+  PeriodicOrbitNormalForm,
+  ZeroHopfNormalForm,
+} from './normalFormTypes'
 
 export type ContinuationProgress = {
   done: boolean
@@ -287,6 +306,7 @@ export type LimitCycleManifold2DRequest = {
   cycleState: number[]
   ntst: number
   ncol: number
+  normalizedMesh: number[]
   floquetMultipliers: Array<{ re: number; im: number }>
   settings: LimitCycleManifold2DSettingsRequest
 }
@@ -298,6 +318,7 @@ export type LimitCycleFloquetModesRequest = {
   cycleState: number[]
   ntst: number
   ncol: number
+  normalizedMesh: number[]
   parameterName: string
 }
 
@@ -335,12 +356,17 @@ export type Codim1CurvePoint = {
   eigenvalues?: Array<[number, number] | { re?: number; im?: number }>
   auxiliary?: number | null
   codim2?: Codim2PointData
+  codim2_events?: Codim2PointData[]
 }
 
 export type Codim1CurveBranch = {
   curve_type?: string
   param1_index?: number
   param2_index?: number
+  ntst?: number
+  ncol?: number
+  normalized_mesh?: number[]
+  collocation_adaptation?: CollocationAdaptationReport
   points: Codim1CurvePoint[]
   codim2_bifurcations?: Array<{ index: number; type?: string }>
   indices?: number[]
@@ -371,7 +397,12 @@ export type HopfCurveContinuationRequest = {
   forward: boolean
 }
 
-export type Codim2BranchTarget = 'Fold' | 'Hopf' | 'LimitPointCycle' | 'Homoclinic'
+export type Codim2BranchTarget =
+  | 'Fold'
+  | 'Hopf'
+  | 'LimitPointCycle'
+  | 'NeimarkSacker'
+  | 'Homoclinic'
 
 export type Codim2BranchSeed = {
   target: Codim2BranchTarget
@@ -390,7 +421,11 @@ export type Codim2BranchSeed = {
 
 export type Codim2BranchSwitchRequest = {
   system: SystemConfig
-  sourceType: 'GeneralizedHopf' | 'BogdanovTakens'
+  sourceType:
+    | 'GeneralizedHopf'
+    | 'BogdanovTakens'
+    | 'ZeroHopf'
+    | 'DoubleHopf'
   target: Codim2BranchTarget
   state: number[]
   neighborState?: number[]
@@ -404,6 +439,10 @@ export type Codim2BranchSwitchRequest = {
   neighborAuxiliary?: number
   neighborTestValue?: number
   secondLyapunov?: number
+  frequency?: number
+  orientation?: 'Negative' | 'Positive'
+  mode?: 1 | 2
+  cycleAmplitude?: number
   perturbation: number
   ntst: number
   ncol: number
@@ -416,6 +455,60 @@ export type Codim2BranchSwitchResult = {
   target: Codim2BranchTarget
   branch: Codim1CurveBranch | ContinuationBranchDataWire
   seed: Codim2BranchSeed | { setup: unknown; predictor_residual: number; corrected_residual: number }
+  normalForm?: ZeroHopfNormalForm | HopfHopfNormalForm
+}
+
+export type NormalFormComputationRequest =
+  | {
+      system: SystemConfig
+      sourceType: 'Map'
+      normalFormType: 'BranchPoint' | 'PeriodDoubling' | 'NeimarkSacker'
+      state: number[]
+      paramName: string
+      paramValue: number
+      mapIterations: number
+    }
+  | {
+      system: SystemConfig
+      sourceType: 'PeriodicOrbit'
+      normalFormType: 'BranchPoint' | 'PeriodDoubling' | 'NeimarkSacker'
+      state: number[]
+      paramName: string
+      paramValue: number
+      collocationDegree: number
+      normalizedMesh: number[]
+    }
+  | {
+      system: SystemConfig
+      sourceType: 'ZeroHopf' | 'HopfHopf'
+      state: number[]
+      param1Name: string
+      param2Name: string
+      param1Value: number
+      param2Value: number
+      sourceFrequency: number
+    }
+
+export type NormalFormComputationResult = {
+  normalForm: ComputedNormalForm
+}
+
+export type PeriodicBranchPointSwitchRequest = {
+  system: SystemConfig
+  state: number[]
+  paramName: string
+  paramValue: number
+  collocationDegree: number
+  normalizedMesh: number[]
+  amplitude: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type PeriodicBranchPointSwitchResult = {
+  normalForm: Extract<PeriodicOrbitNormalForm, { type: 'BranchPoint' }>
+  setup: LimitCycleSetupWire
+  branch: ContinuationBranchDataWire
 }
 
 export type IsoperiodicCurveContinuationRequest = {
@@ -428,6 +521,29 @@ export type IsoperiodicCurveContinuationRequest = {
   param2Value: number
   ntst: number
   ncol: number
+  normalizedMesh?: number[]
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type LimitCycleCodim1CurveType =
+  | 'LimitPointCycle'
+  | 'PeriodDoubling'
+  | 'NeimarkSacker'
+
+export type LimitCycleCodim1CurveContinuationRequest = {
+  system: SystemConfig
+  curveType: LimitCycleCodim1CurveType
+  lcState: number[]
+  period: number
+  param1Name: string
+  param1Value: number
+  param2Name: string
+  param2Value: number
+  initialK?: number
+  ntst: number
+  ncol: number
+  normalizedMesh?: number[]
   settings: ContinuationSettings
   forward: boolean
 }
@@ -464,6 +580,7 @@ export type LimitCycleContinuationFromPDRequest = {
   paramValue: number
   ntst: number
   ncol: number
+  normalizedMesh: number[]
   amplitude: number
   settings: ContinuationSettings
   forward: boolean
@@ -626,6 +743,14 @@ export interface ForkCoreClient {
     request: LimitCycleFloquetModesRequest,
     opts?: { signal?: AbortSignal }
   ): Promise<LimitCycleFloquetModesResult>
+  computeNormalForm(
+    request: NormalFormComputationRequest,
+    opts?: { signal?: AbortSignal }
+  ): Promise<NormalFormComputationResult>
+  runPeriodicBranchPointSwitch(
+    request: PeriodicBranchPointSwitchRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<PeriodicBranchPointSwitchResult>
   runFoldCurveContinuation(
     request: FoldCurveContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
@@ -640,6 +765,10 @@ export interface ForkCoreClient {
   ): Promise<Codim2BranchSwitchResult>
   runIsoperiodicCurveContinuation(
     request: IsoperiodicCurveContinuationRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<Codim1CurveBranch>
+  runLimitCycleCodim1CurveContinuation(
+    request: LimitCycleCodim1CurveContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<Codim1CurveBranch>
   runLimitCycleContinuationFromHopf(

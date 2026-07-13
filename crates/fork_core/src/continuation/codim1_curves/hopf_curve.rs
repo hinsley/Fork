@@ -1,4 +1,4 @@
-//! Hopf bifurcation curve continuation.
+//! Hopf and map Neimark-Sacker bifurcation-curve continuation.
 //!
 //! Continues a Hopf bifurcation curve in two-parameter space using a bordered
 //! system approach. The defining system is:
@@ -9,16 +9,22 @@
 //! g₂(x, α, κ) = vext₂ = 0        (second singularity condition)
 //! ```
 //!
-//! where κ = ω² is the squared Hopf frequency, and we use the matrix
-//! RED = A·A + κ·I with 2x2 border structure.
+//! For flows, κ = ω² is the squared Hopf frequency and
+//! `RED = A² + κI`. For maps, κ stores `cos(θ)` for the critical unit-circle
+//! multiplier pair and `RED = A² - 2κA + I`. Both reductions have a real
+//! two-dimensional kernel and use the same 2x2 border structure.
 
+use super::equilibrium_codim2::{
+    hopf_hopf_normal_form, zero_hopf_normal_form, HopfHopfNormalForm, ZeroHopfNormalForm,
+};
 use super::normal_forms::{hopf_normal_form, HopfNormalForm};
 use super::Codim2TestFunctions;
-use crate::autodiff::Dual;
 use crate::continuation::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
 use crate::equation_engine::EquationSystem;
-use crate::equilibrium::{compute_jacobian, SystemKind};
-use crate::traits::DynamicalSystem;
+use crate::equilibrium::{
+    compute_jacobian, compute_param_jacobian, compute_system_jacobian,
+    evaluate_equilibrium_residual, SystemKind,
+};
 use anyhow::{anyhow, bail, Result};
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex;
@@ -53,13 +59,13 @@ impl HopfBorders {
     /// 2. Solve Bord * vext = [0; I_2] with 2 RHS columns
     /// 3. Apply QR to vext, take first n rows of Q's first 2 columns
     /// 4. Same for transposed system
-    pub fn update(&mut self, jac: &DMatrix<f64>, kappa: f64) -> Result<()> {
+    pub fn update(&mut self, jac: &DMatrix<f64>, auxiliary: f64, kind: SystemKind) -> Result<()> {
         let n = jac.nrows();
         if n == 0 {
             return Ok(());
         }
 
-        let (vext, wext) = match solve_bordered(jac, kappa, self) {
+        let (vext, wext) = match solve_bordered(jac, auxiliary, kind, self) {
             Ok(val) => val,
             Err(_) => return Ok(()),
         };
@@ -76,14 +82,40 @@ impl HopfBorders {
     }
 }
 
+fn spectral_reduction(jac: &DMatrix<f64>, auxiliary: f64, kind: SystemKind) -> DMatrix<f64> {
+    let n = jac.nrows();
+    match kind {
+        SystemKind::Flow => jac * jac + DMatrix::identity(n, n) * auxiliary,
+        SystemKind::Map { .. } => jac * jac - jac * (2.0 * auxiliary) + DMatrix::identity(n, n),
+    }
+}
+
 fn finite_diff_step(value: f64) -> f64 {
     let scale = value.abs().max(1.0);
     1e-6 * scale
 }
 
-fn build_bordered_matrix(jac: &DMatrix<f64>, kappa: f64, borders: &HopfBorders) -> DMatrix<f64> {
+fn compute_spectral_jacobian(
+    system: &EquationSystem,
+    kind: SystemKind,
+    state: &[f64],
+) -> Result<DMatrix<f64>> {
+    let n = system.equations.len();
+    let values = match kind {
+        SystemKind::Flow => compute_jacobian(system, kind, state)?,
+        SystemKind::Map { .. } => compute_system_jacobian(system, kind, state)?,
+    };
+    Ok(DMatrix::from_row_slice(n, n, &values))
+}
+
+fn build_bordered_matrix(
+    jac: &DMatrix<f64>,
+    auxiliary: f64,
+    kind: SystemKind,
+    borders: &HopfBorders,
+) -> DMatrix<f64> {
     let n = jac.nrows();
-    let red = jac * jac + DMatrix::identity(n, n) * kappa;
+    let red = spectral_reduction(jac, auxiliary, kind);
 
     let mut bordered = DMatrix::zeros(n + 2, n + 2);
     bordered.view_mut((0, 0), (n, n)).copy_from(&red);
@@ -99,11 +131,12 @@ fn build_bordered_matrix(jac: &DMatrix<f64>, kappa: f64, borders: &HopfBorders) 
 
 fn solve_bordered(
     jac: &DMatrix<f64>,
-    kappa: f64,
+    auxiliary: f64,
+    kind: SystemKind,
     borders: &HopfBorders,
 ) -> Result<(DMatrix<f64>, DMatrix<f64>)> {
     let n = jac.nrows();
-    let bordered = build_bordered_matrix(jac, kappa, borders);
+    let bordered = build_bordered_matrix(jac, auxiliary, kind, borders);
 
     let mut rhs = DMatrix::zeros(n + 2, 2);
     rhs[(n, 0)] = 1.0;
@@ -180,6 +213,27 @@ pub fn estimate_hopf_kappa_from_jacobian(jac: &DMatrix<f64>) -> Option<f64> {
     }
 }
 
+/// Estimate `cos(theta)` for the non-real multiplier pair closest to the unit
+/// circle. This is the auxiliary variable in the map Neimark-Sacker defining
+/// system `A^2 - 2 cos(theta) A + I`.
+pub fn estimate_map_ns_cosine_from_jacobian(jac: &DMatrix<f64>) -> Option<f64> {
+    let eigenvalues = jac.clone().complex_eigenvalues();
+    eigenvalues
+        .iter()
+        .filter(|value| {
+            value.re.is_finite()
+                && value.im.is_finite()
+                && value.im.abs() > 1.0e-10 * value.norm().max(1.0)
+        })
+        .min_by(|left, right| {
+            (left.norm() - 1.0)
+                .abs()
+                .total_cmp(&(right.norm() - 1.0).abs())
+                .then_with(|| right.im.abs().total_cmp(&left.im.abs()))
+        })
+        .map(|value| value.re)
+}
+
 fn select_hopf_indices_from_jres(jres: &DMatrix<f64>) -> Option<((usize, usize), (usize, usize))> {
     if jres.ncols() < 2 {
         return None;
@@ -249,14 +303,14 @@ impl<'a> HopfCurveProblem<'a> {
     /// * `system` - The dynamical system
     /// * `kind` - Flow or Map
     /// * `hopf_state` - State at the Hopf point
-    /// * `hopf_omega` - Hopf frequency ω (imaginary part of critical eigenvalue)
+    /// * `critical_value` - Hopf frequency ω for flows; `cos(θ)` for maps
     /// * `param1_index` - First parameter to vary
     /// * `param2_index` - Second parameter to vary
     pub fn new(
         system: &'a mut EquationSystem,
         kind: SystemKind,
         hopf_state: &[f64],
-        hopf_omega: f64,
+        critical_value: f64,
         param1_index: usize,
         param2_index: usize,
     ) -> Result<Self> {
@@ -266,19 +320,38 @@ impl<'a> HopfCurveProblem<'a> {
         }
 
         // Compute Jacobian at Hopf point
-        let jac = compute_jacobian(system, kind, hopf_state)?;
-        let jac_mat = DMatrix::from_row_slice(n, n, &jac);
+        let jac_mat = compute_spectral_jacobian(system, kind, hopf_state)?;
+        let residual_jac_values = compute_jacobian(system, kind, hopf_state)?;
+        let residual_jac = DMatrix::from_row_slice(n, n, &residual_jac_values);
 
-        let kappa_seed =
-            estimate_hopf_kappa_from_jacobian(&jac_mat).unwrap_or(hopf_omega * hopf_omega);
-        let kappa = if kappa_seed.is_finite() && kappa_seed > 0.0 {
-            kappa_seed
-        } else {
-            hopf_omega * hopf_omega
+        let kappa = match kind {
+            SystemKind::Flow => {
+                // The caller's frequency identifies which Hopf eigenspace to
+                // use at a Hopf-Hopf point.  A global spectral estimator is
+                // ambiguous there and systematically selected the faster
+                // pair, making the second Hopf branch unreachable.
+                let requested = critical_value * critical_value;
+                let seed = if requested.is_finite() && requested > 0.0 {
+                    requested
+                } else {
+                    estimate_hopf_kappa_from_jacobian(&jac_mat).unwrap_or(requested)
+                };
+                if !seed.is_finite() || seed <= 0.0 {
+                    bail!("Hopf frequency squared must be finite and positive");
+                }
+                seed
+            }
+            SystemKind::Map { .. } => {
+                let seed = estimate_map_ns_cosine_from_jacobian(&jac_mat).unwrap_or(critical_value);
+                if !seed.is_finite() || seed.abs() > 1.0 + 1.0e-8 {
+                    bail!("Map Neimark-Sacker cosine must lie in [-1, 1]");
+                }
+                seed.clamp(-1.0, 1.0)
+            }
         };
 
-        // Initialize borders from the nullspace of A^2 + κI
-        let (v, w) = initialize_hopf_borders(&jac_mat, kappa)?;
+        // Initialize borders from the two-dimensional critical eigenspace.
+        let (v, w) = initialize_hopf_borders(&jac_mat, kappa, kind)?;
         let borders = HopfBorders::new(v, w);
 
         let mut problem = Self {
@@ -293,7 +366,7 @@ impl<'a> HopfCurveProblem<'a> {
 
         let p1 = problem.system.params[param1_index];
         let p2 = problem.system.params[param2_index];
-        if let Err(_) = problem.update_indices(hopf_state, p1, p2, kappa, &jac_mat) {
+        if let Err(_) = problem.update_indices(hopf_state, p1, p2, kappa, &jac_mat, &residual_jac) {
             // Keep default indices when selection fails.
         }
 
@@ -322,7 +395,7 @@ impl<'a> HopfCurveProblem<'a> {
 
     fn compute_g_matrix(&self, jac: &DMatrix<f64>, kappa: f64) -> Result<DMatrix<f64>> {
         let n = self.nphase();
-        let (vext, _) = solve_bordered(jac, kappa, &self.borders)?;
+        let (vext, _) = solve_bordered(jac, kappa, self.kind, &self.borders)?;
         Ok(g_matrix_from_vext(&vext, n))
     }
 
@@ -347,8 +420,7 @@ impl<'a> HopfCurveProblem<'a> {
             let mut state_pert = state.to_vec();
             state_pert[i] += step;
             let jac_pert = self.with_params(p1, p2, |system| {
-                let j = compute_jacobian(system, kind, &state_pert)?;
-                Ok(DMatrix::from_row_slice(n, n, &j))
+                compute_spectral_jacobian(system, kind, &state_pert)
             })?;
             let g_pert = self.compute_g_matrix(&jac_pert, kappa)?;
             let g_pert_flat = flatten_g_matrix(&g_pert);
@@ -360,8 +432,7 @@ impl<'a> HopfCurveProblem<'a> {
         // Derivatives w.r.t. parameters
         let step_p1 = finite_diff_step(p1);
         let jac_p1 = self.with_params(p1 + step_p1, p2, |system| {
-            let j = compute_jacobian(system, kind, state)?;
-            Ok(DMatrix::from_row_slice(n, n, &j))
+            compute_spectral_jacobian(system, kind, state)
         })?;
         let g_p1 = self.compute_g_matrix(&jac_p1, kappa)?;
         let g_p1_flat = flatten_g_matrix(&g_p1);
@@ -371,8 +442,7 @@ impl<'a> HopfCurveProblem<'a> {
 
         let step_p2 = finite_diff_step(p2);
         let jac_p2 = self.with_params(p1, p2 + step_p2, |system| {
-            let j = compute_jacobian(system, kind, state)?;
-            Ok(DMatrix::from_row_slice(n, n, &j))
+            compute_spectral_jacobian(system, kind, state)
         })?;
         let g_p2 = self.compute_g_matrix(&jac_p2, kappa)?;
         let g_p2_flat = flatten_g_matrix(&g_p2);
@@ -397,7 +467,8 @@ impl<'a> HopfCurveProblem<'a> {
         p1: f64,
         p2: f64,
         kappa: f64,
-        jac: &DMatrix<f64>,
+        spectral_jac: &DMatrix<f64>,
+        residual_jac: &DMatrix<f64>,
     ) -> Result<()> {
         let n = self.nphase();
 
@@ -405,31 +476,29 @@ impl<'a> HopfCurveProblem<'a> {
         let mut a = DMatrix::zeros(n, n + 3);
         for row in 0..n {
             for col in 0..n {
-                a[(row, col)] = jac[(row, col)];
+                a[(row, col)] = residual_jac[(row, col)];
             }
         }
 
-        let mut f_dual = vec![Dual::new(0.0, 0.0); n];
+        let kind = self.kind;
         let param1_index = self.param1_index;
-        self.with_params(p1, p2, |system| {
-            system.evaluate_dual_wrt_param(state, param1_index, &mut f_dual);
-            Ok(())
+        let f_p1 = self.with_params(p1, p2, |system| {
+            compute_param_jacobian(system, kind, state, param1_index)
         })?;
         for row in 0..n {
-            a[(row, n)] = f_dual[row].eps;
+            a[(row, n)] = f_p1[row];
         }
 
         let param2_index = self.param2_index;
-        self.with_params(p1, p2, |system| {
-            system.evaluate_dual_wrt_param(state, param2_index, &mut f_dual);
-            Ok(())
+        let f_p2 = self.with_params(p1, p2, |system| {
+            compute_param_jacobian(system, kind, state, param2_index)
         })?;
         for row in 0..n {
-            a[(row, n + 1)] = f_dual[row].eps;
+            a[(row, n + 1)] = f_p2[row];
         }
 
         // Column n + 2 (kappa) stays zero for F.
-        let g_deriv = match self.compute_g_derivatives(state, p1, p2, kappa, jac) {
+        let g_deriv = match self.compute_g_derivatives(state, p1, p2, kappa, spectral_jac) {
             Ok(val) => val,
             Err(_) => return Ok(()),
         };
@@ -454,7 +523,7 @@ impl<'a> HopfCurveProblem<'a> {
     /// Evaluate the Hopf singularity functions (g1, g2) using bordered system.
     fn eval_singularity(&mut self, jac: &DMatrix<f64>, kappa: f64) -> Result<(f64, f64)> {
         let n = self.nphase();
-        let (vext, _) = solve_bordered(jac, kappa, &self.borders)?;
+        let (vext, _) = solve_bordered(jac, kappa, self.kind, &self.borders)?;
         let g = g_matrix_from_vext(&vext, n);
         Ok(g_values_from_matrix(
             &g,
@@ -473,6 +542,28 @@ impl<'a> HopfCurveProblem<'a> {
         kappa: f64,
     ) -> Result<Codim2TestFunctions> {
         let mut tests = Codim2TestFunctions::default();
+        if self.kind.is_map() {
+            // On a map NS curve the auxiliary is cos(theta). These four
+            // algebraic tests therefore locate the strong resonances without
+            // inverse trigonometric branch ambiguities.
+            tests.cusp = f64::NAN;
+            tests.bogdanov_takens = f64::NAN;
+            tests.zero_hopf = f64::NAN;
+            tests.double_hopf = f64::NAN;
+            tests.generalized_hopf = f64::NAN;
+            tests.cusp_cycles = f64::NAN;
+            tests.fold_flip = f64::NAN;
+            tests.fold_ns = f64::NAN;
+            tests.flip_ns = f64::NAN;
+            tests.double_ns = f64::NAN;
+            tests.gpd = f64::NAN;
+            tests.chenciner = f64::NAN;
+            tests.resonance_1_1 = kappa - 1.0;
+            tests.resonance_1_2 = kappa + 1.0;
+            tests.resonance_1_3 = kappa + 0.5;
+            tests.resonance_1_4 = kappa;
+            return Ok(tests);
+        }
         tests.generalized_hopf = f64::NAN;
 
         // BT test: κ → 0 (Hopf frequency collapses)
@@ -481,14 +572,25 @@ impl<'a> HopfCurveProblem<'a> {
         // ZH test: det(A) → 0 (zero eigenvalue appears)
         tests.zero_hopf = jac.determinant();
 
-        // HH test: bialternate product for second pair of pure imaginary eigenvalues
-        // This requires computing det(A^{[2]} - λI) at λ = -kappa
+        // HH test: signed real part of the non-source conjugate pair nearest
+        // the imaginary axis.  The previous shifted bialternate determinant
+        // was even in that real part for canonical Hopf-Hopf unfoldings, so it
+        // touched zero without changing sign and could not be located by the
+        // curve event detector.
         let n = jac.nrows();
         if n >= 4 {
-            let bialt_n = n * (n - 1) / 2;
-            let bialt = compute_bialternate_matrix(jac);
-            let bialt_shifted = bialt - DMatrix::identity(bialt_n, bialt_n) * (-kappa);
-            tests.double_hopf = bialt_shifted.determinant();
+            let source_frequency = kappa.max(0.0).sqrt();
+            let frequency_tolerance = 1e-6 * (1.0 + source_frequency);
+            tests.double_hopf = jac
+                .clone()
+                .complex_eigenvalues()
+                .iter()
+                .filter(|eigenvalue| {
+                    eigenvalue.im > 1e-8
+                        && (eigenvalue.im - source_frequency).abs() > frequency_tolerance
+                })
+                .min_by(|left, right| left.re.abs().total_cmp(&right.re.abs()))
+                .map_or(f64::NAN, |eigenvalue| eigenvalue.re);
         }
 
         // GH test: first Lyapunov coefficient. A generalized Hopf
@@ -516,7 +618,7 @@ impl<'a> HopfCurveProblem<'a> {
             bail!("Hopf frequency squared must be positive");
         }
         let n = jac.nrows();
-        let (right_ext, left_ext) = solve_bordered(jac, kappa, &self.borders)?;
+        let (right_ext, left_ext) = solve_bordered(jac, kappa, self.kind, &self.borders)?;
         let right_nullspace = right_ext.view((0, 0), (n, 2)).into_owned();
         let left_nullspace = left_ext.view((0, 0), (n, 2)).into_owned();
         let kind = self.kind;
@@ -555,8 +657,63 @@ impl<'a> HopfCurveProblem<'a> {
         self.normal_form_for(&state, p1, p2, &jac, kappa, true)
     }
 
+    /// Recompute the detailed Zero-Hopf normal form at a refined Hopf-curve
+    /// point, retaining the source-curve frequency to select the correct
+    /// eigenspace.
+    pub(crate) fn zero_hopf_normal_form_at(
+        &mut self,
+        aug_state: &DVector<f64>,
+    ) -> Result<ZeroHopfNormalForm> {
+        if !self.kind.is_flow() {
+            bail!("Zero-Hopf normal forms are only defined for flows");
+        }
+        let n = self.nphase();
+        if aug_state.len() != n + 3 {
+            bail!("Augmented state has wrong dimension for Zero-Hopf normal form");
+        }
+        let state: Vec<f64> = aug_state.rows(2, n).iter().copied().collect();
+        zero_hopf_normal_form(
+            self.system,
+            &state,
+            self.param1_index,
+            self.param2_index,
+            aug_state[0],
+            aug_state[1],
+            aug_state[n + 2].max(0.0).sqrt(),
+        )
+    }
+
+    /// Recompute the detailed nonresonant Hopf-Hopf normal form at a refined
+    /// Hopf-curve point.
+    pub(crate) fn hopf_hopf_normal_form_at(
+        &mut self,
+        aug_state: &DVector<f64>,
+    ) -> Result<HopfHopfNormalForm> {
+        if !self.kind.is_flow() {
+            bail!("Hopf-Hopf normal forms are only defined for flows");
+        }
+        let n = self.nphase();
+        if aug_state.len() != n + 3 {
+            bail!("Augmented state has wrong dimension for Hopf-Hopf normal form");
+        }
+        let state: Vec<f64> = aug_state.rows(2, n).iter().copied().collect();
+        hopf_hopf_normal_form(
+            self.system,
+            &state,
+            self.param1_index,
+            self.param2_index,
+            aug_state[0],
+            aug_state[1],
+            aug_state[n + 2].max(0.0).sqrt(),
+        )
+    }
+
     pub fn codim2_tests(&self) -> Codim2TestFunctions {
         self.codim2_tests
+    }
+
+    pub(crate) fn system_kind(&self) -> SystemKind {
+        self.kind
     }
 }
 
@@ -582,20 +739,11 @@ impl<'a> ContinuationProblem for HopfCurveProblem<'a> {
         let state: Vec<f64> = aug_state.rows(2, n).iter().cloned().collect();
         let kappa = aug_state[n + 2];
 
-        // Evaluate residual of equilibrium equations
+        // Evaluate the flow equilibrium or iterated-map fixed-point residual.
         let kind = self.kind;
         let mut f_out = vec![0.0; n];
         self.with_params(p1, p2, |system| {
-            match kind {
-                SystemKind::Flow => system.apply(0.0, &state, &mut f_out),
-                SystemKind::Map { .. } => {
-                    system.apply(0.0, &state, &mut f_out);
-                    for i in 0..n {
-                        f_out[i] -= state[i];
-                    }
-                }
-            }
-            Ok(())
+            evaluate_equilibrium_residual(system, kind, &state, &mut f_out)
         })?;
 
         // Copy equilibrium residual
@@ -605,8 +753,7 @@ impl<'a> ContinuationProblem for HopfCurveProblem<'a> {
 
         // Compute Jacobian and singularity functions
         let jac = self.with_params(p1, p2, |system| {
-            let j = compute_jacobian(system, kind, &state)?;
-            Ok(DMatrix::from_row_slice(n, n, &j))
+            compute_spectral_jacobian(system, kind, &state)
         })?;
 
         let (g1, g2) = self.eval_singularity(&jac, kappa)?;
@@ -632,34 +779,37 @@ impl<'a> ContinuationProblem for HopfCurveProblem<'a> {
         let mut jext = DMatrix::zeros(n + 2, n + 3);
 
         // dF/dp1
-        let mut f_dual = vec![Dual::new(0.0, 0.0); n];
-        self.with_params(p1, p2, |system| {
-            system.evaluate_dual_wrt_param(&state, param1_idx, &mut f_dual);
-            Ok(())
+        let f_p1 = self.with_params(p1, p2, |system| {
+            compute_param_jacobian(system, kind, &state, param1_idx)
         })?;
         for i in 0..n {
-            jext[(i, 0)] = f_dual[i].eps;
+            jext[(i, 0)] = f_p1[i];
         }
 
         // dF/dp2
-        self.with_params(p1, p2, |system| {
-            system.evaluate_dual_wrt_param(&state, param2_idx, &mut f_dual);
-            Ok(())
+        let f_p2 = self.with_params(p1, p2, |system| {
+            compute_param_jacobian(system, kind, &state, param2_idx)
         })?;
         for i in 0..n {
-            jext[(i, 1)] = f_dual[i].eps;
+            jext[(i, 1)] = f_p2[i];
         }
 
-        // dF/dx (state Jacobian)
-        let jac = self.with_params(p1, p2, |system| {
+        // dF/dx uses the fixed-point residual Jacobian for maps.
+        let residual_jac = self.with_params(p1, p2, |system| {
             let j = compute_jacobian(system, kind, &state)?;
             Ok(DMatrix::from_row_slice(n, n, &j))
         })?;
         for row in 0..n {
             for col in 0..n {
-                jext[(row, col + 2)] = jac[(row, col)];
+                jext[(row, col + 2)] = residual_jac[(row, col)];
             }
         }
+
+        // The singularity reduction uses the flow Jacobian or map multiplier
+        // matrix, not the map fixed-point residual Jacobian.
+        let jac = self.with_params(p1, p2, |system| {
+            compute_spectral_jacobian(system, kind, &state)
+        })?;
 
         // dF/dκ = 0 (equilibrium doesn't depend on κ)
         // Already zero
@@ -671,8 +821,7 @@ impl<'a> ContinuationProblem for HopfCurveProblem<'a> {
         // dg/dp1
         let step_p1 = finite_diff_step(p1);
         let jac_p1 = self.with_params(p1 + step_p1, p2, |system| {
-            let j = compute_jacobian(system, kind, &state)?;
-            Ok(DMatrix::from_row_slice(n, n, &j))
+            compute_spectral_jacobian(system, kind, &state)
         })?;
         let g_p1 = self.compute_g_matrix(&jac_p1, kappa)?;
         let (g1_p1, g2_p1) = g_values_from_matrix(&g_p1, self.borders.index1, self.borders.index2);
@@ -682,8 +831,7 @@ impl<'a> ContinuationProblem for HopfCurveProblem<'a> {
         // dg/dp2
         let step_p2 = finite_diff_step(p2);
         let jac_p2 = self.with_params(p1, p2 + step_p2, |system| {
-            let j = compute_jacobian(system, kind, &state)?;
-            Ok(DMatrix::from_row_slice(n, n, &j))
+            compute_spectral_jacobian(system, kind, &state)
         })?;
         let g_p2 = self.compute_g_matrix(&jac_p2, kappa)?;
         let (g1_p2, g2_p2) = g_values_from_matrix(&g_p2, self.borders.index1, self.borders.index2);
@@ -696,8 +844,7 @@ impl<'a> ContinuationProblem for HopfCurveProblem<'a> {
             let mut state_pert = state.clone();
             state_pert[i] += step;
             let jac_xi = self.with_params(p1, p2, |system| {
-                let j = compute_jacobian(system, kind, &state_pert)?;
-                Ok(DMatrix::from_row_slice(n, n, &j))
+                compute_spectral_jacobian(system, kind, &state_pert)
             })?;
             let g_xi = self.compute_g_matrix(&jac_xi, kappa)?;
             let (g1_xi, g2_xi) =
@@ -726,8 +873,7 @@ impl<'a> ContinuationProblem for HopfCurveProblem<'a> {
 
         let kind = self.kind;
         let jac = self.with_params(p1, p2, |system| {
-            let j = compute_jacobian(system, kind, &state)?;
-            Ok(DMatrix::from_row_slice(n, n, &j))
+            compute_spectral_jacobian(system, kind, &state)
         })?;
 
         // Compute eigenvalues
@@ -738,7 +884,7 @@ impl<'a> ContinuationProblem for HopfCurveProblem<'a> {
         self.codim2_tests = self.compute_codim2_tests(&state, p1, p2, &jac, kappa)?;
 
         // Standard test functions
-        let hopf = kappa; // Should be O(ω²)
+        let hopf = if kind.is_flow() { kappa } else { 1.0 };
 
         Ok(PointDiagnostics {
             test_values: TestFunctionValues::equilibrium(1.0, hopf, 1.0),
@@ -758,26 +904,32 @@ impl<'a> ContinuationProblem for HopfCurveProblem<'a> {
         let jac = match self.cached_jacobian.clone() {
             Some(cached) => cached,
             None => self.with_params(p1, p2, |system| {
-                let j = compute_jacobian(system, kind, &state)?;
-                Ok(DMatrix::from_row_slice(n, n, &j))
+                compute_spectral_jacobian(system, kind, &state)
             })?,
         };
 
-        self.borders.update(&jac, kappa)?;
-        let _ = self.update_indices(&state, p1, p2, kappa, &jac);
+        self.borders.update(&jac, kappa, self.kind)?;
+        let residual_jac = self.with_params(p1, p2, |system| {
+            let values = compute_jacobian(system, kind, &state)?;
+            Ok(DMatrix::from_row_slice(n, n, &values))
+        })?;
+        let _ = self.update_indices(&state, p1, p2, kappa, &jac, &residual_jac);
         Ok(())
     }
 }
 
 /// Initialize Hopf curve borders from eigenvectors of critical eigenvalue pair.
-fn initialize_hopf_borders(jac: &DMatrix<f64>, kappa: f64) -> Result<(DMatrix<f64>, DMatrix<f64>)> {
+fn initialize_hopf_borders(
+    jac: &DMatrix<f64>,
+    auxiliary: f64,
+    kind: SystemKind,
+) -> Result<(DMatrix<f64>, DMatrix<f64>)> {
     let n = jac.nrows();
     if n < 2 {
         bail!("Hopf requires at least 2D system");
     }
 
-    // Use RED = A*A + κ*I which should be nearly singular at Hopf
-    let red = jac * jac + DMatrix::identity(n, n) * kappa;
+    let red = spectral_reduction(jac, auxiliary, kind);
     let svd = red.svd(true, true);
 
     let mut v = DMatrix::zeros(n, 2);
@@ -804,40 +956,6 @@ fn initialize_hopf_borders(jac: &DMatrix<f64>, kappa: f64) -> Result<(DMatrix<f6
     }
 
     Ok((v, w))
-}
-
-/// Compute the bialternate product matrix A^{[2]}.
-fn compute_bialternate_matrix(jac: &DMatrix<f64>) -> DMatrix<f64> {
-    let n = jac.nrows();
-    if n < 2 {
-        return DMatrix::zeros(0, 0);
-    }
-
-    let m = n * (n - 1) / 2;
-    let mut bialt = DMatrix::zeros(m, m);
-
-    let mut row = 0;
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let mut col = 0;
-            for k in 0..n {
-                for l in (k + 1)..n {
-                    let d_jl = if j == l { 1.0 } else { 0.0 };
-                    let d_jk = if j == k { 1.0 } else { 0.0 };
-                    let d_il = if i == l { 1.0 } else { 0.0 };
-                    let d_ik = if i == k { 1.0 } else { 0.0 };
-
-                    bialt[(row, col)] = jac[(i, k)] * d_jl - jac[(i, l)] * d_jk
-                        + jac[(j, l)] * d_ik
-                        - jac[(j, k)] * d_il;
-                    col += 1;
-                }
-            }
-            row += 1;
-        }
-    }
-
-    bialt
 }
 
 #[cfg(test)]

@@ -13,6 +13,8 @@ import type {
   EventSeriesResult,
   ForkCoreClient,
   LimitCycleFloquetModesRequest as CoreLimitCycleFloquetModesRequest,
+  LimitCycleCodim1CurveType,
+  NormalFormProvenance,
   LyapunovExponentsRequest as CoreLyapunovExponentsRequest,
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
@@ -81,7 +83,9 @@ import {
   normalizeEigenvalueArray,
   normalizeBranchEigenvalues,
   trimHomoclinicLargeCycleSeedPoint,
+  isUniformNormalizedCollocationMesh,
   resolveContinuationPointParam2Value,
+  resolveNormalizedCollocationMesh,
   serializeBranchDataForWasm,
 } from '../system/continuation'
 import { hasCustomObjectParams, resolveObjectParams } from '../system/parameters'
@@ -253,6 +257,23 @@ function validateBranchName(name: string): string | null {
     return 'Branch names must be alphanumeric with underscores only.'
   }
   return null
+}
+
+function attachNormalFormProvenance(
+  system: System,
+  branchId: string,
+  pointIndex: number,
+  provenance: NormalFormProvenance
+): System {
+  const branch = system.branches[branchId]
+  if (!branch || !branch.data.points[pointIndex]) return system
+  const points = branch.data.points.map((point, index) =>
+    index === pointIndex ? { ...point, normal_form: provenance } : point
+  )
+  return updateBranch(system, branchId, {
+    ...branch,
+    data: { ...branch.data, points },
+  })
 }
 
 function validateManifoldCaps(
@@ -951,6 +972,46 @@ function limitCyclePackedStateLayoutForBranchType(
   return 'auto'
 }
 
+function prepareLimitCycleCurveSeedState(
+  snapshot: SubsystemSnapshot,
+  state: number[],
+  ntst: number,
+  ncol: number,
+  branchType: ContinuationObject['branchType'],
+  label: string
+): number[] {
+  const projected = projectLimitCyclePackedStateForSnapshot(
+    snapshot,
+    state,
+    ntst,
+    ncol,
+    label,
+    limitCyclePackedStateLayoutForBranchType(branchType)
+  )
+  const canonical = canonicalizeLimitCycleStateForAnalysis(
+    projected,
+    snapshot.freeVariableNames.length,
+    ntst,
+    ncol,
+    branchType
+  )
+  if (branchType === 'limit_cycle') return canonical
+
+  const dimension = snapshot.freeVariableNames.length
+  const period = canonical[canonical.length - 1]
+  const coordinates = canonical.slice(0, -1)
+  const closingMeshStart = ntst * dimension
+  const closingMeshEnd = (ntst + 1) * dimension
+  if (coordinates.length < closingMeshEnd) {
+    throw new Error(`${label} has incomplete explicit periodic coordinates.`)
+  }
+  return [
+    ...coordinates.slice(0, closingMeshStart),
+    ...coordinates.slice(closingMeshEnd),
+    period,
+  ]
+}
+
 type LimitCycleAnalysisContext = {
   baseParams: number[]
   snapshot: SubsystemSnapshot
@@ -958,6 +1019,7 @@ type LimitCycleAnalysisContext = {
   seedState: number[]
   seedNtst: number
   seedNcol: number
+  seedNormalizedMesh: number[]
   seedBranchType: ContinuationObject['branchType']
   runtimeParameterRef: ParameterRef | null
   selectedPoint: ContinuationPoint | null
@@ -973,6 +1035,10 @@ function resolveLimitCycleAnalysisContext(
   let seedState = limitCycle.state
   let seedNtst = limitCycle.ntst
   let seedNcol = limitCycle.ncol
+  let seedNormalizedMesh = resolveNormalizedCollocationMesh(
+    seedNtst,
+    limitCycle.normalized_mesh
+  )
   let seedBranchType: ContinuationObject['branchType'] = 'limit_cycle'
   let snapshot = buildObjectSubsystemSnapshot(system, limitCycle)
   let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
@@ -1006,6 +1072,12 @@ function resolveLimitCycleAnalysisContext(
       ) {
         seedNtst = Math.max(1, Math.trunc(branchType.ntst as number))
         seedNcol = Math.max(1, Math.trunc(branchType.ncol as number))
+        seedNormalizedMesh = resolveNormalizedCollocationMesh(
+          seedNtst,
+          'normalized_mesh' in branchType && Array.isArray(branchType.normalized_mesh)
+            ? branchType.normalized_mesh
+            : undefined
+        )
       }
 
       const applyNativeParamValue = (ref: ParameterRef | null, value: number | undefined) => {
@@ -1099,6 +1171,7 @@ function resolveLimitCycleAnalysisContext(
     seedState,
     seedNtst,
     seedNcol,
+    seedNormalizedMesh,
     seedBranchType,
     runtimeParameterRef,
     selectedPoint,
@@ -1246,6 +1319,23 @@ export type Codim2BranchCreationRequest = {
   ntst: number
   ncol: number
   tolerance: number
+  orientation?: 'Negative' | 'Positive'
+  mode?: 1 | 2
+  cycleAmplitude?: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type NormalFormAtPointRequest = {
+  branchId: string
+  pointIndex: number
+}
+
+export type PeriodicBranchPointCreationRequest = {
+  branchId: string
+  pointIndex: number
+  name: string
+  amplitude: number
   settings: ContinuationSettings
   forward: boolean
 }
@@ -1255,6 +1345,17 @@ export type IsoperiodicCurveContinuationRequest = {
   pointIndex: number
   name: string
   parameterName: string
+  param2Name: string
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type LimitCycleCodim1CurveCreationRequest = {
+  branchId: string
+  pointIndex: number
+  curveType: LimitCycleCodim1CurveType
+  targetAuxiliary?: number
+  name: string
   param2Name: string
   settings: ContinuationSettings
   forward: boolean
@@ -1693,6 +1794,7 @@ export type AppActions = {
   computeLyapunovExponents: (request: OrbitLyapunovRequest) => Promise<void>
   computeCovariantLyapunovVectors: (request: OrbitCovariantLyapunovRequest) => Promise<void>
   computeLimitCycleFloquetModes: (request: LimitCycleFloquetModesRequest) => Promise<void>
+  computeNormalFormAtPoint: (request: NormalFormAtPointRequest) => Promise<void>
   solveEquilibrium: (request: EquilibriumSolveRequest) => Promise<void>
   createEquilibriumBranch: (request: EquilibriumContinuationRequest) => Promise<void>
   createEquilibriumManifold1D: (request: EquilibriumManifold1DRequest) => Promise<void>
@@ -1707,7 +1809,13 @@ export type AppActions = {
   createFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   createHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
   createCodim2BranchFromPoint: (request: Codim2BranchCreationRequest) => Promise<void>
+  createPeriodicBranchFromPoint: (
+    request: PeriodicBranchPointCreationRequest
+  ) => Promise<void>
   createIsoperiodicCurveFromPoint: (request: IsoperiodicCurveContinuationRequest) => Promise<void>
+  createLimitCycleCodim1CurveFromPoint: (
+    request: LimitCycleCodim1CurveCreationRequest
+  ) => Promise<void>
   createNSCurveFromPoint: (request: MapNSCurveContinuationRequest) => Promise<void>
   createLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
   createLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
@@ -2889,6 +2997,7 @@ export function AppProvider({
           seedState,
           seedNtst,
           seedNcol,
+          seedNormalizedMesh,
           seedBranchType,
         } = context
         if (runConfig.paramNames.length === 0) {
@@ -2927,6 +3036,7 @@ export function AppProvider({
           cycleState: reducedState,
           ntst: seedNtst,
           ncol: seedNcol,
+          normalizedMesh: seedNormalizedMesh,
           parameterName: runtimeParameterName,
         }
         const result = await client.computeLimitCycleFloquetModes(payload)
@@ -4200,6 +4310,7 @@ export function AppProvider({
           seedState,
           seedNtst,
           seedNcol,
+          seedNormalizedMesh,
           seedBranchType,
           selectedPoint,
         } = context
@@ -4234,6 +4345,7 @@ export function AppProvider({
             cycleState,
             ntst: seedNtst,
             ncol: seedNcol,
+            normalizedMesh: seedNormalizedMesh,
             parameterName: runtimeParameterName,
           })
           floquet = normalizeFiniteFloquetMultipliers(floquetResult.multipliers)
@@ -4266,6 +4378,7 @@ export function AppProvider({
             cycleState,
             ntst: seedNtst,
             ncol: seedNcol,
+            normalizedMesh: seedNormalizedMesh,
             floquetMultipliers: floquet,
             settings: resolvedManifoldSettings,
           },
@@ -4863,6 +4976,7 @@ export function AppProvider({
             stability: pt.codim2_type || 'None',
             eigenvalues: normalizeEigenvalueArray(pt.eigenvalues),
             codim2: pt.codim2,
+            codim2_events: pt.codim2_events,
           })),
           bifurcations: curveData.codim2_bifurcations?.map((b) => b.index) || [],
           indices: curveData.points.map((_, i) => i),
@@ -5029,6 +5143,7 @@ export function AppProvider({
             eigenvalues: normalizeEigenvalueArray(pt.eigenvalues),
             auxiliary: pt.auxiliary ?? undefined,
             codim2: pt.codim2,
+            codim2_events: pt.codim2_events,
           })),
           bifurcations: curveData.codim2_bifurcations?.map((b) => b.index) || [],
           indices: curveData.points.map((_, i) => i),
@@ -5081,6 +5196,192 @@ export function AppProvider({
     [client, state.system, store]
   )
 
+  const computeNormalFormAtPoint = useCallback(
+    async (request: NormalFormAtPointRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      try {
+        const sourceBranch = state.system.branches[request.branchId]
+        const point = sourceBranch?.data.points[request.pointIndex]
+        if (!sourceBranch || !point) {
+          throw new Error('Select a valid continuation point.')
+        }
+        const system = state.system.config
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
+        const sourceObjectCandidate = sourceObjectId
+          ? state.system.objects[sourceObjectId]
+          : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate)
+          ? sourceObjectCandidate
+          : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        let parameterNames: string[]
+        let parameterValues: number[]
+        let normalizedMesh: number[] | undefined
+        let mapIterations: number | undefined
+        let result
+
+        if (system.type === 'map' && sourceBranch.branchType === 'equilibrium') {
+          const normalFormType = point.stability === 'BranchPoint' || point.stability === 'Fold'
+            ? 'BranchPoint'
+            : point.stability === 'PeriodDoubling'
+              ? 'PeriodDoubling'
+              : point.stability === 'NeimarkSacker'
+                ? 'NeimarkSacker'
+                : null
+          if (!normalFormType) {
+            throw new Error('Map normal forms are available at BP, PD, or NS points.')
+          }
+          const parameterRef = sourceBranch.parameterRef ??
+            parseContinuationParameter(system, snapshot, sourceBranch.parameterName)
+          const parameterName = resolveRuntimeParameterName(snapshot, parameterRef)
+          runConfig = applyReducedParamOverrides(runConfig, {
+            [parameterName]: point.param_value,
+          })
+          mapIterations = Math.max(1, Math.trunc(sourceBranch.mapIterations ?? 1))
+          parameterNames = [resolveDisplayParameterName(parameterRef)]
+          parameterValues = [point.param_value]
+          result = await client.computeNormalForm({
+            system: runConfig,
+            sourceType: 'Map',
+            normalFormType,
+            state: projectStateForSnapshot(snapshot, point.state, 'map normal-form point'),
+            paramName: parameterName,
+            paramValue: point.param_value,
+            mapIterations,
+          })
+        } else if (system.type === 'flow' && sourceBranch.branchType === 'limit_cycle') {
+          const normalFormType = point.stability === 'PeriodDoubling'
+            ? 'PeriodDoubling'
+            : point.stability === 'NeimarkSacker'
+              ? 'NeimarkSacker'
+              : point.stability === 'BranchPoint' || point.stability === 'CycleFold'
+                ? 'BranchPoint'
+                : null
+          if (!normalFormType) {
+            throw new Error('Cycle normal forms are available at BP, LPC, PD, or NS points.')
+          }
+          const branchType = sourceBranch.data.branch_type
+          if (!branchType || branchType.type !== 'LimitCycle') {
+            throw new Error('Limit-cycle collocation metadata is missing.')
+          }
+          if (!branchType.normalized_mesh || branchType.normalized_mesh.length !== branchType.ntst + 1) {
+            throw new Error(
+              'This legacy cycle branch has no persistent normalized mesh; recontinue it before computing a normal form.'
+            )
+          }
+          normalizedMesh = [...branchType.normalized_mesh]
+          const parameterRef = sourceBranch.parameterRef ??
+            parseContinuationParameter(system, snapshot, sourceBranch.parameterName)
+          const parameterName = resolveRuntimeParameterName(snapshot, parameterRef)
+          runConfig = applyReducedParamOverrides(runConfig, {
+            [parameterName]: point.param_value,
+          })
+          parameterNames = [resolveDisplayParameterName(parameterRef)]
+          parameterValues = [point.param_value]
+          result = await client.computeNormalForm({
+            system: runConfig,
+            sourceType: 'PeriodicOrbit',
+            normalFormType,
+            state: projectLimitCyclePackedStateForSnapshot(
+              snapshot,
+              point.state,
+              branchType.ntst,
+              branchType.ncol,
+              'periodic normal-form point',
+              'implicit'
+            ),
+            paramName: parameterName,
+            paramValue: point.param_value,
+            collocationDegree: branchType.ncol,
+            normalizedMesh,
+          })
+        } else if (
+          system.type === 'flow' &&
+          point.codim2 &&
+          (point.codim2.type === 'ZeroHopf' || point.codim2.type === 'DoubleHopf')
+        ) {
+          const branchType = sourceBranch.data.branch_type
+          if (!branchType || (branchType.type !== 'FoldCurve' && branchType.type !== 'HopfCurve')) {
+            throw new Error('Equilibrium codimension-two source parameter metadata is missing.')
+          }
+          const param1Ref = branchType.param1_ref ??
+            parseContinuationParameter(system, snapshot, branchType.param1_name)
+          const param2Ref = branchType.param2_ref ??
+            parseContinuationParameter(system, snapshot, branchType.param2_name)
+          const param1Name = resolveRuntimeParameterName(snapshot, param1Ref)
+          const param2Name = resolveRuntimeParameterName(snapshot, param2Ref)
+          const param2Value = point.param2_value
+          if (!Number.isFinite(param2Value)) {
+            throw new Error('Codimension-two source has no finite second parameter.')
+          }
+          runConfig = applyReducedParamOverrides(runConfig, {
+            [param1Name]: point.param_value,
+            [param2Name]: param2Value as number,
+          })
+          const coefficient = (name: string) =>
+            point.codim2?.coefficients.find((entry) => entry.name === name)?.value
+          const sourceFrequency = point.codim2.type === 'ZeroHopf'
+            ? coefficient('omega')
+            : coefficient('omega1')
+          if (!Number.isFinite(sourceFrequency) || (sourceFrequency ?? 0) <= 0) {
+            throw new Error('Codimension-two source frequency metadata is missing.')
+          }
+          parameterNames = [
+            resolveDisplayParameterName(param1Ref),
+            resolveDisplayParameterName(param2Ref),
+          ]
+          parameterValues = [point.param_value, param2Value as number]
+          result = await client.computeNormalForm({
+            system: runConfig,
+            sourceType: point.codim2.type === 'ZeroHopf' ? 'ZeroHopf' : 'HopfHopf',
+            state: projectStateForSnapshot(snapshot, point.state, 'codimension-two normal-form point'),
+            param1Name,
+            param2Name,
+            param1Value: point.param_value,
+            param2Value: param2Value as number,
+            sourceFrequency: sourceFrequency as number,
+          })
+        } else {
+          throw new Error('The selected point does not expose a supported normal form.')
+        }
+
+        const provenance: NormalFormProvenance = {
+          source_kind: result.normalForm.type === 'ZeroHopf'
+            ? 'ZeroHopf'
+            : result.normalForm.type === 'HopfHopf'
+              ? 'HopfHopf'
+              : sourceBranch.branchType === 'limit_cycle'
+                ? 'PeriodicOrbit'
+                : 'Map',
+          source_branch_id: request.branchId,
+          source_point_index: request.pointIndex,
+          parameter_names: parameterNames,
+          parameter_values: parameterValues,
+          map_iterations: mapIterations,
+          normalized_mesh: normalizedMesh,
+          computed_at: new Date().toISOString(),
+          normal_form: result.normalForm,
+        }
+        const updated = attachNormalFormProvenance(
+          state.system,
+          request.branchId,
+          request.pointIndex,
+          provenance
+        )
+        dispatch({ type: 'SET_SYSTEM', system: updated })
+        await store.save(updated)
+      } catch (err) {
+        dispatch({ type: 'SET_ERROR', error: err instanceof Error ? err.message : String(err) })
+      } finally {
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
   const createCodim2BranchFromPoint = useCallback(
     async (request: Codim2BranchCreationRequest) => {
       if (!state.system) return
@@ -5100,7 +5401,12 @@ export function AppProvider({
           throw new Error('The selected point has not passed its nondegeneracy checks.')
         }
         const sourceType = point.codim2.type
-        if (sourceType !== 'GeneralizedHopf' && sourceType !== 'BogdanovTakens') {
+        if (
+          sourceType !== 'GeneralizedHopf' &&
+          sourceType !== 'BogdanovTakens' &&
+          sourceType !== 'ZeroHopf' &&
+          sourceType !== 'DoubleHopf'
+        ) {
           throw new Error('The selected codimension-two point does not support branch switching.')
         }
         if (sourceType === 'GeneralizedHopf' && request.target !== 'LimitPointCycle') {
@@ -5108,6 +5414,21 @@ export function AppProvider({
         }
         if (sourceType === 'BogdanovTakens' && request.target === 'LimitPointCycle') {
           throw new Error('Bogdanov-Takens points switch to fold, Hopf, or homoclinic branches.')
+        }
+        if (
+          sourceType === 'ZeroHopf' &&
+          request.target !== 'Fold' &&
+          request.target !== 'Hopf' &&
+          request.target !== 'NeimarkSacker'
+        ) {
+          throw new Error('Zero-Hopf points switch to fold, Hopf, or periodic NS curves.')
+        }
+        if (
+          sourceType === 'DoubleHopf' &&
+          request.target !== 'Hopf' &&
+          request.target !== 'NeimarkSacker'
+        ) {
+          throw new Error('Hopf-Hopf points switch to Hopf or periodic NS curves.')
         }
         const branchType = sourceBranch.data.branch_type
         if (
@@ -5167,6 +5488,14 @@ export function AppProvider({
             neighborAuxiliary: neighbor?.auxiliary,
             neighborTestValue,
             secondLyapunov: coefficient('l2'),
+            frequency: sourceType === 'ZeroHopf'
+              ? coefficient('omega')
+              : sourceType === 'DoubleHopf'
+                ? coefficient('omega1')
+                : undefined,
+            orientation: request.orientation,
+            mode: request.mode,
+            cycleAmplitude: request.cycleAmplitude,
             perturbation: request.perturbation,
             ntst: request.ntst,
             ncol: request.ncol,
@@ -5197,6 +5526,8 @@ export function AppProvider({
           storedBranchType = 'homoclinic_curve'
         } else {
           const curve = result.branch as Codim1CurveBranch
+          const outputNtst = curve.ntst ?? request.ntst
+          const outputNcol = curve.ncol ?? request.ncol
           const curveBranchType = request.target === 'Fold'
             ? {
                 type: 'FoldCurve' as const,
@@ -5213,15 +5544,31 @@ export function AppProvider({
                   param1_ref: param1Ref,
                   param2_ref: param2Ref,
                 }
-              : {
-                  type: 'LPCCurve' as const,
-                  param1_name: param1DisplayName,
-                  param2_name: param2DisplayName,
-                  param1_ref: param1Ref,
-                  param2_ref: param2Ref,
-                  ntst: request.ntst,
-                  ncol: request.ncol,
-                }
+              : request.target === 'NeimarkSacker'
+                ? {
+                    type: 'NSCurve' as const,
+                    param1_name: param1DisplayName,
+                    param2_name: param2DisplayName,
+                    param1_ref: param1Ref,
+                    param2_ref: param2Ref,
+                    ntst: outputNtst,
+                    ncol: outputNcol,
+                    normalized_mesh:
+                      curve.normalized_mesh ??
+                      Array.from({ length: outputNtst + 1 }, (_, index) => index / outputNtst),
+                  }
+                : {
+                    type: 'LPCCurve' as const,
+                    param1_name: param1DisplayName,
+                    param2_name: param2DisplayName,
+                    param1_ref: param1Ref,
+                    param2_ref: param2Ref,
+                    ntst: outputNtst,
+                    ncol: outputNcol,
+                    normalized_mesh:
+                      curve.normalized_mesh ??
+                      Array.from({ length: outputNtst + 1 }, (_, index) => index / outputNtst),
+                  }
           branchData = normalizeBranchEigenvalues({
             points: curve.points.map((entry) => ({
               state: entry.state,
@@ -5231,16 +5578,20 @@ export function AppProvider({
               eigenvalues: normalizeEigenvalueArray(entry.eigenvalues),
               auxiliary: entry.auxiliary ?? undefined,
               codim2: entry.codim2,
+              codim2_events: entry.codim2_events,
             })),
             bifurcations: curve.codim2_bifurcations?.map((entry) => entry.index) ?? [],
             indices: curve.indices ?? curve.points.map((_, index) => index),
             branch_type: curveBranchType,
           }, { stateDimension: snapshot.freeVariableNames.length })
+          branchData.collocation_adaptation = curve.collocation_adaptation
           storedBranchType = request.target === 'Fold'
             ? 'fold_curve'
             : request.target === 'Hopf'
               ? 'hopf_curve'
-              : 'lpc_curve'
+              : request.target === 'NeimarkSacker'
+                ? 'ns_curve'
+                : 'lpc_curve'
         }
         branchData.codim2_seed = {
           source_type: sourceType,
@@ -5251,6 +5602,25 @@ export function AppProvider({
           predictor_residual: seed.predictor_residual,
           corrected_residual: seed.corrected_residual,
           correction_iterations: seed.correction_iterations,
+        }
+        let sourceSystem = state.system
+        if (result.normalForm) {
+          const provenance: NormalFormProvenance = {
+            source_kind: sourceType === 'ZeroHopf' ? 'ZeroHopf' : 'HopfHopf',
+            source_branch_id: request.branchId,
+            source_point_index: request.pointIndex,
+            parameter_names: [param1DisplayName, param2DisplayName],
+            parameter_values: [point.param_value, point.param2_value ?? Number.NaN],
+            computed_at: new Date().toISOString(),
+            normal_form: result.normalForm,
+          }
+          branchData.normal_form_provenance = provenance
+          sourceSystem = attachNormalFormProvenance(
+            sourceSystem,
+            request.branchId,
+            request.pointIndex,
+            provenance
+          )
         }
         const branch: ContinuationObject = {
           type: 'continuation',
@@ -5271,7 +5641,139 @@ export function AppProvider({
           subsystemSnapshot: snapshot,
         }
         if (!sourceObjectId) throw new Error('Unable to locate the parent object in the tree.')
-        const created = addBranch(state.system, branch, sourceObjectId)
+        const created = addBranch(sourceSystem, branch, sourceObjectId)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        dispatch({ type: 'SET_ERROR', error: err instanceof Error ? err.message : String(err) })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const createPeriodicBranchFromPoint = useCallback(
+    async (request: PeriodicBranchPointCreationRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        if (system.type !== 'flow') {
+          throw new Error('Periodic branch-point switching requires a flow system.')
+        }
+        const sourceBranch = state.system.branches[request.branchId]
+        const point = sourceBranch?.data.points[request.pointIndex]
+        if (!sourceBranch || !point || sourceBranch.branchType !== 'limit_cycle') {
+          throw new Error('Select a branch point on a limit-cycle branch.')
+        }
+        if (point.stability !== 'BranchPoint') {
+          throw new Error('The selected cycle point is not a generic periodic branch point.')
+        }
+        const branchType = sourceBranch.data.branch_type
+        if (!branchType || branchType.type !== 'LimitCycle') {
+          throw new Error('Limit-cycle collocation metadata is missing.')
+        }
+        if (!branchType.normalized_mesh || branchType.normalized_mesh.length !== branchType.ntst + 1) {
+          throw new Error(
+            'This legacy cycle branch has no persistent normalized mesh; recontinue it before switching branches.'
+          )
+        }
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) throw new Error(nameError)
+        if (branchNameExistsForBranch(state.system, sourceBranch, name)) {
+          throw new Error(`Branch "${name}" already exists.`)
+        }
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
+        if (!sourceObjectId) throw new Error('Unable to locate the parent limit cycle in the tree.')
+        const sourceObjectCandidate = state.system.objects[sourceObjectId]
+        const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const parameterRef = sourceBranch.parameterRef ??
+          parseContinuationParameter(system, snapshot, sourceBranch.parameterName)
+        const parameterName = resolveRuntimeParameterName(snapshot, parameterRef)
+        const parameterDisplayName = resolveDisplayParameterName(parameterRef)
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        runConfig = applyReducedParamOverrides(runConfig, {
+          [parameterName]: point.param_value,
+        })
+        const normalizedMesh = [...branchType.normalized_mesh]
+        const result = await client.runPeriodicBranchPointSwitch(
+          {
+            system: runConfig,
+            state: projectLimitCyclePackedStateForSnapshot(
+              snapshot,
+              point.state,
+              branchType.ntst,
+              branchType.ncol,
+              'periodic branch-point source',
+              'implicit'
+            ),
+            paramName: parameterName,
+            paramValue: point.param_value,
+            collocationDegree: branchType.ncol,
+            normalizedMesh,
+            amplitude: request.amplitude,
+            settings: request.settings,
+            forward: request.forward,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: 'Periodic BP Branch', progress },
+              }),
+          }
+        )
+        if (result.branch.points.length <= 1) {
+          throw new Error('Periodic branch switching stopped at the corrected seed.')
+        }
+        const provenance: NormalFormProvenance = {
+          source_kind: 'PeriodicOrbit',
+          source_branch_id: request.branchId,
+          source_point_index: request.pointIndex,
+          parameter_names: [parameterDisplayName],
+          parameter_values: [point.param_value],
+          normalized_mesh: normalizedMesh,
+          computed_at: new Date().toISOString(),
+          normal_form: result.normalForm,
+        }
+        const branchData = normalizeBranchEigenvalues(
+          {
+            ...result.branch,
+            normal_form_provenance: provenance,
+          },
+          { stateDimension: snapshot.freeVariableNames.length }
+        )
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name,
+          systemName: system.name,
+          parameterName: parameterDisplayName,
+          parameterRef,
+          parentObjectId: sourceObjectId,
+          startObjectId: request.branchId,
+          parentObject: resolveBranchParentObjectName(state.system, sourceBranch),
+          startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
+          branchType: 'limit_cycle',
+          data: branchData,
+          settings: request.settings,
+          timestamp: new Date().toISOString(),
+          params: [...baseParams],
+          subsystemSnapshot: snapshot,
+        }
+        const sourceSystem = attachNormalFormProvenance(
+          state.system,
+          request.branchId,
+          request.pointIndex,
+          provenance
+        )
+        const created = addBranch(sourceSystem, branch, sourceObjectId)
         const selected = selectNode(created.system, created.nodeId)
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
@@ -5332,6 +5834,10 @@ export function AppProvider({
         }
         const ntst = Math.max(1, Math.trunc(branchType.ntst ?? 20))
         const ncol = Math.max(1, Math.trunc(branchType.ncol ?? 4))
+        const normalizedMesh = resolveNormalizedCollocationMesh(
+          ntst,
+          branchType.normalized_mesh
+        )
 
         const name = request.name.trim()
         const nameError = validateBranchName(name)
@@ -5418,6 +5924,7 @@ export function AppProvider({
             param2Value,
             ntst,
             ncol,
+            normalizedMesh,
             settings: request.settings,
             forward: request.forward,
           },
@@ -5444,6 +5951,7 @@ export function AppProvider({
             eigenvalues: normalizeEigenvalueArray(pt.eigenvalues),
             auxiliary: pt.auxiliary ?? undefined,
             codim2: pt.codim2,
+            codim2_events: pt.codim2_events,
           })),
           bifurcations: curveData.codim2_bifurcations?.map((b) => b.index) || [],
           indices:
@@ -5456,10 +5964,16 @@ export function AppProvider({
             param2_name: param2DisplayName,
             param1_ref: param1Ref,
             param2_ref: param2Ref,
-            ntst,
-            ncol,
+            ntst: curveData.ntst ?? ntst,
+            ncol: curveData.ncol ?? ncol,
+            normalized_mesh:
+              curveData.normalized_mesh &&
+              curveData.normalized_mesh.length === (curveData.ntst ?? ntst) + 1
+                ? curveData.normalized_mesh
+                : normalizedMesh,
           },
         }, { stateDimension: snapshot.freeVariableNames.length })
+        branchData.collocation_adaptation = curveData.collocation_adaptation
 
         const branch: ContinuationObject = {
           type: 'continuation',
@@ -5486,6 +6000,321 @@ export function AppProvider({
         }
 
         const created = addBranch(state.system, branch, parentNodeId)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        dispatch({ type: 'SET_ERROR', error: message })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
+  const createLimitCycleCodim1CurveFromPoint = useCallback(
+    async (request: LimitCycleCodim1CurveCreationRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        const validation = validateSystemConfig(system)
+        if (!validation.valid) {
+          throw new Error('System settings are invalid.')
+        }
+        if (system.type !== 'flow') {
+          throw new Error('Limit-cycle bifurcation curves are only available for flow systems.')
+        }
+
+        const sourceBranch = state.system.branches[request.branchId]
+        if (!sourceBranch) {
+          throw new Error('Select a valid branch to continue.')
+        }
+        const isCycleCurveSource =
+          sourceBranch.branchType === 'lpc_curve' ||
+          sourceBranch.branchType === 'pd_curve' ||
+          sourceBranch.branchType === 'ns_curve'
+        if (sourceBranch.branchType !== 'limit_cycle' && !isCycleCurveSource) {
+          throw new Error(
+            'Limit-cycle bifurcation curves require a limit-cycle or cycle-curve source branch.'
+          )
+        }
+
+        const point: ContinuationPoint | undefined =
+          sourceBranch.data.points[request.pointIndex]
+        if (!point) {
+          throw new Error('Select a valid branch point.')
+        }
+        const curveConfig =
+          request.curveType === 'LimitPointCycle'
+            ? {
+                sourceStability: 'CycleFold' as const,
+                label: 'LPC',
+                branchType: 'lpc_curve' as const,
+                metadataType: 'LPCCurve' as const,
+              }
+            : request.curveType === 'PeriodDoubling'
+              ? {
+                  sourceStability: 'PeriodDoubling' as const,
+                  label: 'PD',
+                  branchType: 'pd_curve' as const,
+                  metadataType: 'PDCurve' as const,
+                }
+              : {
+                  sourceStability: 'NeimarkSacker' as const,
+                  label: 'NS',
+                  branchType: 'ns_curve' as const,
+                  metadataType: 'NSCurve' as const,
+                }
+        const matchingSwitch = point.codim2?.branch_switches?.find(
+          (branchSwitch) => branchSwitch.target === request.curveType
+        )
+        const directSource =
+          sourceBranch.branchType === 'limit_cycle' &&
+          point.stability === curveConfig.sourceStability
+        const adjacentSource = Boolean(
+          isCycleCurveSource &&
+          point.codim2?.refined &&
+          !point.codim2.candidate &&
+          matchingSwitch?.available
+        )
+        if (!directSource && !adjacentSource) {
+          const reason = matchingSwitch?.reason
+          throw new Error(
+            reason ??
+              `Selected point does not expose an available ${curveConfig.label} curve switch.`
+          )
+        }
+
+        const sourceBranchType = sourceBranch.data.branch_type
+        const expectedSourceMetadataType =
+          sourceBranch.branchType === 'limit_cycle'
+            ? 'LimitCycle'
+            : sourceBranch.branchType === 'lpc_curve'
+              ? 'LPCCurve'
+              : sourceBranch.branchType === 'pd_curve'
+                ? 'PDCurve'
+                : 'NSCurve'
+        if (
+          !sourceBranchType ||
+          sourceBranchType.type !== expectedSourceMetadataType ||
+          !('ntst' in sourceBranchType) ||
+          !('ncol' in sourceBranchType)
+        ) {
+          throw new Error('Limit-cycle source mesh metadata is missing or inconsistent.')
+        }
+        const ntst = Math.max(1, Math.trunc(sourceBranchType.ntst))
+        const ncol = Math.max(1, Math.trunc(sourceBranchType.ncol))
+        const sourceNormalizedMesh =
+          'normalized_mesh' in sourceBranchType &&
+          Array.isArray(sourceBranchType.normalized_mesh)
+            ? sourceBranchType.normalized_mesh
+            : undefined
+        const normalizedMesh = resolveNormalizedCollocationMesh(
+          ntst,
+          sourceNormalizedMesh
+        )
+
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) {
+          throw new Error(nameError)
+        }
+        if (branchNameExistsForBranch(state.system, sourceBranch, name)) {
+          throw new Error(`Branch "${name}" already exists.`)
+        }
+
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
+        const sourceObjectCandidate = sourceObjectId
+          ? state.system.objects[sourceObjectId]
+          : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate)
+          ? sourceObjectCandidate
+          : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const sourceParam1Name =
+          'param1_name' in sourceBranchType
+            ? sourceBranchType.param1_name
+            : sourceBranch.parameterName
+        const sourceParam2Name =
+          'param2_name' in sourceBranchType
+            ? sourceBranchType.param2_name
+            : request.param2Name
+        const param1Ref = sourceBranch.parameterRef
+          ? sourceBranch.parameterRef
+          : parseContinuationParameter(system, snapshot, sourceParam1Name)
+        const param2Ref = isCycleCurveSource
+          ? sourceBranch.parameter2Ref ??
+            parseContinuationParameter(system, snapshot, sourceParam2Name)
+          : parseContinuationParameter(system, snapshot, request.param2Name)
+        if (formatParameterRefLabel(param2Ref) === formatParameterRefLabel(param1Ref)) {
+          throw new Error('Second parameter must be different from the continuation parameter.')
+        }
+        const param1Name = resolveRuntimeParameterName(snapshot, param1Ref)
+        const param2Name = resolveRuntimeParameterName(snapshot, param2Ref)
+        const param1DisplayName = resolveDisplayParameterName(param1Ref)
+        const param2DisplayName = resolveDisplayParameterName(param2Ref)
+
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        runConfig = applyReducedParamOverrides(runConfig, {
+          [param1Name]: point.param_value,
+        })
+        runConfig = applyReducedParamOverrides(
+          runConfig,
+          resolveBranchPointReducedParamOverrides(sourceBranch, point)
+        )
+        if (isCycleCurveSource) {
+          const refinedParam2Value = Number.isFinite(point.param2_value)
+            ? point.param2_value
+            : resolveContinuationPointParam2Value(
+                point,
+                sourceBranchType,
+                snapshot.freeVariableNames.length
+              )
+          if (!Number.isFinite(refinedParam2Value)) {
+            throw new Error('The refined cycle-curve point has no second parameter value.')
+          }
+          runConfig = applyReducedParamOverrides(runConfig, {
+            [param2Name]: refinedParam2Value as number,
+          })
+        }
+        const param2Idx = runConfig.paramNames.indexOf(param2Name)
+        const param2Value = runConfig.params[param2Idx] ?? Number.NaN
+        if (!Number.isFinite(param2Value)) {
+          throw new Error('Unable to resolve second continuation parameter value.')
+        }
+
+        const projectedPointState = prepareLimitCycleCurveSeedState(
+          snapshot,
+          point.state,
+          ntst,
+          ncol,
+          sourceBranch.branchType,
+          `${curveConfig.label} point`,
+        )
+        const period = projectedPointState[projectedPointState.length - 1]
+        if (!Number.isFinite(period) || period <= 0) {
+          throw new Error('Selected point has no valid period.')
+        }
+
+        let initialK: number | undefined
+        if (request.curveType === 'NeimarkSacker') {
+          const targetAuxiliary =
+            request.targetAuxiliary ?? matchingSwitch?.target_auxiliary
+          if (Number.isFinite(targetAuxiliary)) {
+            initialK = targetAuxiliary as number
+            if (Math.abs(initialK) > 1 + 1e-8) {
+              throw new Error('The target Neimark-Sacker cosine must lie in [-1, 1].')
+            }
+            initialK = Math.max(-1, Math.min(1, initialK))
+          } else {
+            const multiplier = normalizeEigenvalueArray(point.eigenvalues)
+              .filter((value) => Math.abs(value.im) > 1e-8)
+              .map((value) => ({ value, radius: Math.hypot(value.re, value.im) }))
+              .filter(({ radius }) => Number.isFinite(radius) && radius > 0)
+              .sort((left, right) =>
+                Math.abs(left.radius - 1) - Math.abs(right.radius - 1)
+              )[0]
+            if (!multiplier) {
+              throw new Error(
+                'Selected Neimark-Sacker target has no explicit cosine or complex Floquet multiplier.'
+              )
+            }
+            initialK = multiplier.value.re / multiplier.radius
+          }
+        }
+
+        const curveData = await client.runLimitCycleCodim1CurveContinuation(
+          {
+            system: runConfig,
+            curveType: request.curveType,
+            lcState: projectedPointState.slice(0, -1),
+            period,
+            param1Name,
+            param1Value: point.param_value,
+            param2Name,
+            param2Value,
+            initialK,
+            ntst,
+            ncol,
+            normalizedMesh,
+            settings: request.settings,
+            forward: request.forward,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: `${curveConfig.label} Curve`, progress },
+              }),
+          }
+        )
+        if (curveData.points.length <= 1) {
+          throw new Error(
+            `${curveConfig.label} curve continuation stopped at the seed point. Try a smaller step size or adjust parameters.`
+          )
+        }
+
+        const branchData = normalizeBranchEigenvalues({
+          points: curveData.points.map((entry) => ({
+            state: entry.state || point.state,
+            param_value: entry.param1_value,
+            param2_value: entry.param2_value,
+            stability: entry.codim2_type || 'None',
+            eigenvalues: normalizeEigenvalueArray(entry.eigenvalues),
+            auxiliary: entry.auxiliary ?? undefined,
+            codim2: entry.codim2,
+            codim2_events: entry.codim2_events,
+          })),
+          bifurcations: curveData.codim2_bifurcations?.map((entry) => entry.index) ?? [],
+          indices:
+            curveData.indices && curveData.indices.length === curveData.points.length
+              ? curveData.indices
+              : curveData.points.map((_, index) => index),
+          branch_type: {
+            type: curveConfig.metadataType,
+            param1_name: param1DisplayName,
+            param2_name: param2DisplayName,
+            param1_ref: param1Ref,
+            param2_ref: param2Ref,
+            ntst: curveData.ntst ?? ntst,
+            ncol: curveData.ncol ?? ncol,
+            normalized_mesh:
+              curveData.normalized_mesh &&
+              curveData.normalized_mesh.length === (curveData.ntst ?? ntst) + 1
+                ? curveData.normalized_mesh
+                : normalizedMesh,
+          },
+        }, { stateDimension: snapshot.freeVariableNames.length })
+        branchData.collocation_adaptation = curveData.collocation_adaptation
+
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name,
+          systemName: system.name,
+          parameterName: `${param1DisplayName}, ${param2DisplayName}`,
+          parameterRef: param1Ref,
+          parameter2Ref: param2Ref,
+          parentObjectId: sourceObjectId ?? undefined,
+          startObjectId: request.branchId,
+          parentObject: resolveBranchParentObjectName(state.system, sourceBranch),
+          startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
+          branchType: curveConfig.branchType,
+          data: branchData,
+          settings: request.settings,
+          timestamp: new Date().toISOString(),
+          params: [...baseParams],
+          subsystemSnapshot: snapshot,
+        }
+
+        if (!sourceObjectId) {
+          throw new Error('Unable to locate the parent limit cycle in the tree.')
+        }
+        const created = addBranch(state.system, branch, sourceObjectId)
         const selected = selectNode(created.system, created.nodeId)
         dispatch({ type: 'SET_SYSTEM', system: selected })
         await store.save(selected)
@@ -5614,6 +6443,7 @@ export function AppProvider({
             eigenvalues: normalizeEigenvalueArray(pt.eigenvalues),
             auxiliary: pt.auxiliary ?? undefined,
             codim2: pt.codim2,
+            codim2_events: pt.codim2_events,
           })),
           bifurcations: curveData.codim2_bifurcations?.map((b) => b.index) || [],
           indices: curveData.points.map((_, i) => i),
@@ -5841,6 +6671,10 @@ export function AppProvider({
               type: 'LimitCycle' as const,
               ntst: Math.round(request.ntst),
               ncol: Math.round(request.ncol),
+              normalized_mesh: resolveNormalizedCollocationMesh(
+                Math.round(request.ntst),
+                undefined
+              ),
             },
         }, { stateDimension: snapshot.freeVariableNames.length })
 
@@ -5853,6 +6687,20 @@ export function AppProvider({
         if (!Number.isFinite(period) || period <= 0) {
           throw new Error('Limit cycle continuation returned an invalid period.')
         }
+
+        const normalizedType = normalizedBranchData.branch_type
+        const objNtst =
+          normalizedType?.type === 'LimitCycle'
+            ? normalizedType.ntst
+            : Math.round(request.ntst)
+        const objNcol =
+          normalizedType?.type === 'LimitCycle'
+            ? normalizedType.ncol
+            : Math.round(request.ncol)
+        const objNormalizedMesh = resolveNormalizedCollocationMesh(
+          objNtst,
+          normalizedType?.type === 'LimitCycle' ? normalizedType.normalized_mesh : undefined
+        )
 
         const logicalIndex =
           sourceBranch.data.indices?.[request.pointIndex] ?? request.pointIndex
@@ -5867,8 +6715,9 @@ export function AppProvider({
             equilibriumBranchName: resolveEntityName(state.system, request.branchId, sourceBranch.name),
             pointIndex: logicalIndex,
           },
-          ntst: Math.round(request.ntst),
-          ncol: Math.round(request.ncol),
+          ntst: objNtst,
+          ncol: objNcol,
+          normalized_mesh: objNormalizedMesh,
           period,
           state: firstPoint.state,
           parameters: [...baseParams],
@@ -6037,6 +6886,10 @@ export function AppProvider({
               type: 'LimitCycle' as const,
               ntst: Math.round(request.ntst),
               ncol: Math.round(request.ncol),
+              normalized_mesh: resolveNormalizedCollocationMesh(
+                Math.round(request.ntst),
+                undefined
+              ),
             },
         }, { stateDimension: snapshot.freeVariableNames.length })
 
@@ -6050,13 +6903,28 @@ export function AppProvider({
           throw new Error('Limit cycle continuation returned an invalid period.')
         }
 
+        const normalizedType = normalizedBranchData.branch_type
+        const objNtst =
+          normalizedType?.type === 'LimitCycle'
+            ? normalizedType.ntst
+            : Math.round(request.ntst)
+        const objNcol =
+          normalizedType?.type === 'LimitCycle'
+            ? normalizedType.ncol
+            : Math.round(request.ncol)
+        const objNormalizedMesh = resolveNormalizedCollocationMesh(
+          objNtst,
+          normalizedType?.type === 'LimitCycle' ? normalizedType.normalized_mesh : undefined
+        )
+
         const lcObj: LimitCycleObject = {
           type: 'limit_cycle',
           name: limitCycleName,
           systemName: system.name,
           origin: { type: 'orbit', orbitName: orbit.name },
-          ntst: Math.round(request.ntst),
-          ncol: Math.round(request.ncol),
+          ntst: objNtst,
+          ncol: objNcol,
+          normalized_mesh: objNormalizedMesh,
           period,
           state: firstPoint.state,
           parameters: [...baseParams],
@@ -6392,6 +7260,10 @@ export function AppProvider({
         // PD seeds are packed with the source branch discretization. Until
         // init_lc_from_pd supports source/target NCOL conversion, inherit NCOL.
         const runNcol = Math.max(1, Math.round(sourceNcol))
+        const sourceNormalizedMesh = resolveNormalizedCollocationMesh(
+          runNtst,
+          branchType?.type === 'LimitCycle' ? branchType.normalized_mesh : undefined
+        )
 
         const baseParams = getBranchParams(state.system, sourceBranch)
         let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
@@ -6418,6 +7290,7 @@ export function AppProvider({
             paramValue: point.param_value,
             ntst: runNtst,
             ncol: runNcol,
+            normalizedMesh: sourceNormalizedMesh,
             amplitude: request.amplitude,
             settings: request.settings,
             forward: request.forward,
@@ -6450,6 +7323,7 @@ export function AppProvider({
               type: 'LimitCycle' as const,
               ntst: runNtst * 2,
               ncol: runNcol,
+              normalized_mesh: resolveNormalizedCollocationMesh(runNtst * 2, undefined),
             },
         }, { stateDimension: snapshot.freeVariableNames.length })
 
@@ -6470,6 +7344,10 @@ export function AppProvider({
           objNtst = normalizedType.ntst
           objNcol = normalizedType.ncol
         }
+        const objNormalizedMesh = resolveNormalizedCollocationMesh(
+          objNtst,
+          normalizedType?.type === 'LimitCycle' ? normalizedType.normalized_mesh : undefined
+        )
 
         const lcObj: LimitCycleObject = {
           type: 'limit_cycle',
@@ -6483,6 +7361,7 @@ export function AppProvider({
           },
           ntst: objNtst,
           ncol: objNcol,
+          normalized_mesh: objNormalizedMesh,
           period,
           state: firstPoint.state,
           parameters: [...baseParams],
@@ -6624,6 +7503,15 @@ export function AppProvider({
         if (sourceType?.type === 'LimitCycle') {
           sourceNtst = sourceType.ntst
           sourceNcol = sourceType.ncol
+        }
+        const sourceNormalizedMesh = resolveNormalizedCollocationMesh(
+          sourceNtst,
+          sourceType?.type === 'LimitCycle' ? sourceType.normalized_mesh : undefined
+        )
+        if (!isUniformNormalizedCollocationMesh(sourceNormalizedMesh)) {
+          throw new Error(
+            'Homoclinic initialization from a large cycle does not yet support a nonuniform collocation mesh. Recontinue the source cycle on a uniform mesh first.'
+          )
         }
 
         const baseParams = getBranchParams(state.system, sourceBranch)
@@ -7486,8 +8374,11 @@ export function AppProvider({
       extendBranch,
       createFoldCurveFromPoint,
       createHopfCurveFromPoint,
+      computeNormalFormAtPoint,
       createCodim2BranchFromPoint,
+      createPeriodicBranchFromPoint,
       createIsoperiodicCurveFromPoint,
+      createLimitCycleCodim1CurveFromPoint,
       createNSCurveFromPoint,
       createLimitCycleFromOrbit,
       createLimitCycleFromHopf,
@@ -7530,8 +8421,11 @@ export function AppProvider({
       extendBranch,
       createFoldCurveFromPoint,
       createHopfCurveFromPoint,
+      computeNormalFormAtPoint,
       createCodim2BranchFromPoint,
+      createPeriodicBranchFromPoint,
       createIsoperiodicCurveFromPoint,
+      createLimitCycleCodim1CurveFromPoint,
       createNSCurveFromPoint,
       createLimitCycleFromHopf,
       createLimitCycleFromOrbit,

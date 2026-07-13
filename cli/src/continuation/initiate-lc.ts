@@ -34,6 +34,11 @@ import {
   runLimitCycleManifold2DWithProgress
 } from './progress';
 import { formatEquilibriumLabel } from '../labels';
+import {
+  buildCollocationAdaptivitySettings,
+  collocationAdaptivityEntries,
+  defaultCollocationAdaptivityInputs,
+} from './collocation-adaptivity';
 
 const DEFAULT_MANIFOLD_CAPS: ManifoldTerminationCaps = {
   max_steps: 2000,
@@ -96,6 +101,7 @@ export async function initiateLCFromHopf(
   let correctorStepsInput = '10';
   let correctorToleranceInput = '1e-6';
   let stepToleranceInput = '1e-6';
+  const adaptivityInputs = defaultCollocationAdaptivityInputs();
 
   const directionLabel = (forward: boolean) =>
     forward ? 'Forward (Increasing Param)' : 'Backward (Decreasing Param)';
@@ -265,6 +271,8 @@ export async function initiateLCFromHopf(
     }
   ];
 
+  entries.push(...collocationAdaptivityEntries(adaptivityInputs));
+
   while (true) {
     const result = await runConfigMenu('Initiate Limit Cycle from Hopf', entries);
     if (result === 'back') {
@@ -305,7 +313,8 @@ export async function initiateLCFromHopf(
     max_steps: Math.max(parseIntOrDefault(maxStepsInput, 300), 1),
     corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
     corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-6), Number.EPSILON),
-    step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON)
+    step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON),
+    collocation_adaptivity: buildCollocationAdaptivitySettings(adaptivityInputs),
   };
 
   console.log(chalk.cyan("Initializing limit cycle from Hopf bifurcation..."));
@@ -349,7 +358,12 @@ export async function initiateLCFromHopf(
     );
 
     // Ensure branch_type is included with mesh parameters for plotting scripts.
-    branchData.branch_type = branchData.branch_type ?? { type: 'LimitCycle', ntst, ncol };
+    branchData.branch_type = branchData.branch_type ?? {
+      type: 'LimitCycle',
+      ntst,
+      ncol,
+      normalized_mesh: Array.from({ length: ntst + 1 }, (_, index) => index / ntst),
+    };
 
     const newBranch: ContinuationObject = {
       type: 'continuation',
@@ -368,6 +382,14 @@ export async function initiateLCFromHopf(
     const seedPoint = branchData.points[0];
     const seedState = seedPoint?.state ?? [];
     const seedPeriod = seedState.length > 0 ? seedState[seedState.length - 1] : NaN;
+    const finalBranchType = branchData.branch_type;
+    const objectNtst = finalBranchType?.type === 'LimitCycle' ? finalBranchType.ntst : ntst;
+    const objectNcol = finalBranchType?.type === 'LimitCycle' ? finalBranchType.ncol : ncol;
+    const objectMesh =
+      finalBranchType?.type === 'LimitCycle' &&
+      finalBranchType.normalized_mesh?.length === objectNtst + 1
+        ? [...finalBranchType.normalized_mesh]
+        : Array.from({ length: objectNtst + 1 }, (_, index) => index / objectNtst);
 
     const lcObj: LimitCycleObject = {
       type: 'limit_cycle',
@@ -379,8 +401,9 @@ export async function initiateLCFromHopf(
         equilibriumBranchName: branch.name,
         pointIndex: hopfPointIndex,
       },
-      ntst,
-      ncol,
+      ntst: objectNtst,
+      ncol: objectNcol,
+      normalized_mesh: objectMesh,
       period: seedPeriod,
       state: [...seedState],
       parameters: [...runConfig.params],
@@ -458,6 +481,7 @@ export async function initiateLCBranchFromPoint(
   let correctorStepsInput = '10';
   let correctorToleranceInput = '1e-6';
   let stepToleranceInput = '1e-6';
+  const adaptivityInputs = defaultCollocationAdaptivityInputs();
 
   const directionLabel = (forward: boolean) =>
     forward ? 'Forward (Increasing Param)' : 'Backward (Decreasing Param)';
@@ -594,6 +618,8 @@ export async function initiateLCBranchFromPoint(
     }
   ];
 
+  entries.push(...collocationAdaptivityEntries(adaptivityInputs));
+
   while (true) {
     const result = await runConfigMenu('Create Limit Cycle Branch from Point', entries);
     if (result === 'back') {
@@ -623,7 +649,8 @@ export async function initiateLCBranchFromPoint(
     max_steps: Math.max(parseIntOrDefault(maxStepsInput, 300), 1),
     corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
     corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-6), Number.EPSILON),
-    step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON)
+    step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON),
+    collocation_adaptivity: buildCollocationAdaptivitySettings(adaptivityInputs),
   };
 
   printInfo(`Running LC continuation (max ${continuationSettings.max_steps} steps)...`);
@@ -745,11 +772,17 @@ export async function initiateLCFromPD(
 
   // Extract source ntst/ncol from branch metadata
   let sourceNtst = 20, sourceNcol = 4;
+  let sourceNormalizedMesh: number[] | undefined;
   const btData = sourceBranch.data.branch_type as any;
   if (btData?.type === 'LimitCycle' && btData.ntst && btData.ncol) {
     sourceNtst = btData.ntst;
     sourceNcol = btData.ncol;
+    sourceNormalizedMesh = btData.normalized_mesh;
   }
+  sourceNormalizedMesh =
+    Array.isArray(sourceNormalizedMesh) && sourceNormalizedMesh.length === sourceNtst + 1
+      ? sourceNormalizedMesh
+      : Array.from({ length: sourceNtst + 1 }, (_, index) => index / sourceNtst);
 
   // Configuration defaults
   let limitCycleObjectName = `lc_pd_${sourceBranch.name}_idx${pdPointIdx}`;
@@ -763,6 +796,7 @@ export async function initiateLCFromPD(
   let correctorStepsInput = '10';
   let correctorToleranceInput = '1e-6';
   let stepToleranceInput = '1e-6';
+  const adaptivityInputs = defaultCollocationAdaptivityInputs();
 
   const directionLabel = (forward: boolean) =>
     forward ? 'Forward (Increasing Param)' : 'Backward (Decreasing Param)';
@@ -898,6 +932,7 @@ export async function initiateLCFromPD(
     }
   ];
 
+  entries.push(...collocationAdaptivityEntries(adaptivityInputs));
   const result = await runConfigMenu('Branch to Period-Doubled Limit Cycle', entries);
   if (result === 'back') return null;
 
@@ -933,6 +968,7 @@ export async function initiateLCFromPD(
       corrector_steps: parseIntOrDefault(correctorStepsInput, 10),
       corrector_tolerance: parseFloatOrDefault(correctorToleranceInput, 1e-6),
       step_tolerance: parseFloatOrDefault(stepToleranceInput, 1e-6),
+      collocation_adaptivity: buildCollocationAdaptivitySettings(adaptivityInputs),
     }
   };
 
@@ -956,6 +992,7 @@ export async function initiateLCFromPD(
       pdPoint.param_value,
       sourceNtst,
       sourceNcol,
+      sourceNormalizedMesh,
       runConfig.amplitude
     );
 
@@ -973,7 +1010,16 @@ export async function initiateLCFromPD(
 
     // Ensure branch_type is included with mesh parameters for plotting scripts.
     if (!branchData.branch_type) {
-      branchData.branch_type = { type: 'LimitCycle', ntst: sourceNtst * 2, ncol: sourceNcol };
+      const doubledNtst = sourceNtst * 2;
+      branchData.branch_type = {
+        type: 'LimitCycle',
+        ntst: doubledNtst,
+        ncol: sourceNcol,
+        normalized_mesh: Array.from(
+          { length: doubledNtst + 1 },
+          (_, index) => index / doubledNtst
+        ),
+      };
     }
 
     const newBranch: ContinuationObject = {
@@ -996,10 +1042,18 @@ export async function initiateLCFromPD(
 
     let objNtst = sourceNtst * 2;
     let objNcol = sourceNcol;
+    let objNormalizedMesh = Array.from(
+      { length: objNtst + 1 },
+      (_, index) => index / objNtst
+    );
     const bt = branchData.branch_type as any;
     if (bt?.type === 'LimitCycle' && typeof bt.ntst === 'number' && typeof bt.ncol === 'number') {
       objNtst = bt.ntst;
       objNcol = bt.ncol;
+      objNormalizedMesh =
+        Array.isArray(bt.normalized_mesh) && bt.normalized_mesh.length === objNtst + 1
+          ? [...bt.normalized_mesh]
+          : Array.from({ length: objNtst + 1 }, (_, index) => index / objNtst);
     }
 
     const lcObj: LimitCycleObject = {
@@ -1014,6 +1068,7 @@ export async function initiateLCFromPD(
       },
       ntst: objNtst,
       ncol: objNcol,
+      normalized_mesh: objNormalizedMesh,
       period: seedPeriod,
       state: [...seedState],
       parameters: [...runConfig.params],

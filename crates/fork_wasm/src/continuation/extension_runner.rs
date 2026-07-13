@@ -5,7 +5,10 @@ use super::shared::{compute_tangent_from_problem, OwnedEquilibriumContinuationPr
 use crate::system::build_system;
 use fork_core::continuation::homoclinic::HomoclinicProblem;
 use fork_core::continuation::homoclinic_init::decode_homoclinic_state_with_basis;
-use fork_core::continuation::periodic::PeriodicOrbitCollocationProblem;
+use fork_core::continuation::periodic::{
+    uniform_normalized_mesh, CollocationAdaptationReport, CollocationAdaptivitySettings,
+    PeriodicOrbitCollocationProblem,
+};
 use fork_core::continuation::{
     homoclinic_setup_from_homoclinic_point, orient_problem_tangent, pack_homoclinic_state,
     palc_norm, BranchType, ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint,
@@ -17,6 +20,7 @@ use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::SystemKind;
 use fork_core::traits::DynamicalSystem;
 use nalgebra::DVector;
+use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 
@@ -32,6 +36,33 @@ struct ExtensionMergeContext {
     branch: ContinuationBranch,
     index_offset: i32,
     sign: i32,
+    collocation_adaptation: Option<CollocationAdaptationReport>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Default)]
+struct ExtensionRunnerOptions {
+    #[serde(default)]
+    collocation_adaptivity: CollocationAdaptivitySettings,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct PersistedExtensionMetadata {
+    #[serde(default)]
+    collocation_adaptation: Option<CollocationAdaptationReport>,
+}
+
+#[derive(Serialize)]
+struct ExtensionBranchResult {
+    #[serde(flatten)]
+    branch: ContinuationBranch,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    collocation_adaptation: Option<CollocationAdaptationReport>,
+}
+
+#[derive(Serialize)]
+struct AtomicExtensionResult {
+    branch: ContinuationBranch,
+    collocation_adaptation: Option<CollocationAdaptationReport>,
 }
 
 enum ExtensionRunnerKind {
@@ -565,9 +596,13 @@ impl WasmContinuationExtensionRunner {
     ) -> Result<WasmContinuationExtensionRunner, JsValue> {
         console_error_panic_hook::set_once();
 
+        let options: ExtensionRunnerOptions = from_value(settings_val.clone())
+            .map_err(|e| JsValue::from_str(&format!("Invalid continuation options: {}", e)))?;
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
+        let persisted_metadata: PersistedExtensionMetadata = from_value(branch_val.clone())
+            .map_err(|e| JsValue::from_str(&format!("Invalid branch metadata: {}", e)))?;
         let mut branch: ContinuationBranch = from_value(branch_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid branch data: {}", e)))?;
 
@@ -627,6 +662,7 @@ impl WasmContinuationExtensionRunner {
             branch,
             index_offset: last_index,
             sign,
+            collocation_adaptation: persisted_metadata.collocation_adaptation,
         };
         let endpoint = merge
             .branch
@@ -731,7 +767,11 @@ impl WasmContinuationExtensionRunner {
 
                 ExtensionRunnerKind::Equilibrium { runner, merge }
             }
-            BranchType::LimitCycle { ntst, ncol } => {
+            BranchType::LimitCycle {
+                ntst,
+                ncol,
+                normalized_mesh,
+            } => {
                 validate_limit_cycle_extension_system_type(system_type)
                     .map_err(JsValue::from_str)?;
                 if merge.branch.upoldp.is_none() {
@@ -766,15 +806,29 @@ impl WasmContinuationExtensionRunner {
                 let phase_anchor: Vec<f64> = endpoint.state.iter().take(dim).cloned().collect();
 
                 let mut boxed_system = Box::new(system);
-                let problem = PeriodicOrbitCollocationProblem::new(
+                let normalized_mesh = if normalized_mesh.is_empty() {
+                    uniform_normalized_mesh(*ntst)
+                } else {
+                    normalized_mesh.clone()
+                };
+                let mut problem = PeriodicOrbitCollocationProblem::new_on_mesh_with_adaptivity(
                     static_system_ref(&mut boxed_system),
                     param_index,
-                    *ntst,
                     *ncol,
                     phase_anchor,
                     phase_direction,
+                    normalized_mesh,
+                    options.collocation_adaptivity,
                 )
                 .map_err(|e| JsValue::from_str(&format!("Failed to create LC problem: {}", e)))?;
+                if let Some(report) = merge.collocation_adaptation.clone() {
+                    problem.seed_adaptation_report(report).map_err(|e| {
+                        JsValue::from_str(&format!(
+                            "Failed to restore LC collocation adaptation report: {}",
+                            e
+                        ))
+                    })?;
+                }
 
                 let dim = problem.dimension();
                 if endpoint.state.len() != dim {
@@ -1220,7 +1274,33 @@ impl WasmContinuationExtensionRunner {
         to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
+    pub fn get_adaptation_report(&self) -> Result<JsValue, JsValue> {
+        match self.runner.as_ref() {
+            Some(ExtensionRunnerKind::LimitCycle { runner, .. }) => {
+                to_value(runner.problem().adaptation_report())
+                    .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+            }
+            _ => Ok(JsValue::NULL),
+        }
+    }
+
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
+        let completed = self.take_merged_result()?;
+        to_value(&completed).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn get_result_with_report(&mut self) -> Result<JsValue, JsValue> {
+        let completed = self.take_merged_result()?;
+        to_value(&AtomicExtensionResult {
+            branch: completed.branch,
+            collocation_adaptation: completed.collocation_adaptation,
+        })
+        .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+}
+
+impl WasmContinuationExtensionRunner {
+    fn take_merged_result(&mut self) -> Result<ExtensionBranchResult, JsValue> {
         let runner_kind = self
             .runner
             .take()
@@ -1228,10 +1308,60 @@ impl WasmContinuationExtensionRunner {
 
         let (extension, merge) = match runner_kind {
             ExtensionRunnerKind::Equilibrium { runner, merge } => (runner.take_result(), merge),
-            ExtensionRunnerKind::LimitCycle { runner, merge, .. } => (runner.take_result(), merge),
+            ExtensionRunnerKind::LimitCycle {
+                runner, mut merge, ..
+            } => {
+                let (mut extension, problem) = runner.take_result_with_problem();
+                let final_mesh = problem.normalized_mesh().to_vec();
+                let final_ntst = final_mesh.len().saturating_sub(1);
+                let final_ncol = problem.adaptation_report().degree;
+                let prior_attempts = merge
+                    .collocation_adaptation
+                    .as_ref()
+                    .map(|report| report.attempts.len())
+                    .unwrap_or(0);
+                let external_states = merge
+                    .branch
+                    .points
+                    .iter()
+                    .map(|point| point.state.clone())
+                    .collect::<Vec<_>>();
+                let transferred = problem
+                    .transfer_branch_states_to_current_discretization(&external_states)
+                    .map_err(|error| {
+                        JsValue::from_str(&format!(
+                            "Failed to transfer existing LC extension history: {}",
+                            error
+                        ))
+                    })?;
+                if transferred.len() != merge.branch.points.len() {
+                    return Err(JsValue::from_str(
+                        "Adaptive LC extension changed the persisted branch length",
+                    ));
+                }
+                for (point, state) in merge.branch.points.iter_mut().zip(transferred) {
+                    point.state = state;
+                }
+                let final_branch_type = BranchType::LimitCycle {
+                    ntst: final_ntst,
+                    ncol: final_ncol,
+                    normalized_mesh: final_mesh,
+                };
+                extension.branch_type = final_branch_type.clone();
+                merge.branch.branch_type = final_branch_type;
+                let report = problem.adaptation_report().clone();
+                if report.attempts.len() > prior_attempts {
+                    // Saved endpoint tangents use the previous numerical layout.
+                    // The completed extension contributes fresh final-layout seeds.
+                    merge.branch.resume_state = None;
+                }
+                merge.collocation_adaptation = Some(report);
+                (extension, merge)
+            }
             ExtensionRunnerKind::Homoclinic { runner, merge, .. } => (runner.take_result(), merge),
         };
 
+        let collocation_adaptation = merge.collocation_adaptation;
         let mut branch = merge.branch;
         let orig_count = branch.points.len();
         let ExtensionMergeContext {
@@ -1261,7 +1391,10 @@ impl WasmContinuationExtensionRunner {
             branch.homoc_context = extension.homoc_context;
         }
 
-        to_value(&branch).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+        Ok(ExtensionBranchResult {
+            branch,
+            collocation_adaptation,
+        })
     }
 }
 
@@ -1347,7 +1480,11 @@ mod tests {
             }],
             bifurcations: Vec::new(),
             indices: vec![0],
-            branch_type: BranchType::LimitCycle { ntst: 1, ncol: 1 },
+            branch_type: BranchType::LimitCycle {
+                ntst: 1,
+                ncol: 1,
+                normalized_mesh: vec![0.0, 1.0],
+            },
             upoldp: Some(vec![vec![1.0]]),
             homoc_context: None,
             resume_state: None,
@@ -1762,7 +1899,11 @@ mod tests {
             ],
             bifurcations: Vec::new(),
             indices: vec![0, -1, 2],
-            branch_type: BranchType::LimitCycle { ntst: 1, ncol: 1 },
+            branch_type: BranchType::LimitCycle {
+                ntst: 1,
+                ncol: 1,
+                normalized_mesh: vec![0.0, 1.0],
+            },
             upoldp: None,
             homoc_context: None,
             resume_state: None,

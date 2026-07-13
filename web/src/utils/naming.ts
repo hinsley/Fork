@@ -20,6 +20,8 @@ export type DefaultNameKind =
   | 'foldCurve'
   | 'hopfCurve'
   | 'isoperiodicCurve'
+  | 'lpcCurve'
+  | 'pdCurve'
   | 'nsCurve'
   | 'homoclinic'
   | 'homoclinicRestart'
@@ -53,6 +55,8 @@ const INHERITED_OPERATION_PREFIXES = [
   'fold_curve',
   'hopf_curve',
   'ns_curve',
+  'lpc_curve',
+  'pd_curve',
   'cycle_pd',
   'lc_pd',
   'manifold',
@@ -62,6 +66,8 @@ const INHERITED_OPERATION_PREFIXES = [
   'fold',
   'hopf',
   'ns',
+  'lpc',
+  'pd',
 ]
 
 function normalizeNameFragment(value: string): string {
@@ -219,6 +225,12 @@ export function suggestDefaultName(
       break
     case 'isoperiodicCurve':
       baseName = composeDerivedName(['isoperiodic'], source || 'branch')
+      break
+    case 'lpcCurve':
+      baseName = composeDerivedName(['lpc'], source || 'branch')
+      break
+    case 'pdCurve':
+      baseName = composeDerivedName(['pd'], source || 'branch')
       break
     case 'nsCurve':
       baseName = composeDerivedName(['ns'], source || 'branch')

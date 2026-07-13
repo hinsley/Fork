@@ -64,6 +64,12 @@ describe('naming utils', () => {
         parameterName: 'beta',
       })
     ).toBe('isoperiodic_LC_Equilibrium_1_mu_beta')
+    expect(suggestDefaultName('lpcCurve', { sourceName: 'lc_branch_mu' })).toBe(
+      'lpc_lc_branch_mu'
+    )
+    expect(suggestDefaultName('pdCurve', { sourceName: 'lc_branch_mu' })).toBe(
+      'pd_lc_branch_mu'
+    )
   })
 
   it('removes inherited operation noise from derived branch names', () => {

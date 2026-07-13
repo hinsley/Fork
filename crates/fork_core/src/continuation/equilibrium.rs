@@ -1,3 +1,4 @@
+use super::map_normal_forms::{map_branch_point_normal_form, MapBranchPointKind};
 use super::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
 use super::util::{
     hopf_test_function, neimark_sacker_test_function, neutral_saddle_test_function,
@@ -135,6 +136,12 @@ impl<'a> ContinuationProblem for EquilibriumContinuationProblem<'a> {
 
         let mut test_values = TestFunctionValues::equilibrium(fold, hopf, neutral);
         if self.kind.is_map() {
+            // A zero of det(D Phi^k - I) is a +1 multiplier event for a
+            // discrete map, not an equilibrium fold. Its local normal form
+            // subsequently distinguishes fold, transcritical, and pitchfork
+            // cases without conflating map and flow terminology.
+            test_values.fold = 1.0;
+            test_values.branch_point = fold;
             test_values.period_doubling = period_doubling_test_function(&eigenvalues);
             test_values.neimark_sacker = neimark_sacker_test_function(&eigenvalues);
         }
@@ -143,6 +150,30 @@ impl<'a> ContinuationProblem for EquilibriumContinuationProblem<'a> {
             test_values,
             eigenvalues,
             cycle_points,
+        })
+    }
+
+    fn classify_bifurcation(
+        &mut self,
+        aug_state: &DVector<f64>,
+        detected: BifurcationType,
+    ) -> Result<BifurcationType> {
+        if !self.kind.is_map() || detected != BifurcationType::BranchPoint {
+            return Ok(detected);
+        }
+        let dim = self.dimension();
+        let state = aug_state.rows(1, dim).iter().copied().collect::<Vec<_>>();
+        let normal_form = map_branch_point_normal_form(
+            self.system,
+            &state,
+            self.param_index,
+            aug_state[0],
+            self.kind.map_iterations(),
+        )?;
+        Ok(if normal_form.kind == MapBranchPointKind::Fold {
+            BifurcationType::Fold
+        } else {
+            BifurcationType::BranchPoint
         })
     }
 }

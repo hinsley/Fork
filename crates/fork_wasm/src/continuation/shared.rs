@@ -3,7 +3,8 @@
 pub(crate) use fork_core::continuation::compute_tangent_from_problem;
 use fork_core::continuation::util::{neimark_sacker_test_function, period_doubling_test_function};
 use fork_core::continuation::{
-    compute_eigenvalues, hopf_test_function, neutral_saddle_test_function, ContinuationProblem,
+    compute_eigenvalues, hopf_test_function, map_branch_point_normal_form,
+    neutral_saddle_test_function, BifurcationType, ContinuationProblem, MapBranchPointKind,
     PointDiagnostics, TestFunctionValues,
 };
 use fork_core::equation_engine::EquationSystem;
@@ -157,6 +158,11 @@ impl ContinuationProblem for OwnedEquilibriumContinuationProblem {
 
         let mut test_values = TestFunctionValues::equilibrium(fold, hopf, neutral);
         if kind.is_map() {
+            // For a map, det(D Phi^k - I)=0 is the generic +1-multiplier
+            // event. Classification below distinguishes saddle-node from a
+            // transcritical or pitchfork branch point using the local normal form.
+            test_values.fold = 1.0;
+            test_values.branch_point = fold;
             test_values.period_doubling = period_doubling_test_function(&eigenvalues);
             test_values.neimark_sacker = neimark_sacker_test_function(&eigenvalues);
         }
@@ -165,6 +171,30 @@ impl ContinuationProblem for OwnedEquilibriumContinuationProblem {
             test_values,
             eigenvalues,
             cycle_points,
+        })
+    }
+
+    fn classify_bifurcation(
+        &mut self,
+        aug_state: &DVector<f64>,
+        detected: BifurcationType,
+    ) -> anyhow::Result<BifurcationType> {
+        if !self.kind.is_map() || detected != BifurcationType::BranchPoint {
+            return Ok(detected);
+        }
+        let dim = self.dimension();
+        let state = aug_state.rows(1, dim).iter().copied().collect::<Vec<_>>();
+        let normal_form = map_branch_point_normal_form(
+            &mut self.system,
+            &state,
+            self.param_index,
+            aug_state[0],
+            self.kind.map_iterations(),
+        )?;
+        Ok(if normal_form.kind == MapBranchPointKind::Fold {
+            BifurcationType::Fold
+        } else {
+            BifurcationType::BranchPoint
         })
     }
 }
@@ -316,7 +346,8 @@ mod problem_tests {
 
         let diagnostics = problem.diagnostics(&aug_state).expect("diagnostics");
         let values = diagnostics.test_values;
-        assert!((values.fold - 2.0).abs() < 1e-12);
+        assert!((values.fold - 1.0).abs() < 1e-12);
+        assert!((values.branch_point - 2.0).abs() < 1e-12);
         assert!((values.period_doubling - 12.0).abs() < 1e-12);
         assert_eq!(values.hopf, 0.0);
         assert_eq!(values.neutral_saddle, 0.0);
@@ -326,6 +357,52 @@ mod problem_tests {
         assert_eq!(eigenvalues.len(), 2);
         assert!((eigenvalues[0] - 2.0).abs() < 1e-12);
         assert!((eigenvalues[1] - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn stepped_map_problem_classifies_pitchfork_and_fold_plus_one_events() {
+        let pitchfork = build_system(
+            vec!["x + mu*a*x + c*x^3".to_string()],
+            vec![0.0, -0.456, -1.234],
+            &vec!["mu".to_string(), "a".to_string(), "c".to_string()],
+            &vec!["x".to_string()],
+        )
+        .expect("pitchfork map");
+        let mut pitchfork_problem = OwnedEquilibriumContinuationProblem::new(
+            pitchfork,
+            SystemKind::Map { iterations: 1 },
+            0,
+        );
+        let pitchfork_aug = DVector::from_vec(vec![0.0, 0.0]);
+        assert_eq!(
+            pitchfork_problem
+                .classify_bifurcation(
+                    &pitchfork_aug,
+                    fork_core::continuation::BifurcationType::BranchPoint,
+                )
+                .expect("pitchfork classification"),
+            fork_core::continuation::BifurcationType::BranchPoint
+        );
+
+        let fold = build_system(
+            vec!["x + mu - x^2".to_string()],
+            vec![0.0],
+            &vec!["mu".to_string()],
+            &vec!["x".to_string()],
+        )
+        .expect("fold map");
+        let mut fold_problem =
+            OwnedEquilibriumContinuationProblem::new(fold, SystemKind::Map { iterations: 1 }, 0);
+        let fold_aug = DVector::from_vec(vec![0.0, 0.0]);
+        assert_eq!(
+            fold_problem
+                .classify_bifurcation(
+                    &fold_aug,
+                    fork_core::continuation::BifurcationType::BranchPoint,
+                )
+                .expect("fold classification"),
+            fork_core::continuation::BifurcationType::Fold
+        );
     }
 
     #[test]

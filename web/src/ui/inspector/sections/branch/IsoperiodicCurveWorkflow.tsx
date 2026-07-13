@@ -1,4 +1,5 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
 
 export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -253,6 +254,13 @@ export function IsoperiodicCurveWorkflow({ scope }: { scope: InspectorSelectionC
                           data-testid="isoperiodic-curve-step-tolerance"
                         />
                       </label>
+                      <CollocationAdaptivityFields
+                        draft={isoperiodicCurveDraft}
+                        onChange={(patch) =>
+                          setIsoperiodicCurveDraft((prev) => ({ ...prev, ...patch }))
+                        }
+                        testIdPrefix="isoperiodic-curve"
+                      />
                       {isoperiodicCurveError ? (
                         <div className="field-error">{isoperiodicCurveError}</div>
                       ) : null}

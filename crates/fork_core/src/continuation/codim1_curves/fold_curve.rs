@@ -10,6 +10,7 @@
 //!
 //! where vext is the solution of [A, w; v', 0] * [vext; g] = [0; 1].
 
+use super::equilibrium_codim2::{zero_hopf_normal_form, ZeroHopfNormalForm};
 use super::normal_forms::{
     bogdanov_takens_normal_form, fold_normal_form, BogdanovTakensNormalForm, FoldNormalForm,
 };
@@ -251,6 +252,46 @@ impl<'a> FoldCurveProblem<'a> {
             let jac = DMatrix::from_row_slice(n, n, &values);
             bogdanov_takens_normal_form(system, kind, &state, &jac)
         })
+    }
+
+    /// Recompute the detailed Zero-Hopf normal form at a refined point found
+    /// from the fold side.  The nonzero imaginary pair supplies the source
+    /// frequency that a Hopf-curve point would otherwise carry explicitly.
+    pub(crate) fn zero_hopf_normal_form_at(
+        &mut self,
+        aug_state: &DVector<f64>,
+    ) -> Result<ZeroHopfNormalForm> {
+        if !self.kind.is_flow() {
+            bail!("Zero-Hopf normal forms are only defined for flows");
+        }
+        let n = self.nphase();
+        if aug_state.len() != n + 2 {
+            bail!("Augmented state has wrong dimension for Zero-Hopf normal form");
+        }
+        let p1 = aug_state[0];
+        let p2 = aug_state[1];
+        let state: Vec<f64> = aug_state.rows(2, n).iter().copied().collect();
+        let kind = self.kind;
+        let jacobian = self.with_params(p1, p2, |system| {
+            let values = compute_jacobian(system, kind, &state)?;
+            Ok(DMatrix::from_row_slice(n, n, &values))
+        })?;
+        let frequency = jacobian
+            .complex_eigenvalues()
+            .iter()
+            .filter(|eigenvalue| eigenvalue.im > 1e-8)
+            .min_by(|left, right| left.re.abs().total_cmp(&right.re.abs()))
+            .map(|eigenvalue| eigenvalue.im)
+            .ok_or_else(|| anyhow::anyhow!("Zero-Hopf point has no imaginary eigenpair"))?;
+        zero_hopf_normal_form(
+            self.system,
+            &state,
+            self.param1_index,
+            self.param2_index,
+            p1,
+            p2,
+            frequency,
+        )
     }
 }
 

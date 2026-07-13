@@ -1,5 +1,6 @@
 import type { InspectorSelectionController } from '../../InspectorDetailsPanel'
 import { InspectorSubDisclosure } from '../selectionSession'
+import { CollocationAdaptivityFields } from './branch/CollocationAdaptivityFields'
 
 export function OrbitInspectorSections({
   scope,
@@ -895,6 +896,13 @@ export function OrbitInspectorSections({
                           data-testid="limit-cycle-from-orbit-step-tolerance"
                         />
                       </label>
+                      <CollocationAdaptivityFields
+                        draft={limitCycleFromOrbitDraft}
+                        onChange={(patch) =>
+                          setLimitCycleFromOrbitDraft((prev) => ({ ...prev, ...patch }))
+                        }
+                        testIdPrefix="limit-cycle-from-orbit"
+                      />
                       {limitCycleFromOrbitError ? (
                         <div className="field-error">{limitCycleFromOrbitError}</div>
                       ) : null}

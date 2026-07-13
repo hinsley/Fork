@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createDemoSystem, createPeriodDoublingSystem } from '../system/fixtures'
 import { InspectorDetailsPanel } from './InspectorDetailsPanel'
+import { buildCollocationAdaptivitySettings } from './inspector/collocationAdaptivity'
 import { makeSurfaceProfileDefaults, toManifold2DProfile } from './manifoldProfileDrafts'
 import { useState } from 'react'
 import {
@@ -20,6 +21,7 @@ import {
 import { buildSubsystemSnapshot } from '../system/subsystemGateway'
 import { renderPlot } from '../viewports/plotly/plotlyAdapter'
 import type {
+  Codim2PointData,
   ContinuationObject,
   EquilibriumObject,
   IsoclineObject,
@@ -133,7 +135,9 @@ function renderInspectorForStateSpaceStride(
   selectedNodeId: string,
   onUpdateRender: ReturnType<typeof vi.fn>,
   onExtendEquilibriumManifold1D: ReturnType<typeof vi.fn> = vi.fn(),
-  onExtendManifold2D: ReturnType<typeof vi.fn> = vi.fn()
+  onExtendManifold2D: ReturnType<typeof vi.fn> = vi.fn(),
+  onCreateLimitCycleCodim1CurveFromPoint: ReturnType<typeof vi.fn> = vi.fn(),
+  onCreateCodim2BranchFromPoint: ReturnType<typeof vi.fn> = vi.fn()
 ) {
   render(
     <InspectorDetailsPanel
@@ -159,6 +163,8 @@ function renderInspectorForStateSpaceStride(
       onExtendBranch={vi.fn().mockResolvedValue(undefined)}
       onCreateFoldCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
       onCreateHopfCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
+      onCreateLimitCycleCodim1CurveFromPoint={onCreateLimitCycleCodim1CurveFromPoint}
+      onCreateCodim2BranchFromPoint={onCreateCodim2BranchFromPoint}
       onCreateNSCurveFromPoint={vi.fn().mockResolvedValue(undefined)}
       onCreateLimitCycleFromHopf={vi.fn().mockResolvedValue(undefined)}
       onCreateLimitCycleFromOrbit={vi.fn().mockResolvedValue(undefined)}
@@ -169,6 +175,319 @@ function renderInspectorForStateSpaceStride(
 }
 
 describe('InspectorDetailsPanel', () => {
+  it('validates adaptive mesh integers exactly and ignores stale disabled fields', () => {
+    expect(
+      buildCollocationAdaptivitySettings({
+        adaptiveCollocationEnabled: true,
+        adaptiveDefectTolerance: '0.025',
+        adaptiveMaxRefinements: '3.5',
+        adaptiveMaxMeshPoints: '512',
+      })
+    ).toBeNull()
+
+    expect(
+      buildCollocationAdaptivitySettings({
+        adaptiveCollocationEnabled: false,
+        adaptiveDefectTolerance: 'invalid',
+        adaptiveMaxRefinements: '3.5',
+        adaptiveMaxMeshPoints: 'invalid',
+      })
+    ).toEqual({
+      enabled: false,
+      redistribution_enabled: true,
+      defect_tolerance: 0.025,
+      max_refinements: 3,
+      max_mesh_points: 512,
+    })
+  })
+
+  it('shows collocation mesh adaptation provenance in the branch summary', async () => {
+    const user = userEvent.setup()
+    const fixture = createStateSpaceStrideBranchFixture('lpc_curve')
+    const sourceBranch = fixture.system.branches[fixture.nodeId]
+    const system = updateBranch(fixture.system, fixture.nodeId, {
+      ...sourceBranch,
+      data: {
+        ...sourceBranch.data,
+        collocation_adaptation: {
+          initial_mesh_points: 4,
+          current_mesh_points: 6,
+          degree: 2,
+          defect_tolerance: 0.025,
+          refinement_budget: 3,
+          max_mesh_points: 64,
+          initial_normalized_mesh: [0, 0.25, 0.5, 0.75, 1],
+          current_normalized_mesh: [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1],
+          attempts: [
+            {
+              sequence: 1,
+              kind: 'refinement',
+              old_mesh_points: 4,
+              new_mesh_points: 6,
+              degree: 2,
+              trigger_defect: 0.2,
+              tolerance: 0.025,
+              interval_scaled_defects: [0.2, 0.01, 0.02, 0.15],
+              old_normalized_mesh: [0, 0.25, 0.5, 0.75, 1],
+              new_normalized_mesh: [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1],
+            },
+          ],
+        },
+      },
+    })
+
+    renderInspectorForStateSpaceStride(system, fixture.nodeId, vi.fn())
+    await user.click(screen.getByTestId('action-branch-summary-toggle'))
+
+    expect(screen.getByTestId('collocation-adaptation-report')).toHaveTextContent(
+      '4 → 6'
+    )
+    expect(screen.getByTestId('collocation-adaptation-report')).toHaveTextContent(
+      'refinement: 4 → 6'
+    )
+  })
+
+  it.each([
+    ['CycleFold', 'LimitPointCycle', 'LPC'],
+    ['PeriodDoubling', 'PeriodDoubling', 'PD'],
+    ['NeimarkSacker', 'NeimarkSacker', 'NS'],
+  ] as const)(
+    'exposes %s points as a %s curve workflow',
+    async (stability, curveType, label) => {
+      const user = userEvent.setup()
+      const config: SystemConfig = {
+        name: `Flow_${stability}_Inspector`,
+        equations: ['-y + mu*x', 'x + nu*y'],
+        params: [0.2, 0.4],
+        paramNames: ['mu', 'nu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      }
+      const base = createSystem({ name: config.name, config })
+      const limitCycle: LimitCycleObject = {
+        type: 'limit_cycle',
+        name: `LC_${stability}`,
+        systemName: config.name,
+        origin: { type: 'orbit', orbitName: 'Orbit_1' },
+        ntst: 1,
+        ncol: 1,
+        period: 6,
+        state: [1, 0, 0, 1, 6],
+        parameters: [...config.params],
+        parameterName: 'mu',
+        paramValue: 0.2,
+        floquetMultipliers: [],
+        createdAt: new Date().toISOString(),
+      }
+      const withObject = addObject(base, limitCycle)
+      const branch: ContinuationObject = {
+        type: 'continuation',
+        name: `lc_${stability}_mu`,
+        systemName: config.name,
+        parameterName: 'mu',
+        parentObject: limitCycle.name,
+        startObject: limitCycle.name,
+        branchType: 'limit_cycle',
+        data: {
+          points: [
+            {
+              state: [1, 0, 0, 1, 6],
+              param_value: 0.25,
+              stability,
+              eigenvalues:
+                stability === 'NeimarkSacker'
+                  ? [
+                      { re: 0.5, im: 0.866 },
+                      { re: 0.5, im: -0.866 },
+                    ]
+                  : [],
+            },
+          ],
+          bifurcations: [0],
+          indices: [0],
+          branch_type: { type: 'LimitCycle', ntst: 1, ncol: 1 },
+        },
+        settings: continuationSettings,
+        timestamp: new Date().toISOString(),
+        params: [...config.params],
+      }
+      const fixture = addBranch(withObject.system, branch, withObject.nodeId)
+      const onCreate = vi.fn().mockResolvedValue(undefined)
+      renderInspectorForStateSpaceStride(
+        fixture.system,
+        fixture.nodeId,
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+        onCreate
+      )
+
+      await user.click(screen.getByTestId('action-branch-points-toggle'))
+      await user.click(screen.getByTestId('branch-bifurcation-0'))
+      await user.click(screen.getByTestId('inspector-workflow-back'))
+
+      expect(screen.getByTestId('action-limit-cycle-codim1-curve-toggle')).toHaveTextContent(
+        `${label} curve`
+      )
+      await user.click(screen.getByTestId('action-limit-cycle-codim1-curve-toggle'))
+      expect(
+        screen.getByTestId('limit-cycle-codim1-curve-adaptive-collocation-enabled')
+      ).toBeChecked()
+      await user.clear(screen.getByTestId('limit-cycle-codim1-curve-name'))
+      await user.type(screen.getByTestId('limit-cycle-codim1-curve-name'), `${label}_mu_nu`)
+      await user.selectOptions(screen.getByTestId('limit-cycle-codim1-curve-param2'), 'nu')
+      await user.click(screen.getByTestId('limit-cycle-codim1-curve-submit'))
+
+      expect(onCreate).toHaveBeenCalledWith({
+        branchId: fixture.nodeId,
+        pointIndex: 0,
+        curveType,
+        name: `${label}_mu_nu`,
+        param2Name: 'nu',
+        settings: {
+          step_size: 0.01,
+          min_step_size: 1e-5,
+          max_step_size: 0.1,
+          max_steps: 300,
+          corrector_steps: 10,
+          corrector_tolerance: 1e-8,
+          step_tolerance: 1e-8,
+          collocation_adaptivity: {
+            enabled: true,
+            redistribution_enabled: true,
+            defect_tolerance: 0.025,
+            max_refinements: 3,
+            max_mesh_points: 512,
+          },
+        },
+        forward: true,
+      })
+    }
+  )
+
+  it('exposes an available NSNS alternate curve and forwards its secondary cosine', async () => {
+    const user = userEvent.setup()
+    const config: SystemConfig = {
+      name: 'Flow_NSNS_Inspector',
+      equations: ['-y + mu*x', 'x + nu*y'],
+      params: [0.2, 0.4],
+      paramNames: ['mu', 'nu'],
+      varNames: ['x', 'y'],
+      solver: 'rk4',
+      type: 'flow',
+    }
+    const base = createSystem({ name: config.name, config })
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_NSNS',
+      systemName: config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_1' },
+      ntst: 1,
+      ncol: 1,
+      period: 6,
+      state: [1, 0, 0, 1, 6],
+      parameters: [...config.params],
+      parameterName: 'mu',
+      paramValue: 0.2,
+      floquetMultipliers: [],
+      createdAt: new Date().toISOString(),
+    }
+    const withObject = addObject(base, limitCycle)
+    const codim2: Codim2PointData = {
+      type: 'DoubleNeimarkSacker',
+      refined: true,
+      candidate: false,
+      test_function: 'secondary_unit_pair_modulus',
+      test_function_value: 0,
+      residual_norm: 2e-9,
+      iterations: 4,
+      tolerance: 1e-8,
+      source_segment: [0, 1],
+      source_test_values: [-0.1, 0.1],
+      method: 'bracketed_newton',
+      coefficients: [{ name: 'secondary_unit_pair_cosine', value: 0.25 }],
+      conditioning: {},
+      branch_switches: [
+        { target: 'NeimarkSacker', available: true, target_auxiliary: 0.25 },
+      ],
+    }
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'ns_curve_mu_nu',
+      systemName: config.name,
+      parameterName: 'mu, nu',
+      parameterRef: { kind: 'native_param', name: 'mu' },
+      parameter2Ref: { kind: 'native_param', name: 'nu' },
+      parentObject: limitCycle.name,
+      startObject: limitCycle.name,
+      branchType: 'ns_curve',
+      data: {
+        points: [
+          {
+            state: [1, 0, 0, 1, 1, 0, 6],
+            param_value: 0.25,
+            param2_value: 0.45,
+            stability: 'DoubleNeimarkSacker',
+            eigenvalues: [],
+            codim2,
+            codim2_events: [codim2],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+        branch_type: {
+          type: 'NSCurve',
+          param1_name: 'mu',
+          param2_name: 'nu',
+          ntst: 1,
+          ncol: 1,
+          normalized_mesh: [0, 1],
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...config.params],
+    }
+    const fixture = addBranch(withObject.system, branch, withObject.nodeId)
+    const onCreate = vi.fn().mockResolvedValue(undefined)
+    renderInspectorForStateSpaceStride(
+      fixture.system,
+      fixture.nodeId,
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      onCreate
+    )
+
+    await user.click(screen.getByTestId('action-branch-points-toggle'))
+    await user.click(screen.getByTestId('branch-bifurcation-0'))
+    await user.click(screen.getByTestId('inspector-workflow-back'))
+
+    expect(screen.getByTestId('action-limit-cycle-codim1-curve-toggle')).toHaveTextContent(
+      'NS curve'
+    )
+    await user.click(screen.getByTestId('action-limit-cycle-codim1-curve-toggle'))
+    expect(screen.getByTestId('limit-cycle-codim1-curve-target')).toHaveValue(
+      'NeimarkSacker'
+    )
+    await user.clear(screen.getByTestId('limit-cycle-codim1-curve-name'))
+    await user.type(screen.getByTestId('limit-cycle-codim1-curve-name'), 'nsns_secondary')
+    await user.selectOptions(screen.getByTestId('limit-cycle-codim1-curve-param2'), 'nu')
+    await user.click(screen.getByTestId('limit-cycle-codim1-curve-submit'))
+
+    expect(onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        branchId: fixture.nodeId,
+        pointIndex: 0,
+        curveType: 'NeimarkSacker',
+        targetAuxiliary: 0.25,
+        name: 'nsns_secondary',
+        param2Name: 'nu',
+      })
+    )
+  })
+
   it('hides orbit result menus until an orbit has been run', () => {
     const baseSystem = createSystem({
       name: 'Empty_Orbit_Inspector',
@@ -395,9 +714,56 @@ describe('InspectorDetailsPanel', () => {
 
   it('shows codimension-two refinement diagnostics for a selected branch point', async () => {
     const user = userEvent.setup()
+    const onCreateCodim2BranchFromPoint = vi.fn().mockResolvedValue(undefined)
     const branchResult = createStateSpaceStrideBranchFixture('homoclinic_curve')
     const sourceBranch = branchResult.system.branches[branchResult.nodeId]
     const sourcePoint = sourceBranch.data.points[0]
+    const primaryCodim2: Codim2PointData = {
+      type: 'GeneralizedHopf',
+      refined: true,
+      candidate: false,
+      test_function: 'first_lyapunov_coefficient',
+      test_function_value: 2e-11,
+      residual_norm: 3e-10,
+      iterations: 5,
+      tolerance: 1e-9,
+      source_segment: [3, 4],
+      source_test_values: [-0.2, 0.1],
+      method: 'bracketed_newton',
+      coefficients: [
+        { name: 'l1', value: 0.0125 },
+        { name: 'l2', value: 0.75 },
+      ],
+      conditioning: {
+        bordered_condition_number: 120,
+        jacobian_condition_number: 80,
+      },
+      branch_switches: [
+        {
+          target: 'NeimarkSacker',
+          available: true,
+          target_auxiliary: 0.5,
+        },
+        {
+          target: 'LimitPointCycle',
+          available: false,
+          reason: 'A higher-order predictor is required.',
+        },
+      ],
+      certification: {
+        defining_conditions_verified: true,
+        nondegeneracy_evaluated: true,
+        nondegenerate: true,
+      },
+    }
+    const simultaneousEvent: Codim2PointData = {
+      ...primaryCodim2,
+      type: 'DoubleHopf',
+      test_function: 'second imaginary pair',
+      test_function_value: -4e-12,
+      coefficients: [],
+      branch_switches: [],
+    }
     const system = updateBranch(branchResult.system, branchResult.nodeId, {
       ...sourceBranch,
       data: {
@@ -406,33 +772,22 @@ describe('InspectorDetailsPanel', () => {
           {
             ...sourcePoint,
             stability: 'GeneralizedHopf',
-            codim2: {
-              type: 'GeneralizedHopf',
-              refined: true,
-              candidate: false,
-              test_function: 'first_lyapunov_coefficient',
-              test_function_value: 2e-11,
-              residual_norm: 3e-10,
-              iterations: 5,
-              tolerance: 1e-9,
-              source_segment: [3, 4],
-              source_test_values: [-0.2, 0.1],
-              method: 'bracketed_newton',
-              coefficients: [
-                { name: 'l1', value: 0.0125 },
-                { name: 'l2', value: 0.75 },
-              ],
-              conditioning: {
-                bordered_condition_number: 120,
-                jacobian_condition_number: 80,
-              },
-            },
+            codim2: primaryCodim2,
+            codim2_events: [primaryCodim2, simultaneousEvent],
           },
         ],
       },
     })
 
-    renderInspectorForStateSpaceStride(system, branchResult.nodeId, vi.fn())
+    renderInspectorForStateSpaceStride(
+      system,
+      branchResult.nodeId,
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      onCreateCodim2BranchFromPoint
+    )
 
     await user.click(screen.getByTestId('branch-points-toggle'))
     await user.click(screen.getByTestId('branch-point-details-toggle'))
@@ -453,7 +808,21 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.getByText('1.2000e+2')).toBeVisible()
     expect(screen.getByText('Jacobian condition number')).toBeVisible()
     expect(screen.getByText('8.0000e+1')).toBeVisible()
+    expect(screen.getByText('Adjacent cycle curves')).toBeVisible()
+    expect(screen.getByText('Available (auxiliary 5.0000e-1)')).toBeVisible()
+    expect(screen.getByText('Unavailable — A higher-order predictor is required.')).toBeVisible()
+    expect(screen.getByText('Certification')).toBeVisible()
+    expect(screen.getByText('Verified nondegenerate')).toBeVisible()
+    expect(screen.getByText('Simultaneous codimension-two events')).toBeVisible()
+    expect(screen.getByText(/second imaginary pair=-4\.0000e-12/)).toBeVisible()
     expect(screen.getByTestId('codim2-switch-lpc')).toBeVisible()
+    await user.click(screen.getByTestId('codim2-switch-lpc'))
+    expect(onCreateCodim2BranchFromPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: 'LimitPointCycle',
+        settings: expect.objectContaining({ max_steps: 50 }),
+      })
+    )
   })
 
   it('maps 2D manifold profile draft values explicitly', () => {
@@ -1987,6 +2356,13 @@ describe('InspectorDetailsPanel', () => {
         corrector_steps: 10,
         corrector_tolerance: 1e-6,
         step_tolerance: 1e-6,
+        collocation_adaptivity: {
+          enabled: true,
+          redistribution_enabled: true,
+          defect_tolerance: 0.025,
+          max_refinements: 3,
+          max_mesh_points: 512,
+        },
       },
       forward: false,
     })
@@ -4488,6 +4864,13 @@ describe('InspectorDetailsPanel', () => {
         corrector_steps: 10,
         corrector_tolerance: 1e-6,
         step_tolerance: 1e-6,
+        collocation_adaptivity: {
+          enabled: true,
+          redistribution_enabled: true,
+          defect_tolerance: 0.025,
+          max_refinements: 3,
+          max_mesh_points: 512,
+        },
       },
       forward: true,
     })

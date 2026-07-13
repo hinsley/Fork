@@ -201,6 +201,7 @@ function createCodimCycleAnalysisSystem(): {
         param2_ref: { kind: 'native_param', name: 'nu' },
         ntst: 2,
         ncol: 1,
+        normalized_mesh: [0, 0.3, 1],
       },
     },
     settings: continuationSettings,
@@ -970,6 +971,7 @@ describe('appState limit cycle render targets', () => {
           systemParams: number[]
           ntst: number
           ncol: number
+          normalizedMesh: number[]
         }
       | null = null
     const originalCompute = client.computeLimitCycleFloquetModes.bind(client)
@@ -979,6 +981,7 @@ describe('appState limit cycle render targets', () => {
         systemParams: [...request.system.params],
         ntst: request.ntst,
         ncol: request.ncol,
+        normalizedMesh: [...request.normalizedMesh],
       }
       return originalCompute(request, opts)
     }
@@ -999,6 +1002,7 @@ describe('appState limit cycle render targets', () => {
       expect(capturedRequest!.systemParams[0]).toBeCloseTo(0.25, 12)
       expect(capturedRequest!.ntst).toBe(4)
       expect(capturedRequest!.ncol).toBe(2)
+      expect(capturedRequest!.normalizedMesh).toEqual([0, 0.25, 0.5, 0.75, 1])
       expect(getContext().state.error).toBeNull()
     })
   })
@@ -1011,6 +1015,7 @@ describe('appState limit cycle render targets', () => {
           cycleState: number[]
           systemParams: number[]
           parameterName: string
+          normalizedMesh: number[]
         }
       | null = null
     client.computeLimitCycleFloquetModes = async (request) => {
@@ -1018,6 +1023,7 @@ describe('appState limit cycle render targets', () => {
         cycleState: [...request.cycleState],
         systemParams: [...request.system.params],
         parameterName: request.parameterName,
+        normalizedMesh: [...request.normalizedMesh],
       }
       return {
         ntst: request.ntst,
@@ -1060,6 +1066,7 @@ describe('appState limit cycle render targets', () => {
       expect(capturedRequest!.cycleState).toEqual(fixture.expectedCycleState)
       expect(capturedRequest!.systemParams).toEqual([0.15, 1.3, 0.7])
       expect(capturedRequest!.parameterName).toBe(fixture.frozenRuntimeParameterName)
+      expect(capturedRequest!.normalizedMesh).toEqual([0, 0.3, 1])
     })
   })
 
@@ -1175,9 +1182,11 @@ describe('appState limit cycle render targets', () => {
       expect(floquetRequest!.cycleState).toEqual(fixture.expectedCycleState)
       expect(floquetRequest!.system.params).toEqual([0.15, 1.3, 0.7])
       expect(floquetRequest!.parameterName).toBe(fixture.frozenRuntimeParameterName)
+      expect(floquetRequest!.normalizedMesh).toEqual([0, 0.3, 1])
       expect(manifoldRequest!.cycleState).toEqual(fixture.expectedCycleState)
       expect(manifoldRequest!.system.params).toEqual([0.15, 1.3, 0.7])
       expect(manifoldRequest!.floquetMultipliers).toEqual(computedMultipliers)
+      expect(manifoldRequest!.normalizedMesh).toEqual([0, 0.3, 1])
       expect(manifoldRequest!.floquetMultipliers).not.toContainEqual({ re: 88, im: 0 })
       expect(manifoldRequest!.floquetMultipliers).not.toContainEqual({ re: 99, im: 0 })
       expect(
@@ -2004,6 +2013,12 @@ describe('appState Hopf curve continuation', () => {
         jacobian_condition_number: 80,
       },
     }
+    const simultaneousCodim2: NonNullable<ContinuationPoint['codim2']> = {
+      ...codim2,
+      type: 'DoubleHopf',
+      test_function: 'hopf_pair_collision',
+      test_function_value: -3e-11,
+    }
     client.runHopfCurveContinuation = async (request) => ({
       points: [
         {
@@ -2014,6 +2029,7 @@ describe('appState Hopf curve continuation', () => {
           eigenvalues: [],
           auxiliary: request.hopfOmega * request.hopfOmega,
           codim2,
+          codim2_events: [codim2, simultaneousCodim2],
         },
         {
           state: request.hopfState,
@@ -2051,7 +2067,467 @@ describe('appState Hopf curve continuation', () => {
       const hopfCurveId = findBranchIdByName(next!, 'hopf_curve_p1_p2')
       expect(next!.branches[hopfCurveId].parentObject).toBe('EQ_H_RENAMED')
       expect(next!.branches[hopfCurveId].data.points[0].codim2).toEqual(codim2)
+      expect(next!.branches[hopfCurveId].data.points[0].codim2_events).toEqual([
+        codim2,
+        simultaneousCodim2,
+      ])
     })
+  })
+})
+
+describe('appState flow limit-cycle codim-1 curve continuation', () => {
+  const cases = [
+    {
+      stability: 'CycleFold' as const,
+      curveType: 'LimitPointCycle' as const,
+      branchType: 'lpc_curve' as const,
+      metadataType: 'LPCCurve' as const,
+    },
+    {
+      stability: 'PeriodDoubling' as const,
+      curveType: 'PeriodDoubling' as const,
+      branchType: 'pd_curve' as const,
+      metadataType: 'PDCurve' as const,
+    },
+    {
+      stability: 'NeimarkSacker' as const,
+      curveType: 'NeimarkSacker' as const,
+      branchType: 'ns_curve' as const,
+      metadataType: 'NSCurve' as const,
+    },
+  ]
+
+  it.each(cases)(
+    'continues $stability points with the $curveType runner',
+    async ({ stability, curveType, branchType, metadataType }) => {
+      const base = createSystem({
+        name: `Flow_${stability}_Curve`,
+        config: {
+          name: `Flow_${stability}_Curve`,
+          equations: ['-y + mu*x', 'x + nu*y'],
+          params: [0.2, 0.4],
+          paramNames: ['mu', 'nu'],
+          varNames: ['x', 'y'],
+          solver: 'rk4',
+          type: 'flow',
+        },
+      })
+      const limitCycle: LimitCycleObject = {
+        type: 'limit_cycle',
+        name: `LC_${stability}`,
+        systemName: base.config.name,
+        origin: { type: 'orbit', orbitName: 'Orbit_1' },
+        ntst: 1,
+        ncol: 1,
+        period: 6,
+        state: [1, 0, 0, 1, 6],
+        parameters: [...base.config.params],
+        parameterName: 'mu',
+        paramValue: 0.2,
+        floquetMultipliers: [],
+        createdAt: new Date().toISOString(),
+      }
+      const withObject = addObject(base, limitCycle)
+      const sourceBranch: ContinuationObject = {
+        type: 'continuation',
+        name: `lc_${stability}_mu`,
+        systemName: base.config.name,
+        parameterName: 'mu',
+        parentObject: limitCycle.name,
+        startObject: limitCycle.name,
+        branchType: 'limit_cycle',
+        data: {
+          points: [
+            {
+              state: [1, 0, 0, 1, 6],
+              param_value: 0.25,
+              stability,
+              eigenvalues:
+                stability === 'NeimarkSacker'
+                  ? [
+                      { re: 0.5, im: Math.sqrt(3) / 2 },
+                      { re: 0.5, im: -Math.sqrt(3) / 2 },
+                    ]
+                  : [],
+            },
+          ],
+          bifurcations: [0],
+          indices: [0],
+          branch_type: { type: 'LimitCycle', ntst: 1, ncol: 1 },
+        },
+        settings: continuationSettings,
+        timestamp: new Date().toISOString(),
+        params: [...base.config.params],
+      }
+      const withBranch = addBranch(withObject.system, sourceBranch, withObject.nodeId)
+      const client = new MockForkCoreClient(0)
+      const runCurve = vi.fn(async (request) => ({
+        curve_type: request.curveType,
+        points: [
+          {
+            state: [...request.lcState, request.period],
+            param1_value: request.param1Value,
+            param2_value: request.param2Value,
+            codim2_type: 'None',
+            eigenvalues: [],
+            auxiliary: request.initialK,
+          },
+          {
+            state: [...request.lcState, request.period],
+            param1_value: request.param1Value + 0.01,
+            param2_value: request.param2Value + 0.02,
+            codim2_type: 'None',
+            eigenvalues: [],
+            auxiliary: request.initialK,
+          },
+        ],
+        codim2_bifurcations: [],
+        indices: [0, 1],
+      }))
+      client.runLimitCycleCodim1CurveContinuation = runCurve
+      const { getContext } = setupApp(withBranch.system, client)
+
+      await act(async () => {
+        await getContext().actions.createLimitCycleCodim1CurveFromPoint({
+          branchId: withBranch.nodeId,
+          pointIndex: 0,
+          curveType,
+          name: `${branchType}_mu_nu`,
+          param2Name: 'nu',
+          settings: continuationSettings,
+          forward: true,
+        })
+      })
+
+      await waitFor(() => {
+        expect(getContext().state.error).toBeNull()
+        const next = getContext().state.system!
+        const curveId = findBranchIdByName(next, `${branchType}_mu_nu`)
+        const curve = next.branches[curveId]
+        expect(curve.branchType).toBe(branchType)
+        expect(curve.data.branch_type).toMatchObject({
+          type: metadataType,
+          param1_name: 'mu',
+          param2_name: 'nu',
+          ntst: 1,
+          ncol: 1,
+        })
+        expect(curve.data.points).toHaveLength(2)
+      })
+
+      expect(runCurve).toHaveBeenCalledWith(
+        expect.objectContaining({
+          curveType,
+          lcState: [1, 0, 0, 1],
+          period: 6,
+          param1Name: 'mu',
+          param1Value: 0.25,
+          param2Name: 'nu',
+          param2Value: 0.4,
+          initialK: curveType === 'NeimarkSacker' ? 0.5 : undefined,
+          ntst: 1,
+          ncol: 1,
+        }),
+        expect.objectContaining({ onProgress: expect.any(Function) })
+      )
+    }
+  )
+
+  it('switches an NSNS point to the adjacent NS curve with its secondary cosine and final mesh', async () => {
+    const base = createSystem({
+      name: 'Flow_NSNS_Adjacent_Curve',
+      config: {
+        name: 'Flow_NSNS_Adjacent_Curve',
+        equations: ['-y + mu*x', 'x + nu*y'],
+        params: [0.2, 0.4],
+        paramNames: ['mu', 'nu'],
+        varNames: ['x', 'y'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    })
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_NSNS',
+      systemName: base.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_1' },
+      ntst: 1,
+      ncol: 1,
+      period: 6,
+      state: [1, 0, 0, 1, 6],
+      parameters: [...base.config.params],
+      parameterName: 'mu',
+      paramValue: 0.2,
+      floquetMultipliers: [],
+      createdAt: new Date().toISOString(),
+    }
+    const withObject = addObject(base, limitCycle)
+    const codim2: NonNullable<ContinuationPoint['codim2']> = {
+      type: 'DoubleNeimarkSacker',
+      refined: true,
+      candidate: false,
+      test_function: 'secondary_unit_pair_modulus',
+      test_function_value: 0,
+      residual_norm: 2e-9,
+      iterations: 4,
+      tolerance: 1e-8,
+      source_segment: [0, 1],
+      source_test_values: [-0.1, 0.1],
+      method: 'bracketed_newton',
+      coefficients: [{ name: 'secondary_unit_pair_cosine', value: 0.25 }],
+      conditioning: {},
+      branch_switches: [
+        { target: 'NeimarkSacker', available: true, target_auxiliary: 0.25 },
+      ],
+    }
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'ns_curve_mu_nu',
+      systemName: base.config.name,
+      parameterName: 'mu, nu',
+      parameterRef: { kind: 'native_param', name: 'mu' },
+      parameter2Ref: { kind: 'native_param', name: 'nu' },
+      parentObject: limitCycle.name,
+      startObject: limitCycle.name,
+      branchType: 'ns_curve',
+      data: {
+        points: [
+          {
+            // Stage-first explicit: stage, mesh_0, mesh_1, period.
+            state: [10, 11, 20, 21, 20, 21, 6],
+            param_value: 0.25,
+            param2_value: 0.45,
+            stability: 'DoubleNeimarkSacker',
+            eigenvalues: [
+              { re: 0.8, im: 0.6 },
+              { re: 0.8, im: -0.6 },
+              { re: 0.25, im: Math.sqrt(1 - 0.25 ** 2) },
+              { re: 0.25, im: -Math.sqrt(1 - 0.25 ** 2) },
+            ],
+            codim2,
+            codim2_events: [codim2],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+        branch_type: {
+          type: 'NSCurve',
+          param1_name: 'mu',
+          param2_name: 'nu',
+          ntst: 1,
+          ncol: 1,
+          normalized_mesh: [0, 1],
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...base.config.params],
+    }
+    const withBranch = addBranch(withObject.system, sourceBranch, withObject.nodeId)
+    const client = new MockForkCoreClient(0)
+    const adaptation = {
+      initial_mesh_points: 1,
+      current_mesh_points: 2,
+      degree: 1,
+      defect_tolerance: 1e-7,
+      refinement_budget: 1,
+      max_mesh_points: 4,
+      initial_normalized_mesh: [0, 1],
+      current_normalized_mesh: [0, 0.25, 1],
+      attempts: [],
+    }
+    const runCurve = vi.fn(async (request) => ({
+      curve_type: request.curveType,
+      ntst: 2,
+      ncol: 1,
+      normalized_mesh: [0, 0.25, 1],
+      collocation_adaptation: adaptation,
+      points: [
+        {
+          state: [...request.lcState, request.period],
+          param1_value: request.param1Value,
+          param2_value: request.param2Value,
+          codim2_type: 'None',
+          eigenvalues: [],
+          auxiliary: request.initialK,
+          codim2_events: [],
+        },
+        {
+          state: [...request.lcState, request.period],
+          param1_value: request.param1Value + 0.01,
+          param2_value: request.param2Value + 0.02,
+          codim2_type: 'None',
+          eigenvalues: [],
+          auxiliary: request.initialK,
+          codim2_events: [],
+        },
+      ],
+      codim2_bifurcations: [],
+      indices: [0, 1],
+    }))
+    client.runLimitCycleCodim1CurveContinuation = runCurve
+    const { getContext } = setupApp(withBranch.system, client)
+
+    await act(async () => {
+      await getContext().actions.createLimitCycleCodim1CurveFromPoint({
+        branchId: withBranch.nodeId,
+        pointIndex: 0,
+        curveType: 'NeimarkSacker',
+        targetAuxiliary: 0.25,
+        name: 'nsns_secondary',
+        param2Name: 'nu',
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      expect(getContext().state.error).toBeNull()
+      const next = getContext().state.system!
+      const curve = next.branches[findBranchIdByName(next, 'nsns_secondary')]
+      expect(curve.branchType).toBe('ns_curve')
+      expect(curve.data.branch_type).toMatchObject({
+        type: 'NSCurve',
+        ntst: 2,
+        ncol: 1,
+        normalized_mesh: [0, 0.25, 1],
+      })
+      expect(curve.data.collocation_adaptation).toEqual(adaptation)
+      expect(curve.data.points[0].codim2_events).toEqual([])
+    })
+
+    expect(runCurve).toHaveBeenCalledWith(
+      expect.objectContaining({
+        curveType: 'NeimarkSacker',
+        // Adjacent switching canonicalizes the stage-first explicit source and
+        // removes the duplicate closing mesh point before entering the runner.
+        lcState: [20, 21, 10, 11],
+        period: 6,
+        param1Name: 'mu',
+        param1Value: 0.25,
+        param2Name: 'nu',
+        param2Value: 0.45,
+        initialK: 0.25,
+        ntst: 1,
+        ncol: 1,
+        normalizedMesh: [0, 1],
+      }),
+      expect.objectContaining({ onProgress: expect.any(Function) })
+    )
+  })
+})
+
+describe('appState map Neimark-Sacker curve continuation', () => {
+  it('runs the map Hopf defining system and stores a two-parameter curve', async () => {
+    const base = createSystem({
+      name: 'Map_NS_Curve',
+      config: {
+        name: 'Map_NS_Curve',
+        equations: [
+          '(1+mu)*(cos(nu)*x-sin(nu)*y)',
+          '(1+mu)*(sin(nu)*x+cos(nu)*y)',
+        ],
+        params: [-0.1, 0.7],
+        paramNames: ['mu', 'nu'],
+        varNames: ['x', 'y'],
+        solver: 'discrete',
+        type: 'map',
+      },
+    })
+    const fixedPoint: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'FP_NS',
+      systemName: base.config.name,
+      parameters: [...base.config.params],
+    }
+    const withObject = addObject(base, fixedPoint)
+    const sourceBranch: ContinuationObject = {
+      type: 'continuation',
+      name: 'fp_ns_mu',
+      systemName: base.config.name,
+      parameterName: 'mu',
+      parentObject: fixedPoint.name,
+      startObject: fixedPoint.name,
+      branchType: 'equilibrium',
+      data: {
+        points: [
+          {
+            state: [0, 0],
+            param_value: 0,
+            stability: 'NeimarkSacker',
+            eigenvalues: [
+              { re: Math.cos(0.7), im: Math.sin(0.7) },
+              { re: Math.cos(0.7), im: -Math.sin(0.7) },
+            ],
+          },
+        ],
+        bifurcations: [0],
+        indices: [0],
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [...base.config.params],
+      mapIterations: 1,
+    }
+    const withBranch = addBranch(withObject.system, sourceBranch, withObject.nodeId)
+    const client = new MockForkCoreClient(0)
+    const runHopf = vi.fn(async (request) => ({
+      points: [
+        {
+          state: request.hopfState,
+          param1_value: request.param1Value,
+          param2_value: request.param2Value,
+          codim2_type: 'None',
+          eigenvalues: [],
+          auxiliary: request.hopfOmega * request.hopfOmega,
+        },
+        {
+          state: request.hopfState,
+          param1_value: request.param1Value + 0.01,
+          param2_value: request.param2Value + 0.01,
+          codim2_type: 'None',
+          eigenvalues: [],
+          auxiliary: request.hopfOmega * request.hopfOmega,
+        },
+      ],
+      codim2_bifurcations: [],
+      indices: [0, 1],
+    }))
+    client.runHopfCurveContinuation = runHopf
+    const { getContext } = setupApp(withBranch.system, client)
+
+    await act(async () => {
+      await getContext().actions.createNSCurveFromPoint({
+        branchId: withBranch.nodeId,
+        pointIndex: 0,
+        name: 'ns_map_mu_nu',
+        param2Name: 'nu',
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      expect(getContext().state.error).toBeNull()
+      const next = getContext().state.system!
+      const curve = next.branches[findBranchIdByName(next, 'ns_map_mu_nu')]
+      expect(curve.branchType).toBe('hopf_curve')
+      expect(curve.mapIterations).toBe(1)
+      expect(curve.data.points).toHaveLength(2)
+    })
+    expect(runHopf).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.objectContaining({ type: 'map' }),
+        hopfState: [0, 0],
+        hopfOmega: expect.any(Number),
+        param1Name: 'mu',
+        param1Value: 0,
+        param2Name: 'nu',
+        param2Value: 0.7,
+        mapIterations: 1,
+      }),
+      expect.objectContaining({ onProgress: expect.any(Function) })
+    )
   })
 })
 
@@ -2647,6 +3123,71 @@ describe('appState branch-point object parameter inheritance', () => {
     })
   })
 
+  it('preserves the exact source and adapted meshes when branching a cycle at PD', async () => {
+    const { system } = createPeriodDoublingSystem()
+    const sourceBranchId = findBranchIdByName(system, 'lc_pd_mu')
+    const sourceBranch = system.branches[sourceBranchId]
+    if (sourceBranch.data.branch_type?.type !== 'LimitCycle') {
+      throw new Error('Expected a limit-cycle branch fixture.')
+    }
+    sourceBranch.data.branch_type.normalized_mesh = [0, 0.1, 0.35, 0.8, 1]
+    const client = new MockForkCoreClient(0)
+    let receivedSourceMesh: number[] | null = null
+    client.runLimitCycleContinuationFromPD = async (request) => {
+      receivedSourceMesh = [...request.normalizedMesh]
+      return normalizeBranchEigenvalues({
+        points: [
+          {
+            state: [...request.lcState],
+            param_value: request.paramValue,
+            stability: 'None',
+            eigenvalues: [],
+          },
+          {
+            state: [...request.lcState],
+            param_value: request.paramValue + request.settings.step_size,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0, 1],
+        branch_type: {
+          type: 'LimitCycle',
+          ntst: 3,
+          ncol: 2,
+          normalized_mesh: [0, 0.2, 0.7, 1],
+        },
+      })
+    }
+    const { getContext } = setupApp(system, client)
+
+    await act(async () => {
+      await getContext().actions.createLimitCycleFromPD({
+        branchId: sourceBranchId,
+        pointIndex: 1,
+        limitCycleName: 'LC_PD_Mesh',
+        branchName: 'lc_pd_mesh_mu',
+        amplitude: 0.1,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    await waitFor(() => {
+      const next = getContext().state.system
+      expect(next).not.toBeNull()
+      expect(receivedSourceMesh).toEqual([0, 0.1, 0.35, 0.8, 1])
+      const lcId = findObjectIdByName(next!, 'LC_PD_Mesh')
+      const lc = next!.objects[lcId] as LimitCycleObject
+      expect({ ntst: lc.ntst, ncol: lc.ncol, mesh: lc.normalized_mesh }).toEqual({
+        ntst: 3,
+        ncol: 2,
+        mesh: [0, 0.2, 0.7, 1],
+      })
+    })
+  })
+
   it('does not store custom parameters when inherited params match system defaults', async () => {
     const { system } = createPeriodDoublingSystem()
     const sourceBranchId = findBranchIdByName(system, 'lc_pd_mu')
@@ -2813,6 +3354,84 @@ describe('appState homoclinic and homotopy actions', () => {
       expect(created.data.resume_state?.max_index_seed?.endpoint_index).toBe(1)
       expect(created.data.resume_state?.max_index_seed?.step_size).toBe(0.02)
     })
+  })
+
+  it('rejects nonuniform large-cycle meshes before homoclinic initialization', async () => {
+    const base = makeTwoParamSystem('Homoc_App_M1_Nonuniform')
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'LC_Nonuniform',
+      systemName: base.config.name,
+      origin: { type: 'orbit', orbitName: 'Orbit_A' },
+      ntst: 2,
+      ncol: 2,
+      period: 6,
+      state: [0, 1, 1, 0, 0, -1, 6],
+      normalized_mesh: [0, 0.2, 1],
+      createdAt: new Date().toISOString(),
+    }
+    const added = addObject(base, limitCycle)
+    const branch: ContinuationObject = {
+      type: 'continuation',
+      name: 'lc_branch_nonuniform',
+      systemName: base.config.name,
+      parameterName: 'mu',
+      parentObject: limitCycle.name,
+      startObject: limitCycle.name,
+      branchType: 'limit_cycle',
+      data: {
+        points: [
+          {
+            state: [0, 1, 1, 0, 0, -1, 6],
+            param_value: 0.2,
+            stability: 'None',
+            eigenvalues: [],
+          },
+        ],
+        bifurcations: [],
+        indices: [0],
+        branch_type: {
+          type: 'LimitCycle',
+          ntst: 2,
+          ncol: 2,
+          normalized_mesh: [0, 0.2, 1],
+        },
+      },
+      settings: continuationSettings,
+      timestamp: new Date().toISOString(),
+      params: [0.2, 0.1],
+    }
+    const branchResult = addBranch(added.system, branch, added.nodeId)
+    const client = new MockForkCoreClient(0)
+    let initializerCalls = 0
+    client.runHomoclinicFromLargeCycle = async () => {
+      initializerCalls += 1
+      throw new Error('legacy initializer should not be called')
+    }
+    const { getContext } = setupApp(branchResult.system, client)
+
+    await act(async () => {
+      await getContext().actions.createHomoclinicFromLargeCycle({
+        branchId: branchResult.nodeId,
+        pointIndex: 0,
+        name: 'homoc_nonuniform',
+        parameterName: 'mu',
+        param2Name: 'nu',
+        targetNtst: 8,
+        targetNcol: 2,
+        freeTime: true,
+        freeEps0: true,
+        freeEps1: false,
+        settings: continuationSettings,
+        forward: true,
+      })
+    })
+
+    expect(initializerCalls).toBe(0)
+    expect(getContext().state.error).toContain(
+      'does not yet support a nonuniform collocation mesh'
+    )
+    expect(getContext().state.error).toContain('uniform mesh')
   })
 
   it('creates a homoclinic branch from a frozen large-cycle point with reduced packed state', async () => {
@@ -4416,5 +5035,90 @@ describe('appState equilibrium manifold actions', () => {
       expect(findBranchIdByName(next!, 'flow_branch_plus')).toBeTruthy()
       expect(findBranchIdByName(next!, 'flow_branch_minus')).toBeTruthy()
     })
+  })
+
+  it('computes and persists the +1 map normal form at a Fold point', async () => {
+    const base = createSystem({
+      name: 'Map_Fold_Normal_Form',
+      config: {
+        name: 'Map_Fold_Normal_Form',
+        equations: ['x + mu - x^2'],
+        params: [0],
+        paramNames: ['mu'],
+        varNames: ['x'],
+        solver: 'rk4',
+        type: 'map',
+      },
+    })
+    const equilibrium: EquilibriumObject = {
+      type: 'equilibrium',
+      name: 'FP',
+      systemName: base.config.name,
+      parameters: [0],
+    }
+    const added = addObject(base, equilibrium)
+    const branchResult = addBranch(
+      added.system,
+      {
+        type: 'continuation',
+        name: 'fixed_points',
+        systemName: base.config.name,
+        parameterName: 'mu',
+        parentObjectId: added.nodeId,
+        parentObject: equilibrium.name,
+        startObject: equilibrium.name,
+        branchType: 'equilibrium',
+        data: {
+          points: [{ state: [0], param_value: 0, stability: 'Fold' }],
+          bifurcations: [0],
+          indices: [0],
+          branch_type: { type: 'Equilibrium' },
+        },
+        settings: continuationSettings,
+        timestamp: new Date().toISOString(),
+        params: [0],
+        mapIterations: 3,
+      },
+      added.nodeId
+    )
+    const client = new MockForkCoreClient(0)
+    const compute = vi.fn(async () => ({
+      normalForm: {
+        type: 'BranchPoint' as const,
+        kind: 'Fold' as const,
+        constant_parameter_coefficient: 1,
+        linear_parameter_coefficient: 0,
+        quadratic_coefficient: -1,
+        cubic_coefficient: 0,
+        conditioning: {
+          eigenvector_pairing: 1,
+          right_residual: 0,
+          left_residual: 0,
+          homological_residual: 0,
+        },
+      },
+    }))
+    client.computeNormalForm = compute
+    const { getContext } = setupApp(branchResult.system, client)
+
+    await act(async () => {
+      await getContext().actions.computeNormalFormAtPoint({
+        branchId: branchResult.nodeId,
+        pointIndex: 0,
+      })
+    })
+
+    expect(compute).toHaveBeenCalledWith(expect.objectContaining({
+      sourceType: 'Map',
+      normalFormType: 'BranchPoint',
+      mapIterations: 3,
+    }))
+    const stored = getContext().state.system?.branches[branchResult.nodeId]
+      ?.data.points[0].normal_form
+    expect(stored?.normal_form).toEqual(expect.objectContaining({
+      type: 'BranchPoint',
+      kind: 'Fold',
+      quadratic_coefficient: -1,
+    }))
   })
 })

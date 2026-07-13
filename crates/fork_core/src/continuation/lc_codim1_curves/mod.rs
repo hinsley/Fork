@@ -6,6 +6,7 @@
 //! - PD (Period Doubling) - flip bifurcation curve
 //! - NS (Neimark-Sacker) - torus bifurcation curve
 
+mod codim2;
 mod isoperiodic_curve;
 mod lpc_curve;
 #[cfg(test)]
@@ -23,7 +24,392 @@ use crate::traits::DynamicalSystem;
 use anyhow::{anyhow, bail, Result};
 use nalgebra::{DMatrix, DVector};
 
-const MAX_SCALED_COLLOCATION_DEFECT: f64 = 2.5e-2;
+use crate::continuation::periodic::{
+    defect_weighted_normalized_mesh, meshes_materially_different, propose_uniform_mesh_refinement,
+    transfer_collocation_aug, validated_normalized_mesh, CollocationAdaptationReport,
+    CollocationAdaptivitySettings, CollocationDefectEstimate, CollocationDefectTermination,
+    CollocationDefectTerminationReason, CollocationMeshAdaptationKind,
+    CollocationRefinementAttempt,
+};
+
+#[derive(Debug, Clone)]
+struct CurveCollocationAdaptation {
+    settings: CollocationAdaptivitySettings,
+    report: CollocationAdaptationReport,
+    transfer_start_index: usize,
+}
+
+#[derive(Debug, Clone)]
+enum CurveMeshAdaptationDecision {
+    Adapt(Vec<f64>),
+    Terminate,
+}
+
+impl CurveCollocationAdaptation {
+    fn new(normalized_mesh: &[f64], degree: usize) -> Result<Self> {
+        let settings = CollocationAdaptivitySettings::default();
+        let mesh_points = normalized_mesh.len().saturating_sub(1);
+        let normalized_mesh = validated_normalized_mesh(mesh_points, normalized_mesh)?;
+        Ok(Self {
+            settings,
+            report: CollocationAdaptationReport {
+                initial_mesh_points: mesh_points,
+                current_mesh_points: mesh_points,
+                degree,
+                defect_tolerance: settings.defect_tolerance,
+                refinement_budget: settings.max_refinements,
+                max_mesh_points: settings.max_mesh_points,
+                initial_normalized_mesh: normalized_mesh.clone(),
+                current_normalized_mesh: normalized_mesh,
+                attempts: Vec::new(),
+                termination: None,
+            },
+            transfer_start_index: 0,
+        })
+    }
+
+    fn configure(&mut self, settings: CollocationAdaptivitySettings) -> Result<()> {
+        if !settings.defect_tolerance.is_finite() || settings.defect_tolerance <= 0.0 {
+            bail!("Collocation defect tolerance must be finite and positive");
+        }
+        if settings.max_mesh_points < 2 {
+            bail!("Adaptive collocation requires a mesh-point cap of at least 2");
+        }
+        if settings.max_mesh_points < self.report.current_mesh_points {
+            bail!(
+                "Adaptive collocation mesh-point cap {} is below the active mesh size {}",
+                settings.max_mesh_points,
+                self.report.current_mesh_points
+            );
+        }
+        self.settings = settings;
+        self.report.defect_tolerance = settings.defect_tolerance;
+        self.report.refinement_budget = settings.max_refinements;
+        self.report.max_mesh_points = settings.max_mesh_points;
+        Ok(())
+    }
+
+    fn settings(&self) -> CollocationAdaptivitySettings {
+        self.settings
+    }
+
+    fn report(&self) -> &CollocationAdaptationReport {
+        &self.report
+    }
+
+    fn transfer_attempts(&self) -> &[CollocationRefinementAttempt] {
+        &self.report.attempts[self.transfer_start_index.min(self.report.attempts.len())..]
+    }
+
+    fn seed_report(
+        &mut self,
+        mut report: CollocationAdaptationReport,
+        normalized_mesh: &[f64],
+        degree: usize,
+    ) -> Result<()> {
+        if report.current_mesh_points != normalized_mesh.len().saturating_sub(1)
+            || report.degree != degree
+            || meshes_materially_different(&report.current_normalized_mesh, normalized_mesh)
+        {
+            bail!("Collocation adaptation report does not match the active LC-curve mesh");
+        }
+        self.transfer_start_index = report.attempts.len();
+        report.defect_tolerance = self.settings.defect_tolerance;
+        report.refinement_budget = self.settings.max_refinements;
+        report.max_mesh_points = self.settings.max_mesh_points;
+        report.termination = None;
+        self.report = report;
+        Ok(())
+    }
+
+    fn record_termination(
+        &mut self,
+        reason: CollocationDefectTerminationReason,
+        measured_defect: f64,
+        normalized_mesh: &[f64],
+        degree: usize,
+    ) {
+        self.report.termination = Some(CollocationDefectTermination {
+            reason,
+            measured_defect,
+            tolerance: self.settings.defect_tolerance,
+            mesh_points: normalized_mesh.len().saturating_sub(1),
+            degree,
+            refinements_attempted: self
+                .report
+                .attempts
+                .len()
+                .saturating_sub(self.transfer_start_index),
+            refinement_budget: self.settings.max_refinements,
+            max_mesh_points: self.settings.max_mesh_points,
+            normalized_mesh: normalized_mesh.to_vec(),
+        });
+    }
+
+    fn decide(
+        &mut self,
+        estimate: &CollocationDefectEstimate,
+        normalized_mesh: &[f64],
+        degree: usize,
+    ) -> Result<CurveMeshAdaptationDecision> {
+        if !self.settings.enabled {
+            self.record_termination(
+                CollocationDefectTerminationReason::AdaptivityDisabled,
+                estimate.max_scaled_defect,
+                normalized_mesh,
+                degree,
+            );
+            return Ok(CurveMeshAdaptationDecision::Terminate);
+        }
+        let current_run_attempts = self.transfer_attempts();
+        if current_run_attempts.len() >= self.settings.max_refinements {
+            self.record_termination(
+                CollocationDefectTerminationReason::RefinementBudgetExhausted,
+                estimate.max_scaled_defect,
+                normalized_mesh,
+                degree,
+            );
+            return Ok(CurveMeshAdaptationDecision::Terminate);
+        }
+
+        let old_mesh_points = normalized_mesh.len().saturating_sub(1);
+        let already_redistributed = current_run_attempts
+            .iter()
+            .any(|attempt| attempt.kind == CollocationMeshAdaptationKind::Redistribution);
+        let redistribution = if self.settings.redistribution_enabled && !already_redistributed {
+            let candidate = defect_weighted_normalized_mesh(
+                normalized_mesh,
+                &estimate.interval_scaled_defects,
+                degree,
+                old_mesh_points,
+            )?;
+            meshes_materially_different(&candidate, normalized_mesh).then_some(candidate)
+        } else {
+            None
+        };
+
+        let (kind, new_normalized_mesh) = if let Some(candidate) = redistribution {
+            (CollocationMeshAdaptationKind::Redistribution, candidate)
+        } else {
+            if old_mesh_points >= self.settings.max_mesh_points {
+                self.record_termination(
+                    CollocationDefectTerminationReason::MeshPointLimitReached,
+                    estimate.max_scaled_defect,
+                    normalized_mesh,
+                    degree,
+                );
+                return Ok(CurveMeshAdaptationDecision::Terminate);
+            }
+            let Some(new_mesh_points) = propose_uniform_mesh_refinement(
+                &estimate.interval_scaled_defects,
+                degree,
+                self.settings.defect_tolerance,
+                self.settings.max_mesh_points,
+            ) else {
+                self.record_termination(
+                    CollocationDefectTerminationReason::RefinementStalled,
+                    estimate.max_scaled_defect,
+                    normalized_mesh,
+                    degree,
+                );
+                return Ok(CurveMeshAdaptationDecision::Terminate);
+            };
+            (
+                CollocationMeshAdaptationKind::Refinement,
+                defect_weighted_normalized_mesh(
+                    normalized_mesh,
+                    &estimate.interval_scaled_defects,
+                    degree,
+                    new_mesh_points,
+                )?,
+            )
+        };
+
+        self.report.attempts.push(CollocationRefinementAttempt {
+            sequence: self.report.attempts.len() + 1,
+            kind,
+            old_mesh_points,
+            new_mesh_points: new_normalized_mesh.len() - 1,
+            degree,
+            trigger_defect: estimate.max_scaled_defect,
+            tolerance: self.settings.defect_tolerance,
+            interval_scaled_defects: estimate.interval_scaled_defects.clone(),
+            old_normalized_mesh: normalized_mesh.to_vec(),
+            new_normalized_mesh: new_normalized_mesh.clone(),
+        });
+        self.report.current_mesh_points = new_normalized_mesh.len() - 1;
+        self.report.current_normalized_mesh = new_normalized_mesh.clone();
+        self.report.termination = None;
+        Ok(CurveMeshAdaptationDecision::Adapt(new_normalized_mesh))
+    }
+}
+
+/// Transfer a stage-first, explicitly closed LC-curve vector between meshes.
+///
+/// The vector layout is `[p1, stages..., mesh_0..mesh_ntst, trailing...]`,
+/// where the first trailing scalar is the period and the remaining scalars are
+/// curve-specific auxiliaries (`p2`, and `k` for NS).  The physical profile is
+/// transferred by the same collocation polynomial used for ordinary cycles;
+/// every trailing scalar is preserved exactly.
+fn transfer_explicit_curve_aug(
+    aug: &DVector<f64>,
+    source_mesh: &[f64],
+    destination_mesh: &[f64],
+    degree: usize,
+    dim: usize,
+    nodes: &[f64],
+    trailing_scalars: usize,
+) -> Result<DVector<f64>> {
+    let old_ntst = source_mesh.len().saturating_sub(1);
+    let new_ntst = destination_mesh.len().saturating_sub(1);
+    let old_stage_len = old_ntst * degree * dim;
+    let old_mesh_len = (old_ntst + 1) * dim;
+    let old_profile_end = 1 + old_stage_len + old_mesh_len;
+    if trailing_scalars == 0 || aug.len() != old_profile_end + trailing_scalars {
+        bail!("Explicit LC-curve profile transfer layout mismatch");
+    }
+
+    let mut ordinary = DVector::zeros(1 + old_ntst * (degree + 1) * dim + 1);
+    ordinary[0] = aug[0];
+    let old_mesh_start = 1 + old_stage_len;
+    ordinary.as_mut_slice()[1..1 + old_ntst * dim]
+        .copy_from_slice(&aug.as_slice()[old_mesh_start..old_mesh_start + old_ntst * dim]);
+    let ordinary_stage_start = 1 + old_ntst * dim;
+    ordinary.as_mut_slice()[ordinary_stage_start..ordinary_stage_start + old_stage_len]
+        .copy_from_slice(&aug.as_slice()[1..1 + old_stage_len]);
+    let ordinary_period_index = ordinary.len() - 1;
+    ordinary[ordinary_period_index] = aug[old_profile_end];
+
+    let ordinary =
+        transfer_collocation_aug(&ordinary, source_mesh, destination_mesh, degree, dim, nodes)?;
+    let new_stage_len = new_ntst * degree * dim;
+    let new_mesh_len = (new_ntst + 1) * dim;
+    let new_profile_end = 1 + new_stage_len + new_mesh_len;
+    let mut transferred = DVector::zeros(new_profile_end + trailing_scalars);
+    transferred[0] = aug[0];
+    let ordinary_new_stage_start = 1 + new_ntst * dim;
+    transferred.as_mut_slice()[1..1 + new_stage_len].copy_from_slice(
+        &ordinary.as_slice()[ordinary_new_stage_start..ordinary_new_stage_start + new_stage_len],
+    );
+    let new_mesh_start = 1 + new_stage_len;
+    transferred.as_mut_slice()[new_mesh_start..new_mesh_start + new_ntst * dim]
+        .copy_from_slice(&ordinary.as_slice()[1..1 + new_ntst * dim]);
+    transferred.as_mut_slice()
+        [new_mesh_start + new_ntst * dim..new_mesh_start + (new_ntst + 1) * dim]
+        .copy_from_slice(&ordinary.as_slice()[1..1 + dim]);
+    transferred.as_mut_slice()[new_profile_end..]
+        .copy_from_slice(&aug.as_slice()[old_profile_end..]);
+    if transferred.iter().any(|value| !value.is_finite()) {
+        bail!("Explicit LC-curve profile transfer produced a non-finite value");
+    }
+    Ok(transferred)
+}
+
+fn transfer_explicit_curve_state(
+    state: &[f64],
+    source_mesh: &[f64],
+    destination_mesh: &[f64],
+    degree: usize,
+    dim: usize,
+    nodes: &[f64],
+    trailing_scalars: usize,
+) -> Result<Vec<f64>> {
+    let mut aug = DVector::zeros(state.len() + 1);
+    aug.as_mut_slice()[1..].copy_from_slice(state);
+    Ok(transfer_explicit_curve_aug(
+        &aug,
+        source_mesh,
+        destination_mesh,
+        degree,
+        dim,
+        nodes,
+        trailing_scalars,
+    )?
+    .as_slice()[1..]
+        .to_vec())
+}
+
+/// Mesh-first counterpart of [`transfer_explicit_curve_aug`], used by the PD
+/// minimally-extended system whose established wire layout is
+/// `[p1, mesh_0..mesh_ntst, stages..., trailing...]`.
+fn transfer_explicit_mesh_first_curve_aug(
+    aug: &DVector<f64>,
+    source_mesh: &[f64],
+    destination_mesh: &[f64],
+    degree: usize,
+    dim: usize,
+    nodes: &[f64],
+    trailing_scalars: usize,
+) -> Result<DVector<f64>> {
+    let old_ntst = source_mesh.len().saturating_sub(1);
+    let new_ntst = destination_mesh.len().saturating_sub(1);
+    let old_mesh_len = (old_ntst + 1) * dim;
+    let old_stage_len = old_ntst * degree * dim;
+    let old_profile_end = 1 + old_mesh_len + old_stage_len;
+    if trailing_scalars == 0 || aug.len() != old_profile_end + trailing_scalars {
+        bail!("Explicit mesh-first LC-curve profile transfer layout mismatch");
+    }
+
+    let mut ordinary = DVector::zeros(1 + old_ntst * (degree + 1) * dim + 1);
+    ordinary[0] = aug[0];
+    ordinary.as_mut_slice()[1..1 + old_ntst * dim]
+        .copy_from_slice(&aug.as_slice()[1..1 + old_ntst * dim]);
+    let ordinary_stage_start = 1 + old_ntst * dim;
+    let source_stage_start = 1 + old_mesh_len;
+    ordinary.as_mut_slice()[ordinary_stage_start..ordinary_stage_start + old_stage_len]
+        .copy_from_slice(&aug.as_slice()[source_stage_start..source_stage_start + old_stage_len]);
+    let ordinary_period_index = ordinary.len() - 1;
+    ordinary[ordinary_period_index] = aug[old_profile_end];
+
+    let ordinary =
+        transfer_collocation_aug(&ordinary, source_mesh, destination_mesh, degree, dim, nodes)?;
+    let new_mesh_len = (new_ntst + 1) * dim;
+    let new_stage_len = new_ntst * degree * dim;
+    let new_profile_end = 1 + new_mesh_len + new_stage_len;
+    let mut transferred = DVector::zeros(new_profile_end + trailing_scalars);
+    transferred[0] = aug[0];
+    transferred.as_mut_slice()[1..1 + new_ntst * dim]
+        .copy_from_slice(&ordinary.as_slice()[1..1 + new_ntst * dim]);
+    transferred.as_mut_slice()[1 + new_ntst * dim..1 + (new_ntst + 1) * dim]
+        .copy_from_slice(&ordinary.as_slice()[1..1 + dim]);
+    let ordinary_new_stage_start = 1 + new_ntst * dim;
+    let destination_stage_start = 1 + new_mesh_len;
+    transferred.as_mut_slice()[destination_stage_start..destination_stage_start + new_stage_len]
+        .copy_from_slice(
+            &ordinary.as_slice()
+                [ordinary_new_stage_start..ordinary_new_stage_start + new_stage_len],
+        );
+    transferred.as_mut_slice()[new_profile_end..]
+        .copy_from_slice(&aug.as_slice()[old_profile_end..]);
+    if transferred.iter().any(|value| !value.is_finite()) {
+        bail!("Explicit mesh-first LC-curve profile transfer produced a non-finite value");
+    }
+    Ok(transferred)
+}
+
+fn transfer_explicit_mesh_first_curve_state(
+    state: &[f64],
+    source_mesh: &[f64],
+    destination_mesh: &[f64],
+    degree: usize,
+    dim: usize,
+    nodes: &[f64],
+    trailing_scalars: usize,
+) -> Result<Vec<f64>> {
+    let mut aug = DVector::zeros(state.len() + 1);
+    aug.as_mut_slice()[1..].copy_from_slice(state);
+    Ok(transfer_explicit_mesh_first_curve_aug(
+        &aug,
+        source_mesh,
+        destination_mesh,
+        degree,
+        dim,
+        nodes,
+        trailing_scalars,
+    )?
+    .as_slice()[1..]
+        .to_vec())
+}
 
 /// Integral phase gauge evaluated on the complete Gauss collocation profile.
 ///
@@ -46,17 +432,38 @@ struct FullProfilePhaseGauge {
 }
 
 impl FullProfilePhaseGauge {
+    #[cfg(test)]
     fn new(ntst: usize, ncol: usize, dim: usize, gauss_weights: &[f64]) -> Result<Self> {
+        Self::new_on_mesh(
+            &crate::continuation::periodic::uniform_normalized_mesh(ntst),
+            ncol,
+            dim,
+            gauss_weights,
+        )
+    }
+
+    fn new_on_mesh(
+        normalized_mesh: &[f64],
+        ncol: usize,
+        dim: usize,
+        gauss_weights: &[f64],
+    ) -> Result<Self> {
+        let ntst = normalized_mesh.len().saturating_sub(1);
+        let normalized_mesh =
+            crate::continuation::periodic::validated_normalized_mesh(ntst, normalized_mesh)?;
         if ntst < 2 || ncol == 0 || dim == 0 || gauss_weights.len() != ncol {
             bail!("Invalid collocation layout for the integral phase gauge");
         }
-        let mut stage_weights = Vec::with_capacity(ncol);
-        for &weight in gauss_weights {
-            let normalized = weight / ntst as f64;
-            if !normalized.is_finite() || normalized <= 0.0 {
-                bail!("Integral phase gauge requires positive finite Gauss weights");
+        let mut stage_weights = Vec::with_capacity(ntst * ncol);
+        for interval in 0..ntst {
+            let interval_width = normalized_mesh[interval + 1] - normalized_mesh[interval];
+            for &weight in gauss_weights {
+                let normalized = interval_width * weight;
+                if !normalized.is_finite() || normalized <= 0.0 {
+                    bail!("Integral phase gauge requires positive finite Gauss weights");
+                }
+                stage_weights.push(normalized);
             }
-            stage_weights.push(normalized);
         }
         Ok(Self {
             ntst,
@@ -123,7 +530,7 @@ impl FullProfilePhaseGauge {
                 let stage_index = interval * self.ncol + stage;
                 for component in 0..self.dim {
                     let value = reference_derivative[stage_index * self.dim + component];
-                    norm_squared += self.stage_weights[stage] * value * value;
+                    norm_squared += self.stage_weights[stage_index] * value * value;
                 }
             }
         }
@@ -155,7 +562,7 @@ impl FullProfilePhaseGauge {
                 let stage_index = interval * self.ncol + stage;
                 for component in 0..self.dim {
                     let index = stage_index * self.dim + component;
-                    phase += self.stage_weights[stage]
+                    phase += self.stage_weights[stage_index]
                         * (stages[index] - reference[index])
                         * derivative[index];
                 }
@@ -187,7 +594,7 @@ impl FullProfilePhaseGauge {
                 for component in 0..self.dim {
                     let index = stage_index * self.dim + component;
                     jac[(row, stage_col_start + index)] =
-                        self.stage_weights[stage] * derivative[index];
+                        self.stage_weights[stage_index] * derivative[index];
                 }
             }
         }
@@ -203,15 +610,18 @@ impl FullProfilePhaseGauge {
 /// Build mesh-independent diagonal PALC weights for an explicitly closed
 /// collocation profile. `mesh_0` and `mesh_ntst` represent the same periodic
 /// node, so they split that node's weight equally.
-fn explicit_profile_palc_weights(
+fn explicit_profile_palc_weights_on_mesh(
     augmented_len: usize,
-    ntst: usize,
+    normalized_mesh: &[f64],
     ncol: usize,
     dim: usize,
     nodes: &[f64],
     mesh_start: usize,
     stage_start: usize,
 ) -> Result<DVector<f64>> {
+    let ntst = normalized_mesh.len().saturating_sub(1);
+    let normalized_mesh =
+        crate::continuation::periodic::validated_normalized_mesh(ntst, normalized_mesh)?;
     if ntst < 2 || ncol == 0 || dim == 0 || nodes.len() != ncol {
         bail!("Invalid explicit collocation layout for PALC metric");
     }
@@ -221,22 +631,27 @@ fn explicit_profile_palc_weights(
         bail!("Explicit collocation layout exceeds augmented PALC state");
     }
 
-    let mut positions = Vec::with_capacity(ncol + 1);
-    positions.push(0.0);
-    positions.extend(nodes.iter().copied());
-    let mut node_weights = Vec::with_capacity(positions.len());
-    for index in 0..positions.len() {
+    let node_count = ntst * (ncol + 1);
+    let mut positions = Vec::with_capacity(node_count);
+    for interval in 0..ntst {
+        let left = normalized_mesh[interval];
+        let width = normalized_mesh[interval + 1] - left;
+        positions.push(left);
+        positions.extend(nodes.iter().map(|node| left + width * node));
+    }
+    let mut node_weights = Vec::with_capacity(node_count);
+    for index in 0..node_count {
         let previous = if index == 0 {
-            positions[positions.len() - 1] - 1.0
+            positions[node_count - 1] - 1.0
         } else {
             positions[index - 1]
         };
-        let next = if index + 1 == positions.len() {
-            1.0
+        let next = if index + 1 == node_count {
+            positions[0] + 1.0
         } else {
             positions[index + 1]
         };
-        let weight = 0.5 * (next - previous) / ntst as f64;
+        let weight = 0.5 * (next - previous);
         if !weight.is_finite() || weight <= 0.0 {
             bail!("Collocation nodes do not define a positive PALC quadrature metric");
         }
@@ -244,8 +659,9 @@ fn explicit_profile_palc_weights(
     }
 
     let mut weights = DVector::from_element(augmented_len, 1.0);
-    let mesh_weight = node_weights[0];
     for mesh in 0..=ntst {
+        let canonical_mesh = if mesh == ntst { 0 } else { mesh };
+        let mesh_weight = node_weights[canonical_mesh * (ncol + 1)];
         let endpoint_factor = if mesh == 0 || mesh == ntst { 0.5 } else { 1.0 };
         for component in 0..dim {
             weights[mesh_start + mesh * dim + component] = endpoint_factor * mesh_weight;
@@ -253,7 +669,7 @@ fn explicit_profile_palc_weights(
     }
     for interval in 0..ntst {
         for stage in 0..ncol {
-            let weight = node_weights[stage + 1];
+            let weight = node_weights[interval * (ncol + 1) + stage + 1];
             let stage_index = interval * ncol + stage;
             for component in 0..dim {
                 weights[stage_start + stage_index * dim + component] = weight;
@@ -296,6 +712,7 @@ fn lagrange_coefficients(nodes: &[f64]) -> Result<Vec<Vec<f64>>> {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 fn scaled_collocation_defect(
     system: &mut EquationSystem,
     param1_index: usize,
@@ -309,6 +726,69 @@ fn scaled_collocation_defect(
     ncol: usize,
     nodes: &[f64],
 ) -> Result<f64> {
+    scaled_collocation_defect_on_mesh(
+        system,
+        param1_index,
+        param2_index,
+        param1,
+        param2,
+        mesh_states,
+        stage_states,
+        period,
+        &crate::continuation::periodic::uniform_normalized_mesh(ntst),
+        ncol,
+        nodes,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+#[cfg(test)]
+fn scaled_collocation_defect_on_mesh(
+    system: &mut EquationSystem,
+    param1_index: usize,
+    param2_index: usize,
+    param1: f64,
+    param2: f64,
+    mesh_states: &[Vec<f64>],
+    stage_states: &[Vec<f64>],
+    period: f64,
+    normalized_mesh: &[f64],
+    ncol: usize,
+    nodes: &[f64],
+) -> Result<f64> {
+    Ok(collocation_defect_estimate_on_mesh(
+        system,
+        param1_index,
+        param2_index,
+        param1,
+        param2,
+        mesh_states,
+        stage_states,
+        period,
+        normalized_mesh,
+        ncol,
+        nodes,
+    )?
+    .max_scaled_defect)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collocation_defect_estimate_on_mesh(
+    system: &mut EquationSystem,
+    param1_index: usize,
+    param2_index: usize,
+    param1: f64,
+    param2: f64,
+    mesh_states: &[Vec<f64>],
+    stage_states: &[Vec<f64>],
+    period: f64,
+    normalized_mesh: &[f64],
+    ncol: usize,
+    nodes: &[f64],
+) -> Result<CollocationDefectEstimate> {
+    let ntst = normalized_mesh.len().saturating_sub(1);
+    let normalized_mesh =
+        crate::continuation::periodic::validated_normalized_mesh(ntst, normalized_mesh)?;
     if !period.is_finite() || period <= 0.0 {
         bail!("Cannot estimate collocation defect for a nonpositive period");
     }
@@ -332,7 +812,6 @@ fn scaled_collocation_defect(
     system.params[param1_index] = param1;
     system.params[param2_index] = param2;
 
-    let h = period / ntst as f64;
     let mut stage_flows = vec![0.0; stage_states.len() * dim];
     let mut flow = vec![0.0; dim];
     for (index, state) in stage_states.iter().enumerate() {
@@ -359,9 +838,11 @@ fn scaled_collocation_defect(
     }
 
     let mut max_defect = 0.0_f64;
+    let mut interval_scaled_defects = vec![0.0_f64; ntst];
     let mut state = vec![0.0; dim];
     let mut actual_flow = vec![0.0; dim];
     for (interval, mesh_state) in mesh_states.iter().take(ntst).enumerate() {
+        let h = period * (normalized_mesh[interval + 1] - normalized_mesh[interval]);
         for (basis, integrals) in &check_bases {
             state.copy_from_slice(mesh_state);
             for component in 0..dim {
@@ -378,44 +859,19 @@ fn scaled_collocation_defect(
                     polynomial_flow += basis[stage] * stage_flows[index];
                 }
                 let scale = 1.0 + actual_flow[component].abs().max(polynomial_flow.abs());
-                max_defect =
-                    max_defect.max((polynomial_flow - actual_flow[component]).abs() / scale);
+                let defect = (polynomial_flow - actual_flow[component]).abs() / scale;
+                max_defect = max_defect.max(defect);
+                interval_scaled_defects[interval] = interval_scaled_defects[interval].max(defect);
             }
         }
     }
     if !max_defect.is_finite() {
         bail!("Collocation defect estimate is non-finite");
     }
-    Ok(max_defect)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn collocation_profile_is_acceptable(
-    system: &mut EquationSystem,
-    param1_index: usize,
-    param2_index: usize,
-    param1: f64,
-    param2: f64,
-    mesh_states: &[Vec<f64>],
-    stage_states: &[Vec<f64>],
-    period: f64,
-    ntst: usize,
-    ncol: usize,
-    nodes: &[f64],
-) -> Result<bool> {
-    Ok(scaled_collocation_defect(
-        system,
-        param1_index,
-        param2_index,
-        param1,
-        param2,
-        mesh_states,
-        stage_states,
-        period,
-        ntst,
-        ncol,
-        nodes,
-    )? <= MAX_SCALED_COLLOCATION_DEFECT)
+    Ok(CollocationDefectEstimate {
+        max_scaled_defect: max_defect,
+        interval_scaled_defects,
+    })
 }
 
 /// Border vectors for LC bifurcation curve continuation.

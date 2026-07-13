@@ -8,6 +8,14 @@ export type SteppedRunner<TResult> = {
   get_result: () => TResult
 }
 
+type AdaptiveSteppedRunner<TBranch, TReport> = SteppedRunner<TBranch> & {
+  get_adaptation_report?: () => TReport | null
+  get_result_with_report?: () => {
+    branch: TBranch
+    collocation_adaptation?: TReport | null
+  }
+}
+
 function computeBatchSize(maxSteps: number): number {
   if (!Number.isFinite(maxSteps) || maxSteps <= 0) return 1
   return Math.max(1, Math.ceil(maxSteps / DEFAULT_PROGRESS_UPDATES))
@@ -23,7 +31,8 @@ function abortIfNeeded(signal: AbortSignal): void {
 export function runSteppedRunnerToCompletion<TResult>(
   runner: SteppedRunner<TResult>,
   signal: AbortSignal,
-  onProgress: (progress: ContinuationProgress) => void
+  onProgress: (progress: ContinuationProgress) => void,
+  terminalGetter?: (runner: SteppedRunner<TResult>) => TResult
 ): TResult {
   let progress = runner.get_progress()
   onProgress(progress)
@@ -35,5 +44,37 @@ export function runSteppedRunnerToCompletion<TResult>(
     onProgress(progress)
   }
 
-  return runner.get_result()
+  return terminalGetter ? terminalGetter(runner) : runner.get_result()
+}
+
+export function runAdaptiveSteppedRunnerToCompletion<
+  TBranch extends object,
+  TReport,
+>(
+  runner: AdaptiveSteppedRunner<TBranch, TReport>,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): TBranch & { collocation_adaptation?: TReport } {
+  return runSteppedRunnerToCompletion(
+    runner,
+    signal,
+    onProgress,
+    (completed) => {
+      const adaptive = completed as AdaptiveSteppedRunner<TBranch, TReport>
+      if (typeof adaptive.get_result_with_report === 'function') {
+        const result = adaptive.get_result_with_report()
+        return result.collocation_adaptation
+          ? { ...result.branch, collocation_adaptation: result.collocation_adaptation }
+          : result.branch
+      }
+
+      // RunnerHandle::get_result consumes the inner runner. Capture the optional
+      // report first for older WASM packages that do not expose the atomic getter.
+      const report = typeof adaptive.get_adaptation_report === 'function'
+        ? adaptive.get_adaptation_report()
+        : null
+      const branch = adaptive.get_result()
+      return report ? { ...branch, collocation_adaptation: report } : branch
+    }
+  )
 }

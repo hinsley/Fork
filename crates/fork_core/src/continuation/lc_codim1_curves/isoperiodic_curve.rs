@@ -5,10 +5,17 @@
 //! - Isoperiodic condition: T - T_seed = 0
 
 use super::{
-    collocation_profile_is_acceptable, explicit_profile_palc_weights, FullProfilePhaseGauge,
+    collocation_defect_estimate_on_mesh, explicit_profile_palc_weights_on_mesh,
+    transfer_explicit_curve_aug, transfer_explicit_curve_state, CurveCollocationAdaptation,
+    CurveMeshAdaptationDecision, FullProfilePhaseGauge,
 };
-use crate::continuation::periodic::{extract_multipliers_collocation, CollocationCoefficients};
-use crate::continuation::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
+use crate::continuation::periodic::{
+    extract_multipliers_collocation, uniform_normalized_mesh, validated_normalized_mesh,
+    CollocationAdaptationReport, CollocationAdaptivitySettings, CollocationCoefficients,
+};
+use crate::continuation::problem::{
+    ContinuationProblem, PointDiagnostics, StepRejectionAction, TestFunctionValues,
+};
 use crate::equation_engine::EquationSystem;
 use crate::equilibrium::{compute_jacobian, SystemKind};
 use crate::traits::DynamicalSystem;
@@ -30,12 +37,16 @@ pub struct IsoperiodicCurveProblem<'a> {
     dim: usize,
     /// Number of mesh intervals
     ntst: usize,
+    /// Persistent normalized collocation interval boundaries.
+    normalized_mesh: Vec<f64>,
     /// Collocation degree
     ncol: usize,
     /// Collocation coefficients
     coeffs: CollocationCoefficients,
     /// Integral phase condition on the complete Gauss collocation profile.
     phase_gauge: FullProfilePhaseGauge,
+    /// Bounded a-posteriori mesh adaptation and provenance.
+    adaptation: CurveCollocationAdaptation,
     /// Seed period to keep fixed on the curve
     target_period: f64,
     /// Cached BVP Jacobian for diagnostics
@@ -59,6 +70,36 @@ impl<'a> IsoperiodicCurveProblem<'a> {
         ntst: usize,
         ncol: usize,
     ) -> Result<Self> {
+        Self::new_on_mesh(
+            system,
+            _lc_state,
+            period,
+            param1_index,
+            param2_index,
+            _param1_value,
+            _param2_value,
+            ncol,
+            uniform_normalized_mesh(ntst),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_on_mesh(
+        system: &'a mut EquationSystem,
+        _lc_state: Vec<f64>,
+        period: f64,
+        param1_index: usize,
+        param2_index: usize,
+        _param1_value: f64,
+        _param2_value: f64,
+        ncol: usize,
+        normalized_mesh: Vec<f64>,
+    ) -> Result<Self> {
+        let ntst = normalized_mesh.len().saturating_sub(1);
+        if ntst < 2 {
+            bail!("Isoperiodic curve requires at least two mesh intervals");
+        }
+        let normalized_mesh = validated_normalized_mesh(ntst, &normalized_mesh)?;
         if !period.is_finite() || period <= 0.0 {
             bail!("Selected point has no valid period");
         }
@@ -71,10 +112,6 @@ impl<'a> IsoperiodicCurveProblem<'a> {
             bail!("Unknown continuation parameter index");
         }
 
-        if ntst < 2 {
-            bail!("Isoperiodic curve requires at least two mesh intervals");
-        }
-
         let dim = system.equations.len();
         let coeffs = CollocationCoefficients::new(ncol)?;
 
@@ -84,7 +121,9 @@ impl<'a> IsoperiodicCurveProblem<'a> {
         let work_f = vec![0.0; stage_count * dim];
         let work_j = vec![0.0; stage_count * dim * dim];
 
-        let phase_gauge = FullProfilePhaseGauge::new(ntst, ncol, dim, &coeffs.b)?;
+        let phase_gauge =
+            FullProfilePhaseGauge::new_on_mesh(&normalized_mesh, ncol, dim, &coeffs.b)?;
+        let adaptation = CurveCollocationAdaptation::new(&normalized_mesh, ncol)?;
 
         Ok(Self {
             system,
@@ -92,14 +131,40 @@ impl<'a> IsoperiodicCurveProblem<'a> {
             param2_index,
             dim,
             ntst,
+            normalized_mesh,
             ncol,
             coeffs,
             phase_gauge,
+            adaptation,
             target_period: period,
             cached_jac: None,
             work_f,
             work_j,
         })
+    }
+
+    pub fn normalized_mesh(&self) -> &[f64] {
+        &self.normalized_mesh
+    }
+
+    pub fn set_collocation_adaptivity(
+        &mut self,
+        settings: CollocationAdaptivitySettings,
+    ) -> Result<()> {
+        self.adaptation.configure(settings)
+    }
+
+    pub fn adaptation_report(&self) -> &CollocationAdaptationReport {
+        self.adaptation.report()
+    }
+
+    pub fn seed_adaptation_report(&mut self, report: CollocationAdaptationReport) -> Result<()> {
+        self.adaptation
+            .seed_report(report, &self.normalized_mesh, self.ncol)
+    }
+
+    fn interval_width(&self, interval: usize) -> f64 {
+        self.normalized_mesh[interval + 1] - self.normalized_mesh[interval]
     }
 
     /// Number of LC coordinates (stages + mesh states).
@@ -162,6 +227,74 @@ impl<'a> IsoperiodicCurveProblem<'a> {
         &aug.as_slice()[1..1 + stage_len]
     }
 
+    fn defect_estimate(
+        &mut self,
+        aug: &DVector<f64>,
+    ) -> Result<crate::continuation::periodic::CollocationDefectEstimate> {
+        let aug_slice = aug.as_slice();
+        let mesh_states = (0..=self.ntst)
+            .map(|mesh| self.mesh_slice(aug_slice, mesh).to_vec())
+            .collect::<Vec<_>>();
+        let stage_states = (0..self.ntst)
+            .flat_map(|interval| {
+                (0..self.ncol)
+                    .map(|stage| self.stage_slice(aug_slice, interval, stage).to_vec())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        collocation_defect_estimate_on_mesh(
+            self.system,
+            self.param1_index,
+            self.param2_index,
+            self.get_p1(aug),
+            self.get_p2(aug),
+            &mesh_states,
+            &stage_states,
+            self.get_period(aug),
+            &self.normalized_mesh,
+            self.ncol,
+            &self.coeffs.nodes,
+        )
+    }
+
+    fn replace_mesh(
+        &mut self,
+        normalized_mesh: Vec<f64>,
+        accepted_aug: &DVector<f64>,
+    ) -> Result<()> {
+        let ntst = normalized_mesh.len().saturating_sub(1);
+        let normalized_mesh = validated_normalized_mesh(ntst, &normalized_mesh)?;
+        let mut phase_gauge = FullProfilePhaseGauge::new_on_mesh(
+            &normalized_mesh,
+            self.ncol,
+            self.dim,
+            &self.coeffs.b,
+        )?;
+        let stage_len = ntst * self.ncol * self.dim;
+        let mesh_len = (ntst + 1) * self.dim;
+        let profile_end = 1 + stage_len + mesh_len;
+        if accepted_aug.len() != profile_end + 2 {
+            bail!("Transferred isoperiodic state has an invalid collocation layout");
+        }
+        phase_gauge.set_reference(
+            self.system,
+            self.param1_index,
+            self.param2_index,
+            accepted_aug[0],
+            accepted_aug[profile_end + 1],
+            accepted_aug[profile_end],
+            &accepted_aug.as_slice()[1..1 + stage_len],
+        )?;
+        self.ntst = ntst;
+        self.normalized_mesh = normalized_mesh;
+        self.phase_gauge = phase_gauge;
+        self.cached_jac = None;
+        self.work_f.resize(ntst * self.ncol * self.dim, 0.0);
+        self.work_j
+            .resize(ntst * self.ncol * self.dim * self.dim, 0.0);
+        Ok(())
+    }
+
     fn set_phase_reference(&mut self, aug: &DVector<f64>) -> Result<()> {
         let stages = self.stage_profile(aug);
         self.phase_gauge.set_reference(
@@ -203,12 +336,12 @@ impl<'a> IsoperiodicCurveProblem<'a> {
         let p1 = self.get_p1(aug);
         let p2 = self.get_p2(aug);
         let period = self.get_period(aug);
-        let h = period / self.ntst as f64;
         let aug_slice = aug.as_slice();
 
         let n_stages = self.ntst * self.ncol;
         let n_eqs = n_stages * self.dim + self.ntst * self.dim + 1 + self.dim;
         let n_vars = self.ncoords() + 1; // coords + T
+        let period_col = n_vars - 1;
 
         let mut jac = DMatrix::<f64>::zeros(n_eqs, n_vars);
 
@@ -222,11 +355,15 @@ impl<'a> IsoperiodicCurveProblem<'a> {
                 if start + self.dim * self.dim <= self.work_j.len() {
                     self.work_j[start..start + self.dim * self.dim].copy_from_slice(&j);
                 }
+                let flow = self.eval_f(&z, p1, p2);
+                let flow_start = idx * self.dim;
+                self.work_f[flow_start..flow_start + self.dim].copy_from_slice(&flow);
             }
         }
 
         // Fill collocation Jacobian entries.
         for interval in 0..self.ntst {
+            let h = period * self.interval_width(interval);
             for stage in 0..self.ncol {
                 let stage_idx = interval * self.ncol + stage;
                 let row = stage_idx * self.dim;
@@ -257,12 +394,22 @@ impl<'a> IsoperiodicCurveProblem<'a> {
                         }
                     }
                 }
+
+                for r in 0..self.dim {
+                    let mut period_sum = 0.0;
+                    for k in 0..self.ncol {
+                        let flow_index = (interval * self.ncol + k) * self.dim + r;
+                        period_sum += self.coeffs.a[stage][k] * self.work_f[flow_index];
+                    }
+                    jac[(row + r, period_col)] = -self.interval_width(interval) * period_sum;
+                }
             }
         }
 
         // Continuity equations.
         let cont_row = n_stages * self.dim;
         for interval in 0..self.ntst {
+            let h = period * self.interval_width(interval);
             let row = cont_row + interval * self.dim;
             let mesh_col = n_stages * self.dim + interval * self.dim;
             let next_col = n_stages * self.dim + ((interval + 1) % (self.ntst + 1)) * self.dim;
@@ -284,6 +431,14 @@ impl<'a> IsoperiodicCurveProblem<'a> {
                         jac[(row + r, k_col + c)] -= h * b * jv;
                     }
                 }
+            }
+            for r in 0..self.dim {
+                let mut period_sum = 0.0;
+                for k in 0..self.ncol {
+                    let flow_index = (interval * self.ncol + k) * self.dim + r;
+                    period_sum += self.coeffs.b[k] * self.work_f[flow_index];
+                }
+                jac[(row + r, period_col)] = -self.interval_width(interval) * period_sum;
             }
         }
 
@@ -363,9 +518,9 @@ impl<'a> ContinuationProblem for IsoperiodicCurveProblem<'a> {
 
     fn palc_metric_weights(&self, _aug: &DVector<f64>) -> Result<DVector<f64>> {
         let stage_dim = self.ntst * self.ncol * self.dim;
-        explicit_profile_palc_weights(
+        explicit_profile_palc_weights_on_mesh(
             self.dimension() + 1,
-            self.ntst,
+            &self.normalized_mesh,
             self.ncol,
             self.dim,
             &self.coeffs.nodes,
@@ -384,7 +539,6 @@ impl<'a> ContinuationProblem for IsoperiodicCurveProblem<'a> {
         }
         self.ensure_phase_reference(aug)?;
 
-        let h = period / self.ntst as f64;
         let aug_slice = aug.as_slice();
         let n_stages = self.ntst * self.ncol;
 
@@ -400,6 +554,7 @@ impl<'a> ContinuationProblem for IsoperiodicCurveProblem<'a> {
 
         // Collocation equations.
         for interval in 0..self.ntst {
+            let h = period * self.interval_width(interval);
             let mesh = self.mesh_slice(aug_slice, interval);
             for stage in 0..self.ncol {
                 let z = self.stage_slice(aug_slice, interval, stage);
@@ -419,6 +574,7 @@ impl<'a> ContinuationProblem for IsoperiodicCurveProblem<'a> {
         // Continuity equations.
         let cont_row = n_stages * self.dim;
         for interval in 0..self.ntst {
+            let h = period * self.interval_width(interval);
             let mesh_i = self.mesh_slice(aug_slice, interval);
             let mesh_next = self.mesh_slice(aug_slice, interval + 1);
             let row = cont_row + interval * self.dim;
@@ -504,30 +660,103 @@ impl<'a> ContinuationProblem for IsoperiodicCurveProblem<'a> {
     }
 
     fn is_step_acceptable(&mut self, aug: &DVector<f64>) -> Result<bool> {
-        let aug_slice = aug.as_slice();
-        let mesh_states = (0..=self.ntst)
-            .map(|mesh| self.mesh_slice(aug_slice, mesh).to_vec())
-            .collect::<Vec<_>>();
-        let stage_states = (0..self.ntst)
-            .flat_map(|interval| {
-                (0..self.ncol)
-                    .map(|stage| self.stage_slice(aug_slice, interval, stage).to_vec())
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-        collocation_profile_is_acceptable(
-            self.system,
-            self.param1_index,
-            self.param2_index,
-            self.get_p1(aug),
-            self.get_p2(aug),
-            &mesh_states,
-            &stage_states,
-            self.get_period(aug),
-            self.ntst,
+        Ok(self.defect_estimate(aug)?.max_scaled_defect
+            <= self.adaptation.settings().defect_tolerance)
+    }
+
+    fn handle_step_rejection(
+        &mut self,
+        accepted_aug: &DVector<f64>,
+        accepted_tangent: &DVector<f64>,
+        rejected_aug: &DVector<f64>,
+        branch_states: &[Vec<f64>],
+    ) -> Result<StepRejectionAction> {
+        let estimate = self.defect_estimate(rejected_aug)?;
+        if estimate.max_scaled_defect <= self.adaptation.settings().defect_tolerance {
+            return Ok(StepRejectionAction::ReduceStep);
+        }
+        let old_mesh = self.normalized_mesh.clone();
+        let CurveMeshAdaptationDecision::Adapt(new_mesh) =
+            self.adaptation.decide(&estimate, &old_mesh, self.ncol)?
+        else {
+            return Ok(StepRejectionAction::Terminate);
+        };
+        let transferred_aug = transfer_explicit_curve_aug(
+            accepted_aug,
+            &old_mesh,
+            &new_mesh,
             self.ncol,
+            self.dim,
             &self.coeffs.nodes,
-        )
+            2,
+        )?;
+        let transferred_tangent = transfer_explicit_curve_aug(
+            accepted_tangent,
+            &old_mesh,
+            &new_mesh,
+            self.ncol,
+            self.dim,
+            &self.coeffs.nodes,
+            2,
+        )?;
+        let transferred_branch_states = branch_states
+            .iter()
+            .map(|state| {
+                transfer_explicit_curve_state(
+                    state,
+                    &old_mesh,
+                    &new_mesh,
+                    self.ncol,
+                    self.dim,
+                    &self.coeffs.nodes,
+                    2,
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.replace_mesh(new_mesh, &transferred_aug)?;
+        Ok(StepRejectionAction::Refined {
+            accepted_aug: transferred_aug,
+            accepted_tangent: transferred_tangent,
+            branch_states: transferred_branch_states,
+            branch_type: None,
+        })
+    }
+
+    fn transfer_branch_states_to_current_discretization(
+        &self,
+        branch_states: &[Vec<f64>],
+    ) -> Result<Vec<Vec<f64>>> {
+        if self.adaptation.report().attempts.is_empty()
+            && branch_states
+                .iter()
+                .all(|state| state.len() == self.dimension())
+        {
+            return Ok(branch_states.to_vec());
+        }
+        let mut transferred = branch_states.to_vec();
+        for attempt in self.adaptation.transfer_attempts() {
+            transferred = transferred
+                .iter()
+                .map(|state| {
+                    transfer_explicit_curve_state(
+                        state,
+                        &attempt.old_normalized_mesh,
+                        &attempt.new_normalized_mesh,
+                        self.ncol,
+                        self.dim,
+                        &self.coeffs.nodes,
+                        2,
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+        }
+        if transferred
+            .iter()
+            .any(|state| state.len() != self.dimension())
+        {
+            bail!("Adaptive isoperiodic continuation failed to transfer branch history");
+        }
+        Ok(transferred)
     }
 
     fn update_after_step(&mut self, aug: &DVector<f64>) -> Result<()> {
@@ -539,8 +768,13 @@ impl<'a> ContinuationProblem for IsoperiodicCurveProblem<'a> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::transfer_explicit_curve_state;
     use super::IsoperiodicCurveProblem;
-    use crate::continuation::ContinuationProblem;
+    use crate::continuation::periodic::{
+        CollocationAdaptationReport, CollocationAdaptivitySettings, CollocationMeshAdaptationKind,
+        CollocationRefinementAttempt,
+    };
+    use crate::continuation::{ContinuationProblem, StepRejectionAction};
     use crate::equation_engine::{Bytecode, EquationSystem, OpCode};
     use nalgebra::{DMatrix, DVector};
 
@@ -880,6 +1114,78 @@ mod tests {
     }
 
     #[test]
+    fn nonuniform_bvp_jacobian_matches_finite_differences() {
+        let mut system = make_parameterized_two_dim_flow_system();
+        let normalized_mesh = vec![0.0, 0.08, 0.42, 1.0];
+        let ntst = normalized_mesh.len() - 1;
+        let ncol = 2;
+        let dim = 2;
+        let ncoords = ntst * ncol * dim + (ntst + 1) * dim;
+        let mut problem = IsoperiodicCurveProblem::new_on_mesh(
+            &mut system,
+            vec![0.0; ncoords],
+            1.3,
+            0,
+            1,
+            0.1,
+            0.2,
+            ncol,
+            normalized_mesh.clone(),
+        )
+        .expect("nonuniform isoperiodic problem");
+        assert_eq!(problem.normalized_mesh(), normalized_mesh);
+
+        let mut aug = DVector::zeros(problem.dimension() + 1);
+        aug[0] = 0.1;
+        for index in 0..ncoords {
+            aug[1 + index] = 0.4 + 0.03 * index as f64;
+        }
+        aug[problem.period_index()] = 1.3;
+        aug[problem.param2_idx()] = 0.2;
+        let mut base_residual = DVector::zeros(problem.dimension());
+        problem
+            .residual(&aug, &mut base_residual)
+            .expect("initialize nonuniform phase gauge");
+        let analytic = problem
+            .build_bvp_jac(&aug)
+            .expect("analytic nonuniform BVP Jacobian");
+
+        let phase_row = ntst * ncol * dim + ntst * dim;
+        let epsilon = 1e-7;
+        for column in 0..analytic.ncols() {
+            let aug_column = if column < ncoords {
+                1 + column
+            } else {
+                problem.period_index()
+            };
+            let mut plus = aug.clone();
+            let mut minus = aug.clone();
+            plus[aug_column] += epsilon;
+            minus[aug_column] -= epsilon;
+            let mut plus_residual = DVector::zeros(problem.dimension());
+            let mut minus_residual = DVector::zeros(problem.dimension());
+            problem
+                .residual(&plus, &mut plus_residual)
+                .expect("plus residual");
+            problem
+                .residual(&minus, &mut minus_residual)
+                .expect("minus residual");
+            for row in 0..analytic.nrows() {
+                let full_row = if row <= phase_row { row } else { row + 1 };
+                let numerical =
+                    (plus_residual[full_row] - minus_residual[full_row]) / (2.0 * epsilon);
+                let error = (analytic[(row, column)] - numerical).abs();
+                assert!(
+                    error < 3e-6,
+                    "nonuniform BVP Jacobian mismatch at ({row}, {column}): analytic={}, numerical={}, error={error:.3e}",
+                    analytic[(row, column)],
+                    numerical
+                );
+            }
+        }
+    }
+
+    #[test]
     fn rejects_an_independently_underresolved_profile() {
         let mut system = make_two_dim_flow_system();
         let ntst = 2;
@@ -906,5 +1212,112 @@ mod tests {
         assert!(!problem
             .is_step_acceptable(&aug)
             .expect("under-resolved profile"));
+    }
+
+    #[test]
+    fn extension_transfer_skips_attempts_from_the_seeded_report() {
+        let mut system = make_two_dim_flow_system();
+        let current_mesh = vec![0.0, 0.18, 0.61, 1.0];
+        let previous_mesh = vec![0.0, 0.5, 1.0];
+        let ntst = current_mesh.len() - 1;
+        let ncol = 1;
+        let dim = 2;
+        let ncoords = ntst * ncol * dim + (ntst + 1) * dim;
+        let mut problem = IsoperiodicCurveProblem::new_on_mesh(
+            &mut system,
+            vec![0.0; ncoords],
+            1.0,
+            0,
+            1,
+            0.0,
+            0.0,
+            ncol,
+            current_mesh.clone(),
+        )
+        .expect("isoperiodic restart problem");
+        problem
+            .set_collocation_adaptivity(CollocationAdaptivitySettings {
+                enabled: true,
+                redistribution_enabled: false,
+                defect_tolerance: 1.0e-12,
+                max_refinements: 3,
+                max_mesh_points: 8,
+            })
+            .expect("adaptive settings");
+        problem
+            .seed_adaptation_report(CollocationAdaptationReport {
+                initial_mesh_points: previous_mesh.len() - 1,
+                current_mesh_points: current_mesh.len() - 1,
+                degree: ncol,
+                defect_tolerance: 0.5,
+                refinement_budget: 99,
+                max_mesh_points: 128,
+                initial_normalized_mesh: previous_mesh.clone(),
+                current_normalized_mesh: current_mesh.clone(),
+                attempts: (1..=3)
+                    .map(|sequence| CollocationRefinementAttempt {
+                        sequence,
+                        kind: CollocationMeshAdaptationKind::Redistribution,
+                        old_mesh_points: previous_mesh.len() - 1,
+                        new_mesh_points: current_mesh.len() - 1,
+                        degree: ncol,
+                        trigger_defect: 0.5,
+                        tolerance: 0.5,
+                        interval_scaled_defects: vec![0.25, 0.5],
+                        old_normalized_mesh: previous_mesh.clone(),
+                        new_normalized_mesh: current_mesh.clone(),
+                    })
+                    .collect(),
+                termination: None,
+            })
+            .expect("seed prior report");
+        assert_eq!(problem.adaptation_report().defect_tolerance, 1.0e-12);
+        assert_eq!(problem.adaptation_report().refinement_budget, 3);
+        assert_eq!(problem.adaptation_report().max_mesh_points, 8);
+
+        let mut accepted = DVector::zeros(problem.dimension() + 1);
+        for index in 0..ncoords {
+            accepted[1 + index] = if index % 2 == 0 {
+                3.0 + index as f64
+            } else {
+                -2.0 - index as f64
+            };
+        }
+        accepted[problem.period_index()] = 1.0;
+        accepted[problem.param2_idx()] = 0.0;
+        let mut tangent = DVector::zeros(accepted.len());
+        tangent[0] = 1.0;
+        let persisted_before_extension = accepted.as_slice()[1..].to_vec();
+
+        let action = problem
+            .handle_step_rejection(&accepted, &tangent, &accepted, &[])
+            .expect("one new adaptive retry");
+        assert!(matches!(action, StepRejectionAction::Refined { .. }));
+        assert_eq!(problem.adaptation_report().attempts.len(), 4);
+        let new_attempt = problem
+            .adaptation_report()
+            .attempts
+            .last()
+            .expect("new adaptation attempt");
+
+        let expected = transfer_explicit_curve_state(
+            &persisted_before_extension,
+            &current_mesh,
+            &new_attempt.new_normalized_mesh,
+            ncol,
+            dim,
+            &problem.coeffs.nodes,
+            2,
+        )
+        .expect("single current-to-final transfer");
+        let transferred = problem
+            .transfer_branch_states_to_current_discretization(&[persisted_before_extension])
+            .expect("extension history transfer");
+
+        assert_eq!(transferred.len(), 1);
+        assert_eq!(transferred[0].len(), expected.len());
+        for (actual, expected) in transferred[0].iter().zip(expected) {
+            assert!((actual - expected).abs() < 1.0e-12);
+        }
     }
 }

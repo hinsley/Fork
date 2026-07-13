@@ -10,6 +10,8 @@ import chalk from 'chalk';
 import { Storage } from '../storage';
 import { WasmBridge } from '../wasm';
 import {
+  Codim2PointData,
+  CollocationAdaptationReport,
   ContinuationObject,
   ContinuationPoint,
   ManifoldCurveGeometry,
@@ -53,9 +55,67 @@ import {
 } from './initiate-homoclinic';
 import { initiateHomotopySaddleFromEquilibrium } from './initiate-homotopy-saddle';
 import { printProgress, printProgressComplete } from '../format';
+import {
+  computeAndPersistNormalForm,
+  initiatePeriodicBranchPointSwitch,
+  printNormalForm
+} from './normal-forms';
 
 type BranchDetailResult = 'SUMMARY' | 'EXIT' | NavigationRequest;
 const DETAIL_PAGE_SIZE = 10;
+
+const PERIODIC_CODIM2_CURVE_ACTIONS: Record<
+  string,
+  { action: string; label: string }
+> = {
+  LimitPointCycle: {
+    action: 'SWITCH_PERIODIC_CODIM2_LPC',
+    label: 'Switch to Adjacent LPC Curve',
+  },
+  PeriodDoubling: {
+    action: 'SWITCH_PERIODIC_CODIM2_PD',
+    label: 'Switch to Adjacent PD Curve',
+  },
+  NeimarkSacker: {
+    action: 'SWITCH_PERIODIC_CODIM2_NS',
+    label: 'Switch to Adjacent NS Curve',
+  },
+};
+
+export interface PeriodicCodim2CurveAction {
+  action: string;
+  label: string;
+  target: string;
+  targetAuxiliary?: number;
+}
+
+export function periodicCodim2CurveActionsForPoint(
+  branchType: ContinuationObject['branchType'],
+  point: ContinuationPoint
+): PeriodicCodim2CurveAction[] {
+  if (branchType !== 'lpc_curve' && branchType !== 'pd_curve' && branchType !== 'ns_curve') {
+    return [];
+  }
+  const events = point.codim2_events && point.codim2_events.length > 0
+    ? point.codim2_events
+    : point.codim2
+      ? [point.codim2]
+      : [];
+  const actions = new Map<string, PeriodicCodim2CurveAction>();
+  for (const event of events) {
+    if (!event.refined || event.candidate) continue;
+    for (const branchSwitch of event.branch_switches ?? []) {
+      const actionConfig = PERIODIC_CODIM2_CURVE_ACTIONS[branchSwitch.target];
+      if (!branchSwitch.available || !actionConfig || actions.has(actionConfig.action)) continue;
+      actions.set(actionConfig.action, {
+        ...actionConfig,
+        target: branchSwitch.target,
+        targetAuxiliary: branchSwitch.target_auxiliary,
+      });
+    }
+  }
+  return [...actions.values()];
+}
 
 function formatTerminationReason(reason: string | undefined): string {
   if (!reason || reason.trim().length === 0) return 'Unknown';
@@ -67,9 +127,19 @@ function formatTerminationReason(reason: string | undefined): string {
 }
 
 function printCodim2Diagnostics(point: ContinuationPoint): void {
-  const codim2 = point.codim2;
-  if (!codim2) return;
+  const events = point.codim2_events && point.codim2_events.length > 0
+    ? point.codim2_events
+    : point.codim2
+      ? [point.codim2]
+      : [];
+  events.forEach((codim2, index) => printOneCodim2Diagnostic(codim2, index, events.length));
+}
 
+function printOneCodim2Diagnostic(
+  codim2: Codim2PointData,
+  index: number,
+  eventCount: number
+): void {
   const status = codim2.refined && codim2.candidate
     ? 'Refined candidate'
     : codim2.refined
@@ -77,7 +147,8 @@ function printCodim2Diagnostics(point: ContinuationPoint): void {
       : codim2.candidate
         ? 'Candidate'
         : 'Detected';
-  console.log(chalk.white('\nCodimension-two refinement:'));
+  const suffix = eventCount > 1 ? ` ${index + 1}/${eventCount}` : '';
+  console.log(chalk.white(`\nCodimension-two refinement${suffix}:`));
   console.log(`  Type: ${codim2.type} (${status})`);
   console.log(
     `  Test residual: ${codim2.test_function}=${formatNumberFullPrecision(codim2.test_function_value)}`
@@ -101,6 +172,32 @@ function printCodim2Diagnostics(point: ContinuationPoint): void {
     }
     if (typeof jacobianCondition === 'number') {
       console.log(`    Jacobian: ${formatNumberFullPrecision(jacobianCondition)}`);
+    }
+  }
+  if ((codim2.branch_switches?.length ?? 0) > 0) {
+    console.log('  Adjacent curve switches:');
+    codim2.branch_switches?.forEach((branchSwitch) => {
+      const auxiliary = typeof branchSwitch.target_auxiliary === 'number'
+        ? ` (auxiliary ${formatNumberFullPrecision(branchSwitch.target_auxiliary)})`
+        : '';
+      const availability = branchSwitch.available ? 'available' : 'unavailable';
+      const reason = branchSwitch.reason ? ` — ${branchSwitch.reason}` : '';
+      console.log(`    ${branchSwitch.target}${auxiliary}: ${availability}${reason}`);
+    });
+  }
+  if (codim2.certification) {
+    console.log('  Certification:');
+    console.log(
+      `    Defining conditions: ${codim2.certification.defining_conditions_verified ? 'verified' : 'not verified'}`
+    );
+    const nondegeneracy = codim2.certification.nondegeneracy_evaluated
+      ? codim2.certification.nondegenerate
+        ? 'verified nondegenerate'
+        : 'failed or degenerate'
+      : 'not evaluated';
+    console.log(`    Higher-order nondegeneracy: ${nondegeneracy}`);
+    if (codim2.certification.reason) {
+      console.log(`    Note: ${codim2.certification.reason}`);
     }
   }
   console.log(
@@ -171,6 +268,24 @@ function summarizeManifoldSolverDiagnostics(branch: ContinuationObject): string 
     : 'n/a';
   const localShrinks = diagnostics.local_leaf_shrinks ?? 0;
   return `Termination: ${reason} • Final leaf delta=${delta} • floor=${floor} (reached=${floorFlag}) • per-leaf reductions=${localShrinks} • failed ring/attempt/solved=${failedRing}/${failedAttempt}/${failedLeafPoints} • leaf reason=${leafReason} @ point/seg=${leafPoint}/${leafSeg} time=${leafTime} tau=${leafTau}${detail}`;
+}
+
+function summarizeCollocationAdaptation(
+  report: CollocationAdaptationReport | undefined
+): string | null {
+  if (!report) return null;
+  const attempts = report.attempts.length === 0
+    ? 'none'
+    : report.attempts
+        .map(
+          (attempt) =>
+            `${attempt.kind} ${attempt.old_mesh_points}->${attempt.new_mesh_points}`
+        )
+        .join(', ');
+  const termination = report.termination
+    ? ` • termination=${formatTerminationReason(report.termination.reason)} (defect ${formatNumber(report.termination.measured_defect)})`
+    : '';
+  return `Collocation mesh: ${report.initial_mesh_points}->${report.current_mesh_points} x degree ${report.degree} • tolerance=${formatNumber(report.defect_tolerance)} • adaptations=${attempts}${termination}`;
 }
 
 /**
@@ -336,9 +451,12 @@ export async function browseBranchSummary(
     const choices: any[] = [...summaryChoices];
     choices.push(new inquirer.Separator());
     choices.push({ name: chalk.red('Exit Branch Viewer'), value: 'EXIT' });
-    const manifoldSummary = summarizeManifoldSolverDiagnostics(branch);
-    const summaryMessage = manifoldSummary
-      ? `Branch Summary\n${chalk.gray(manifoldSummary)}`
+    const diagnosticSummary = [
+      summarizeManifoldSolverDiagnostics(branch),
+      summarizeCollocationAdaptation(branch.data.collocation_adaptation),
+    ].filter((summary): summary is string => Boolean(summary));
+    const summaryMessage = diagnosticSummary.length > 0
+      ? `Branch Summary\n${diagnosticSummary.map((summary) => chalk.gray(summary)).join('\n')}`
       : 'Branch Summary';
 
     const { selection } = await inquirer.prompt({
@@ -891,6 +1009,9 @@ export async function showPointDetails(
   }
 
   printCodim2Diagnostics(pt);
+  if (pt.normal_form) {
+    printNormalForm(pt.normal_form.normal_form);
+  }
 
   if (branchType === 'homoclinic_curve') {
     const branchTypeData = branch.data.branch_type as any;
@@ -924,6 +1045,30 @@ export async function showPointDetails(
 
   // Build action menu based on branch type and point type
   const choices: any[] = [];
+  const adjacentPeriodicCurveSwitches = new Map<
+    string,
+    PeriodicCodim2CurveAction
+  >();
+
+  const normalFormEligible =
+    (sysConfig.type === 'map' && branchType === 'equilibrium' &&
+      ['Fold', 'BranchPoint', 'PeriodDoubling', 'NeimarkSacker'].includes(pt.stability)) ||
+    (sysConfig.type === 'flow' && branchType === 'limit_cycle' &&
+      ['BranchPoint', 'CycleFold', 'PeriodDoubling', 'NeimarkSacker'].includes(pt.stability)) ||
+    (sysConfig.type === 'flow' &&
+      (pt.codim2?.type === 'ZeroHopf' || pt.codim2?.type === 'DoubleHopf'));
+  if (normalFormEligible) {
+    choices.push({ name: 'Compute Normal Form', value: 'COMPUTE_NORMAL_FORM' });
+  }
+  if (
+    branchType === 'limit_cycle' &&
+    pt.stability === 'BranchPoint' &&
+    pt.normal_form?.normal_form.type === 'BranchPoint' &&
+    (pt.normal_form.normal_form.kind === 'Transcritical' ||
+      pt.normal_form.normal_form.kind === 'Pitchfork')
+  ) {
+    choices.push({ name: 'Correct & Continue Secondary Periodic Branch', value: 'SWITCH_PERIODIC_BP' });
+  }
 
   if (pt.codim2?.refined && !pt.codim2.candidate) {
     if (pt.codim2.type === 'GeneralizedHopf') {
@@ -932,7 +1077,24 @@ export async function showPointDetails(
       choices.push({ name: 'Switch to Fold Curve', value: 'SWITCH_CODIM2_FOLD' });
       choices.push({ name: 'Switch to Hopf Curve', value: 'SWITCH_CODIM2_HOPF' });
       choices.push({ name: 'Switch to Homoclinic Branch', value: 'SWITCH_CODIM2_HOMOCLINIC' });
+    } else if (pt.codim2.type === 'ZeroHopf') {
+      choices.push({ name: 'Switch to Fold Curve', value: 'SWITCH_CODIM2_FOLD' });
+      choices.push({ name: 'Switch to Hopf Curve', value: 'SWITCH_CODIM2_HOPF' });
+      const nsSwitch = pt.codim2.branch_switches?.find(
+        (entry) => entry.target === 'NeimarkSacker'
+      );
+      if (!nsSwitch || nsSwitch.available) {
+        choices.push({ name: 'Switch to Periodic NS Curve', value: 'SWITCH_CODIM2_NS' });
+      }
+    } else if (pt.codim2.type === 'DoubleHopf') {
+      choices.push({ name: 'Switch to Hopf Curve', value: 'SWITCH_CODIM2_HOPF' });
+      choices.push({ name: 'Switch to Periodic NS Curve', value: 'SWITCH_CODIM2_NS' });
     }
+  }
+
+  for (const curveAction of periodicCodim2CurveActionsForPoint(branchType, pt)) {
+    adjacentPeriodicCurveSwitches.set(curveAction.action, curveAction);
+    choices.push({ name: curveAction.label, value: curveAction.action });
   }
 
   if (branchType === 'equilibrium') {
@@ -1027,6 +1189,22 @@ export async function showPointDetails(
 
   if (action === 'NEW_EQ_BRANCH') {
     const newBranch = await initiateEquilibriumBranchFromPoint(sysName, branch, pt);
+    if (!newBranch) return 'BACK';
+    return {
+      kind: 'OPEN_BRANCH',
+      objectName: newBranch.parentObject,
+      branchName: newBranch.name,
+      autoInspect: true,
+    };
+  }
+
+  if (action === 'COMPUTE_NORMAL_FORM') {
+    computeAndPersistNormalForm(sysName, branch, pt, arrayIdx);
+    return 'BACK';
+  }
+
+  if (action === 'SWITCH_PERIODIC_BP') {
+    const newBranch = await initiatePeriodicBranchPointSwitch(sysName, branch, pt, arrayIdx);
     if (!newBranch) return 'BACK';
     return {
       kind: 'OPEN_BRANCH',
@@ -1177,6 +1355,7 @@ export async function showPointDetails(
     SWITCH_CODIM2_LPC: 'LimitPointCycle',
     SWITCH_CODIM2_FOLD: 'Fold',
     SWITCH_CODIM2_HOPF: 'Hopf',
+    SWITCH_CODIM2_NS: 'NeimarkSacker',
     SWITCH_CODIM2_HOMOCLINIC: 'Homoclinic'
   };
   if (action in codim2Targets) {
@@ -1187,6 +1366,26 @@ export async function showPointDetails(
       arrayIdx,
       codim2Targets[action]
     );
+    if (newBranch) {
+      return {
+        kind: 'OPEN_BRANCH' as const,
+        objectName: newBranch.parentObject,
+        branchName: newBranch.name,
+        autoInspect: true,
+      };
+    }
+    return 'BACK';
+  }
+
+  const adjacentPeriodicSwitch = adjacentPeriodicCurveSwitches.get(action);
+  if (adjacentPeriodicSwitch) {
+    const newBranch = adjacentPeriodicSwitch.target === 'LimitPointCycle'
+      ? await initiateLPCCurve(sysName, branch, pt, arrayIdx)
+      : adjacentPeriodicSwitch.target === 'PeriodDoubling'
+        ? await initiatePDCurve(sysName, branch, pt, arrayIdx)
+        : await initiateNSCurve(sysName, branch, pt, arrayIdx, {
+            targetAuxiliary: adjacentPeriodicSwitch.targetAuxiliary,
+          });
     if (newBranch) {
       return {
         kind: 'OPEN_BRANCH' as const,

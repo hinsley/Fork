@@ -7,6 +7,7 @@ import type {
   ClvRenderStyle,
   ComplexValue,
   ContinuationObject,
+  ContinuationPoint,
   EquilibriumEigenvectorRenderStyle,
   EquilibriumObject,
   IsoclineObject,
@@ -56,6 +57,7 @@ import type {
   IsoperiodicCurveContinuationRequest,
   IsoclineComputeRequest,
   LimitCycleFloquetModesRequest,
+  LimitCycleCodim1CurveCreationRequest,
   MapNSCurveContinuationRequest,
   LimitCycleManifold2DRequest,
   LimitCycleHopfContinuationRequest,
@@ -65,6 +67,8 @@ import type {
   LimitCycleOrbitContinuationRequest,
   LimitCyclePDContinuationRequest,
   MapCyclePDContinuationRequest,
+  NormalFormAtPointRequest,
+  PeriodicBranchPointCreationRequest,
 } from '../../state/appState'
 import type {
   BranchPointSelection,
@@ -124,6 +128,11 @@ import {
 } from './selectionSession'
 import { isWorkflowId, type WorkflowActionEntry } from './selectionSessionState'
 import { useWorkflowFocus } from './useWorkflowFocus'
+import {
+  buildCollocationAdaptivitySettings,
+  type CollocationAdaptivityDraft,
+} from './collocationAdaptivity'
+import { supportsNormalFormWorkflow } from './sections/branch/normalFormPresentation'
 
 import { SelectionInspectorView } from './SelectionInspectorView'
 
@@ -200,9 +209,16 @@ type InspectorDetailsPanelProps = {
   onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
+  onComputeNormalFormAtPoint?: (request: NormalFormAtPointRequest) => Promise<void>
   onCreateCodim2BranchFromPoint?: (request: Codim2BranchCreationRequest) => Promise<void>
+  onCreatePeriodicBranchFromPoint?: (
+    request: PeriodicBranchPointCreationRequest
+  ) => Promise<void>
   onCreateIsoperiodicCurveFromPoint?: (
     request: IsoperiodicCurveContinuationRequest
+  ) => Promise<void>
+  onCreateLimitCycleCodim1CurveFromPoint?: (
+    request: LimitCycleCodim1CurveCreationRequest
   ) => Promise<void>
   onCreateNSCurveFromPoint: (request: MapNSCurveContinuationRequest) => Promise<void>
   onCreateLimitCycleFromHopf: (request: LimitCycleHopfContinuationRequest) => Promise<void>
@@ -287,7 +303,7 @@ type EquilibriumSolveDraft = {
   mapIterations: string
 }
 
-type LimitCycleFromOrbitDraft = {
+type LimitCycleFromOrbitDraft = CollocationAdaptivityDraft & {
   limitCycleName: string
   branchName: string
   parameterName: string
@@ -304,7 +320,7 @@ type LimitCycleFromOrbitDraft = {
   forward: boolean
 }
 
-type LimitCycleFromHopfDraft = {
+type LimitCycleFromHopfDraft = CollocationAdaptivityDraft & {
   limitCycleName: string
   branchName: string
   parameterName: string
@@ -321,7 +337,7 @@ type LimitCycleFromHopfDraft = {
   forward: boolean
 }
 
-type LimitCycleFromPDDraft = {
+type LimitCycleFromPDDraft = CollocationAdaptivityDraft & {
   limitCycleName: string
   branchName: string
   amplitude: string
@@ -460,7 +476,7 @@ type LimitCycleManifoldDraft = {
   caps: ManifoldCapsDraft
 }
 
-type ContinuationDraft = {
+type ContinuationDraft = CollocationAdaptivityDraft & {
   name: string
   parameterName: string
   stepSize: string
@@ -473,7 +489,7 @@ type ContinuationDraft = {
   forward: boolean
 }
 
-type Codim1CurveDraft = {
+type Codim1CurveDraft = CollocationAdaptivityDraft & {
   name: string
   param2Name: string
   stepSize: string
@@ -486,7 +502,67 @@ type Codim1CurveDraft = {
   forward: boolean
 }
 
-type IsoperiodicCurveDraft = {
+type LimitCycleCodim1CurveTarget = LimitCycleCodim1CurveCreationRequest['curveType']
+
+type LimitCycleCodim1CurveOption = {
+  type: LimitCycleCodim1CurveTarget
+  label: 'LPC' | 'PD' | 'NS'
+  targetAuxiliary?: number
+}
+
+function limitCycleCodim1CurveOption(
+  type: LimitCycleCodim1CurveTarget,
+  targetAuxiliary?: number
+): LimitCycleCodim1CurveOption {
+  return {
+    type,
+    label:
+      type === 'LimitPointCycle'
+        ? 'LPC'
+        : type === 'PeriodDoubling'
+          ? 'PD'
+          : 'NS',
+    ...(Number.isFinite(targetAuxiliary) ? { targetAuxiliary } : {}),
+  }
+}
+
+function limitCycleCodim1CurveOptionsForPoint(
+  point: ContinuationPoint | null
+): LimitCycleCodim1CurveOption[] {
+  if (!point) return []
+  const direct =
+    point.stability === 'CycleFold'
+      ? limitCycleCodim1CurveOption('LimitPointCycle')
+      : point.stability === 'PeriodDoubling'
+        ? limitCycleCodim1CurveOption('PeriodDoubling')
+        : point.stability === 'NeimarkSacker'
+          ? limitCycleCodim1CurveOption('NeimarkSacker')
+          : null
+  const options = new Map<LimitCycleCodim1CurveTarget, LimitCycleCodim1CurveOption>()
+  if (direct) options.set(direct.type, direct)
+  if (point.codim2?.refined && !point.codim2.candidate) {
+    for (const branchSwitch of point.codim2.branch_switches ?? []) {
+      if (
+        !branchSwitch.available ||
+        (branchSwitch.target !== 'LimitPointCycle' &&
+          branchSwitch.target !== 'PeriodDoubling' &&
+          branchSwitch.target !== 'NeimarkSacker')
+      ) {
+        continue
+      }
+      options.set(
+        branchSwitch.target,
+        limitCycleCodim1CurveOption(
+          branchSwitch.target,
+          branchSwitch.target_auxiliary
+        )
+      )
+    }
+  }
+  return [...options.values()]
+}
+
+type IsoperiodicCurveDraft = CollocationAdaptivityDraft & {
   name: string
   parameterName: string
   param2Name: string
@@ -799,6 +875,9 @@ function formatBranchType(
   if (branch.branchType === 'eq_manifold_1d') return 'equilibrium manifold (1D)'
   if (branch.branchType === 'eq_manifold_2d') return 'equilibrium manifold (2D)'
   if (branch.branchType === 'cycle_manifold_2d') return 'cycle manifold (2D)'
+  if (branch.branchType === 'hopf_curve' && systemType === 'map') {
+    return 'neimark-sacker curve'
+  }
   return branch.branchType.replaceAll('_', ' ')
 }
 
@@ -1124,6 +1203,11 @@ function makeLimitCycleFromOrbitDraft(system: SystemConfig): LimitCycleFromOrbit
     correctorSteps: '10',
     correctorTolerance: '1e-6',
     stepTolerance: '1e-6',
+    adaptiveCollocationEnabled: true,
+    adaptiveRedistributionEnabled: true,
+    adaptiveDefectTolerance: '0.025',
+    adaptiveMaxRefinements: '3',
+    adaptiveMaxMeshPoints: '512',
     forward: true,
   }
 }
@@ -1143,6 +1227,11 @@ function makeLimitCycleFromHopfDraft(system: SystemConfig): LimitCycleFromHopfDr
     correctorSteps: '10',
     correctorTolerance: '1e-6',
     stepTolerance: '1e-6',
+    adaptiveCollocationEnabled: true,
+    adaptiveRedistributionEnabled: true,
+    adaptiveDefectTolerance: '0.025',
+    adaptiveMaxRefinements: '3',
+    adaptiveMaxMeshPoints: '512',
     forward: true,
   }
 }
@@ -1159,6 +1248,11 @@ function makeLimitCycleFromPDDraft(): LimitCycleFromPDDraft {
     correctorSteps: '10',
     correctorTolerance: '1e-6',
     stepTolerance: '1e-6',
+    adaptiveCollocationEnabled: true,
+    adaptiveRedistributionEnabled: true,
+    adaptiveDefectTolerance: '0.025',
+    adaptiveMaxRefinements: '3',
+    adaptiveMaxMeshPoints: '512',
     forward: true,
   }
 }
@@ -1435,6 +1529,11 @@ function makeContinuationDraft(system: SystemConfig): ContinuationDraft {
     correctorSteps: '4',
     correctorTolerance: '1e-6',
     stepTolerance: '1e-6',
+    adaptiveCollocationEnabled: true,
+    adaptiveRedistributionEnabled: true,
+    adaptiveDefectTolerance: '0.025',
+    adaptiveMaxRefinements: '3',
+    adaptiveMaxMeshPoints: '512',
     forward: true,
   }
 }
@@ -1497,6 +1596,11 @@ function makeCodim1CurveDraft(system: SystemConfig): Codim1CurveDraft {
     correctorSteps: '10',
     correctorTolerance: '1e-8',
     stepTolerance: '1e-8',
+    adaptiveCollocationEnabled: true,
+    adaptiveRedistributionEnabled: true,
+    adaptiveDefectTolerance: '0.025',
+    adaptiveMaxRefinements: '3',
+    adaptiveMaxMeshPoints: '512',
     forward: true,
   }
 }
@@ -1516,6 +1620,11 @@ function makeIsoperiodicCurveDraft(system: SystemConfig): IsoperiodicCurveDraft 
     correctorSteps: '10',
     correctorTolerance: '1e-8',
     stepTolerance: '1e-8',
+    adaptiveCollocationEnabled: true,
+    adaptiveRedistributionEnabled: true,
+    adaptiveDefectTolerance: '0.025',
+    adaptiveMaxRefinements: '3',
+    adaptiveMaxMeshPoints: '512',
     forward: true,
   }
 }
@@ -1571,6 +1680,7 @@ function buildContinuationSettings(draft: ContinuationDraft) {
   const correctorSteps = parseInteger(draft.correctorSteps)
   const correctorTolerance = parseNumber(draft.correctorTolerance)
   const stepTolerance = parseNumber(draft.stepTolerance)
+  const collocationAdaptivity = buildCollocationAdaptivitySettings(draft)
 
   if (
     stepSize === null ||
@@ -1579,7 +1689,8 @@ function buildContinuationSettings(draft: ContinuationDraft) {
     maxStep === null ||
     correctorSteps === null ||
     correctorTolerance === null ||
-    stepTolerance === null
+    stepTolerance === null ||
+    collocationAdaptivity === null
   ) {
     return { settings: null, error: 'Continuation settings must be numeric.' }
   }
@@ -1601,6 +1712,7 @@ function buildContinuationSettings(draft: ContinuationDraft) {
       corrector_steps: Math.max(Math.trunc(correctorSteps), 1),
       corrector_tolerance: Math.max(correctorTolerance, Number.EPSILON),
       step_tolerance: Math.max(stepTolerance, Number.EPSILON),
+      collocation_adaptivity: collocationAdaptivity,
     },
     error: null,
   }
@@ -1614,6 +1726,7 @@ function buildCodim1ContinuationSettings(draft: Codim1CurveDraft) {
   const correctorSteps = parseInteger(draft.correctorSteps)
   const correctorTolerance = parseNumber(draft.correctorTolerance)
   const stepTolerance = parseNumber(draft.stepTolerance)
+  const collocationAdaptivity = buildCollocationAdaptivitySettings(draft)
 
   if (
     stepSize === null ||
@@ -1622,7 +1735,8 @@ function buildCodim1ContinuationSettings(draft: Codim1CurveDraft) {
     maxStep === null ||
     correctorSteps === null ||
     correctorTolerance === null ||
-    stepTolerance === null
+    stepTolerance === null ||
+    collocationAdaptivity === null
   ) {
     return { settings: null, error: 'Continuation settings must be numeric.' }
   }
@@ -1644,6 +1758,7 @@ function buildCodim1ContinuationSettings(draft: Codim1CurveDraft) {
       corrector_steps: Math.max(Math.trunc(correctorSteps), 1),
       corrector_tolerance: Math.max(correctorTolerance, Number.EPSILON),
       step_tolerance: Math.max(stepTolerance, Number.EPSILON),
+      collocation_adaptivity: collocationAdaptivity,
     },
     error: null,
   }
@@ -1914,8 +2029,11 @@ function useInspectorSelectionController({
   onExtendBranch,
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
+  onComputeNormalFormAtPoint = async () => {},
   onCreateCodim2BranchFromPoint = async () => {},
+  onCreatePeriodicBranchFromPoint = async () => {},
   onCreateIsoperiodicCurveFromPoint = async () => {},
+  onCreateLimitCycleCodim1CurveFromPoint = async () => {},
   onCreateNSCurveFromPoint,
   onCreateLimitCycleFromHopf,
   onCreateLimitCycleFromOrbit,
@@ -2523,6 +2641,13 @@ function useInspectorSelectionController({
     makeIsoperiodicCurveDraft(system.config)
   )
   const [isoperiodicCurveError, setIsoperiodicCurveError] = useState<string | null>(null)
+  const [limitCycleCodim1CurveDraft, setLimitCycleCodim1CurveDraft] =
+    useState<Codim1CurveDraft>(() => makeCodim1CurveDraft(system.config))
+  const [limitCycleCodim1CurveTarget, setLimitCycleCodim1CurveTarget] =
+    useState<LimitCycleCodim1CurveTarget | null>(null)
+  const [limitCycleCodim1CurveError, setLimitCycleCodim1CurveError] = useState<
+    string | null
+  >(null)
   const [nsCurveDraft, setNSCurveDraft] = useState<Codim1CurveDraft>(() =>
     makeCodim1CurveDraft(system.config)
   )
@@ -3048,6 +3173,16 @@ function useInspectorSelectionController({
           : resolveDistinctParam(parameterName)
       return { ...prev, parameterName, param2Name }
     })
+    setLimitCycleCodim1CurveDraft((prev) => {
+      if (continuationParameterLabels.length === 0) {
+        if (!prev.param2Name) return prev
+        return { ...prev, param2Name: '' }
+      }
+      if (continuationParameterSet.has(prev.param2Name)) {
+        return prev
+      }
+      return { ...prev, param2Name: firstParam }
+    })
     setNSCurveDraft((prev) => {
       if (continuationParameterLabels.length === 0) {
         if (!prev.param2Name) return prev
@@ -3432,6 +3567,38 @@ function useInspectorSelectionController({
       const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
       return { ...prev, parameterName, param2Name, name: nextName }
     })
+    setLimitCycleCodim1CurveDraft((prev) => {
+      const sourceCurveParam2 =
+        branch &&
+        (branch.branchType === 'lpc_curve' ||
+          branch.branchType === 'pd_curve' ||
+          branch.branchType === 'ns_curve') &&
+        hopfCodim1Params &&
+        continuationParameterSet.has(hopfCodim1Params.param2)
+          ? hopfCodim1Params.param2
+          : null
+      const param2Name =
+        sourceCurveParam2 ??
+        (continuationParameterSet.has(prev.param2Name) &&
+        prev.param2Name !== branchParameterName
+          ? prev.param2Name
+          : fallbackParam)
+      const target = limitCycleCodim1CurveOptionsForPoint(
+        selectedBranchPoint ?? null
+      )[0]?.type
+      const nameKind =
+        target === 'LimitPointCycle'
+          ? 'lpcCurve'
+          : target === 'PeriodDoubling'
+            ? 'pdCurve'
+            : 'nsCurve'
+      const suggestedName = suggestDefaultName(nameKind, {
+        sourceName: branchName,
+        existingNames: existingBranchNames,
+      })
+      const nextName = prev.name.trim().length > 0 ? prev.name : suggestedName
+      return { ...prev, param2Name, name: nextName }
+    })
     setNSCurveDraft((prev) => {
       const param2Name =
         continuationParameterSet.has(prev.param2Name) &&
@@ -3584,6 +3751,7 @@ function useInspectorSelectionController({
     setBranchPointError(null)
     setFoldCurveError(null)
     setHopfCurveError(null)
+    setLimitCycleCodim1CurveError(null)
     setNSCurveError(null)
     setLimitCycleFromHopfError(null)
     setLimitCycleFromPDError(null)
@@ -3600,6 +3768,7 @@ function useInspectorSelectionController({
     existingBranchNames,
     existingObjectNames,
     firstContinuationParameter,
+    selectedBranchPoint,
   ])
 
   useEffect(() => {
@@ -4110,6 +4279,30 @@ function useInspectorSelectionController({
     showCodim1CurveContinuations && !isDiscreteMap && isHopfCurvePointSelected
   const showNSCurveContinuation =
     showCodim1CurveContinuations && isDiscreteMap && isNSCurvePointSelected
+  const limitCycleCodim1CurveOptions = useMemo(
+    () =>
+      !isDiscreteMap &&
+      branch &&
+      (branch.branchType === 'limit_cycle' ||
+        branch.branchType === 'lpc_curve' ||
+        branch.branchType === 'pd_curve' ||
+        branch.branchType === 'ns_curve')
+        ? limitCycleCodim1CurveOptionsForPoint(selectedBranchPoint ?? null)
+        : [],
+    [branch, isDiscreteMap, selectedBranchPoint]
+  )
+  const limitCycleCodim1Curve =
+    limitCycleCodim1CurveOptions.find(
+      (option) => option.type === limitCycleCodim1CurveTarget
+    ) ?? limitCycleCodim1CurveOptions[0] ?? null
+  useEffect(() => {
+    setLimitCycleCodim1CurveTarget((current) =>
+      current && limitCycleCodim1CurveOptions.some((option) => option.type === current)
+        ? current
+        : limitCycleCodim1CurveOptions[0]?.type ?? null
+    )
+  }, [branchPointIndex, limitCycleCodim1CurveOptions, selectionKey])
+  const showLimitCycleCodim1CurveContinuation = Boolean(limitCycleCodim1Curve)
   const showIsoperiodicContinuation =
     (branch?.branchType === 'limit_cycle' || branch?.branchType === 'isoperiodic_curve') &&
     hasSelectedBranchPoint
@@ -4342,6 +4535,31 @@ function useInspectorSelectionController({
     limitCycleFloquetModePointCount > 0 &&
     limitCycleFloquetModeCount > 0
 
+  const branchNormalFormProvenance = branch?.data.normal_form_provenance
+  const branchNormalFormIsChildProvenance = Boolean(
+    branchNormalFormProvenance &&
+      ![
+        branchNormalFormProvenance.source_branch_id,
+        branchNormalFormProvenance.source_branch_name,
+        branchNormalFormProvenance.source_branch,
+      ].some(
+        (sourceBranch) =>
+          sourceBranch === selectedNodeId || sourceBranch === branch?.name
+      )
+  )
+  const showNormalFormWorkflow = Boolean(
+    branch &&
+      selectedBranchPoint &&
+      (supportsNormalFormWorkflow(
+        systemDraft.type,
+        branch.branchType,
+        selectedBranchPoint.stability,
+        selectedBranchPoint.codim2?.type
+      ) ||
+        selectedBranchPoint.normal_form ||
+        branchNormalFormIsChildProvenance)
+  )
+
   const workflowActions: WorkflowActionEntry[] = []
   if (
     showVisibilityToggle ||
@@ -4477,6 +4695,14 @@ function useInspectorSelectionController({
       }
     )
   }
+  if (showNormalFormWorkflow) {
+    workflowActions.push({
+      id: 'normal-form-workflow-toggle',
+      group: 'Bifurcations',
+      label: 'Normal form & branch switching',
+      description: 'Compute local coefficients and continue an eligible outgoing branch.',
+    })
+  }
   if (canExtendInvariantManifold) {
     workflowActions.push({
       id: 'manifold-extend-toggle',
@@ -4507,6 +4733,14 @@ function useInspectorSelectionController({
       group: 'Bifurcations',
       label: 'Codimension-1 curve',
       description: 'Continue an eligible fold, Hopf, or Neimark-Sacker point.',
+    })
+  }
+  if (showLimitCycleCodim1CurveContinuation && limitCycleCodim1Curve) {
+    workflowActions.push({
+      id: 'limit-cycle-codim1-curve-toggle',
+      group: 'Bifurcations',
+      label: `${limitCycleCodim1Curve.label} curve`,
+      description: `Continue the selected cycle bifurcation as a two-parameter ${limitCycleCodim1Curve.label} curve.`,
     })
   }
   if (showIsoperiodicContinuation) {
@@ -6000,7 +6234,7 @@ function useInspectorSelectionController({
         step_size: 0.01,
         min_step_size: 1e-5,
         max_step_size: 0.1,
-        max_steps: 300,
+        max_steps: 50,
         corrector_steps: 10,
         corrector_tolerance: 1e-8,
         step_tolerance: 1e-8,
@@ -6091,6 +6325,94 @@ function useInspectorSelectionController({
       param2Name: isoperiodicCurveDraft.param2Name,
       settings,
       forward: isoperiodicCurveDraft.forward,
+    })
+  }
+
+  const handleCreateLimitCycleCodim1Curve = async () => {
+    if (runDisabled) {
+      setLimitCycleCodim1CurveError('Apply valid system settings before continuing.')
+      return
+    }
+    if (isDiscreteMap) {
+      setLimitCycleCodim1CurveError(
+        'Limit-cycle bifurcation curves are only available for flow systems.'
+      )
+      return
+    }
+    if (
+      !branch ||
+      !selectedNodeId ||
+      (branch.branchType !== 'limit_cycle' &&
+        branch.branchType !== 'lpc_curve' &&
+        branch.branchType !== 'pd_curve' &&
+        branch.branchType !== 'ns_curve')
+    ) {
+      setLimitCycleCodim1CurveError('Select a limit-cycle or cycle-curve branch to continue.')
+      return
+    }
+    if (!selectedBranchPoint || branchPointIndex === null || !limitCycleCodim1Curve) {
+      setLimitCycleCodim1CurveError(
+        'Select a cycle fold, period-doubling, or Neimark-Sacker point to continue.'
+      )
+      return
+    }
+    if (continuationParameterCount < 2) {
+      setLimitCycleCodim1CurveError('Add another parameter before continuing.')
+      return
+    }
+    if (!limitCycleCodim1CurveDraft.param2Name) {
+      setLimitCycleCodim1CurveError('Select a second continuation parameter.')
+      return
+    }
+    if (limitCycleCodim1CurveDraft.param2Name === branchParameterName) {
+      setLimitCycleCodim1CurveError(
+        'Second parameter must be different from the continuation parameter.'
+      )
+      return
+    }
+
+    const nameKind =
+      limitCycleCodim1Curve.type === 'LimitPointCycle'
+        ? 'lpcCurve'
+        : limitCycleCodim1Curve.type === 'PeriodDoubling'
+          ? 'pdCurve'
+          : 'nsCurve'
+    const suggestedName = suggestDefaultName(nameKind, {
+      sourceName: branch.name,
+      existingNames: existingBranchNames,
+    })
+    const name = limitCycleCodim1CurveDraft.name.trim() || suggestedName
+    if (!name.trim()) {
+      setLimitCycleCodim1CurveError('Curve name is required.')
+      return
+    }
+    if (!isCliSafeName(name)) {
+      setLimitCycleCodim1CurveError(
+        'Curve names must be alphanumeric with underscores only.'
+      )
+      return
+    }
+
+    const { settings, error } = buildCodim1ContinuationSettings(
+      limitCycleCodim1CurveDraft
+    )
+    if (!settings) {
+      setLimitCycleCodim1CurveError(error ?? 'Invalid continuation settings.')
+      return
+    }
+
+    setLimitCycleCodim1CurveError(null)
+    await onCreateLimitCycleCodim1CurveFromPoint({
+      branchId: selectedNodeId,
+      pointIndex: branchPointIndex,
+      curveType: limitCycleCodim1Curve.type,
+      ...(Number.isFinite(limitCycleCodim1Curve.targetAuxiliary)
+        ? { targetAuxiliary: limitCycleCodim1Curve.targetAuxiliary }
+        : {}),
+      name,
+      param2Name: limitCycleCodim1CurveDraft.param2Name,
+      settings,
+      forward: limitCycleCodim1CurveDraft.forward,
     })
   }
 
@@ -6242,6 +6564,7 @@ function useInspectorSelectionController({
     }
 
     const { settings, error } = buildContinuationSettings({
+      ...limitCycleFromHopfDraft,
       name: '',
       parameterName: limitCycleFromHopfDraft.parameterName,
       stepSize: limitCycleFromHopfDraft.stepSize,
@@ -6344,6 +6667,7 @@ function useInspectorSelectionController({
     }
 
     const { settings, error } = buildContinuationSettings({
+      ...limitCycleFromPDDraft,
       name: '',
       parameterName: branchParameterName,
       stepSize: limitCycleFromPDDraft.stepSize,
@@ -6437,6 +6761,7 @@ function useInspectorSelectionController({
     }
 
     const { settings, error } = buildContinuationSettings({
+      ...limitCycleFromPDDraft,
       name: '',
       parameterName: branchParameterName,
       stepSize: limitCycleFromPDDraft.stepSize,
@@ -7004,6 +7329,7 @@ function useInspectorSelectionController({
     }
 
     const { settings, error } = buildContinuationSettings({
+      ...limitCycleFromOrbitDraft,
       name: '',
       parameterName: limitCycleFromOrbitDraft.parameterName,
       stepSize: limitCycleFromOrbitDraft.stepSize,
@@ -7290,6 +7616,9 @@ function useInspectorSelectionController({
     handleComputeLyapunov,
     handleCreateBranchFromPoint,
     handleCreateCodim2Branch,
+    onComputeNormalFormAtPoint,
+    onCreateCodim2BranchFromPoint,
+    onCreatePeriodicBranchFromPoint,
     handleCreateCycleFromPD,
     handleCreateEquilibriumBranch,
     handleCreateEquilibriumManifold,
@@ -7300,6 +7629,7 @@ function useInspectorSelectionController({
     handleCreateHomotopySaddleFromEquilibrium,
     handleCreateHopfCurve,
     handleCreateIsoperiodicCurve,
+    handleCreateLimitCycleCodim1Curve,
     handleCreateLimitCycleFromHopf,
     handleCreateLimitCycleFromOrbit,
     handleCreateLimitCycleFromPD,
@@ -7371,6 +7701,10 @@ function useInspectorSelectionController({
     isoclineStale,
     kaplanYorkeDimension,
     limitCycle,
+    limitCycleCodim1Curve,
+    limitCycleCodim1CurveOptions,
+    limitCycleCodim1CurveDraft,
+    limitCycleCodim1CurveError,
     limitCycleDisplayMultipliers,
     limitCycleDisplayParamValue,
     limitCycleDisplayParams,
@@ -7505,6 +7839,8 @@ function useInspectorSelectionController({
     setIsoclineError,
     setIsoclineLevelDraft,
     setLimitCycleFromHopfDraft,
+    setLimitCycleCodim1CurveDraft,
+    setLimitCycleCodim1CurveTarget,
     setLimitCycleFromOrbitDraft,
     setLimitCycleFromPDDraft,
     setLimitCycleManifoldDraft,
@@ -7530,6 +7866,7 @@ function useInspectorSelectionController({
     showHopfCurveContinuation,
     showIsoperiodicContinuation,
     showLimitCycleFromHopf,
+    showLimitCycleCodim1CurveContinuation,
     showLimitCycleFromPD,
     showNSCurveContinuation,
     showSceneAxisPicker,

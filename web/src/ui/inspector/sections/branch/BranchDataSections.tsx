@@ -1,6 +1,10 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
 import { InspectorSubDisclosure } from '../../selectionSession'
 
+function formatAdaptationTermination(reason: string): string {
+  return reason.replaceAll('_', ' ')
+}
+
 export function BranchDataSections({ scope }: { scope: InspectorSelectionController }) {
   const {
     BranchNavigatorContent,
@@ -164,6 +168,55 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                                   4
                                 ),
                               },
+                            ]}
+                          />
+                        </div>
+                      ) : null}
+                      {branch.data.collocation_adaptation ? (
+                        <div
+                          className="inspector-section"
+                          data-testid="collocation-adaptation-report"
+                        >
+                          <h4 className="inspector-subheading">Collocation adaptation</h4>
+                          <InspectorMetrics
+                            rows={[
+                              {
+                                label: 'Mesh intervals',
+                                value: `${branch.data.collocation_adaptation.initial_mesh_points} → ${branch.data.collocation_adaptation.current_mesh_points}`,
+                              },
+                              {
+                                label: 'Collocation degree',
+                                value: branch.data.collocation_adaptation.degree,
+                              },
+                              {
+                                label: 'Defect tolerance',
+                                value: formatScientific(
+                                  branch.data.collocation_adaptation.defect_tolerance,
+                                  4
+                                ),
+                              },
+                              {
+                                label: 'Adaptations',
+                                value: branch.data.collocation_adaptation.attempts.length,
+                              },
+                              ...branch.data.collocation_adaptation.attempts.map((attempt) => ({
+                                label: `Attempt ${attempt.sequence}`,
+                                value: `${attempt.kind}: ${attempt.old_mesh_points} → ${attempt.new_mesh_points} (defect ${formatScientific(attempt.trigger_defect, 4)})`,
+                              })),
+                              ...(branch.data.collocation_adaptation.termination
+                                ? [
+                                    {
+                                      label: 'Termination',
+                                      value: `${formatAdaptationTermination(
+                                        branch.data.collocation_adaptation.termination.reason
+                                      )} at defect ${formatScientific(
+                                        branch.data.collocation_adaptation.termination
+                                          .measured_defect,
+                                        4
+                                      )}`,
+                                    },
+                                  ]
+                                : []),
                             ]}
                           />
                         </div>
@@ -535,6 +588,55 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                           />
                         </div>
                       ) : null}
+                      {branch.data.collocation_adaptation ? (
+                        <div
+                          className="inspector-section"
+                          data-testid="collocation-adaptation-report"
+                        >
+                          <h4 className="inspector-subheading">Collocation adaptation</h4>
+                          <InspectorMetrics
+                            rows={[
+                              {
+                                label: 'Mesh intervals',
+                                value: `${branch.data.collocation_adaptation.initial_mesh_points} → ${branch.data.collocation_adaptation.current_mesh_points}`,
+                              },
+                              {
+                                label: 'Collocation degree',
+                                value: branch.data.collocation_adaptation.degree,
+                              },
+                              {
+                                label: 'Defect tolerance',
+                                value: formatScientific(
+                                  branch.data.collocation_adaptation.defect_tolerance,
+                                  4
+                                ),
+                              },
+                              {
+                                label: 'Adaptations',
+                                value: branch.data.collocation_adaptation.attempts.length,
+                              },
+                              ...branch.data.collocation_adaptation.attempts.map((attempt) => ({
+                                label: `Attempt ${attempt.sequence}`,
+                                value: `${attempt.kind}: ${attempt.old_mesh_points} → ${attempt.new_mesh_points} (defect ${formatScientific(attempt.trigger_defect, 4)})`,
+                              })),
+                              ...(branch.data.collocation_adaptation.termination
+                                ? [
+                                    {
+                                      label: 'Termination',
+                                      value: `${formatAdaptationTermination(
+                                        branch.data.collocation_adaptation.termination.reason
+                                      )} at defect ${formatScientific(
+                                        branch.data.collocation_adaptation.termination
+                                          .measured_defect,
+                                        4
+                                      )}`,
+                                    },
+                                  ]
+                                : []),
+                            ]}
+                          />
+                        </div>
+                      ) : null}
                       {manifoldSolverDiagnostics ? (
                         <div className="inspector-section">
                           <h4 className="inspector-subheading">Manifold solver diagnostics</h4>
@@ -879,6 +981,89 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                                             ]
                                           : []),
                                       ]}
+                                    />
+                                  </>
+                                ) : null}
+                                {(selectedBranchPoint.codim2.branch_switches?.length ?? 0) > 0 ? (
+                                  <>
+                                    <h4 className="inspector-subheading">
+                                      Adjacent cycle curves
+                                    </h4>
+                                    <InspectorMetrics
+                                      rows={selectedBranchPoint.codim2.branch_switches?.map(
+                                        (branchSwitch) => ({
+                                          label: branchSwitch.target,
+                                          value: branchSwitch.available
+                                            ? `Available${
+                                                typeof branchSwitch.target_auxiliary === 'number'
+                                                  ? ` (auxiliary ${formatScientific(
+                                                      branchSwitch.target_auxiliary,
+                                                      4
+                                                    )})`
+                                                  : ''
+                                              }`
+                                            : `Unavailable${
+                                                branchSwitch.reason
+                                                  ? ` — ${branchSwitch.reason}`
+                                                  : ''
+                                              }`,
+                                        })
+                                      ) ?? []}
+                                    />
+                                  </>
+                                ) : null}
+                                {selectedBranchPoint.codim2.certification ? (
+                                  <>
+                                    <h4 className="inspector-subheading">Certification</h4>
+                                    <InspectorMetrics
+                                      rows={[
+                                        {
+                                          label: 'Defining conditions',
+                                          value: selectedBranchPoint.codim2.certification
+                                            .defining_conditions_verified
+                                            ? 'Verified'
+                                            : 'Not verified',
+                                        },
+                                        {
+                                          label: 'Higher-order nondegeneracy',
+                                          value: selectedBranchPoint.codim2.certification
+                                            .nondegeneracy_evaluated
+                                            ? selectedBranchPoint.codim2.certification.nondegenerate
+                                              ? 'Verified nondegenerate'
+                                              : 'Failed or degenerate'
+                                            : 'Not evaluated',
+                                        },
+                                        ...(selectedBranchPoint.codim2.certification.reason
+                                          ? [
+                                              {
+                                                label: 'Certification note',
+                                                value:
+                                                  selectedBranchPoint.codim2.certification.reason,
+                                              },
+                                            ]
+                                          : []),
+                                      ]}
+                                    />
+                                  </>
+                                ) : null}
+                                {(selectedBranchPoint.codim2_events?.length ?? 0) > 1 ? (
+                                  <>
+                                    <h4 className="inspector-subheading">
+                                      Simultaneous codimension-two events
+                                    </h4>
+                                    <InspectorMetrics
+                                      rows={(selectedBranchPoint.codim2_events ?? [])
+                                        .slice(1)
+                                        .map((event) => ({
+                                          label: event.type,
+                                          value: `${event.refined ? 'Refined' : 'Detected'}; ${
+                                            event.test_function
+                                          }=${formatScientific(event.test_function_value, 4)}${
+                                            event.certification?.reason
+                                              ? ` — ${event.certification.reason}`
+                                              : ''
+                                          }`,
+                                        }))}
                                     />
                                   </>
                                 ) : null}

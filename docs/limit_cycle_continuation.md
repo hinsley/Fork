@@ -25,17 +25,18 @@ Note: This document has not been fully human-reviewed; treat it as guidance and 
 
 ## Overview
 
-Fork supports two methods for initiating limit cycle continuation:
+Fork supports three methods for initiating limit cycle continuation:
 
 1. **From Orbit Data**: If you have an orbit that converges to a stable limit cycle (e.g., from numerical integration), Fork can extract one period and use it to initialize limit cycle continuation.
-2. **From Period-Doubling (PD) Bifurcation**: When a limit cycle undergoes a period-doubling bifurcation, a new limit cycle family emerges with double the period. Fork can branch from a detected PD point to this new family.
+2. **From a Hopf Bifurcation**: Fork builds a small-amplitude periodic predictor from a selected equilibrium or Hopf-curve point and corrects it through limit-cycle continuation.
+3. **From Period-Doubling (PD) Bifurcation**: When a limit cycle undergoes a period-doubling bifurcation, a new limit cycle family emerges with double the period. Fork can branch from a detected PD point to this new family.
 
 For fixed-period continuation in a two-parameter plane (isoperiodic curves), see
 [`docs/isoperiodic_curve_continuation.md`](./isoperiodic_curve_continuation.md).
 For frozen-variable subsystem semantics and reduced/full-state projection rules, see
 [`docs/frozen_variable_subsystems.md`](./frozen_variable_subsystems.md).
 
-Note: Hopf-based initialization exists in the core but is not currently exposed in the UI or CLI.
+Orbit, Hopf, and PD initialization are exposed in both the web Inspector and CLI branch workflows.
 
 ### Key Concepts
 
@@ -74,6 +75,11 @@ You'll be prompted for:
 | Direction | forward | Continue in positive or negative parameter direction |
 | Step size | 0.01 | Initial continuation step size |
 | Max points | 50 | Maximum continuation steps |
+| Adaptive collocation mesh | enabled | Retry an under-resolved accepted frontier on an adapted mesh |
+| Redistribute before refinement | enabled | Move the existing intervals once before adding intervals |
+| Defect tolerance | 0.025 | Maximum scaled independent off-node defect |
+| Max mesh adaptations | 3 | Retry budget for this continuation invocation; zero is valid |
+| Max mesh intervals | 512 | Hard cap for automatic mesh growth |
 
 Additional settings (min/max step size, corrector steps, corrector tolerance, step tolerance) are
 available in the CLI configuration menu and the web Inspector for tighter control.
@@ -149,6 +155,11 @@ System Menu → Objects → [select orbit] → Create Limit Cycle Object (from t
 | Step size | 0.01 | Initial continuation step size |
 | Direction | forward | Parameter direction |
 | Max points | 50 | Continuation steps |
+| Adaptive collocation mesh | enabled | Retry an under-resolved accepted frontier on an adapted mesh |
+| Redistribute before refinement | enabled | Move the existing intervals once before adding intervals |
+| Defect tolerance | 0.025 | Maximum scaled independent off-node defect |
+| Max mesh adaptations | 3 | Retry budget for this continuation invocation; zero is valid |
+| Max mesh intervals | 512 | Hard cap for automatic mesh growth |
 
 Additional settings (min/max step size, corrector steps, corrector tolerance, step tolerance) are
 available in the CLI configuration menu and the web Inspector.
@@ -606,11 +617,27 @@ no recursive interpolation of prior intervals in the nonlinear BVP.
 
 Collocation equations are exactly enforced at the Gauss nodes, so their algebraic residual alone can
 hide an under-resolved orbit. Fork evaluates the reconstructed polynomial derivative at independent
-off-node check points and compares it with the vector field. An excessive scaled defect rejects the
-trial and retries with a smaller pseudo-arclength step while preserving the valid branch prefix.
-The same acceptance check applies to LPC, PD, NS, and isoperiodic cycle-curve trials. These paths
-require at least two mesh intervals because a one-interval periodic layout aliases the current and
-next mesh blocks needed by Floquet condensation.
+off-node check points and compares it with the vector field, retaining one scaled maximum per mesh
+interval. For ordinary limit-cycle branches and LPC, PD, NS, and isoperiodic cycle curves, an
+excessive defect first attempts a defect-weighted redistribution with the same interval count. If the
+frontier remains under-resolved, later retries add a deterministic bounded number of intervals and
+place the nonuniform boundaries using the local indicators. Fork interpolates the accepted profile,
+PALC tangent, all published points, and persisted extension history onto the exact new Gauss layout,
+then retries the same step. An adaptation does not consume accepted-step progress or pretend that a
+smaller pseudo-arclength step fixes spatial resolution.
+
+The defaults allow three adaptations per continuation invocation, subject to a 512-interval cap.
+Restarted extensions keep cumulative provenance but get a fresh retry budget, and already-applied
+historical transfers are not replayed. Report-returning core and WASM entrypoints preserve the initial
+and current normalized meshes, local trigger defects, every redistribution/refinement, and a
+structured disabled/budget/cap/stalled termination. Web and CLI branches store this report; their
+controls expose enablement, redistribution, defect tolerance, retry budget, and mesh cap, while the
+Inspector/CLI summary shows the resulting provenance. Homoclinic defining systems remain on their
+own fixed truncation mesh. The large-cycle homoclinic initializer is still uniform-source-only; web
+and CLI reject a nonuniform source and ask the user to recontinue the cycle on a uniform mesh before
+calling that legacy initializer. Discrete maps do not use flow collocation. All flow-cycle
+collocation paths require at least two mesh intervals because a one-interval periodic layout aliases
+the current and next mesh blocks needed by Floquet condensation.
 
 ---
 
@@ -797,6 +824,10 @@ The number of mesh intervals controls discretization accuracy:
 - Newton corrector struggles to converge
 - Orbit profile looks under-resolved
 
+Ordinary flow-cycle correction/continuation and LPC, PD, NS, and isoperiodic cycle curves adapt the
+normalized mesh automatically when the independent defect exceeds tolerance. Manual NTST selection
+still sets the starting cost, and the configured retry and mesh caps keep that cost bounded.
+
 ### Collocation Degree (ncol)
 
 Higher degree = higher-order polynomial approximation per interval:
@@ -875,6 +906,10 @@ These are autonomous realizations of canonical periodic normal forms. They are n
 their purpose is to provide orbit, bifurcation-locus, period, and Floquet oracles that are independent
 of shooting. Each test must take several accepted collocation-curve steps and check the defining
 residual, off-node defect, exact parameter locus, and critical multiplier at every point.
+
+Ordinary-cycle mesh adaptation additionally uses an analytic slow-fast circle with
+`theta' = a + b cos(theta)`. Its exact period and normalized profile make a deterministic oracle for
+coarse-mesh defect, automatic refinement, transfer, correction, and final defect acceptance.
 
 For LPC, use the Bautin radial normal form, with $r^2=x^2+y^2$,
 
@@ -1038,6 +1073,70 @@ this model.
 
 The maintained MATLAB definitions and testruns are distributed in the
 [official MATCONT release archive](https://sourceforge.net/projects/matcont/files/MatCont/MatCont7p6/MatCont7p6.zip/download).
+
+## Periodic-Orbit Normal Forms and Generic Branch Points
+
+Fork computes PD, NS, and nontrivial $+1$ Floquet normal forms from a local Poincare return map
+through the first collocation mesh point. Removing the flow direction before the spectral solve is
+essential: the autonomous phase multiplier is always $+1$ and must not be mistaken for an LPC or a
+generic periodic branch point. Each result includes the return-map and section residuals,
+left/right eigenvector residuals and pairing, and the largest homological-equation residual.
+
+For a nontrivial $+1$ multiplier, the reduced scalar equation is
+
+$$
+\xi \mapsto \xi+a_{01}\,\delta\mu+b_{11}\xi\,\delta\mu
+       +\frac{b_{20}}{2}\xi^2+\frac{b_{30}}{6}\xi^3.
+$$
+
+Fork classifies the event as an LPC when $a_{01}\ne0$. When $a_{01}=0$, the same Floquet crossing is
+a generic periodic branch point (transcritical or pitchfork according to the remaining
+coefficients), and `periodic_branch_point_switch_setup` constructs a predictor on the emanating
+periodic branch; the ordinary limit-cycle start path then fixed-parameter-corrects that predictor.
+The core entry point is `periodic_orbit_normal_form`; packed-state WASM entry points reconstruct the
+exact persistent collocation mesh and phase direction before computing coefficients or switching.
+The web Inspector exposes coefficient and conditioning readouts, persists their source provenance,
+and corrects and continues a generic transcritical or pitchfork periodic branch into a child branch.
+
+### Codimension-two points on cycle-bifurcation curves
+
+Fork evaluates the interaction tests below only after removing the autonomous flow multiplier and
+the multiplier (or complex pair) that defines the source LPC, PD, or NS curve. Consequently an
+LPPD, LPNS, PDNS, or NSNS test refers to an independent secondary Floquet mode. A real reciprocal
+pair is not an NS pair: NS tests match nonreal conjugates and use the signed factor
+$|\mu|^2-1$.
+
+Every detected sign change is localized by a bracketed secant iteration whose trial point is
+pseudo-arclength-corrected back to the codimension-one collocation curve. Multiple simultaneous
+events on one source segment are retained in deterministic table order rather than collapsed to a
+single label. The serialized record contains both endpoint test values, the refined test and curve
+residuals, named coefficients, conditioning, certification, and typed branch-switch metadata.
+
+| Event | Source curve(s) | Defining test and retained diagnostics | Typed switch after refinement |
+| --- | --- | --- | --- |
+| CPC | LPC | Zero of the periodic return-map quadratic coefficient; retains the cubic and parameter coefficients plus return-map conditioning. | Reported unavailable: selecting the other tangent LPC arc requires a two-parameter unfolding tangent. |
+| LPPD | LPC or PD | Independent secondary $-1$ or $+1$ multiplier after removing the source curve's tracked mode; retains signed secondary tests and nearest-mode distances. | LPC to PD or PD to LPC. |
+| LPNS | LPC or NS | Independent secondary nonreal unit pair or $+1$ multiplier; retains the second pair's cosine and unit-modulus residual. | LPC to NS (with its cosine) or NS to LPC. |
+| GPD | PD | Zero of the periodic PD cubic coefficient; retains the parameter coefficient, critical multiplier, and return-map conditioning. | Reported unavailable: the doubled-cycle LPC predictor also needs a normalized fifth-order coefficient. |
+| PDNS | PD or NS | Independent secondary nonreal unit pair or $-1$ multiplier; retains its cosine and spectral residuals. | PD to NS (with its cosine) or NS to PD. |
+| CH | NS | Zero of the real periodic NS cubic coefficient; retains its imaginary part, parameter coefficient, critical angle/modulus, and return-map conditioning. | Reported unavailable: a torus-fold is not one of Fork's periodic-orbit codimension-one curve problems. |
+| NSNS | NS | Signed unit-modulus test for a second nonreal conjugate pair after removing the angle-selected defining pair. | A second NS curve, carrying the secondary pair's cosine. |
+| R1, R2 | NS | $k-1=0$ and $k+1=0$, where $k=\cos\theta$; retains the order, angle, cosine, and refined test. | R1 to LPC and R2 to PD. |
+| R3, R4 | NS | $k+1/2=0$ and $k=0$; retains the order, angle, cosine, and refined test. | Reported unavailable: these emit resonant period-three or period-four orbit branches, for which Fork has no typed predictor. |
+
+For GPD, Chenciner, and R1--R4, `defining_conditions_verified` can be true while
+`nondegeneracy_evaluated` is false. This is deliberate, not a "candidate" label. At the
+BifurcationKit.jl revision used for parity review
+([commit `ed4b14eef65b60fd1612e6914fa669f44fac3d81`, 2026-06-30](https://github.com/bifurcationkit/BifurcationKit.jl/commit/ed4b14eef65b60fd1612e6914fa669f44fac3d81)),
+the generated periodic codimension-two normal-form constructors dispatch these event names but leave
+their `nf` field unset (`nothing`); BK therefore
+does not provide an independent normalized higher-order or resonant nondegeneracy coefficient to use
+as an oracle. Fork records that limitation explicitly in each event's certification reason.
+
+Cycle-curve problems retain the normalized collocation mesh that produced the source branch. The
+same interval boundaries and widths are used by residuals, Jacobians, phase quadrature, PALC weights,
+defect checks, periodic normal-form profile reconstruction, refinement, WASM serialization, and
+extension. The legacy constructors remain uniform-mesh convenience wrappers.
 
 ## Branching to Period-Doubled Limit Cycles
 

@@ -3,7 +3,7 @@
 use super::curve_runners::normalize_lc_seed_for_stage_first_explicit;
 use crate::system::{SystemType, WasmSystem};
 use fork_core::continuation::codim1_curves::{
-    estimate_hopf_kappa_from_jacobian, refine_codim2_points,
+    estimate_hopf_kappa_from_jacobian, estimate_map_ns_cosine_from_jacobian, refine_codim2_points,
 };
 use fork_core::continuation::equilibrium::{
     compute_eigenvalues_for_state, continue_parameter as core_continuation,
@@ -12,6 +12,7 @@ use fork_core::continuation::equilibrium::{
 use fork_core::continuation::{
     bogdanov_takens_curve_seeds, bogdanov_takens_homoclinic_seed,
     compute_limit_cycle_floquet_modes as core_compute_limit_cycle_floquet_modes,
+    compute_limit_cycle_floquet_modes_on_mesh as core_compute_limit_cycle_floquet_modes_on_mesh,
     continue_homoclinic_curve, continue_homotopy_saddle_curve, continue_limit_cycle_collocation,
     continue_limit_cycle_manifold_2d, continue_limit_cycle_manifold_2d_with_progress,
     continue_manifold_eq_1d_with_kind_and_periodicity, continue_manifold_eq_2d,
@@ -20,15 +21,16 @@ use fork_core::continuation::{
     generalized_hopf_lpc_seed, homoclinic_setup_from_homoclinic_point_with_source_extras,
     homoclinic_setup_from_homotopy_saddle_point, homoclinic_setup_from_large_cycle,
     homotopy_saddle_setup_from_equilibrium, limit_cycle_setup_from_hopf,
-    limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd, BranchType, Codim1CurveBranch,
-    Codim1CurvePoint, Codim1CurveType, Codim2Bifurcation, Codim2BifurcationType, CollocationConfig,
-    ContinuationBranch, ContinuationSettings, FoldCurveProblem, HomoclinicExtraFlags,
-    HomoclinicFixedScalars, HomoclinicSetup, HomotopySaddleSetup, HopfCurveProblem,
-    IsoperiodicCurveProblem, LPCCurveProblem, LimitCycleSetup, Manifold1DSettings,
-    Manifold2DSettings, ManifoldCycle2DSettings, ManifoldGeometry, ManifoldSurfaceResumeState,
-    NSCurveProblem, OrbitTimeMode, PDCurveProblem, StepResult,
+    limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd, limit_cycle_setup_from_pd_on_mesh,
+    uniform_normalized_mesh, BranchType, Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType,
+    Codim2Bifurcation, Codim2BifurcationType, CollocationConfig, ContinuationBranch,
+    ContinuationSettings, FoldCurveProblem, HomoclinicExtraFlags, HomoclinicFixedScalars,
+    HomoclinicSetup, HomotopySaddleSetup, HopfCurveProblem, IsoperiodicCurveProblem,
+    LPCCurveProblem, LimitCycleSetup, Manifold1DSettings, Manifold2DSettings,
+    ManifoldCycle2DSettings, ManifoldGeometry, ManifoldSurfaceResumeState, NSCurveProblem,
+    OrbitTimeMode, PDCurveProblem, StepResult,
 };
-use fork_core::equilibrium::{compute_jacobian, SystemKind};
+use fork_core::equilibrium::{compute_jacobian, compute_system_jacobian, SystemKind};
 use fork_core::traits::DynamicalSystem;
 use js_sys::Function;
 use nalgebra::DMatrix;
@@ -256,7 +258,11 @@ impl WasmSystem {
                 )
                 .map_err(|e| JsValue::from_str(&format!("Branch extension failed: {}", e)))?
             }
-            BranchType::LimitCycle { ntst, ncol } => {
+            BranchType::LimitCycle {
+                ntst,
+                ncol,
+                normalized_mesh,
+            } => {
                 validate_limit_cycle_system_type(&self.system_type).map_err(JsValue::from_str)?;
                 // Extract phase anchor and direction from upoldp
                 let upoldp = branch
@@ -286,6 +292,7 @@ impl WasmSystem {
                     degree: *ncol,
                     phase_anchor,
                     phase_direction,
+                    normalized_mesh: normalized_mesh.clone(),
                 };
                 extend_limit_cycle_collocation(
                     &mut self.system,
@@ -699,6 +706,33 @@ impl WasmSystem {
         to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
+    pub fn compute_limit_cycle_floquet_modes_on_mesh(
+        &mut self,
+        cycle_state: Vec<f64>,
+        ncol: u32,
+        normalized_mesh: Vec<f64>,
+        parameter_name: &str,
+    ) -> Result<JsValue, JsValue> {
+        if !matches!(self.system_type, SystemType::Flow) {
+            return Err(JsValue::from_str(
+                "Floquet mode computation is currently available for flow systems only.",
+            ));
+        }
+        let param_index =
+            *self.system.param_map.get(parameter_name).ok_or_else(|| {
+                JsValue::from_str(&format!("Unknown parameter: {}", parameter_name))
+            })?;
+        let result = core_compute_limit_cycle_floquet_modes_on_mesh(
+            &mut self.system,
+            param_index,
+            &cycle_state,
+            ncol as usize,
+            normalized_mesh,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Floquet mode computation failed: {}", e)))?;
+        to_value(&result).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
     /// Initializes a limit cycle guess from a Hopf bifurcation point.
     /// Returns the LimitCycleSetup as a serialized JsValue.
     pub fn init_lc_from_hopf(
@@ -962,6 +996,35 @@ impl WasmSystem {
             param_value,
             ntst as usize,
             ncol as usize,
+            amplitude,
+        )
+        .map_err(|e| JsValue::from_str(&format!("Failed to initialize LC from PD: {}", e)))?;
+
+        to_value(&setup).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    pub fn init_lc_from_pd_on_mesh(
+        &mut self,
+        lc_state: Vec<f64>,
+        param_name: &str,
+        param_value: f64,
+        ncol: u32,
+        normalized_mesh: Vec<f64>,
+        amplitude: f64,
+    ) -> Result<JsValue, JsValue> {
+        let param_index = *self
+            .system
+            .param_map
+            .get(param_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param_name)))?;
+
+        let setup = limit_cycle_setup_from_pd_on_mesh(
+            &mut self.system,
+            param_index,
+            &lc_state,
+            param_value,
+            ncol as usize,
+            normalized_mesh,
             amplitude,
         )
         .map_err(|e| JsValue::from_str(&format!("Failed to initialize LC from PD: {}", e)))?;
@@ -1438,6 +1501,7 @@ impl WasmSystem {
                 codim2_type,
                 auxiliary: None,
                 eigenvalues: pt.eigenvalues.clone(),
+                codim2_events: codim2.clone().into_iter().collect(),
                 codim2,
             });
         }
@@ -1446,6 +1510,9 @@ impl WasmSystem {
             curve_type: Codim1CurveType::Fold,
             param1_index,
             param2_index,
+            ntst: 0,
+            ncol: 0,
+            normalized_mesh: Vec::new(),
             points: codim1_points,
             codim2_bifurcations,
             indices: branch.indices.clone(),
@@ -1507,16 +1574,27 @@ impl WasmSystem {
         self.system.params[param2_index] = param2_value;
 
         let n = hopf_state.len();
-        let jac = compute_jacobian(&self.system, kind, &hopf_state)
-            .map_err(|e| JsValue::from_str(&format!("Failed to compute Jacobian: {}", e)))?;
+        let jac = match kind {
+            SystemKind::Flow => compute_jacobian(&self.system, kind, &hopf_state),
+            SystemKind::Map { .. } => compute_system_jacobian(&self.system, kind, &hopf_state),
+        }
+        .map_err(|e| JsValue::from_str(&format!("Failed to compute Jacobian: {}", e)))?;
         let jac_mat = DMatrix::from_row_slice(n, n, &jac);
-        let kappa_seed =
-            estimate_hopf_kappa_from_jacobian(&jac_mat).unwrap_or(hopf_omega * hopf_omega);
-        let kappa = if kappa_seed.is_finite() && kappa_seed > 0.0 {
-            kappa_seed
-        } else {
-            hopf_omega * hopf_omega
+        let kappa = match kind {
+            SystemKind::Flow => {
+                estimate_hopf_kappa_from_jacobian(&jac_mat).unwrap_or(hopf_omega * hopf_omega)
+            }
+            SystemKind::Map { .. } => estimate_map_ns_cosine_from_jacobian(&jac_mat)
+                .unwrap_or_else(|| (1.0 - hopf_omega * hopf_omega).max(0.0).sqrt()),
         };
+        if !kappa.is_finite()
+            || (kind.is_flow() && kappa <= 0.0)
+            || (kind.is_map() && kappa.abs() > 1.0 + 1.0e-8)
+        {
+            return Err(JsValue::from_str(
+                "Invalid Hopf/Neimark-Sacker spectral seed",
+            ));
+        }
         let kappa_default = kappa;
 
         // Create Hopf curve problem
@@ -1524,7 +1602,7 @@ impl WasmSystem {
             &mut self.system,
             kind,
             &hopf_state,
-            hopf_omega,
+            if kind.is_map() { kappa } else { hopf_omega },
             param1_index,
             param2_index,
         )
@@ -1545,14 +1623,25 @@ impl WasmSystem {
         let initial_point = fork_core::continuation::ContinuationPoint {
             state: augmented_state,
             param_value: param1_value,
-            stability: fork_core::continuation::BifurcationType::Hopf,
+            stability: if kind.is_map() {
+                fork_core::continuation::BifurcationType::NeimarkSacker
+            } else {
+                fork_core::continuation::BifurcationType::Hopf
+            },
             eigenvalues: vec![],
             cycle_points: None,
         };
 
         // Run continuation
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
-            .map_err(|e| JsValue::from_str(&format!("Hopf curve continuation failed: {}", e)))?;
+            .map_err(|e| {
+                let label = if kind.is_map() {
+                    "Neimark-Sacker"
+                } else {
+                    "Hopf"
+                };
+                JsValue::from_str(&format!("{label} curve continuation failed: {e}"))
+            })?;
 
         let events = refine_codim2_points(
             &mut problem,
@@ -1614,14 +1703,22 @@ impl WasmSystem {
                 codim2_type,
                 auxiliary: Some(kappa), // κ extracted from augmented state
                 eigenvalues: pt.eigenvalues.clone(),
+                codim2_events: codim2.clone().into_iter().collect(),
                 codim2,
             });
         }
 
         let codim1_branch = Codim1CurveBranch {
-            curve_type: Codim1CurveType::Hopf,
+            curve_type: if kind.is_map() {
+                Codim1CurveType::NeimarkSacker
+            } else {
+                Codim1CurveType::Hopf
+            },
             param1_index,
             param2_index,
+            ntst: 0,
+            ncol: 0,
+            normalized_mesh: Vec::new(),
             points: codim1_points,
             codim2_bifurcations,
             indices: branch.indices.clone(),
@@ -1762,6 +1859,7 @@ impl WasmSystem {
                     auxiliary: None,
                     eigenvalues: pt.eigenvalues.clone(),
                     codim2: None,
+                    codim2_events: Vec::new(),
                 }
             })
             .collect();
@@ -1770,6 +1868,9 @@ impl WasmSystem {
             curve_type: Codim1CurveType::Isoperiodic,
             param1_index,
             param2_index,
+            ntst,
+            ncol,
+            normalized_mesh: uniform_normalized_mesh(ntst),
             points: codim1_points,
             codim2_bifurcations: vec![],
             indices: branch.indices.clone(),
@@ -1888,6 +1989,7 @@ impl WasmSystem {
                     auxiliary: None,
                     eigenvalues: pt.eigenvalues.clone(),
                     codim2: None,
+                    codim2_events: Vec::new(),
                 }
             })
             .collect();
@@ -1896,6 +1998,9 @@ impl WasmSystem {
             curve_type: Codim1CurveType::LimitPointCycle,
             param1_index,
             param2_index,
+            ntst,
+            ncol,
+            normalized_mesh: uniform_normalized_mesh(ntst),
             points: codim1_points,
             codim2_bifurcations: vec![],
             indices: branch.indices.clone(),
@@ -2020,6 +2125,7 @@ impl WasmSystem {
                     auxiliary: None,
                     eigenvalues: pt.eigenvalues.clone(),
                     codim2: None,
+                    codim2_events: Vec::new(),
                 }
             })
             .collect();
@@ -2028,6 +2134,9 @@ impl WasmSystem {
             curve_type: Codim1CurveType::PeriodDoubling,
             param1_index,
             param2_index,
+            ntst,
+            ncol,
+            normalized_mesh: uniform_normalized_mesh(ntst),
             points: codim1_points,
             codim2_bifurcations: vec![],
             indices: branch.indices.clone(),
@@ -2140,6 +2249,7 @@ impl WasmSystem {
                     auxiliary: Some(k_value), // Store k = cos(θ)
                     eigenvalues: pt.eigenvalues.clone(),
                     codim2: None,
+                    codim2_events: Vec::new(),
                 }
             })
             .collect();
@@ -2148,6 +2258,9 @@ impl WasmSystem {
             curve_type: Codim1CurveType::NeimarkSacker,
             param1_index,
             param2_index,
+            ntst,
+            ncol,
+            normalized_mesh: uniform_normalized_mesh(ntst),
             points: codim1_points,
             codim2_bifurcations: vec![],
             indices: branch.indices.clone(),
@@ -2367,7 +2480,11 @@ mod tests {
             }],
             bifurcations: Vec::new(),
             indices: vec![0],
-            branch_type: BranchType::LimitCycle { ntst: 1, ncol: 1 },
+            branch_type: BranchType::LimitCycle {
+                ntst: 1,
+                ncol: 1,
+                normalized_mesh: vec![0.0, 1.0],
+            },
             upoldp: Some(vec![vec![1.0, 0.0]]),
             homoc_context: None,
             resume_state: None,
@@ -2417,7 +2534,11 @@ mod tests {
             }],
             bifurcations: Vec::new(),
             indices: vec![0],
-            branch_type: BranchType::LimitCycle { ntst: 3, ncol: 2 },
+            branch_type: BranchType::LimitCycle {
+                ntst: 3,
+                ncol: 2,
+                normalized_mesh: vec![0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0],
+            },
             upoldp: None,
             homoc_context: None,
             resume_state: None,

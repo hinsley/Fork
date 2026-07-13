@@ -34,11 +34,24 @@ pub mod homotopy_saddle;
 #[path = "continuation/manifold.rs"]
 pub mod manifold;
 
+#[path = "continuation/map_normal_forms.rs"]
+pub mod map_normal_forms;
+
+#[path = "continuation/periodic_normal_forms.rs"]
+pub mod periodic_normal_forms;
+
+#[path = "continuation/packed_periodic_source.rs"]
+pub mod packed_periodic_source;
+
 // Re-export types needed for external use
 pub use codim1_curves::{
     bogdanov_takens_curve_seeds, bogdanov_takens_homoclinic_seed, generalized_hopf_lpc_seed,
-    Codim2BranchSeed, Codim2BranchTarget, Codim2TestFunctions, FoldCurveProblem,
-    HomoclinicBranchSeed, HopfCurveProblem,
+    hopf_hopf_equilibrium_curve_seeds, hopf_hopf_neimark_sacker_seeds, hopf_hopf_normal_form,
+    refine_codim2_points, zero_hopf_equilibrium_curve_seeds, zero_hopf_neimark_sacker_seed,
+    zero_hopf_normal_form, Codim2BranchSeed, Codim2BranchTarget, Codim2CurveProblem,
+    Codim2TestFunctions, EquilibriumCodim2NormalFormDiagnostics, FoldCurveProblem,
+    HomoclinicBranchSeed, HopfCurveProblem, HopfHopfNeimarkSackerPredictor, HopfHopfNormalForm,
+    RefinedCodim2Event, ZeroHopfNormalForm,
 };
 pub use homoclinic::continue_homoclinic_curve;
 pub use homoclinic_init::{
@@ -61,22 +74,48 @@ pub use manifold::{
     extend_limit_cycle_manifold_2d_with_progress, extend_manifold_eq_1d_with_kind_and_periodicity,
     extend_manifold_eq_2d, extend_manifold_eq_2d_with_progress,
 };
-pub use periodic::{
-    compute_limit_cycle_floquet_modes, continue_limit_cycle_collocation,
-    extend_limit_cycle_collocation, limit_cycle_setup_from_hopf, limit_cycle_setup_from_orbit,
-    limit_cycle_setup_from_pd, CollocationConfig, FloquetModeVectors, LimitCycleGuess,
-    LimitCycleSetup, OrbitTimeMode,
+pub use map_normal_forms::{
+    map_branch_point_normal_form, map_neimark_sacker_normal_form, map_normal_form,
+    map_period_doubling_normal_form, MapBranchPointKind, MapBranchPointNormalForm, MapCriticality,
+    MapNeimarkSackerNormalForm, MapNormalForm, MapNormalFormConditioning, MapNormalFormType,
+    MapPeriodDoublingNormalForm,
 };
-pub use problem::{PointDiagnostics, TestFunctionValues};
+pub use packed_periodic_source::limit_cycle_setup_from_packed_state;
+pub use periodic::{
+    compute_limit_cycle_floquet_modes, compute_limit_cycle_floquet_modes_on_mesh,
+    continue_limit_cycle_collocation, continue_limit_cycle_collocation_with_report,
+    correct_limit_cycle_setup_adaptive, extend_limit_cycle_collocation,
+    extend_limit_cycle_collocation_with_report, gauss_legendre_nodes, limit_cycle_setup_from_hopf,
+    limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd, limit_cycle_setup_from_pd_on_mesh,
+    uniform_normalized_mesh, CollocationAdaptationReport, CollocationAdaptivitySettings,
+    CollocationConfig, CollocationDefectEstimate, CollocationDefectTermination,
+    CollocationDefectTerminationError, CollocationDefectTerminationReason,
+    CollocationMeshAdaptationKind, CollocationRefinementAttempt, FloquetModeVectors,
+    LimitCycleContinuationResult, LimitCycleGuess, LimitCycleSetup, OrbitTimeMode,
+};
+pub use periodic_normal_forms::{
+    periodic_branch_point_normal_form, periodic_branch_point_normal_form_with_settings,
+    periodic_branch_point_switch_setup, periodic_neimark_sacker_normal_form,
+    periodic_neimark_sacker_normal_form_for_cosine_with_settings,
+    periodic_neimark_sacker_normal_form_with_settings, periodic_orbit_normal_form,
+    periodic_period_doubling_normal_form, periodic_period_doubling_normal_form_with_settings,
+    periodic_plus_one_bifurcation_type, PeriodicOrbitBranchPointKind,
+    PeriodicOrbitBranchPointNormalForm, PeriodicOrbitCriticality,
+    PeriodicOrbitNeimarkSackerNormalForm, PeriodicOrbitNormalForm,
+    PeriodicOrbitNormalFormConditioning, PeriodicOrbitNormalFormSettings,
+    PeriodicOrbitNormalFormType, PeriodicOrbitPeriodDoublingNormalForm,
+};
+pub use problem::{PointDiagnostics, StepRejectionAction, TestFunctionValues};
 pub use types::{
     BifurcationType, BranchType, Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType,
-    Codim2Bifurcation, Codim2BifurcationType, Codim2Coefficient, Codim2Conditioning,
-    Codim2PointData, ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint,
-    ContinuationResumeState, ContinuationSettings, HomoclinicBasisSnapshot,
-    HomoclinicResumeContext, HomotopyStage, Manifold1DSettings, Manifold2DSettings, ManifoldBounds,
-    ManifoldCurveGeometry, ManifoldCurveResumeState, ManifoldCycle2DSettings, ManifoldDirection,
-    ManifoldEigenKind, ManifoldGeometry, ManifoldHkoFiberResumeState, ManifoldMapDomainCursor,
-    ManifoldRingDiagnostic, ManifoldStability, ManifoldSurfaceGeometry, ManifoldSurfaceResumeState,
+    Codim2Bifurcation, Codim2BifurcationType, Codim2BranchSwitch, Codim2Certification,
+    Codim2Coefficient, Codim2Conditioning, Codim2PointData, ContinuationBranch,
+    ContinuationEndpointSeed, ContinuationPoint, ContinuationResumeState, ContinuationSettings,
+    HomoclinicBasisSnapshot, HomoclinicResumeContext, HomotopyStage, Manifold1DSettings,
+    Manifold2DSettings, ManifoldBounds, ManifoldCurveGeometry, ManifoldCurveResumeState,
+    ManifoldCycle2DSettings, ManifoldDirection, ManifoldEigenKind, ManifoldGeometry,
+    ManifoldHkoFiberResumeState, ManifoldMapDomainCursor, ManifoldRingDiagnostic,
+    ManifoldStability, ManifoldSurfaceGeometry, ManifoldSurfaceResumeState,
     ManifoldTerminationCaps, StepResult,
 };
 pub use util::{
@@ -86,7 +125,8 @@ pub use util::{
 
 use crate::equation_engine::EquationSystem;
 use crate::equilibrium::{
-    compute_param_jacobian, compute_system_jacobian, evaluate_equilibrium_residual, SystemKind,
+    compute_map_cycle_points, compute_param_jacobian, compute_system_jacobian,
+    evaluate_equilibrium_residual, SystemKind,
 };
 use anyhow::{anyhow, bail, Result};
 use nalgebra::{DMatrix, DVector};
@@ -102,7 +142,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
     settings: ContinuationSettings,
     forward: bool,
 ) -> Result<ContinuationBranch> {
-    let dim = problem.dimension();
+    let mut dim = problem.dimension();
 
     // Build initial augmented state [p, x...]
     let mut prev_aug = DVector::zeros(dim + 1);
@@ -179,14 +219,30 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             }
 
             if !problem.is_step_acceptable(&corrected_aug)? {
-                consecutive_failures += 1;
-                step_size *= 0.5;
-                if step_size < settings.min_step_size
-                    || consecutive_failures >= MAX_CONSECUTIVE_FAILURES
-                {
-                    break;
+                match handle_rejected_trial(
+                    problem,
+                    &mut prev_aug,
+                    &mut prev_tangent,
+                    &mut prev_diag,
+                    &mut branch,
+                    &corrected_aug,
+                )? {
+                    RejectedTrialDisposition::RetryTransferredStep => {
+                        dim = problem.dimension();
+                        continue;
+                    }
+                    RejectedTrialDisposition::Terminate => break,
+                    RejectedTrialDisposition::ReduceStep => {
+                        consecutive_failures += 1;
+                        step_size *= 0.5;
+                        if step_size < settings.min_step_size
+                            || consecutive_failures >= MAX_CONSECUTIVE_FAILURES
+                        {
+                            break;
+                        }
+                        continue;
+                    }
                 }
-                continue;
             }
 
             // Update gauges/reference data before computing the next tangent;
@@ -225,21 +281,28 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             let new_tests = &diagnostics.test_values;
 
             // Detect limit cycle bifurcations
-            let cycle_fold_crossed = prev_tests.cycle_fold * new_tests.cycle_fold < 0.0;
-            let period_doubling_crossed =
-                prev_tests.period_doubling * new_tests.period_doubling < 0.0;
+            let cycle_fold_crossed =
+                scalar_test_crossed_or_reached(prev_tests.cycle_fold, new_tests.cycle_fold);
+            let period_doubling_crossed = scalar_test_crossed_or_reached(
+                prev_tests.period_doubling,
+                new_tests.period_doubling,
+            );
             let neimark_sacker_crossed =
                 neimark_sacker_crossed_with_complex_pairs(&prev_diag, &diagnostics);
 
             // Detect equilibrium bifurcations
-            let fold_crossed = prev_tests.fold * new_tests.fold < 0.0;
+            let fold_crossed = scalar_test_crossed_or_reached(prev_tests.fold, new_tests.fold);
+            let branch_point_crossed =
+                scalar_test_crossed_or_reached(prev_tests.branch_point, new_tests.branch_point);
             let hopf_crossed = hopf_crossed_with_complex_pairs(&prev_diag, &diagnostics);
             let neutral_saddle_crossed =
                 neutral_saddle_crossed_with_real_pairs(&prev_diag, &diagnostics);
 
             // Prioritize: Fold > Hopf > CycleFold > PeriodDoubling > NeimarkSacker
-            let bifurcation_type = if fold_crossed {
+            let detected_type = if fold_crossed {
                 BifurcationType::Fold
+            } else if branch_point_crossed {
+                BifurcationType::BranchPoint
             } else if hopf_crossed {
                 BifurcationType::Hopf
             } else if cycle_fold_crossed {
@@ -255,14 +318,14 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             };
 
             // Refine bifurcation point if detected
-            let (final_aug, final_diag) = if bifurcation_type != BifurcationType::None {
+            let (final_aug, final_diag) = if detected_type != BifurcationType::None {
                 match refine_bifurcation_bisection(
                     problem,
                     &prev_aug,
                     prev_tests,
                     &corrected_aug,
                     new_tests,
-                    bifurcation_type,
+                    detected_type,
                     &prev_tangent,
                     settings.corrector_steps,
                     settings.corrector_tolerance,
@@ -273,6 +336,12 @@ pub fn continue_with_problem<P: ContinuationProblem>(
                 }
             } else {
                 (corrected_aug.clone(), diagnostics.clone())
+            };
+
+            let bifurcation_type = if detected_type != BifurcationType::None {
+                problem.classify_bifurcation(&final_aug, detected_type)?
+            } else {
+                BifurcationType::None
             };
 
             let output_aug = final_aug;
@@ -346,6 +415,79 @@ enum SingleStepOutcome {
     Accepted,
     Retry,
     Terminated,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RejectedTrialDisposition {
+    ReduceStep,
+    RetryTransferredStep,
+    Terminate,
+}
+
+fn handle_rejected_trial<P: ContinuationProblem>(
+    problem: &mut P,
+    prev_aug: &mut DVector<f64>,
+    prev_tangent: &mut DVector<f64>,
+    prev_diag: &mut PointDiagnostics,
+    branch: &mut ContinuationBranch,
+    rejected_aug: &DVector<f64>,
+) -> Result<RejectedTrialDisposition> {
+    let branch_states = branch
+        .points
+        .iter()
+        .map(|point| point.state.clone())
+        .collect::<Vec<_>>();
+    match problem.handle_step_rejection(prev_aug, prev_tangent, rejected_aug, &branch_states)? {
+        StepRejectionAction::ReduceStep => Ok(RejectedTrialDisposition::ReduceStep),
+        StepRejectionAction::Terminate => Ok(RejectedTrialDisposition::Terminate),
+        StepRejectionAction::Refined {
+            accepted_aug,
+            accepted_tangent,
+            branch_states,
+            branch_type,
+        } => {
+            let expected_aug_len = problem.dimension() + 1;
+            if accepted_aug.len() != expected_aug_len || accepted_tangent.len() != expected_aug_len
+            {
+                bail!(
+                    "Discretization refinement returned dimension {}, expected {}",
+                    accepted_aug.len(),
+                    expected_aug_len
+                );
+            }
+            if branch_states.len() != branch.points.len()
+                || branch_states
+                    .iter()
+                    .any(|state| state.len() != problem.dimension())
+            {
+                bail!("Discretization refinement returned incompatible branch-state layouts");
+            }
+            for (point, state) in branch.points.iter_mut().zip(branch_states) {
+                point.state = state;
+            }
+            if let Some(branch_type) = branch_type {
+                branch.branch_type = branch_type;
+            }
+            // Saved endpoint vectors belong to the old state dimension.  The
+            // finalizer will rebuild the active frontier seed after adaptation.
+            branch.resume_state = None;
+            *prev_aug = accepted_aug;
+            let transferred_tangent =
+                normalize_tangent_or_compute(problem, prev_aug, accepted_tangent)?;
+            problem.update_after_step(prev_aug)?;
+            let mut refined_tangent = compute_tangent_from_problem(problem, prev_aug)?;
+            if palc_dot(problem, prev_aug, &refined_tangent, &transferred_tangent)? < 0.0 {
+                refined_tangent = -refined_tangent;
+            }
+            *prev_tangent = refined_tangent;
+            *prev_diag = problem.diagnostics(prev_aug)?;
+            if let Some(frontier) = branch.points.last_mut() {
+                frontier.eigenvalues = prev_diag.eigenvalues.clone();
+                frontier.cycle_points = prev_diag.cycle_points.clone();
+            }
+            Ok(RejectedTrialDisposition::RetryTransferredStep)
+        }
+    }
 }
 
 fn clamp_step_size(step_size: f64, settings: ContinuationSettings) -> f64 {
@@ -706,6 +848,11 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
         Ok(self.step_result())
     }
 
+    /// Borrow the active problem for read-only solver-specific progress data.
+    pub fn problem(&self) -> &P {
+        &self.problem
+    }
+
     /// Execute one continuation attempt. Rejected trials request a retry and
     /// do not consume the accepted-step progress budget.
     fn single_step(&mut self) -> Result<SingleStepOutcome> {
@@ -736,14 +883,36 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
                 return Ok(SingleStepOutcome::Retry);
             }
             if !self.problem.is_step_acceptable(&corrected_aug)? {
-                self.consecutive_failures += 1;
-                self.step_size *= 0.5;
-                if self.step_size < self.settings.min_step_size
-                    || self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES
-                {
-                    return Ok(SingleStepOutcome::Terminated);
+                match handle_rejected_trial(
+                    &mut self.problem,
+                    &mut self.prev_aug,
+                    &mut self.prev_tangent,
+                    &mut self.prev_diag,
+                    &mut self.branch,
+                    &corrected_aug,
+                )? {
+                    RejectedTrialDisposition::RetryTransferredStep => {
+                        self.dim = self.problem.dimension();
+                        if self.initial_aug.len() != self.dim + 1 {
+                            self.initial_aug = self.prev_aug.clone();
+                            self.initial_tangent = self.prev_tangent.clone();
+                        }
+                        return Ok(SingleStepOutcome::Retry);
+                    }
+                    RejectedTrialDisposition::Terminate => {
+                        return Ok(SingleStepOutcome::Terminated);
+                    }
+                    RejectedTrialDisposition::ReduceStep => {
+                        self.consecutive_failures += 1;
+                        self.step_size *= 0.5;
+                        if self.step_size < self.settings.min_step_size
+                            || self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES
+                        {
+                            return Ok(SingleStepOutcome::Terminated);
+                        }
+                        return Ok(SingleStepOutcome::Retry);
+                    }
                 }
-                return Ok(SingleStepOutcome::Retry);
             }
             // Update gauges/reference data before computing the next tangent;
             // the tangent must belong to the Jacobian used on the next step.
@@ -786,20 +955,27 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             let new_tests = &diagnostics.test_values;
 
             // Detect limit cycle bifurcations
-            let cycle_fold_crossed = prev_tests.cycle_fold * new_tests.cycle_fold < 0.0;
-            let period_doubling_crossed =
-                prev_tests.period_doubling * new_tests.period_doubling < 0.0;
+            let cycle_fold_crossed =
+                scalar_test_crossed_or_reached(prev_tests.cycle_fold, new_tests.cycle_fold);
+            let period_doubling_crossed = scalar_test_crossed_or_reached(
+                prev_tests.period_doubling,
+                new_tests.period_doubling,
+            );
             let neimark_sacker_crossed =
                 neimark_sacker_crossed_with_complex_pairs(&self.prev_diag, &diagnostics);
 
             // Detect equilibrium bifurcations
-            let fold_crossed = prev_tests.fold * new_tests.fold < 0.0;
+            let fold_crossed = scalar_test_crossed_or_reached(prev_tests.fold, new_tests.fold);
+            let branch_point_crossed =
+                scalar_test_crossed_or_reached(prev_tests.branch_point, new_tests.branch_point);
             let hopf_crossed = hopf_crossed_with_complex_pairs(&self.prev_diag, &diagnostics);
             let neutral_saddle_crossed =
                 neutral_saddle_crossed_with_real_pairs(&self.prev_diag, &diagnostics);
 
-            let bifurcation_type = if fold_crossed {
+            let detected_type = if fold_crossed {
                 BifurcationType::Fold
+            } else if branch_point_crossed {
+                BifurcationType::BranchPoint
             } else if hopf_crossed {
                 BifurcationType::Hopf
             } else if cycle_fold_crossed {
@@ -815,14 +991,14 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             };
 
             // Refine bifurcation point if detected
-            let (final_aug, final_diag) = if bifurcation_type != BifurcationType::None {
+            let (final_aug, final_diag) = if detected_type != BifurcationType::None {
                 match refine_bifurcation_bisection(
                     &mut self.problem,
                     &self.prev_aug,
                     prev_tests,
                     &corrected_aug,
                     new_tests,
-                    bifurcation_type,
+                    detected_type,
                     &self.prev_tangent,
                     self.settings.corrector_steps,
                     self.settings.corrector_tolerance,
@@ -833,6 +1009,13 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
                 }
             } else {
                 (corrected_aug.clone(), diagnostics.clone())
+            };
+
+            let bifurcation_type = if detected_type != BifurcationType::None {
+                self.problem
+                    .classify_bifurcation(&final_aug, detected_type)?
+            } else {
+                BifurcationType::None
             };
 
             let output_aug = final_aug;
@@ -1356,6 +1539,31 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
         continue_with_initial_tangent(problem, initial_point, tangent.clone(), settings)?
     };
 
+    if branch
+        .points
+        .iter()
+        .any(|point| point.state.len() != problem.dimension())
+    {
+        let external_states = branch
+            .points
+            .iter()
+            .map(|point| point.state.clone())
+            .collect::<Vec<_>>();
+        let transferred =
+            problem.transfer_branch_states_to_current_discretization(&external_states)?;
+        if transferred.len() != branch.points.len() {
+            bail!("Discretization refinement lost external branch points during extension");
+        }
+        for (point, state) in branch.points.iter_mut().zip(transferred) {
+            point.state = state;
+        }
+        branch.resume_state = None;
+    }
+
+    if extension.branch_type != BranchType::Equilibrium {
+        branch.branch_type = extension.branch_type.clone();
+    }
+
     // Merge extension into main branch (skip first point as it's the endpoint)
     let index_offset = last_index;
     let sign = if is_append { 1 } else { -1 };
@@ -1420,7 +1628,7 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
     initial_tangent: DVector<f64>,
     settings: ContinuationSettings,
 ) -> Result<ContinuationBranch> {
-    let dim = problem.dimension();
+    let mut dim = problem.dimension();
 
     // Build initial augmented state
     let mut prev_aug = DVector::zeros(dim + 1);
@@ -1484,14 +1692,30 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
                 continue;
             }
             if !problem.is_step_acceptable(&corrected_aug)? {
-                consecutive_failures += 1;
-                step_size *= 0.5;
-                if step_size < settings.min_step_size
-                    || consecutive_failures >= MAX_CONSECUTIVE_FAILURES
-                {
-                    break;
+                match handle_rejected_trial(
+                    problem,
+                    &mut prev_aug,
+                    &mut prev_tangent,
+                    &mut prev_diag,
+                    &mut branch,
+                    &corrected_aug,
+                )? {
+                    RejectedTrialDisposition::RetryTransferredStep => {
+                        dim = problem.dimension();
+                        continue;
+                    }
+                    RejectedTrialDisposition::Terminate => break,
+                    RejectedTrialDisposition::ReduceStep => {
+                        consecutive_failures += 1;
+                        step_size *= 0.5;
+                        if step_size < settings.min_step_size
+                            || consecutive_failures >= MAX_CONSECUTIVE_FAILURES
+                        {
+                            break;
+                        }
+                        continue;
+                    }
                 }
-                continue;
             }
             consecutive_failures = 0;
 
@@ -1513,20 +1737,27 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             let new_tests = &diag.test_values;
 
             // Detect limit cycle bifurcations
-            let cycle_fold_crossed = prev_tests.cycle_fold * new_tests.cycle_fold < 0.0;
-            let period_doubling_crossed =
-                prev_tests.period_doubling * new_tests.period_doubling < 0.0;
+            let cycle_fold_crossed =
+                scalar_test_crossed_or_reached(prev_tests.cycle_fold, new_tests.cycle_fold);
+            let period_doubling_crossed = scalar_test_crossed_or_reached(
+                prev_tests.period_doubling,
+                new_tests.period_doubling,
+            );
             let neimark_sacker_crossed =
                 neimark_sacker_crossed_with_complex_pairs(&prev_diag, &diag);
 
             // Detect equilibrium bifurcations
-            let fold_crossed = prev_tests.fold * new_tests.fold < 0.0;
+            let fold_crossed = scalar_test_crossed_or_reached(prev_tests.fold, new_tests.fold);
+            let branch_point_crossed =
+                scalar_test_crossed_or_reached(prev_tests.branch_point, new_tests.branch_point);
             let hopf_crossed = hopf_crossed_with_complex_pairs(&prev_diag, &diag);
             let neutral_saddle_crossed = neutral_saddle_crossed_with_real_pairs(&prev_diag, &diag);
 
             // Prioritize: Fold > Hopf > CycleFold > PeriodDoubling > NeimarkSacker
-            let bifurcation_type = if fold_crossed {
+            let detected_type = if fold_crossed {
                 BifurcationType::Fold
+            } else if branch_point_crossed {
+                BifurcationType::BranchPoint
             } else if hopf_crossed {
                 BifurcationType::Hopf
             } else if cycle_fold_crossed {
@@ -1542,14 +1773,14 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             };
 
             // Refine bifurcation point if detected
-            let (final_aug, final_diag) = if bifurcation_type != BifurcationType::None {
+            let (final_aug, final_diag) = if detected_type != BifurcationType::None {
                 match refine_bifurcation_bisection(
                     problem,
                     &prev_aug,
                     prev_tests,
                     &corrected_aug,
                     new_tests,
-                    bifurcation_type,
+                    detected_type,
                     &prev_tangent,
                     settings.corrector_steps,
                     settings.corrector_tolerance,
@@ -1560,6 +1791,12 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
                 }
             } else {
                 (corrected_aug.clone(), diag.clone())
+            };
+
+            let bifurcation_type = if detected_type != BifurcationType::None {
+                problem.classify_bifurcation(&final_aug, detected_type)?
+            } else {
+                BifurcationType::None
             };
 
             let output_aug = final_aug;
@@ -1973,6 +2210,18 @@ fn correct_with_problem<P: ContinuationProblem>(
 pub fn extend_branch(
     system: &mut EquationSystem,
     kind: SystemKind,
+    branch: ContinuationBranch,
+    param_index: usize,
+    settings: ContinuationSettings,
+    forward: bool,
+) -> Result<ContinuationBranch> {
+    equilibrium::extend_branch(system, kind, branch, param_index, settings, forward)
+}
+
+#[allow(dead_code)]
+fn extend_branch_legacy(
+    system: &mut EquationSystem,
+    kind: SystemKind,
     mut branch: ContinuationBranch,
     param_index: usize,
     settings: ContinuationSettings,
@@ -2117,13 +2366,26 @@ pub fn extend_branch(
             };
 
             let prev_tests = prev_diag.test_values;
-            let fold_crossed = prev_tests.fold * diagnostics.test_values.fold < 0.0;
+            let fold_crossed =
+                scalar_test_crossed_or_reached(prev_tests.fold, diagnostics.test_values.fold);
+            let branch_point_crossed = scalar_test_crossed_or_reached(
+                prev_tests.branch_point,
+                diagnostics.test_values.branch_point,
+            );
+            let period_doubling_crossed = scalar_test_crossed_or_reached(
+                prev_tests.period_doubling,
+                diagnostics.test_values.period_doubling,
+            );
+            let neimark_sacker_crossed =
+                neimark_sacker_crossed_with_complex_pairs(&prev_diag, &diagnostics);
             let hopf_crossed = hopf_crossed_with_complex_pairs(&prev_diag, &diagnostics);
             let neutral_crossed = neutral_saddle_crossed_with_real_pairs(&prev_diag, &diagnostics);
 
             let mut current_tangent = new_tangent.clone();
 
-            if fold_crossed {
+            if branch_point_crossed {
+                new_pt.stability = BifurcationType::BranchPoint;
+            } else if fold_crossed {
                 match refine_fold_point(
                     system,
                     kind,
@@ -2145,6 +2407,10 @@ pub fn extend_branch(
                     }
                 }
                 new_pt.stability = BifurcationType::Fold;
+            } else if period_doubling_crossed {
+                new_pt.stability = BifurcationType::PeriodDoubling;
+            } else if neimark_sacker_crossed {
+                new_pt.stability = BifurcationType::NeimarkSacker;
             } else if hopf_crossed && !neutral_crossed {
                 match refine_hopf_point(
                     system,
@@ -2562,13 +2828,25 @@ fn compute_test_gradient(
     Ok(grad)
 }
 
+fn scalar_test_reached(prev: f64, new: f64) -> bool {
+    if !prev.is_finite() || !new.is_finite() {
+        return false;
+    }
+    let tolerance = 1024.0 * f64::EPSILON * prev.abs().max(new.abs()).max(1.0);
+    new.abs() <= tolerance && prev.abs() > tolerance
+}
+
+fn scalar_test_crossed_or_reached(prev: f64, new: f64) -> bool {
+    prev.is_finite() && new.is_finite() && (prev * new < 0.0 || scalar_test_reached(prev, new))
+}
+
 fn hopf_crossed_with_complex_pairs(
     prev_diag: &PointDiagnostics,
     new_diag: &PointDiagnostics,
 ) -> bool {
     let prev_pairs = hopf_pair_count(&prev_diag.eigenvalues);
     let new_pairs = hopf_pair_count(&new_diag.eigenvalues);
-    prev_diag.test_values.hopf * new_diag.test_values.hopf < 0.0
+    scalar_test_crossed_or_reached(prev_diag.test_values.hopf, new_diag.test_values.hopf)
         && prev_pairs > 0
         && new_pairs > 0
         && prev_pairs == new_pairs
@@ -2590,11 +2868,17 @@ fn neimark_sacker_crossed_with_complex_pairs(
         .iter()
         .filter(|eigenvalue| eigenvalue.im > 1.0e-8 && eigenvalue.norm_sqr() > 1.0)
         .count();
-    prev_diag.test_values.neimark_sacker * new_diag.test_values.neimark_sacker < 0.0
-        && prev_pairs > 0
+    let reached = scalar_test_reached(
+        prev_diag.test_values.neimark_sacker,
+        new_diag.test_values.neimark_sacker,
+    );
+    scalar_test_crossed_or_reached(
+        prev_diag.test_values.neimark_sacker,
+        new_diag.test_values.neimark_sacker,
+    ) && prev_pairs > 0
         && new_pairs > 0
         && prev_pairs == new_pairs
-        && prev_outside != new_outside
+        && (prev_outside != new_outside || reached)
 }
 
 fn neutral_saddle_crossed_with_real_pairs(
@@ -2603,8 +2887,10 @@ fn neutral_saddle_crossed_with_real_pairs(
 ) -> bool {
     let prev_real = real_eigenvalue_count(&prev_diag.eigenvalues);
     let new_real = real_eigenvalue_count(&new_diag.eigenvalues);
-    prev_diag.test_values.neutral_saddle * new_diag.test_values.neutral_saddle < 0.0
-        && prev_real >= 2
+    scalar_test_crossed_or_reached(
+        prev_diag.test_values.neutral_saddle,
+        new_diag.test_values.neutral_saddle,
+    ) && prev_real >= 2
         && new_real >= 2
         && prev_real == new_real
 }
@@ -2621,10 +2907,14 @@ fn compute_point_diagnostics(
 
     let old_param = system.params[param_index];
     system.params[param_index] = param;
-
-    let system_jac = compute_system_jacobian(system, kind, &state)?;
-
+    let evaluated = (|| {
+        let system_jac = compute_system_jacobian(system, kind, &state)?;
+        let cycle_points = (kind.is_map() && kind.map_iterations() > 1)
+            .then(|| compute_map_cycle_points(system, &state, kind.map_iterations()));
+        Ok::<_, anyhow::Error>((system_jac, cycle_points))
+    })();
     system.params[param_index] = old_param;
+    let (system_jac, cycle_points) = evaluated?;
 
     let mut residual_jac = system_jac.clone();
     if kind.is_map() {
@@ -2652,10 +2942,18 @@ fn compute_point_diagnostics(
         (0.0, 0.0)
     };
 
+    let mut test_values = TestFunctionValues::equilibrium(fold, hopf, neutral);
+    if kind.is_map() {
+        test_values.fold = 1.0;
+        test_values.branch_point = fold;
+        test_values.period_doubling = util::period_doubling_test_function(&eigenvalues);
+        test_values.neimark_sacker = util::neimark_sacker_test_function(&eigenvalues);
+    }
+
     Ok(PointDiagnostics {
-        test_values: TestFunctionValues::equilibrium(fold, hopf, neutral),
+        test_values,
         eigenvalues,
-        cycle_points: None,
+        cycle_points,
     })
 }
 
@@ -2834,6 +3132,23 @@ mod tests {
             vec![Complex::new(1.0, 0.0), outside_pair, outside_pair.conj()],
         );
         assert!(neimark_sacker_crossed_with_complex_pairs(&inside, &outside));
+    }
+
+    #[test]
+    fn ns_crossing_guard_accepts_a_step_that_lands_on_the_unit_circle() {
+        let inside_pair = Complex::from_polar(0.95, 0.4);
+        let unit_pair = Complex::from_polar(1.0, 0.4);
+        let inside = cycle_diagnostics(
+            inside_pair.norm_sqr() - 1.0,
+            vec![Complex::new(1.0, 0.0), inside_pair, inside_pair.conj()],
+        );
+        let on_circle = cycle_diagnostics(
+            unit_pair.norm_sqr() - 1.0,
+            vec![Complex::new(1.0, 0.0), unit_pair, unit_pair.conj()],
+        );
+        assert!(neimark_sacker_crossed_with_complex_pairs(
+            &inside, &on_circle
+        ));
     }
 
     #[test]

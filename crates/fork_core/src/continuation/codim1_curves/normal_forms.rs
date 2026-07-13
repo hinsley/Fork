@@ -108,7 +108,7 @@ fn directional_step(state: &[f64], direction: &DVector<f64>, exponent: f64) -> R
 }
 
 /// Apply the symmetric bilinear form `B = D^2 F` to two real directions.
-fn bilinear_real(
+pub(super) fn bilinear_real(
     system: &EquationSystem,
     kind: SystemKind,
     state: &[f64],
@@ -134,7 +134,7 @@ fn bilinear_real(
 }
 
 /// Apply the symmetric trilinear form `C = D^3 F` to three real directions.
-fn trilinear_real(
+pub(super) fn trilinear_real(
     system: &EquationSystem,
     kind: SystemKind,
     state: &[f64],
@@ -306,7 +306,7 @@ pub(crate) fn fold_normal_form(
     })
 }
 
-fn complex_matrix_from_real(real: &DMatrix<f64>) -> DMatrix<Complex<f64>> {
+pub(super) fn complex_matrix_from_real(real: &DMatrix<f64>) -> DMatrix<Complex<f64>> {
     real.map(|value| Complex::new(value, 0.0))
 }
 
@@ -323,14 +323,17 @@ fn join_complex(real: DVector<f64>, imag: DVector<f64>) -> DVector<Complex<f64>>
     )
 }
 
-fn hermitian_inner(left: &DVector<Complex<f64>>, right: &DVector<Complex<f64>>) -> Complex<f64> {
+pub(super) fn hermitian_inner(
+    left: &DVector<Complex<f64>>,
+    right: &DVector<Complex<f64>>,
+) -> Complex<f64> {
     left.iter()
         .zip(right.iter())
         .map(|(p, q)| p.conj() * q)
         .sum()
 }
 
-fn bilinear_complex(
+pub(super) fn bilinear_complex(
     system: &EquationSystem,
     kind: SystemKind,
     state: &[f64],
@@ -363,7 +366,7 @@ fn trilinear_q_q_qbar(
     Ok(join_complex(real, imag))
 }
 
-fn multilinear_complex(
+pub(super) fn multilinear_complex(
     system: &EquationSystem,
     kind: SystemKind,
     state: &[f64],

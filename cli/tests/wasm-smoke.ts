@@ -59,6 +59,205 @@ assert.equal(state.length, 1);
 assert.ok(Math.abs(state[0] - 0.25) < 1e-10, `Expected x ~= 0.25 after one step, got ${state[0]}`);
 assert.ok(Math.abs(system.get_t() - 0.25) < 1e-12, `Expected t ~= 0.25, got ${system.get_t()}`);
 
+const mapNormalFormSystem = new wasm.WasmSystem(
+  ['(-1+mu*a)*x+c*x^3'],
+  new Float64Array([0, 0.456, -1.234]),
+  ['mu', 'a', 'c'],
+  ['x'],
+  'discrete',
+  'map'
+);
+const mapPdNormalForm = mapNormalFormSystem.compute_map_normal_form(
+  new Float64Array([0]),
+  0,
+  0,
+  1,
+  'periodDoubling'
+);
+assert.equal(mapPdNormalForm.type, 'PeriodDoubling');
+assert.ok(Math.abs(mapPdNormalForm.parameter_coefficient - 0.456) < 1e-5);
+assert.ok(Math.abs(mapPdNormalForm.cubic_coefficient + 1.234) < 5e-4);
+assert.equal(mapPdNormalForm.criticality, 'Subcritical');
+
+const mapFoldNormalFormSystem = new wasm.WasmSystem(
+  ['x+mu-x^2'],
+  new Float64Array([0]),
+  ['mu'],
+  ['x'],
+  'discrete',
+  'map'
+);
+const mapFoldNormalForm = mapFoldNormalFormSystem.compute_map_normal_form(
+  new Float64Array([0]),
+  0,
+  0,
+  1,
+  'branchPoint'
+);
+assert.equal(mapFoldNormalForm.type, 'BranchPoint');
+assert.equal(mapFoldNormalForm.kind, 'Fold');
+assert.ok(Math.abs(mapFoldNormalForm.quadratic_coefficient + 2) < 2e-5);
+
+const zeroHopfEquations = [
+  'beta1+x^2-u^2-v^2',
+  'beta2*u-v+x*u-u*(u^2+v^2)',
+  'u+beta2*v+x*v-v*(u^2+v^2)',
+];
+const zeroHopfSystem = new wasm.WasmSystem(
+  zeroHopfEquations,
+  new Float64Array([0, 0]),
+  ['beta1', 'beta2'],
+  ['x', 'u', 'v'],
+  'tsit5',
+  'flow'
+);
+const zeroHopfNormalForm = zeroHopfSystem.compute_zero_hopf_normal_form(
+  new Float64Array([0, 0, 0]), 0, 1, 0, 0, 1
+);
+assert.equal(zeroHopfNormalForm.has_neimark_sacker, true);
+assert.ok(zeroHopfNormalForm.diagnostics.max_eigen_residual < 1e-8);
+const zeroHopfSwitch = zeroHopfSystem.switch_from_zero_hopf(
+  new Float64Array([0, 0, 0]), 0, 1, 0, 0, 1, 0.02, 0.08, 8, 2, 5e-7
+);
+assert.equal(zeroHopfSwitch.equilibriumCurveSeeds.length, 4);
+assert.ok(zeroHopfSwitch.neimarkSackerSeed);
+const zeroHopfFoldSeed = zeroHopfSwitch.equilibriumCurveSeeds.find(
+  (seed: any) => seed.target === 'Fold' && seed.perturbation > 0
+);
+assert.ok(zeroHopfFoldSeed);
+const zeroHopfFoldRunner = new wasm.WasmFoldCurveRunner(
+  zeroHopfEquations,
+  new Float64Array([zeroHopfFoldSeed.param1_value, zeroHopfFoldSeed.param2_value]),
+  ['beta1', 'beta2'],
+  ['x', 'u', 'v'],
+  'flow',
+  1,
+  new Float64Array(zeroHopfFoldSeed.state),
+  'beta1',
+  zeroHopfFoldSeed.param1_value,
+  'beta2',
+  zeroHopfFoldSeed.param2_value,
+  {
+    step_size: 0.005,
+    min_step_size: 1e-7,
+    max_step_size: 0.02,
+    max_steps: 3,
+    corrector_steps: 10,
+    corrector_tolerance: 1e-9,
+    step_tolerance: 1e-9,
+  },
+  true
+);
+while (!zeroHopfFoldRunner.get_progress().done) zeroHopfFoldRunner.run_steps(1);
+assert.ok(zeroHopfFoldRunner.get_result().points.length > 1);
+
+const hopfHopfEquations = [
+  'beta1*x1-1.7*y1-x1*(x1^2+y1^2)-2*x1*(x2^2+y2^2)',
+  '1.7*x1+beta1*y1-y1*(x1^2+y1^2)-2*y1*(x2^2+y2^2)',
+  'beta2*x2-y2-3*x2*(x1^2+y1^2)-4*x2*(x2^2+y2^2)',
+  'x2+beta2*y2-3*y2*(x1^2+y1^2)-4*y2*(x2^2+y2^2)',
+];
+const hopfHopfSystem = new wasm.WasmSystem(
+  hopfHopfEquations,
+  new Float64Array([0, 0]),
+  ['beta1', 'beta2'],
+  ['x1', 'y1', 'x2', 'y2'],
+  'tsit5',
+  'flow'
+);
+const hopfHopfSwitch = hopfHopfSystem.switch_from_hopf_hopf(
+  new Float64Array([0, 0, 0, 0]), 0, 1, 0, 0, 1.7, 0.02, 0.07, 8, 2, 5e-7
+);
+assert.equal(hopfHopfSwitch.normalForm.neimark_sacker_predictors.length, 2);
+assert.equal(hopfHopfSwitch.hopfCurveSeeds.length, 4);
+assert.equal(hopfHopfSwitch.neimarkSackerSeeds.length, 2);
+
+const periodicNormalFormNtst = 8;
+const periodicNormalFormNcol = 2;
+const periodicNormalFormNodes = [
+  (1 - 1 / Math.sqrt(3)) / 2,
+  (1 + 1 / Math.sqrt(3)) / 2,
+];
+const periodicNormalFormState = (time: number): number[] => [Math.cos(time), Math.sin(time), 0];
+const periodicNormalFormMesh = [0, 0.06, 0.15, 0.27, 0.4, 0.56, 0.7, 0.84, 1];
+const periodicNormalFormMeshStates = periodicNormalFormMesh.slice(0, -1).map((phase) =>
+  periodicNormalFormState(2 * Math.PI * phase)
+);
+const periodicNormalFormStageStates = periodicNormalFormMesh.slice(0, -1).flatMap((phase, interval) => {
+  const intervalWidth = periodicNormalFormMesh[interval + 1] - phase;
+  return periodicNormalFormNodes.map((node) =>
+    periodicNormalFormState(2 * Math.PI * (phase + node * intervalWidth))
+  );
+});
+const periodicNormalFormPackedState = [
+  ...periodicNormalFormMeshStates.flat(),
+  ...periodicNormalFormStageStates.flat(),
+  2 * Math.PI,
+];
+const periodicNormalFormSystem = new wasm.WasmSystem(
+  [
+    '-y+x*(1-x^2-y^2)',
+    'x+y*(1-x^2-y^2)',
+    'a*mu*z+b*z^2',
+  ],
+  new Float64Array([0, 0.7, -1.2]),
+  ['mu', 'a', 'b'],
+  ['x', 'y', 'z'],
+  'tsit5',
+  'flow'
+);
+const periodicBranchPointNormalForm = periodicNormalFormSystem.compute_periodic_normal_form_from_packed_state(
+  new Float64Array(periodicNormalFormPackedState),
+  0,
+  0,
+  periodicNormalFormNcol,
+  new Float64Array(periodicNormalFormMesh),
+  'branchPoint'
+);
+assert.equal(periodicBranchPointNormalForm.type, 'BranchPoint');
+assert.equal(periodicBranchPointNormalForm.kind, 'Transcritical');
+assert.ok(periodicBranchPointNormalForm.conditioning.return_map_residual < 1e-8);
+const periodicBranchSwitch = periodicNormalFormSystem.switch_periodic_branch_from_packed_state(
+  new Float64Array(periodicNormalFormPackedState),
+  0,
+  0,
+  periodicNormalFormNcol,
+  new Float64Array(periodicNormalFormMesh),
+  0.03
+);
+assert.equal(periodicBranchSwitch.normalForm.kind, 'Transcritical');
+assert.ok(Math.abs(periodicBranchSwitch.setup.guess.param_value - 1.2 * 0.03 / 0.7) < 5e-4);
+assert.equal(periodicBranchSwitch.setup.guess.requires_fixed_parameter_correction, true);
+assert.deepEqual(periodicBranchSwitch.setup.normalized_mesh, periodicNormalFormMesh);
+
+const periodicBpRunner = new wasm.WasmLimitCycleRunner(
+  [
+    '-y+x*(1-x^2-y^2)',
+    'x+y*(1-x^2-y^2)',
+    'a*mu*z+b*z^2',
+  ],
+  new Float64Array([0, 0.7, -1.2]),
+  ['mu', 'a', 'b'],
+  ['x', 'y', 'z'],
+  'flow',
+  periodicBranchSwitch.setup,
+  'mu',
+  {
+    step_size: 0.003,
+    min_step_size: 1e-7,
+    max_step_size: 0.01,
+    max_steps: 4,
+    corrector_steps: 12,
+    corrector_tolerance: 1e-9,
+    step_tolerance: 1e-9,
+  },
+  true
+);
+while (!periodicBpRunner.get_progress().done) periodicBpRunner.run_steps(1);
+const periodicBpResult = periodicBpRunner.get_result_with_report();
+assert.ok(periodicBpResult.branch.points.length > 1, 'Expected a continued secondary periodic branch');
+assert.deepEqual(periodicBpResult.branch.branch_type.normalized_mesh, periodicNormalFormMesh);
+
 const manifoldRunner = new wasm.WasmEqManifold1DRunner(
   ['x'],
   new Float64Array(),
@@ -369,6 +568,7 @@ const generalizedHopfLpcRunner = new wasm.WasmLPCCurveRunner(
   generalizedHopfSeed.param2_value,
   8,
   2,
+  new Float64Array(Array.from({ length: 9 }, (_, index) => index / 8)),
   {
     step_size: 1e-3,
     min_step_size: 1e-7,
@@ -467,6 +667,88 @@ assert.ok(
   `Corrected NS period mismatch: ${nsCorrectedPeriod}`
 );
 
+// An adaptive ordinary-cycle extension must preserve cumulative provenance,
+// append only new attempts, and return branch+report atomically.
+const nsPriorMesh = [0, 0.1, 0.4, 0.75, 1];
+const nsCurrentMesh = Array.from(
+  { length: nsNtst + 1 },
+  (_, index) => index / nsNtst
+);
+const nsPriorAdaptation = {
+  initial_mesh_points: nsNtst,
+  current_mesh_points: nsNtst,
+  degree: nsNcol,
+  defect_tolerance: 1e-14,
+  refinement_budget: 4,
+  max_mesh_points: 24,
+  initial_normalized_mesh: nsPriorMesh,
+  current_normalized_mesh: nsCurrentMesh,
+  attempts: [
+    {
+      sequence: 1,
+      kind: 'redistribution',
+      old_mesh_points: nsNtst,
+      new_mesh_points: nsNtst,
+      degree: nsNcol,
+      trigger_defect: 0.1,
+      tolerance: 1e-14,
+      interval_scaled_defects: [0.1, 0.02, 0.03, 0.04],
+      old_normalized_mesh: nsPriorMesh,
+      new_normalized_mesh: nsCurrentMesh,
+    },
+  ],
+};
+const nsExtensionRunner = new wasm.WasmContinuationExtensionRunner(
+  nsEquations,
+  nsParams,
+  nsParamNames,
+  nsVarNames,
+  'flow',
+  1,
+  { ...nsSeedBranch, collocation_adaptation: nsPriorAdaptation },
+  'mu',
+  {
+    step_size: 1e-3,
+    min_step_size: 1e-7,
+    max_step_size: 2e-3,
+    max_steps: 1,
+    corrector_steps: 10,
+    corrector_tolerance: 1e-9,
+    step_tolerance: 1e-10,
+    collocation_adaptivity: {
+      enabled: true,
+      redistribution_enabled: false,
+      defect_tolerance: 1e-14,
+      max_refinements: 4,
+      max_mesh_points: 24,
+    },
+  },
+  true
+);
+while (!nsExtensionRunner.get_progress().done) {
+  nsExtensionRunner.run_steps(1);
+}
+const nsExtensionResult = nsExtensionRunner.get_result_with_report();
+assert.ok(nsExtensionResult.collocation_adaptation);
+assert.equal(nsExtensionResult.collocation_adaptation.attempts[0].sequence, 1);
+assert.ok(
+  nsExtensionResult.collocation_adaptation.attempts.length >
+    nsPriorAdaptation.attempts.length,
+  'Expected the extension to append a new mesh adaptation'
+);
+assert.equal(
+  nsExtensionResult.branch.branch_type.ntst,
+  nsExtensionResult.collocation_adaptation.current_mesh_points
+);
+const nsExtensionStateLength =
+  nsExtensionResult.branch.branch_type.ntst *
+    (nsExtensionResult.branch.branch_type.ncol + 1) *
+    nsDim +
+  1;
+for (const point of nsExtensionResult.branch.points) {
+  assert.equal(point.state.length, nsExtensionStateLength);
+}
+
 const nsFloquetSystem = new wasm.WasmSystem(
   nsEquations,
   nsParams,
@@ -491,6 +773,56 @@ const nsSeedCritical = (nsSeedModes.multipliers as Array<{ re: number; im: numbe
 assert.ok(nsSeedCritical, 'Expected a nonreal Floquet multiplier in the corrected NS seed');
 assert.ok(Math.abs(Math.hypot(nsSeedCritical.re, nsSeedCritical.im) - 1) < 3e-3);
 
+// NSNS switching must use the refined second unit-pair cosine carried by the
+// branch-switch metadata, not whichever complex multiplier appears first.
+const nsnsSecondaryCosine = nsSeedCritical.re > 0 ? -0.75 : 0.75;
+const nsnsSwitchMetadata = {
+  type: 'DoubleNeimarkSacker',
+  refined: true,
+  candidate: false,
+  branch_switches: [
+    {
+      target: 'NeimarkSacker',
+      available: true,
+      target_auxiliary: nsnsSecondaryCosine,
+    },
+  ],
+};
+const nsnsSwitch = nsnsSwitchMetadata.branch_switches.find(
+  (entry) => entry.target === 'NeimarkSacker' && entry.available
+);
+assert.ok(nsnsSwitch);
+assert.ok(Math.abs(nsnsSwitch.target_auxiliary - nsSeedCritical.re) > 0.5);
+const nsnsCurveRunner = new wasm.WasmNSCurveRunner(
+  nsEquations,
+  nsParams,
+  nsParamNames,
+  nsVarNames,
+  new Float64Array(nsCorrectedState.slice(0, -1)),
+  nsCorrectedPeriod,
+  'mu',
+  nsMu,
+  'beta',
+  nsBeta,
+  nsnsSwitch.target_auxiliary,
+  nsNtst,
+  nsNcol,
+  new Float64Array(Array.from({ length: nsNtst + 1 }, (_, index) => index / nsNtst)),
+  {
+    step_size: 2e-3,
+    min_step_size: 1e-7,
+    max_step_size: 5e-3,
+    max_steps: 0,
+    corrector_steps: 10,
+    corrector_tolerance: 1e-8,
+    step_tolerance: 1e-10,
+  },
+  true
+);
+const nsnsCurve = nsnsCurveRunner.get_result();
+assert.equal(nsnsCurve.points.length, 1);
+assert.equal(nsnsCurve.points[0].auxiliary, nsnsSecondaryCosine);
+
 const nsCurveRunner = new wasm.WasmNSCurveRunner(
   nsEquations,
   nsParams,
@@ -505,6 +837,7 @@ const nsCurveRunner = new wasm.WasmNSCurveRunner(
   nsSeedCritical.re,
   nsNtst,
   nsNcol,
+  new Float64Array(Array.from({ length: nsNtst + 1 }, (_, index) => index / nsNtst)),
   {
     step_size: 2e-3,
     min_step_size: 1e-7,
@@ -521,7 +854,9 @@ while (!nsCurveRunner.get_progress().done) {
 }
 const nsCurveProgress = nsCurveRunner.get_progress();
 assert.equal(nsCurveProgress.current_step, 3, 'Expected three accepted NS continuation steps');
-const nsCurve = nsCurveRunner.get_result();
+const nsCurveResult = nsCurveRunner.get_result_with_report();
+const nsCurve = nsCurveResult.branch;
+assert.equal(nsCurveResult.collocation_adaptation.current_mesh_points, nsCurve.ntst);
 assert.equal(nsCurve.curve_type, 'NeimarkSacker');
 assert.equal(nsCurve.points.length, 4);
 const nsExplicitCoordinateCount = nsNtst * nsNcol * nsDim + (nsNtst + 1) * nsDim;
@@ -557,6 +892,54 @@ for (const point of nsCurve.points) {
   assert.ok(Math.abs(positive.im + negative.im) < 4e-3);
   assert.ok(Math.abs(point.auxiliary - positive.re) < 4e-3);
   assert.ok(Math.abs(point.auxiliary - expectedK) < 4e-3);
+}
+
+const mapNsRunner = new wasm.WasmHopfCurveRunner(
+  [
+    '(1+p1+p2)*(0.5*x-0.8660254037844386*y)',
+    '(1+p1+p2)*(0.8660254037844386*x+0.5*y)',
+  ],
+  new Float64Array([-0.2, 0.2]),
+  ['p1', 'p2'],
+  ['x', 'y'],
+  'map',
+  1,
+  new Float64Array([0, 0]),
+  0.8660254037844386,
+  'p1',
+  -0.2,
+  'p2',
+  0.2,
+  {
+    step_size: 0.02,
+    min_step_size: 1e-7,
+    max_step_size: 0.04,
+    max_steps: 4,
+    corrector_steps: 10,
+    corrector_tolerance: 1e-10,
+    step_tolerance: 1e-10,
+  },
+  true
+);
+while (!mapNsRunner.get_progress().done) {
+  mapNsRunner.run_steps(1);
+}
+const mapNsCurve = mapNsRunner.get_result();
+assert.equal(mapNsCurve.curve_type, 'NeimarkSacker');
+assert.ok(mapNsCurve.points.length >= 3, 'Expected multiple map NS curve points');
+for (const point of mapNsCurve.points) {
+  assert.ok(
+    Math.abs(point.param1_value + point.param2_value) < 1e-4,
+    `Map NS locus mismatch: p1=${point.param1_value}, p2=${point.param2_value}`
+  );
+  assert.ok(Math.abs(point.auxiliary - 0.5) < 3e-4);
+  const multipliers = (point.eigenvalues as Array<
+    { re: number; im: number } | [number, number]
+  >).map(nsComplexParts);
+  assert.equal(multipliers.length, 2);
+  assert.ok(
+    multipliers.every((value) => Math.abs(Math.hypot(value.re, value.im) - 1) < 1e-4)
+  );
 }
 
 const bogdanovTakensSystem = new wasm.WasmSystem(
@@ -651,5 +1034,211 @@ const bogdanovTakensHomoclinicRunner = new wasm.WasmHomoclinicRunner(
   true
 );
 assert.equal(bogdanovTakensHomoclinicRunner.get_progress().done, false);
+
+function arithmeticGeometricMean(left: number, right: number): number {
+  for (let iteration = 0; iteration < 32; iteration += 1) {
+    const arithmetic = 0.5 * (left + right);
+    const geometric = Math.sqrt(left * right);
+    left = arithmetic;
+    right = geometric;
+    if (Math.abs(left - right) < 1e-15) break;
+  }
+  return left;
+}
+
+function duffingStateAt(time: number, amplitude: number): number[] {
+  const steps = Math.max(1, Math.ceil(time / 1e-3));
+  const step = time / steps;
+  let x = amplitude;
+  let y = 0;
+  const flow = (u: number, v: number): [number, number] => [v, u - u ** 3];
+  for (let index = 0; index < steps; index += 1) {
+    const k1 = flow(x, y);
+    const k2 = flow(x + 0.5 * step * k1[0], y + 0.5 * step * k1[1]);
+    const k3 = flow(x + 0.5 * step * k2[0], y + 0.5 * step * k2[1]);
+    const k4 = flow(x + step * k3[0], y + step * k3[1]);
+    x += step * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]) / 6;
+    y += step * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1]) / 6;
+  }
+  return [x, y];
+}
+
+function duffingLargeCycleState(ntst: number, ncol: number): number[] {
+  assert.equal(ncol, 2, 'Duffing reference fixture uses two Gauss stages');
+  const modulus = 0.99;
+  const frequency = 1 / Math.sqrt(2 - modulus ** 2);
+  const amplitude = Math.sqrt(2) * frequency;
+  const completeEllipticK = Math.PI / (
+    2 * arithmeticGeometricMean(1, Math.sqrt(1 - modulus ** 2))
+  );
+  const period = 2 * completeEllipticK / frequency;
+  const nodes = [(1 - 1 / Math.sqrt(3)) / 2, (1 + 1 / Math.sqrt(3)) / 2];
+  const state: number[] = [];
+  for (let interval = 0; interval < ntst; interval += 1) {
+    state.push(...duffingStateAt(period * interval / ntst, amplitude));
+  }
+  for (let interval = 0; interval < ntst; interval += 1) {
+    for (const node of nodes) {
+      state.push(...duffingStateAt(period * (interval + node) / ntst, amplitude));
+    }
+  }
+  state.push(period);
+  return state;
+}
+
+function packHomoclinicSetup(setup: any): number[] {
+  const packed = [
+    ...setup.guess.mesh_states.flat(),
+    ...setup.guess.stage_states.flat(2),
+    ...setup.guess.x0,
+    setup.guess.param2_value,
+  ];
+  if (setup.extras.free_time) packed.push(setup.guess.time);
+  if (setup.extras.free_eps0) packed.push(setup.guess.eps0);
+  if (setup.extras.free_eps1) packed.push(setup.guess.eps1);
+  packed.push(...setup.guess.yu, ...setup.guess.ys);
+  return packed;
+}
+
+function runDuffingHomoclinic(setup: any, params: number[]): any {
+  const runner = new wasm.WasmHomoclinicRunner(
+    ['y', 'x-x^3+(mu-nu)*y'],
+    new Float64Array(params),
+    ['mu', 'nu'],
+    ['x', 'y'],
+    setup,
+    {
+      step_size: 1e-4,
+      min_step_size: 1e-9,
+      max_step_size: 1e-3,
+      max_steps: 3,
+      corrector_steps: 32,
+      corrector_tolerance: 1e-8,
+      step_tolerance: 1e-8,
+    },
+    true
+  );
+  while (!runner.get_progress().done) runner.run_steps(1);
+  return runner.get_result();
+}
+
+function duffingPointParams(setup: any, point: any): [number, number] {
+  const dim = 2;
+  const param2Index = (setup.ntst + 1) * dim + setup.ntst * setup.ncol * dim + dim;
+  return [point.param_value, point.state[param2Index]];
+}
+
+function assertDuffingHomoclinicBranch(label: string, setup: any, branch: any): void {
+  assert.ok(branch.points.length > 1, `${label} must advance beyond the seed point`);
+  const accepted = branch.points.slice(1);
+  const gaps = accepted.map((point: any) => {
+    const [mu, nu] = duffingPointParams(setup, point);
+    assert.ok(Number.isFinite(mu) && Number.isFinite(nu));
+    return mu - nu;
+  });
+  assert.ok(
+    Math.max(...gaps) - Math.min(...gaps) < 1e-8,
+    `${label} left the analytic mu=nu Duffing locus: ${JSON.stringify(gaps)}`
+  );
+  assert.ok(Math.abs(gaps[0]) < 5e-4, `${label} Duffing locus drift is too large: ${gaps[0]}`);
+  assert.ok(
+    Math.abs(accepted.at(-1).param_value - accepted[0].param_value) > 5e-5,
+    `${label} did not move measurably along the homoclinic locus`
+  );
+}
+
+const duffingEquations = ['y', 'x-x^3+(mu-nu)*y'];
+const duffingParamNames = ['mu', 'nu'];
+const duffingVarNames = ['x', 'y'];
+const duffingSourceNtst = 32;
+const duffingSourceNcol = 2;
+const duffingTargetNtst = 8;
+const duffingTargetNcol = 2;
+const duffingSystem = new wasm.WasmSystem(
+  duffingEquations,
+  new Float64Array([0, 0]),
+  duffingParamNames,
+  duffingVarNames,
+  'rk4',
+  'flow'
+);
+const duffingMethod1Setup = duffingSystem.init_homoclinic_from_large_cycle(
+  new Float64Array(duffingLargeCycleState(duffingSourceNtst, duffingSourceNcol)),
+  duffingSourceNtst,
+  duffingSourceNcol,
+  'mu',
+  'nu',
+  duffingTargetNtst,
+  duffingTargetNcol,
+  true,
+  false,
+  false
+);
+const duffingMethod1Branch = runDuffingHomoclinic(duffingMethod1Setup, [0, 0]);
+assertDuffingHomoclinicBranch('Method 1', duffingMethod1Setup, duffingMethod1Branch);
+
+const duffingSourcePoint = duffingMethod1Branch.points[1];
+const duffingSourceParams = duffingPointParams(duffingMethod1Setup, duffingSourcePoint);
+const duffingRestartSystem = new wasm.WasmSystem(
+  duffingEquations,
+  new Float64Array(duffingSourceParams),
+  duffingParamNames,
+  duffingVarNames,
+  'rk4',
+  'flow'
+);
+const duffingMethod2Setup = duffingRestartSystem.init_homoclinic_from_homoclinic(
+  new Float64Array(duffingSourcePoint.state),
+  duffingTargetNtst,
+  duffingTargetNcol,
+  true,
+  false,
+  false,
+  duffingMethod1Setup.guess.time,
+  duffingMethod1Setup.guess.eps0,
+  duffingMethod1Setup.guess.eps1,
+  'mu',
+  'nu',
+  duffingTargetNtst,
+  duffingTargetNcol,
+  true,
+  false,
+  false
+);
+const duffingMethod2Branch = runDuffingHomoclinic(duffingMethod2Setup, duffingSourceParams);
+assertDuffingHomoclinicBranch('Method 2', duffingMethod2Setup, duffingMethod2Branch);
+
+const duffingStageDSetup = duffingRestartSystem.init_homoclinic_from_homoclinic(
+  new Float64Array(duffingSourcePoint.state),
+  duffingTargetNtst,
+  duffingTargetNcol,
+  true,
+  false,
+  false,
+  duffingMethod1Setup.guess.time,
+  duffingMethod1Setup.guess.eps0,
+  duffingMethod1Setup.guess.eps1,
+  'mu',
+  'nu',
+  duffingTargetNtst,
+  duffingTargetNcol,
+  true,
+  false,
+  true
+);
+const duffingMethod4Setup = duffingRestartSystem.init_homoclinic_from_homotopy_saddle(
+  new Float64Array(packHomoclinicSetup(duffingStageDSetup)),
+  duffingTargetNtst,
+  duffingTargetNcol,
+  'mu',
+  'nu',
+  duffingTargetNtst,
+  duffingTargetNcol,
+  true,
+  false,
+  false
+);
+const duffingMethod4Branch = runDuffingHomoclinic(duffingMethod4Setup, duffingSourceParams);
+assertDuffingHomoclinicBranch('Method 4', duffingMethod4Setup, duffingMethod4Branch);
 
 console.log('PASS real WASM node boundary smoke');

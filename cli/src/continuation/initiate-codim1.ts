@@ -28,8 +28,20 @@ import {
   runPDCurveWithProgress,
   runNSCurveWithProgress
 } from './progress';
+import {
+  buildCollocationAdaptivitySettings,
+  collocationAdaptivityEntries,
+  defaultCollocationAdaptivityInputs,
+} from './collocation-adaptivity';
 
 type EigenvalueWire = [number, number];
+
+function resolveNormalizedMesh(ntst: number, mesh?: number[]): number[] {
+  if (Array.isArray(mesh) && mesh.length === ntst + 1) {
+    return [...mesh];
+  }
+  return Array.from({ length: ntst + 1 }, (_, index) => index / ntst);
+}
 
 function normalizeEigenvalues(raw: ContinuationPoint['eigenvalues'] | undefined): Array<{ re: number; im: number }> {
   if (!raw || !Array.isArray(raw)) return [];
@@ -43,6 +55,157 @@ function normalizeEigenvalues(raw: ContinuationPoint['eigenvalues'] | undefined)
       im: typeof entry?.im === 'number' ? entry.im : Number(entry?.im ?? 0),
     };
   });
+}
+
+type PeriodicCodim1SourceBranch =
+  | 'limit_cycle'
+  | 'lpc_curve'
+  | 'pd_curve'
+  | 'ns_curve';
+
+interface PeriodicCodim1Source {
+  adjacentSwitch: boolean;
+  ntst: number;
+  ncol: number;
+  normalizedMesh: number[];
+  param1Name: string;
+  param1Value: number;
+  param2Name: string;
+  param2Value: number;
+  seedState: number[];
+}
+
+export interface PeriodicCodim2CurveSwitchOptions {
+  targetAuxiliary?: number;
+}
+
+function preparePeriodicCodim1SeedState(
+  state: number[],
+  dimension: number,
+  ntst: number,
+  ncol: number,
+  branchType: PeriodicCodim1SourceBranch
+): number[] {
+  if (!Number.isInteger(dimension) || dimension <= 0) {
+    throw new Error('The periodic source dimension is invalid.');
+  }
+  if (!Number.isInteger(ntst) || ntst <= 0 || !Number.isInteger(ncol) || ncol <= 0) {
+    throw new Error('The periodic source collocation mesh metadata is invalid.');
+  }
+
+  const stageLength = ntst * ncol * dimension;
+  const implicitSource = branchType === 'limit_cycle';
+  const meshLength = (implicitSource ? ntst : ntst + 1) * dimension;
+  const expectedLength = stageLength + meshLength + 1;
+  if (state.length !== expectedLength) {
+    throw new Error(
+      `The selected ${branchType} point has state length ${state.length}; expected ${expectedLength}.`
+    );
+  }
+
+  const stageFirst = branchType === 'lpc_curve' || branchType === 'ns_curve';
+  const canonical = stageFirst
+    ? [
+        ...state.slice(stageLength, stageLength + meshLength),
+        ...state.slice(0, stageLength),
+        state[state.length - 1],
+      ]
+    : [...state];
+  if (implicitSource) {
+    return canonical;
+  }
+
+  // Codimension-one cycle curves store an explicit closing mesh point. The
+  // LPC/PD/NS runners consume the standard mesh-first implicit cycle layout.
+  const period = canonical[canonical.length - 1];
+  const coordinates = canonical.slice(0, -1);
+  const closingMeshStart = ntst * dimension;
+  return [
+    ...coordinates.slice(0, closingMeshStart),
+    ...coordinates.slice(closingMeshStart + dimension),
+    period,
+  ];
+}
+
+function resolvePeriodicCodim1Source(
+  branch: ContinuationObject,
+  point: ContinuationPoint,
+  paramNames: string[],
+  branchParams: number[],
+  dimension: number
+): PeriodicCodim1Source {
+  const branchType = branch.branchType;
+  if (
+    branchType !== 'limit_cycle' &&
+    branchType !== 'lpc_curve' &&
+    branchType !== 'pd_curve' &&
+    branchType !== 'ns_curve'
+  ) {
+    throw new Error('A limit-cycle, LPC, PD, or NS branch is required.');
+  }
+
+  const metadata = branch.data?.branch_type;
+  const expectedMetadataType = {
+    limit_cycle: 'LimitCycle',
+    lpc_curve: 'LPCCurve',
+    pd_curve: 'PDCurve',
+    ns_curve: 'NSCurve',
+  }[branchType];
+  if (
+    !metadata ||
+    metadata.type !== expectedMetadataType ||
+    !('ntst' in metadata) ||
+    !('ncol' in metadata)
+  ) {
+    throw new Error('The periodic source mesh metadata is missing or inconsistent.');
+  }
+
+  const ntst = metadata.ntst;
+  const ncol = metadata.ncol;
+  if (!Number.isInteger(ntst) || ntst <= 0 || !Number.isInteger(ncol) || ncol <= 0) {
+    throw new Error('The periodic source collocation mesh metadata is invalid.');
+  }
+  const normalizedMesh = resolveNormalizedMesh(
+    ntst,
+    'normalized_mesh' in metadata ? metadata.normalized_mesh : undefined
+  );
+  const adjacentSwitch = branchType !== 'limit_cycle';
+  const param1Name = adjacentSwitch && 'param1_name' in metadata
+    ? metadata.param1_name
+    : branch.parameterName;
+  const param2Name = adjacentSwitch && 'param2_name' in metadata
+    ? metadata.param2_name
+    : paramNames.find((name) => name !== param1Name) ?? paramNames[0];
+  const param1Value = point.param_value;
+  const param2Index = paramNames.indexOf(param2Name);
+  const param2Value = adjacentSwitch ? point.param2_value : branchParams[param2Index];
+  if (
+    !paramNames.includes(param1Name) ||
+    param2Index < 0 ||
+    param1Name === param2Name ||
+    !Number.isFinite(param1Value) ||
+    !Number.isFinite(param2Value)
+  ) {
+    throw new Error('The selected periodic point has invalid continuation parameter values.');
+  }
+
+  return {
+    adjacentSwitch,
+    ntst,
+    ncol,
+    normalizedMesh,
+    param1Name,
+    param1Value,
+    param2Name,
+    param2Value: param2Value as number,
+    seedState: preparePeriodicCodim1SeedState(
+      point.state,
+      dimension,
+      ntst,
+      ncol,
+      branchType
+    ),
+  };
 }
 
 function extractHopfOmega(point: ContinuationPoint): number {
@@ -706,22 +869,23 @@ export async function initiateLPCCurve(
 
   const branchParams = getBranchParams(sysName, branch, sysConfig);
 
-  // Extract ntst/ncol from branch type
-  const bt = branch.branchType;
-  if (bt !== 'limit_cycle' || !branch.data?.branch_type) {
-    printError("LPC curve requires a limit cycle branch");
+  let source: PeriodicCodim1Source;
+  try {
+    source = resolvePeriodicCodim1Source(
+      branch,
+      lpcPoint,
+      paramNames,
+      branchParams,
+      sysConfig.varNames.length
+    );
+  } catch (error) {
+    printError(`LPC curve requires a valid periodic source point: ${error}`);
     return null;
   }
-  const lcBranchType = branch.data.branch_type as { type: 'LimitCycle'; ntst: number; ncol: number };
-  const ntst = lcBranchType.ntst || 20;
-  const ncol = lcBranchType.ncol || 4;
-
-  // Param1 is the continuation parameter from the source branch
-  const param1Name = branch.parameterName;
-  const param1Value = lpcPoint.param_value;
-  let param2Name = paramNames.find(p => p !== param1Name) || paramNames[0];
+  const { ntst, ncol, normalizedMesh, param1Name, param1Value } = source;
+  let param2Name = source.param2Name;
   let param2Idx = paramNames.indexOf(param2Name);
-  let param2Value = branchParams[param2Idx];
+  let param2Value = source.param2Value;
 
   // Configuration variables
   let curveName = `lpc_curve_${branch.name}`;
@@ -732,12 +896,13 @@ export async function initiateLPCCurve(
   let directionForward = true;
   let correctorStepsInput = '10';
   let correctorToleranceInput = '1e-8';
+  const adaptivityInputs = defaultCollocationAdaptivityInputs();
 
   const directionLabel = (forward: boolean) =>
     forward ? 'Forward' : 'Backward';
 
   const entries: ConfigEntry[] = [
-    {
+    ...(source.adjacentSwitch ? [] : [{
       id: 'param2',
       label: 'Second parameter',
       section: 'Two-Parameter Setup',
@@ -761,7 +926,7 @@ export async function initiateLPCCurve(
         param2Idx = paramNames.indexOf(param2Name);
         param2Value = branchParams[param2Idx];
       }
-    },
+    }]),
     {
       id: 'curveName',
       label: 'Curve name',
@@ -855,6 +1020,8 @@ export async function initiateLPCCurve(
     }
   ];
 
+  entries.push(...collocationAdaptivityEntries(adaptivityInputs));
+
   // Show info header
   console.log('');
   console.log(chalk.yellow('LPC Curve Continuation (Two-Parameter)'));
@@ -883,7 +1050,8 @@ export async function initiateLPCCurve(
     max_steps: Math.max(parseIntOrDefault(maxStepsInput, 300), 1),
     corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
     corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-8), Number.EPSILON),
-    step_tolerance: 1e-8
+    step_tolerance: 1e-8,
+    collocation_adaptivity: buildCollocationAdaptivitySettings(adaptivityInputs),
   };
 
   printInfo(`Running LPC curve continuation (max ${continuationSettings.max_steps} steps)...`);
@@ -892,12 +1060,13 @@ export async function initiateLPCCurve(
     const runConfig = { ...sysConfig };
     runConfig.params = [...branchParams];
     runConfig.params[paramNames.indexOf(param1Name)] = param1Value;
+    runConfig.params[paramNames.indexOf(param2Name)] = param2Value;
 
     const bridge = new WasmBridge(runConfig);
 
     // Extract period from end of state, and LC coords without period
-    const lcPeriod = lpcPoint.state[lpcPoint.state.length - 1];
-    const lcCoords = lpcPoint.state.slice(0, -1);
+    const lcPeriod = source.seedState[source.seedState.length - 1];
+    const lcCoords = source.seedState.slice(0, -1);
 
     const curveData = runLPCCurveWithProgress(
       bridge,
@@ -909,6 +1078,7 @@ export async function initiateLPCCurve(
       param2Value,
       ntst,
       ncol,
+      normalizedMesh,
       continuationSettings,
       directionForward,
       'LPC Curve'
@@ -929,6 +1099,7 @@ export async function initiateLPCCurve(
         param2_value: pt.param2_value,
         stability: pt.codim2_type || 'None',
         codim2: pt.codim2,
+        codim2_events: pt.codim2_events,
         eigenvalues: (pt.eigenvalues || []).map((eig: any) => {
           if (Array.isArray(eig)) {
             return { re: eig[0] ?? 0, im: eig[1] ?? 0 };
@@ -943,9 +1114,11 @@ export async function initiateLPCCurve(
         type: 'LPCCurve' as const,
         param1_name: param1Name,
         param2_name: param2Name,
-        ntst,
-        ncol
-      }
+        ntst: curveData.ntst ?? ntst,
+        ncol: curveData.ncol ?? ncol,
+        normalized_mesh: curveData.normalized_mesh ?? normalizedMesh
+      },
+      collocation_adaptation: curveData.collocation_adaptation
     };
 
     const newBranch: ContinuationObject = {
@@ -997,13 +1170,14 @@ export async function initiateIsoperiodicCurve(
     return null;
   }
   const lcBranchType = branch.data.branch_type as
-    | { type: 'LimitCycle'; ntst: number; ncol: number }
+    | { type: 'LimitCycle'; ntst: number; ncol: number; normalized_mesh?: number[] }
     | {
         type: 'IsoperiodicCurve';
         param1_name: string;
         param2_name: string;
         ntst: number;
         ncol: number;
+        normalized_mesh?: number[];
       };
   if (lcBranchType.type !== 'LimitCycle' && lcBranchType.type !== 'IsoperiodicCurve') {
     printError('Limit cycle mesh metadata is missing for this branch');
@@ -1011,6 +1185,7 @@ export async function initiateIsoperiodicCurve(
   }
   const ntst = lcBranchType.ntst || 20;
   const ncol = lcBranchType.ncol || 4;
+  const normalizedMesh = resolveNormalizedMesh(ntst, lcBranchType.normalized_mesh);
 
   const sourceParam1Name =
     lcBranchType.type === 'IsoperiodicCurve' ? lcBranchType.param1_name : branch.parameterName;
@@ -1053,6 +1228,7 @@ export async function initiateIsoperiodicCurve(
   let directionForward = true;
   let correctorStepsInput = '10';
   let correctorToleranceInput = '1e-8';
+  const adaptivityInputs = defaultCollocationAdaptivityInputs();
 
   const directionLabel = (forward: boolean) =>
     forward ? 'Forward' : 'Backward';
@@ -1204,6 +1380,8 @@ export async function initiateIsoperiodicCurve(
     }
   ];
 
+  entries.push(...collocationAdaptivityEntries(adaptivityInputs));
+
   // Show info header
   console.log('');
   console.log(chalk.yellow('Isoperiodic Curve Continuation (Two-Parameter)'));
@@ -1245,7 +1423,8 @@ export async function initiateIsoperiodicCurve(
     max_steps: Math.max(parseIntOrDefault(maxStepsInput, 300), 1),
     corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
     corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-8), Number.EPSILON),
-    step_tolerance: 1e-8
+    step_tolerance: 1e-8,
+    collocation_adaptivity: buildCollocationAdaptivitySettings(adaptivityInputs),
   };
 
   printInfo(`Running isoperiodic curve continuation (max ${continuationSettings.max_steps} steps)...`);
@@ -1269,6 +1448,7 @@ export async function initiateIsoperiodicCurve(
       param2Value,
       ntst,
       ncol,
+      normalizedMesh,
       continuationSettings,
       directionForward,
       'Isoperiodic curve'
@@ -1305,9 +1485,11 @@ export async function initiateIsoperiodicCurve(
         type: 'IsoperiodicCurve' as const,
         param1_name: param1Name,
         param2_name: param2Name,
-        ntst,
-        ncol
-      }
+        ntst: curveData.ntst ?? ntst,
+        ncol: curveData.ncol ?? ncol,
+        normalized_mesh: curveData.normalized_mesh ?? normalizedMesh
+      },
+      collocation_adaptation: curveData.collocation_adaptation
     };
 
     const newBranch: ContinuationObject = {
@@ -1353,20 +1535,23 @@ export async function initiatePDCurve(
 
   const branchParams = getBranchParams(sysName, branch, sysConfig);
 
-  const bt = branch.branchType;
-  if (bt !== 'limit_cycle' || !branch.data?.branch_type) {
-    printError("PD curve requires a limit cycle branch");
+  let source: PeriodicCodim1Source;
+  try {
+    source = resolvePeriodicCodim1Source(
+      branch,
+      pdPoint,
+      paramNames,
+      branchParams,
+      sysConfig.varNames.length
+    );
+  } catch (error) {
+    printError(`PD curve requires a valid periodic source point: ${error}`);
     return null;
   }
-  const lcBranchType = branch.data.branch_type as { type: 'LimitCycle'; ntst: number; ncol: number };
-  const ntst = lcBranchType.ntst || 20;
-  const ncol = lcBranchType.ncol || 4;
-
-  const param1Name = branch.parameterName;
-  const param1Value = pdPoint.param_value;
-  let param2Name = paramNames.find(p => p !== param1Name) || paramNames[0];
+  const { ntst, ncol, normalizedMesh, param1Name, param1Value } = source;
+  let param2Name = source.param2Name;
   let param2Idx = paramNames.indexOf(param2Name);
-  let param2Value = branchParams[param2Idx];
+  let param2Value = source.param2Value;
 
   // Configuration variables
   let curveName = `pd_curve_${branch.name}`;
@@ -1377,12 +1562,13 @@ export async function initiatePDCurve(
   let directionForward = true;
   let correctorStepsInput = '10';
   let correctorToleranceInput = '1e-8';
+  const adaptivityInputs = defaultCollocationAdaptivityInputs();
 
   const directionLabel = (forward: boolean) =>
     forward ? 'Forward' : 'Backward';
 
   const entries: ConfigEntry[] = [
-    {
+    ...(source.adjacentSwitch ? [] : [{
       id: 'param2',
       label: 'Second parameter',
       section: 'Two-Parameter Setup',
@@ -1406,7 +1592,7 @@ export async function initiatePDCurve(
         param2Idx = paramNames.indexOf(param2Name);
         param2Value = branchParams[param2Idx];
       }
-    },
+    }]),
     {
       id: 'curveName',
       label: 'Curve name',
@@ -1510,6 +1696,7 @@ export async function initiatePDCurve(
 
   // Show info header
   console.log('');
+  entries.push(...collocationAdaptivityEntries(adaptivityInputs));
   console.log(chalk.yellow('PD Curve Continuation (Two-Parameter)'));
   console.log(chalk.gray(`Tracking period-doubling in (${param1Name}, ${param2Name}) space`));
   console.log(chalk.gray(`Starting point: ${param1Name}=${param1Value}`));
@@ -1543,7 +1730,8 @@ export async function initiatePDCurve(
     max_steps: Math.max(parseIntOrDefault(maxStepsInput, 300), 1),
     corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
     corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-8), Number.EPSILON),
-    step_tolerance: 1e-8
+    step_tolerance: 1e-8,
+    collocation_adaptivity: buildCollocationAdaptivitySettings(adaptivityInputs),
   };
 
   printInfo(`Running PD curve continuation (max ${continuationSettings.max_steps} steps)...`);
@@ -1552,14 +1740,15 @@ export async function initiatePDCurve(
     const runConfig = { ...sysConfig };
     runConfig.params = [...branchParams];
     runConfig.params[paramNames.indexOf(param1Name)] = param1Value;
+    runConfig.params[paramNames.indexOf(param2Name)] = param2Value;
 
     const bridge = new WasmBridge(runConfig);
 
     // Extract period from end of state, and LC coords without period suffix
     // pdPoint.state from ContinuationPoint = [mesh, stages, T] (NO param prefix)
     // param_value is stored separately in ContinuationPoint
-    const lcPeriod = pdPoint.state[pdPoint.state.length - 1];
-    const lcCoords = pdPoint.state.slice(0, -1);  // Just strip period at end
+    const lcPeriod = source.seedState[source.seedState.length - 1];
+    const lcCoords = source.seedState.slice(0, -1);
 
     const curveData = runPDCurveWithProgress(
       bridge,
@@ -1571,6 +1760,7 @@ export async function initiatePDCurve(
       param2Value,
       ntst,
       ncol,
+      normalizedMesh,
       continuationSettings,
       directionForward,
       'PD Curve'
@@ -1590,6 +1780,7 @@ export async function initiatePDCurve(
         param2_value: pt.param2_value,
         stability: pt.codim2_type || 'None',
         codim2: pt.codim2,
+        codim2_events: pt.codim2_events,
         eigenvalues: (pt.eigenvalues || []).map((eig: any) => {
           if (Array.isArray(eig)) {
             return { re: eig[0] ?? 0, im: eig[1] ?? 0 };
@@ -1604,9 +1795,11 @@ export async function initiatePDCurve(
         type: 'PDCurve' as const,
         param1_name: param1Name,
         param2_name: param2Name,
-        ntst,
-        ncol
-      }
+        ntst: curveData.ntst ?? ntst,
+        ncol: curveData.ncol ?? ncol,
+        normalized_mesh: curveData.normalized_mesh ?? normalizedMesh
+      },
+      collocation_adaptation: curveData.collocation_adaptation
     };
 
     const newBranch: ContinuationObject = {
@@ -1640,7 +1833,8 @@ export async function initiateNSCurve(
   sysName: string,
   branch: ContinuationObject,
   nsPoint: ContinuationPoint,
-  nsPointIndex: number
+  nsPointIndex: number,
+  switchOptions: PeriodicCodim2CurveSwitchOptions = {}
 ): Promise<ContinuationObject | null> {
   const sysConfig = Storage.loadSystem(sysName);
   const paramNames = sysConfig.paramNames;
@@ -1652,20 +1846,23 @@ export async function initiateNSCurve(
 
   const branchParams = getBranchParams(sysName, branch, sysConfig);
 
-  const bt = branch.branchType;
-  if (bt !== 'limit_cycle' || !branch.data?.branch_type) {
-    printError("NS curve requires a limit cycle branch");
+  let source: PeriodicCodim1Source;
+  try {
+    source = resolvePeriodicCodim1Source(
+      branch,
+      nsPoint,
+      paramNames,
+      branchParams,
+      sysConfig.varNames.length
+    );
+  } catch (error) {
+    printError(`NS curve requires a valid periodic source point: ${error}`);
     return null;
   }
-  const lcBranchType = branch.data.branch_type as { type: 'LimitCycle'; ntst: number; ncol: number };
-  const ntst = lcBranchType.ntst || 20;
-  const ncol = lcBranchType.ncol || 4;
-
-  const param1Name = branch.parameterName;
-  const param1Value = nsPoint.param_value;
-  let param2Name = paramNames.find(p => p !== param1Name) || paramNames[0];
+  const { ntst, ncol, normalizedMesh, param1Name, param1Value } = source;
+  let param2Name = source.param2Name;
   let param2Idx = paramNames.indexOf(param2Name);
-  let param2Value = branchParams[param2Idx];
+  let param2Value = source.param2Value;
 
   // Configuration variables
   let curveName = `ns_curve_${branch.name}`;
@@ -1676,10 +1873,20 @@ export async function initiateNSCurve(
   let directionForward = true;
   let correctorStepsInput = '10';
   let correctorToleranceInput = '1e-8';
+  const adaptivityInputs = defaultCollocationAdaptivityInputs();
 
   // Calculate initial k from NS eigenvalues if available
   let initialK = 0.0;
-  if (nsPoint.eigenvalues && nsPoint.eigenvalues.length > 0) {
+  if (switchOptions.targetAuxiliary !== undefined) {
+    if (
+      !Number.isFinite(switchOptions.targetAuxiliary) ||
+      Math.abs(switchOptions.targetAuxiliary) > 1 + 1e-8
+    ) {
+      printError('The target Neimark-Sacker cosine must lie in [-1, 1].');
+      return null;
+    }
+    initialK = Math.max(-1, Math.min(1, switchOptions.targetAuxiliary));
+  } else if (nsPoint.eigenvalues && nsPoint.eigenvalues.length > 0) {
     // Find the complex eigenvalue pair on the unit circle
     for (const eig of nsPoint.eigenvalues) {
       if (Math.abs(eig.im) > 1e-6) {
@@ -1695,7 +1902,7 @@ export async function initiateNSCurve(
     forward ? 'Forward' : 'Backward';
 
   const entries: ConfigEntry[] = [
-    {
+    ...(source.adjacentSwitch ? [] : [{
       id: 'param2',
       label: 'Second parameter',
       section: 'Two-Parameter Setup',
@@ -1719,7 +1926,7 @@ export async function initiateNSCurve(
         param2Idx = paramNames.indexOf(param2Name);
         param2Value = branchParams[param2Idx];
       }
-    },
+    }]),
     {
       id: 'curveName',
       label: 'Curve name',
@@ -1815,6 +2022,7 @@ export async function initiateNSCurve(
 
   // Show info header
   console.log('');
+  entries.push(...collocationAdaptivityEntries(adaptivityInputs));
   console.log(chalk.yellow('NS Curve Continuation (Two-Parameter)'));
   console.log(chalk.gray(`Tracking Neimark-Sacker in (${param1Name}, ${param2Name}) space`));
   console.log(chalk.gray(`Starting point: ${param1Name}=${param1Value}`));
@@ -1842,7 +2050,8 @@ export async function initiateNSCurve(
     max_steps: Math.max(parseIntOrDefault(maxStepsInput, 300), 1),
     corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
     corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-8), Number.EPSILON),
-    step_tolerance: 1e-8
+    step_tolerance: 1e-8,
+    collocation_adaptivity: buildCollocationAdaptivitySettings(adaptivityInputs),
   };
 
   printInfo(`Running NS curve continuation (max ${continuationSettings.max_steps} steps)...`);
@@ -1851,12 +2060,13 @@ export async function initiateNSCurve(
     const runConfig = { ...sysConfig };
     runConfig.params = [...branchParams];
     runConfig.params[paramNames.indexOf(param1Name)] = param1Value;
+    runConfig.params[paramNames.indexOf(param2Name)] = param2Value;
 
     const bridge = new WasmBridge(runConfig);
 
     // Extract period from end of state, and LC coords without period
-    const lcPeriod = nsPoint.state[nsPoint.state.length - 1];
-    const lcCoords = nsPoint.state.slice(0, -1);
+    const lcPeriod = source.seedState[source.seedState.length - 1];
+    const lcCoords = source.seedState.slice(0, -1);
 
     const curveData = runNSCurveWithProgress(
       bridge,
@@ -1869,6 +2079,7 @@ export async function initiateNSCurve(
       initialK,
       ntst,
       ncol,
+      normalizedMesh,
       continuationSettings,
       directionForward,
       'NS Curve'
@@ -1888,6 +2099,7 @@ export async function initiateNSCurve(
         param2_value: pt.param2_value,
         stability: pt.codim2_type || 'None',
         codim2: pt.codim2,
+        codim2_events: pt.codim2_events,
         eigenvalues: (pt.eigenvalues || []).map((eig: any) => {
           if (Array.isArray(eig)) {
             return { re: eig[0] ?? 0, im: eig[1] ?? 0 };
@@ -1902,9 +2114,11 @@ export async function initiateNSCurve(
         type: 'NSCurve' as const,
         param1_name: param1Name,
         param2_name: param2Name,
-        ntst,
-        ncol
-      }
+        ntst: curveData.ntst ?? ntst,
+        ncol: curveData.ncol ?? ncol,
+        normalized_mesh: curveData.normalized_mesh ?? normalizedMesh
+      },
+      collocation_adaptation: curveData.collocation_adaptation
     };
 
     const newBranch: ContinuationObject = {

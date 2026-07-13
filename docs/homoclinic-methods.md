@@ -70,6 +70,11 @@ Field meanings:
 
 Source: selected limit-cycle branch point.
 
+The source cycle must use a uniform normalized collocation mesh. Method 1's legacy initializer does
+not yet consume explicit nonuniform interval coordinates, so web and CLI reject adaptive nonuniform
+sources before initialization. Recontinue the cycle on a uniform mesh (with collocation adaptivity
+disabled) and select a point from that branch before retrying Method 1.
+
 | Field | Meaning | Practical Guidance |
 |---|---|---|
 | First parameter / Second parameter | Parameter plane for codim-1 homoclinic continuation | Choose two parameters with visible effect in your model |
@@ -163,6 +168,63 @@ Interpretation:
 - Smaller values mean endpoints lie closer to the local manifold neighborhood near the saddle.
 - If endpoint distances suddenly grow after extension starts, you likely launched with a nonlocal first predictor step or an under-resolved mesh.
 - Stable runs usually show gradual evolution of `eps0/eps1`, not abrupt jumps at the extension seam.
+
+## Validated Duffing Reference Fixture
+
+Fork's deterministic Methods 1/2/4 regression uses the two-parameter Duffing flow
+
+$$
+\dot{x}=y, \qquad
+\dot{y}=x-x^3+(\mu-\nu)y.
+$$
+
+When `mu = nu`, the system is conservative and has a family of periodic orbits
+
+$$
+x(t)=A\,\operatorname{dn}(\omega t,k), \qquad
+A^2=\frac{2}{2-k^2}, \qquad
+\omega^2=\frac{1}{2-k^2}.
+$$
+
+For
+
+$$
+H(x,y)=\frac{y^2}{2}-\frac{x^2}{2}+\frac{x^4}{4},
+$$
+
+the perturbed flow satisfies
+
+$$
+\dot H=(\mu-\nu)y^2.
+$$
+
+A nonconstant homoclinic orbit returns to the same saddle energy, so integrating this identity makes `mu = nu` the exact homoclinic locus.
+
+As `k` approaches one, the period diverges and this family approaches the homoclinic loop to the saddle `(0, 0)`. The fixture uses `k = 0.99`, samples the resulting cycle on `NTST = 32`, `NCOL = 2`, and converts it to a homoclinic mesh with `NTST = 8`, `NCOL = 2`.
+
+Reproducible Method 1/2 settings and Method 4 CLI/WASM target settings:
+
+- `Free T = on`, `Free eps0 = off`, `Free eps1 = off`
+- `Initial step size = 1e-4`, `Min step size = 1e-9`, `Max step size = 1e-3`
+- `Max points/accepted steps = 3`, `Corrector steps = 32`
+- `Corrector tolerance = 1e-8`, `Step tolerance = 1e-8`
+
+Expected diagnostics:
+
+- Method 1 produces the seed plus three accepted points.
+- Method 2, restarted from the first accepted Method 1 point, also produces the seed plus three accepted points.
+- Method 4, initialized from a homoclinic-ready StageD profile encoded with the staged workflow's source flags, produces the seed plus three accepted points.
+- The core StageD conversion helper, which retains the StageD `T`/`eps1` free flags, also accepts all three requested steps; the CLI/WASM regression additionally changes the target to the `T`-only layout above.
+- The accepted points remain on a line parallel to the analytic locus `mu = nu`: the spread in `mu - nu` is below `1e-8`. With the intentionally small `8 x 2` target mesh, the absolute offset from the analytic locus is below `5e-4`.
+
+Run the core and CLI/WASM certifications with:
+
+```bash
+cargo test -p fork_core --test homoclinic_reference
+cd cli && npm run test:wasm
+```
+
+The Method 4 fixture certifies StageD decoding, conversion, and continuation independently of StageD generation: it re-encodes an accepted homoclinic connection using the fixed StageD source layout (`T` and `eps1` free, `eps0` fixed). Conversion must decode that source layout before applying the target free/fixed choices. The heuristic Method 3 stage-generation path is not used as evidence that an arbitrary StageD profile is already a corrected homoclinic connection.
 
 ## Troubleshooting Playbook
 

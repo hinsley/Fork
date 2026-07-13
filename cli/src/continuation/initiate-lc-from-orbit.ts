@@ -23,6 +23,11 @@ import { normalizeBranchEigenvalues } from './serialization';
 import { isValidName } from './utils';
 import { inspectBranch } from './inspect';
 import { runLimitCycleContinuationWithProgress } from './progress';
+import {
+  buildCollocationAdaptivitySettings,
+  collocationAdaptivityEntries,
+  defaultCollocationAdaptivityInputs,
+} from './collocation-adaptivity';
 
 export type InitiateLcFromOrbitOptions = {
   autoInspect?: boolean;
@@ -83,6 +88,7 @@ export async function initiateLCFromOrbit(
   let correctorStepsInput = '10';
   let correctorToleranceInput = '1e-6';
   let stepToleranceInput = '1e-6';
+  const adaptivityInputs = defaultCollocationAdaptivityInputs();
 
   const directionLabel = (forward: boolean) =>
     forward ? 'Forward (Increasing Param)' : 'Backward (Decreasing Param)';
@@ -276,6 +282,8 @@ export async function initiateLCFromOrbit(
     }
   ];
 
+  entries.push(...collocationAdaptivityEntries(adaptivityInputs));
+
   while (true) {
     const result = await runConfigMenu('Initiate Limit Cycle from Orbit', entries);
     if (result === 'back') {
@@ -311,7 +319,8 @@ export async function initiateLCFromOrbit(
     max_steps: Math.max(parseIntOrDefault(maxStepsInput, 300), 1),
     corrector_steps: Math.max(parseIntOrDefault(correctorStepsInput, 10), 1),
     corrector_tolerance: Math.max(parseFloatOrDefault(correctorToleranceInput, 1e-6), Number.EPSILON),
-    step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON)
+    step_tolerance: Math.max(parseFloatOrDefault(stepToleranceInput, 1e-6), Number.EPSILON),
+    collocation_adaptivity: buildCollocationAdaptivitySettings(adaptivityInputs),
   };
 
   console.log(chalk.cyan("Initializing limit cycle from orbit..."));
@@ -359,7 +368,12 @@ export async function initiateLCFromOrbit(
     );
 
     // Ensure branch_type is included with mesh parameters for plotting scripts.
-    branchData.branch_type = branchData.branch_type ?? { type: 'LimitCycle', ntst, ncol };
+    branchData.branch_type = branchData.branch_type ?? {
+      type: 'LimitCycle',
+      ntst,
+      ncol,
+      normalized_mesh: Array.from({ length: ntst + 1 }, (_, index) => index / ntst),
+    };
 
     const newBranch: ContinuationObject = {
       type: 'continuation',
@@ -378,14 +392,23 @@ export async function initiateLCFromOrbit(
     const seedPoint = branchData.points[0];
     const seedState = seedPoint?.state ?? [];
     const seedPeriod = seedState.length > 0 ? seedState[seedState.length - 1] : NaN;
+    const finalBranchType = branchData.branch_type;
+    const objectNtst = finalBranchType?.type === 'LimitCycle' ? finalBranchType.ntst : ntst;
+    const objectNcol = finalBranchType?.type === 'LimitCycle' ? finalBranchType.ncol : ncol;
+    const objectMesh =
+      finalBranchType?.type === 'LimitCycle' &&
+      finalBranchType.normalized_mesh?.length === objectNtst + 1
+        ? [...finalBranchType.normalized_mesh]
+        : Array.from({ length: objectNtst + 1 }, (_, index) => index / objectNtst);
 
     const lcObj: LimitCycleObject = {
       type: 'limit_cycle',
       name: limitCycleObjectName,
       systemName: sysName,
       origin: { type: 'orbit', orbitName: orbit.name },
-      ntst,
-      ncol,
+      ntst: objectNtst,
+      ncol: objectNcol,
+      normalized_mesh: objectMesh,
       period: seedPeriod,
       state: [...seedState],
       parameters: [...runConfig.params],

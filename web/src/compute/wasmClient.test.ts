@@ -337,4 +337,36 @@ describe('WasmForkCoreClient', () => {
     worker.emit({ id: message.id, ok: true, result: { points: [], bifurcations: [], indices: [] } })
     await expect(promise).resolves.toEqual({ points: [], bifurcations: [], indices: [] })
   })
+
+  it('sends limit-cycle codim-1 curve continuation worker requests', async () => {
+    const client = new WasmForkCoreClient()
+    const request = {
+      system: {
+        ...baseSystem,
+        params: [0.2, 0.1],
+        paramNames: ['mu', 'nu'],
+      },
+      curveType: 'PeriodDoubling' as const,
+      lcState: [0, 1, 1, 0],
+      period: 5,
+      param1Name: 'mu',
+      param1Value: 0.2,
+      param2Name: 'nu',
+      param2Value: 0.1,
+      ntst: 2,
+      ncol: 2,
+      settings: continuationSettings,
+      forward: true,
+    }
+
+    const promise = client.runLimitCycleCodim1CurveContinuation(request)
+    await flushQueue()
+
+    const worker = MockWorker.instances[0]
+    const message = worker.posted.at(-1) as { id: string; kind: string; payload: unknown }
+    expect(message.kind).toBe('runLimitCycleCodim1CurveContinuation')
+    expect(message.payload).toEqual(request)
+    worker.emit({ id: message.id, ok: true, result: { points: [] } })
+    await expect(promise).resolves.toEqual({ points: [] })
+  })
 })

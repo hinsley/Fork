@@ -11,15 +11,25 @@
 //! - Bordered Jacobian includes rotation by e^{iθ}
 
 use super::{
-    collocation_profile_is_acceptable, explicit_profile_palc_weights, FullProfilePhaseGauge,
-    LCBorders,
+    codim2::{
+        append_return_map_conditioning, curve_normal_form_settings, limit_cycle_setup_from_profile,
+        secondary_cycle_tests, secondary_spectral_coefficients, TrackedCycleMultiplier,
+    },
+    collocation_defect_estimate_on_mesh, explicit_profile_palc_weights_on_mesh,
+    transfer_explicit_curve_aug, transfer_explicit_curve_state, CurveCollocationAdaptation,
+    CurveMeshAdaptationDecision, FullProfilePhaseGauge, LCBorders,
 };
 use crate::continuation::codim1_curves::Codim2TestFunctions;
 use crate::continuation::periodic::{
     extract_collocation_transfers_from_jacobian, extract_multipliers_collocation,
-    CollocationCoefficients,
+    uniform_normalized_mesh, validated_normalized_mesh, CollocationAdaptationReport,
+    CollocationAdaptivitySettings, CollocationCoefficients, LimitCycleSetup,
 };
-use crate::continuation::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
+use crate::continuation::periodic_normal_forms::periodic_neimark_sacker_normal_form_for_cosine_with_settings;
+use crate::continuation::problem::{
+    ContinuationProblem, PointDiagnostics, StepRejectionAction, TestFunctionValues,
+};
+use crate::continuation::{Codim2BifurcationType, Codim2Coefficient};
 use crate::equation_engine::EquationSystem;
 use crate::equilibrium::{compute_jacobian, SystemKind};
 use crate::traits::DynamicalSystem;
@@ -108,12 +118,16 @@ pub struct NSCurveProblem<'a> {
     dim: usize,
     /// Number of mesh intervals
     ntst: usize,
+    /// Persistent normalized collocation boundaries, including 0 and 1.
+    normalized_mesh: Vec<f64>,
     /// Collocation degree
     ncol: usize,
     /// Collocation coefficients
     coeffs: CollocationCoefficients,
     /// Integral phase condition on the complete Gauss collocation profile.
     phase_gauge: FullProfilePhaseGauge,
+    /// Bounded a-posteriori mesh adaptation and provenance.
+    adaptation: CurveCollocationAdaptation,
     /// Border vectors for first singularity (real part)
     borders1: LCBorders,
     /// Border vectors for second singularity (imaginary part)  
@@ -149,6 +163,36 @@ impl<'a> NSCurveProblem<'a> {
         ntst: usize,
         ncol: usize,
     ) -> Result<Self> {
+        Self::new_on_mesh(
+            system,
+            lc_state,
+            period,
+            param1_index,
+            param2_index,
+            param1_value,
+            param2_value,
+            initial_k,
+            ntst,
+            ncol,
+            uniform_normalized_mesh(ntst),
+        )
+    }
+
+    /// Create an NS curve problem on explicit normalized mesh boundaries.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_on_mesh(
+        system: &'a mut EquationSystem,
+        lc_state: Vec<f64>,
+        period: f64,
+        param1_index: usize,
+        param2_index: usize,
+        param1_value: f64,
+        param2_value: f64,
+        initial_k: f64,
+        ntst: usize,
+        ncol: usize,
+        normalized_mesh: Vec<f64>,
+    ) -> Result<Self> {
         let dim = system.equations.len();
         if dim == 0 || ntst < 2 {
             bail!("NS continuation requires a positive state dimension and at least two mesh intervals");
@@ -159,6 +203,7 @@ impl<'a> NSCurveProblem<'a> {
         if !initial_k.is_finite() || !(-1.0..=1.0).contains(&initial_k) {
             bail!("NS rotation parameter k must be finite and lie in [-1, 1]");
         }
+        let normalized_mesh = validated_normalized_mesh(ntst, &normalized_mesh)?;
         let coeffs = CollocationCoefficients::new(ncol)?;
 
         let stage_count = ntst * ncol;
@@ -174,7 +219,9 @@ impl<'a> NSCurveProblem<'a> {
         let work_f = vec![0.0; stage_count * dim];
         let work_j = vec![0.0; stage_count * dim * dim];
 
-        let phase_gauge = FullProfilePhaseGauge::new(ntst, ncol, dim, &coeffs.b)?;
+        let phase_gauge =
+            FullProfilePhaseGauge::new_on_mesh(&normalized_mesh, ncol, dim, &coeffs.b)?;
+        let adaptation = CurveCollocationAdaptation::new(&normalized_mesh, ncol)?;
 
         // The NS characteristic operator is defined on a doubled period after
         // eliminating collocation stages, hence 2 * ntst * dim unknowns.
@@ -202,9 +249,11 @@ impl<'a> NSCurveProblem<'a> {
             param2_index,
             dim,
             ntst,
+            normalized_mesh,
             ncol,
             coeffs,
             phase_gauge,
+            adaptation,
             borders1,
             borders2,
             index1,
@@ -227,6 +276,26 @@ impl<'a> NSCurveProblem<'a> {
         problem.set_ns_borders_from_operator(&seed_operator)?;
 
         Ok(problem)
+    }
+
+    pub fn normalized_mesh(&self) -> &[f64] {
+        &self.normalized_mesh
+    }
+
+    pub fn set_collocation_adaptivity(
+        &mut self,
+        settings: CollocationAdaptivitySettings,
+    ) -> Result<()> {
+        self.adaptation.configure(settings)
+    }
+
+    pub fn adaptation_report(&self) -> &CollocationAdaptationReport {
+        self.adaptation.report()
+    }
+
+    pub fn seed_adaptation_report(&mut self, report: CollocationAdaptationReport) -> Result<()> {
+        self.adaptation
+            .seed_report(report, &self.normalized_mesh, self.ncol)
     }
 
     fn ncoords(&self) -> usize {
@@ -296,6 +365,81 @@ impl<'a> NSCurveProblem<'a> {
         &aug.as_slice()[1..1 + stage_len]
     }
 
+    fn defect_estimate(
+        &mut self,
+        aug: &DVector<f64>,
+    ) -> Result<crate::continuation::periodic::CollocationDefectEstimate> {
+        let aug_slice = aug.as_slice();
+        let mesh_states = (0..=self.ntst)
+            .map(|mesh| self.mesh_slice(aug_slice, mesh).to_vec())
+            .collect::<Vec<_>>();
+        let stage_states = (0..self.ntst)
+            .flat_map(|interval| {
+                (0..self.ncol)
+                    .map(|stage| self.stage_slice(aug_slice, interval, stage).to_vec())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        collocation_defect_estimate_on_mesh(
+            self.system,
+            self.param1_index,
+            self.param2_index,
+            self.get_p1(aug),
+            self.get_p2(aug),
+            &mesh_states,
+            &stage_states,
+            self.get_period(aug),
+            &self.normalized_mesh,
+            self.ncol,
+            &self.coeffs.nodes,
+        )
+    }
+
+    fn replace_mesh(
+        &mut self,
+        normalized_mesh: Vec<f64>,
+        accepted_aug: &DVector<f64>,
+    ) -> Result<()> {
+        let ntst = normalized_mesh.len().saturating_sub(1);
+        let normalized_mesh = validated_normalized_mesh(ntst, &normalized_mesh)?;
+        let mut phase_gauge = FullProfilePhaseGauge::new_on_mesh(
+            &normalized_mesh,
+            self.ncol,
+            self.dim,
+            &self.coeffs.b,
+        )?;
+        let stage_len = ntst * self.ncol * self.dim;
+        let mesh_len = (ntst + 1) * self.dim;
+        let profile_end = 1 + stage_len + mesh_len;
+        if accepted_aug.len() != profile_end + 3 {
+            bail!("Transferred NS state has an invalid collocation layout");
+        }
+        phase_gauge.set_reference(
+            self.system,
+            self.param1_index,
+            self.param2_index,
+            accepted_aug[0],
+            accepted_aug[profile_end + 1],
+            accepted_aug[profile_end],
+            &accepted_aug.as_slice()[1..1 + stage_len],
+        )?;
+        let border_dim = 2 * ntst * self.dim;
+        let mut phi1 = DVector::zeros(border_dim);
+        phi1[0] = 1.0;
+        let mut phi2 = DVector::zeros(border_dim);
+        phi2[1] = 1.0;
+        self.ntst = ntst;
+        self.normalized_mesh = normalized_mesh;
+        self.phase_gauge = phase_gauge;
+        self.borders1 = LCBorders::new(phi1.clone(), phi1);
+        self.borders2 = LCBorders::new(phi2.clone(), phi2);
+        self.cached_jac = None;
+        self.work_f.resize(ntst * self.ncol * self.dim, 0.0);
+        self.work_j
+            .resize(ntst * self.ncol * self.dim * self.dim, 0.0);
+        Ok(())
+    }
+
     fn set_phase_reference(&mut self, aug: &DVector<f64>) -> Result<()> {
         let stages = self.stage_profile(aug);
         self.phase_gauge.set_reference(
@@ -314,6 +458,128 @@ impl<'a> NSCurveProblem<'a> {
             self.set_phase_reference(aug)?;
         }
         Ok(())
+    }
+
+    fn normal_form_setup(&mut self, aug: &DVector<f64>) -> Result<LimitCycleSetup> {
+        let mesh_states = (0..self.ntst)
+            .map(|mesh| self.mesh_slice(aug.as_slice(), mesh).to_vec())
+            .collect();
+        let stage_states = (0..self.ntst)
+            .map(|interval| {
+                (0..self.ncol)
+                    .map(|stage| self.stage_slice(aug.as_slice(), interval, stage).to_vec())
+                    .collect()
+            })
+            .collect();
+        limit_cycle_setup_from_profile(
+            self.system,
+            self.param1_index,
+            self.param2_index,
+            self.get_p1(aug),
+            self.get_p2(aug),
+            self.get_period(aug),
+            mesh_states,
+            stage_states,
+            self.ncol,
+            &self.normalized_mesh,
+        )
+    }
+
+    pub(crate) fn codim2_coefficients_at(
+        &mut self,
+        aug: &DVector<f64>,
+        bifurcation_type: Codim2BifurcationType,
+        test_value: f64,
+    ) -> Result<Vec<Codim2Coefficient>> {
+        match bifurcation_type {
+            Codim2BifurcationType::Chenciner => {
+                let setup = self.normal_form_setup(aug)?;
+                let normal_form = periodic_neimark_sacker_normal_form_for_cosine_with_settings(
+                    self.system,
+                    &setup,
+                    self.param1_index,
+                    self.get_k(aug),
+                    curve_normal_form_settings(self.ntst, self.ncol),
+                )?;
+                let mut coefficients = vec![
+                    Codim2Coefficient {
+                        name: "first_lyapunov_coefficient".to_string(),
+                        value: normal_form.cubic_coefficient.re,
+                    },
+                    Codim2Coefficient {
+                        name: "cubic_imaginary_part".to_string(),
+                        value: normal_form.cubic_coefficient.im,
+                    },
+                    Codim2Coefficient {
+                        name: "parameter_coefficient_real".to_string(),
+                        value: normal_form.parameter_coefficient.re,
+                    },
+                    Codim2Coefficient {
+                        name: "parameter_coefficient_imaginary".to_string(),
+                        value: normal_form.parameter_coefficient.im,
+                    },
+                    Codim2Coefficient {
+                        name: "critical_angle".to_string(),
+                        value: normal_form.angle,
+                    },
+                    Codim2Coefficient {
+                        name: "critical_modulus_residual".to_string(),
+                        value: (normal_form.multiplier.norm() - 1.0).abs(),
+                    },
+                ];
+                append_return_map_conditioning(&mut coefficients, normal_form.conditioning);
+                Ok(coefficients)
+            }
+            Codim2BifurcationType::FoldNeimarkSacker
+            | Codim2BifurcationType::FlipNeimarkSacker
+            | Codim2BifurcationType::DoubleNeimarkSacker => {
+                let jac = self.build_periodic_jac(aug)?;
+                let remapped = self.remap_jac_for_multiplier_extraction(&jac);
+                let multipliers =
+                    extract_multipliers_collocation(&remapped, self.dim, self.ntst, self.ncol)?;
+                let secondary = secondary_cycle_tests(
+                    &multipliers,
+                    TrackedCycleMultiplier::UnitPair {
+                        cosine: self.get_k(aug),
+                    },
+                )?;
+                Ok(secondary_spectral_coefficients(&secondary))
+            }
+            Codim2BifurcationType::Resonance1_1
+            | Codim2BifurcationType::Resonance1_2
+            | Codim2BifurcationType::Resonance1_3
+            | Codim2BifurcationType::Resonance1_4 => {
+                let order = match bifurcation_type {
+                    Codim2BifurcationType::Resonance1_1 => 1.0,
+                    Codim2BifurcationType::Resonance1_2 => 2.0,
+                    Codim2BifurcationType::Resonance1_3 => 3.0,
+                    Codim2BifurcationType::Resonance1_4 => 4.0,
+                    _ => unreachable!(),
+                };
+                Ok(vec![
+                    Codim2Coefficient {
+                        name: "resonance_order".to_string(),
+                        value: order,
+                    },
+                    Codim2Coefficient {
+                        name: "tracked_cosine".to_string(),
+                        value: self.get_k(aug),
+                    },
+                    Codim2Coefficient {
+                        name: "tracked_angle".to_string(),
+                        value: self.get_k(aug).clamp(-1.0, 1.0).acos(),
+                    },
+                    Codim2Coefficient {
+                        name: "resonance_test".to_string(),
+                        value: test_value,
+                    },
+                ])
+            }
+            _ => Ok(vec![Codim2Coefficient {
+                name: "test_value".to_string(),
+                value: test_value,
+            }]),
+        }
     }
 
     fn eval_f(&mut self, state: &[f64], p1: f64, p2: f64) -> Vec<f64> {
@@ -426,14 +692,12 @@ impl<'a> NSCurveProblem<'a> {
         let p1 = self.get_p1(aug);
         let p2 = self.get_p2(aug);
         let period = self.get_period(aug);
-        let h = period / self.ntst as f64;
         let aug_slice = aug.as_slice();
 
         let n_stages = self.ntst * self.ncol;
         let n_eqs = n_stages * self.dim + self.ntst * self.dim + self.dim + 1;
         let n_vars = self.ncoords() + 1;
         let period_col = n_vars - 1;
-        let dh_dperiod = 1.0 / self.ntst as f64;
 
         let mut jac = DMatrix::<f64>::zeros(n_eqs, n_vars);
 
@@ -456,6 +720,8 @@ impl<'a> NSCurveProblem<'a> {
 
         // Collocation equations
         for interval in 0..self.ntst {
+            let dh_dperiod = self.normalized_mesh[interval + 1] - self.normalized_mesh[interval];
+            let h = period * dh_dperiod;
             for stage in 0..self.ncol {
                 let stage_idx = interval * self.ncol + stage;
                 let row = stage_idx * self.dim;
@@ -491,6 +757,8 @@ impl<'a> NSCurveProblem<'a> {
         // Continuity equations
         let cont_row = n_stages * self.dim;
         for interval in 0..self.ntst {
+            let dh_dperiod = self.normalized_mesh[interval + 1] - self.normalized_mesh[interval];
+            let h = period * dh_dperiod;
             let row = cont_row + interval * self.dim;
             let mesh_col = n_stages * self.dim + interval * self.dim;
             let next_col = n_stages * self.dim + ((interval + 1) % (self.ntst + 1)) * self.dim;
@@ -590,9 +858,9 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
 
     fn palc_metric_weights(&self, _aug: &DVector<f64>) -> Result<DVector<f64>> {
         let stage_dim = self.ntst * self.ncol * self.dim;
-        explicit_profile_palc_weights(
+        explicit_profile_palc_weights_on_mesh(
             self.dimension() + 1,
-            self.ntst,
+            &self.normalized_mesh,
             self.ncol,
             self.dim,
             &self.coeffs.nodes,
@@ -615,7 +883,6 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
         }
         self.ensure_phase_reference(aug)?;
 
-        let h = period / self.ntst as f64;
         let aug_slice = aug.as_slice();
         let n_stages = self.ntst * self.ncol;
 
@@ -631,6 +898,7 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
 
         // Collocation equations
         for interval in 0..self.ntst {
+            let h = period * (self.normalized_mesh[interval + 1] - self.normalized_mesh[interval]);
             let mesh = self.mesh_slice(aug_slice, interval);
             for stage in 0..self.ncol {
                 let z = self.stage_slice(aug_slice, interval, stage);
@@ -650,6 +918,7 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
         // Continuity equations
         let cont_row = n_stages * self.dim;
         for interval in 0..self.ntst {
+            let h = period * (self.normalized_mesh[interval + 1] - self.normalized_mesh[interval]);
             let mesh_i = self.mesh_slice(aug_slice, interval);
             let mesh_next = self.mesh_slice(aug_slice, interval + 1);
             let row = cont_row + interval * self.dim;
@@ -729,18 +998,36 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
         let multipliers =
             extract_multipliers_collocation(&remapped_jac, self.dim, self.ntst, self.ncol)?;
 
-        // Codim-2 test functions for NS curve
-        // R1, R2, R3, R4: strong resonances at k = 1, -1, -1/2, 0
-        // LPNS, CH, PDNS, NSNS
         let mut tests = Codim2TestFunctions::default();
         tests.resonance_1_1 = k - 1.0; // R1: k = cos(0) = 1
         tests.resonance_1_2 = k + 1.0; // R2: k = cos(π) = -1
         tests.resonance_1_3 = k + 0.5; // R3: k = cos(2π/3) = -1/2
         tests.resonance_1_4 = k; // R4: k = cos(π/2) = 0
-        tests.fold_ns = 1.0; // LPNS placeholder
-        tests.chenciner = 1.0; // CH placeholder
-        tests.flip_ns = 1.0; // PDNS placeholder
-        tests.double_ns = 1.0; // NSNS placeholder
+        match secondary_cycle_tests(&multipliers, TrackedCycleMultiplier::UnitPair { cosine: k }) {
+            Ok(secondary) => {
+                tests.fold_ns = secondary.plus_one;
+                tests.flip_ns = secondary.minus_one;
+                tests.double_ns = secondary.unit_pair;
+            }
+            Err(_) => {
+                tests.fold_ns = f64::NAN;
+                tests.flip_ns = f64::NAN;
+                tests.double_ns = f64::NAN;
+            }
+        }
+        tests.chenciner = self
+            .normal_form_setup(aug)
+            .and_then(|setup| {
+                periodic_neimark_sacker_normal_form_for_cosine_with_settings(
+                    self.system,
+                    &setup,
+                    self.param1_index,
+                    k,
+                    curve_normal_form_settings(self.ntst, self.ncol),
+                )
+            })
+            .map(|normal_form| normal_form.cubic_coefficient.re)
+            .unwrap_or(f64::NAN);
         self.codim2_tests = tests;
 
         Ok(PointDiagnostics {
@@ -751,30 +1038,103 @@ impl<'a> ContinuationProblem for NSCurveProblem<'a> {
     }
 
     fn is_step_acceptable(&mut self, aug: &DVector<f64>) -> Result<bool> {
-        let aug_slice = aug.as_slice();
-        let mesh_states = (0..=self.ntst)
-            .map(|mesh| self.mesh_slice(aug_slice, mesh).to_vec())
-            .collect::<Vec<_>>();
-        let stage_states = (0..self.ntst)
-            .flat_map(|interval| {
-                (0..self.ncol)
-                    .map(|stage| self.stage_slice(aug_slice, interval, stage).to_vec())
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-        collocation_profile_is_acceptable(
-            self.system,
-            self.param1_index,
-            self.param2_index,
-            self.get_p1(aug),
-            self.get_p2(aug),
-            &mesh_states,
-            &stage_states,
-            self.get_period(aug),
-            self.ntst,
+        Ok(self.defect_estimate(aug)?.max_scaled_defect
+            <= self.adaptation.settings().defect_tolerance)
+    }
+
+    fn handle_step_rejection(
+        &mut self,
+        accepted_aug: &DVector<f64>,
+        accepted_tangent: &DVector<f64>,
+        rejected_aug: &DVector<f64>,
+        branch_states: &[Vec<f64>],
+    ) -> Result<StepRejectionAction> {
+        let estimate = self.defect_estimate(rejected_aug)?;
+        if estimate.max_scaled_defect <= self.adaptation.settings().defect_tolerance {
+            return Ok(StepRejectionAction::ReduceStep);
+        }
+        let old_mesh = self.normalized_mesh.clone();
+        let CurveMeshAdaptationDecision::Adapt(new_mesh) =
+            self.adaptation.decide(&estimate, &old_mesh, self.ncol)?
+        else {
+            return Ok(StepRejectionAction::Terminate);
+        };
+        let transferred_aug = transfer_explicit_curve_aug(
+            accepted_aug,
+            &old_mesh,
+            &new_mesh,
             self.ncol,
+            self.dim,
             &self.coeffs.nodes,
-        )
+            3,
+        )?;
+        let transferred_tangent = transfer_explicit_curve_aug(
+            accepted_tangent,
+            &old_mesh,
+            &new_mesh,
+            self.ncol,
+            self.dim,
+            &self.coeffs.nodes,
+            3,
+        )?;
+        let transferred_branch_states = branch_states
+            .iter()
+            .map(|state| {
+                transfer_explicit_curve_state(
+                    state,
+                    &old_mesh,
+                    &new_mesh,
+                    self.ncol,
+                    self.dim,
+                    &self.coeffs.nodes,
+                    3,
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.replace_mesh(new_mesh, &transferred_aug)?;
+        Ok(StepRejectionAction::Refined {
+            accepted_aug: transferred_aug,
+            accepted_tangent: transferred_tangent,
+            branch_states: transferred_branch_states,
+            branch_type: None,
+        })
+    }
+
+    fn transfer_branch_states_to_current_discretization(
+        &self,
+        branch_states: &[Vec<f64>],
+    ) -> Result<Vec<Vec<f64>>> {
+        if self.adaptation.report().attempts.is_empty()
+            && branch_states
+                .iter()
+                .all(|state| state.len() == self.dimension())
+        {
+            return Ok(branch_states.to_vec());
+        }
+        let mut transferred = branch_states.to_vec();
+        for attempt in self.adaptation.transfer_attempts() {
+            transferred = transferred
+                .iter()
+                .map(|state| {
+                    transfer_explicit_curve_state(
+                        state,
+                        &attempt.old_normalized_mesh,
+                        &attempt.new_normalized_mesh,
+                        self.ncol,
+                        self.dim,
+                        &self.coeffs.nodes,
+                        3,
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+        }
+        if transferred
+            .iter()
+            .any(|state| state.len() != self.dimension())
+        {
+            bail!("Adaptive NS continuation failed to transfer branch history");
+        }
+        Ok(transferred)
     }
 
     fn update_after_step(&mut self, aug: &DVector<f64>) -> Result<()> {
@@ -1024,11 +1384,12 @@ mod tests {
     }
 
     #[test]
-    fn bvp_period_column_matches_finite_difference() {
+    fn nonuniform_bvp_period_column_matches_finite_difference() {
         let mut system = linear_growth_system();
         let ntst = 2;
         let ncol = 1;
-        let mut problem = NSCurveProblem::new(
+        let normalized_mesh = vec![0.0, 0.2, 1.0];
+        let mut problem = NSCurveProblem::new_on_mesh(
             &mut system,
             nonstationary_stage_first_state(ntst, ncol, 2),
             1.0,
@@ -1039,8 +1400,10 @@ mod tests {
             0.5,
             ntst,
             ncol,
+            normalized_mesh.clone(),
         )
         .expect("NS problem");
+        assert_eq!(problem.normalized_mesh(), normalized_mesh);
         let mut aug = DVector::zeros(problem.aug_dim());
         aug[1] = 1.0;
         aug[2] = -2.0;

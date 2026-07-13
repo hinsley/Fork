@@ -582,6 +582,8 @@ pub struct ContinuationSettings {
 pub enum BifurcationType {
     None,
     Fold,
+    /// Simple `+1` multiplier crossing of a discrete map.
+    BranchPoint,
     Hopf,
     NeutralSaddle,
     CycleFold,
@@ -609,6 +611,10 @@ pub enum BranchType {
     LimitCycle {
         ntst: usize,
         ncol: usize,
+        /// Persistent normalized collocation interval boundaries.  Empty is
+        /// the legacy uniform-mesh representation.
+        #[serde(default)]
+        normalized_mesh: Vec<f64>,
     },
     HomoclinicCurve {
         ntst: usize,
@@ -826,13 +832,47 @@ pub struct Codim2Conditioning {
     pub jacobian_condition_number: Option<f64>,
 }
 
+/// Availability of a mathematically adjacent codimension-one cycle curve.
+///
+/// Intersection switches reuse the refined point's state, parameters, period,
+/// and collocation mesh. `target_auxiliary` supplies the target NS cosine when
+/// the destination defining system needs one.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Codim2BranchSwitch {
+    pub target: Codim1CurveType,
+    pub available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_auxiliary: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Scope of the mathematical certification attached to a refined event.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct Codim2Certification {
+    /// The codimension-one defining equations, codimension-two scalar test,
+    /// and curve-corrected localization all meet their requested tolerances.
+    pub defining_conditions_verified: bool,
+    /// Whether an order-specific higher normal-form nondegeneracy coefficient
+    /// was evaluated.
+    pub nondegeneracy_evaluated: bool,
+    /// Result of that evaluation; absent when the coefficient was not computed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nondegenerate: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 /// Refinement diagnostics and provenance attached to a codimension-two curve point.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Codim2PointData {
     #[serde(rename = "type")]
     pub bifurcation_type: Codim2BifurcationType,
     pub refined: bool,
-    /// True when a higher-order nondegeneracy invariant is not yet available.
+    /// True when an available required check failed or a required coefficient
+    /// is missing, so the event is not yet actionable. Supported parity events
+    /// whose external reference exposes only defining conditions remain false;
+    /// their narrower certification is explicit in `certification`.
     pub candidate: bool,
     pub test_function: String,
     pub test_function_value: f64,
@@ -846,6 +886,10 @@ pub struct Codim2PointData {
     pub coefficients: Vec<Codim2Coefficient>,
     #[serde(default)]
     pub conditioning: Codim2Conditioning,
+    #[serde(default)]
+    pub branch_switches: Vec<Codim2BranchSwitch>,
+    #[serde(default)]
+    pub certification: Codim2Certification,
 }
 
 /// Index and classification of a codimension-two point on a stored curve.
@@ -876,6 +920,10 @@ pub struct Codim1CurvePoint {
     /// Optional refinement/classification diagnostics for a codimension-two point.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codim2: Option<Codim2PointData>,
+    /// All events refined on this point's source segment. `codim2` remains the
+    /// deterministic primary event for backwards-compatible clients.
+    #[serde(default)]
+    pub codim2_events: Vec<Codim2PointData>,
 }
 
 /// A complete codim-1 bifurcation curve branch.
@@ -887,6 +935,14 @@ pub struct Codim1CurveBranch {
     pub param1_index: usize,
     /// Index of second active parameter
     pub param2_index: usize,
+    /// Periodic collocation metadata for LC-defined curves. Equilibrium
+    /// curves retain zero/empty legacy values.
+    #[serde(default)]
+    pub ntst: usize,
+    #[serde(default)]
+    pub ncol: usize,
+    #[serde(default)]
+    pub normalized_mesh: Vec<f64>,
     /// Points on the curve
     pub points: Vec<Codim1CurvePoint>,
     /// Refined codim-2 bifurcation indices and classifications.

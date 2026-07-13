@@ -1,4 +1,5 @@
 import type { InspectorSelectionController } from '../../../InspectorDetailsPanel'
+import { CollocationAdaptivityFields } from './CollocationAdaptivityFields'
 
 export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectionController }) {
   const {
@@ -287,6 +288,13 @@ export function LimitCycleFromHopfWorkflow({ scope }: { scope: InspectorSelectio
                               data-testid="limit-cycle-from-hopf-step-tolerance"
                             />
                           </label>
+                          <CollocationAdaptivityFields
+                            draft={limitCycleFromHopfDraft}
+                            onChange={(patch) =>
+                              setLimitCycleFromHopfDraft((prev) => ({ ...prev, ...patch }))
+                            }
+                            testIdPrefix="limit-cycle-from-hopf"
+                          />
                           {limitCycleFromHopfError ? (
                             <div className="field-error">{limitCycleFromHopfError}</div>
                           ) : null}

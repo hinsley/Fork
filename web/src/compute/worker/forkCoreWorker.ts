@@ -33,6 +33,7 @@ import type {
   HopfCurveContinuationRequest,
   IsoperiodicCurveContinuationRequest,
   LimitCycleContinuationFromHopfRequest,
+  LimitCycleCodim1CurveContinuationRequest,
   LimitCycleContinuationFromOrbitRequest,
   LimitCycleContinuationFromPDRequest,
   LimitCycleContinuationResult,
@@ -44,6 +45,10 @@ import type {
   Manifold2DExtensionResult,
   LyapunovExponentsRequest,
   MapCycleContinuationFromPDRequest,
+  NormalFormComputationRequest,
+  NormalFormComputationResult,
+  PeriodicBranchPointSwitchRequest,
+  PeriodicBranchPointSwitchResult,
   SampleMap1DFunctionRequest,
   SampleMap1DFunctionResult,
   SimulateOrbitRequest,
@@ -56,7 +61,10 @@ import type {
 import { discardHomoclinicInitialApproximationPoint } from '../../system/continuation'
 import { periodicPeriodsForConfig } from '../../system/periodicity'
 import type { SystemConfig } from '../../system/types'
-import { runSteppedRunnerToCompletion } from './steppedRunner'
+import {
+  runAdaptiveSteppedRunnerToCompletion,
+  runSteppedRunnerToCompletion,
+} from './steppedRunner'
 import { createWorkerSuccessResponse, getComputeHandler } from '../computeProtocol'
 import type {
   ComputeHandlerMap,
@@ -107,6 +115,23 @@ function createWasmSystem(wasm: WasmModule, system: SystemConfig): WasmSystem {
   ) as WasmSystem
   instance.set_periods(new Float64Array(periodicPeriodsForConfig(system)))
   return instance
+}
+
+function resolvedCycleMesh(ntst: number, normalizedMesh?: number[]): Float64Array {
+  if (normalizedMesh && normalizedMesh.length === ntst + 1) {
+    return new Float64Array(normalizedMesh)
+  }
+  return new Float64Array(
+    Array.from({ length: ntst + 1 }, (_, index) => index / Math.max(ntst, 1))
+  )
+}
+
+function isUniformCycleMesh(mesh: number[]): boolean {
+  const intervals = mesh.length - 1
+  if (intervals < 1) return false
+  return mesh.every(
+    (value, index) => Math.abs(value - index / intervals) <= 1e-12
+  )
 }
 
 async function runOrbit(request: SimulateOrbitRequest, signal: AbortSignal): Promise<SimulateOrbitResult> {
@@ -344,7 +369,7 @@ async function runEquilibriumContinuation(
 ): Promise<EquilibriumContinuationResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const settings: Record<string, number> = { ...request.settings }
+  const settings = { ...request.settings }
   const mapIterations =
     request.system.type === 'map' ? request.mapIterations ?? 1 : 1
   const runner = new wasm.WasmEquilibriumRunner(
@@ -361,7 +386,7 @@ async function runEquilibriumContinuation(
     new Float64Array(periodicPeriodsForConfig(request.system))
   )
 
-  return runSteppedRunnerToCompletion(runner, signal, onProgress)
+  return runAdaptiveSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 function isCodim1BranchType(branchType: unknown): boolean {
@@ -386,7 +411,7 @@ async function runContinuationExtension(
 ): Promise<ContinuationExtensionResult> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const settings: Record<string, number> = { ...request.settings }
+  const settings = { ...request.settings }
   const mapIterations =
     request.system.type === 'map' ? request.mapIterations ?? 1 : 1
   const runner = isCodim1BranchType(request.branchData.branch_type)
@@ -415,7 +440,7 @@ async function runContinuationExtension(
         request.forward
       )
 
-  return runSteppedRunnerToCompletion(runner, signal, onProgress)
+  return runAdaptiveSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runEquilibriumManifold1D(
@@ -534,6 +559,11 @@ async function runLimitCycleManifold2D(
   abortIfNeeded(signal)
   const wasm = await loadWasm()
   const system = createWasmSystem(wasm, request.system)
+  if (!isUniformCycleMesh(request.normalizedMesh)) {
+    throw new Error(
+      'Limit-cycle manifold initialization does not yet support an explicit nonuniform collocation mesh. Recontinue on a uniform mesh first.'
+    )
+  }
 
   const computeWithProgress = system.compute_cycle_manifold_2d_with_progress
   if (typeof computeWithProgress === 'function') {
@@ -573,7 +603,22 @@ async function runComputeLimitCycleFloquetModes(
   const wasm = await loadWasm()
   const system = createWasmSystem(wasm, request.system)
   abortIfNeeded(signal)
+  const computeModesOnMesh = system.compute_limit_cycle_floquet_modes_on_mesh
   const computeModes = system.compute_limit_cycle_floquet_modes
+  if (typeof computeModesOnMesh === 'function') {
+    return computeModesOnMesh.call(
+      system,
+      new Float64Array(request.cycleState),
+      request.ncol,
+      new Float64Array(request.normalizedMesh),
+      request.parameterName
+    )
+  }
+  if (!isUniformCycleMesh(request.normalizedMesh)) {
+    throw new Error(
+      'This WASM build cannot compute Floquet modes on a nonuniform collocation mesh. Rebuild fork_wasm pkg-web.'
+    )
+  }
   if (typeof computeModes !== 'function') {
     throw new Error(
       'Floquet mode computation is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
@@ -588,6 +633,155 @@ async function runComputeLimitCycleFloquetModes(
   )
 }
 
+async function computeNormalForm(
+  request: NormalFormComputationRequest,
+  signal: AbortSignal
+): Promise<NormalFormComputationResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = createWasmSystem(wasm, request.system)
+  if (request.sourceType === 'Map') {
+    const paramIndex = request.system.paramNames.indexOf(request.paramName)
+    if (paramIndex < 0) throw new Error(`Unknown map parameter: ${request.paramName}`)
+    const compute = (system as unknown as {
+      compute_map_normal_form?: (...args: unknown[]) => unknown
+    }).compute_map_normal_form
+    if (typeof compute !== 'function') {
+      throw new Error('Map normal forms are unavailable in this WASM build.')
+    }
+    return {
+      normalForm: compute.call(
+        system,
+        new Float64Array(request.state),
+        paramIndex,
+        request.paramValue,
+        request.mapIterations,
+        request.normalFormType
+      ) as NormalFormComputationResult['normalForm'],
+    }
+  }
+  if (request.sourceType === 'PeriodicOrbit') {
+    const paramIndex = request.system.paramNames.indexOf(request.paramName)
+    if (paramIndex < 0) throw new Error(`Unknown periodic-orbit parameter: ${request.paramName}`)
+    if (request.normalizedMesh.length < 3) {
+      throw new Error(
+        'Periodic normal forms require persistent normalized-mesh metadata; recontinue this legacy branch first.'
+      )
+    }
+    const compute = (system as unknown as {
+      compute_periodic_normal_form_from_packed_state?: (...args: unknown[]) => unknown
+    }).compute_periodic_normal_form_from_packed_state
+    if (typeof compute !== 'function') {
+      throw new Error(
+        'Packed periodic-orbit normal forms are unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+      )
+    }
+    return {
+      normalForm: compute.call(
+        system,
+        new Float64Array(request.state),
+        paramIndex,
+        request.paramValue,
+        request.collocationDegree,
+        new Float64Array(request.normalizedMesh),
+        request.normalFormType
+      ) as NormalFormComputationResult['normalForm'],
+    }
+  }
+
+  const param1Index = request.system.paramNames.indexOf(request.param1Name)
+  const param2Index = request.system.paramNames.indexOf(request.param2Name)
+  if (param1Index < 0 || param2Index < 0 || param1Index === param2Index) {
+    throw new Error('Equilibrium codimension-two normal forms require two distinct parameters.')
+  }
+  const methodName = request.sourceType === 'ZeroHopf'
+    ? 'compute_zero_hopf_normal_form'
+    : 'compute_hopf_hopf_normal_form'
+  const compute = (system as unknown as Record<string, unknown>)[methodName]
+  if (typeof compute !== 'function') {
+    throw new Error(`${request.sourceType} normal forms are unavailable in this WASM build.`)
+  }
+  const raw = (compute as (...args: unknown[]) => Record<string, unknown>).call(
+    system,
+    new Float64Array(request.state),
+    param1Index,
+    param2Index,
+    request.param1Value,
+    request.param2Value,
+    request.sourceFrequency
+  )
+  return {
+    normalForm: {
+      ...raw,
+      type: request.sourceType,
+    } as NormalFormComputationResult['normalForm'],
+  }
+}
+
+async function runPeriodicBranchPointSwitch(
+  request: PeriodicBranchPointSwitchRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<PeriodicBranchPointSwitchResult> {
+  abortIfNeeded(signal)
+  if (request.system.type !== 'flow') {
+    throw new Error('Periodic branch-point switching requires a flow system.')
+  }
+  if (request.normalizedMesh.length < 3) {
+    throw new Error(
+      'Periodic branch-point switching requires persistent normalized-mesh metadata; recontinue this legacy branch first.'
+    )
+  }
+  const paramIndex = request.system.paramNames.indexOf(request.paramName)
+  if (paramIndex < 0) throw new Error(`Unknown periodic-orbit parameter: ${request.paramName}`)
+  const wasm = await loadWasm()
+  const system = createWasmSystem(wasm, request.system)
+  const switchBranch = (system as unknown as {
+    switch_periodic_branch_from_packed_state?: (...args: unknown[]) => {
+      normalForm: PeriodicBranchPointSwitchResult['normalForm']
+      setup: PeriodicBranchPointSwitchResult['setup']
+    }
+  }).switch_periodic_branch_from_packed_state
+  if (typeof switchBranch !== 'function') {
+    throw new Error(
+      'Packed periodic branch-point switching is unavailable in this WASM build. Rebuild fork_wasm pkg-web.'
+    )
+  }
+  const switched = switchBranch.call(
+    system,
+    new Float64Array(request.state),
+    paramIndex,
+    request.paramValue,
+    request.collocationDegree,
+    new Float64Array(request.normalizedMesh),
+    request.amplitude
+  )
+  if (
+    switched.normalForm.kind !== 'Transcritical' &&
+    switched.normalForm.kind !== 'Pitchfork'
+  ) {
+    throw new Error(
+      `Periodic ${switched.normalForm.kind} points do not have a generic secondary cycle branch.`
+    )
+  }
+  const runner = new wasm.WasmLimitCycleRunner(
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    request.system.type,
+    switched.setup,
+    request.paramName,
+    { ...request.settings },
+    request.forward
+  )
+  const branch = await runAdaptiveSteppedRunnerToCompletion(runner, signal, onProgress)
+  if (!branch.points || branch.points.length <= 1) {
+    throw new Error('Periodic branch switching did not accept a secondary continuation step.')
+  }
+  return { ...switched, branch }
+}
+
 async function runFoldCurveContinuation(
   request: FoldCurveContinuationRequest,
   signal: AbortSignal,
@@ -595,7 +789,7 @@ async function runFoldCurveContinuation(
 ): Promise<Codim1CurveBranch> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const settings: Record<string, number> = { ...request.settings }
+  const settings = { ...request.settings }
   const mapIterations =
     request.system.type === 'map' ? request.mapIterations ?? 1 : 1
   const runner = new wasm.WasmFoldCurveRunner(
@@ -624,7 +818,7 @@ async function runHopfCurveContinuation(
 ): Promise<Codim1CurveBranch> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const settings: Record<string, number> = { ...request.settings }
+  const settings = { ...request.settings }
   const mapIterations =
     request.system.type === 'map' ? request.mapIterations ?? 1 : 1
   const runner = new wasm.WasmHopfCurveRunner(
@@ -655,7 +849,165 @@ async function runCodim2BranchSwitch(
   abortIfNeeded(signal)
   const wasm = await loadWasm()
   const system = createWasmSystem(wasm, request.system)
-  const settings: Record<string, number> = { ...request.settings }
+  const settings = { ...request.settings }
+
+  if (request.sourceType === 'ZeroHopf' || request.sourceType === 'DoubleHopf') {
+    if (request.system.type !== 'flow') {
+      throw new Error('Zero-Hopf and Hopf-Hopf branch switching require a flow system.')
+    }
+    const param1Index = request.system.paramNames.indexOf(request.param1Name)
+    const param2Index = request.system.paramNames.indexOf(request.param2Name)
+    if (param1Index < 0 || param2Index < 0 || param1Index === param2Index) {
+      throw new Error('Equilibrium codimension-two switching requires two distinct parameters.')
+    }
+    const frequency = request.frequency
+    if (!Number.isFinite(frequency) || (frequency ?? 0) <= 0) {
+      throw new Error(`${request.sourceType} switching requires a positive source frequency.`)
+    }
+    const cycleAmplitude = request.cycleAmplitude ?? request.perturbation
+    const orientationSign = request.orientation === 'Negative' ? -1 : 1
+    const uniformMesh = resolvedCycleMesh(request.ntst)
+
+    type EquilibriumSwitchResult = {
+      normalForm: Record<string, unknown> & {
+        frequency?: number
+        frequency1?: number
+        frequency2?: number
+      }
+      equilibriumCurveSeeds?: Codim2BranchSeed[]
+      hopfCurveSeeds?: Codim2BranchSeed[]
+      neimarkSackerSeed?: Codim2BranchSeed | null
+      neimarkSackerSeeds?: Codim2BranchSeed[]
+    }
+    const switchName = request.sourceType === 'ZeroHopf'
+      ? 'switch_from_zero_hopf'
+      : 'switch_from_hopf_hopf'
+    const switchMethod = (system as unknown as Record<string, unknown>)[switchName]
+    if (typeof switchMethod !== 'function') {
+      throw new Error(`${request.sourceType} branch switching is unavailable in this WASM build.`)
+    }
+    const switched = (switchMethod as (...args: unknown[]) => EquilibriumSwitchResult).call(
+      system,
+      new Float64Array(request.state),
+      param1Index,
+      param2Index,
+      request.param1Value,
+      request.param2Value,
+      frequency,
+      request.perturbation,
+      cycleAmplitude,
+      request.ntst,
+      request.ncol,
+      request.tolerance
+    )
+
+    let seed: Codim2BranchSeed | undefined
+    if (request.sourceType === 'ZeroHopf') {
+      if (request.target === 'NeimarkSacker') {
+        seed = switched.neimarkSackerSeed ?? undefined
+        if (!seed) {
+          throw new Error(
+            'This Zero-Hopf normal form does not satisfy the sign condition for an NS curve of periodic orbits.'
+          )
+        }
+      } else if (request.target === 'Fold' || request.target === 'Hopf') {
+        seed = switched.equilibriumCurveSeeds?.find(
+          (candidate) =>
+            candidate.target === request.target &&
+            Math.sign(candidate.perturbation) === orientationSign
+        )
+      } else {
+        throw new Error(`Zero-Hopf points cannot switch to ${request.target}.`)
+      }
+    } else if (request.target === 'Hopf') {
+      const mode = request.mode ?? 1
+      const modeFrequency = mode === 1
+        ? switched.normalForm.frequency1
+        : switched.normalForm.frequency2
+      seed = switched.hopfCurveSeeds?.find(
+        (candidate) =>
+          Math.sign(candidate.perturbation) === orientationSign &&
+          Number.isFinite(candidate.auxiliary) &&
+          Math.abs((candidate.auxiliary ?? 0) - (modeFrequency ?? 0) ** 2) <=
+            1e-6 * Math.max(1, (modeFrequency ?? 0) ** 2)
+      )
+    } else if (request.target === 'NeimarkSacker') {
+      const modeSign = (request.mode ?? 1) === 1 ? 1 : -1
+      seed = switched.neimarkSackerSeeds?.find(
+        (candidate) => Math.sign(candidate.perturbation) === modeSign
+      )
+    } else {
+      throw new Error(`Hopf-Hopf points cannot switch to ${request.target}.`)
+    }
+    if (!seed) {
+      throw new Error(
+        `No corrected ${request.target} seed matched orientation ${request.orientation ?? 'Positive'}` +
+          (request.mode ? ` and mode ${request.mode}.` : '.')
+      )
+    }
+
+    const runner = request.target === 'Fold'
+      ? new wasm.WasmFoldCurveRunner(
+          request.system.equations,
+          new Float64Array(request.system.params),
+          request.system.paramNames,
+          request.system.varNames,
+          request.system.type,
+          1,
+          new Float64Array(seed.state),
+          request.param1Name,
+          seed.param1_value,
+          request.param2Name,
+          seed.param2_value,
+          settings,
+          request.forward
+        )
+      : request.target === 'Hopf'
+        ? new wasm.WasmHopfCurveRunner(
+            request.system.equations,
+            new Float64Array(request.system.params),
+            request.system.paramNames,
+            request.system.varNames,
+            request.system.type,
+            1,
+            new Float64Array(seed.state),
+            Math.sqrt(seed.auxiliary ?? 0),
+            request.param1Name,
+            seed.param1_value,
+            request.param2Name,
+            seed.param2_value,
+            settings,
+            request.forward
+          )
+        : new wasm.WasmNSCurveRunner(
+            request.system.equations,
+            new Float64Array(request.system.params),
+            request.system.paramNames,
+            request.system.varNames,
+            new Float64Array(seed.state),
+            seed.period ?? 0,
+            request.param1Name,
+            seed.param1_value,
+            request.param2Name,
+            seed.param2_value,
+            seed.auxiliary ?? Number.NaN,
+            seed.ntst ?? request.ntst,
+            seed.ncol ?? request.ncol,
+            uniformMesh,
+            settings,
+            request.forward
+          )
+    const branch = await runAdaptiveSteppedRunnerToCompletion(runner, signal, onProgress)
+    return {
+      target: request.target,
+      branch,
+      seed,
+      normalForm: {
+        ...switched.normalForm,
+        type: request.sourceType === 'ZeroHopf' ? 'ZeroHopf' : 'HopfHopf',
+      } as Codim2BranchSwitchResult['normalForm'],
+    }
+  }
 
   if (request.sourceType === 'GeneralizedHopf') {
     if (request.target !== 'LimitPointCycle') {
@@ -710,10 +1062,11 @@ async function runCodim2BranchSwitch(
       seed.param2_value,
       seed.ntst ?? request.ntst,
       seed.ncol ?? request.ncol,
+      resolvedCycleMesh(seed.ntst ?? request.ntst),
       settings,
       request.forward
     )
-    const branch = await runSteppedRunnerToCompletion(runner, signal, onProgress)
+    const branch = await runAdaptiveSteppedRunnerToCompletion(runner, signal, onProgress)
     return { target: request.target, branch, seed }
   }
 
@@ -819,7 +1172,7 @@ async function runIsoperiodicCurveContinuation(
 ): Promise<Codim1CurveBranch> {
   abortIfNeeded(signal)
   const wasm = await loadWasm()
-  const settings: Record<string, number> = { ...request.settings }
+  const settings = { ...request.settings }
   const runnerCtor = (wasm as { WasmIsoperiodicCurveRunner?: WasmModule['WasmIsoperiodicCurveRunner'] })
     .WasmIsoperiodicCurveRunner
   if (typeof runnerCtor !== 'function') {
@@ -835,7 +1188,7 @@ async function runIsoperiodicCurveContinuation(
           param2Value: number,
           ntst: number,
           ncol: number,
-          settings: Record<string, number>,
+          settings: Record<string, unknown>,
           forward: boolean
         ) => Codim1CurveBranch
       }
@@ -898,11 +1251,65 @@ async function runIsoperiodicCurveContinuation(
     request.param2Value,
     request.ntst,
     request.ncol,
+    resolvedCycleMesh(request.ntst, request.normalizedMesh),
     settings,
     request.forward
   )
 
-  return runSteppedRunnerToCompletion(runner, signal, onProgress)
+  return runAdaptiveSteppedRunnerToCompletion(runner, signal, onProgress)
+}
+
+async function runLimitCycleCodim1CurveContinuation(
+  request: LimitCycleCodim1CurveContinuationRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<Codim1CurveBranch> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const settings = { ...request.settings }
+  const commonArgs = [
+    request.system.equations,
+    new Float64Array(request.system.params),
+    request.system.paramNames,
+    request.system.varNames,
+    new Float64Array(request.lcState),
+    request.period,
+    request.param1Name,
+    request.param1Value,
+    request.param2Name,
+    request.param2Value,
+  ] as const
+  const normalizedMesh = resolvedCycleMesh(request.ntst, request.normalizedMesh)
+
+  const runner = request.curveType === 'LimitPointCycle'
+    ? new wasm.WasmLPCCurveRunner(
+        ...commonArgs,
+        request.ntst,
+        request.ncol,
+        normalizedMesh,
+        settings,
+        request.forward
+      )
+    : request.curveType === 'PeriodDoubling'
+      ? new wasm.WasmPDCurveRunner(
+          ...commonArgs,
+          request.ntst,
+          request.ncol,
+          normalizedMesh,
+          settings,
+          request.forward
+        )
+      : new wasm.WasmNSCurveRunner(
+          ...commonArgs,
+          request.initialK ?? 0,
+          request.ntst,
+          request.ncol,
+          normalizedMesh,
+          settings,
+          request.forward
+        )
+
+  return runAdaptiveSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runLimitCycleContinuationFromHopf(
@@ -923,7 +1330,7 @@ async function runLimitCycleContinuationFromHopf(
     request.ncol
   )
 
-  const settings: Record<string, number> = { ...request.settings }
+  const settings = { ...request.settings }
   const runner = new wasm.WasmLimitCycleRunner(
     request.system.equations,
     new Float64Array(request.system.params),
@@ -936,7 +1343,7 @@ async function runLimitCycleContinuationFromHopf(
     request.forward
   )
 
-  return runSteppedRunnerToCompletion(runner, signal, onProgress)
+  return runAdaptiveSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runLimitCycleContinuationFromOrbit(
@@ -959,7 +1366,7 @@ async function runLimitCycleContinuationFromOrbit(
     request.tolerance
   )
 
-  const settings: Record<string, number> = { ...request.settings }
+  const settings = { ...request.settings }
   const runner = new wasm.WasmLimitCycleRunner(
     request.system.equations,
     new Float64Array(request.system.params),
@@ -972,7 +1379,7 @@ async function runLimitCycleContinuationFromOrbit(
     request.forward
   )
 
-  return runSteppedRunnerToCompletion(runner, signal, onProgress)
+  return runAdaptiveSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runLimitCycleContinuationFromPD(
@@ -984,16 +1391,34 @@ async function runLimitCycleContinuationFromPD(
   const wasm = await loadWasm()
   const system = createWasmSystem(wasm, request.system)
 
-  const setup = system.init_lc_from_pd(
-    new Float64Array(request.lcState),
-    request.parameterName,
-    request.paramValue,
-    request.ntst,
-    request.ncol,
-    request.amplitude
-  )
+  const initOnMesh = system.init_lc_from_pd_on_mesh
+  const setup = typeof initOnMesh === 'function'
+    ? initOnMesh.call(
+        system,
+        new Float64Array(request.lcState),
+        request.parameterName,
+        request.paramValue,
+        request.ncol,
+        new Float64Array(request.normalizedMesh),
+        request.amplitude
+      )
+    : (() => {
+        if (!isUniformCycleMesh(request.normalizedMesh)) {
+          throw new Error(
+            'This WASM build cannot initialize a period-doubled cycle from a nonuniform mesh. Rebuild fork_wasm pkg-web.'
+          )
+        }
+        return system.init_lc_from_pd(
+          new Float64Array(request.lcState),
+          request.parameterName,
+          request.paramValue,
+          request.ntst,
+          request.ncol,
+          request.amplitude
+        )
+      })()
 
-  const settings: Record<string, number> = { ...request.settings }
+  const settings = { ...request.settings }
   const runner = new wasm.WasmLimitCycleRunner(
     request.system.equations,
     new Float64Array(request.system.params),
@@ -1006,7 +1431,7 @@ async function runLimitCycleContinuationFromPD(
     request.forward
   )
 
-  return runSteppedRunnerToCompletion(runner, signal, onProgress)
+  return runAdaptiveSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
 async function runHomoclinicFromLargeCycle(
@@ -1038,7 +1463,7 @@ async function runHomoclinicFromLargeCycle(
     request.freeEps1
   )
 
-  const settings: Record<string, number> = { ...request.settings }
+  const settings = { ...request.settings }
   const HomoclinicRunner = wasm.WasmHomoclinicRunner
   if (typeof HomoclinicRunner !== 'function') {
     throw new Error(
@@ -1095,7 +1520,7 @@ async function runHomoclinicFromHomoclinic(
     request.freeEps1
   )
 
-  const settings: Record<string, number> = { ...request.settings }
+  const settings = { ...request.settings }
   const HomoclinicRunner = wasm.WasmHomoclinicRunner
   if (typeof HomoclinicRunner !== 'function') {
     throw new Error(
@@ -1143,7 +1568,7 @@ async function runHomotopySaddleFromEquilibrium(
     request.eps1Tol
   )
 
-  const settings: Record<string, number> = { ...request.settings }
+  const settings = { ...request.settings }
   const HomotopySaddleRunner = wasm.WasmHomotopySaddleRunner
   if (typeof HomotopySaddleRunner !== 'function') {
     throw new Error(
@@ -1192,7 +1617,7 @@ async function runHomoclinicFromHomotopySaddle(
     request.freeEps1
   )
 
-  const settings: Record<string, number> = { ...request.settings }
+  const settings = { ...request.settings }
   const HomoclinicRunner = wasm.WasmHomoclinicRunner
   if (typeof HomoclinicRunner !== 'function') {
     throw new Error(
@@ -1323,10 +1748,13 @@ const handlers = {
   runEquilibriumManifold2D,
   runLimitCycleManifold2D,
   computeLimitCycleFloquetModes: runComputeLimitCycleFloquetModes,
+  computeNormalForm,
+  runPeriodicBranchPointSwitch,
   runFoldCurveContinuation,
   runHopfCurveContinuation,
   runCodim2BranchSwitch,
   runIsoperiodicCurveContinuation,
+  runLimitCycleCodim1CurveContinuation,
   runLimitCycleContinuationFromHopf,
   runLimitCycleContinuationFromOrbit,
   runLimitCycleContinuationFromPD,

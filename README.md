@@ -53,8 +53,9 @@ Map cycles are represented as fixed points of an iterated map, <code>F<sup>k</su
 | --- | --- | --- |
 | Fixed points and periodic points | **Available** | Solve and continue <code>F<sup>k</sup>(x) = x</code>; return the individual points of a <code>k</code>-cycle. |
 | Saddle-node (fold) | **Available** | Detect and refine folds on map branches; continue fold curves in two parameters. |
-| Period-doubling (flip) | **Detection and branch switching available** | Detect and refine a multiplier crossing <code>-1</code>; construct a seed for the doubled cycle. Two-parameter flip curves are not implemented. |
-| Neimark-Sacker | **Detection available** | Detect and refine a complex multiplier pair crossing the unit circle. Two-parameter Neimark-Sacker curves are not implemented for maps. |
+| Branch point | **Detection and normal form available** | Localize a <code>+1</code> multiplier event and use the reduced map normal form to distinguish a saddle-node from transcritical, pitchfork, or degenerate branching. The coefficients and conditioning diagnostics also support iterated maps. |
+| Period-doubling (flip) | **Detection and branch switching available** | Detect and refine a multiplier crossing <code>-1</code>, compute its cubic map normal form and criticality, and construct a seed for the doubled cycle. Two-parameter flip curves are not implemented. |
+| Neimark-Sacker | **Available** | Detect and refine a complex multiplier pair crossing the unit circle, compute its complex cubic map normal form and criticality, then continue the Neimark-Sacker curve in two parameters. The generic normal form rejects the strong 1:1 through 1:4 resonances explicitly. The core, Node WASM, and web workflow are covered by analytic references with a known unit-circle locus. |
 | Map codimension-two points | **Not implemented** | No dedicated map codimension-two defining system or validated detection path is present. |
 
 ### ODE equilibria
@@ -70,17 +71,18 @@ Map cycles are represented as fixed points of an iterated map, <code>F<sup>k</su
 
 | Object or event | Status | Current capability |
 | --- | --- | --- |
-| Limit-cycle branch | **Available** | Orthogonal collocation, initialization from a Hopf point or sampled orbit, branch extension, Floquet multipliers, and Floquet modes. |
-| Limit point of cycles (LPC) | **Experimental** | A two-parameter LPC defining system and runner exist. Automatic LPC detection on ordinary limit-cycle branches is currently disabled, and LPC codimension-two tests remain placeholders. |
-| Period-doubling of cycles | **Detection and branch switching available; curve experimental** | Detect a multiplier crossing <code>-1</code> and initialize the doubled-period branch. The two-parameter PD-curve path still contains temporary diagnostics and disabled adaptation logic. |
-| Neimark-Sacker / torus bifurcation | **Detection available; curve experimental** | Detect a complex Floquet pair crossing the unit circle. The two-parameter NS-curve path uses a simplified singularity formulation and is not yet benchmarked as a production solver. |
+| Limit-cycle branch | **Available** | Orthogonal collocation, initialization from a Hopf point or sampled orbit, branch extension, Floquet multipliers, and Floquet modes. Ordinary cycles and LPC, PD, NS, and isoperiodic curves monitor the scaled collocation defect, redistribute nonuniform meshes or increase the interval count when needed, transfer accepted states and tangents across each remesh, and retain a structured adaptation report. Mesh-sensitive follow-on workflows preserve the stored mesh or reject unsupported legacy data instead of silently replacing it with a uniform mesh. |
+| Limit point of cycles (LPC) | **Available; published benchmark pending** | Automatically detect and refine a cycle fold on an ordinary limit-cycle branch, then continue its two-parameter LPC curve. An analytic Bautin reference covers automatic detection, multiple curve steps, and the real-WASM web workflow; the published MLfast benchmark remains pending. |
+| Generic branch point of cycles | **Detection, normal form, and switching available** | Distinguish a nontrivial <code>+1</code> Floquet branch point from an LPC using its Poincare-map normal form, then construct, correct, and continue the secondary periodic branch. Analytic transcritical and pitchfork suspensions validate the coefficients and switched branch. |
+| Period-doubling of cycles | **Available; published curve benchmark pending** | Detect a multiplier crossing <code>-1</code>, compute its Poincare-map cubic normal form and criticality, initialize and continue the doubled-period branch, and continue the two-parameter PD curve. The core PD-cycle path is now properly tested—much better than before—including the published MATCONT stable-Orbit-to-collocation-to-PD workflow and multiple accepted PD-curve steps. |
+| Neimark-Sacker / torus bifurcation | **Available; published benchmark pending** | Detect a complex Floquet pair crossing the unit circle, compute its complex cubic Poincare-map normal form and criticality, and continue the two-parameter NS curve. The generic normal form rejects the strong 1:1 through 1:4 resonances explicitly. An analytic transverse-pair reference covers multiple collocation-curve steps; the published Steinmetz-Larter benchmark remains pending. |
 | Isoperiodic curves | **Available** | Continue a limit-cycle family in two parameters while holding its period fixed. This is a continuation constraint, not a bifurcation type. |
 
 ### Global connections
 
 | Connection | Status | Current capability |
 | --- | --- | --- |
-| Homoclinic to a saddle equilibrium | **Experimental** | Open-orbit collocation with equilibrium, endpoint-distance, invariant-subspace, and Riccati constraints. Initialization is available from a large cycle or a homotopy-saddle workflow. |
+| Homoclinic to a saddle equilibrium | **Experimental; analytic reference validated** | Open-orbit collocation with equilibrium, endpoint-distance, invariant-subspace, and Riccati constraints. A Duffing reference validates large-cycle initialization, restart continuation, and conversion from a corrected Stage-D seed through core and Node WASM. Heuristic Stage-D generation itself is not yet certified as a corrected connection. |
 | Homoclinic to a saddle-focus | **Experimental and not benchmarked** | The generic saddle-equilibrium formulation can construct real invariant-subspace bases from complex eigenvectors, but dedicated saddle-focus benchmark coverage is still missing. |
 | Homoclinic to a periodic orbit | **Not implemented** | No periodic-orbit endpoint and invariant-bundle defining system is present. |
 
@@ -90,12 +92,12 @@ Equilibrium fold and Hopf curves run a bracketed secant locator after continuati
 
 | Point type | Status | Current capability |
 | --- | --- | --- |
-| Zero-Hopf and double-Hopf | **Experimental refined detection** | Sign-changing tests on equilibrium fold and Hopf curves use the shared curve-corrected locator, but normal-form classification and branch switching are not implemented. |
-| Strong resonances 1:1, 1:2, 1:3, and 1:4 | **Experimental detection** | Algebraic tests exist on the experimental Neimark-Sacker curve path. |
+| Zero-Hopf and double-Hopf | **Available for nonresonant points** | Curve-corrected detection retains detailed local normal forms and conditioning. Zero-Hopf switches to both orientations of fold and Hopf curves and, when its sign condition holds, an NS curve of cycles. Hopf-Hopf switches to both orientations of either Hopf mode and to either emanating NS curve of cycles. The generic Hopf-Hopf formulas explicitly reject 1:1 and 1:2 internal resonances. |
+| Strong resonances 1:1, 1:2, 1:3, and 1:4 | **Available detection and refinement** | Angle tests on NS curves are curve-corrected and retain resonance diagnostics. R1 and R2 provide typed LPC and PD switches; R3 and R4 report that period-three and period-four branch predictors are unavailable. |
 | Cusp | **Available for ODE fold curves** | Computes the quadratic fold coefficient, refines its zero, and retains the cubic cusp coefficient for the nondegeneracy check. |
 | Bogdanov-Takens | **Available for ODE fold curves** | Refines the double-zero point, retains the nilpotent-chain coefficients and residuals, and switches to nearby fold, Hopf, and homoclinic branches. |
 | Generalized Hopf (Bautin) | **Available for ODE Hopf curves** | Computes and refines the first Lyapunov coefficient, validates the second Lyapunov coefficient, and switches to the emanating limit-point-of-cycles curve. |
-| Chenciner and cycle interaction points | **Not implemented** | Chenciner, fold-flip, fold-NS, flip-NS, double-NS, generalized PD, and cusp-of-cycles tests are incomplete or placeholders. |
+| Cycle interaction points | **Available detection and refinement** | CPC, fold-flip, fold-NS, generalized PD, flip-NS, Chenciner, double-NS, and the four strong resonances use curve-corrected tests with named coefficients, residuals, conditioning, certification, and simultaneous-event preservation. Intersections expose typed alternate-curve switches; higher-order switches whose required normalized coefficient or target curve is unavailable say so explicitly. |
 | Full codimension-two continuation | **Not implemented** | Fork refines points and can switch from selected nondegenerate points, but it does not continue codimension-two loci themselves. |
 
 ## Rendering

@@ -115,9 +115,146 @@ async function run() {
   const utils = require('../src/continuation/utils') as typeof import('../src/continuation/utils');
   const format = require('../src/format') as typeof import('../src/format');
   const labels = require('../src/labels') as typeof import('../src/labels');
+  const normalForms = require('../src/continuation/normal-forms') as typeof import('../src/continuation/normal-forms');
+  const inspect = require('../src/continuation/inspect') as typeof import('../src/continuation/inspect');
+  const collocationAdaptivity = require('../src/continuation/collocation-adaptivity') as typeof import('../src/continuation/collocation-adaptivity');
   const chalk = require('chalk');
 
   chalk.level = 0;
+
+  test('periodic codim2 menu exposes only available adjacent curve switches', () => {
+    const point = {
+      state: [],
+      param_value: 0.25,
+      param2_value: 0.45,
+      stability: 'DoubleNeimarkSacker',
+      codim2_events: [
+        {
+          refined: true,
+          candidate: false,
+          branch_switches: [
+            {
+              target: 'NeimarkSacker',
+              available: true,
+              target_auxiliary: 0.25,
+            },
+            {
+              target: 'LimitPointCycle',
+              available: true,
+            },
+            {
+              target: 'PeriodDoubling',
+              available: true,
+            },
+            {
+              target: 'Homoclinic',
+              available: false,
+              reason: 'Higher-order predictor unavailable.',
+            },
+          ],
+        },
+      ],
+    } as any;
+    assert.deepEqual(inspect.periodicCodim2CurveActionsForPoint('ns_curve', point), [
+      {
+        action: 'SWITCH_PERIODIC_CODIM2_NS',
+        label: 'Switch to Adjacent NS Curve',
+        target: 'NeimarkSacker',
+        targetAuxiliary: 0.25,
+      },
+      {
+        action: 'SWITCH_PERIODIC_CODIM2_LPC',
+        label: 'Switch to Adjacent LPC Curve',
+        target: 'LimitPointCycle',
+        targetAuxiliary: undefined,
+      },
+      {
+        action: 'SWITCH_PERIODIC_CODIM2_PD',
+        label: 'Switch to Adjacent PD Curve',
+        target: 'PeriodDoubling',
+        targetAuxiliary: undefined,
+      },
+    ]);
+    assert.deepEqual(inspect.periodicCodim2CurveActionsForPoint('limit_cycle', point), []);
+    const unavailablePoint = {
+      ...point,
+      codim2_events: [
+        {
+          refined: true,
+          candidate: false,
+          branch_switches: [
+            {
+              target: 'LimitPointCycle',
+              available: false,
+              reason: 'A higher-order predictor is required.',
+            },
+          ],
+        },
+      ],
+    } as any;
+    assert.deepEqual(
+      inspect.periodicCodim2CurveActionsForPoint('lpc_curve', unavailablePoint),
+      []
+    );
+  });
+
+  test('collocation adaptivity validates exact integers and disabled subordinate fields', () => {
+    const defaults = collocationAdaptivity.defaultCollocationAdaptivityInputs();
+    assert.deepEqual(
+      collocationAdaptivity.buildCollocationAdaptivitySettings({
+        ...defaults,
+        maxRefinements: '0'
+      }),
+      {
+        enabled: true,
+        redistribution_enabled: true,
+        defect_tolerance: 0.025,
+        max_refinements: 0,
+        max_mesh_points: 512
+      }
+    );
+    assert.throws(
+      () => collocationAdaptivity.buildCollocationAdaptivitySettings({
+        ...defaults,
+        maxRefinements: '3.7'
+      }),
+      /nonnegative integer/
+    );
+    assert.throws(
+      () => collocationAdaptivity.buildCollocationAdaptivitySettings({
+        ...defaults,
+        maxMeshPoints: 'invalid'
+      }),
+      /integer of at least 2/
+    );
+    assert.deepEqual(
+      collocationAdaptivity.buildCollocationAdaptivitySettings({
+        ...defaults,
+        enabled: false,
+        defectTolerance: 'invalid',
+        maxRefinements: '3.7',
+        maxMeshPoints: 'invalid'
+      }),
+      {
+        enabled: false,
+        redistribution_enabled: true,
+        defect_tolerance: 0.025,
+        max_refinements: 3,
+        max_mesh_points: 512
+      }
+    );
+  });
+
+  test('large-cycle homoclinic mesh guard distinguishes uniform and nonuniform meshes', () => {
+    assert.equal(
+      collocationAdaptivity.isUniformNormalizedCollocationMesh([0, 0.25, 0.5, 0.75, 1]),
+      true
+    );
+    assert.equal(
+      collocationAdaptivity.isUniformNormalizedCollocationMesh([0, 0.1, 0.5, 0.75, 1]),
+      false
+    );
+  });
 
   test('limit-cycle stability removes exactly one credible trivial +1 multiplier', () => {
     assert.equal(
@@ -640,6 +777,69 @@ async function run() {
     Storage.saveSystem(makeSystemConfig(sysName));
 
     assert.equal(Storage.purgeLegacyBranches(sysName), false);
+  });
+
+  test('normal-form provenance persists only on the selected source point', () => {
+    const sysName = nextSystemName();
+    Storage.saveSystem(makeSystemConfig(sysName));
+    Storage.saveObject(sysName, {
+      type: 'equilibrium',
+      name: 'eq_seed',
+      systemName: sysName
+    } as any);
+    const branch = makeContinuationBranch({
+      name: 'branch1',
+      systemName: sysName,
+      parentObject: 'eq_seed'
+    }) as any;
+    branch.data.points = [
+      { state: [0], param_value: 0, stability: 'Fold' },
+      { state: [0.1], param_value: 0.1, stability: 'None' }
+    ];
+    branch.data.indices = [0, 1];
+    const provenance = {
+      source_kind: 'Map' as const,
+      source_branch_id: 'branch1',
+      source_branch_name: 'branch1',
+      source_point_index: 0,
+      parameter_names: ['p0'],
+      parameter_values: [0],
+      map_iterations: 1,
+      computed_at: new Date(0).toISOString(),
+      normal_form: {
+        type: 'BranchPoint' as const,
+        kind: 'Fold' as const,
+        constant_parameter_coefficient: 1,
+        linear_parameter_coefficient: 0,
+        quadratic_coefficient: -2,
+        cubic_coefficient: 0,
+        conditioning: {
+          eigenvector_pairing: 1,
+          right_residual: 0,
+          left_residual: 0,
+          homological_residual: 0
+        }
+      }
+    };
+
+    normalForms.persistSourcePointNormalForm(sysName, branch, 0, provenance);
+    const stored = Storage.loadBranch(sysName, 'eq_seed', 'branch1') as any;
+    assert.equal(stored.data.points[0].normal_form.source_branch_id, 'branch1');
+    assert.equal(stored.data.points[1].normal_form, undefined);
+    assert.equal(stored.data.normal_form_provenance, undefined);
+  });
+
+  test('periodic branch-point predictor amplitude preserves branch orientation', () => {
+    assert.equal(normalForms.periodicBranchPointAmplitude(-0.05), -0.05);
+    assert.equal(normalForms.periodicBranchPointAmplitude(0.05), 0.05);
+    assert.throws(
+      () => normalForms.periodicBranchPointAmplitude(0),
+      /finite and nonzero/
+    );
+    assert.throws(
+      () => normalForms.periodicBranchPointAmplitude(Number.NaN),
+      /finite and nonzero/
+    );
   });
 
   let failures = 0;

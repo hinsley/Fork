@@ -21,6 +21,101 @@ References:
 
 ---
 
+### 2026-07-13: Retain equilibrium codimension-two normal forms and correct branch predictors
+Context:
+Zero-Hopf and Hopf-Hopf markers were refined on Hopf curves, but Fork retained only a scalar test
+value. There was no inspectable coefficient set or supported switch to the intersecting equilibrium
+curves and the Neimark-Sacker curves of periodic orbits. The old Hopf-Hopf bialternate determinant
+also touched zero without changing sign on a canonical unfolding.
+Decision:
+Compute Kuznetsov-normalized Zero-Hopf and nonresonant Hopf-Hopf multilinear coefficients at the
+refined point, including eigenvector pairings, homological residuals, unfolding condition numbers,
+and low-order resonance distance. Retain the scalar diagnostics on the refined marker. Build both
+orientations of every equilibrium target from its defining-system tangent, and build the one
+applicable Zero-Hopf plus both Hopf-Hopf NS-cycle predictors through second order before correcting
+them on the collocation NS defining system. Detect Hopf-Hopf with the signed real part of the
+non-source conjugate pair.
+Why:
+A serialized marker must contain enough numerical provenance to decide whether switching is safe.
+Correcting the normal-form orbit on the actual target system prevents a plausible-looking seed from
+being treated as a validated branch.
+Impact:
+Core and WASM callers can compute coefficients separately or request all corrected branch seeds.
+Canonical three- and four-dimensional oracle tests continue several steps on every equilibrium and
+periodic-orbit target. Resonant Hopf-Hopf points are reported as unsupported rather than applying
+the nonresonant formulas.
+References:
+`crates/fork_core/src/continuation/codim1_curves/equilibrium_codim2.rs`,
+`crates/fork_core/src/continuation/codim1_curves/branching.rs`,
+`crates/fork_core/tests/equilibrium_codim2_branching.rs`,
+`crates/fork_wasm/src/continuation/equilibrium_codim2.rs`,
+`docs/equilibrium_codim2_branching.md`
+
+---
+
+### 2026-07-13: Adapt collocation meshes at the rejected numerical frontier
+Context:
+Reducing the pseudo-arclength step cannot repair a converged cycle whose fixed NTST/NCOL profile is
+intrinsically under-resolved, and publishing a resized endpoint alone would mix incompatible packed
+state layouts within one branch.
+Decision:
+Compute a scaled defect for every active interval. On the first retry of each continuation invocation,
+redistribute the same number of intervals toward large defects when that changes the mesh materially;
+on later retries, add a deterministic bounded number of intervals and place them by the same
+defect-weighted rule. Interpolate the last accepted state, tangent, every published point, and saved
+extension history onto the new Gauss layout. Retry the same PALC step without consuming its progress
+or reducing its arclength. Limit retries and mesh growth explicitly, and preserve the exact normalized
+mesh, cumulative attempts, and any budget/cap termination in serializable core metadata. A resumed
+run gets a fresh retry budget while retaining earlier provenance; only attempts appended by that run
+are applied to already-persisted branch states.
+Why:
+Dimension-changing adaptation must preserve the represented cycle and keep every point, tangent,
+branch type, and valid resume seed on one layout. Nonuniform interval placement resolves a localized
+defect without paying the cost of globally uniform refinement.
+Impact:
+Ordinary flow-cycle seed correction, continuation, and extension adapt automatically. The LPC, PD,
+NS, and isoperiodic cycle-curve defining systems use the same redistribution/refinement policy with
+layout-specific profile and border transfer. WASM, web, and CLI preserve exact meshes and cumulative
+reports; the web Inspector and CLI expose enable/redistribution/tolerance/retry/cap controls plus a
+concise provenance summary. Homoclinic defining systems and discrete-map cycles remain fixed-layout:
+homoclinic continuation has its own truncation mesh, while maps do not use flow collocation. The
+legacy large-cycle-to-homoclinic initializer also assumes a uniform source cycle, so web and CLI
+reject a nonuniform adaptive source with instructions to recontinue on a uniform mesh instead of
+silently interpreting it on the wrong interval coordinates.
+References:
+`crates/fork_core/src/continuation/problem.rs`,
+`crates/fork_core/src/continuation/periodic.rs`,
+`crates/fork_core/src/continuation/lc_codim1_curves/`,
+`crates/fork_wasm/src/continuation/extension_runner.rs`,
+`docs/limit_cycle_continuation.md`
+
+---
+
+### 2026-07-13: Define map Neimark-Sacker curves with the multiplier matrix
+Context:
+The web exposed map Neimark-Sacker curve continuation through the flow Hopf runner. The core applied
+`A^2 + kappa I` to the fixed-point residual Jacobian `D(F^m - I)`, which is neither the map
+unit-circle condition nor the multiplier matrix used for stability.
+Decision:
+For maps, keep `D(F^m - I)` only in the fixed-point equations and PALC Jacobian. Build the spectral
+border from `M = D(F^m)` and use `M^2 - 2 k M + I`, where `k = cos(theta)` for the critical conjugate
+multiplier pair. Estimate `k` from the non-real pair closest to the unit circle, retain it as the
+curve auxiliary, and expose the result as a Neimark-Sacker curve. The strong-resonance tests are
+`k-1`, `k+1`, `k+1/2`, and `k` for resonances 1:1 through 1:4.
+Why:
+A map NS pair satisfies `lambda^2 - 2 cos(theta) lambda + 1 = 0`. Separating the residual and
+spectral Jacobians also makes iterated-map fixed points use the correct `F^m` derivatives.
+Impact:
+The analytic rotating-map regression follows the exact two-parameter unit-modulus locus through
+multiple core steps, and the WASM runner returns unit-modulus multipliers plus `cos(theta)` instead
+of a flow frequency squared.
+References:
+`crates/fork_core/src/continuation/codim1_curves/hopf_curve.rs`,
+`crates/fork_core/tests/map_ns_curve.rs`,
+`crates/fork_wasm/src/continuation/curve_runners.rs`
+
+---
+
 ### 2026-07-13: Gauge cycle curves on the full Gauss profile and split benchmark roles
 Context:
 LPC, PD, NS, and isoperiodic curves used incompatible pointwise or mesh-only phase gauges, and

@@ -3,11 +3,13 @@
 use super::runner_boundary::{serialize_js, OwnedContinuationRunner};
 use crate::system::build_system;
 use fork_core::continuation::periodic::{
-    correct_limit_cycle_setup, prepare_limit_cycle_setup, PeriodicOrbitCollocationProblem,
+    correct_limit_cycle_setup_adaptive, prepare_limit_cycle_setup, CollocationAdaptivitySettings,
+    LimitCycleContinuationResult, PeriodicOrbitCollocationProblem,
 };
 use fork_core::continuation::{
     BranchType, ContinuationPoint, ContinuationSettings, LimitCycleSetup,
 };
+use serde::Deserialize;
 use serde_wasm_bindgen::from_value;
 use wasm_bindgen::prelude::*;
 
@@ -16,6 +18,12 @@ fn validate_flow_system_type(system_type: &str) -> anyhow::Result<()> {
         anyhow::bail!("Limit-cycle collocation is available for flow systems only.");
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Default)]
+struct LimitCycleRunnerOptions {
+    #[serde(default)]
+    collocation_adaptivity: CollocationAdaptivitySettings,
 }
 
 #[cfg(test)]
@@ -83,6 +91,9 @@ impl WasmLimitCycleRunner {
 
         let setup: LimitCycleSetup = from_value(setup_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid limit cycle setup: {}", e)))?;
+        let options: LimitCycleRunnerOptions = from_value(settings_val.clone())
+            .map_err(|e| JsValue::from_str(&format!("Invalid limit cycle options: {}", e)))?;
+        let adaptivity = options.collocation_adaptivity;
         let settings: ContinuationSettings = from_value(settings_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid continuation settings: {}", e)))?;
 
@@ -93,25 +104,30 @@ impl WasmLimitCycleRunner {
             .get(parameter_name)
             .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", parameter_name)))?;
 
-        let (setup, flat_state) = if setup.guess.requires_fixed_parameter_correction {
+        let prepared: anyhow::Result<_> = if setup.guess.requires_fixed_parameter_correction {
             let correction_iterations = settings.corrector_steps.max(8);
-            correct_limit_cycle_setup(
+            correct_limit_cycle_setup_adaptive(
                 &mut system,
                 param_index,
                 setup,
                 settings.corrector_tolerance,
                 correction_iterations,
+                adaptivity,
             )
+            .map(|(setup, flat_state, report)| (setup, flat_state, Some(report)))
         } else {
             prepare_limit_cycle_setup(setup, system.equations.len())
-        }
-        .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+                .map(|(setup, flat_state)| (setup, flat_state, None))
+        };
+        let (setup, flat_state, correction_report) =
+            prepared.map_err(|e| JsValue::from_str(&format!("{}", e)))?;
 
         let config = setup.collocation_config();
         let mesh_points = config.mesh_points;
         let degree = config.degree;
         let phase_anchor = config.phase_anchor.clone();
         let phase_direction = config.phase_direction.clone();
+        let normalized_mesh = config.normalized_mesh.clone();
 
         let initial_point = ContinuationPoint {
             state: flat_state,
@@ -123,15 +139,20 @@ impl WasmLimitCycleRunner {
 
         let mut runner = OwnedContinuationRunner::new(
             system,
-            |system| {
-                PeriodicOrbitCollocationProblem::new(
+            move |system| {
+                let mut problem = PeriodicOrbitCollocationProblem::new_on_mesh_with_adaptivity(
                     system,
                     param_index,
-                    mesh_points,
                     degree,
                     phase_anchor,
                     phase_direction,
-                )
+                    normalized_mesh,
+                    adaptivity,
+                )?;
+                if let Some(report) = correction_report {
+                    problem.seed_adaptation_report(report)?;
+                }
+                Ok(problem)
             },
             initial_point,
             settings,
@@ -143,6 +164,7 @@ impl WasmLimitCycleRunner {
             .set_branch_type(BranchType::LimitCycle {
                 ntst: mesh_points,
                 ncol: degree,
+                normalized_mesh: config.normalized_mesh,
             });
 
         Ok(WasmLimitCycleRunner { runner })
@@ -160,15 +182,46 @@ impl WasmLimitCycleRunner {
         self.runner.get_progress()
     }
 
+    pub fn get_adaptation_report(&self) -> Result<JsValue, JsValue> {
+        serialize_js(self.runner.problem()?.adaptation_report())
+    }
+
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let branch = self.runner.take_result()?;
+        let (mut branch, problem) = self.runner.take_result_with_problem()?;
+        branch.branch_type = BranchType::LimitCycle {
+            ntst: problem.normalized_mesh().len() - 1,
+            ncol: degree_from_report(problem.adaptation_report()),
+            normalized_mesh: problem.normalized_mesh().to_vec(),
+        };
         serialize_js(&branch)
     }
+
+    pub fn get_result_with_report(&mut self) -> Result<JsValue, JsValue> {
+        let (mut branch, problem) = self.runner.take_result_with_problem()?;
+        branch.branch_type = BranchType::LimitCycle {
+            ntst: problem.normalized_mesh().len() - 1,
+            ncol: degree_from_report(problem.adaptation_report()),
+            normalized_mesh: problem.normalized_mesh().to_vec(),
+        };
+        serialize_js(&LimitCycleContinuationResult {
+            branch,
+            collocation_adaptation: problem.adaptation_report().clone(),
+        })
+    }
+}
+
+fn degree_from_report(
+    report: &fork_core::continuation::periodic::CollocationAdaptationReport,
+) -> usize {
+    report.degree
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{flatten_collocation_state, validate_flow_system_type, validate_mesh_states};
+    use super::{
+        flatten_collocation_state, validate_flow_system_type, validate_mesh_states,
+        LimitCycleRunnerOptions,
+    };
 
     #[test]
     fn limit_cycle_runner_rejects_map_systems() {
@@ -193,12 +246,35 @@ mod tests {
 
         assert_eq!(flat, vec![1.0, 2.0, 1.5, 2.5, 3.0]);
     }
+
+    #[test]
+    fn limit_cycle_adaptivity_options_accept_absent_and_partial_objects() {
+        let absent: LimitCycleRunnerOptions =
+            serde_json::from_value(serde_json::json!({})).expect("absent options");
+        assert_eq!(
+            absent.collocation_adaptivity,
+            fork_core::continuation::CollocationAdaptivitySettings::default()
+        );
+
+        let partial: LimitCycleRunnerOptions = serde_json::from_value(serde_json::json!({
+            "collocation_adaptivity": {
+                "enabled": false,
+                "defect_tolerance": 1.0e-3
+            }
+        }))
+        .expect("partial adaptivity options");
+        assert!(!partial.collocation_adaptivity.enabled);
+        assert_eq!(partial.collocation_adaptivity.defect_tolerance, 1.0e-3);
+        assert!(partial.collocation_adaptivity.redistribution_enabled);
+        assert_eq!(partial.collocation_adaptivity.max_refinements, 3);
+        assert_eq!(partial.collocation_adaptivity.max_mesh_points, 512);
+    }
 }
 
 #[cfg(all(test, target_arch = "wasm32"))]
 mod wasm_tests {
     use super::WasmLimitCycleRunner;
-    use fork_core::continuation::periodic::CollocationCoefficients;
+    use fork_core::continuation::periodic::{uniform_normalized_mesh, CollocationCoefficients};
     use fork_core::continuation::{
         BranchType, ContinuationBranch, ContinuationSettings, LimitCycleGuess, LimitCycleSetup,
     };
@@ -234,6 +310,7 @@ mod wasm_tests {
             phase_direction: vec![1.0],
             mesh_points,
             collocation_degree: degree,
+            normalized_mesh: uniform_normalized_mesh(mesh_points),
         };
         to_value(&setup).expect("setup")
     }
@@ -272,6 +349,7 @@ mod wasm_tests {
             phase_direction: vec![0.0, 1.0],
             mesh_points,
             collocation_degree: degree,
+            normalized_mesh: uniform_normalized_mesh(mesh_points),
         };
         to_value(&setup).expect("periodic setup")
     }
@@ -372,6 +450,7 @@ mod wasm_tests {
             BranchType::LimitCycle {
                 ntst: mesh_points,
                 ncol: degree,
+                normalized_mesh: uniform_normalized_mesh(mesh_points),
             }
         );
         assert_eq!(branch.points.len(), 1);

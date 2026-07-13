@@ -13,8 +13,10 @@ import {
     LimitCycleMeta,
     ContinuationProgress,
     AnalysisProgress,
-    EquilibriumSolveProgress
+    EquilibriumSolveProgress,
+    CollocationAdaptationReport
 } from "./types";
+import type { ComputedNormalForm, HopfHopfNormalForm, ZeroHopfNormalForm } from './normal-form-types';
 
 export type CovariantLyapunovResponse = {
     dimension: number;
@@ -35,6 +37,7 @@ export type ContinuationRunner = {
     get_progress(): ContinuationProgress;
     is_done(): boolean;
     get_result(): ContinuationBranchData;
+    get_adaptation_report?(): CollocationAdaptationReport;
 };
 
 export type Codim1CurveRunner = {
@@ -42,6 +45,7 @@ export type Codim1CurveRunner = {
     get_progress(): ContinuationProgress;
     is_done(): boolean;
     get_result(): any;
+    get_adaptation_report?(): CollocationAdaptationReport;
 };
 
 export type ManifoldRunner<T> = {
@@ -494,6 +498,7 @@ export class WasmBridge {
         param2Value: number,
         ntst: number,
         ncol: number,
+        normalizedMesh: number[],
         settings: any,
         forward: boolean
     ): Codim1CurveRunner {
@@ -512,6 +517,7 @@ export class WasmBridge {
             param2Value,
             ntst,
             ncol,
+            new Float64Array(normalizedMesh),
             settings,
             forward
         ) as Codim1CurveRunner;
@@ -526,6 +532,7 @@ export class WasmBridge {
         param2Value: number,
         ntst: number,
         ncol: number,
+        normalizedMesh: number[],
         settings: any,
         forward: boolean
     ): Codim1CurveRunner {
@@ -549,6 +556,7 @@ export class WasmBridge {
             param2Value,
             ntst,
             ncol,
+            new Float64Array(normalizedMesh),
             settings,
             forward
         ) as Codim1CurveRunner;
@@ -563,6 +571,7 @@ export class WasmBridge {
         param2Value: number,
         ntst: number,
         ncol: number,
+        normalizedMesh: number[],
         settings: any,
         forward: boolean
     ): Codim1CurveRunner {
@@ -581,6 +590,7 @@ export class WasmBridge {
             param2Value,
             ntst,
             ncol,
+            new Float64Array(normalizedMesh),
             settings,
             forward
         ) as Codim1CurveRunner;
@@ -596,6 +606,7 @@ export class WasmBridge {
         initialK: number,
         ntst: number,
         ncol: number,
+        normalizedMesh: number[],
         settings: any,
         forward: boolean
     ): Codim1CurveRunner {
@@ -615,6 +626,7 @@ export class WasmBridge {
             initialK,
             ntst,
             ncol,
+            new Float64Array(normalizedMesh),
             settings,
             forward
         ) as Codim1CurveRunner;
@@ -1035,14 +1047,15 @@ export class WasmBridge {
         paramValue: number,
         ntst: number,
         ncol: number,
+        normalizedMesh: number[],
         amplitude: number
     ): any {
-        return this.instance.init_lc_from_pd(
+        return this.instance.init_lc_from_pd_on_mesh(
             new Float64Array(lcState),
             parameterName,
             paramValue,
-            ntst,
             ncol,
+            new Float64Array(normalizedMesh),
             amplitude
         );
     }
@@ -1417,6 +1430,176 @@ export class WasmBridge {
             settings,
             forward
         );
+    }
+
+    computeMapNormalForm(
+        state: number[],
+        parameterName: string,
+        parameterValue: number,
+        mapIterations: number,
+        normalFormType: 'BranchPoint' | 'PeriodDoubling' | 'NeimarkSacker'
+    ): ComputedNormalForm {
+        const paramIndex = this.config.paramNames.indexOf(parameterName);
+        if (paramIndex < 0) throw new Error(`Unknown map parameter: ${parameterName}`);
+        const method = (this.instance as any).compute_map_normal_form;
+        if (typeof method !== 'function') throw new Error('Map normal forms are unavailable in this WASM build.');
+        return method.call(
+            this.instance,
+            new Float64Array(state),
+            paramIndex,
+            parameterValue,
+            Math.max(1, Math.trunc(mapIterations)),
+            normalFormType
+        ) as ComputedNormalForm;
+    }
+
+    computePeriodicNormalFormFromPackedState(
+        state: number[],
+        parameterName: string,
+        parameterValue: number,
+        collocationDegree: number,
+        normalizedMesh: number[],
+        normalFormType: 'BranchPoint' | 'PeriodDoubling' | 'NeimarkSacker'
+    ): ComputedNormalForm {
+        const paramIndex = this.config.paramNames.indexOf(parameterName);
+        if (paramIndex < 0) throw new Error(`Unknown periodic-orbit parameter: ${parameterName}`);
+        const method = (this.instance as any).compute_periodic_normal_form_from_packed_state;
+        if (typeof method !== 'function') {
+            throw new Error('Packed periodic normal forms are unavailable in this WASM build.');
+        }
+        return method.call(
+            this.instance,
+            new Float64Array(state),
+            paramIndex,
+            parameterValue,
+            collocationDegree,
+            new Float64Array(normalizedMesh),
+            normalFormType
+        ) as ComputedNormalForm;
+    }
+
+    switchPeriodicBranchFromPackedState(
+        state: number[],
+        parameterName: string,
+        parameterValue: number,
+        collocationDegree: number,
+        normalizedMesh: number[],
+        amplitude: number
+    ): { normalForm: ComputedNormalForm; setup: unknown } {
+        const paramIndex = this.config.paramNames.indexOf(parameterName);
+        if (paramIndex < 0) throw new Error(`Unknown periodic-orbit parameter: ${parameterName}`);
+        const method = (this.instance as any).switch_periodic_branch_from_packed_state;
+        if (typeof method !== 'function') {
+            throw new Error('Packed periodic branch switching is unavailable in this WASM build.');
+        }
+        return method.call(
+            this.instance,
+            new Float64Array(state),
+            paramIndex,
+            parameterValue,
+            collocationDegree,
+            new Float64Array(normalizedMesh),
+            amplitude
+        ) as { normalForm: ComputedNormalForm; setup: unknown };
+    }
+
+    computeZeroHopfNormalForm(
+        state: number[],
+        param1Name: string,
+        param2Name: string,
+        param1Value: number,
+        param2Value: number,
+        frequency: number
+    ): ZeroHopfNormalForm {
+        return this.computeEquilibriumCodim2NormalForm(
+            'compute_zero_hopf_normal_form', state, param1Name, param2Name,
+            param1Value, param2Value, frequency, 'ZeroHopf'
+        ) as ZeroHopfNormalForm;
+    }
+
+    computeHopfHopfNormalForm(
+        state: number[],
+        param1Name: string,
+        param2Name: string,
+        param1Value: number,
+        param2Value: number,
+        frequency: number
+    ): HopfHopfNormalForm {
+        return this.computeEquilibriumCodim2NormalForm(
+            'compute_hopf_hopf_normal_form', state, param1Name, param2Name,
+            param1Value, param2Value, frequency, 'HopfHopf'
+        ) as HopfHopfNormalForm;
+    }
+
+    switchFromEquilibriumCodim2(
+        sourceType: 'ZeroHopf' | 'DoubleHopf',
+        state: number[],
+        param1Name: string,
+        param2Name: string,
+        param1Value: number,
+        param2Value: number,
+        frequency: number,
+        curvePerturbation: number,
+        cycleAmplitude: number,
+        ntst: number,
+        ncol: number,
+        tolerance: number
+    ): any {
+        const param1Index = this.config.paramNames.indexOf(param1Name);
+        const param2Index = this.config.paramNames.indexOf(param2Name);
+        if (param1Index < 0 || param2Index < 0 || param1Index === param2Index) {
+            throw new Error('Codimension-two switching requires two distinct parameters.');
+        }
+        const methodName = sourceType === 'ZeroHopf'
+            ? 'switch_from_zero_hopf'
+            : 'switch_from_hopf_hopf';
+        const method = (this.instance as any)[methodName];
+        if (typeof method !== 'function') throw new Error(`${sourceType} switching is unavailable in this WASM build.`);
+        return method.call(
+            this.instance,
+            new Float64Array(state),
+            param1Index,
+            param2Index,
+            param1Value,
+            param2Value,
+            frequency,
+            curvePerturbation,
+            cycleAmplitude,
+            ntst,
+            ncol,
+            tolerance
+        );
+    }
+
+    private computeEquilibriumCodim2NormalForm(
+        methodName: string,
+        state: number[],
+        param1Name: string,
+        param2Name: string,
+        param1Value: number,
+        param2Value: number,
+        frequency: number,
+        type: 'ZeroHopf' | 'HopfHopf'
+    ): ZeroHopfNormalForm | HopfHopfNormalForm {
+        const param1Index = this.config.paramNames.indexOf(param1Name);
+        const param2Index = this.config.paramNames.indexOf(param2Name);
+        if (param1Index < 0 || param2Index < 0 || param1Index === param2Index) {
+            throw new Error('Codimension-two normal forms require two distinct parameters.');
+        }
+        const method = (this.instance as any)[methodName];
+        if (typeof method !== 'function') throw new Error(`${type} normal forms are unavailable in this WASM build.`);
+        return {
+            ...method.call(
+                this.instance,
+                new Float64Array(state),
+                param1Index,
+                param2Index,
+                param1Value,
+                param2Value,
+                frequency
+            ),
+            type
+        } as ZeroHopfNormalForm | HopfHopfNormalForm;
     }
 }
 

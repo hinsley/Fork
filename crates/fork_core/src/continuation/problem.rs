@@ -3,7 +3,27 @@ use nalgebra::{DMatrix, DVector};
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
 
-use super::BifurcationType;
+use super::{BifurcationType, BranchType};
+
+/// Action requested by a continuation problem after a converged trial fails
+/// its a-posteriori acceptance check.
+///
+/// Most problems keep the historical behavior of reducing the PALC step.
+/// Discretized problems may instead replace their discretization, transfer the
+/// accepted numerical frontier, and retry the same geometric step.  A hard
+/// termination is reserved for a structured, problem-specific retry budget or
+/// resolution cap; callers can retrieve the detailed reason from the problem.
+#[derive(Debug, Clone)]
+pub enum StepRejectionAction {
+    ReduceStep,
+    Refined {
+        accepted_aug: DVector<f64>,
+        accepted_tangent: DVector<f64>,
+        branch_states: Vec<Vec<f64>>,
+        branch_type: Option<BranchType>,
+    },
+    Terminate,
+}
 
 /// Generic diagnostics reported by a continuation problem at a given point.
 #[derive(Debug, Clone)]
@@ -16,6 +36,7 @@ pub struct PointDiagnostics {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct TestFunctionValues {
     pub fold: f64,
+    pub branch_point: f64,
     pub hopf: f64,
     pub neutral_saddle: f64,
     pub cycle_fold: f64,
@@ -27,6 +48,7 @@ impl TestFunctionValues {
     pub fn equilibrium(fold: f64, hopf: f64, neutral_saddle: f64) -> Self {
         Self {
             fold,
+            branch_point: 1.0,
             hopf,
             neutral_saddle,
             cycle_fold: 1.0,
@@ -38,6 +60,7 @@ impl TestFunctionValues {
     pub fn limit_cycle(cycle_fold: f64, period_doubling: f64, neimark_sacker: f64) -> Self {
         Self {
             fold: 1.0,
+            branch_point: 1.0,
             hopf: 1.0,
             neutral_saddle: 1.0,
             cycle_fold,
@@ -49,6 +72,7 @@ impl TestFunctionValues {
     pub fn value_for(&self, kind: BifurcationType) -> f64 {
         match kind {
             BifurcationType::Fold => self.fold,
+            BifurcationType::BranchPoint => self.branch_point,
             BifurcationType::Hopf => self.hopf,
             BifurcationType::NeutralSaddle => self.neutral_saddle,
             BifurcationType::CycleFold => self.cycle_fold,
@@ -60,6 +84,7 @@ impl TestFunctionValues {
 
     pub fn is_finite(&self) -> bool {
         self.fold.is_finite()
+            && self.branch_point.is_finite()
             && self.hopf.is_finite()
             && self.neutral_saddle.is_finite()
             && self.cycle_fold.is_finite()
@@ -92,6 +117,20 @@ pub trait ContinuationProblem {
     /// Return diagnostics (test functions, eigenvalues, etc.) for bifurcation detection.
     fn diagnostics(&mut self, aug_state: &DVector<f64>) -> Result<PointDiagnostics>;
 
+    /// Refine a candidate's semantic classification at its corrected location.
+    ///
+    /// The default keeps the detected test-function label. Discrete maps use
+    /// this hook to distinguish a genuine branch point from a saddle-node;
+    /// both have a simple `+1` multiplier and therefore share the same scalar
+    /// localization test.
+    fn classify_bifurcation(
+        &mut self,
+        _aug_state: &DVector<f64>,
+        detected: BifurcationType,
+    ) -> Result<BifurcationType> {
+        Ok(detected)
+    }
+
     /// Check whether a converged trial point is accurate enough to accept.
     ///
     /// Discretized problems can reject an under-resolved point here without
@@ -99,6 +138,39 @@ pub trait ContinuationProblem {
     /// trial is retried with a smaller pseudo-arclength step.
     fn is_step_acceptable(&mut self, _aug_state: &DVector<f64>) -> Result<bool> {
         Ok(true)
+    }
+
+    /// Handle a converged trial rejected by [`Self::is_step_acceptable`].
+    ///
+    /// `accepted_aug` and `accepted_tangent` describe the last valid frontier;
+    /// `branch_states` contains the packed state of every already-published
+    /// point.  A dimension-changing refinement must transfer all three so a
+    /// branch never mixes incompatible state layouts.
+    fn handle_step_rejection(
+        &mut self,
+        _accepted_aug: &DVector<f64>,
+        _accepted_tangent: &DVector<f64>,
+        _rejected_aug: &DVector<f64>,
+        _branch_states: &[Vec<f64>],
+    ) -> Result<StepRejectionAction> {
+        Ok(StepRejectionAction::ReduceStep)
+    }
+
+    /// Transfer externally held branch states after this problem changed its
+    /// discretization. Extension workflows keep the original branch outside
+    /// the inner continuation runner, so they invoke this hook before merging
+    /// a resized extension.
+    fn transfer_branch_states_to_current_discretization(
+        &self,
+        branch_states: &[Vec<f64>],
+    ) -> Result<Vec<Vec<f64>>> {
+        if branch_states
+            .iter()
+            .any(|state| state.len() != self.dimension())
+        {
+            anyhow::bail!("Continuation problem cannot transfer external branch-state layouts");
+        }
+        Ok(branch_states.to_vec())
     }
 
     /// Optional hook called after each successful continuation step.

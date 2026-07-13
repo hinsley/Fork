@@ -4,6 +4,7 @@
 //! two-parameter space, with detection of codim-2 bifurcation points.
 
 mod branching;
+mod equilibrium_codim2;
 mod fold_curve;
 mod hopf_curve;
 pub(crate) mod normal_forms;
@@ -11,10 +12,18 @@ mod refinement;
 
 pub use branching::{
     bogdanov_takens_curve_seeds, bogdanov_takens_homoclinic_seed, generalized_hopf_lpc_seed,
-    Codim2BranchSeed, Codim2BranchTarget, HomoclinicBranchSeed,
+    hopf_hopf_equilibrium_curve_seeds, hopf_hopf_neimark_sacker_seeds,
+    zero_hopf_equilibrium_curve_seeds, zero_hopf_neimark_sacker_seed, Codim2BranchSeed,
+    Codim2BranchTarget, HomoclinicBranchSeed,
+};
+pub use equilibrium_codim2::{
+    hopf_hopf_normal_form, zero_hopf_normal_form, EquilibriumCodim2NormalFormDiagnostics,
+    HopfHopfNeimarkSackerPredictor, HopfHopfNormalForm, ZeroHopfNormalForm,
 };
 pub use fold_curve::FoldCurveProblem;
-pub use hopf_curve::{estimate_hopf_kappa_from_jacobian, HopfCurveProblem};
+pub use hopf_curve::{
+    estimate_hopf_kappa_from_jacobian, estimate_map_ns_cosine_from_jacobian, HopfCurveProblem,
+};
 pub use refinement::{refine_codim2_points, Codim2CurveProblem, RefinedCodim2Event};
 
 use super::types::Codim2BifurcationType;
