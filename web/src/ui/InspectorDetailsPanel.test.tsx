@@ -3106,6 +3106,15 @@ describe('InspectorDetailsPanel', () => {
       />
     )
 
+    const isoperiodicAction = screen.getByTestId('action-isoperiodic-curve-toggle')
+    const isoperiodicActionGroup = isoperiodicAction.closest('.inspector-actions__group')
+    expect(isoperiodicActionGroup).not.toBeNull()
+    expect(
+      within(isoperiodicActionGroup as HTMLElement).getByRole('heading', {
+        name: 'Continuation',
+      })
+    ).toBeInTheDocument()
+
     await user.click(screen.getByTestId('isoperiodic-curve-toggle'))
     await user.clear(screen.getByTestId('isoperiodic-curve-name'))
     await user.type(screen.getByTestId('isoperiodic-curve-name'), 'iso_curve_nu_mu')

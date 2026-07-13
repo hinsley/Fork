@@ -4746,7 +4746,7 @@ function useInspectorSelectionController({
   if (showIsoperiodicContinuation) {
     workflowActions.push({
       id: 'isoperiodic-curve-toggle',
-      group: 'Bifurcations',
+      group: 'Continuation',
       label:
         branch?.branchType === 'isoperiodic_curve'
           ? 'Continue isoperiodic curve'
