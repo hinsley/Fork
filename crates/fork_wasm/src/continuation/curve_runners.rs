@@ -2,15 +2,18 @@
 
 use super::runner_boundary::{serialize_js, OwnedContinuationRunner};
 use crate::system::build_system;
-use fork_core::continuation::codim1_curves::estimate_hopf_kappa_from_jacobian;
+use fork_core::continuation::codim1_curves::{
+    estimate_hopf_kappa_from_jacobian, refine_codim2_points,
+};
 use fork_core::continuation::{
-    Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType, Codim2BifurcationType, ContinuationPoint,
-    ContinuationSettings, FoldCurveProblem, HopfCurveProblem, IsochroneCurveProblem,
-    LPCCurveProblem, NSCurveProblem, PDCurveProblem,
+    Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType, Codim2Bifurcation, Codim2BifurcationType,
+    ContinuationPoint, ContinuationSettings, FoldCurveProblem, HopfCurveProblem,
+    IsochroneCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
 };
 use fork_core::equilibrium::{compute_jacobian, SystemKind};
 use nalgebra::DMatrix;
 use serde_wasm_bindgen::from_value;
+use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
 
 fn normalize_lc_seed_for_stage_first_explicit(
@@ -175,41 +178,66 @@ impl WasmFoldCurveRunner {
     }
 
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let branch = self.runner.take_result()?;
+        let settings = self.runner.settings()?;
+        let (branch, mut problem) = self.runner.take_result_with_problem()?;
+        let events = refine_codim2_points(
+            &mut problem,
+            &branch.points,
+            settings.corrector_steps.max(8),
+            settings.corrector_tolerance.clamp(1e-10, 1e-6),
+        )
+        .map_err(|error| JsValue::from_str(&format!("Codim-2 refinement failed: {error}")))?;
+        let mut events_by_index: BTreeMap<usize, _> = events
+            .into_iter()
+            .map(|event| (event.replace_index, event))
+            .collect();
         let n = self.fold_state.len();
 
-        let codim1_points: Vec<Codim1CurvePoint> = branch
-            .points
-            .iter()
-            .map(|pt| {
-                let p2 = if !pt.state.is_empty() {
-                    pt.state[0]
-                } else {
-                    self.param2_value
-                };
-                let physical_state: Vec<f64> = if pt.state.len() >= n + 1 {
-                    pt.state[1..(n + 1)].to_vec()
-                } else {
-                    self.fold_state.clone()
-                };
+        let mut codim1_points = Vec::with_capacity(branch.points.len());
+        let mut codim2_bifurcations = Vec::new();
+        for (index, original_point) in branch.points.iter().enumerate() {
+            let (pt, codim2) = match events_by_index.remove(&index) {
+                Some(event) => (event.point, Some(event.data)),
+                None => (original_point.clone(), None),
+            };
+            let p2 = if !pt.state.is_empty() {
+                pt.state[0]
+            } else {
+                self.param2_value
+            };
+            let physical_state: Vec<f64> = if pt.state.len() >= n + 1 {
+                pt.state[1..(n + 1)].to_vec()
+            } else {
+                self.fold_state.clone()
+            };
 
-                Codim1CurvePoint {
-                    state: physical_state,
-                    param1_value: pt.param_value,
-                    param2_value: p2,
-                    codim2_type: Codim2BifurcationType::None,
-                    auxiliary: None,
-                    eigenvalues: pt.eigenvalues.clone(),
-                }
-            })
-            .collect();
+            let codim2_type = codim2
+                .as_ref()
+                .map(|data| data.bifurcation_type)
+                .unwrap_or(Codim2BifurcationType::None);
+            if codim2_type != Codim2BifurcationType::None {
+                codim2_bifurcations.push(Codim2Bifurcation {
+                    index,
+                    bifurcation_type: codim2_type,
+                });
+            }
+            codim1_points.push(Codim1CurvePoint {
+                state: physical_state,
+                param1_value: pt.param_value,
+                param2_value: p2,
+                codim2_type,
+                auxiliary: None,
+                eigenvalues: pt.eigenvalues.clone(),
+                codim2,
+            });
+        }
 
         let codim1_branch = Codim1CurveBranch {
             curve_type: Codim1CurveType::Fold,
             param1_index: self.param1_index,
             param2_index: self.param2_index,
             points: codim1_points,
-            codim2_bifurcations: vec![],
+            codim2_bifurcations,
             indices: branch.indices.clone(),
         };
 
@@ -591,47 +619,72 @@ impl WasmHopfCurveRunner {
     }
 
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
-        let branch = self.runner.take_result()?;
+        let settings = self.runner.settings()?;
+        let (branch, mut problem) = self.runner.take_result_with_problem()?;
+        let events = refine_codim2_points(
+            &mut problem,
+            &branch.points,
+            settings.corrector_steps.max(8),
+            settings.corrector_tolerance.clamp(1e-10, 1e-6),
+        )
+        .map_err(|error| JsValue::from_str(&format!("Codim-2 refinement failed: {error}")))?;
+        let mut events_by_index: BTreeMap<usize, _> = events
+            .into_iter()
+            .map(|event| (event.replace_index, event))
+            .collect();
         let n = self.hopf_state.len();
         let kappa_default = self.hopf_kappa;
 
-        let codim1_points: Vec<Codim1CurvePoint> = branch
-            .points
-            .iter()
-            .map(|pt| {
-                let p2 = if !pt.state.is_empty() {
-                    pt.state[0]
-                } else {
-                    self.param2_value
-                };
-                let physical_state: Vec<f64> = if pt.state.len() >= n + 1 {
-                    pt.state[1..(n + 1)].to_vec()
-                } else {
-                    self.hopf_state.clone()
-                };
-                let kappa = if pt.state.len() >= n + 2 {
-                    pt.state[n + 1]
-                } else {
-                    kappa_default
-                };
+        let mut codim1_points = Vec::with_capacity(branch.points.len());
+        let mut codim2_bifurcations = Vec::new();
+        for (index, original_point) in branch.points.iter().enumerate() {
+            let (pt, codim2) = match events_by_index.remove(&index) {
+                Some(event) => (event.point, Some(event.data)),
+                None => (original_point.clone(), None),
+            };
+            let p2 = if !pt.state.is_empty() {
+                pt.state[0]
+            } else {
+                self.param2_value
+            };
+            let physical_state: Vec<f64> = if pt.state.len() >= n + 1 {
+                pt.state[1..(n + 1)].to_vec()
+            } else {
+                self.hopf_state.clone()
+            };
+            let kappa = if pt.state.len() >= n + 2 {
+                pt.state[n + 1]
+            } else {
+                kappa_default
+            };
 
-                Codim1CurvePoint {
-                    state: physical_state,
-                    param1_value: pt.param_value,
-                    param2_value: p2,
-                    codim2_type: Codim2BifurcationType::None,
-                    auxiliary: Some(kappa),
-                    eigenvalues: pt.eigenvalues.clone(),
-                }
-            })
-            .collect();
+            let codim2_type = codim2
+                .as_ref()
+                .map(|data| data.bifurcation_type)
+                .unwrap_or(Codim2BifurcationType::None);
+            if codim2_type != Codim2BifurcationType::None {
+                codim2_bifurcations.push(Codim2Bifurcation {
+                    index,
+                    bifurcation_type: codim2_type,
+                });
+            }
+            codim1_points.push(Codim1CurvePoint {
+                state: physical_state,
+                param1_value: pt.param_value,
+                param2_value: p2,
+                codim2_type,
+                auxiliary: Some(kappa),
+                eigenvalues: pt.eigenvalues.clone(),
+                codim2,
+            });
+        }
 
         let codim1_branch = Codim1CurveBranch {
             curve_type: Codim1CurveType::Hopf,
             param1_index: self.param1_index,
             param2_index: self.param2_index,
             points: codim1_points,
-            codim2_bifurcations: vec![],
+            codim2_bifurcations,
             indices: branch.indices.clone(),
         };
 
@@ -799,6 +852,7 @@ impl WasmLPCCurveRunner {
                     codim2_type: Codim2BifurcationType::None,
                     auxiliary: None,
                     eigenvalues: pt.eigenvalues.clone(),
+                    codim2: None,
                 }
             })
             .collect();
@@ -949,6 +1003,7 @@ impl WasmIsochroneCurveRunner {
                     codim2_type: Codim2BifurcationType::None,
                     auxiliary: None,
                     eigenvalues: pt.eigenvalues.clone(),
+                    codim2: None,
                 }
             })
             .collect();
@@ -1119,6 +1174,7 @@ impl WasmPDCurveRunner {
                     codim2_type: Codim2BifurcationType::None,
                     auxiliary: None,
                     eigenvalues: pt.eigenvalues.clone(),
+                    codim2: None,
                 }
             })
             .collect();
@@ -1299,6 +1355,7 @@ impl WasmNSCurveRunner {
                     codim2_type: Codim2BifurcationType::None,
                     auxiliary: Some(k_value),
                     eigenvalues: pt.eigenvalues.clone(),
+                    codim2: None,
                 }
             })
             .collect();

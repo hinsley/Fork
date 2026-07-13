@@ -5,9 +5,12 @@
 
 mod fold_curve;
 mod hopf_curve;
+pub(crate) mod normal_forms;
+mod refinement;
 
 pub use fold_curve::FoldCurveProblem;
 pub use hopf_curve::{estimate_hopf_kappa_from_jacobian, HopfCurveProblem};
+pub use refinement::{refine_codim2_points, Codim2CurveProblem, RefinedCodim2Event};
 
 use super::types::Codim2BifurcationType;
 use anyhow::Result;

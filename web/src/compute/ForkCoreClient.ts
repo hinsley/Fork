@@ -2,6 +2,7 @@ import type {
   ContinuationBranchData,
   ContinuationSettings,
   ContinuationPoint,
+  Codim2PointData,
   Manifold2DProfile,
   ManifoldCycle2DAlgorithm,
   ManifoldStability,
@@ -333,6 +334,7 @@ export type Codim1CurvePoint = {
   codim2_type?: string
   eigenvalues?: Array<[number, number] | { re?: number; im?: number }>
   auxiliary?: number | null
+  codim2?: Codim2PointData
 }
 
 export type Codim1CurveBranch = {

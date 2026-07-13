@@ -1541,6 +1541,24 @@ describe('appState Hopf curve continuation', () => {
     }
     const branchResult = addBranch(added.system, branch, added.nodeId)
     const client = new MockForkCoreClient(0)
+    const codim2: NonNullable<ContinuationPoint['codim2']> = {
+      type: 'GeneralizedHopf',
+      refined: true,
+      candidate: false,
+      test_function: 'first_lyapunov_coefficient',
+      test_function_value: 2e-11,
+      residual_norm: 3e-10,
+      iterations: 5,
+      tolerance: 1e-9,
+      source_segment: [3, 4],
+      source_test_values: [-0.2, 0.1],
+      method: 'bracketed_newton',
+      coefficients: [{ name: 'l1', value: 2e-11 }],
+      conditioning: {
+        bordered_condition_number: 120,
+        jacobian_condition_number: 80,
+      },
+    }
     client.runHopfCurveContinuation = async (request) => ({
       points: [
         {
@@ -1550,6 +1568,7 @@ describe('appState Hopf curve continuation', () => {
           codim2_type: 'None',
           eigenvalues: [],
           auxiliary: request.hopfOmega * request.hopfOmega,
+          codim2,
         },
         {
           state: request.hopfState,
@@ -1586,6 +1605,7 @@ describe('appState Hopf curve continuation', () => {
       expect(getContext().state.error).toBeNull()
       const hopfCurveId = findBranchIdByName(next!, 'hopf_curve_p1_p2')
       expect(next!.branches[hopfCurveId].parentObject).toBe('EQ_H_RENAMED')
+      expect(next!.branches[hopfCurveId].data.points[0].codim2).toEqual(codim2)
     })
   })
 })

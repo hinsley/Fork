@@ -750,6 +750,123 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                                 { label: 'Stability', value: selectedBranchPoint.stability },
                               ]}
                             />
+                            {selectedBranchPoint.codim2 ? (
+                              <>
+                                <h4 className="inspector-subheading">
+                                  Codimension-two refinement
+                                </h4>
+                                <InspectorMetrics
+                                  rows={[
+                                    { label: 'Type', value: selectedBranchPoint.codim2.type },
+                                    {
+                                      label: 'Status',
+                                      value:
+                                        selectedBranchPoint.codim2.refined &&
+                                        selectedBranchPoint.codim2.candidate
+                                          ? 'Refined candidate'
+                                          : selectedBranchPoint.codim2.refined
+                                            ? 'Refined'
+                                            : selectedBranchPoint.codim2.candidate
+                                              ? 'Candidate'
+                                              : 'Detected',
+                                    },
+                                    {
+                                      label: 'Test function',
+                                      value: selectedBranchPoint.codim2.test_function,
+                                    },
+                                    {
+                                      label: 'Test residual',
+                                      value: formatScientific(
+                                        selectedBranchPoint.codim2.test_function_value,
+                                        4
+                                      ),
+                                    },
+                                    {
+                                      label: 'Curve residual',
+                                      value: formatScientific(
+                                        selectedBranchPoint.codim2.residual_norm,
+                                        4
+                                      ),
+                                    },
+                                    {
+                                      label: 'Iterations',
+                                      value: selectedBranchPoint.codim2.iterations,
+                                    },
+                                    {
+                                      label: 'Tolerance',
+                                      value: formatScientific(
+                                        selectedBranchPoint.codim2.tolerance,
+                                        4
+                                      ),
+                                    },
+                                    { label: 'Method', value: selectedBranchPoint.codim2.method },
+                                    {
+                                      label: 'Source segment',
+                                      value: selectedBranchPoint.codim2.source_segment.join(' to '),
+                                    },
+                                    {
+                                      label: 'Source test values',
+                                      value: selectedBranchPoint.codim2.source_test_values
+                                        .map((value) => formatScientific(value, 4))
+                                        .join(' to '),
+                                    },
+                                  ]}
+                                />
+                                {selectedBranchPoint.codim2.coefficients.length > 0 ? (
+                                  <>
+                                    <h4 className="inspector-subheading">
+                                      Normal-form coefficients
+                                    </h4>
+                                    <InspectorMetrics
+                                      rows={selectedBranchPoint.codim2.coefficients.map(
+                                        (coefficient) => ({
+                                          label: coefficient.name,
+                                          value: formatScientific(coefficient.value, 4),
+                                        })
+                                      )}
+                                    />
+                                  </>
+                                ) : null}
+                                {typeof selectedBranchPoint.codim2.conditioning
+                                  .bordered_condition_number === 'number' ||
+                                typeof selectedBranchPoint.codim2.conditioning
+                                  .jacobian_condition_number === 'number' ? (
+                                  <>
+                                    <h4 className="inspector-subheading">Conditioning</h4>
+                                    <InspectorMetrics
+                                      rows={[
+                                        ...(typeof selectedBranchPoint.codim2.conditioning
+                                          .bordered_condition_number === 'number'
+                                          ? [
+                                              {
+                                                label: 'Bordered condition number',
+                                                value: formatScientific(
+                                                  selectedBranchPoint.codim2.conditioning
+                                                    .bordered_condition_number,
+                                                  4
+                                                ),
+                                              },
+                                            ]
+                                          : []),
+                                        ...(typeof selectedBranchPoint.codim2.conditioning
+                                          .jacobian_condition_number === 'number'
+                                          ? [
+                                              {
+                                                label: 'Jacobian condition number',
+                                                value: formatScientific(
+                                                  selectedBranchPoint.codim2.conditioning
+                                                    .jacobian_condition_number,
+                                                  4
+                                                ),
+                                              },
+                                            ]
+                                          : []),
+                                      ]}
+                                    />
+                                  </>
+                                ) : null}
+                              </>
+                            ) : null}
                             <div className="inspector-subheading-row">
                               <h4 className="inspector-subheading">Parameters</h4>
                               {selectedBranchPointParams.length > 0 ? (

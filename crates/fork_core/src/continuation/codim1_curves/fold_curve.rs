@@ -10,6 +10,7 @@
 //!
 //! where vext is the solution of [A, w; v', 0] * [vext; g] = [0; 1].
 
+use super::normal_forms::{fold_normal_form, FoldNormalForm};
 use super::{Borders, Codim2TestFunctions};
 use crate::autodiff::Dual;
 use crate::continuation::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
@@ -122,9 +123,16 @@ impl<'a> FoldCurveProblem<'a> {
     }
 
     /// Compute codim-2 test functions for the fold curve.
-    fn compute_codim2_tests(&mut self, jac: &DMatrix<f64>) -> Result<Codim2TestFunctions> {
+    fn compute_codim2_tests(
+        &mut self,
+        state: &[f64],
+        p1: f64,
+        p2: f64,
+        jac: &DMatrix<f64>,
+    ) -> Result<Codim2TestFunctions> {
         let n = self.nphase();
         let mut tests = Codim2TestFunctions::default();
+        tests.cusp = f64::NAN;
 
         // Build bordered matrix and solve for null vectors
         let mut bordered = DMatrix::zeros(n + 1, n + 1);
@@ -140,8 +148,8 @@ impl<'a> FoldCurveProblem<'a> {
 
         let lu = bordered.clone().lu();
         if let (Some(vext), Some(wext)) = (lu.solve(&rhs), bordered.transpose().lu().solve(&rhs)) {
-            let v = vext.rows(0, n);
-            let w = wext.rows(0, n);
+            let v = vext.rows(0, n).into_owned();
+            let w = wext.rows(0, n).into_owned();
 
             // BT test: v' * w (inner product of null vectors)
             tests.bogdanov_takens = v.dot(&w);
@@ -152,10 +160,11 @@ impl<'a> FoldCurveProblem<'a> {
                 tests.zero_hopf = compute_bialternate_determinant(jac);
             }
 
-            // CP test: quadratic normal form coefficient
-            // a = w' * D²F(x)[v,v] / (w'*v) where D²F is Hessian
-            // This requires computing second derivatives - simplified here
-            tests.cusp = 1.0; // Placeholder - full implementation needs Hessians
+            // CP test: MATCONT quadratic fold coefficient
+            // a = 1/2 p^T B(q,q), with p^T q = 1.
+            if let Ok(normal_form) = self.normal_form_for(state, p1, p2, jac, &v, &w) {
+                tests.cusp = normal_form.quadratic_coefficient;
+            }
         }
 
         Ok(tests)
@@ -163,6 +172,62 @@ impl<'a> FoldCurveProblem<'a> {
 
     pub fn codim2_tests(&self) -> Codim2TestFunctions {
         self.codim2_tests
+    }
+
+    fn normal_form_for(
+        &mut self,
+        state: &[f64],
+        p1: f64,
+        p2: f64,
+        jac: &DMatrix<f64>,
+        right_seed: &DVector<f64>,
+        left_seed: &DVector<f64>,
+    ) -> Result<FoldNormalForm> {
+        let kind = self.kind;
+        self.with_params(p1, p2, |system| {
+            fold_normal_form(system, kind, state, jac, right_seed, left_seed)
+        })
+    }
+
+    /// Recompute the full fold/cusp normal form at an augmented curve point.
+    ///
+    /// This is kept separate from the sign test so a refined cusp can retain
+    /// its cubic nondegeneracy coefficient and nullspace conditioning.
+    pub(crate) fn normal_form_at(&mut self, aug_state: &DVector<f64>) -> Result<FoldNormalForm> {
+        let n = self.nphase();
+        if aug_state.len() != n + 2 {
+            bail!("Augmented state has wrong dimension for fold normal form");
+        }
+        let p1 = aug_state[0];
+        let p2 = aug_state[1];
+        let state: Vec<f64> = aug_state.rows(2, n).iter().copied().collect();
+        let kind = self.kind;
+        let jac = self.with_params(p1, p2, |system| {
+            let values = compute_jacobian(system, kind, &state)?;
+            Ok(DMatrix::from_row_slice(n, n, &values))
+        })?;
+
+        let mut bordered = DMatrix::zeros(n + 1, n + 1);
+        bordered.view_mut((0, 0), (n, n)).copy_from(&jac);
+        for i in 0..n {
+            bordered[(i, n)] = self.borders.w[i];
+            bordered[(n, i)] = self.borders.v[i];
+        }
+        let mut rhs = DVector::zeros(n + 1);
+        rhs[n] = 1.0;
+        let right_ext = bordered
+            .clone()
+            .lu()
+            .solve(&rhs)
+            .ok_or_else(|| anyhow::anyhow!("Fold bordered right-null solve is singular"))?;
+        let left_ext = bordered
+            .transpose()
+            .lu()
+            .solve(&rhs)
+            .ok_or_else(|| anyhow::anyhow!("Fold bordered left-null solve is singular"))?;
+        let right_seed = right_ext.rows(0, n).into_owned();
+        let left_seed = left_ext.rows(0, n).into_owned();
+        self.normal_form_for(&state, p1, p2, &jac, &right_seed, &left_seed)
     }
 }
 
@@ -322,7 +387,7 @@ impl<'a> ContinuationProblem for FoldCurveProblem<'a> {
             jac.clone().complex_eigenvalues().iter().cloned().collect();
 
         // Compute codim-2 test functions
-        self.codim2_tests = self.compute_codim2_tests(&jac)?;
+        self.codim2_tests = self.compute_codim2_tests(&state, p1, p2, &jac)?;
 
         // For the standard test functions, use fold = det(A) which should be ~0 on the curve
         let fold = jac.determinant();
@@ -450,5 +515,51 @@ mod tests {
         assert!(problem.is_ok());
         let problem = problem.unwrap();
         assert_eq!(problem.dimension(), 2); // n+1 = 1+1 = 2 equations
+    }
+
+    #[test]
+    fn cusp_test_changes_sign_on_cubic_fold_curve() {
+        // Universal cusp unfolding: x' = x^3 + b*x + a.
+        // Its fold curve is b = -3*x^2, a = 2*x^3, and the MATCONT
+        // quadratic coefficient is a_nf = 3*x.
+        let equation = Bytecode {
+            ops: vec![
+                OpCode::LoadVar(0),
+                OpCode::LoadConst(3.0),
+                OpCode::Pow,
+                OpCode::LoadParam(1),
+                OpCode::LoadVar(0),
+                OpCode::Mul,
+                OpCode::Add,
+                OpCode::LoadParam(0),
+                OpCode::Add,
+            ],
+        };
+        let mut system = EquationSystem::new(vec![equation], vec![0.0, 0.0]);
+        let mut problem = FoldCurveProblem::new(&mut system, SystemKind::Flow, &[0.0], 0, 1)
+            .expect("cubic fold problem");
+
+        let coefficient_at = |problem: &mut FoldCurveProblem<'_>, x: f64| {
+            let aug = DVector::from_vec(vec![2.0 * x.powi(3), -3.0 * x.powi(2), x]);
+            problem.diagnostics(&aug).expect("fold diagnostics");
+            problem.codim2_tests().cusp
+        };
+
+        let negative = coefficient_at(&mut problem, -0.2);
+        let zero = coefficient_at(&mut problem, 0.0);
+        let positive = coefficient_at(&mut problem, 0.2);
+
+        assert!(
+            negative < 0.0,
+            "expected negative cusp coefficient, got {negative}"
+        );
+        assert!(
+            zero.abs() < 1e-8,
+            "expected zero cusp coefficient, got {zero}"
+        );
+        assert!(
+            positive > 0.0,
+            "expected positive cusp coefficient, got {positive}"
+        );
     }
 }

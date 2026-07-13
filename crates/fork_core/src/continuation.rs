@@ -66,7 +66,8 @@ pub use periodic::{
 pub use problem::{PointDiagnostics, TestFunctionValues};
 pub use types::{
     BifurcationType, BranchType, Codim1CurveBranch, Codim1CurvePoint, Codim1CurveType,
-    Codim2BifurcationType, ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint,
+    Codim2Bifurcation, Codim2BifurcationType, Codim2Coefficient, Codim2Conditioning,
+    Codim2PointData, ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint,
     ContinuationResumeState, ContinuationSettings, HomoclinicBasisSnapshot,
     HomoclinicResumeContext, HomotopyStage, Manifold1DSettings, Manifold2DSettings, ManifoldBounds,
     ManifoldCurveGeometry, ManifoldCurveResumeState, ManifoldCycle2DSettings, ManifoldDirection,
@@ -828,8 +829,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
         )
     }
 
-    /// Take the final branch result, consuming the runner.
-    pub fn take_result(mut self) -> ContinuationBranch {
+    fn finalize_resume_state(&mut self) {
         let mut resume_state = self.branch.resume_state.take().unwrap_or_default();
 
         // Prefer boundary secants from accepted points for endpoint seeds.
@@ -876,7 +876,26 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
         if resume_state.min_index_seed.is_some() || resume_state.max_index_seed.is_some() {
             self.branch.resume_state = Some(resume_state);
         }
+    }
+
+    /// Take the final branch result, consuming the runner.
+    pub fn take_result(mut self) -> ContinuationBranch {
+        self.finalize_resume_state();
         self.branch
+    }
+
+    /// Take the branch together with its continuation problem.
+    ///
+    /// Codimension-two post-processing uses the same continuously oriented
+    /// border vectors that generated the curve instead of reconstructing a
+    /// fresh problem from serialized points.
+    pub fn take_result_with_problem(mut self) -> (ContinuationBranch, P) {
+        self.finalize_resume_state();
+        (self.branch, self.problem)
+    }
+
+    pub fn settings(&self) -> ContinuationSettings {
+        self.settings
     }
 
     /// Get a reference to the branch.

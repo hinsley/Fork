@@ -21,6 +21,29 @@ References:
 
 ---
 
+### 2026-07-12: Refine equilibrium codim-2 points on their source curve
+Context:
+Fold-curve cusp and Hopf-curve generalized-Hopf tests were constant placeholders, while other
+codim-2 crossings were attached to an unrefined step endpoint and lost their numerical provenance.
+Decision:
+Use MATCONT normal-form conventions for the fold quadratic/cusp cubic coefficients and the first
+Lyapunov coefficient. Locate supported sign changes with bracketed secant interpolation followed by
+pseudo-arclength correction back to the codim-1 curve. Replace the public crossing sample with the
+refined point, but keep the solver at its accepted continuation endpoint. Store residuals,
+coefficients, conditioning, and source-segment provenance on the selectable branch point. Restrict
+generalized-Hopf calculations to flows; maps use the Neimark-Sacker/Chenciner path.
+Why:
+The locator preserves a bracket and avoids differentiating a normal-form coefficient, while keeping
+continuation state stable and making numerical confidence inspectable.
+Impact:
+Initial and extended fold/Hopf curves expose refined codim-2 points consistently in WASM, web, and
+CLI results. Generalized-Hopf points remain candidates until the second Lyapunov coefficient exists.
+References:
+`crates/fork_core/src/continuation/codim1_curves/normal_forms.rs`,
+`crates/fork_core/src/continuation/codim1_curves/refinement.rs`,
+`crates/fork_wasm/src/continuation/curve_runners.rs`,
+`web/src/ui/inspector/sections/branch/BranchDataSections.tsx`
+
 ### 2026-07-10: Extend 2D manifolds from accepted numerical frontiers
 Context:
 Two-dimensional equilibrium and limit-cycle manifolds could only be recomputed from their local

@@ -810,6 +810,52 @@ pub enum Codim2BifurcationType {
     Resonance1_4,
 }
 
+/// A named normal-form coefficient evaluated at a codimension-two point.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Codim2Coefficient {
+    pub name: String,
+    pub value: f64,
+}
+
+/// Conditioning estimates for the solves used to classify a codimension-two point.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct Codim2Conditioning {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bordered_condition_number: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jacobian_condition_number: Option<f64>,
+}
+
+/// Refinement diagnostics and provenance attached to a codimension-two curve point.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Codim2PointData {
+    #[serde(rename = "type")]
+    pub bifurcation_type: Codim2BifurcationType,
+    pub refined: bool,
+    /// True when a higher-order nondegeneracy invariant is not yet available.
+    pub candidate: bool,
+    pub test_function: String,
+    pub test_function_value: f64,
+    pub residual_norm: f64,
+    pub iterations: usize,
+    pub tolerance: f64,
+    pub source_segment: [usize; 2],
+    pub source_test_values: [f64; 2],
+    pub method: String,
+    #[serde(default)]
+    pub coefficients: Vec<Codim2Coefficient>,
+    #[serde(default)]
+    pub conditioning: Codim2Conditioning,
+}
+
+/// Index and classification of a codimension-two point on a stored curve.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Codim2Bifurcation {
+    pub index: usize,
+    #[serde(rename = "type")]
+    pub bifurcation_type: Codim2BifurcationType,
+}
+
 /// A point on a codim-1 bifurcation curve (in two-parameter space).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Codim1CurvePoint {
@@ -827,6 +873,9 @@ pub struct Codim1CurvePoint {
     /// Eigenvalues at this point
     #[serde(default)]
     pub eigenvalues: Vec<Complex<f64>>,
+    /// Optional refinement/classification diagnostics for a codimension-two point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codim2: Option<Codim2PointData>,
 }
 
 /// A complete codim-1 bifurcation curve branch.
@@ -840,8 +889,8 @@ pub struct Codim1CurveBranch {
     pub param2_index: usize,
     /// Points on the curve
     pub points: Vec<Codim1CurvePoint>,
-    /// Indices of points where codim-2 bifurcations were detected
-    pub codim2_bifurcations: Vec<usize>,
+    /// Refined codim-2 bifurcation indices and classifications.
+    pub codim2_bifurcations: Vec<Codim2Bifurcation>,
     /// Arclength indices relative to start (0)
     pub indices: Vec<i32>,
 }

@@ -393,6 +393,65 @@ describe('InspectorDetailsPanel', () => {
     ).toBeVisible()
   })
 
+  it('shows codimension-two refinement diagnostics for a selected branch point', async () => {
+    const user = userEvent.setup()
+    const branchResult = createStateSpaceStrideBranchFixture('homoclinic_curve')
+    const sourceBranch = branchResult.system.branches[branchResult.nodeId]
+    const sourcePoint = sourceBranch.data.points[0]
+    const system = updateBranch(branchResult.system, branchResult.nodeId, {
+      ...sourceBranch,
+      data: {
+        ...sourceBranch.data,
+        points: [
+          {
+            ...sourcePoint,
+            stability: 'GeneralizedHopf',
+            codim2: {
+              type: 'GeneralizedHopf',
+              refined: true,
+              candidate: false,
+              test_function: 'first_lyapunov_coefficient',
+              test_function_value: 2e-11,
+              residual_norm: 3e-10,
+              iterations: 5,
+              tolerance: 1e-9,
+              source_segment: [3, 4],
+              source_test_values: [-0.2, 0.1],
+              method: 'bracketed_newton',
+              coefficients: [{ name: 'l1', value: 0.0125 }],
+              conditioning: {
+                bordered_condition_number: 120,
+                jacobian_condition_number: 80,
+              },
+            },
+          },
+        ],
+      },
+    })
+
+    renderInspectorForStateSpaceStride(system, branchResult.nodeId, vi.fn())
+
+    await user.click(screen.getByTestId('branch-points-toggle'))
+    await user.click(screen.getByTestId('branch-point-details-toggle'))
+
+    expect(screen.getByText('Codimension-two refinement')).toBeVisible()
+    expect(screen.getAllByText('GeneralizedHopf')).toHaveLength(2)
+    expect(screen.getByText('Refined')).toBeVisible()
+    expect(screen.getByText('first_lyapunov_coefficient')).toBeVisible()
+    expect(screen.getByText('2.0000e-11')).toBeVisible()
+    expect(screen.getByText('3.0000e-10')).toBeVisible()
+    expect(screen.getByText('bracketed_newton')).toBeVisible()
+    expect(screen.getByText('3 to 4')).toBeVisible()
+    expect(screen.getByText('-2.0000e-1 to 1.0000e-1')).toBeVisible()
+    expect(screen.getByText('Normal-form coefficients')).toBeVisible()
+    expect(screen.getByText('l1')).toBeVisible()
+    expect(screen.getByText('1.2500e-2')).toBeVisible()
+    expect(screen.getByText('Bordered condition number')).toBeVisible()
+    expect(screen.getByText('1.2000e+2')).toBeVisible()
+    expect(screen.getByText('Jacobian condition number')).toBeVisible()
+    expect(screen.getByText('8.0000e+1')).toBeVisible()
+  })
+
   it('maps 2D manifold profile draft values explicitly', () => {
     expect(toManifold2DProfile('adaptive_global')).toBe('AdaptiveGlobal')
     expect(toManifold2DProfile('local_preview')).toBe('LocalPreview')

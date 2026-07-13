@@ -1,7 +1,9 @@
 //! WasmSystem continuation methods.
 
 use crate::system::{SystemType, WasmSystem};
-use fork_core::continuation::codim1_curves::estimate_hopf_kappa_from_jacobian;
+use fork_core::continuation::codim1_curves::{
+    estimate_hopf_kappa_from_jacobian, refine_codim2_points,
+};
 use fork_core::continuation::equilibrium::{
     compute_eigenvalues_for_state, continue_parameter as core_continuation,
     extend_branch as core_extend_branch, map_cycle_seed_from_pd,
@@ -17,7 +19,7 @@ use fork_core::continuation::{
     homoclinic_setup_from_homotopy_saddle_point, homoclinic_setup_from_large_cycle,
     homotopy_saddle_setup_from_equilibrium, limit_cycle_setup_from_hopf,
     limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd, BranchType, Codim1CurveBranch,
-    Codim1CurvePoint, Codim1CurveType, Codim2BifurcationType, CollocationConfig,
+    Codim1CurvePoint, Codim1CurveType, Codim2Bifurcation, Codim2BifurcationType, CollocationConfig,
     ContinuationBranch, ContinuationSettings, FoldCurveProblem, HomoclinicExtraFlags,
     HomoclinicFixedScalars, HomoclinicSetup, HomotopySaddleSetup, HopfCurveProblem,
     IsochroneCurveProblem, LPCCurveProblem, LimitCycleSetup, Manifold1DSettings,
@@ -31,6 +33,7 @@ use nalgebra::DMatrix;
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::{from_value, to_value};
+use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1212,44 +1215,69 @@ impl WasmSystem {
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
             .map_err(|e| JsValue::from_str(&format!("Fold curve continuation failed: {}", e)))?;
 
+        let events = refine_codim2_points(
+            &mut problem,
+            &branch.points,
+            settings.corrector_steps.max(8),
+            settings.corrector_tolerance.clamp(1e-10, 1e-6),
+        )
+        .map_err(|error| JsValue::from_str(&format!("Codim-2 refinement failed: {error}")))?;
+        let mut events_by_index: BTreeMap<usize, _> = events
+            .into_iter()
+            .map(|event| (event.replace_index, event))
+            .collect();
+
         // Convert to Codim1CurveBranch format
         // The continuation stores augmented state as [p1, p2, x1, ..., xn]
         // pt.param_value = p1, pt.state = [p2, x1, ..., xn]
-        let codim1_points: Vec<Codim1CurvePoint> = branch
-            .points
-            .iter()
-            .map(|pt| {
-                // pt.state layout: [p2, x1, ..., xn]
-                // Extract p2 (first element)
-                let p2 = if !pt.state.is_empty() {
-                    pt.state[0]
-                } else {
-                    param2_value
-                };
-                // Extract physical state (elements 1 to n)
-                let physical_state: Vec<f64> = if pt.state.len() >= n + 1 {
-                    pt.state[1..(n + 1)].to_vec()
-                } else {
-                    fold_state.clone()
-                };
+        let mut codim1_points = Vec::with_capacity(branch.points.len());
+        let mut codim2_bifurcations = Vec::new();
+        for (index, original_point) in branch.points.iter().enumerate() {
+            let (pt, codim2) = match events_by_index.remove(&index) {
+                Some(event) => (event.point, Some(event.data)),
+                None => (original_point.clone(), None),
+            };
+            // pt.state layout: [p2, x1, ..., xn]
+            // Extract p2 (first element)
+            let p2 = if !pt.state.is_empty() {
+                pt.state[0]
+            } else {
+                param2_value
+            };
+            // Extract physical state (elements 1 to n)
+            let physical_state: Vec<f64> = if pt.state.len() >= n + 1 {
+                pt.state[1..(n + 1)].to_vec()
+            } else {
+                fold_state.clone()
+            };
 
-                Codim1CurvePoint {
-                    state: physical_state,
-                    param1_value: pt.param_value, // p1
-                    param2_value: p2,             // p2 extracted from augmented state
-                    codim2_type: Codim2BifurcationType::None,
-                    auxiliary: None,
-                    eigenvalues: pt.eigenvalues.clone(),
-                }
-            })
-            .collect();
+            let codim2_type = codim2
+                .as_ref()
+                .map(|data| data.bifurcation_type)
+                .unwrap_or(Codim2BifurcationType::None);
+            if codim2_type != Codim2BifurcationType::None {
+                codim2_bifurcations.push(Codim2Bifurcation {
+                    index,
+                    bifurcation_type: codim2_type,
+                });
+            }
+            codim1_points.push(Codim1CurvePoint {
+                state: physical_state,
+                param1_value: pt.param_value, // p1
+                param2_value: p2,             // p2 extracted from augmented state
+                codim2_type,
+                auxiliary: None,
+                eigenvalues: pt.eigenvalues.clone(),
+                codim2,
+            });
+        }
 
         let codim1_branch = Codim1CurveBranch {
             curve_type: Codim1CurveType::Fold,
             param1_index,
             param2_index,
             points: codim1_points,
-            codim2_bifurcations: vec![],
+            codim2_bifurcations,
             indices: branch.indices.clone(),
         };
 
@@ -1356,51 +1384,76 @@ impl WasmSystem {
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
             .map_err(|e| JsValue::from_str(&format!("Hopf curve continuation failed: {}", e)))?;
 
+        let events = refine_codim2_points(
+            &mut problem,
+            &branch.points,
+            settings.corrector_steps.max(8),
+            settings.corrector_tolerance.clamp(1e-10, 1e-6),
+        )
+        .map_err(|error| JsValue::from_str(&format!("Codim-2 refinement failed: {error}")))?;
+        let mut events_by_index: BTreeMap<usize, _> = events
+            .into_iter()
+            .map(|event| (event.replace_index, event))
+            .collect();
+
         // Convert to Codim1CurveBranch format
         // The continuation stores augmented state as [p1, p2, x1, ..., xn, κ]
         // pt.param_value = p1, pt.state = [p2, x1, ..., xn, κ]
         let n = hopf_state.len(); // Physical state dimension
-        let codim1_points: Vec<Codim1CurvePoint> = branch
-            .points
-            .iter()
-            .map(|pt| {
-                // pt.state layout: [p2, x1, ..., xn, κ]
-                // Extract p2 (first element)
-                let p2 = if !pt.state.is_empty() {
-                    pt.state[0]
-                } else {
-                    param2_value
-                };
-                // Extract physical state (elements 1 to n)
-                let physical_state: Vec<f64> = if pt.state.len() >= n + 1 {
-                    pt.state[1..(n + 1)].to_vec()
-                } else {
-                    hopf_state.clone()
-                };
-                // Extract κ (last element)
-                let kappa = if pt.state.len() >= n + 2 {
-                    pt.state[n + 1]
-                } else {
-                    kappa_default
-                };
+        let mut codim1_points = Vec::with_capacity(branch.points.len());
+        let mut codim2_bifurcations = Vec::new();
+        for (index, original_point) in branch.points.iter().enumerate() {
+            let (pt, codim2) = match events_by_index.remove(&index) {
+                Some(event) => (event.point, Some(event.data)),
+                None => (original_point.clone(), None),
+            };
+            // pt.state layout: [p2, x1, ..., xn, κ]
+            // Extract p2 (first element)
+            let p2 = if !pt.state.is_empty() {
+                pt.state[0]
+            } else {
+                param2_value
+            };
+            // Extract physical state (elements 1 to n)
+            let physical_state: Vec<f64> = if pt.state.len() >= n + 1 {
+                pt.state[1..(n + 1)].to_vec()
+            } else {
+                hopf_state.clone()
+            };
+            // Extract κ (last element)
+            let kappa = if pt.state.len() >= n + 2 {
+                pt.state[n + 1]
+            } else {
+                kappa_default
+            };
 
-                Codim1CurvePoint {
-                    state: physical_state,
-                    param1_value: pt.param_value, // p1
-                    param2_value: p2,             // p2 extracted from augmented state
-                    codim2_type: Codim2BifurcationType::None,
-                    auxiliary: Some(kappa), // κ extracted from augmented state
-                    eigenvalues: pt.eigenvalues.clone(),
-                }
-            })
-            .collect();
+            let codim2_type = codim2
+                .as_ref()
+                .map(|data| data.bifurcation_type)
+                .unwrap_or(Codim2BifurcationType::None);
+            if codim2_type != Codim2BifurcationType::None {
+                codim2_bifurcations.push(Codim2Bifurcation {
+                    index,
+                    bifurcation_type: codim2_type,
+                });
+            }
+            codim1_points.push(Codim1CurvePoint {
+                state: physical_state,
+                param1_value: pt.param_value, // p1
+                param2_value: p2,             // p2 extracted from augmented state
+                codim2_type,
+                auxiliary: Some(kappa), // κ extracted from augmented state
+                eigenvalues: pt.eigenvalues.clone(),
+                codim2,
+            });
+        }
 
         let codim1_branch = Codim1CurveBranch {
             curve_type: Codim1CurveType::Hopf,
             param1_index,
             param2_index,
             points: codim1_points,
-            codim2_bifurcations: vec![],
+            codim2_bifurcations,
             indices: branch.indices.clone(),
         };
 
@@ -1536,6 +1589,7 @@ impl WasmSystem {
                     codim2_type: Codim2BifurcationType::None,
                     auxiliary: None,
                     eigenvalues: pt.eigenvalues.clone(),
+                    codim2: None,
                 }
             })
             .collect();
@@ -1684,6 +1738,7 @@ impl WasmSystem {
                     codim2_type: Codim2BifurcationType::None,
                     auxiliary: None,
                     eigenvalues: pt.eigenvalues.clone(),
+                    codim2: None,
                 }
             })
             .collect();
@@ -1822,6 +1877,7 @@ impl WasmSystem {
                     codim2_type: Codim2BifurcationType::None,
                     auxiliary: None,
                     eigenvalues: pt.eigenvalues.clone(),
+                    codim2: None,
                 }
             })
             .collect();
@@ -1964,6 +2020,7 @@ impl WasmSystem {
                     codim2_type: Codim2BifurcationType::None,
                     auxiliary: Some(k_value), // Store k = cos(θ)
                     eigenvalues: pt.eigenvalues.clone(),
+                    codim2: None,
                 }
             })
             .collect();

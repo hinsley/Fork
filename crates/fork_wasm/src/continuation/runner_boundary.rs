@@ -60,6 +60,20 @@ impl<P: ContinuationProblem> RunnerHandle<P> {
         Ok(runner.take_result())
     }
 
+    pub(crate) fn take_result_with_problem(
+        &mut self,
+    ) -> Result<(ContinuationBranch, P), RunnerHandleError> {
+        let runner = self
+            .runner
+            .take()
+            .ok_or(RunnerHandleError::NotInitialized)?;
+        Ok(runner.take_result_with_problem())
+    }
+
+    pub(crate) fn settings(&self) -> Result<ContinuationSettings, RunnerHandleError> {
+        Ok(self.runner_ref()?.settings())
+    }
+
     pub(crate) fn runner_mut(&mut self) -> Result<&mut ContinuationRunner<P>, RunnerHandleError> {
         self.runner
             .as_mut()
@@ -136,6 +150,16 @@ impl<P: ContinuationProblem + 'static> OwnedContinuationRunner<P> {
 
     pub(crate) fn take_result(&mut self) -> Result<ContinuationBranch, JsValue> {
         self.runner.take_result().map_err(runner_error_to_js)
+    }
+
+    pub(crate) fn take_result_with_problem(&mut self) -> Result<(ContinuationBranch, P), JsValue> {
+        self.runner
+            .take_result_with_problem()
+            .map_err(runner_error_to_js)
+    }
+
+    pub(crate) fn settings(&self) -> Result<ContinuationSettings, JsValue> {
+        self.runner.settings().map_err(runner_error_to_js)
     }
 
     pub(crate) fn runner_mut(&mut self) -> Result<&mut ContinuationRunner<P>, JsValue> {

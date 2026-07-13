@@ -12,6 +12,7 @@
 //! where κ = ω² is the squared Hopf frequency, and we use the matrix
 //! RED = A·A + κ·I with 2x2 border structure.
 
+use super::normal_forms::{hopf_normal_form, HopfNormalForm};
 use super::Codim2TestFunctions;
 use crate::autodiff::Dual;
 use crate::continuation::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
@@ -465,10 +466,14 @@ impl<'a> HopfCurveProblem<'a> {
     /// Compute codim-2 test functions for the Hopf curve.
     fn compute_codim2_tests(
         &mut self,
+        state: &[f64],
+        p1: f64,
+        p2: f64,
         jac: &DMatrix<f64>,
         kappa: f64,
     ) -> Result<Codim2TestFunctions> {
         let mut tests = Codim2TestFunctions::default();
+        tests.generalized_hopf = f64::NAN;
 
         // BT test: κ → 0 (Hopf frequency collapses)
         tests.bogdanov_takens = kappa;
@@ -486,11 +491,66 @@ impl<'a> HopfCurveProblem<'a> {
             tests.double_hopf = bialt_shifted.determinant();
         }
 
-        // GH test: first Lyapunov coefficient
-        // This requires computing normal form coefficients - simplified here
-        tests.generalized_hopf = 1.0; // Placeholder
+        // GH test: MATCONT first Lyapunov coefficient.  A generalized Hopf
+        // point is an ODE concept; maps use the Neimark-Sacker/Chenciner path.
+        if let Ok(normal_form) = self.normal_form_for(state, p1, p2, jac, kappa) {
+            tests.generalized_hopf = normal_form.first_lyapunov_coefficient;
+        }
 
         Ok(tests)
+    }
+
+    fn normal_form_for(
+        &mut self,
+        state: &[f64],
+        p1: f64,
+        p2: f64,
+        jac: &DMatrix<f64>,
+        kappa: f64,
+    ) -> Result<HopfNormalForm> {
+        if !self.kind.is_flow() {
+            bail!("Generalized Hopf normal forms are only defined for flows");
+        }
+        if !kappa.is_finite() || kappa <= 0.0 {
+            bail!("Hopf frequency squared must be positive");
+        }
+        let n = jac.nrows();
+        let (right_ext, left_ext) = solve_bordered(jac, kappa, &self.borders)?;
+        let right_nullspace = right_ext.view((0, 0), (n, 2)).into_owned();
+        let left_nullspace = left_ext.view((0, 0), (n, 2)).into_owned();
+        let kind = self.kind;
+        self.with_params(p1, p2, |system| {
+            hopf_normal_form(
+                system,
+                kind,
+                state,
+                jac,
+                kappa.sqrt(),
+                &right_nullspace,
+                &left_nullspace,
+            )
+        })
+    }
+
+    /// Recompute the full Hopf normal form at an augmented curve point.
+    ///
+    /// The returned diagnostics are suitable for retaining at a refined
+    /// generalized-Hopf point.
+    pub(crate) fn normal_form_at(&mut self, aug_state: &DVector<f64>) -> Result<HopfNormalForm> {
+        let n = self.nphase();
+        if aug_state.len() != n + 3 {
+            bail!("Augmented state has wrong dimension for Hopf normal form");
+        }
+        let p1 = aug_state[0];
+        let p2 = aug_state[1];
+        let state: Vec<f64> = aug_state.rows(2, n).iter().copied().collect();
+        let kappa = aug_state[n + 2];
+        let kind = self.kind;
+        let jac = self.with_params(p1, p2, |system| {
+            let values = compute_jacobian(system, kind, &state)?;
+            Ok(DMatrix::from_row_slice(n, n, &values))
+        })?;
+        self.normal_form_for(&state, p1, p2, &jac, kappa)
     }
 
     pub fn codim2_tests(&self) -> Codim2TestFunctions {
@@ -673,7 +733,7 @@ impl<'a> ContinuationProblem for HopfCurveProblem<'a> {
             jac.clone().complex_eigenvalues().iter().cloned().collect();
 
         // Compute codim-2 test functions
-        self.codim2_tests = self.compute_codim2_tests(&jac, kappa)?;
+        self.codim2_tests = self.compute_codim2_tests(&state, p1, p2, &jac, kappa)?;
 
         // Standard test functions
         let hopf = kappa; // Should be O(ω²)
@@ -887,6 +947,82 @@ mod tests {
         let (idx1, idx2) = select_hopf_indices_from_jres(&jres).expect("index selection");
         assert_eq!(idx1, (0, 0));
         assert_eq!(idx2, (1, 0));
+    }
+
+    #[test]
+    fn generalized_hopf_test_tracks_radial_cubic_coefficient() {
+        // Radial Hopf/Bautin normal form:
+        //   x' = mu*x - y + beta*x*(x^2+y^2)
+        //   y' = x + mu*y + beta*y*(x^2+y^2)
+        // Along mu=0, the first Lyapunov coefficient has the sign of beta.
+        let first = Bytecode {
+            ops: vec![
+                OpCode::LoadParam(0),
+                OpCode::LoadVar(0),
+                OpCode::Mul,
+                OpCode::LoadVar(1),
+                OpCode::Sub,
+                OpCode::LoadParam(1),
+                OpCode::LoadVar(0),
+                OpCode::Mul,
+                OpCode::LoadVar(0),
+                OpCode::LoadConst(2.0),
+                OpCode::Pow,
+                OpCode::LoadVar(1),
+                OpCode::LoadConst(2.0),
+                OpCode::Pow,
+                OpCode::Add,
+                OpCode::Mul,
+                OpCode::Add,
+            ],
+        };
+        let second = Bytecode {
+            ops: vec![
+                OpCode::LoadVar(0),
+                OpCode::LoadParam(0),
+                OpCode::LoadVar(1),
+                OpCode::Mul,
+                OpCode::Add,
+                OpCode::LoadParam(1),
+                OpCode::LoadVar(1),
+                OpCode::Mul,
+                OpCode::LoadVar(0),
+                OpCode::LoadConst(2.0),
+                OpCode::Pow,
+                OpCode::LoadVar(1),
+                OpCode::LoadConst(2.0),
+                OpCode::Pow,
+                OpCode::Add,
+                OpCode::Mul,
+                OpCode::Add,
+            ],
+        };
+        let mut system = EquationSystem::new(vec![first, second], vec![0.0, -1.0]);
+        let mut problem =
+            HopfCurveProblem::new(&mut system, SystemKind::Flow, &[0.0, 0.0], 1.0, 0, 1)
+                .expect("radial Hopf problem");
+
+        let coefficient_at = |problem: &mut HopfCurveProblem<'_>, beta: f64| {
+            let aug = DVector::from_vec(vec![0.0, beta, 0.0, 0.0, 1.0]);
+            problem.diagnostics(&aug).expect("Hopf diagnostics");
+            problem.codim2_tests().generalized_hopf
+        };
+
+        let negative = coefficient_at(&mut problem, -1.0);
+        let zero = coefficient_at(&mut problem, 0.0);
+        let positive = coefficient_at(&mut problem, 1.0);
+
+        assert!(negative < 0.0, "expected negative l1, got {negative}");
+        assert!(
+            (negative + 2.0).abs() < 1e-4,
+            "expected l1=-2, got {negative}"
+        );
+        assert!(zero.abs() < 1e-8, "expected zero l1, got {zero}");
+        assert!(positive > 0.0, "expected positive l1, got {positive}");
+        assert!(
+            (positive - 2.0).abs() < 1e-4,
+            "expected l1=2, got {positive}"
+        );
     }
 
     #[test]

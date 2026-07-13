@@ -3,11 +3,14 @@
 use super::runner_boundary::static_system_ref;
 use super::shared::compute_tangent_from_problem;
 use crate::system::build_system;
-use fork_core::continuation::codim1_curves::estimate_hopf_kappa_from_jacobian;
+use fork_core::continuation::codim1_curves::{
+    estimate_hopf_kappa_from_jacobian, refine_codim2_points,
+};
 use fork_core::continuation::{
-    Codim2BifurcationType, Codim2TestFunctions, ContinuationBranch, ContinuationPoint,
-    ContinuationProblem, ContinuationRunner, ContinuationSettings, FoldCurveProblem,
-    HopfCurveProblem, IsochroneCurveProblem, LPCCurveProblem, NSCurveProblem, PDCurveProblem,
+    Codim2BifurcationType, Codim2PointData, Codim2TestFunctions, ContinuationBranch,
+    ContinuationPoint, ContinuationProblem, ContinuationRunner, ContinuationSettings,
+    FoldCurveProblem, HopfCurveProblem, IsochroneCurveProblem, LPCCurveProblem, NSCurveProblem,
+    PDCurveProblem,
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::{compute_jacobian, SystemKind};
@@ -15,6 +18,7 @@ use nalgebra::{DMatrix, DVector};
 use num_complex::Complex;
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::{from_value, to_value};
+use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -101,6 +105,8 @@ struct Codim1BranchPoint {
     eigenvalues: Vec<Complex<f64>>,
     #[serde(default)]
     auxiliary: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    codim2: Option<Codim2PointData>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -798,40 +804,44 @@ impl WasmCodim1CurveExtensionRunner {
             .take()
             .ok_or_else(|| JsValue::from_str("Runner not initialized"))?;
 
-        let (extension, mut merge, curve_dim, codim2_types) = match runner_kind {
+        let (extension, mut merge, curve_dim, codim2_results) = match runner_kind {
             Codim1ExtensionRunnerKind::Fold {
                 runner,
                 merge,
                 dim,
-                mut system,
-                kind,
+                system: _system,
+                kind: _kind,
             } => {
-                let extension = runner.take_result();
-                let codim2_types = detect_codim2_fold(
-                    &extension,
-                    &merge.branch.branch_type,
-                    system.as_mut(),
-                    kind,
-                    dim,
-                )?;
-                (extension, merge, CurveDim::Equilibrium(dim), codim2_types)
+                let settings = runner.settings();
+                let (extension, mut problem) = runner.take_result_with_problem();
+                let events = refine_codim2_points(
+                    &mut problem,
+                    &extension.points,
+                    settings.corrector_steps.max(8),
+                    settings.corrector_tolerance.clamp(1e-10, 1e-6),
+                )
+                .map_err(to_js_error)?;
+                let codim2_results = refined_extension_results(extension.points.len(), events);
+                (extension, merge, CurveDim::Equilibrium(dim), codim2_results)
             }
             Codim1ExtensionRunnerKind::Hopf {
                 runner,
                 merge,
                 dim,
-                mut system,
-                kind,
+                system: _system,
+                kind: _kind,
             } => {
-                let extension = runner.take_result();
-                let codim2_types = detect_codim2_hopf(
-                    &extension,
-                    &merge.branch.branch_type,
-                    system.as_mut(),
-                    kind,
-                    dim,
-                )?;
-                (extension, merge, CurveDim::Equilibrium(dim), codim2_types)
+                let settings = runner.settings();
+                let (extension, mut problem) = runner.take_result_with_problem();
+                let events = refine_codim2_points(
+                    &mut problem,
+                    &extension.points,
+                    settings.corrector_steps.max(8),
+                    settings.corrector_tolerance.clamp(1e-10, 1e-6),
+                )
+                .map_err(to_js_error)?;
+                let codim2_results = refined_extension_results(extension.points.len(), events);
+                (extension, merge, CurveDim::Equilibrium(dim), codim2_results)
             }
             Codim1ExtensionRunnerKind::LPC {
                 runner,
@@ -841,7 +851,8 @@ impl WasmCodim1CurveExtensionRunner {
                 let extension = runner.take_result();
                 let codim2_types =
                     detect_codim2_lpc(&extension, &merge.branch.branch_type, system.as_mut())?;
-                (extension, merge, CurveDim::LimitCycle, codim2_types)
+                let codim2_results = typed_extension_results(codim2_types);
+                (extension, merge, CurveDim::LimitCycle, codim2_results)
             }
             Codim1ExtensionRunnerKind::Isochrone {
                 runner,
@@ -851,7 +862,8 @@ impl WasmCodim1CurveExtensionRunner {
                 let extension = runner.take_result();
                 let codim2_types =
                     vec![Codim2BifurcationType::None; extension.points.len().saturating_sub(1)];
-                (extension, merge, CurveDim::LimitCycle, codim2_types)
+                let codim2_results = typed_extension_results(codim2_types);
+                (extension, merge, CurveDim::LimitCycle, codim2_results)
             }
             Codim1ExtensionRunnerKind::PD {
                 runner,
@@ -861,7 +873,8 @@ impl WasmCodim1CurveExtensionRunner {
                 let extension = runner.take_result();
                 let codim2_types =
                     detect_codim2_pd(&extension, &merge.branch.branch_type, system.as_mut())?;
-                (extension, merge, CurveDim::LimitCycle, codim2_types)
+                let codim2_results = typed_extension_results(codim2_types);
+                (extension, merge, CurveDim::LimitCycle, codim2_results)
             }
             Codim1ExtensionRunnerKind::NS {
                 runner,
@@ -871,7 +884,8 @@ impl WasmCodim1CurveExtensionRunner {
                 let extension = runner.take_result();
                 let codim2_types =
                     detect_codim2_ns(&extension, &merge.branch.branch_type, system.as_mut())?;
-                (extension, merge, CurveDim::LimitCycle, codim2_types)
+                let codim2_results = typed_extension_results(codim2_types);
+                (extension, merge, CurveDim::LimitCycle, codim2_results)
             }
         };
 
@@ -879,12 +893,19 @@ impl WasmCodim1CurveExtensionRunner {
             index_offset, sign, ..
         } = merge;
 
-        let mut codim2_iter = codim2_types.into_iter();
+        let mut codim2_iter = codim2_results.into_iter();
 
-        for (i, pt) in extension.points.into_iter().enumerate().skip(1) {
-            let codim2_type = codim2_iter.next().unwrap_or(Codim2BifurcationType::None);
-            let converted =
-                convert_extension_point(&merge.branch.branch_type, &pt, curve_dim, codim2_type)?;
+        for (i, original_point) in extension.points.into_iter().enumerate().skip(1) {
+            let codim2 = codim2_iter.next().unwrap_or_default();
+            let point = codim2.point.as_ref().unwrap_or(&original_point);
+            let codim2_type = codim2.bifurcation_type;
+            let converted = convert_extension_point(
+                &merge.branch.branch_type,
+                point,
+                curve_dim,
+                codim2_type,
+                codim2.data,
+            )?;
             if codim2_type != Codim2BifurcationType::None {
                 merge.branch.bifurcations.push(merge.branch.points.len());
             }
@@ -902,6 +923,53 @@ impl WasmCodim1CurveExtensionRunner {
 enum CurveDim {
     Equilibrium(usize),
     LimitCycle,
+}
+
+struct ExtensionCodim2Result {
+    bifurcation_type: Codim2BifurcationType,
+    point: Option<ContinuationPoint>,
+    data: Option<Codim2PointData>,
+}
+
+impl Default for ExtensionCodim2Result {
+    fn default() -> Self {
+        Self {
+            bifurcation_type: Codim2BifurcationType::None,
+            point: None,
+            data: None,
+        }
+    }
+}
+
+fn refined_extension_results(
+    point_count: usize,
+    events: Vec<fork_core::continuation::codim1_curves::RefinedCodim2Event>,
+) -> Vec<ExtensionCodim2Result> {
+    let mut by_index: BTreeMap<usize, _> = events
+        .into_iter()
+        .map(|event| (event.replace_index, event))
+        .collect();
+    (1..point_count)
+        .map(|index| match by_index.remove(&index) {
+            Some(event) => ExtensionCodim2Result {
+                bifurcation_type: event.data.bifurcation_type,
+                point: Some(event.point),
+                data: Some(event.data),
+            },
+            None => ExtensionCodim2Result::default(),
+        })
+        .collect()
+}
+
+fn typed_extension_results(types: Vec<Codim2BifurcationType>) -> Vec<ExtensionCodim2Result> {
+    types
+        .into_iter()
+        .map(|bifurcation_type| ExtensionCodim2Result {
+            bifurcation_type,
+            point: None,
+            data: None,
+        })
+        .collect()
 }
 
 fn orient_tangent(tangent: &mut DVector<f64>, secant: Option<&DVector<f64>>, forward: bool) {
@@ -1227,6 +1295,7 @@ fn convert_extension_point(
     point: &ContinuationPoint,
     curve_dim: CurveDim,
     codim2_type: Codim2BifurcationType,
+    codim2: Option<Codim2PointData>,
 ) -> Result<Codim1BranchPoint, JsValue> {
     let stability = Some(codim2_stability_label(codim2_type));
     match branch_type {
@@ -1246,6 +1315,7 @@ fn convert_extension_point(
                     stability,
                     eigenvalues: point.eigenvalues.clone(),
                     auxiliary: None,
+                    codim2,
                 })
             }
             _ => Err(JsValue::from_str("Fold curve conversion missing dimension")),
@@ -1267,6 +1337,7 @@ fn convert_extension_point(
                     stability,
                     eigenvalues: point.eigenvalues.clone(),
                     auxiliary: Some(kappa),
+                    codim2,
                 })
             }
             _ => Err(JsValue::from_str("Hopf curve conversion missing dimension")),
@@ -1292,6 +1363,7 @@ fn convert_extension_point(
                 stability,
                 eigenvalues: point.eigenvalues.clone(),
                 auxiliary: None,
+                codim2,
             })
         }
         Codim1BranchType::NSCurve { .. } => {
@@ -1314,6 +1386,7 @@ fn convert_extension_point(
                 stability,
                 eigenvalues: point.eigenvalues.clone(),
                 auxiliary: Some(k_value),
+                codim2,
             })
         }
     }
@@ -1325,75 +1398,6 @@ fn codim2_stability_label(bifurcation: Codim2BifurcationType) -> String {
     } else {
         format!("{:?}", bifurcation)
     }
-}
-
-fn detect_codim2_fold(
-    extension: &ContinuationBranch,
-    branch_type: &Codim1BranchType,
-    system: &mut EquationSystem,
-    kind: SystemKind,
-    dim: usize,
-) -> Result<Vec<Codim2BifurcationType>, JsValue> {
-    let (param1_index, param2_index) = param_indices(system, branch_type)?;
-    let first = extension
-        .points
-        .first()
-        .ok_or_else(|| JsValue::from_str("Fold extension has no points"))?;
-    if first.state.len() < dim + 1 {
-        return Err(JsValue::from_str(
-            "Fold extension point has unexpected state length",
-        ));
-    }
-    let p2 = first.state[0];
-    let state = first.state[1..(dim + 1)].to_vec();
-
-    system.params[param1_index] = first.param_value;
-    system.params[param2_index] = p2;
-
-    let mut problem = FoldCurveProblem::new(system, kind, &state, param1_index, param2_index)
-        .map_err(to_js_error)?;
-
-    detect_codim2_for_extension(extension, |point| {
-        codim2_tests_for_fold(&mut problem, point)
-    })
-}
-
-fn detect_codim2_hopf(
-    extension: &ContinuationBranch,
-    branch_type: &Codim1BranchType,
-    system: &mut EquationSystem,
-    kind: SystemKind,
-    dim: usize,
-) -> Result<Vec<Codim2BifurcationType>, JsValue> {
-    let (param1_index, param2_index) = param_indices(system, branch_type)?;
-    let first = extension
-        .points
-        .first()
-        .ok_or_else(|| JsValue::from_str("Hopf extension has no points"))?;
-    if first.state.len() < dim + 2 {
-        return Err(JsValue::from_str(
-            "Hopf extension point has unexpected state length",
-        ));
-    }
-    let p2 = first.state[0];
-    let state = first.state[1..(dim + 1)].to_vec();
-    let kappa = first.state[dim + 1];
-    let hopf_omega = if kappa.is_finite() && kappa > 0.0 {
-        kappa.sqrt()
-    } else {
-        1.0
-    };
-
-    system.params[param1_index] = first.param_value;
-    system.params[param2_index] = p2;
-
-    let mut problem =
-        HopfCurveProblem::new(system, kind, &state, hopf_omega, param1_index, param2_index)
-            .map_err(to_js_error)?;
-
-    detect_codim2_for_extension(extension, |point| {
-        codim2_tests_for_hopf(&mut problem, point)
-    })
 }
 
 fn detect_codim2_lpc(
@@ -1537,28 +1541,6 @@ where
     Ok(detected)
 }
 
-fn codim2_tests_for_fold(
-    problem: &mut FoldCurveProblem,
-    point: &ContinuationPoint,
-) -> Result<Codim2TestFunctions, JsValue> {
-    let aug = aug_from_point(point);
-    problem.diagnostics(&aug).map_err(to_js_error)?;
-    let tests = problem.codim2_tests();
-    problem.update_after_step(&aug).map_err(to_js_error)?;
-    Ok(tests)
-}
-
-fn codim2_tests_for_hopf(
-    problem: &mut HopfCurveProblem,
-    point: &ContinuationPoint,
-) -> Result<Codim2TestFunctions, JsValue> {
-    let aug = aug_from_point(point);
-    problem.diagnostics(&aug).map_err(to_js_error)?;
-    let tests = problem.codim2_tests();
-    problem.update_after_step(&aug).map_err(to_js_error)?;
-    Ok(tests)
-}
-
 fn codim2_tests_for_lpc(
     problem: &mut LPCCurveProblem,
     point: &ContinuationPoint,
@@ -1653,7 +1635,10 @@ mod tests {
         build_secant_direction, convert_extension_point, Codim1BranchData, Codim1BranchPoint,
         Codim1BranchType, CurveDim,
     };
-    use fork_core::continuation::{BifurcationType, Codim2BifurcationType, ContinuationPoint};
+    use fork_core::continuation::{
+        BifurcationType, Codim2BifurcationType, Codim2Coefficient, Codim2Conditioning,
+        Codim2PointData, ContinuationPoint,
+    };
     use nalgebra::DVector;
 
     #[test]
@@ -1678,6 +1663,7 @@ mod tests {
             &point,
             CurveDim::LimitCycle,
             Codim2BifurcationType::None,
+            None,
         )
         .expect("convert isochrone point");
 
@@ -1685,6 +1671,54 @@ mod tests {
         assert_eq!(converted.param2_value, Some(0.12));
         assert_eq!(converted.state, vec![0.3, -0.4, 5.5]);
         assert_eq!(converted.stability.as_deref(), Some("None"));
+    }
+
+    #[test]
+    fn convert_extension_point_preserves_codim2_refinement_metadata() {
+        let branch_type = Codim1BranchType::FoldCurve {
+            param1_name: "a".to_string(),
+            param2_name: "b".to_string(),
+        };
+        let point = ContinuationPoint {
+            state: vec![0.0, 0.0],
+            param_value: 0.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+        };
+        let metadata = Codim2PointData {
+            bifurcation_type: Codim2BifurcationType::Cusp,
+            refined: true,
+            candidate: false,
+            test_function: "fold quadratic coefficient a".to_string(),
+            test_function_value: 1e-10,
+            residual_norm: 2e-11,
+            iterations: 4,
+            tolerance: 1e-8,
+            source_segment: [2, 3],
+            source_test_values: [-0.1, 0.2],
+            method: "bracketed secant with pseudo-arclength curve correction".to_string(),
+            coefficients: vec![Codim2Coefficient {
+                name: "c".to_string(),
+                value: 1.0,
+            }],
+            conditioning: Codim2Conditioning {
+                bordered_condition_number: Some(3.0),
+                jacobian_condition_number: Some(4.0),
+            },
+        };
+
+        let converted = convert_extension_point(
+            &branch_type,
+            &point,
+            CurveDim::Equilibrium(1),
+            Codim2BifurcationType::Cusp,
+            Some(metadata.clone()),
+        )
+        .expect("convert refined cusp");
+
+        assert_eq!(converted.stability.as_deref(), Some("Cusp"));
+        assert_eq!(converted.codim2, Some(metadata));
     }
 
     #[test]
@@ -1698,6 +1732,7 @@ mod tests {
                     stability: None,
                     eigenvalues: Vec::new(),
                     auxiliary: None,
+                    codim2: None,
                 },
                 Codim1BranchPoint {
                     state: vec![0.0],
@@ -1706,6 +1741,7 @@ mod tests {
                     stability: None,
                     eigenvalues: Vec::new(),
                     auxiliary: None,
+                    codim2: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -1746,6 +1782,7 @@ mod tests {
                     stability: None,
                     eigenvalues: Vec::new(),
                     auxiliary: None,
+                    codim2: None,
                 },
                 Codim1BranchPoint {
                     state: vec![0.0],
@@ -1754,6 +1791,7 @@ mod tests {
                     stability: None,
                     eigenvalues: Vec::new(),
                     auxiliary: None,
+                    codim2: None,
                 },
                 Codim1BranchPoint {
                     state: vec![0.0],
@@ -1762,6 +1800,7 @@ mod tests {
                     stability: None,
                     eigenvalues: Vec::new(),
                     auxiliary: None,
+                    codim2: None,
                 },
             ],
             bifurcations: Vec::new(),
@@ -1811,6 +1850,7 @@ mod tests {
             &point,
             CurveDim::LimitCycle,
             Codim2BifurcationType::None,
+            None,
         )
         .expect_err("short state should fail");
 
@@ -1853,6 +1893,7 @@ mod wasm_tests {
             stability: None,
             eigenvalues: Vec::new(),
             auxiliary: None,
+            codim2: None,
         }
     }
 

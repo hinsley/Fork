@@ -65,6 +65,51 @@ function formatTerminationReason(reason: string | undefined): string {
     .join(' ');
 }
 
+function printCodim2Diagnostics(point: ContinuationPoint): void {
+  const codim2 = point.codim2;
+  if (!codim2) return;
+
+  const status = codim2.refined && codim2.candidate
+    ? 'Refined candidate'
+    : codim2.refined
+      ? 'Refined'
+      : codim2.candidate
+        ? 'Candidate'
+        : 'Detected';
+  console.log(chalk.white('\nCodimension-two refinement:'));
+  console.log(`  Type: ${codim2.type} (${status})`);
+  console.log(
+    `  Test residual: ${codim2.test_function}=${formatNumberFullPrecision(codim2.test_function_value)}`
+  );
+  console.log(`  Curve residual: ${formatNumberFullPrecision(codim2.residual_norm)}`);
+  console.log(
+    `  Iterations: ${codim2.iterations} (tolerance ${formatNumberFullPrecision(codim2.tolerance)})`
+  );
+  if (codim2.coefficients.length > 0) {
+    console.log('  Normal-form coefficients:');
+    codim2.coefficients.forEach((coefficient) => {
+      console.log(`    ${coefficient.name}: ${formatNumberFullPrecision(coefficient.value)}`);
+    });
+  }
+  const borderedCondition = codim2.conditioning.bordered_condition_number;
+  const jacobianCondition = codim2.conditioning.jacobian_condition_number;
+  if (typeof borderedCondition === 'number' || typeof jacobianCondition === 'number') {
+    console.log('  Conditioning:');
+    if (typeof borderedCondition === 'number') {
+      console.log(`    Bordered: ${formatNumberFullPrecision(borderedCondition)}`);
+    }
+    if (typeof jacobianCondition === 'number') {
+      console.log(`    Jacobian: ${formatNumberFullPrecision(jacobianCondition)}`);
+    }
+  }
+  console.log(
+    `  Method: ${codim2.method} | source segment ${codim2.source_segment[0]} to ${codim2.source_segment[1]}`
+  );
+  console.log(
+    `  Source test values: ${codim2.source_test_values.map(formatNumberFullPrecision).join(' to ')}`
+  );
+}
+
 function summarizeManifoldSolverDiagnostics(branch: ContinuationObject): string | null {
   if (branch.branchType === 'eq_manifold_1d') {
     const geometry = branch.data.manifold_geometry;
@@ -843,6 +888,8 @@ export async function showPointDetails(
     }
     console.log(`State: ${formatArray(pt.state)}`);
   }
+
+  printCodim2Diagnostics(pt);
 
   if (branchType === 'homoclinic_curve') {
     const branchTypeData = branch.data.branch_type as any;

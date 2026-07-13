@@ -117,6 +117,25 @@ export interface ContinuationSettings {
   step_tolerance: number
 }
 
+export interface Codim2PointData {
+  type: string
+  refined: boolean
+  candidate: boolean
+  test_function: string
+  test_function_value: number
+  residual_norm: number
+  iterations: number
+  tolerance: number
+  source_segment: [number, number]
+  source_test_values: [number, number]
+  method: string
+  coefficients: Array<{ name: string; value: number }>
+  conditioning: {
+    bordered_condition_number?: number
+    jacobian_condition_number?: number
+  }
+}
+
 export interface ContinuationPoint {
   state: number[]
   param_value: number
@@ -133,6 +152,7 @@ export interface ContinuationPoint {
   eigenvalues?: ContinuationEigenvalue[]
   cycle_points?: number[][]
   auxiliary?: number
+  codim2?: Codim2PointData
 }
 
 export type ManifoldStability = 'Stable' | 'Unstable'

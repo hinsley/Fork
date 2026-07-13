@@ -322,6 +322,7 @@ export async function initiateFoldCurve(
         param_value: pt.param1_value,
         param2_value: pt.param2_value,
         stability: pt.codim2_type || 'None',
+        codim2: pt.codim2,
         eigenvalues: (pt.eigenvalues || []).map((eig: any) => {
           // Handle both array format [re, im] and object format {re, im}
           if (Array.isArray(eig)) {
@@ -639,6 +640,7 @@ export async function initiateHopfCurve(
         param_value: pt.param1_value,
         param2_value: pt.param2_value,
         stability: pt.codim2_type || 'None',
+        codim2: pt.codim2,
         eigenvalues: (pt.eigenvalues || []).map((eig: any) => {
           // Handle both array format [re, im] and object format {re, im}
           if (Array.isArray(eig)) {
@@ -926,6 +928,7 @@ export async function initiateLPCCurve(
         param_value: pt.param1_value,
         param2_value: pt.param2_value,
         stability: pt.codim2_type || 'None',
+        codim2: pt.codim2,
         eigenvalues: (pt.eigenvalues || []).map((eig: any) => {
           if (Array.isArray(eig)) {
             return { re: eig[0] ?? 0, im: eig[1] ?? 0 };
@@ -1284,6 +1287,7 @@ export async function initiateIsochroneCurve(
         param_value: pt.param1_value,
         param2_value: pt.param2_value,
         stability: pt.codim2_type || 'None',
+        codim2: pt.codim2,
         eigenvalues: (pt.eigenvalues || []).map((eig: any) => {
           if (Array.isArray(eig)) {
             return { re: eig[0] ?? 0, im: eig[1] ?? 0 };
@@ -1585,6 +1589,7 @@ export async function initiatePDCurve(
         param_value: pt.param1_value,
         param2_value: pt.param2_value,
         stability: pt.codim2_type || 'None',
+        codim2: pt.codim2,
         eigenvalues: (pt.eigenvalues || []).map((eig: any) => {
           if (Array.isArray(eig)) {
             return { re: eig[0] ?? 0, im: eig[1] ?? 0 };
@@ -1882,6 +1887,7 @@ export async function initiateNSCurve(
         param_value: pt.param1_value,
         param2_value: pt.param2_value,
         stability: pt.codim2_type || 'None',
+        codim2: pt.codim2,
         eigenvalues: (pt.eigenvalues || []).map((eig: any) => {
           if (Array.isArray(eig)) {
             return { re: eig[0] ?? 0, im: eig[1] ?? 0 };

@@ -86,13 +86,14 @@ Map cycles are represented as fixed points of an iterated map, <code>F<sup>k</su
 
 ### Codimension-two points
 
-Codimension-two support currently means sign-change tests evaluated while extending a codimension-one curve. These labels are not yet produced by a dedicated root-refinement pass, and no codimension-two set is itself continued.
+Equilibrium fold and Hopf curves run a bracketed secant locator after continuation. Each trial is corrected back to the codimension-one defining curve, and a refined point replaces the crossing step in the public branch. Refined points retain the curve residual, test residual, named normal-form coefficients, condition estimates, and source-segment provenance in the web and CLI inspectors. Fork still does not continue codimension-two sets.
 
 | Point type | Status | Current capability |
 | --- | --- | --- |
-| Bogdanov-Takens, zero-Hopf, and double-Hopf | **Experimental detection** | Test functions exist on equilibrium fold and Hopf curves, but coverage and numerical validation remain limited. |
+| Bogdanov-Takens, zero-Hopf, and double-Hopf | **Experimental refined detection** | Sign-changing test functions on equilibrium fold and Hopf curves use the shared curve-corrected locator, but coverage and numerical validation remain limited. |
 | Strong resonances 1:1, 1:2, 1:3, and 1:4 | **Experimental detection** | Algebraic tests exist on the experimental Neimark-Sacker curve path. |
-| Cusp and generalized Hopf (Bautin) | **Not implemented** | Public types exist, but the relevant normal-form test functions are placeholders. |
+| Cusp | **Available for ODE fold curves** | Computes the MATCONT quadratic fold coefficient, refines its zero, and retains the cubic cusp coefficient for the nondegeneracy check. |
+| Generalized Hopf (Bautin) | **Experimental refined detection for ODE Hopf curves** | Computes the MATCONT first Lyapunov coefficient and refines its zero. The point remains marked as a candidate until a nonzero second Lyapunov coefficient is implemented. |
 | Chenciner and cycle interaction points | **Not implemented** | Chenciner, fold-flip, fold-NS, flip-NS, double-NS, generalized PD, and cusp-of-cycles tests are incomplete or placeholders. |
 | Full codimension-two continuation | **Not implemented** | Fork currently detects candidate points only; it does not continue codimension-two loci. |
 
