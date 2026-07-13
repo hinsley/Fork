@@ -8,12 +8,14 @@ export function EmbedCapturePreview({
   theme,
   headers,
   interaction,
+  captureStaticFallbacks,
   onFigureCapture,
 }: {
   viewportIds: string[]
   theme: EmbedTheme
   headers: EmbedHeaders
   interaction: EmbedInteraction
+  captureStaticFallbacks: boolean
   onFigureCapture: (state: PlotlyFigureCaptureState) => void
 }) {
   const { state, actions } = useAppContext()
@@ -38,6 +40,7 @@ export function EmbedCapturePreview({
           onComputeEventSeriesFromOrbit={actions.computeEventSeriesFromOrbit}
           onComputeEventSeriesFromSamples={actions.computeEventSeriesFromSamples}
           isoclineGeometryCache={state.isoclineGeometryCache}
+          captureStaticFallbacks={captureStaticFallbacks}
           onFigureCapture={onFigureCapture}
         />
       </div>

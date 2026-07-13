@@ -34,7 +34,10 @@ MathJax builds installed with Fork into the downloaded page. The dependency sour
 figure payload are gzip-compressed and base64-encoded. A small inline bootstrap decompresses them,
 installs both libraries without `eval`, and renders the figures without making CDN requests. This
 mode is intended for uploaded-HTML previews such as Notion that execute inline scripts but block
-external scripts. The compressed dependency payload preserves the Plotly and MathJax license texts.
+external scripts. It also converts Plotly `scattergl` traces to SVG `scatter` traces. True 3D
+Plotly traces still require WebGL for interaction, so Fork captures the selected viewport's current
+camera as a PNG and uses that image when the viewing host does not provide WebGL. The compressed
+dependency payload preserves the Plotly and MathJax license texts.
 
 ## Behavior and compatibility
 
@@ -52,9 +55,11 @@ well as the small inline bootstrap contained in the exported HTML.
 
 Bundled exports do not require CDN access, but they require a browser with `DecompressionStream`
 gzip support and a host that permits inline scripts. The files are larger than CDN-backed exports
-and can still exceed an upload provider's limit when figures contain large arrays. Restrictive
-hosts can also reject the dynamically installed inline dependency code; the page reports this as
-an in-page error rather than failing silently. CDN-backed export remains the default.
+and can still exceed an upload provider's limit when figures contain large arrays or one or more 3D
+PNG fallbacks. On a WebGL-capable viewer, 3D plots remain interactive; without WebGL, their exported
+current-camera images are static. Restrictive hosts can also reject the dynamically installed
+inline dependency code; the page reports this as an in-page error rather than failing silently.
+CDN-backed export remains the default.
 
 Exported plot pages are public assets. Anyone who can open the HTML can inspect its plotted data,
 including hover metadata included in the Plotly figure. Use the normal ZIP export separately when

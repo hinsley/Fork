@@ -1,7 +1,12 @@
 import { render, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { PlotlyViewport } from './PlotlyViewport'
-import { purgePlot, relayoutPlot, renderPlot } from './plotlyAdapter'
+import {
+  capturePlotImage,
+  purgePlot,
+  relayoutPlot,
+  renderPlot,
+} from './plotlyAdapter'
 
 describe('PlotlyViewport', () => {
   it('injects uirevision into layout and scene', async () => {
@@ -158,5 +163,32 @@ describe('PlotlyViewport', () => {
         data: [{ type: 'scatter', x: [1], y: [2] }],
       },
     })
+  })
+
+  it('captures a static fallback for bundled 3D figures', async () => {
+    vi.clearAllMocks()
+    const onFigureCapture = vi.fn()
+
+    render(
+      <PlotlyViewport
+        plotId="plot-export-3d"
+        data={[{ type: 'scatter3d', x: [1], y: [2], z: [3] }]}
+        layout={{ scene: { aspectmode: 'data' } }}
+        captureEnabled
+        captureStaticFallback
+        onFigureCapture={onFigureCapture}
+      />
+    )
+
+    await waitFor(() => {
+      expect(onFigureCapture).toHaveBeenCalledWith(
+        expect.objectContaining({
+          plotId: 'plot-export-3d',
+          status: 'ready',
+          fallbackImage: 'data:image/png;base64,static-fallback',
+        })
+      )
+    })
+    expect(capturePlotImage).toHaveBeenCalledTimes(1)
   })
 })

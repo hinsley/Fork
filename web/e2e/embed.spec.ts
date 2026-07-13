@@ -6,6 +6,17 @@ import { createHarness } from './harness'
 const PLOTLY_CDN_URL = 'https://cdn.plot.ly/plotly-2.32.0.min.js'
 const MATHJAX_CDN_URL = 'https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg.js'
 
+function bundledPlotPayload(html: string): {
+  viewports: Array<{
+    figure: { data: Array<{ type?: string }> }
+    fallbackImage?: string
+  }>
+} {
+  const match = html.match(/<script id="plot-data"[^>]*>([^<]+)<\/script>/)
+  if (!match?.[1]) throw new Error('Bundled plot payload is missing')
+  return JSON.parse(gunzipSync(Buffer.from(match[1], 'base64')).toString('utf8'))
+}
+
 test('builder downloads a standalone stacked Plotly HTML page', async ({ page }) => {
   const port = Number(process.env.PLAYWRIGHT_PORT ?? 4173)
   const publisherUrl = `http://localhost:${port}/Demo_System_embed.html`
@@ -185,5 +196,84 @@ test('bundled export renders under restrictive CSP without network dependencies'
       )
     )
     .toBe(true)
+  expect(requests).toEqual([publisherUrl])
+})
+
+test('bundled 3D export falls back to its captured camera without WebGL', async ({ page }) => {
+  test.setTimeout(60_000)
+  const port = Number(process.env.PLAYWRIGHT_PORT ?? 4173)
+  const publisherUrl = `http://localhost:${port}/Lorenz_embed.html`
+  const harness = createHarness(page)
+  await harness.goto({ deterministic: true, mock: true })
+  await harness.openSystem('Lorenz')
+  await harness.createScene()
+  await harness.createOrbit()
+  await harness.selectTreeNode('Orbit_1')
+  await harness.runOrbit()
+
+  await page.getByTestId('open-systems').click()
+  await page
+    .locator('.dialog__list-row')
+    .filter({ has: page.getByRole('button', { name: 'Lorenz', exact: true }) })
+    .getByRole('button', { name: 'Export' })
+    .click()
+  await page.getByRole('button', { name: 'Create embed' }).click()
+  await page.getByRole('checkbox', {
+    name: 'Bundle dependencies (Experimental)',
+  }).check()
+
+  const downloadButton = page.getByTestId('download-embed-html')
+  await expect(downloadButton).toBeEnabled({ timeout: 20_000 })
+  const downloadPromise = page.waitForEvent('download')
+  await downloadButton.click()
+  const download = await downloadPromise
+  const downloadPath = await download.path()
+  expect(downloadPath).not.toBeNull()
+  const html = await readFile(downloadPath!, 'utf8')
+  const payload = bundledPlotPayload(html)
+  expect(payload.viewports).toHaveLength(1)
+  expect(payload.viewports[0]?.figure.data.some((trace) => trace.type === 'scatter3d')).toBe(
+    true
+  )
+  expect(payload.viewports[0]?.fallbackImage).toMatch(/^data:image\/png;base64,/)
+
+  await page.addInitScript({
+    content: `
+      const originalGetContext = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (type, ...args) {
+        if (type === 'webgl' || type === 'experimental-webgl' || type === 'webgl2') {
+          return null;
+        }
+        return originalGetContext.call(this, type, ...args);
+      };
+    `,
+  })
+  const requests: string[] = []
+  page.on('request', (request) => requests.push(request.url()))
+  await page.route(publisherUrl, (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      headers: {
+        'Content-Security-Policy': [
+          "default-src 'none'",
+          "script-src 'unsafe-inline'",
+          "style-src 'unsafe-inline'",
+          'img-src data:',
+          'font-src data:',
+          "connect-src 'none'",
+          'worker-src blob:',
+        ].join('; '),
+      },
+      body: html,
+    })
+  )
+
+  await page.goto(publisherUrl)
+  const fallback = page.locator('.plot-fallback-image')
+  await expect(fallback).toHaveCount(1, { timeout: 15_000 })
+  await expect(fallback).toHaveAttribute('src', /^data:image\/png;base64,/)
+  await expect(page.locator('.js-plotly-plot')).toHaveCount(0)
+  await expect(page.locator('#error')).toBeHidden()
+  await expect(page.getByText(/WebGL is not supported/)).toHaveCount(0)
   expect(requests).toEqual([publisherUrl])
 })

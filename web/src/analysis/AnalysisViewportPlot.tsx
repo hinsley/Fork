@@ -70,6 +70,7 @@ type AnalysisViewportPlotProps = {
     request: ComputeEventSeriesFromSamplesRequest,
     opts?: { signal?: AbortSignal }
   ) => Promise<{ hits: EventSeriesHit[] }>
+  captureStaticFallback?: boolean
   onFigureCapture?: (state: PlotlyFigureCaptureState) => void
 }
 
@@ -611,6 +612,7 @@ export function AnalysisViewportPlot({
   onSelectOrbitPoint,
   onComputeEventSeriesFromOrbit,
   onComputeEventSeriesFromSamples,
+  captureStaticFallback = false,
   onFigureCapture
 }: AnalysisViewportPlotProps) {
   const eventExpression = useMemo(
@@ -873,6 +875,7 @@ export function AnalysisViewportPlot({
       captureEnabled={
         Boolean(onFigureCapture) && traceState.message !== 'Computing event map…'
       }
+      captureStaticFallback={captureStaticFallback}
       onFigureCapture={onFigureCapture}
     />
   )

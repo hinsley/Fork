@@ -49,6 +49,11 @@ behavior.
   snapshots only Plotly's public `graphDiv.data` and `graphDiv.layout` fields.
   `web/src/viewports/plotly/figureCapture.ts` converts typed arrays to JSON,
   drops non-finite numbers, and removes Fork-only `uid`/`uirevision` values.
+- `web/src/viewports/plotly/PlotlyViewport.tsx` and
+  `web/src/viewports/plotly/plotlyAdapter.ts`: bundled embed capture calls
+  `Plotly.toImage()` after saved camera restoration for figures containing true
+  3D WebGL traces. The resulting current-camera PNG is presentation-only and
+  is used as a static fallback by viewers where WebGL is unavailable.
 - `web/src/viewports/plotly/plotlyAdapter.ts`: the loaded Plotly module is
   assigned to `window.Plotly` so browser tests can invoke `Plotly.relayout`.
 - `web/src/embed/standaloneHtml.ts`: downloaded embed pages call
@@ -56,6 +61,9 @@ behavior.
   pinned Plotly.js 2.32.0 CDN build. The experimental bundled format
   decompresses the installed Plotly build from an inline gzip/base64 payload
   and installs it with a script element, without `eval` or network requests.
+  Bundled payload generation converts 2D `scattergl` traces to SVG `scatter`
+  traces. Its runtime detects WebGL before rendering true 3D traces and shows
+  the captured PNG fallback when WebGL is missing or `Plotly.newPlot()` rejects.
   Interactive exports enable the native modebar, responsiveness, and scroll
   zoom; static-presentation exports set `staticPlot: true` and hide the
   modebar. These pages contain no Fork runtime.

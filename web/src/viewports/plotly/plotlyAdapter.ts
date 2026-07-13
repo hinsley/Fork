@@ -18,6 +18,10 @@ type PlotlyModule = {
     }
   ) => Promise<void>
   purge: (container: HTMLElement) => void
+  toImage?: (
+    container: HTMLElement,
+    options: { format: 'png'; width: number; height: number; scale: number }
+  ) => Promise<string>
   Plots?: {
     resize: (container: HTMLElement) => MaybePromise<void>
   }
@@ -508,6 +512,32 @@ export async function relayoutPlot(container: HTMLElement, update: Record<string
   if (Plotly.relayout) {
     await Plotly.relayout(container, update)
   }
+}
+
+export async function capturePlotImage(container: HTMLElement): Promise<string> {
+  const Plotly = await loadPlotly()
+  if (!Plotly.toImage) {
+    throw new Error('Plotly image capture is unavailable.')
+  }
+  const bounds = container.getBoundingClientRect()
+  const width = Math.max(
+    320,
+    Math.min(1600, Math.round(bounds.width || container.clientWidth || 960))
+  )
+  const height = Math.max(
+    220,
+    Math.min(1200, Math.round(bounds.height || container.clientHeight || 560))
+  )
+  const dataUrl = await Plotly.toImage(container, {
+    format: 'png',
+    width,
+    height,
+    scale: 1,
+  })
+  if (!dataUrl.startsWith('data:image/png;base64,')) {
+    throw new Error('Plotly returned an invalid fallback image.')
+  }
+  return dataUrl
 }
 
 export function purgePlot(container: HTMLElement) {

@@ -10,6 +10,7 @@ export type StandaloneViewport = {
   type: string
   height: number
   figure: PlotlyFigureSnapshot
+  fallbackImage?: string
 }
 
 export type StandaloneEmbed = {

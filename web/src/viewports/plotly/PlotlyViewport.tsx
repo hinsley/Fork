@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import type { Layout, Data } from 'plotly.js'
-import { isPlotlyLoaded, preloadPlotly, purgePlot, renderPlot } from './plotlyAdapter'
+import {
+  capturePlotImage,
+  isPlotlyLoaded,
+  preloadPlotly,
+  purgePlot,
+  renderPlot,
+} from './plotlyAdapter'
 import { usePlotViewport, type PlotlyRelayoutEvent } from './usePlotViewport'
 import {
   capturePlotlyFigure,
+  figureNeedsStaticWebGlFallback,
   type PlotlyFigureCaptureState,
 } from './figureCapture'
 
@@ -132,6 +139,7 @@ export function PlotlyViewport({
   onPointClick,
   onResize,
   captureEnabled = false,
+  captureStaticFallback = false,
   onFigureCapture,
 }: {
   plotId: string
@@ -144,6 +152,7 @@ export function PlotlyViewport({
   onPointClick?: (point: PlotlyPointClick) => void
   onResize?: (size: { width: number; height: number }) => void
   captureEnabled?: boolean
+  captureStaticFallback?: boolean
   onFigureCapture?: (state: PlotlyFigureCaptureState) => void
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -215,10 +224,17 @@ export function PlotlyViewport({
         await onPlotReadyRef.current?.(node)
         if (controller.signal.aborted) return
         if (captureEnabled) {
+          const figure = capturePlotlyFigure(node)
+          const fallbackImage =
+            captureStaticFallback && figureNeedsStaticWebGlFallback(figure)
+              ? await capturePlotImage(node)
+              : undefined
+          if (controller.signal.aborted) return
           onFigureCaptureRef.current?.({
             plotId,
             status: 'ready',
-            figure: capturePlotlyFigure(node),
+            figure,
+            ...(fallbackImage ? { fallbackImage } : {}),
           })
         }
       } catch (err) {
@@ -237,7 +253,7 @@ export function PlotlyViewport({
     return () => {
       controller.abort()
     }
-  }, [captureEnabled, data, layoutWithUirevision, plotId])
+  }, [captureEnabled, captureStaticFallback, data, layoutWithUirevision, plotId])
 
   useEffect(() => {
     const node = containerRef.current

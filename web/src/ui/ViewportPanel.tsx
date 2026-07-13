@@ -125,6 +125,7 @@ type ViewportPanelProps = {
       geometry: ComputeIsoclineResult
     }
   >
+  captureStaticFallbacks?: boolean
   onFigureCapture?: (state: PlotlyFigureCaptureState) => void
 }
 
@@ -182,6 +183,7 @@ type ViewportTileProps = {
   showHeader: boolean
   interaction: 'plot' | 'none'
   captureEnabled: boolean
+  captureStaticFallback: boolean
   onFigureCapture?: (state: PlotlyFigureCaptureState) => void
 }
 
@@ -6582,6 +6584,7 @@ function ViewportTile({
   showHeader,
   interaction,
   captureEnabled,
+  captureStaticFallback,
   onFigureCapture,
 }: ViewportTileProps) {
   const { node, scene, analysis, diagram } = entry
@@ -6979,6 +6982,7 @@ function ViewportTile({
                 onSelectOrbitPoint={onSelectOrbitPoint}
                 onComputeEventSeriesFromOrbit={onComputeEventSeriesFromOrbit}
                 onComputeEventSeriesFromSamples={onComputeEventSeriesFromSamples}
+                captureStaticFallback={captureStaticFallback}
                 onFigureCapture={onFigureCapture}
               />
             ) : (
@@ -6995,6 +6999,7 @@ function ViewportTile({
                 }
                 onResize={scene ? handleResize : undefined}
                 captureEnabled={captureEnabled}
+                captureStaticFallback={captureStaticFallback}
                 onFigureCapture={onFigureCapture}
               />
             )}
@@ -7039,6 +7044,7 @@ export function ViewportPanel({
   onComputeEventSeriesFromOrbit,
   onComputeEventSeriesFromSamples,
   isoclineGeometryCache,
+  captureStaticFallbacks = false,
   onFigureCapture,
 }: ViewportPanelProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -7470,6 +7476,7 @@ export function ViewportPanel({
                     !hasMapSamples
                   )
                 }
+                captureStaticFallback={captureStaticFallbacks}
                 onFigureCapture={onFigureCapture}
               />
             </div>

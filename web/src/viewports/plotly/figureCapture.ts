@@ -7,8 +7,23 @@ export type PlotlyFigureSnapshot = {
 
 export type PlotlyFigureCaptureState =
   | { plotId: string; status: 'rendering' }
-  | { plotId: string; status: 'ready'; figure: PlotlyFigureSnapshot }
+  | {
+      plotId: string
+      status: 'ready'
+      figure: PlotlyFigureSnapshot
+      fallbackImage?: string
+    }
   | { plotId: string; status: 'error'; message: string }
+
+const STATIC_WEBGL_FALLBACK_TRACE_TYPES = new Set([
+  'scatter3d',
+  'surface',
+  'mesh3d',
+  'cone',
+  'streamtube',
+  'volume',
+  'isosurface',
+])
 
 type PlotlyGraphDiv = HTMLElement & {
   data?: Data[]
@@ -38,4 +53,23 @@ export function capturePlotlyFigure(node: HTMLElement): PlotlyFigureSnapshot {
     layout: Partial<Layout>
   }
   return snapshot
+}
+
+export function figureNeedsStaticWebGlFallback(figure: PlotlyFigureSnapshot): boolean {
+  return figure.data.some((trace) => {
+    const type = (trace as { type?: string }).type
+    return typeof type === 'string' && STATIC_WEBGL_FALLBACK_TRACE_TYPES.has(type)
+  })
+}
+
+export function makeBundledFigureWebGlCompatible(
+  figure: PlotlyFigureSnapshot
+): PlotlyFigureSnapshot {
+  return {
+    data: figure.data.map((trace) => {
+      if ((trace as { type?: string }).type !== 'scattergl') return trace
+      return { ...trace, type: 'scatter' } as Data
+    }),
+    layout: figure.layout,
+  }
 }

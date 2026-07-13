@@ -120,6 +120,7 @@ function EmbedDialogContent({
             ...entry,
             height: system.ui.viewportHeights[id] ?? DEFAULT_EXPORTED_VIEWPORT_HEIGHT,
             figure: capture.figure,
+            ...(capture.fallbackImage ? { fallbackImage: capture.fallbackImage } : {}),
           },
         ]
       }),
@@ -270,12 +271,14 @@ function EmbedDialogContent({
                 onChange={(event) => {
                   setBundleDependencies(event.target.checked)
                   setDownloadError(null)
+                  resetCaptures()
                 }}
               />
               <span>
                 <strong>Bundle dependencies (Experimental)</strong>
                 <small>
-                  Compress Plotly, MathJax, and figure data into the HTML for restrictive hosts.
+                  Package dependencies, convert 2D GPU traces to SVG, and add static 3D
+                  fallbacks for restrictive hosts.
                 </small>
               </span>
             </label>
@@ -326,6 +329,7 @@ function EmbedDialogContent({
                   theme={theme}
                   headers={headers}
                   interaction={interaction}
+                  captureStaticFallbacks={bundleDependencies}
                   onFigureCapture={handleFigureCapture}
                 />
               ) : (

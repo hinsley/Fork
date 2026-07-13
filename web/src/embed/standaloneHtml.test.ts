@@ -107,6 +107,60 @@ describe('standalone Plotly HTML', () => {
     })
   })
 
+  it('makes bundled 2D GPU traces SVG-compatible and preserves 3D image fallbacks', () => {
+    const dependencyPackage = {
+      plotlySource: 'window.Plotly={newPlot(){}};',
+      mathJaxSource: 'window.MathJax={startup:{promise:Promise.resolve()}};',
+    }
+    const embed = fixture({
+      viewports: [
+        {
+          id: 'event-map',
+          name: 'Event map',
+          type: 'Event Map',
+          height: 300,
+          figure: {
+            data: [{ type: 'scattergl', mode: 'markers', x: [1], y: [2] }],
+            layout: {},
+          },
+        },
+        {
+          id: 'state-space',
+          name: '3D state space',
+          type: 'State Space',
+          height: 420,
+          figure: {
+            data: [{ type: 'scatter3d', x: [1], y: [2], z: [3] }],
+            layout: { scene: { camera: { eye: { x: 1, y: 2, z: 3 } } } },
+          },
+          fallbackImage: 'data:image/png;base64,captured-camera',
+        },
+      ],
+    })
+
+    const bundled = buildBundledStandaloneHtml(embed, {
+      dependenciesGzipBase64: gzipBase64(dependencyPackage),
+    })
+    const payload = decodeGzipJson(scriptData(bundled, 'plot-data')) as {
+      viewports: Array<{
+        figure: { data: Array<{ type?: string }> }
+        fallbackImage?: string
+      }>
+    }
+
+    expect(payload.viewports[0]?.figure.data[0]?.type).toBe('scatter')
+    expect(payload.viewports[1]?.figure.data[0]?.type).toBe('scatter3d')
+    expect(payload.viewports[1]?.fallbackImage).toBe(
+      'data:image/png;base64,captured-camera'
+    )
+    expect(bundled).toContain("canvas.getContext('webgl')")
+    expect(bundled).toContain('renderStaticFallback')
+
+    const cdn = buildStandaloneHtml(embed)
+    expect(cdn).toContain('"type":"scattergl"')
+    expect(cdn).not.toContain('data:image/png;base64,captured-camera')
+  })
+
   it('uses a stable HTML filename', () => {
     expect(standaloneEmbedFilename('Lorenz System')).toBe('Lorenz_System_embed.html')
     expect(standaloneEmbedFilename('')).toBe('fork_plot_embed.html')

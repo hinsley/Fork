@@ -1,6 +1,7 @@
 import { gzipSync, strToU8 } from 'fflate'
 import type { BundledDependencyPayload } from './standaloneDependencies'
 import type { StandaloneEmbed } from './types'
+import { makeBundledFigureWebGlCompatible } from '../viewports/plotly/figureCapture'
 
 export const PLOTLY_CDN_URL = 'https://cdn.plot.ly/plotly-2.32.0.min.js'
 export const MATHJAX_CDN_URL =
@@ -52,14 +53,22 @@ export function standaloneEmbedFilename(systemName: string): string {
   return `${base}_embed.html`
 }
 
-function buildPlotPayload(embed: StandaloneEmbed) {
+function buildPlotPayload(
+  embed: StandaloneEmbed,
+  options: { webGlFree?: boolean } = {}
+) {
   return {
     interaction: embed.interaction,
     viewports: embed.viewports.map((viewport) => ({
       name: viewport.name,
       type: viewport.type,
       height: Math.max(MIN_VIEWPORT_HEIGHT, Math.round(viewport.height)),
-      figure: viewport.figure,
+      figure: options.webGlFree
+        ? makeBundledFigureWebGlCompatible(viewport.figure)
+        : viewport.figure,
+      ...(options.webGlFree && viewport.fallbackImage
+        ? { fallbackImage: viewport.fallbackImage }
+        : {}),
     })),
   }
 }
@@ -78,6 +87,39 @@ function gzipJsonToBase64(value: unknown): string {
 }
 
 const RENDER_PAYLOAD_SOURCE = `
+    let webGlSupport;
+    function supportsWebGl() {
+      if (typeof webGlSupport === 'boolean') return webGlSupport;
+      try {
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        webGlSupport = Boolean(context);
+        if (context && typeof context.getExtension === 'function') {
+          context.getExtension('WEBGL_lose_context')?.loseContext();
+        }
+      } catch (_error) {
+        webGlSupport = false;
+      }
+      return webGlSupport;
+    }
+
+    function staticFallbackFor(viewport) {
+      return typeof viewport.fallbackImage === 'string' &&
+        viewport.fallbackImage.startsWith('data:image/png;base64,')
+        ? viewport.fallbackImage
+        : null;
+    }
+
+    function renderStaticFallback(plot, viewport, source) {
+      plot.replaceChildren();
+      plot.classList.add('plot--static-fallback');
+      const image = document.createElement('img');
+      image.className = 'plot-fallback-image';
+      image.src = source;
+      image.alt = viewport.name + ' static preview';
+      plot.append(image);
+    }
+
     async function renderPayload(payload) {
       const root = document.getElementById('plots');
       for (let index = 0; index < payload.viewports.length; index += 1) {
@@ -108,7 +150,17 @@ const RENDER_PAYLOAD_SOURCE = `
           staticPlot: payload.interaction === 'none',
           typesetMath: true
         };
-        await window.Plotly.newPlot(plot, viewport.figure.data, viewport.figure.layout, config);
+        const fallbackImage = staticFallbackFor(viewport);
+        if (fallbackImage && !supportsWebGl()) {
+          renderStaticFallback(plot, viewport, fallbackImage);
+          continue;
+        }
+        try {
+          await window.Plotly.newPlot(plot, viewport.figure.data, viewport.figure.layout, config);
+        } catch (error) {
+          if (!fallbackImage) throw error;
+          renderStaticFallback(plot, viewport, fallbackImage);
+        }
       }
     }
 `
@@ -146,6 +198,8 @@ function buildHtmlDocument({
     .plot-title { font-size: 13px; font-weight: 650; }
     .plot-type { color: ${theme.muted}; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; }
     .plot { flex: 1 1 auto; min-height: 0; width: 100%; }
+    .plot--static-fallback { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .plot-fallback-image { display: block; width: 100%; height: 100%; object-fit: contain; }
     #error { display: none; margin: 16px; padding: 12px; border-radius: 6px; color: ${theme.errorText}; background: ${theme.errorBackground}; white-space: pre-wrap; }
   </style>
 ${headScripts}
@@ -207,7 +261,9 @@ export function buildBundledStandaloneHtml(
   embed: StandaloneEmbed,
   dependencies: BundledDependencyPayload
 ): string {
-  const payloadGzipBase64 = gzipJsonToBase64(buildPlotPayload(embed))
+  const payloadGzipBase64 = gzipJsonToBase64(
+    buildPlotPayload(embed, { webGlFree: true })
+  )
   const dataScripts = `  <!-- Bundled Plotly.js and MathJax license texts are preserved in the dependency payload. -->
   <script id="bundled-dependencies" type="application/octet-stream">${dependencies.dependenciesGzipBase64}</script>
   <script id="plot-data" type="application/octet-stream">${payloadGzipBase64}</script>`

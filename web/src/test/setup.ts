@@ -45,4 +45,7 @@ vi.mock('../viewports/plotly/plotlyAdapter', () => ({
   isPlotlyLoaded: vi.fn(() => true),
   resizePlot: vi.fn(() => Promise.resolve()),
   relayoutPlot: vi.fn(() => Promise.resolve()),
+  capturePlotImage: vi.fn(() =>
+    Promise.resolve('data:image/png;base64,static-fallback')
+  ),
 }))
