@@ -21,13 +21,39 @@ References:
 
 ---
 
+### 2026-07-12: Treat codimension-two branch predictors as corrected, inspectable seeds
+Context:
+Refined generalized-Hopf and Bogdanov-Takens points were selectable but could not initialize their
+emanating codimension-one branches. The limit-point-of-cycles defining system also omitted the
+explicit periodic boundary equations, so multidimensional cycle seeds were not square.
+Decision:
+Compute the second Lyapunov coefficient through fifth-order multilinear forms. At a nondegenerate
+generalized-Hopf point, use the source Hopf-curve secant to predict a small fold of cycles and
+correct it on the LPC defining system. At a nondegenerate Bogdanov-Takens point, compute normalized
+nilpotent chains, quadratic coefficients, and the two-parameter unfolding, then construct and
+correct nearby fold, Hopf, and open-orbit homoclinic seeds. Store source-point provenance and both
+predictor and corrected residuals on every switched branch. Restore the missing explicit periodic
+boundary equations in the LPC problem.
+Why:
+Branch switching is trustworthy only when the target defining-system residual is checked, and the
+stored provenance makes the asymptotic perturbation and correction quality visible after creation.
+Impact:
+The web and CLI expose LPC switching from generalized-Hopf points and fold, Hopf, and homoclinic
+switching from Bogdanov-Takens points after their nondegeneracy checks pass.
+References:
+`crates/fork_core/src/continuation/codim1_curves/branching.rs`,
+`crates/fork_core/src/continuation/codim1_curves/normal_forms.rs`,
+`crates/fork_core/src/continuation/lc_codim1_curves/lpc_curve.rs`
+
+---
+
 ### 2026-07-12: Refine equilibrium codim-2 points on their source curve
 Context:
 Fold-curve cusp and Hopf-curve generalized-Hopf tests were constant placeholders, while other
 codim-2 crossings were attached to an unrefined step endpoint and lost their numerical provenance.
 Decision:
-Use MATCONT normal-form conventions for the fold quadratic/cusp cubic coefficients and the first
-Lyapunov coefficient. Locate supported sign changes with bracketed secant interpolation followed by
+Use explicit fold quadratic/cusp cubic coefficients and the first Lyapunov coefficient. Locate
+supported sign changes with bracketed secant interpolation followed by
 pseudo-arclength correction back to the codim-1 curve. Replace the public crossing sample with the
 refined point, but keep the solver at its accepted continuation endpoint. Store residuals,
 coefficients, conditioning, and source-segment provenance on the selectable branch point. Restrict
@@ -37,7 +63,8 @@ The locator preserves a bracket and avoids differentiating a normal-form coeffic
 continuation state stable and making numerical confidence inspectable.
 Impact:
 Initial and extended fold/Hopf curves expose refined codim-2 points consistently in WASM, web, and
-CLI results. Generalized-Hopf points remain candidates until the second Lyapunov coefficient exists.
+CLI results. Higher-order nondegeneracy coefficients determine whether supported refined points are
+eligible for branch switching.
 References:
 `crates/fork_core/src/continuation/codim1_curves/normal_forms.rs`,
 `crates/fork_core/src/continuation/codim1_curves/refinement.rs`,

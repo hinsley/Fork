@@ -10,7 +10,9 @@
 //!
 //! where vext is the solution of [A, w; v', 0] * [vext; g] = [0; 1].
 
-use super::normal_forms::{fold_normal_form, FoldNormalForm};
+use super::normal_forms::{
+    bogdanov_takens_normal_form, fold_normal_form, BogdanovTakensNormalForm, FoldNormalForm,
+};
 use super::{Borders, Codim2TestFunctions};
 use crate::autodiff::Dual;
 use crate::continuation::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
@@ -151,8 +153,10 @@ impl<'a> FoldCurveProblem<'a> {
             let v = vext.rows(0, n).into_owned();
             let w = wext.rows(0, n).into_owned();
 
-            // BT test: v' * w (inner product of null vectors)
-            tests.bogdanov_takens = v.dot(&w);
+            // BT test: the first nonzero characteristic coefficient. On a
+            // simple fold this is the product of all noncritical eigenvalues;
+            // it vanishes when a second eigenvalue reaches zero.
+            tests.bogdanov_takens = principal_minor_sum(jac);
 
             // ZH test: bialternate product determinant
             // For n >= 3, compute det(A^{[2]}) where A^{[2]} is bialternate product
@@ -160,7 +164,7 @@ impl<'a> FoldCurveProblem<'a> {
                 tests.zero_hopf = compute_bialternate_determinant(jac);
             }
 
-            // CP test: MATCONT quadratic fold coefficient
+            // CP test: quadratic fold coefficient
             // a = 1/2 p^T B(q,q), with p^T q = 1.
             if let Ok(normal_form) = self.normal_form_for(state, p1, p2, jac, &v, &w) {
                 tests.cusp = normal_form.quadratic_coefficient;
@@ -228,6 +232,25 @@ impl<'a> FoldCurveProblem<'a> {
         let right_seed = right_ext.rows(0, n).into_owned();
         let left_seed = left_ext.rows(0, n).into_owned();
         self.normal_form_for(&state, p1, p2, &jac, &right_seed, &left_seed)
+    }
+
+    pub(crate) fn bogdanov_takens_normal_form_at(
+        &mut self,
+        aug_state: &DVector<f64>,
+    ) -> Result<BogdanovTakensNormalForm> {
+        let n = self.nphase();
+        if aug_state.len() != n + 2 {
+            bail!("Augmented state has wrong dimension for Bogdanov-Takens normal form");
+        }
+        let p1 = aug_state[0];
+        let p2 = aug_state[1];
+        let state: Vec<f64> = aug_state.rows(2, n).iter().copied().collect();
+        let kind = self.kind;
+        self.with_params(p1, p2, |system| {
+            let values = compute_jacobian(system, kind, &state)?;
+            let jac = DMatrix::from_row_slice(n, n, &values);
+            bogdanov_takens_normal_form(system, kind, &state, &jac)
+        })
     }
 }
 
@@ -447,6 +470,37 @@ fn initialize_fold_borders(jac: &DMatrix<f64>) -> Result<(DVector<f64>, DVector<
     }
 }
 
+fn principal_minor_sum(jac: &DMatrix<f64>) -> f64 {
+    let n = jac.nrows();
+    if n == 0 || jac.ncols() != n {
+        return f64::NAN;
+    }
+    if n == 1 {
+        return 1.0;
+    }
+    let mut sum = 0.0;
+    for omitted in 0..n {
+        let mut minor = DMatrix::zeros(n - 1, n - 1);
+        let mut row_out = 0;
+        for row in 0..n {
+            if row == omitted {
+                continue;
+            }
+            let mut col_out = 0;
+            for col in 0..n {
+                if col == omitted {
+                    continue;
+                }
+                minor[(row_out, col_out)] = jac[(row, col)];
+                col_out += 1;
+            }
+            row_out += 1;
+        }
+        sum += minor.determinant();
+    }
+    sum
+}
+
 /// Compute determinant of bialternate product matrix for ZH detection.
 /// The bialternate product A^{[2]} has dimension n(n-1)/2 x n(n-1)/2.
 fn compute_bialternate_determinant(jac: &DMatrix<f64>) -> f64 {
@@ -520,7 +574,7 @@ mod tests {
     #[test]
     fn cusp_test_changes_sign_on_cubic_fold_curve() {
         // Universal cusp unfolding: x' = x^3 + b*x + a.
-        // Its fold curve is b = -3*x^2, a = 2*x^3, and the MATCONT
+        // Its fold curve is b = -3*x^2, a = 2*x^3, and the
         // quadratic coefficient is a_nf = 3*x.
         let equation = Bytecode {
             ops: vec![

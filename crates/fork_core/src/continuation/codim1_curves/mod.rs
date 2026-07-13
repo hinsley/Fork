@@ -3,11 +3,16 @@
 //! This module provides continuation of codim-1 bifurcation curves in
 //! two-parameter space, with detection of codim-2 bifurcation points.
 
+mod branching;
 mod fold_curve;
 mod hopf_curve;
 pub(crate) mod normal_forms;
 mod refinement;
 
+pub use branching::{
+    bogdanov_takens_curve_seeds, bogdanov_takens_homoclinic_seed, generalized_hopf_lpc_seed,
+    Codim2BranchSeed, Codim2BranchTarget, HomoclinicBranchSeed,
+};
 pub use fold_curve::FoldCurveProblem;
 pub use hopf_curve::{estimate_hopf_kappa_from_jacobian, HopfCurveProblem};
 pub use refinement::{refine_codim2_points, Codim2CurveProblem, RefinedCodim2Event};

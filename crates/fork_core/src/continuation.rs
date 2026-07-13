@@ -35,7 +35,11 @@ pub mod homotopy_saddle;
 pub mod manifold;
 
 // Re-export types needed for external use
-pub use codim1_curves::{Codim2TestFunctions, FoldCurveProblem, HopfCurveProblem};
+pub use codim1_curves::{
+    bogdanov_takens_curve_seeds, bogdanov_takens_homoclinic_seed, generalized_hopf_lpc_seed,
+    Codim2BranchSeed, Codim2BranchTarget, Codim2TestFunctions, FoldCurveProblem,
+    HomoclinicBranchSeed, HopfCurveProblem,
+};
 pub use homoclinic::continue_homoclinic_curve;
 pub use homoclinic_init::{
     compute_homoclinic_basis, decode_homoclinic_state, homoclinic_setup_from_homoclinic_point,

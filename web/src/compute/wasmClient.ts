@@ -4,6 +4,8 @@ import type {
   ComputeIsoclineRequest,
   ComputeIsoclineResult,
   Codim1CurveBranch,
+  Codim2BranchSwitchRequest,
+  Codim2BranchSwitchResult,
   EventSeriesResult,
   ContinuationProgress,
   ContinuationExtensionRequest,
@@ -321,6 +323,19 @@ export class WasmForkCoreClient implements ForkCoreClient {
       'runHopfCurveContinuation',
       (signal) =>
         this.runWorker('runHopfCurveContinuation', request, signal, opts?.onProgress),
+      opts
+    )
+    return await job.promise
+  }
+
+  async runCodim2BranchSwitch(
+    request: Codim2BranchSwitchRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<Codim2BranchSwitchResult> {
+    const job = this.queue.enqueue(
+      'runCodim2BranchSwitch',
+      (signal) =>
+        this.runWorker('runCodim2BranchSwitch', request, signal, opts?.onProgress),
       opts
     )
     return await job.promise

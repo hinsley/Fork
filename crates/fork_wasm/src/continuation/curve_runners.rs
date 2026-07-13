@@ -16,7 +16,7 @@ use serde_wasm_bindgen::from_value;
 use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
 
-fn normalize_lc_seed_for_stage_first_explicit(
+pub(crate) fn normalize_lc_seed_for_stage_first_explicit(
     lc_state: &[f64],
     ntst: usize,
     ncol: usize,

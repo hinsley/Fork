@@ -418,7 +418,10 @@ describe('InspectorDetailsPanel', () => {
               source_segment: [3, 4],
               source_test_values: [-0.2, 0.1],
               method: 'bracketed_newton',
-              coefficients: [{ name: 'l1', value: 0.0125 }],
+              coefficients: [
+                { name: 'l1', value: 0.0125 },
+                { name: 'l2', value: 0.75 },
+              ],
               conditioning: {
                 bordered_condition_number: 120,
                 jacobian_condition_number: 80,
@@ -450,6 +453,7 @@ describe('InspectorDetailsPanel', () => {
     expect(screen.getByText('1.2000e+2')).toBeVisible()
     expect(screen.getByText('Jacobian condition number')).toBeVisible()
     expect(screen.getByText('8.0000e+1')).toBeVisible()
+    expect(screen.getByTestId('codim2-switch-lpc')).toBeVisible()
   })
 
   it('maps 2D manifold profile draft values explicitly', () => {

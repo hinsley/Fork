@@ -4,6 +4,9 @@ import type {
   ComputeEventSeriesFromSamplesRequest,
   ComputeIsoclineRequest as CoreComputeIsoclineRequest,
   ComputeIsoclineResult,
+  Codim1CurveBranch,
+  ContinuationBranchDataWire,
+  Codim2BranchTarget,
   ContinuationProgress,
   CovariantLyapunovRequest as CoreCovariantLyapunovRequest,
   CovariantLyapunovResponse,
@@ -1056,6 +1059,19 @@ export type HopfCurveContinuationRequest = {
   forward: boolean
 }
 
+export type Codim2BranchCreationRequest = {
+  branchId: string
+  pointIndex: number
+  target: Codim2BranchTarget
+  name: string
+  perturbation: number
+  ntst: number
+  ncol: number
+  tolerance: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
 export type IsochroneCurveContinuationRequest = {
   branchId: string
   pointIndex: number
@@ -1512,6 +1528,7 @@ export type AppActions = {
   extendBranch: (request: BranchExtensionRequest) => Promise<void>
   createFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   createHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
+  createCodim2BranchFromPoint: (request: Codim2BranchCreationRequest) => Promise<void>
   createIsochroneCurveFromPoint: (request: IsochroneCurveContinuationRequest) => Promise<void>
   createNSCurveFromPoint: (request: MapNSCurveContinuationRequest) => Promise<void>
   createLimitCycleFromOrbit: (request: LimitCycleOrbitContinuationRequest) => Promise<void>
@@ -4966,6 +4983,210 @@ export function AppProvider({
     [client, state.system, store]
   )
 
+  const createCodim2BranchFromPoint = useCallback(
+    async (request: Codim2BranchCreationRequest) => {
+      if (!state.system) return
+      dispatch({ type: 'SET_BUSY', busy: true })
+      dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+      try {
+        const system = state.system.config
+        if (system.type !== 'flow') {
+          throw new Error('Codimension-two branch switching requires a flow system.')
+        }
+        const sourceBranch = state.system.branches[request.branchId]
+        const point = sourceBranch?.data.points[request.pointIndex]
+        if (!sourceBranch || !point?.codim2) {
+          throw new Error('Select a refined codimension-two branch point.')
+        }
+        if (point.codim2.candidate || !point.codim2.refined) {
+          throw new Error('The selected point has not passed its nondegeneracy checks.')
+        }
+        const sourceType = point.codim2.type
+        if (sourceType !== 'GeneralizedHopf' && sourceType !== 'BogdanovTakens') {
+          throw new Error('The selected codimension-two point does not support branch switching.')
+        }
+        if (sourceType === 'GeneralizedHopf' && request.target !== 'LimitPointCycle') {
+          throw new Error('Generalized-Hopf points switch to LPC curves.')
+        }
+        if (sourceType === 'BogdanovTakens' && request.target === 'LimitPointCycle') {
+          throw new Error('Bogdanov-Takens points switch to fold, Hopf, or homoclinic branches.')
+        }
+        const branchType = sourceBranch.data.branch_type
+        if (
+          !branchType ||
+          (branchType.type !== 'FoldCurve' && branchType.type !== 'HopfCurve')
+        ) {
+          throw new Error('Codimension-two source-curve parameter metadata is missing.')
+        }
+        const name = request.name.trim()
+        const nameError = validateBranchName(name)
+        if (nameError) throw new Error(nameError)
+        if (branchNameExistsForBranch(state.system, sourceBranch, name)) {
+          throw new Error(`Branch "${name}" already exists.`)
+        }
+        const sourceObjectId = resolveBranchParentObjectId(state.system, sourceBranch)
+        const sourceObjectCandidate = sourceObjectId ? state.system.objects[sourceObjectId] : undefined
+        const sourceObject = isFreezableObject(sourceObjectCandidate) ? sourceObjectCandidate : null
+        const snapshot = buildBranchSubsystemSnapshot(system, sourceBranch, sourceObject)
+        const param1Ref = branchType.param1_ref ?? parseContinuationParameter(system, snapshot, branchType.param1_name)
+        const param2Ref = branchType.param2_ref ?? parseContinuationParameter(system, snapshot, branchType.param2_name)
+        const param1Name = resolveRuntimeParameterName(snapshot, param1Ref)
+        const param2Name = resolveRuntimeParameterName(snapshot, param2Ref)
+        const param1DisplayName = resolveDisplayParameterName(param1Ref)
+        const param2DisplayName = resolveDisplayParameterName(param2Ref)
+        const baseParams = getBranchParams(state.system, sourceBranch)
+        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+        runConfig = applyReducedParamOverrides(runConfig, {
+          [param1Name]: point.param_value,
+          [param2Name]: point.param2_value ?? Number.NaN,
+        })
+        const segment = point.codim2.source_segment
+        const neighborIndex = segment[0] === request.pointIndex ? segment[1] : segment[0]
+        const neighbor = sourceBranch.data.points[neighborIndex]
+        const neighborTestValue =
+          segment[0] === neighborIndex
+            ? point.codim2.source_test_values[0]
+            : point.codim2.source_test_values[1]
+        const coefficient = (coefficientName: string) =>
+          point.codim2?.coefficients.find((entry) => entry.name === coefficientName)?.value
+
+        const result = await client.runCodim2BranchSwitch(
+          {
+            system: runConfig,
+            sourceType,
+            target: request.target,
+            state: projectStateForSnapshot(snapshot, point.state, 'codimension-two point'),
+            neighborState: neighbor
+              ? projectStateForSnapshot(snapshot, neighbor.state, 'source-segment neighbor')
+              : undefined,
+            param1Name,
+            param2Name,
+            param1Value: point.param_value,
+            param2Value: point.param2_value ?? Number.NaN,
+            neighborParam1Value: neighbor?.param_value,
+            neighborParam2Value: neighbor?.param2_value,
+            auxiliary: point.auxiliary,
+            neighborAuxiliary: neighbor?.auxiliary,
+            neighborTestValue,
+            secondLyapunov: coefficient('l2'),
+            perturbation: request.perturbation,
+            ntst: request.ntst,
+            ncol: request.ncol,
+            tolerance: request.tolerance,
+            settings: request.settings,
+            forward: request.forward,
+          },
+          {
+            onProgress: (progress) =>
+              dispatch({
+                type: 'SET_CONTINUATION_PROGRESS',
+                progress: { label: `${request.target} Branch`, progress },
+              }),
+          }
+        )
+        const seed = result.seed as {
+          perturbation?: number
+          predictor_residual: number
+          corrected_residual: number
+          correction_iterations?: number
+        }
+        let branchData
+        let storedBranchType: ContinuationObject['branchType']
+        if (request.target === 'Homoclinic') {
+          branchData = normalizeBranchEigenvalues(result.branch as ContinuationBranchDataWire, {
+            stateDimension: snapshot.freeVariableNames.length,
+          })
+          storedBranchType = 'homoclinic_curve'
+        } else {
+          const curve = result.branch as Codim1CurveBranch
+          const curveBranchType = request.target === 'Fold'
+            ? {
+                type: 'FoldCurve' as const,
+                param1_name: param1DisplayName,
+                param2_name: param2DisplayName,
+                param1_ref: param1Ref,
+                param2_ref: param2Ref,
+              }
+            : request.target === 'Hopf'
+              ? {
+                  type: 'HopfCurve' as const,
+                  param1_name: param1DisplayName,
+                  param2_name: param2DisplayName,
+                  param1_ref: param1Ref,
+                  param2_ref: param2Ref,
+                }
+              : {
+                  type: 'LPCCurve' as const,
+                  param1_name: param1DisplayName,
+                  param2_name: param2DisplayName,
+                  param1_ref: param1Ref,
+                  param2_ref: param2Ref,
+                  ntst: request.ntst,
+                  ncol: request.ncol,
+                }
+          branchData = normalizeBranchEigenvalues({
+            points: curve.points.map((entry) => ({
+              state: entry.state,
+              param_value: entry.param1_value,
+              param2_value: entry.param2_value,
+              stability: entry.codim2_type ?? 'None',
+              eigenvalues: normalizeEigenvalueArray(entry.eigenvalues),
+              auxiliary: entry.auxiliary ?? undefined,
+              codim2: entry.codim2,
+            })),
+            bifurcations: curve.codim2_bifurcations?.map((entry) => entry.index) ?? [],
+            indices: curve.indices ?? curve.points.map((_, index) => index),
+            branch_type: curveBranchType,
+          }, { stateDimension: snapshot.freeVariableNames.length })
+          storedBranchType = request.target === 'Fold'
+            ? 'fold_curve'
+            : request.target === 'Hopf'
+              ? 'hopf_curve'
+              : 'lpc_curve'
+        }
+        branchData.codim2_seed = {
+          source_type: sourceType,
+          source_branch_id: request.branchId,
+          source_point_index: request.pointIndex,
+          target: request.target,
+          perturbation: seed.perturbation ?? request.perturbation,
+          predictor_residual: seed.predictor_residual,
+          corrected_residual: seed.corrected_residual,
+          correction_iterations: seed.correction_iterations,
+        }
+        const branch: ContinuationObject = {
+          type: 'continuation',
+          name,
+          systemName: system.name,
+          parameterName: `${param1DisplayName}, ${param2DisplayName}`,
+          parameterRef: param1Ref,
+          parameter2Ref: param2Ref,
+          parentObjectId: sourceObjectId ?? undefined,
+          startObjectId: request.branchId,
+          parentObject: resolveBranchParentObjectName(state.system, sourceBranch),
+          startObject: resolveEntityName(state.system, request.branchId, sourceBranch.name),
+          branchType: storedBranchType,
+          data: branchData,
+          settings: request.settings,
+          timestamp: new Date().toISOString(),
+          params: [...baseParams],
+          subsystemSnapshot: snapshot,
+        }
+        if (!sourceObjectId) throw new Error('Unable to locate the parent object in the tree.')
+        const created = addBranch(state.system, branch, sourceObjectId)
+        const selected = selectNode(created.system, created.nodeId)
+        dispatch({ type: 'SET_SYSTEM', system: selected })
+        await store.save(selected)
+      } catch (err) {
+        dispatch({ type: 'SET_ERROR', error: err instanceof Error ? err.message : String(err) })
+      } finally {
+        dispatch({ type: 'SET_CONTINUATION_PROGRESS', progress: null })
+        dispatch({ type: 'SET_BUSY', busy: false })
+      }
+    },
+    [client, state.system, store]
+  )
+
   const createIsochroneCurveFromPoint = useCallback(
     async (request: IsochroneCurveContinuationRequest) => {
       if (!state.system) return
@@ -7160,6 +7381,7 @@ export function AppProvider({
       extendBranch,
       createFoldCurveFromPoint,
       createHopfCurveFromPoint,
+      createCodim2BranchFromPoint,
       createIsochroneCurveFromPoint,
       createNSCurveFromPoint,
       createLimitCycleFromOrbit,
@@ -7203,6 +7425,7 @@ export function AppProvider({
       extendBranch,
       createFoldCurveFromPoint,
       createHopfCurveFromPoint,
+      createCodim2BranchFromPoint,
       createIsochroneCurveFromPoint,
       createNSCurveFromPoint,
       createLimitCycleFromHopf,

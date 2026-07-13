@@ -90,12 +90,13 @@ Equilibrium fold and Hopf curves run a bracketed secant locator after continuati
 
 | Point type | Status | Current capability |
 | --- | --- | --- |
-| Bogdanov-Takens, zero-Hopf, and double-Hopf | **Experimental refined detection** | Sign-changing test functions on equilibrium fold and Hopf curves use the shared curve-corrected locator, but coverage and numerical validation remain limited. |
+| Zero-Hopf and double-Hopf | **Experimental refined detection** | Sign-changing tests on equilibrium fold and Hopf curves use the shared curve-corrected locator, but normal-form classification and branch switching are not implemented. |
 | Strong resonances 1:1, 1:2, 1:3, and 1:4 | **Experimental detection** | Algebraic tests exist on the experimental Neimark-Sacker curve path. |
-| Cusp | **Available for ODE fold curves** | Computes the MATCONT quadratic fold coefficient, refines its zero, and retains the cubic cusp coefficient for the nondegeneracy check. |
-| Generalized Hopf (Bautin) | **Experimental refined detection for ODE Hopf curves** | Computes the MATCONT first Lyapunov coefficient and refines its zero. The point remains marked as a candidate until a nonzero second Lyapunov coefficient is implemented. |
+| Cusp | **Available for ODE fold curves** | Computes the quadratic fold coefficient, refines its zero, and retains the cubic cusp coefficient for the nondegeneracy check. |
+| Bogdanov-Takens | **Available for ODE fold curves** | Refines the double-zero point, retains the nilpotent-chain coefficients and residuals, and switches to nearby fold, Hopf, and homoclinic branches. |
+| Generalized Hopf (Bautin) | **Available for ODE Hopf curves** | Computes and refines the first Lyapunov coefficient, validates the second Lyapunov coefficient, and switches to the emanating limit-point-of-cycles curve. |
 | Chenciner and cycle interaction points | **Not implemented** | Chenciner, fold-flip, fold-NS, flip-NS, double-NS, generalized PD, and cusp-of-cycles tests are incomplete or placeholders. |
-| Full codimension-two continuation | **Not implemented** | Fork currently detects candidate points only; it does not continue codimension-two loci. |
+| Full codimension-two continuation | **Not implemented** | Fork refines points and can switch from selected nondegenerate points, but it does not continue codimension-two loci themselves. |
 
 ## Rendering
 Fork uses [Plotly](https://plotly.com/javascript/) to render trajectories, bifurcation diagrams, and other visualizations.

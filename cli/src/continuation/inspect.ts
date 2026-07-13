@@ -45,6 +45,7 @@ import {
   initiateMapCycleFromPD
 } from './initiate-eq';
 import { initiateFoldCurve, initiateHopfCurve, initiateIsochroneCurve, initiateLPCCurve, initiatePDCurve, initiateNSCurve } from './initiate-codim1';
+import { initiateCodim2Branch, type Codim2SwitchTarget } from './initiate-codim2';
 import {
   initiateHomoclinicFromHomoclinic,
   initiateHomoclinicFromHomotopySaddle,
@@ -924,6 +925,16 @@ export async function showPointDetails(
   // Build action menu based on branch type and point type
   const choices: any[] = [];
 
+  if (pt.codim2?.refined && !pt.codim2.candidate) {
+    if (pt.codim2.type === 'GeneralizedHopf') {
+      choices.push({ name: 'Switch to LPC Curve', value: 'SWITCH_CODIM2_LPC' });
+    } else if (pt.codim2.type === 'BogdanovTakens') {
+      choices.push({ name: 'Switch to Fold Curve', value: 'SWITCH_CODIM2_FOLD' });
+      choices.push({ name: 'Switch to Hopf Curve', value: 'SWITCH_CODIM2_HOPF' });
+      choices.push({ name: 'Switch to Homoclinic Branch', value: 'SWITCH_CODIM2_HOMOCLINIC' });
+    }
+  }
+
   if (branchType === 'equilibrium') {
     // For equilibrium branches, always offer to create a new equilibrium branch
     choices.push({ name: `Create New ${equilibriumLabel} Branch`, value: 'NEW_EQ_BRANCH' });
@@ -1151,6 +1162,31 @@ export async function showPointDetails(
 
   if (action === 'CONTINUE_HOPF_CURVE') {
     const newBranch = await initiateHopfCurve(sysName, branch, pt, arrayIdx);
+    if (newBranch) {
+      return {
+        kind: 'OPEN_BRANCH' as const,
+        objectName: newBranch.parentObject,
+        branchName: newBranch.name,
+        autoInspect: true,
+      };
+    }
+    return 'BACK';
+  }
+
+  const codim2Targets: Record<string, Codim2SwitchTarget> = {
+    SWITCH_CODIM2_LPC: 'LimitPointCycle',
+    SWITCH_CODIM2_FOLD: 'Fold',
+    SWITCH_CODIM2_HOPF: 'Hopf',
+    SWITCH_CODIM2_HOMOCLINIC: 'Homoclinic'
+  };
+  if (action in codim2Targets) {
+    const newBranch = await initiateCodim2Branch(
+      sysName,
+      branch,
+      pt,
+      arrayIdx,
+      codim2Targets[action]
+    );
     if (newBranch) {
       return {
         kind: 'OPEN_BRANCH' as const,

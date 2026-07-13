@@ -33,15 +33,15 @@ pub trait Codim2CurveProblem: ContinuationProblem {
         }])
     }
 
-    /// A generalized Hopf zero is a candidate until a nonzero second
-    /// Lyapunov coefficient is available. Other implementations can flag
-    /// their own missing nondegeneracy checks.
+    /// Implementations flag points whose higher-order nondegeneracy checks are
+    /// unavailable or fail at the refined location.
     fn is_codim2_candidate(
         &self,
         bifurcation_type: Codim2BifurcationType,
         _coefficients: &[Codim2Coefficient],
     ) -> bool {
-        bifurcation_type == Codim2BifurcationType::GeneralizedHopf
+        let _ = bifurcation_type;
+        false
     }
 }
 
@@ -52,8 +52,8 @@ impl Codim2CurveProblem for FoldCurveProblem<'_> {
 
     fn supported_codim2_types(&self) -> &'static [Codim2BifurcationType] {
         &[
-            Codim2BifurcationType::Cusp,
             Codim2BifurcationType::BogdanovTakens,
+            Codim2BifurcationType::Cusp,
             Codim2BifurcationType::ZeroHopf,
         ]
     }
@@ -69,23 +69,46 @@ impl Codim2CurveProblem for FoldCurveProblem<'_> {
         bifurcation_type: Codim2BifurcationType,
         test_value: f64,
     ) -> Result<Vec<Codim2Coefficient>> {
-        if bifurcation_type != Codim2BifurcationType::Cusp {
-            return Ok(vec![Codim2Coefficient {
+        match bifurcation_type {
+            Codim2BifurcationType::Cusp => {
+                let normal_form = self.normal_form_at(aug)?;
+                Ok(vec![
+                    Codim2Coefficient {
+                        name: "a".to_string(),
+                        value: normal_form.quadratic_coefficient,
+                    },
+                    Codim2Coefficient {
+                        name: "c".to_string(),
+                        value: normal_form.cubic_coefficient,
+                    },
+                ])
+            }
+            Codim2BifurcationType::BogdanovTakens => {
+                let normal_form = self.bogdanov_takens_normal_form_at(aug)?;
+                Ok(vec![
+                    Codim2Coefficient {
+                        name: "a".to_string(),
+                        value: normal_form.quadratic_coefficient,
+                    },
+                    Codim2Coefficient {
+                        name: "b".to_string(),
+                        value: normal_form.mixed_coefficient,
+                    },
+                    Codim2Coefficient {
+                        name: "chain_residual".to_string(),
+                        value: normal_form.chain_residual,
+                    },
+                    Codim2Coefficient {
+                        name: "adjoint_chain_residual".to_string(),
+                        value: normal_form.adjoint_chain_residual,
+                    },
+                ])
+            }
+            _ => Ok(vec![Codim2Coefficient {
                 name: coefficient_name(self.curve_type(), bifurcation_type).to_string(),
                 value: test_value,
-            }]);
+            }]),
         }
-        let normal_form = self.normal_form_at(aug)?;
-        Ok(vec![
-            Codim2Coefficient {
-                name: "a".to_string(),
-                value: normal_form.quadratic_coefficient,
-            },
-            Codim2Coefficient {
-                name: "c".to_string(),
-                value: normal_form.cubic_coefficient,
-            },
-        ])
     }
 
     fn is_codim2_candidate(
@@ -93,15 +116,35 @@ impl Codim2CurveProblem for FoldCurveProblem<'_> {
         bifurcation_type: Codim2BifurcationType,
         coefficients: &[Codim2Coefficient],
     ) -> bool {
-        if bifurcation_type != Codim2BifurcationType::Cusp {
-            return false;
+        let required: &[&str] = match bifurcation_type {
+            Codim2BifurcationType::Cusp => &["c"],
+            Codim2BifurcationType::BogdanovTakens => &["a", "b"],
+            _ => return false,
+        };
+        let missing_or_degenerate = required.iter().any(|name| {
+            coefficients
+                .iter()
+                .find(|coefficient| coefficient.name == *name)
+                .is_none_or(|coefficient| {
+                    !coefficient.value.is_finite() || coefficient.value.abs() <= 1e-8
+                })
+        });
+        if missing_or_degenerate {
+            return true;
         }
-        coefficients
-            .iter()
-            .find(|coefficient| coefficient.name == "c")
-            .is_none_or(|coefficient| {
-                !coefficient.value.is_finite() || coefficient.value.abs() <= 1e-8
-            })
+        if bifurcation_type == Codim2BifurcationType::BogdanovTakens {
+            return ["chain_residual", "adjoint_chain_residual"]
+                .iter()
+                .any(|name| {
+                    coefficients
+                        .iter()
+                        .find(|coefficient| coefficient.name == *name)
+                        .is_none_or(|coefficient| {
+                            !coefficient.value.is_finite() || coefficient.value > 1e-5
+                        })
+                });
+        }
+        false
     }
 }
 
@@ -144,10 +187,33 @@ impl Codim2CurveProblem for HopfCurveProblem<'_> {
                 value: normal_form.first_lyapunov_coefficient,
             },
             Codim2Coefficient {
+                name: "l2".to_string(),
+                value: normal_form.second_lyapunov_coefficient,
+            },
+            Codim2Coefficient {
                 name: "omega".to_string(),
                 value: omega,
             },
         ])
+    }
+
+    fn is_codim2_candidate(
+        &self,
+        bifurcation_type: Codim2BifurcationType,
+        coefficients: &[Codim2Coefficient],
+    ) -> bool {
+        match bifurcation_type {
+            Codim2BifurcationType::GeneralizedHopf => coefficients
+                .iter()
+                .find(|coefficient| coefficient.name == "l2")
+                .is_none_or(|coefficient| {
+                    !coefficient.value.is_finite() || coefficient.value.abs() <= 1e-8
+                }),
+            // Hopf-side BT points do not currently carry the nilpotent-chain
+            // coefficients needed for safe branch switching.
+            Codim2BifurcationType::BogdanovTakens => true,
+            _ => false,
+        }
     }
 }
 
@@ -686,9 +752,12 @@ mod tests {
     }
 
     #[test]
-    fn refines_radial_hopf_to_generalized_hopf_candidate() {
+    fn refines_radial_hopf_to_nondegenerate_generalized_hopf() {
         let mut system = equation_system(
-            &["mu*x - y + beta*x*(x^2+y^2)", "x + mu*y + beta*y*(x^2+y^2)"],
+            &[
+                "mu*x - y + beta*x*(x^2+y^2) + x*(x^2+y^2)^2",
+                "x + mu*y + beta*y*(x^2+y^2) + y*(x^2+y^2)^2",
+            ],
             &["x", "y"],
             &["mu", "beta"],
             vec![0.0, -1.0],
@@ -715,10 +784,7 @@ mod tests {
             Codim2BifurcationType::GeneralizedHopf
         );
         assert!(event.data.refined, "diagnostics: {:?}", event.data);
-        assert!(
-            event.data.candidate,
-            "l2 is intentionally not yet available"
-        );
+        assert!(!event.data.candidate, "diagnostics: {:?}", event.data);
         assert!(event.point.param_value.abs() < 1e-6);
         assert!(event.data.test_function_value.abs() < 1e-6);
         assert!(event
@@ -726,5 +792,52 @@ mod tests {
             .coefficients
             .iter()
             .any(|coefficient| coefficient.name == "l1"));
+        let second = event
+            .data
+            .coefficients
+            .iter()
+            .find(|coefficient| coefficient.name == "l2")
+            .expect("second Lyapunov coefficient");
+        assert!((second.value - 4.0).abs() < 5e-2, "l2={}", second.value);
+    }
+
+    #[test]
+    fn refines_bogdanov_takens_with_nondegenerate_coefficients() {
+        let mut system = equation_system(
+            &["y", "mu1 + mu2*y + x^2 + 2*x*y"],
+            &["x", "y"],
+            &["mu1", "mu2"],
+            vec![0.0, -0.2],
+        );
+        let mut problem = FoldCurveProblem::new(&mut system, SystemKind::Flow, &[0.0, 0.0], 0, 1)
+            .expect("fold problem");
+        let fold_point = |mu2: f64| ContinuationPoint {
+            state: vec![mu2, 0.0, 0.0],
+            param_value: 0.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+        };
+
+        let events =
+            refine_codim2_points(&mut problem, &[fold_point(-0.2), fold_point(0.2)], 12, 1e-7)
+                .expect("Bogdanov-Takens refinement");
+        let event = events
+            .iter()
+            .find(|event| event.data.bifurcation_type == Codim2BifurcationType::BogdanovTakens)
+            .expect("Bogdanov-Takens event");
+        assert!(event.data.refined, "diagnostics: {:?}", event.data);
+        assert!(!event.data.candidate, "diagnostics: {:?}", event.data);
+        let coefficient = |name: &str| {
+            event
+                .data
+                .coefficients
+                .iter()
+                .find(|coefficient| coefficient.name == name)
+                .map(|coefficient| coefficient.value)
+                .expect("normal-form coefficient")
+        };
+        assert!((coefficient("a") - 1.0).abs() < 1e-4);
+        assert!((coefficient("b") - 2.0).abs() < 1e-4);
     }
 }

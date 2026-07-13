@@ -371,6 +371,53 @@ export type HopfCurveContinuationRequest = {
   forward: boolean
 }
 
+export type Codim2BranchTarget = 'Fold' | 'Hopf' | 'LimitPointCycle' | 'Homoclinic'
+
+export type Codim2BranchSeed = {
+  target: Codim2BranchTarget
+  state: number[]
+  param1_value: number
+  param2_value: number
+  auxiliary?: number
+  period?: number
+  ntst?: number
+  ncol?: number
+  perturbation: number
+  predictor_residual: number
+  corrected_residual: number
+  correction_iterations: number
+}
+
+export type Codim2BranchSwitchRequest = {
+  system: SystemConfig
+  sourceType: 'GeneralizedHopf' | 'BogdanovTakens'
+  target: Codim2BranchTarget
+  state: number[]
+  neighborState?: number[]
+  param1Name: string
+  param2Name: string
+  param1Value: number
+  param2Value: number
+  neighborParam1Value?: number
+  neighborParam2Value?: number
+  auxiliary?: number
+  neighborAuxiliary?: number
+  neighborTestValue?: number
+  secondLyapunov?: number
+  perturbation: number
+  ntst: number
+  ncol: number
+  tolerance: number
+  settings: ContinuationSettings
+  forward: boolean
+}
+
+export type Codim2BranchSwitchResult = {
+  target: Codim2BranchTarget
+  branch: Codim1CurveBranch | ContinuationBranchDataWire
+  seed: Codim2BranchSeed | { setup: unknown; predictor_residual: number; corrected_residual: number }
+}
+
 export type IsochroneCurveContinuationRequest = {
   system: SystemConfig
   lcState: number[]
@@ -587,6 +634,10 @@ export interface ForkCoreClient {
     request: HopfCurveContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
   ): Promise<Codim1CurveBranch>
+  runCodim2BranchSwitch(
+    request: Codim2BranchSwitchRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<Codim2BranchSwitchResult>
   runIsochroneCurveContinuation(
     request: IsochroneCurveContinuationRequest,
     opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }

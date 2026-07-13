@@ -153,8 +153,8 @@ impl<'a> LPCCurveProblem<'a> {
 
     /// Number of residual equations
     fn n_eqs(&self) -> usize {
-        // collocation + continuity + phase + G
-        self.ntst * self.ncol * self.dim + self.ntst * self.dim + 1 + 1
+        // collocation + continuity + periodic boundary + phase + G
+        self.ntst * self.ncol * self.dim + self.ntst * self.dim + self.dim + 1 + 1
     }
 
     /// Extract p1 from augmented state
@@ -179,9 +179,9 @@ impl<'a> LPCCurveProblem<'a> {
         &aug[start..start + self.dim]
     }
 
-    /// Get mesh state at index (0..ntst+1, with periodicity)
+    /// Get an explicit mesh state at index `0..=ntst`.
     fn mesh_slice<'b>(&self, aug: &'b [f64], idx: usize) -> &'b [f64] {
-        let actual = idx % (self.ntst + 1);
+        let actual = idx.min(self.ntst);
         let mesh_offset = 1 + self.ntst * self.ncol * self.dim;
         let start = mesh_offset + actual * self.dim;
         &aug[start..start + self.dim]
@@ -234,7 +234,7 @@ impl<'a> LPCCurveProblem<'a> {
         let aug_slice = aug.as_slice();
 
         let n_stages = self.ntst * self.ncol;
-        let n_eqs = n_stages * self.dim + self.ntst * self.dim + 1;
+        let n_eqs = n_stages * self.dim + self.ntst * self.dim + self.dim + 1;
         let n_vars = self.ncoords() + 1; // coords + T
 
         let mut jac = DMatrix::<f64>::zeros(n_eqs, n_vars);
@@ -292,7 +292,7 @@ impl<'a> LPCCurveProblem<'a> {
         for interval in 0..self.ntst {
             let row = cont_row + interval * self.dim;
             let mesh_col = n_stages * self.dim + interval * self.dim;
-            let next_col = n_stages * self.dim + ((interval + 1) % (self.ntst + 1)) * self.dim;
+            let next_col = n_stages * self.dim + (interval + 1) * self.dim;
 
             for d in 0..self.dim {
                 jac[(row + d, mesh_col + d)] = -1.0;
@@ -314,9 +314,17 @@ impl<'a> LPCCurveProblem<'a> {
             }
         }
 
-        // Phase condition
-        let phase_row = cont_row + self.ntst * self.dim;
+        // Explicit periodic boundary condition mesh_ntst = mesh_0.
+        let periodic_row = cont_row + self.ntst * self.dim;
         let mesh0_col = n_stages * self.dim;
+        let mesh_end_col = n_stages * self.dim + self.ntst * self.dim;
+        for d in 0..self.dim {
+            jac[(periodic_row + d, mesh0_col + d)] = -1.0;
+            jac[(periodic_row + d, mesh_end_col + d)] = 1.0;
+        }
+
+        // Phase condition
+        let phase_row = periodic_row + self.dim;
         for d in 0..self.dim {
             jac[(phase_row, mesh0_col + d)] = self.phase_direction[d];
         }
@@ -388,8 +396,16 @@ impl<'a> ContinuationProblem for LPCCurveProblem<'a> {
             }
         }
 
+        // Explicit periodic boundary condition.
+        let periodic_row = cont_row + self.ntst * self.dim;
+        let mesh0 = self.mesh_slice(aug_slice, 0);
+        let mesh_end = self.mesh_slice(aug_slice, self.ntst);
+        for d in 0..self.dim {
+            out[periodic_row + d] = mesh_end[d] - mesh0[d];
+        }
+
         // Phase condition
-        let phase_row = cont_row + self.ntst * self.dim;
+        let phase_row = periodic_row + self.dim;
         let mesh0 = self.mesh_slice(aug_slice, 0);
         let mut phase = 0.0;
         for d in 0..self.dim {
@@ -437,7 +453,11 @@ impl<'a> ContinuationProblem for LPCCurveProblem<'a> {
             self.build_bvp_jac(aug)?
         };
 
-        let multipliers = extract_multipliers_shooting(&jac, self.dim, self.ntst, self.ncol)?;
+        // The LPC defining system can be regular even when a local shooting
+        // factorization is singular at the seed. Multipliers are diagnostic;
+        // they must not prevent the corrected curve seed from continuing.
+        let multipliers =
+            extract_multipliers_shooting(&jac, self.dim, self.ntst, self.ncol).unwrap_or_default();
 
         // Placeholder codim-2 tests
         let mut tests = Codim2TestFunctions::default();
@@ -462,5 +482,42 @@ impl<'a> ContinuationProblem for LPCCurveProblem<'a> {
 
 #[cfg(test)]
 mod tests {
-    // Tests would go here
+    use super::*;
+    use crate::equation_engine::{Bytecode, OpCode};
+
+    fn rotation_system() -> EquationSystem {
+        EquationSystem::new(
+            vec![
+                Bytecode {
+                    ops: vec![OpCode::LoadVar(1), OpCode::Neg],
+                },
+                Bytecode {
+                    ops: vec![OpCode::LoadVar(0)],
+                },
+            ],
+            vec![0.0, 0.0],
+        )
+    }
+
+    #[test]
+    fn explicit_periodic_mesh_makes_lpc_problem_square() {
+        let mut system = rotation_system();
+        let ntst = 3;
+        let ncol = 2;
+        let ncoords = ntst * ncol * 2 + (ntst + 1) * 2;
+        let problem = LPCCurveProblem::new(
+            &mut system,
+            vec![0.0; ncoords],
+            std::f64::consts::TAU,
+            0,
+            1,
+            0.0,
+            0.0,
+            ntst,
+            ncol,
+        )
+        .expect("LPC problem");
+
+        assert_eq!(problem.dimension() + 1, 1 + ncoords + 1 + 1);
+    }
 }

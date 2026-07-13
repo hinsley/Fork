@@ -491,9 +491,9 @@ impl<'a> HopfCurveProblem<'a> {
             tests.double_hopf = bialt_shifted.determinant();
         }
 
-        // GH test: MATCONT first Lyapunov coefficient.  A generalized Hopf
+        // GH test: first Lyapunov coefficient. A generalized Hopf
         // point is an ODE concept; maps use the Neimark-Sacker/Chenciner path.
-        if let Ok(normal_form) = self.normal_form_for(state, p1, p2, jac, kappa) {
+        if let Ok(normal_form) = self.normal_form_for(state, p1, p2, jac, kappa, false) {
             tests.generalized_hopf = normal_form.first_lyapunov_coefficient;
         }
 
@@ -507,6 +507,7 @@ impl<'a> HopfCurveProblem<'a> {
         p2: f64,
         jac: &DMatrix<f64>,
         kappa: f64,
+        compute_second: bool,
     ) -> Result<HopfNormalForm> {
         if !self.kind.is_flow() {
             bail!("Generalized Hopf normal forms are only defined for flows");
@@ -528,6 +529,7 @@ impl<'a> HopfCurveProblem<'a> {
                 kappa.sqrt(),
                 &right_nullspace,
                 &left_nullspace,
+                compute_second,
             )
         })
     }
@@ -550,7 +552,7 @@ impl<'a> HopfCurveProblem<'a> {
             let values = compute_jacobian(system, kind, &state)?;
             Ok(DMatrix::from_row_slice(n, n, &values))
         })?;
-        self.normal_form_for(&state, p1, p2, &jac, kappa)
+        self.normal_form_for(&state, p1, p2, &jac, kappa, true)
     }
 
     pub fn codim2_tests(&self) -> Codim2TestFunctions {

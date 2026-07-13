@@ -59,6 +59,7 @@ export const computeOperationMetadata = {
   computeLimitCycleFloquetModes: { reportsProgress: false },
   runFoldCurveContinuation: { reportsProgress: true },
   runHopfCurveContinuation: { reportsProgress: true },
+  runCodim2BranchSwitch: { reportsProgress: true },
   runIsochroneCurveContinuation: { reportsProgress: true },
   runLimitCycleContinuationFromHopf: { reportsProgress: true },
   runLimitCycleContinuationFromOrbit: { reportsProgress: true },

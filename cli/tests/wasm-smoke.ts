@@ -308,4 +308,161 @@ assert.deepEqual(
 assert.ok(extendedHkoBranch.manifold_geometry.ring_offsets.length > hkoRingsBefore.length);
 assert.equal(extendedHkoBranch.manifold_geometry.solver_diagnostics.extension_count, 1);
 
+const generalizedHopfSystem = new wasm.WasmSystem(
+  [
+    'mu*x-y+beta*x*(x^2+y^2)+x*(x^2+y^2)^2',
+    'x+mu*y+beta*y*(x^2+y^2)+y*(x^2+y^2)^2',
+  ],
+  new Float64Array([0, 0]),
+  ['mu', 'beta'],
+  ['x', 'y'],
+  'rk4',
+  'flow'
+);
+const generalizedHopfSeed = generalizedHopfSystem.init_lpc_from_generalized_hopf(
+  new Float64Array([0, 0]),
+  new Float64Array([0, 0]),
+  'mu',
+  'beta',
+  0,
+  0,
+  0,
+  -0.1,
+  1,
+  1,
+  -0.2,
+  4,
+  0.1,
+  8,
+  2,
+  1e-7
+);
+assert.equal(generalizedHopfSeed.target, 'LimitPointCycle');
+assert.ok(generalizedHopfSeed.corrected_residual < 1e-5);
+assert.ok(Math.abs(generalizedHopfSeed.param2_value + 0.04) < 5e-3);
+const generalizedHopfLpcRunner = new wasm.WasmLPCCurveRunner(
+  [
+    'mu*x-y+beta*x*(x^2+y^2)+x*(x^2+y^2)^2',
+    'x+mu*y+beta*y*(x^2+y^2)+y*(x^2+y^2)^2',
+  ],
+  new Float64Array([0, 0]),
+  ['mu', 'beta'],
+  ['x', 'y'],
+  new Float64Array(generalizedHopfSeed.state),
+  generalizedHopfSeed.period,
+  'mu',
+  generalizedHopfSeed.param1_value,
+  'beta',
+  generalizedHopfSeed.param2_value,
+  8,
+  2,
+  {
+    step_size: 1e-3,
+    min_step_size: 1e-7,
+    max_step_size: 1e-2,
+    max_steps: 4,
+    corrector_steps: 10,
+    corrector_tolerance: 1e-7,
+    step_tolerance: 1e-8,
+  },
+  true
+);
+while (!generalizedHopfLpcRunner.get_progress().done) {
+  generalizedHopfLpcRunner.run_steps(2);
+}
+assert.ok(generalizedHopfLpcRunner.get_result().points.length > 1);
+
+const bogdanovTakensSystem = new wasm.WasmSystem(
+  ['y', 'mu1+mu2*y+x^2+x*y'],
+  new Float64Array([0, 0]),
+  ['mu1', 'mu2'],
+  ['x', 'y'],
+  'rk4',
+  'flow'
+);
+const bogdanovTakensSeeds = bogdanovTakensSystem.init_curves_from_bogdanov_takens(
+  new Float64Array([0, 0]),
+  'mu1',
+  'mu2',
+  0,
+  0,
+  0.05,
+  1e-9
+);
+assert.equal(bogdanovTakensSeeds[0].target, 'Fold');
+assert.equal(bogdanovTakensSeeds[1].target, 'Hopf');
+assert.ok(bogdanovTakensSeeds[0].corrected_residual < 1e-7);
+assert.ok(bogdanovTakensSeeds[1].corrected_residual < 1e-7);
+const codim2CurveSettings = {
+  step_size: 1e-3,
+  min_step_size: 1e-7,
+  max_step_size: 1e-2,
+  max_steps: 3,
+  corrector_steps: 10,
+  corrector_tolerance: 1e-8,
+  step_tolerance: 1e-8,
+};
+const bogdanovTakensFoldRunner = new wasm.WasmFoldCurveRunner(
+  ['y', 'mu1+mu2*y+x^2+x*y'],
+  new Float64Array([0, 0]),
+  ['mu1', 'mu2'],
+  ['x', 'y'],
+  'flow',
+  1,
+  new Float64Array(bogdanovTakensSeeds[0].state),
+  'mu1',
+  bogdanovTakensSeeds[0].param1_value,
+  'mu2',
+  bogdanovTakensSeeds[0].param2_value,
+  codim2CurveSettings,
+  true
+);
+while (!bogdanovTakensFoldRunner.get_progress().done) {
+  bogdanovTakensFoldRunner.run_steps(2);
+}
+assert.ok(bogdanovTakensFoldRunner.get_result().points.length > 1);
+const bogdanovTakensHopfRunner = new wasm.WasmHopfCurveRunner(
+  ['y', 'mu1+mu2*y+x^2+x*y'],
+  new Float64Array([0, 0]),
+  ['mu1', 'mu2'],
+  ['x', 'y'],
+  'flow',
+  1,
+  new Float64Array(bogdanovTakensSeeds[1].state),
+  Math.sqrt(bogdanovTakensSeeds[1].auxiliary),
+  'mu1',
+  bogdanovTakensSeeds[1].param1_value,
+  'mu2',
+  bogdanovTakensSeeds[1].param2_value,
+  codim2CurveSettings,
+  true
+);
+while (!bogdanovTakensHopfRunner.get_progress().done) {
+  bogdanovTakensHopfRunner.run_steps(2);
+}
+assert.ok(bogdanovTakensHopfRunner.get_result().points.length > 1);
+const bogdanovTakensHomoclinic = bogdanovTakensSystem.init_homoclinic_from_bogdanov_takens(
+  new Float64Array([0, 0]),
+  'mu1',
+  'mu2',
+  0,
+  0,
+  0.05,
+  8,
+  2,
+  1e-6
+);
+assert.equal(bogdanovTakensHomoclinic.setup.guess.mesh_states.length, 9);
+assert.ok(Number.isFinite(bogdanovTakensHomoclinic.corrected_residual));
+const bogdanovTakensHomoclinicRunner = new wasm.WasmHomoclinicRunner(
+  ['y', 'mu1+mu2*y+x^2+x*y'],
+  new Float64Array([0, 0]),
+  ['mu1', 'mu2'],
+  ['x', 'y'],
+  bogdanovTakensHomoclinic.setup,
+  { ...codim2CurveSettings, max_steps: 2 },
+  true
+);
+assert.equal(bogdanovTakensHomoclinicRunner.get_progress().done, false);
+
 console.log('PASS real WASM node boundary smoke');

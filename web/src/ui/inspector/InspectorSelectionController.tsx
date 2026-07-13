@@ -40,6 +40,7 @@ import { resolvePlotlyThemeTokens, type PlotlyThemeTokens } from '../../viewport
 import type {
   BranchContinuationRequest,
   BranchExtensionRequest,
+  Codim2BranchCreationRequest,
   EquilibriumManifold1DExtensionRequest,
   Manifold2DExtensionRequest,
   EquilibriumManifold1DRequest,
@@ -199,6 +200,7 @@ type InspectorDetailsPanelProps = {
   onExtendBranch: (request: BranchExtensionRequest) => Promise<void>
   onCreateFoldCurveFromPoint: (request: FoldCurveContinuationRequest) => Promise<void>
   onCreateHopfCurveFromPoint: (request: HopfCurveContinuationRequest) => Promise<void>
+  onCreateCodim2BranchFromPoint?: (request: Codim2BranchCreationRequest) => Promise<void>
   onCreateIsochroneCurveFromPoint?: (
     request: IsochroneCurveContinuationRequest
   ) => Promise<void>
@@ -1912,6 +1914,7 @@ function useInspectorSelectionController({
   onExtendBranch,
   onCreateFoldCurveFromPoint,
   onCreateHopfCurveFromPoint,
+  onCreateCodim2BranchFromPoint = async () => {},
   onCreateIsochroneCurveFromPoint = async () => {},
   onCreateNSCurveFromPoint,
   onCreateLimitCycleFromHopf,
@@ -5965,6 +5968,44 @@ function useInspectorSelectionController({
     })
   }
 
+  const handleCreateCodim2Branch = async (
+    target: Codim2BranchCreationRequest['target']
+  ) => {
+    if (!branch || !selectedNodeId || !selectedBranchPoint || branchPointIndex === null) return
+    const nameKind = target === 'Fold'
+      ? 'foldCurve'
+      : target === 'Hopf'
+        ? 'hopfCurve'
+        : target === 'Homoclinic'
+          ? 'homoclinic'
+          : 'continuationBranch'
+    const name = suggestDefaultName(nameKind, {
+      sourceName: branch.name,
+      pointIndex: branchPointIndex,
+      existingNames: existingBranchNames,
+    })
+    await onCreateCodim2BranchFromPoint({
+      branchId: selectedNodeId,
+      pointIndex: branchPointIndex,
+      target,
+      name,
+      perturbation: target === 'LimitPointCycle' ? 0.05 : 0.02,
+      ntst: 20,
+      ncol: 4,
+      tolerance: 1e-7,
+      settings: {
+        step_size: 0.01,
+        min_step_size: 1e-5,
+        max_step_size: 0.1,
+        max_steps: 300,
+        corrector_steps: 10,
+        corrector_tolerance: 1e-8,
+        step_tolerance: 1e-8,
+      },
+      forward: true,
+    })
+  }
+
   const handleCreateIsochroneCurve = async () => {
     if (runDisabled) {
       setIsochroneCurveError('Apply valid system settings before continuing.')
@@ -7245,6 +7286,7 @@ function useInspectorSelectionController({
     handleComputeLimitCycleFloquetModes,
     handleComputeLyapunov,
     handleCreateBranchFromPoint,
+    handleCreateCodim2Branch,
     handleCreateCycleFromPD,
     handleCreateEquilibriumBranch,
     handleCreateEquilibriumManifold,

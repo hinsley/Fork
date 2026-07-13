@@ -4,6 +4,8 @@ import type {
   ComputeIsoclineRequest,
   ComputeIsoclineResult,
   Codim1CurveBranch,
+  Codim2BranchSwitchRequest,
+  Codim2BranchSwitchResult,
   EventSeriesHit,
   EventSeriesOrderedSample,
   EventSeriesResult,
@@ -1065,6 +1067,73 @@ export class MockForkCoreClient implements ForkCoreClient {
           ],
           codim2_bifurcations: [],
           indices: [0],
+        }
+      },
+      opts
+    )
+    return await job.promise
+  }
+
+  async runCodim2BranchSwitch(
+    request: Codim2BranchSwitchRequest,
+    opts?: { signal?: AbortSignal; onProgress?: (progress: ContinuationProgress) => void }
+  ): Promise<Codim2BranchSwitchResult> {
+    const job = this.queue.enqueue(
+      'runCodim2BranchSwitch',
+      async (signal) => {
+        if (this.delayMs > 0) await delay(this.delayMs)
+        if (signal.aborted) {
+          const error = new Error('cancelled')
+          error.name = 'AbortError'
+          throw error
+        }
+        opts?.onProgress?.({
+          done: true,
+          current_step: request.settings.max_steps,
+          max_steps: request.settings.max_steps,
+          points_computed: 2,
+          bifurcations_found: 0,
+          current_param: request.param1Value,
+        })
+        const seed = {
+          target: request.target,
+          state: [...request.state],
+          param1_value: request.param1Value + request.perturbation,
+          param2_value: request.param2Value + request.perturbation,
+          auxiliary: request.target === 'Hopf' ? request.perturbation : undefined,
+          period: request.target === 'LimitPointCycle' ? Math.PI * 2 : undefined,
+          ntst: request.ntst,
+          ncol: request.ncol,
+          perturbation: request.perturbation,
+          predictor_residual: 1e-4,
+          corrected_residual: 1e-9,
+          correction_iterations: 2,
+        }
+        return {
+          target: request.target,
+          seed,
+          branch: {
+            points: [
+              {
+                state: [...request.state],
+                param1_value: seed.param1_value,
+                param2_value: seed.param2_value,
+                codim2_type: 'None',
+                eigenvalues: [],
+                auxiliary: seed.auxiliary,
+              },
+              {
+                state: [...request.state],
+                param1_value: seed.param1_value + request.settings.step_size,
+                param2_value: seed.param2_value,
+                codim2_type: 'None',
+                eigenvalues: [],
+                auxiliary: seed.auxiliary,
+              },
+            ],
+            codim2_bifurcations: [],
+            indices: [0, 1],
+          },
         }
       },
       opts

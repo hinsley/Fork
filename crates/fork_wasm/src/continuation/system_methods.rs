@@ -1,5 +1,6 @@
 //! WasmSystem continuation methods.
 
+use super::curve_runners::normalize_lc_seed_for_stage_first_explicit;
 use crate::system::{SystemType, WasmSystem};
 use fork_core::continuation::codim1_curves::{
     estimate_hopf_kappa_from_jacobian, refine_codim2_points,
@@ -9,13 +10,14 @@ use fork_core::continuation::equilibrium::{
     extend_branch as core_extend_branch, map_cycle_seed_from_pd,
 };
 use fork_core::continuation::{
+    bogdanov_takens_curve_seeds, bogdanov_takens_homoclinic_seed,
     compute_limit_cycle_floquet_modes as core_compute_limit_cycle_floquet_modes,
     continue_homoclinic_curve, continue_homotopy_saddle_curve, continue_limit_cycle_collocation,
     continue_limit_cycle_manifold_2d, continue_limit_cycle_manifold_2d_with_progress,
     continue_manifold_eq_1d_with_kind_and_periodicity, continue_manifold_eq_2d,
     continue_manifold_eq_2d_with_progress, continue_with_problem, extend_limit_cycle_collocation,
     extend_limit_cycle_manifold_2d_with_progress, extend_manifold_eq_2d_with_progress,
-    homoclinic_setup_from_homoclinic_point_with_source_extras,
+    generalized_hopf_lpc_seed, homoclinic_setup_from_homoclinic_point_with_source_extras,
     homoclinic_setup_from_homotopy_saddle_point, homoclinic_setup_from_large_cycle,
     homotopy_saddle_setup_from_equilibrium, limit_cycle_setup_from_hopf,
     limit_cycle_setup_from_orbit, limit_cycle_setup_from_pd, BranchType, Codim1CurveBranch,
@@ -706,6 +708,153 @@ impl WasmSystem {
         .map_err(|e| JsValue::from_str(&format!("Failed to initialize limit cycle: {}", e)))?;
 
         to_value(&setup).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn init_lpc_from_generalized_hopf(
+        &mut self,
+        gh_state: Vec<f64>,
+        neighbor_state: Vec<f64>,
+        param1_name: &str,
+        param2_name: &str,
+        gh_param1: f64,
+        gh_param2: f64,
+        neighbor_param1: f64,
+        neighbor_param2: f64,
+        gh_kappa: f64,
+        neighbor_kappa: f64,
+        neighbor_l1: f64,
+        second_lyapunov: f64,
+        amplitude: f64,
+        ntst: u32,
+        ncol: u32,
+        tolerance: f64,
+    ) -> Result<JsValue, JsValue> {
+        let param1_index = *self
+            .system
+            .param_map
+            .get(param1_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param1_name)))?;
+        let param2_index = *self
+            .system
+            .param_map
+            .get(param2_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+        let seed = generalized_hopf_lpc_seed(
+            &mut self.system,
+            &gh_state,
+            &neighbor_state,
+            param1_index,
+            param2_index,
+            gh_param1,
+            gh_param2,
+            neighbor_param1,
+            neighbor_param2,
+            gh_kappa,
+            neighbor_kappa,
+            neighbor_l1,
+            second_lyapunov,
+            amplitude,
+            ntst as usize,
+            ncol as usize,
+            tolerance,
+        )
+        .map_err(|error| {
+            JsValue::from_str(&format!(
+                "Failed to initialize LPC curve from generalized Hopf point: {}",
+                error
+            ))
+        })?;
+        to_value(&seed)
+            .map_err(|error| JsValue::from_str(&format!("Serialization error: {}", error)))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn init_curves_from_bogdanov_takens(
+        &mut self,
+        state: Vec<f64>,
+        param1_name: &str,
+        param2_name: &str,
+        param1_value: f64,
+        param2_value: f64,
+        perturbation: f64,
+        tolerance: f64,
+    ) -> Result<JsValue, JsValue> {
+        let param1_index = *self
+            .system
+            .param_map
+            .get(param1_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param1_name)))?;
+        let param2_index = *self
+            .system
+            .param_map
+            .get(param2_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+        let seeds = bogdanov_takens_curve_seeds(
+            &mut self.system,
+            &state,
+            param1_index,
+            param2_index,
+            param1_value,
+            param2_value,
+            perturbation,
+            tolerance,
+        )
+        .map_err(|error| {
+            JsValue::from_str(&format!(
+                "Failed to initialize curves from Bogdanov-Takens point: {}",
+                error
+            ))
+        })?;
+        to_value(&seeds)
+            .map_err(|error| JsValue::from_str(&format!("Serialization error: {}", error)))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn init_homoclinic_from_bogdanov_takens(
+        &mut self,
+        state: Vec<f64>,
+        param1_name: &str,
+        param2_name: &str,
+        param1_value: f64,
+        param2_value: f64,
+        perturbation: f64,
+        ntst: u32,
+        ncol: u32,
+        tolerance: f64,
+    ) -> Result<JsValue, JsValue> {
+        let param1_index = *self
+            .system
+            .param_map
+            .get(param1_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param1_name)))?;
+        let param2_index = *self
+            .system
+            .param_map
+            .get(param2_name)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown parameter: {}", param2_name)))?;
+        let seed = bogdanov_takens_homoclinic_seed(
+            &mut self.system,
+            &state,
+            param1_index,
+            param2_index,
+            param1_name,
+            param2_name,
+            param1_value,
+            param2_value,
+            perturbation,
+            ntst as usize,
+            ncol as usize,
+            tolerance,
+        )
+        .map_err(|error| {
+            JsValue::from_str(&format!(
+                "Failed to initialize homoclinic branch from Bogdanov-Takens point: {}",
+                error
+            ))
+        })?;
+        to_value(&seed)
+            .map_err(|error| JsValue::from_str(&format!("Serialization error: {}", error)))
     }
 
     /// Initializes a limit cycle guess from a computed orbit.
@@ -1651,32 +1800,9 @@ impl WasmSystem {
         self.system.params[param1_index] = param1_value;
         self.system.params[param2_index] = param2_value;
 
-        // Handle implicit periodicity: if lc_state has ntst mesh points instead of ntst+1,
-        // duplicate the first mesh point at the end (u_0 = u_ntst for periodic BC)
         let dim = self.system.equations.len();
-        let expected_ncoords = ntst * ncol * dim + (ntst + 1) * dim;
-        let implicit_ncoords = ntst * ncol * dim + ntst * dim; // Without u_ntst
-
-        let full_lc_state = if lc_state.len() == implicit_ncoords {
-            // Need to add the last mesh point (copy of first mesh point)
-            let mut padded = lc_state.clone();
-            let stages_len = ntst * ncol * dim;
-            let u0: Vec<f64> = lc_state[stages_len..stages_len + dim].to_vec();
-            padded.extend(u0); // Append u_ntst = u_0
-            padded
-        } else if lc_state.len() == expected_ncoords {
-            lc_state.clone()
-        } else {
-            return Err(JsValue::from_str(&format!(
-                "Invalid lc_state.len()={}, expected {} or {} (ntst={}, ncol={}, dim={})",
-                lc_state.len(),
-                expected_ncoords,
-                implicit_ncoords,
-                ntst,
-                ncol,
-                dim
-            )));
-        };
+        let full_lc_state = normalize_lc_seed_for_stage_first_explicit(&lc_state, ntst, ncol, dim)
+            .map_err(|error| JsValue::from_str(&error))?;
 
         // Create LPC curve problem
         let mut problem = LPCCurveProblem::new(

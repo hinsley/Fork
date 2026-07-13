@@ -537,6 +537,16 @@ export interface ContinuationBranchData {
   homoc_context?: HomoclinicResumeContext
   resume_state?: ContinuationResumeState
   manifold_geometry?: ManifoldGeometry
+  codim2_seed?: {
+    source_type: 'GeneralizedHopf' | 'BogdanovTakens'
+    source_branch_id: string
+    source_point_index: number
+    target: 'Fold' | 'Hopf' | 'LimitPointCycle' | 'Homoclinic'
+    perturbation: number
+    predictor_residual: number
+    corrected_residual: number
+    correction_iterations?: number
+  }
 }
 
 export interface ContinuationObject {

@@ -31,6 +31,7 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
     formatScientific,
     formatTerminationReasonLabel,
     frozenVariableHeaderNames,
+    handleCreateCodim2Branch,
     handleJumpToBranchPoint,
     isBranchRenderTarget,
     isDiscreteMap,
@@ -79,6 +80,14 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                             },
                             { label: 'Points', value: branch.data.points.length },
                             { label: 'Bifurcations', value: branchBifurcations.length },
+                            ...(branch.data.codim2_seed
+                              ? [
+                                  { label: 'Switched from', value: branch.data.codim2_seed.source_type },
+                                  { label: 'Source point', value: branch.data.codim2_seed.source_point_index },
+                                  { label: 'Predictor residual', value: formatScientific(branch.data.codim2_seed.predictor_residual, 4) },
+                                  { label: 'Corrected residual', value: formatScientific(branch.data.codim2_seed.corrected_residual, 4) },
+                                ]
+                              : []),
                             ...(branchStartPoint
                               ? [
                                   {
@@ -391,6 +400,14 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                             { label: 'Continuation param', value: branch.parameterName },
                             { label: 'Points', value: branch.data.points.length },
                             { label: 'Bifurcations', value: branchBifurcations.length },
+                            ...(branch.data.codim2_seed
+                              ? [
+                                  { label: 'Switched from', value: branch.data.codim2_seed.source_type },
+                                  { label: 'Source point', value: branch.data.codim2_seed.source_point_index },
+                                  { label: 'Predictor residual', value: formatScientific(branch.data.codim2_seed.predictor_residual, 4) },
+                                  { label: 'Corrected residual', value: formatScientific(branch.data.codim2_seed.corrected_residual, 4) },
+                                ]
+                              : []),
                             ...(manifoldSurfaceGeometry
                               ? [
                                   { label: 'Surface rings', value: manifoldSurfaceRingCount },
@@ -863,6 +880,49 @@ export function BranchDataSections({ scope }: { scope: InspectorSelectionControl
                                           : []),
                                       ]}
                                     />
+                                  </>
+                                ) : null}
+                                {selectedBranchPoint.codim2.refined &&
+                                !selectedBranchPoint.codim2.candidate &&
+                                (selectedBranchPoint.codim2.type === 'GeneralizedHopf' ||
+                                  selectedBranchPoint.codim2.type === 'BogdanovTakens') ? (
+                                  <>
+                                    <h4 className="inspector-subheading">Branch switching</h4>
+                                    <div className="inspector-actions">
+                                      {selectedBranchPoint.codim2.type === 'GeneralizedHopf' ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => void handleCreateCodim2Branch('LimitPointCycle')}
+                                          data-testid="codim2-switch-lpc"
+                                        >
+                                          Start LPC curve
+                                        </button>
+                                      ) : (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => void handleCreateCodim2Branch('Fold')}
+                                            data-testid="codim2-switch-fold"
+                                          >
+                                            Start fold curve
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => void handleCreateCodim2Branch('Hopf')}
+                                            data-testid="codim2-switch-hopf"
+                                          >
+                                            Start Hopf curve
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => void handleCreateCodim2Branch('Homoclinic')}
+                                            data-testid="codim2-switch-homoclinic"
+                                          >
+                                            Start homoclinic branch
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
                                   </>
                                 ) : null}
                               </>

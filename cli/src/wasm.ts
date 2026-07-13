@@ -904,6 +904,88 @@ export class WasmBridge {
         );
     }
 
+    initLPCFromGeneralizedHopf(args: {
+        ghState: number[];
+        neighborState: number[];
+        param1Name: string;
+        param2Name: string;
+        ghParam1: number;
+        ghParam2: number;
+        neighborParam1: number;
+        neighborParam2: number;
+        ghKappa: number;
+        neighborKappa: number;
+        neighborL1: number;
+        secondLyapunov: number;
+        amplitude: number;
+        ntst: number;
+        ncol: number;
+        tolerance: number;
+    }): any {
+        return this.instance.init_lpc_from_generalized_hopf(
+            new Float64Array(args.ghState),
+            new Float64Array(args.neighborState),
+            args.param1Name,
+            args.param2Name,
+            args.ghParam1,
+            args.ghParam2,
+            args.neighborParam1,
+            args.neighborParam2,
+            args.ghKappa,
+            args.neighborKappa,
+            args.neighborL1,
+            args.secondLyapunov,
+            args.amplitude,
+            args.ntst,
+            args.ncol,
+            args.tolerance
+        );
+    }
+
+    initCurvesFromBogdanovTakens(
+        state: number[],
+        param1Name: string,
+        param2Name: string,
+        param1Value: number,
+        param2Value: number,
+        perturbation: number,
+        tolerance: number
+    ): any {
+        return this.instance.init_curves_from_bogdanov_takens(
+            new Float64Array(state),
+            param1Name,
+            param2Name,
+            param1Value,
+            param2Value,
+            perturbation,
+            tolerance
+        );
+    }
+
+    initHomoclinicFromBogdanovTakens(
+        state: number[],
+        param1Name: string,
+        param2Name: string,
+        param1Value: number,
+        param2Value: number,
+        perturbation: number,
+        ntst: number,
+        ncol: number,
+        tolerance: number
+    ): any {
+        return this.instance.init_homoclinic_from_bogdanov_takens(
+            new Float64Array(state),
+            param1Name,
+            param2Name,
+            param1Value,
+            param2Value,
+            perturbation,
+            ntst,
+            ncol,
+            tolerance
+        );
+    }
+
     /**
      * Initializes a limit cycle guess from a computed orbit.
      * The orbit should have converged to a stable limit cycle.

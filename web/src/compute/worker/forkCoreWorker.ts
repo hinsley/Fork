@@ -6,6 +6,9 @@ import type {
   ComputeIsoclineRequest,
   ComputeIsoclineResult,
   Codim1CurveBranch,
+  Codim2BranchSeed,
+  Codim2BranchSwitchRequest,
+  Codim2BranchSwitchResult,
   ContinuationProgress,
   ContinuationExtensionRequest,
   ContinuationExtensionResult,
@@ -644,6 +647,171 @@ async function runHopfCurveContinuation(
   return runSteppedRunnerToCompletion(runner, signal, onProgress)
 }
 
+async function runCodim2BranchSwitch(
+  request: Codim2BranchSwitchRequest,
+  signal: AbortSignal,
+  onProgress: (progress: ContinuationProgress) => void
+): Promise<Codim2BranchSwitchResult> {
+  abortIfNeeded(signal)
+  const wasm = await loadWasm()
+  const system = createWasmSystem(wasm, request.system)
+  const settings: Record<string, number> = { ...request.settings }
+
+  if (request.sourceType === 'GeneralizedHopf') {
+    if (request.target !== 'LimitPointCycle') {
+      throw new Error('Generalized-Hopf points can switch only to an LPC curve.')
+    }
+    if (
+      !request.neighborState ||
+      request.neighborParam1Value === undefined ||
+      request.neighborParam2Value === undefined ||
+      request.auxiliary === undefined ||
+      request.neighborAuxiliary === undefined ||
+      request.neighborTestValue === undefined ||
+      request.secondLyapunov === undefined
+    ) {
+      throw new Error('Generalized-Hopf branch switching is missing source-segment data.')
+    }
+    const initializer = (system as unknown as {
+      init_lpc_from_generalized_hopf?: (...args: unknown[]) => Codim2BranchSeed
+    }).init_lpc_from_generalized_hopf
+    if (typeof initializer !== 'function') {
+      throw new Error('Generalized-Hopf LPC switching is unavailable in this WASM build.')
+    }
+    const seed = initializer.call(
+      system,
+      new Float64Array(request.state),
+      new Float64Array(request.neighborState),
+      request.param1Name,
+      request.param2Name,
+      request.param1Value,
+      request.param2Value,
+      request.neighborParam1Value,
+      request.neighborParam2Value,
+      request.auxiliary,
+      request.neighborAuxiliary,
+      request.neighborTestValue,
+      request.secondLyapunov,
+      request.perturbation,
+      request.ntst,
+      request.ncol,
+      request.tolerance
+    )
+    const runner = new wasm.WasmLPCCurveRunner(
+      request.system.equations,
+      new Float64Array(request.system.params),
+      request.system.paramNames,
+      request.system.varNames,
+      new Float64Array(seed.state),
+      seed.period ?? 0,
+      request.param1Name,
+      seed.param1_value,
+      request.param2Name,
+      seed.param2_value,
+      seed.ntst ?? request.ntst,
+      seed.ncol ?? request.ncol,
+      settings,
+      request.forward
+    )
+    const branch = await runSteppedRunnerToCompletion(runner, signal, onProgress)
+    return { target: request.target, branch, seed }
+  }
+
+  if (request.sourceType !== 'BogdanovTakens') {
+    throw new Error(`Unsupported codimension-two source: ${request.sourceType}`)
+  }
+  if (request.target === 'Homoclinic') {
+    const initializer = (system as unknown as {
+      init_homoclinic_from_bogdanov_takens?: (...args: unknown[]) => {
+        setup: unknown
+        predictor_residual: number
+        corrected_residual: number
+      }
+    }).init_homoclinic_from_bogdanov_takens
+    if (typeof initializer !== 'function') {
+      throw new Error('Bogdanov-Takens homoclinic switching is unavailable in this WASM build.')
+    }
+    const seed = initializer.call(
+      system,
+      new Float64Array(request.state),
+      request.param1Name,
+      request.param2Name,
+      request.param1Value,
+      request.param2Value,
+      request.perturbation,
+      request.ntst,
+      request.ncol,
+      request.tolerance
+    )
+    const runner = new wasm.WasmHomoclinicRunner(
+      request.system.equations,
+      new Float64Array(request.system.params),
+      request.system.paramNames,
+      request.system.varNames,
+      seed.setup,
+      settings,
+      request.forward
+    )
+    const branch = await runSteppedRunnerToCompletion(runner, signal, onProgress)
+    return { target: request.target, branch, seed }
+  }
+
+  if (request.target !== 'Fold' && request.target !== 'Hopf') {
+    throw new Error(`Bogdanov-Takens cannot switch to ${request.target}.`)
+  }
+  const initializer = (system as unknown as {
+    init_curves_from_bogdanov_takens?: (...args: unknown[]) => [Codim2BranchSeed, Codim2BranchSeed]
+  }).init_curves_from_bogdanov_takens
+  if (typeof initializer !== 'function') {
+    throw new Error('Bogdanov-Takens curve switching is unavailable in this WASM build.')
+  }
+  const seeds = initializer.call(
+    system,
+    new Float64Array(request.state),
+    request.param1Name,
+    request.param2Name,
+    request.param1Value,
+    request.param2Value,
+    request.perturbation,
+    request.tolerance
+  )
+  const seed = request.target === 'Fold' ? seeds[0] : seeds[1]
+  const runner = request.target === 'Fold'
+    ? new wasm.WasmFoldCurveRunner(
+        request.system.equations,
+        new Float64Array(request.system.params),
+        request.system.paramNames,
+        request.system.varNames,
+        request.system.type,
+        1,
+        new Float64Array(seed.state),
+        request.param1Name,
+        seed.param1_value,
+        request.param2Name,
+        seed.param2_value,
+        settings,
+        request.forward
+      )
+    : new wasm.WasmHopfCurveRunner(
+        request.system.equations,
+        new Float64Array(request.system.params),
+        request.system.paramNames,
+        request.system.varNames,
+        request.system.type,
+        1,
+        new Float64Array(seed.state),
+        Math.sqrt(seed.auxiliary ?? 0),
+        request.param1Name,
+        seed.param1_value,
+        request.param2Name,
+        seed.param2_value,
+        settings,
+        request.forward
+      )
+  const branch = await runSteppedRunnerToCompletion(runner, signal, onProgress)
+  return { target: request.target, branch, seed }
+}
+
 async function runIsochroneCurveContinuation(
   request: IsochroneCurveContinuationRequest,
   signal: AbortSignal,
@@ -1157,6 +1325,7 @@ const handlers = {
   computeLimitCycleFloquetModes: runComputeLimitCycleFloquetModes,
   runFoldCurveContinuation,
   runHopfCurveContinuation,
+  runCodim2BranchSwitch,
   runIsochroneCurveContinuation,
   runLimitCycleContinuationFromHopf,
   runLimitCycleContinuationFromOrbit,

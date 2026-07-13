@@ -34,6 +34,7 @@ export type InspectorActions = Pick<
   | 'extendBranch'
   | 'createFoldCurveFromPoint'
   | 'createHopfCurveFromPoint'
+  | 'createCodim2BranchFromPoint'
   | 'createIsochroneCurveFromPoint'
   | 'createNSCurveFromPoint'
   | 'createLimitCycleFromHopf'

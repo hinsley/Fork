@@ -58,6 +58,7 @@ export function InspectorPanel({
           onExtendBranch={actions.extendBranch}
           onCreateFoldCurveFromPoint={actions.createFoldCurveFromPoint}
           onCreateHopfCurveFromPoint={actions.createHopfCurveFromPoint}
+          onCreateCodim2BranchFromPoint={actions.createCodim2BranchFromPoint}
           onCreateIsochroneCurveFromPoint={actions.createIsochroneCurveFromPoint}
           onCreateNSCurveFromPoint={actions.createNSCurveFromPoint}
           onCreateLimitCycleFromHopf={actions.createLimitCycleFromHopf}
