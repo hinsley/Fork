@@ -79,8 +79,27 @@ pub trait ContinuationProblem {
     /// Compute the extended Jacobian (derivative of F w.r.t. [p, x]).
     fn extended_jacobian(&mut self, aug_state: &DVector<f64>) -> Result<DMatrix<f64>>;
 
+    /// Diagonal weights for the pseudo-arclength inner product on `[p, x]`.
+    ///
+    /// The default is the Euclidean metric. Discretized problems should override
+    /// this with quadrature weights so that tangent normalization and corrector
+    /// hyperplanes do not change when the mesh is refined. Every weight must be
+    /// finite and strictly positive.
+    fn palc_metric_weights(&self, _aug_state: &DVector<f64>) -> Result<DVector<f64>> {
+        Ok(DVector::from_element(self.dimension() + 1, 1.0))
+    }
+
     /// Return diagnostics (test functions, eigenvalues, etc.) for bifurcation detection.
     fn diagnostics(&mut self, aug_state: &DVector<f64>) -> Result<PointDiagnostics>;
+
+    /// Check whether a converged trial point is accurate enough to accept.
+    ///
+    /// Discretized problems can reject an under-resolved point here without
+    /// aborting the continuation or mutating reference/gauge state. A rejected
+    /// trial is retried with a smaller pseudo-arclength step.
+    fn is_step_acceptable(&mut self, _aug_state: &DVector<f64>) -> Result<bool> {
+        Ok(true)
+    }
 
     /// Optional hook called after each successful continuation step.
     /// Used by some problems to update internal state (e.g., phase conditions for LCs).

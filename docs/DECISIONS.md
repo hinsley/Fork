@@ -21,6 +21,53 @@ References:
 
 ---
 
+### 2026-07-13: Continue flow limit cycles with collocation-native PALC and Floquet analysis
+Context:
+Orbit seeds could select a multiple of the minimal period, the pseudo-arclength metric changed with
+NTST/NCOL, and chaining interval transfer matrices lost strongly contracting or expanding Floquet
+modes. Floquet vectors were also projected for rendering, so they no longer satisfied the
+variational cocycle used by branch switching and manifold seeding.
+Decision:
+Keep flow limit-cycle continuation entirely in the orthogonal-collocation BVP. Correct sampled
+Orbit seeds at fixed parameter, use an integral phase condition and quadrature-weighted PALC metric,
+and reject nontriviality or independent-defect failures. Obtain interval transfers by eliminating
+collocation stages, but compute their spectrum from one block-cyclic eigenproblem instead of forming
+the transfer product. Return raw mesh and stage Floquet modes, remove exactly one credible trivial
++1 multiplier for stability tests, and reject defective repeated roots rather than manufacturing
+independent eigenvectors. Build PD predictors from the phase-dependent -1 mode only after verifying
+both a nearby -1 multiplier and antiperiodic nullity. Define NS curves with the doubled-period real
+condition `v(0) - 2 k v(1) + v(2) = 0` and independent diagonal/off-diagonal conditions from the
+two-column bordered solve. LPC, PD, NS, and isoperiodic curves use the same quadrature-scaled PALC
+metric and independent off-node defect acceptance rule as ordinary cycle continuation. Before a
+rendered codimension-one cycle point is analyzed, canonicalize its stored explicit profile and apply
+that point's subsystem snapshot and parameter values. In production manifold paths, propagate
+collocation Floquet failures, require stored multipliers to match the recomputed spectrum, and retain
+direct variational integration only for legacy cycles without parameter provenance. Branch extension
+reuses the core quadrature-weighted PALC metric and validated Jacobian-null tangent, and a resume seed
+is accepted only when it belongs to the visible endpoint; its adaptively selected step size is
+preserved subject to any smaller local cap.
+Why:
+The resulting continuation and stability calculations remain mesh-scaled, preserve stiff Floquet
+directions, and use the same collocation discretization for cycles, multipliers, eigenvectors, and
+branch switching.
+Impact:
+Map Orbits are rejected by the flow-limit-cycle path. Orbit seeds must contain a finite, strictly
+ordered time coordinate and a genuine nonconstant return. Under-resolved continuation trials are
+retried at a smaller step, while Hopf and PD predictors remain free to leave the bifurcation
+parameter during PALC correction. Invalid PD sources and defective Floquet eigenspaces now fail
+explicitly instead of producing a plausible but numerically unsupported branch or mode. Exact fold
+tangents are no longer perturbed with an artificial parameter component during branch extension.
+References:
+`crates/fork_core/src/continuation.rs`, `crates/fork_core/src/continuation/periodic.rs`,
+`crates/fork_core/src/continuation/manifold.rs`,
+`crates/fork_core/src/continuation/lc_codim1_curves/mod.rs`,
+`crates/fork_core/src/continuation/lc_codim1_curves/ns_curve.rs`,
+`crates/fork_wasm/src/continuation/lc_runner.rs`,
+`web/src/state/appState.tsx`, `web/src/system/floquetModes.ts`,
+`cli/src/continuation/initiate-lc-from-orbit.ts`
+
+---
+
 ### 2026-07-12: Treat codimension-two branch predictors as corrected, inspectable seeds
 Context:
 Refined generalized-Hopf and Bogdanov-Takens points were selectable but could not initialize their

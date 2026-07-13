@@ -109,6 +109,8 @@ async function run() {
   const { Storage } = require('../src/storage') as typeof import('../src/storage');
   const naming = require('../src/naming') as typeof import('../src/naming');
   const serialization = require('../src/continuation/serialization') as typeof import('../src/continuation/serialization');
+  const metrics = require('../src/continuation/metrics') as typeof import('../src/continuation/metrics');
+  const lcFromOrbit = require('../src/continuation/initiate-lc-from-orbit') as typeof import('../src/continuation/initiate-lc-from-orbit');
   const homocInit = require('../src/continuation/initiate-homoclinic') as typeof import('../src/continuation/initiate-homoclinic');
   const utils = require('../src/continuation/utils') as typeof import('../src/continuation/utils');
   const format = require('../src/format') as typeof import('../src/format');
@@ -116,6 +118,32 @@ async function run() {
   const chalk = require('chalk');
 
   chalk.level = 0;
+
+  test('limit-cycle stability removes exactly one credible trivial +1 multiplier', () => {
+    assert.equal(
+      metrics.interpretLCStability([
+        { re: 1, im: 0 },
+        { re: -1.005, im: 0 }
+      ]),
+      'unstable (1D)'
+    );
+    assert.equal(
+      metrics.interpretLCStability([
+        { re: 1.001, im: 0 },
+        { re: 1.005, im: 0 }
+      ]),
+      'unstable (1D)'
+    );
+    assert.equal(metrics.interpretLCStability([{ re: 1, im: 0.2 }]), 'unknown');
+  });
+
+  test('limit-cycle continuation from Orbit rejects map systems at the CLI entry', () => {
+    assert.equal(lcFromOrbit.limitCycleFromOrbitSystemTypeError('flow'), null);
+    assert.match(
+      lcFromOrbit.limitCycleFromOrbitSystemTypeError('map') ?? '',
+      /flow systems only/
+    );
+  });
 
   const dataDir = path.join(process.cwd(), 'data');
   const systemsDir = path.join(dataDir, 'systems');

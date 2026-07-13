@@ -91,7 +91,7 @@ use crate::equilibrium::{
 use anyhow::{anyhow, bail, Result};
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex;
-pub use problem::ContinuationProblem; // DEBUG_PD_CURVE: Made public for debug
+pub use problem::ContinuationProblem;
 
 // Generic continuation functions using ContinuationProblem trait
 
@@ -137,23 +137,9 @@ pub fn continue_with_problem<P: ContinuationProblem>(
     let mut prev_tangent = compute_tangent_from_problem(problem, &prev_aug)?;
     let forward_sign = if forward { 1.0 } else { -1.0 };
 
-    // When starting from a bifurcation (like Hopf), the tangent's parameter component
-    // may be near-zero due to the branch being nearly orthogonal to the parameter axis.
-    // For high-dimensional problems (like LC collocation), the normalized parameter component
-    // can be extremely small. We use a relative threshold and add a proportional bias.
-    let tangent_norm = prev_tangent.norm();
-    let relative_threshold = 0.01; // 1% of tangent norm
-    let param_component_threshold = relative_threshold * tangent_norm;
-
-    if prev_tangent[0].abs() < param_component_threshold {
-        // Add a bias equal to the threshold value in the user's direction
-        prev_tangent[0] = param_component_threshold * forward_sign;
-        // Re-normalize
-        let norm = prev_tangent.norm();
-        if norm > 1e-12 {
-            prev_tangent = &prev_tangent / norm;
-        }
-    } else if prev_tangent[0] * forward_sign < 0.0 {
+    // A sign flip preserves Jt = 0; changing one component does not. At a fold
+    // the parameter component is legitimately zero, so leave it untouched.
+    if prev_tangent[0] * forward_sign < 0.0 {
         prev_tangent = -prev_tangent;
     }
 
@@ -164,7 +150,8 @@ pub fn continue_with_problem<P: ContinuationProblem>(
     let mut consecutive_failures = 0;
     const MAX_CONSECUTIVE_FAILURES: usize = 20;
 
-    for _step in 0..settings.max_steps {
+    let mut accepted_steps = 0usize;
+    while accepted_steps < settings.max_steps {
         // Predictor: predict along tangent
         let pred_aug = &prev_aug + &prev_tangent * (step_size * direction_sign);
 
@@ -176,6 +163,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             &prev_tangent,
             settings.corrector_steps,
             settings.corrector_tolerance,
+            settings.step_tolerance,
         )?;
 
         if let Some(corrected_aug) = corrected_opt {
@@ -189,6 +177,21 @@ pub fn continue_with_problem<P: ContinuationProblem>(
                 }
                 continue;
             }
+
+            if !problem.is_step_acceptable(&corrected_aug)? {
+                consecutive_failures += 1;
+                step_size *= 0.5;
+                if step_size < settings.min_step_size
+                    || consecutive_failures >= MAX_CONSECUTIVE_FAILURES
+                {
+                    break;
+                }
+                continue;
+            }
+
+            // Update gauges/reference data before computing the next tangent;
+            // the tangent must belong to the Jacobian used on the next step.
+            problem.update_after_step(&corrected_aug)?;
 
             // Compute new tangent
             let new_tangent = compute_tangent_from_problem(problem, &corrected_aug)?;
@@ -204,11 +207,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
             }
 
             // Ensure tangent direction consistency (sign should match prev_tangent)
-            let dot_product: f64 = new_tangent
-                .iter()
-                .zip(prev_tangent.iter())
-                .map(|(a, b)| a * b)
-                .sum();
+            let dot_product = palc_dot(problem, &corrected_aug, &new_tangent, &prev_tangent)?;
             let consistent_tangent = if dot_product < 0.0 {
                 -new_tangent // Flip sign to maintain direction
             } else {
@@ -217,9 +216,6 @@ pub fn continue_with_problem<P: ContinuationProblem>(
 
             // Reset failure counter on success
             consecutive_failures = 0;
-
-            // Update problem state after successful step
-            problem.update_after_step(&corrected_aug)?;
 
             // Compute diagnostics for the new point
             let diagnostics = problem.diagnostics(&corrected_aug)?;
@@ -269,6 +265,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
                     &prev_tangent,
                     settings.corrector_steps,
                     settings.corrector_tolerance,
+                    settings.step_tolerance,
                 ) {
                     Ok((refined_aug, refined_diag)) => (refined_aug, refined_diag),
                     Err(_) => (corrected_aug.clone(), diagnostics.clone()),
@@ -303,6 +300,7 @@ pub fn continue_with_problem<P: ContinuationProblem>(
 
             branch.points.push(new_point);
             branch.indices.push(current_index);
+            accepted_steps += 1;
 
             // Adaptive step size - increase on success
             step_size = (step_size * 1.2).min(settings.max_step_size);
@@ -342,6 +340,13 @@ pub fn continue_with_problem<P: ContinuationProblem>(
 
 const MAX_CONSECUTIVE_FAILURES: usize = 20;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SingleStepOutcome {
+    Accepted,
+    Retry,
+    Terminated,
+}
+
 fn clamp_step_size(step_size: f64, settings: ContinuationSettings) -> f64 {
     let mut clamped = if step_size.is_finite() && step_size > 0.0 {
         step_size
@@ -358,15 +363,74 @@ fn normalize_tangent_or_compute<P: ContinuationProblem>(
     prev_aug: &DVector<f64>,
     mut tangent: DVector<f64>,
 ) -> Result<DVector<f64>> {
-    if tangent.norm() < 1e-12 {
+    if tangent.iter().any(|value| !value.is_finite()) {
+        bail!("Cannot normalize a tangent containing non-finite values");
+    }
+    if tangent.norm_squared() < 1e-24 {
         tangent = compute_tangent_from_problem(problem, prev_aug)?;
     }
-    let norm = tangent.norm();
-    if norm > 1e-12 {
-        Ok(tangent / norm)
-    } else {
-        Ok(tangent)
+    normalize_palc_tangent(problem, prev_aug, tangent)
+}
+
+fn validated_palc_weights<P: ContinuationProblem>(
+    problem: &P,
+    aug_state: &DVector<f64>,
+) -> Result<DVector<f64>> {
+    let weights = problem.palc_metric_weights(aug_state)?;
+    let expected_len = problem.dimension() + 1;
+    if weights.len() != expected_len {
+        bail!(
+            "PALC metric has {} weights, expected {}",
+            weights.len(),
+            expected_len
+        );
     }
+    if weights
+        .iter()
+        .any(|weight| !weight.is_finite() || *weight <= 0.0)
+    {
+        bail!("PALC metric weights must be finite and strictly positive");
+    }
+    Ok(weights)
+}
+
+/// Weighted inner product used by pseudo-arclength continuation.
+pub fn palc_dot<P: ContinuationProblem>(
+    problem: &P,
+    aug_state: &DVector<f64>,
+    lhs: &DVector<f64>,
+    rhs: &DVector<f64>,
+) -> Result<f64> {
+    let weights = validated_palc_weights(problem, aug_state)?;
+    if lhs.len() != weights.len() || rhs.len() != weights.len() {
+        bail!("PALC inner-product vector dimension mismatch");
+    }
+    Ok(lhs.dot(&weights.component_mul(rhs)))
+}
+
+/// Norm induced by a continuation problem's pseudo-arclength metric.
+pub fn palc_norm<P: ContinuationProblem>(
+    problem: &P,
+    aug_state: &DVector<f64>,
+    vector: &DVector<f64>,
+) -> Result<f64> {
+    let norm_squared = palc_dot(problem, aug_state, vector, vector)?;
+    if !norm_squared.is_finite() || norm_squared < 0.0 {
+        bail!("PALC metric produced an invalid squared norm");
+    }
+    Ok(norm_squared.sqrt())
+}
+
+fn normalize_palc_tangent<P: ContinuationProblem>(
+    problem: &P,
+    aug_state: &DVector<f64>,
+    tangent: DVector<f64>,
+) -> Result<DVector<f64>> {
+    let norm = palc_norm(problem, aug_state, &tangent)?;
+    if norm <= 1e-12 {
+        bail!("Failed to normalize a zero PALC tangent");
+    }
+    Ok(tangent / norm)
 }
 
 fn build_resume_seed(
@@ -477,17 +541,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
         let mut prev_tangent = compute_tangent_from_problem(&mut problem, &prev_aug)?;
         let forward_sign = if forward { 1.0 } else { -1.0 };
 
-        let tangent_norm = prev_tangent.norm();
-        let relative_threshold = 0.01;
-        let param_component_threshold = relative_threshold * tangent_norm;
-
-        if prev_tangent[0].abs() < param_component_threshold {
-            prev_tangent[0] = param_component_threshold * forward_sign;
-            let norm = prev_tangent.norm();
-            if norm > 1e-12 {
-                prev_tangent = &prev_tangent / norm;
-            }
-        } else if prev_tangent[0] * forward_sign < 0.0 {
+        if prev_tangent[0] * forward_sign < 0.0 {
             prev_tangent = -prev_tangent;
         }
 
@@ -624,26 +678,36 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             return Ok(self.step_result());
         }
 
-        for _ in 0..batch_size {
+        let mut accepted_in_batch = 0usize;
+        while accepted_in_batch < batch_size {
             if self.current_step >= self.max_steps {
                 self.done = true;
                 break;
             }
 
-            if !self.single_step()? {
-                // Early termination due to step size or failure limit
-                self.done = true;
-                break;
+            match self.single_step()? {
+                SingleStepOutcome::Accepted => {
+                    self.current_step += 1;
+                    accepted_in_batch += 1;
+                }
+                SingleStepOutcome::Retry => {}
+                SingleStepOutcome::Terminated => {
+                    self.done = true;
+                    break;
+                }
             }
+        }
 
-            self.current_step += 1;
+        if self.current_step >= self.max_steps {
+            self.done = true;
         }
 
         Ok(self.step_result())
     }
 
-    /// Execute a single continuation step. Returns false if should terminate.
-    fn single_step(&mut self) -> Result<bool> {
+    /// Execute one continuation attempt. Rejected trials request a retry and
+    /// do not consume the accepted-step progress budget.
+    fn single_step(&mut self) -> Result<SingleStepOutcome> {
         // Predictor: predict along tangent
         let direction_sign = 1.0;
         let pred_aug = &self.prev_aug + &self.prev_tangent * (self.step_size * direction_sign);
@@ -656,6 +720,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             &self.prev_tangent,
             self.settings.corrector_steps,
             self.settings.corrector_tolerance,
+            self.settings.step_tolerance,
         )?;
 
         if let Some(corrected_aug) = corrected_opt {
@@ -665,10 +730,24 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
                 if self.step_size < self.settings.min_step_size
                     || self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES
                 {
-                    return Ok(false);
+                    return Ok(SingleStepOutcome::Terminated);
                 }
-                return Ok(true); // Continue trying
+                return Ok(SingleStepOutcome::Retry);
             }
+            if !self.problem.is_step_acceptable(&corrected_aug)? {
+                self.consecutive_failures += 1;
+                self.step_size *= 0.5;
+                if self.step_size < self.settings.min_step_size
+                    || self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES
+                {
+                    return Ok(SingleStepOutcome::Terminated);
+                }
+                return Ok(SingleStepOutcome::Retry);
+            }
+            // Update gauges/reference data before computing the next tangent;
+            // the tangent must belong to the Jacobian used on the next step.
+            self.problem.update_after_step(&corrected_aug)?;
+
             // Compute new tangent
             let new_tangent = compute_tangent_from_problem(&mut self.problem, &corrected_aug)?;
             if !new_tangent.iter().all(|v| v.is_finite()) {
@@ -677,17 +756,18 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
                 if self.step_size < self.settings.min_step_size
                     || self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES
                 {
-                    return Ok(false);
+                    return Ok(SingleStepOutcome::Terminated);
                 }
-                return Ok(true);
+                return Ok(SingleStepOutcome::Retry);
             }
 
             // Ensure tangent direction consistency
-            let dot_product: f64 = new_tangent
-                .iter()
-                .zip(self.prev_tangent.iter())
-                .map(|(a, b)| a * b)
-                .sum();
+            let dot_product = palc_dot(
+                &self.problem,
+                &corrected_aug,
+                &new_tangent,
+                &self.prev_tangent,
+            )?;
             let consistent_tangent = if dot_product < 0.0 {
                 -new_tangent
             } else {
@@ -696,9 +776,6 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
 
             // Reset failure counter on success
             self.consecutive_failures = 0;
-
-            // Update problem state after successful step
-            self.problem.update_after_step(&corrected_aug)?;
 
             // Compute diagnostics for the new point
             let diagnostics = self.problem.diagnostics(&corrected_aug)?;
@@ -747,6 +824,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
                     &self.prev_tangent,
                     self.settings.corrector_steps,
                     self.settings.corrector_tolerance,
+                    self.settings.step_tolerance,
                 ) {
                     Ok((refined_aug, refined_diag)) => (refined_aug, refined_diag),
                     Err(_) => (corrected_aug.clone(), diagnostics.clone()),
@@ -792,6 +870,7 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
                 consistent_tangent,
             )?;
             self.prev_diag = continuation_diag;
+            return Ok(SingleStepOutcome::Accepted);
         } else {
             // Failed to converge, reduce step size
             self.consecutive_failures += 1;
@@ -799,11 +878,11 @@ impl<P: ContinuationProblem> ContinuationRunner<P> {
             if self.step_size < self.settings.min_step_size
                 || self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES
             {
-                return Ok(false);
+                return Ok(SingleStepOutcome::Terminated);
             }
         }
 
-        Ok(true)
+        Ok(SingleStepOutcome::Retry)
     }
 
     /// Check if continuation is complete.
@@ -982,19 +1061,13 @@ fn build_resume_seed_from_branch_endpoint(
             if secant.norm() > 1e-12 {
                 secant.normalize().iter().copied().collect::<Vec<f64>>()
             } else {
-                let mut fallback = vec![0.0; aug_state.len()];
-                fallback[0] = if index_step >= 0 { 1.0 } else { -1.0 };
-                fallback
+                return None;
             }
         } else {
-            let mut fallback = vec![0.0; aug_state.len()];
-            fallback[0] = if index_step >= 0 { 1.0 } else { -1.0 };
-            fallback
+            return None;
         }
     } else {
-        let mut fallback = vec![0.0; aug_state.len()];
-        fallback[0] = if index_step >= 0 { 1.0 } else { -1.0 };
-        fallback
+        return None;
     };
 
     Some(ContinuationEndpointSeed {
@@ -1019,18 +1092,33 @@ fn orient_extension_tangent(
         return;
     }
 
-    let tangent_norm = tangent.norm();
-    let param_component_threshold = 0.01 * tangent_norm;
-
-    if tangent[0].abs() < param_component_threshold {
-        tangent[0] = param_component_threshold * forward_sign;
-        let norm = tangent.norm();
-        if norm > 1e-12 {
-            *tangent = &*tangent / norm;
-        }
-    } else if tangent[0] * forward_sign < 0.0 {
+    if tangent[0] * forward_sign < 0.0 {
         *tangent = -tangent.clone();
     }
+}
+
+/// Orient a continuation tangent without changing its direction.
+///
+/// A tangent may only be multiplied by `-1`: changing an individual
+/// component would generally move it out of the extended Jacobian nullspace.
+pub fn orient_problem_tangent<P: ContinuationProblem>(
+    problem: &P,
+    aug_state: &DVector<f64>,
+    tangent: &mut DVector<f64>,
+    secant: Option<&DVector<f64>>,
+    forward: bool,
+) -> Result<()> {
+    if let Some(secant) = secant {
+        if palc_dot(problem, aug_state, tangent, secant)? < 0.0 {
+            *tangent = -tangent.clone();
+        }
+    } else {
+        let forward_sign = if forward { 1.0 } else { -1.0 };
+        if tangent[0] * forward_sign < 0.0 {
+            *tangent = -tangent.clone();
+        }
+    }
+    Ok(())
 }
 
 fn cap_extension_step_size(settings: &mut ContinuationSettings, secant_norm: Option<f64>) {
@@ -1055,12 +1143,12 @@ fn cap_extension_step_size(settings: &mut ContinuationSettings, secant_norm: Opt
 fn validate_resume_seed(
     seed: &ContinuationEndpointSeed,
     endpoint_index: i32,
-    expected_aug_len: usize,
+    endpoint_aug: &DVector<f64>,
 ) -> bool {
     if seed.endpoint_index != endpoint_index {
         return false;
     }
-    if seed.aug_state.len() != expected_aug_len || seed.tangent.len() != expected_aug_len {
+    if seed.aug_state.len() != endpoint_aug.len() || seed.tangent.len() != endpoint_aug.len() {
         return false;
     }
     if seed.aug_state.iter().any(|v| !v.is_finite()) {
@@ -1072,6 +1160,17 @@ fn validate_resume_seed(
     if seed.step_size <= 0.0 || !seed.step_size.is_finite() {
         return false;
     }
+    if seed
+        .aug_state
+        .iter()
+        .zip(endpoint_aug.iter())
+        .any(|(saved, endpoint)| {
+            let scale = 1.0 + saved.abs().max(endpoint.abs());
+            (saved - endpoint).abs() > 1e-12 * scale
+        })
+    {
+        return false;
+    }
     let tangent_norm = DVector::from_vec(seed.tangent.clone()).norm();
     tangent_norm > 1e-12
 }
@@ -1080,7 +1179,7 @@ fn select_resume_seed(
     branch: &ContinuationBranch,
     forward: bool,
     endpoint_index: i32,
-    expected_aug_len: usize,
+    endpoint_aug: &DVector<f64>,
 ) -> Option<ContinuationEndpointSeed> {
     let seed = if forward {
         branch
@@ -1093,7 +1192,7 @@ fn select_resume_seed(
             .as_ref()
             .and_then(|state| state.min_index_seed.clone())
     }?;
-    if validate_resume_seed(&seed, endpoint_index, expected_aug_len) {
+    if validate_resume_seed(&seed, endpoint_index, endpoint_aug) {
         Some(seed)
     } else {
         None
@@ -1196,9 +1295,9 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
         }
 
         let secant = &end_aug - &neighbor_aug;
-        let norm = secant.norm();
+        let norm = palc_norm(problem, &end_aug, &secant)?;
         if norm > 1e-12 {
-            (Some(secant.normalize()), Some(norm))
+            (Some(secant / norm), Some(norm))
         } else {
             (None, None)
         }
@@ -1208,12 +1307,15 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
 
     let mut settings = settings;
     cap_extension_step_size(&mut settings, secant_norm);
-    let resume_seed = select_resume_seed(&branch, forward, last_index, dim + 1);
+    let resume_seed = select_resume_seed(&branch, forward, last_index, &end_aug);
 
     let extension = if let Some(seed) = resume_seed {
+        let mut resume_settings = settings;
+        resume_settings.step_size =
+            clamp_step_size(seed.step_size.min(settings.step_size), settings);
         let initial_point = ContinuationPoint {
-            state: seed.aug_state[1..].to_vec(),
-            param_value: seed.aug_state[0],
+            state: endpoint.state.clone(),
+            param_value: endpoint.param_value,
             stability: endpoint.stability,
             eigenvalues: endpoint.eigenvalues.clone(),
             cycle_points: endpoint.cycle_points.clone(),
@@ -1222,7 +1324,7 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
             problem,
             initial_point,
             DVector::from_vec(seed.tangent),
-            settings,
+            resume_settings,
         )?
     } else {
         // With at least two points, secant provides a robust outward direction.
@@ -1232,13 +1334,19 @@ pub fn extend_branch_with_problem<P: ContinuationProblem>(
             compute_tangent_from_problem(problem, &end_aug)?
         };
 
-        orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
+        orient_problem_tangent(
+            problem,
+            &end_aug,
+            &mut tangent,
+            secant_direction.as_ref(),
+            forward,
+        )?;
 
         // Now run continuation with the correctly oriented tangent
         let initial_point = ContinuationPoint {
             state: endpoint.state.clone(),
             param_value: endpoint.param_value,
-            stability: endpoint.stability.clone(),
+            stability: endpoint.stability,
             eigenvalues: endpoint.eigenvalues.clone(),
             cycle_points: endpoint.cycle_points.clone(),
         };
@@ -1346,7 +1454,8 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
     let mut consecutive_failures = 0;
     const MAX_CONSECUTIVE_FAILURES: usize = 20;
 
-    for _step in 0..settings.max_steps {
+    let mut accepted_steps = 0usize;
+    while accepted_steps < settings.max_steps {
         // Predictor: always step in positive tangent direction (tangent is already oriented)
         let pred_aug = &prev_aug + &prev_tangent * step_size;
 
@@ -1358,6 +1467,7 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             &prev_tangent,
             settings.corrector_steps,
             settings.corrector_tolerance,
+            settings.step_tolerance,
         )?;
 
         if let Some(corrected_aug) = corrected_opt {
@@ -1371,11 +1481,25 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
                 }
                 continue;
             }
+            if !problem.is_step_acceptable(&corrected_aug)? {
+                consecutive_failures += 1;
+                step_size *= 0.5;
+                if step_size < settings.min_step_size
+                    || consecutive_failures >= MAX_CONSECUTIVE_FAILURES
+                {
+                    break;
+                }
+                continue;
+            }
             consecutive_failures = 0;
+
+            // Update gauges/reference data before computing the next tangent;
+            // the tangent must belong to the Jacobian used on the next step.
+            problem.update_after_step(&corrected_aug)?;
 
             // Compute new tangent and orient it to match previous direction
             let mut new_tangent = compute_tangent_from_problem(problem, &corrected_aug)?;
-            if new_tangent.dot(&prev_tangent) < 0.0 {
+            if palc_dot(problem, &corrected_aug, &new_tangent, &prev_tangent)? < 0.0 {
                 new_tangent = -new_tangent;
             }
 
@@ -1426,6 +1550,7 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
                     &prev_tangent,
                     settings.corrector_steps,
                     settings.corrector_tolerance,
+                    settings.step_tolerance,
                 ) {
                     Ok((refined_aug, refined_diag)) => (refined_aug, refined_diag),
                     Err(_) => (corrected_aug.clone(), diag.clone()),
@@ -1460,9 +1585,7 @@ pub fn continue_with_initial_tangent<P: ContinuationProblem>(
             branch.points.push(new_pt);
             branch.indices.push(current_index + 1);
             current_index += 1;
-
-            // Update problem state if needed
-            problem.update_after_step(&continuation_aug)?;
+            accepted_steps += 1;
 
             prev_aug = continuation_aug;
             prev_tangent = normalize_tangent_or_compute(problem, &prev_aug, new_tangent)?;
@@ -1505,7 +1628,8 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
     bif_type: BifurcationType,
     tangent: &DVector<f64>,
     corrector_steps: usize,
-    tolerance: f64,
+    residual_tolerance: f64,
+    step_tolerance: f64,
 ) -> Result<(DVector<f64>, problem::PointDiagnostics)> {
     const MAX_BISECTION_ITERS: usize = 10;
     const TEST_TOLERANCE: f64 = 1e-6;
@@ -1546,7 +1670,8 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
             &lo_aug,
             tangent,
             corrector_steps,
-            tolerance,
+            residual_tolerance,
+            step_tolerance,
         )?;
 
         let corrected_aug = match corrected {
@@ -1587,7 +1712,7 @@ fn refine_bifurcation_bisection<P: ContinuationProblem>(
 }
 
 /// Computes the tangent vector using the Jacobian null space.
-fn compute_tangent_from_problem<P: ContinuationProblem>(
+pub fn compute_tangent_from_problem<P: ContinuationProblem>(
     problem: &mut P,
     aug_state: &DVector<f64>,
 ) -> Result<DVector<f64>> {
@@ -1605,79 +1730,171 @@ fn compute_tangent_from_problem<P: ContinuationProblem>(
         );
     }
 
-    // Try multiple bordering directions for robustness
-    // The tangent t satisfies: J * t = 0, ||t|| = 1
-    // We use the bordering method: solve [J; c^T] * t = [0; 1]
+    if jac.iter().any(|value| !value.is_finite()) {
+        bail!("Cannot compute tangent from a non-finite extended Jacobian");
+    }
 
-    let bordering_candidates = [
-        0,   // Parameter direction
-        dim, // Last state component (period for LC)
-        1,   // First state component
-    ];
-
-    for &idx in &bordering_candidates {
-        // Build bordering vector
-        let mut c = DVector::zeros(dim + 1);
-        c[idx.min(dim)] = 1.0;
-
-        // Build bordered system: [J; c^T] * t = [0; 1]
+    // A bordered solve is much more accurate than forming J'J for regular
+    // problems. Try the parameter, final-state, and first-state borders; if a
+    // formulation has an additional gauge null direction, fall back to an
+    // explicitly computed null vector rather than fabricating a parameter basis.
+    let jacobian_scale = jac.norm().max(1.0);
+    let mut tangent = None;
+    for border_index in [0, dim, 1] {
         let mut bordered = DMatrix::zeros(dim + 1, dim + 1);
-        for i in 0..dim {
-            for j in 0..dim + 1 {
-                bordered[(i, j)] = jac[(i, j)];
-            }
-        }
-        for j in 0..dim + 1 {
-            bordered[(dim, j)] = c[j];
-        }
-
-        // Right-hand side [0; 0; ...; 0; 1]
+        bordered.view_mut((0, 0), (dim, dim + 1)).copy_from(&jac);
+        bordered[(dim, border_index.min(dim))] = 1.0;
         let mut rhs = DVector::zeros(dim + 1);
         rhs[dim] = 1.0;
-
-        // Solve using LU decomposition
-        let lu = bordered.lu();
-        if let Some(sol) = lu.solve(&rhs) {
-            let norm = sol.norm();
-            if norm > 1e-10 && sol.iter().all(|v| v.is_finite()) {
-                return Ok(sol / norm);
+        if let Some(candidate) = bordered.lu().solve(&rhs) {
+            if candidate.iter().all(|value| value.is_finite()) && candidate.norm_squared() > 1e-24 {
+                let relative_residual =
+                    (&jac * &candidate).norm() / (jacobian_scale * candidate.norm().max(1.0));
+                if relative_residual <= 1e-10 {
+                    tangent = Some(candidate);
+                    break;
+                }
             }
         }
     }
+    let tangent = match tangent {
+        Some(tangent) => tangent,
+        None => {
+            // Only pay for the SVD on the exceptional path. It distinguishes
+            // a genuine computed null vector from the old silent parameter-axis
+            // fallback when no bordered system can be solved.
+            let singular_values = jac.clone().svd(false, false).singular_values;
+            let largest = singular_values.iter().copied().fold(0.0_f64, f64::max);
+            let rank_tolerance = 64.0 * f64::EPSILON * (dim + 1) as f64 * largest.max(1.0);
+            let numerical_rank = singular_values
+                .iter()
+                .filter(|value| value.is_finite() && **value > rank_tolerance)
+                .count();
+            if numerical_rank == 0 {
+                bail!(
+                    "Cannot compute PALC tangent: extended Jacobian is rank deficient (numerical rank zero)"
+                );
+            }
+            preferred_nullspace_tangent(&jac, numerical_rank)?
+        }
+    };
+    let tangent = normalize_palc_tangent(problem, aug_state, tangent)?;
 
-    // Fallback: use random-ish unit vector in nullspace approximation
-    // Just pick parameter direction
-    let mut tangent = DVector::zeros(dim + 1);
-    tangent[0] = 1.0;
+    let null_residual = &jac * &tangent;
+    let residual_tolerance = 1e-9 * jacobian_scale * tangent.norm().max(1.0);
+    if !null_residual.norm().is_finite() || null_residual.norm() > residual_tolerance {
+        bail!(
+            "Computed PALC tangent does not satisfy Jt = 0 (residual {:.3e}, tolerance {:.3e})",
+            null_residual.norm(),
+            residual_tolerance
+        );
+    }
+
     Ok(tangent)
 }
 
-/// Corrects a predicted point using Moore-Penrose pseudo-arclength correction.
+/// Select a genuine Jacobian-null direction when the solution set has more
+/// than one numerical tangent at a singular branch seed.
+///
+/// Projecting coordinate directions into the complete nullspace gives a
+/// deterministic branch choice while preserving `Jt = 0`; unlike the former
+/// parameter-axis fallback, it never fabricates a non-tangent component.
+fn preferred_nullspace_tangent(jac: &DMatrix<f64>, numerical_rank: usize) -> Result<DVector<f64>> {
+    let column_count = jac.ncols();
+    let nullity = column_count.saturating_sub(numerical_rank);
+    if nullity == 0 {
+        bail!("Cannot compute PALC tangent: extended Jacobian has no numerical nullspace");
+    }
+
+    let gram = jac.transpose() * jac;
+    if gram.iter().any(|value| !value.is_finite()) {
+        bail!("Cannot compute PALC tangent from a non-finite Gram matrix");
+    }
+    let eig = nalgebra::linalg::SymmetricEigen::new(gram);
+    let mut eigen_indices = (0..column_count).collect::<Vec<_>>();
+    eigen_indices.sort_by(|left, right| eig.eigenvalues[*left].total_cmp(&eig.eigenvalues[*right]));
+    let null_indices = &eigen_indices[..nullity.min(eigen_indices.len())];
+
+    let mut preferred_indices = vec![0, column_count - 1];
+    if column_count > 1 {
+        preferred_indices.push(1);
+    }
+    preferred_indices.sort_unstable();
+    preferred_indices.dedup();
+    // Retain the semantic preference order: parameter, final state/period,
+    // then first state component.
+    preferred_indices.sort_by_key(|index| {
+        if *index == 0 {
+            0
+        } else if *index == column_count - 1 {
+            1
+        } else {
+            2
+        }
+    });
+
+    for preferred in preferred_indices {
+        let mut candidate = DVector::zeros(column_count);
+        for &eigen_index in null_indices {
+            let basis = eig.eigenvectors.column(eigen_index);
+            candidate += basis * basis[preferred];
+        }
+        if candidate.norm_squared() > 1e-24 && candidate.iter().all(|value| value.is_finite()) {
+            return Ok(candidate);
+        }
+    }
+
+    let fallback_index = *null_indices
+        .first()
+        .ok_or_else(|| anyhow!("Cannot compute PALC tangent: empty numerical nullspace basis"))?;
+    Ok(eig.eigenvectors.column(fallback_index).into_owned())
+}
+
+/// Corrects a predicted point using a pseudo-arclength correction.
 ///
 /// This uses a bordered pseudo-arclength corrector: solve the bordered system
-/// [J; v'] * delta = [F; 0], which minimizes the correction perpendicular to the tangent.
-/// Both state AND parameter are corrected.
+/// `[J; (Wv)'] delta = [-F; 0]`, which keeps the correction perpendicular
+/// to the tangent in the problem's PALC metric. Both state and parameter are corrected.
 fn correct_with_problem<P: ContinuationProblem>(
     problem: &mut P,
     prediction: &DVector<f64>,
-    _prev_aug: &DVector<f64>,
+    prev_aug: &DVector<f64>,
     prev_tangent: &DVector<f64>,
     max_iters: usize,
-    tolerance: f64,
+    residual_tolerance: f64,
+    step_tolerance: f64,
 ) -> Result<Option<DVector<f64>>> {
     let dim = problem.dimension();
     let mut current = prediction.clone();
+
+    if !residual_tolerance.is_finite() || residual_tolerance <= 0.0 {
+        bail!("Corrector residual tolerance must be finite and strictly positive");
+    }
+    if !step_tolerance.is_finite() || step_tolerance <= 0.0 {
+        bail!("Corrector step tolerance must be finite and strictly positive");
+    }
+
+    let residual_norm = |residual: &DVector<f64>| {
+        if residual.is_empty() {
+            0.0
+        } else {
+            residual.norm() / (residual.len() as f64).sqrt()
+        }
+    };
 
     for _iter in 0..max_iters {
         // Compute residual F(x)
         let mut residual = DVector::zeros(dim);
         problem.residual(&current, &mut residual)?;
 
-        let res_norm = residual.norm();
+        let res_norm = residual_norm(&residual);
 
         // Check convergence: F(x) should be small.
-        if res_norm < tolerance {
+        if res_norm <= residual_tolerance {
             return Ok(Some(current));
+        }
+        if !res_norm.is_finite() {
+            return Ok(None);
         }
 
         // Get the extended Jacobian [dF/dp | dF/dx], dim x (dim+1)
@@ -1690,8 +1907,9 @@ fn correct_with_problem<P: ContinuationProblem>(
                 bordered[(i, j)] = jac[(i, j)];
             }
         }
+        let weights = validated_palc_weights(problem, prev_aug)?;
         for j in 0..(dim + 1) {
-            bordered[(dim, j)] = prev_tangent[j];
+            bordered[(dim, j)] = weights[j] * prev_tangent[j];
         }
 
         // Build extended RHS: [-F; 0] to keep Newton corrections orthogonal
@@ -1705,7 +1923,7 @@ fn correct_with_problem<P: ContinuationProblem>(
         // Solve bordered system
         let lu = bordered.lu();
         if let Some(delta) = lu.solve(&rhs) {
-            let delta_norm = delta.norm();
+            let delta_norm = palc_norm(problem, &current, &delta)?;
 
             if !delta_norm.is_finite() {
                 return Ok(None);
@@ -1719,7 +1937,16 @@ fn correct_with_problem<P: ContinuationProblem>(
             };
 
             // Update ALL components including parameter (clone delta for later use)
-            current += &(damping * &delta);
+            let applied_delta = damping * &delta;
+            let applied_delta_norm = palc_norm(problem, &current, &applied_delta)?;
+            current += &applied_delta;
+
+            if applied_delta_norm <= step_tolerance {
+                let mut updated_residual = DVector::zeros(dim);
+                problem.residual(&current, &mut updated_residual)?;
+                let updated_norm = residual_norm(&updated_residual);
+                return Ok((updated_norm <= residual_tolerance).then_some(current));
+            }
         } else {
             return Ok(None);
         }
@@ -1728,9 +1955,9 @@ fn correct_with_problem<P: ContinuationProblem>(
     // Final convergence check
     let mut final_res = DVector::zeros(dim);
     problem.residual(&current, &mut final_res)?;
-    let final_norm = final_res.norm();
+    let final_norm = residual_norm(&final_res);
 
-    if final_norm < tolerance * 10.0 {
+    if final_norm <= residual_tolerance {
         Ok(Some(current))
     } else {
         Ok(None)
@@ -2794,6 +3021,219 @@ mod tests {
         }
     }
 
+    struct SimpleFoldProblem;
+
+    impl ContinuationProblem for SimpleFoldProblem {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
+            out[0] = aug_state[1] * aug_state[1] - aug_state[0];
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, aug_state: &DVector<f64>) -> Result<DMatrix<f64>> {
+            Ok(DMatrix::from_row_slice(1, 2, &[-1.0, 2.0 * aug_state[1]]))
+        }
+
+        fn diagnostics(&mut self, _aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
+            Ok(PointDiagnostics {
+                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            })
+        }
+    }
+
+    struct AveragedProfileProblem {
+        dimension: usize,
+    }
+
+    impl ContinuationProblem for AveragedProfileProblem {
+        fn dimension(&self) -> usize {
+            self.dimension
+        }
+
+        fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
+            for i in 0..self.dimension {
+                out[i] = aug_state[i + 1] - aug_state[0];
+            }
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, _aug_state: &DVector<f64>) -> Result<DMatrix<f64>> {
+            let mut jac = DMatrix::zeros(self.dimension, self.dimension + 1);
+            for i in 0..self.dimension {
+                jac[(i, 0)] = -1.0;
+                jac[(i, i + 1)] = 1.0;
+            }
+            Ok(jac)
+        }
+
+        fn diagnostics(&mut self, _aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
+            Ok(PointDiagnostics {
+                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            })
+        }
+
+        fn palc_metric_weights(&self, _aug_state: &DVector<f64>) -> Result<DVector<f64>> {
+            let mut weights =
+                DVector::from_element(self.dimension + 1, 1.0 / self.dimension as f64);
+            weights[0] = 1.0;
+            Ok(weights)
+        }
+    }
+
+    struct InexactJacobianProblem {
+        residual_calls: usize,
+    }
+
+    impl ContinuationProblem for InexactJacobianProblem {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
+            self.residual_calls += 1;
+            out[0] = aug_state[1];
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, _aug_state: &DVector<f64>) -> Result<DMatrix<f64>> {
+            // Deliberately inexact so Newton stagnation is observable.
+            Ok(DMatrix::from_row_slice(1, 2, &[0.0, 2.0]))
+        }
+
+        fn diagnostics(&mut self, _aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
+            unreachable!("corrector regression does not request diagnostics")
+        }
+    }
+
+    struct RejectingStepProblem {
+        rejected_steps: usize,
+        largest_accepted_parameter: f64,
+    }
+
+    impl ContinuationProblem for RejectingStepProblem {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
+            out[0] = aug_state[1] - aug_state[0];
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, _aug_state: &DVector<f64>) -> Result<DMatrix<f64>> {
+            Ok(DMatrix::from_row_slice(1, 2, &[-1.0, 1.0]))
+        }
+
+        fn diagnostics(&mut self, _aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
+            Ok(PointDiagnostics {
+                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            })
+        }
+
+        fn is_step_acceptable(&mut self, aug_state: &DVector<f64>) -> Result<bool> {
+            let accepted = aug_state[0].abs() <= self.largest_accepted_parameter;
+            if !accepted {
+                self.rejected_steps += 1;
+            }
+            Ok(accepted)
+        }
+    }
+
+    struct SingularTangentProblem;
+
+    impl ContinuationProblem for SingularTangentProblem {
+        fn dimension(&self) -> usize {
+            2
+        }
+
+        fn residual(&mut self, _aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
+            out.fill(0.0);
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, _aug_state: &DVector<f64>) -> Result<DMatrix<f64>> {
+            Ok(DMatrix::zeros(2, 3))
+        }
+
+        fn diagnostics(&mut self, _aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
+            unreachable!("tangent failure should happen before diagnostics")
+        }
+    }
+
+    struct MultiTangentProblem;
+
+    impl ContinuationProblem for MultiTangentProblem {
+        fn dimension(&self) -> usize {
+            2
+        }
+
+        fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
+            out[0] = aug_state[0];
+            out[1] = 0.0;
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, _aug_state: &DVector<f64>) -> Result<DMatrix<f64>> {
+            Ok(DMatrix::from_row_slice(
+                2,
+                3,
+                &[1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ))
+        }
+
+        fn diagnostics(&mut self, _aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
+            unreachable!("only tangent selection is exercised")
+        }
+    }
+
+    struct UpdatingGaugeProblem {
+        anchor_x: f64,
+        anchor_y: f64,
+        rotated: bool,
+    }
+
+    impl ContinuationProblem for UpdatingGaugeProblem {
+        fn dimension(&self) -> usize {
+            2
+        }
+
+        fn residual(&mut self, aug_state: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
+            let (a, b) = if self.rotated { (0.0, 1.0) } else { (1.0, 0.0) };
+            out[0] = aug_state[1] - aug_state[0];
+            out[1] = a * (aug_state[1] - self.anchor_x) + b * (aug_state[2] - self.anchor_y);
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, _aug_state: &DVector<f64>) -> Result<DMatrix<f64>> {
+            let (a, b) = if self.rotated { (0.0, 1.0) } else { (1.0, 0.0) };
+            Ok(DMatrix::from_row_slice(2, 3, &[-1.0, 1.0, 0.0, 0.0, a, b]))
+        }
+
+        fn diagnostics(&mut self, _aug_state: &DVector<f64>) -> Result<PointDiagnostics> {
+            Ok(PointDiagnostics {
+                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            })
+        }
+
+        fn update_after_step(&mut self, aug_state: &DVector<f64>) -> Result<()> {
+            self.anchor_x = aug_state[1];
+            self.anchor_y = aug_state[2];
+            self.rotated = aug_state[2] > 0.05;
+            Ok(())
+        }
+    }
+
     fn constant_settings(max_steps: usize) -> ContinuationSettings {
         ContinuationSettings {
             step_size: 0.1,
@@ -2812,7 +3252,7 @@ mod tests {
             step_size: 0.1,
             min_step_size: 1e-5,
             max_step_size: 0.2,
-            max_steps: 5,
+            max_steps: 1,
             corrector_steps: 2,
             corrector_tolerance: 1e-6,
             step_tolerance: 1e-6,
@@ -2834,9 +3274,15 @@ mod tests {
         )
         .expect("runner init");
 
-        assert!(runner.single_step().expect("first step"));
+        assert_eq!(
+            runner.single_step().expect("first step"),
+            SingleStepOutcome::Accepted
+        );
         runner.prev_tangent[0] = -runner.prev_tangent[0];
-        assert!(runner.single_step().expect("second step"));
+        assert_eq!(
+            runner.single_step().expect("second step"),
+            SingleStepOutcome::Accepted
+        );
 
         assert_eq!(runner.branch.indices, vec![0, 1, 2]);
     }
@@ -2888,21 +3334,316 @@ mod tests {
     }
 
     #[test]
-    fn test_orient_extension_tangent_biases_small_parameter_component_without_secant() {
+    fn test_orient_extension_tangent_preserves_small_parameter_component_without_secant() {
         let mut forward_tangent = DVector::from_vec(vec![1e-12, 1.0]);
         orient_extension_tangent(&mut forward_tangent, None, true);
         assert!(
-            forward_tangent[0] > 1e-3,
-            "Expected forward tangent parameter component to be biased positive, got {}",
+            (forward_tangent[0] - 1e-12).abs() < 1e-15,
+            "Expected forward tangent parameter component to be preserved, got {}",
             forward_tangent[0]
         );
 
         let mut backward_tangent = DVector::from_vec(vec![1e-12, 1.0]);
         orient_extension_tangent(&mut backward_tangent, None, false);
         assert!(
-            backward_tangent[0] < -1e-3,
-            "Expected backward tangent parameter component to be biased negative, got {}",
+            (backward_tangent[0] + 1e-12).abs() < 1e-15,
+            "Expected backward tangent to be sign-oriented without parameter injection, got {}",
             backward_tangent[0]
+        );
+    }
+
+    #[test]
+    fn test_initial_fold_tangent_remains_in_extended_jacobian_nullspace() {
+        let initial_point = ContinuationPoint {
+            state: vec![0.0],
+            param_value: 0.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+        };
+        let runner =
+            ContinuationRunner::new(SimpleFoldProblem, initial_point, constant_settings(1), true)
+                .expect("runner init at fold");
+
+        let jac = DMatrix::from_row_slice(1, 2, &[-1.0, 0.0]);
+        let null_residual = jac * &runner.prev_tangent;
+        assert!(
+            null_residual.norm() < 1e-12,
+            "fold tangent left the nullspace: residual {}",
+            null_residual.norm()
+        );
+        assert!(
+            runner.prev_tangent[0].abs() < 1e-12,
+            "fold tangent must have zero parameter component, got {}",
+            runner.prev_tangent[0]
+        );
+    }
+
+    #[test]
+    fn test_palc_metric_makes_profile_tangent_normalization_mesh_independent() {
+        for dimension in [1, 100] {
+            let mut problem = AveragedProfileProblem { dimension };
+            let aug_state = DVector::zeros(dimension + 1);
+            let tangent = compute_tangent_from_problem(&mut problem, &aug_state)
+                .expect("regular profile tangent");
+
+            assert!(
+                (tangent[0].abs() - 1.0 / 2.0_f64.sqrt()).abs() < 1e-10,
+                "dimension {} changed parameter scaling: {}",
+                dimension,
+                tangent[0]
+            );
+            let jac = problem.extended_jacobian(&aug_state).expect("jacobian");
+            assert!((jac * tangent).norm() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_palc_predictor_step_is_mesh_independent() {
+        let mut parameter_steps = Vec::new();
+        for dimension in [1, 100] {
+            let initial_point = ContinuationPoint {
+                state: vec![0.0; dimension],
+                param_value: 0.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            };
+            let mut problem = AveragedProfileProblem { dimension };
+            let branch =
+                continue_with_problem(&mut problem, initial_point, constant_settings(1), true)
+                    .expect("profile continuation");
+            parameter_steps.push(branch.points[1].param_value - branch.points[0].param_value);
+        }
+
+        assert!(
+            (parameter_steps[0] - parameter_steps[1]).abs() < 1e-10,
+            "mesh refinement changed the PALC parameter step: {:?}",
+            parameter_steps
+        );
+        assert!((parameter_steps[0] - 0.1 / 2.0_f64.sqrt()).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_palc_corrector_uses_metric_orthogonality() {
+        let mut problem = AveragedProfileProblem { dimension: 2 };
+        let reference = DVector::zeros(3);
+        let tangent = compute_tangent_from_problem(&mut problem, &reference)
+            .expect("regular profile tangent");
+        let prediction = DVector::from_vec(vec![0.1, 0.0, 0.2]);
+        let corrected = correct_with_problem(
+            &mut problem,
+            &prediction,
+            &reference,
+            &tangent,
+            2,
+            1e-12,
+            1e-12,
+        )
+        .expect("corrector result")
+        .expect("corrector convergence");
+
+        let correction = &corrected - &prediction;
+        assert!(
+            palc_dot(&problem, &reference, &tangent, &correction)
+                .expect("metric dot")
+                .abs()
+                < 1e-12
+        );
+        let mut residual = DVector::zeros(2);
+        problem
+            .residual(&corrected, &mut residual)
+            .expect("residual");
+        assert!(residual.norm() < 1e-12);
+    }
+
+    #[test]
+    fn test_palc_corrector_damping_is_mesh_independent() {
+        let mut corrected_points = Vec::new();
+        for dimension in [1, 100] {
+            let mut problem = AveragedProfileProblem { dimension };
+            let reference = DVector::zeros(dimension + 1);
+            let tangent = compute_tangent_from_problem(&mut problem, &reference)
+                .expect("regular profile tangent");
+            let mut prediction = DVector::from_element(dimension + 1, 2.0);
+            prediction[0] = 0.0;
+            let corrected = correct_with_problem(
+                &mut problem,
+                &prediction,
+                &reference,
+                &tangent,
+                4,
+                1e-12,
+                1e-12,
+            )
+            .expect("corrector result")
+            .expect("mesh-independent convergence");
+            corrected_points.push((corrected[0], corrected[1]));
+        }
+
+        assert!((corrected_points[0].0 - corrected_points[1].0).abs() < 1e-12);
+        assert!((corrected_points[0].1 - corrected_points[1].1).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_palc_corrector_uses_step_tolerance_to_detect_stagnation() {
+        let prediction = DVector::from_vec(vec![0.0, 1.0]);
+        let reference = DVector::zeros(2);
+        let tangent = DVector::from_vec(vec![1.0, 0.0]);
+
+        let mut loose = InexactJacobianProblem { residual_calls: 0 };
+        let loose_result = correct_with_problem(
+            &mut loose,
+            &prediction,
+            &reference,
+            &tangent,
+            10,
+            1e-12,
+            0.3,
+        )
+        .expect("loose corrector result");
+        assert!(loose_result.is_none(), "stagnation must not be accepted");
+
+        let mut strict = InexactJacobianProblem { residual_calls: 0 };
+        let strict_result = correct_with_problem(
+            &mut strict,
+            &prediction,
+            &reference,
+            &tangent,
+            10,
+            1e-12,
+            1e-12,
+        )
+        .expect("strict corrector result");
+        assert!(strict_result.is_none());
+        assert!(
+            loose.residual_calls < strict.residual_calls,
+            "step tolerance should stop a stagnating correction early (loose {}, strict {})",
+            loose.residual_calls,
+            strict.residual_calls
+        );
+    }
+
+    #[test]
+    fn test_rejected_step_reduces_step_size_and_preserves_branch_prefix() {
+        let initial_point = ContinuationPoint {
+            state: vec![0.0],
+            param_value: 0.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+        };
+        let mut problem = RejectingStepProblem {
+            rejected_steps: 0,
+            largest_accepted_parameter: 0.04,
+        };
+        let settings = ContinuationSettings {
+            step_size: 0.2,
+            min_step_size: 0.01,
+            max_step_size: 0.2,
+            max_steps: 5,
+            corrector_steps: 4,
+            corrector_tolerance: 1e-12,
+            step_tolerance: 1e-12,
+        };
+
+        let branch = continue_with_problem(&mut problem, initial_point, settings, true)
+            .expect("a rejected trial should not abort continuation");
+        assert!(problem.rejected_steps >= 2);
+        assert!(
+            branch.points.len() == 2,
+            "one accepted-step budget must still retry rejected trials"
+        );
+        assert!(branch.points[1].param_value.abs() <= 0.04);
+    }
+
+    #[test]
+    fn test_runner_progress_counts_accepted_steps_not_rejected_attempts() {
+        let initial_point = ContinuationPoint {
+            state: vec![0.0],
+            param_value: 0.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+        };
+        let problem = RejectingStepProblem {
+            rejected_steps: 0,
+            largest_accepted_parameter: 0.04,
+        };
+        let settings = ContinuationSettings {
+            step_size: 0.2,
+            min_step_size: 0.01,
+            max_step_size: 0.2,
+            max_steps: 1,
+            corrector_steps: 4,
+            corrector_tolerance: 1e-12,
+            step_tolerance: 1e-12,
+        };
+        let mut runner = ContinuationRunner::new(problem, initial_point, settings, true)
+            .expect("runner initialization");
+
+        let progress = runner.run_steps(1).expect("one accepted step");
+        assert!(runner.problem.rejected_steps >= 2);
+        assert_eq!(progress.current_step, 1);
+        assert!(progress.done);
+        assert_eq!(runner.branch().points.len(), 2);
+        assert!(runner.branch().points[1].param_value.abs() <= 0.04);
+    }
+
+    #[test]
+    fn test_rank_deficient_extended_jacobian_returns_tangent_error() {
+        let mut problem = SingularTangentProblem;
+        let err = compute_tangent_from_problem(&mut problem, &DVector::zeros(3))
+            .expect_err("non-regular solution set must not get a fabricated tangent");
+        assert!(
+            err.to_string().contains("rank deficient"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_nonzero_rank_multidimensional_nullspace_selects_a_true_tangent() {
+        let mut problem = MultiTangentProblem;
+        let aug = DVector::zeros(3);
+        let tangent = compute_tangent_from_problem(&mut problem, &aug)
+            .expect("nonzero-rank singular seed should select a null direction");
+        let jacobian = problem.extended_jacobian(&aug).expect("Jacobian");
+        assert!(
+            (&jacobian * &tangent).norm() < 1e-12,
+            "selected direction must remain in the full Jacobian nullspace"
+        );
+        assert!(tangent[0].abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_retained_tangent_uses_the_updated_problem_gauge() {
+        let initial_point = ContinuationPoint {
+            state: vec![0.0, 0.0],
+            param_value: 0.0,
+            stability: BifurcationType::None,
+            eigenvalues: Vec::new(),
+            cycle_points: None,
+        };
+        let problem = UpdatingGaugeProblem {
+            anchor_x: 0.0,
+            anchor_y: 0.0,
+            rotated: false,
+        };
+        let mut runner =
+            ContinuationRunner::new(problem, initial_point, constant_settings(1), true)
+                .expect("runner");
+        runner.run_steps(1).expect("continuation step");
+        assert!(
+            runner.problem.rotated,
+            "test gauge should rotate after acceptance"
+        );
+        let jacobian = runner
+            .problem
+            .extended_jacobian(&runner.prev_aug)
+            .expect("updated Jacobian");
+        assert!(
+            (&jacobian * &runner.prev_tangent).norm() < 1e-12,
+            "retained tangent must satisfy the updated-gauge Jacobian"
         );
     }
 
@@ -3110,8 +3851,68 @@ mod tests {
             .expect("extension with resume seed");
         let new_param = extended.points.last().expect("new point").param_value;
         assert!(
-            new_param < 1.0,
-            "resume seed should drive the first step direction, got param {}",
+            (new_param - 0.95).abs() < 1e-12,
+            "the saved 0.05 adaptive step should override the fresh 0.1 setting, got param {}",
+            new_param
+        );
+    }
+
+    #[test]
+    fn test_extension_rejects_a_resume_seed_from_a_hidden_unrefined_state() {
+        let settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-6,
+            max_step_size: 0.2,
+            max_steps: 1,
+            corrector_steps: 2,
+            corrector_tolerance: 1e-6,
+            step_tolerance: 1e-6,
+        };
+
+        let mut problem = ZeroResidualProblem::default();
+        let branch = ContinuationBranch {
+            points: vec![
+                ContinuationPoint {
+                    state: vec![0.0],
+                    param_value: 0.0,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+                ContinuationPoint {
+                    state: vec![0.0],
+                    param_value: 1.0,
+                    stability: BifurcationType::None,
+                    eigenvalues: Vec::new(),
+                    cycle_points: None,
+                },
+            ],
+            bifurcations: Vec::new(),
+            indices: vec![0, 1],
+            branch_type: BranchType::default(),
+            upoldp: None,
+            homoc_context: None,
+            resume_state: Some(ContinuationResumeState {
+                min_index_seed: None,
+                max_index_seed: Some(ContinuationEndpointSeed {
+                    endpoint_index: 1,
+                    // This can arise when the displayed endpoint is a refined
+                    // bifurcation but the saved runner state is the unrefined
+                    // accepted point beyond it.
+                    aug_state: vec![0.9, 0.0],
+                    tangent: vec![-1.0, 0.0],
+                    step_size: 0.05,
+                }),
+            }),
+            manifold_geometry: None,
+        };
+
+        let extended = extend_branch_with_problem(&mut problem, branch, settings, true)
+            .expect("secant fallback from the visible endpoint");
+        let new_param = extended.points.last().expect("new point").param_value;
+        assert!(
+            new_param > 1.0,
+            "a stale hidden-state seed must not continue from behind the visible endpoint: {}",
             new_param
         );
     }

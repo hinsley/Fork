@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildSortedArrayOrder,
+  canonicalizeLimitCycleStateForAnalysis,
   computeLimitCycleMetrics,
   ensureBranchIndices,
   extractLimitCycleProfile,
@@ -478,6 +479,52 @@ describe('continuation helpers', () => {
     expect(result.period).toBe(7)
   })
 
+  it('canonicalizes explicit codim1 cycle states for mesh-first analysis', () => {
+    const stageFirst = [
+      // stages
+      100, 101, 110, 111,
+      // explicit mesh, including the closing point
+      10, 11, 20, 21, 10, 11,
+      // period
+      6,
+    ]
+
+    expect(
+      canonicalizeLimitCycleStateForAnalysis(stageFirst, 2, 2, 1, 'lpc_curve')
+    ).toEqual([
+      // explicit mesh
+      10, 11, 20, 21, 10, 11,
+      // stages
+      100, 101, 110, 111,
+      // period
+      6,
+    ])
+    expect(
+      canonicalizeLimitCycleStateForAnalysis(stageFirst, 2, 2, 1, 'ns_curve')
+    ).toEqual([10, 11, 20, 21, 10, 11, 100, 101, 110, 111, 6])
+    expect(
+      canonicalizeLimitCycleStateForAnalysis(stageFirst, 2, 2, 1, 'isoperiodic_curve')
+    ).toEqual([10, 11, 20, 21, 10, 11, 100, 101, 110, 111, 6])
+  })
+
+  it('preserves mesh-first limit-cycle and PD analysis states', () => {
+    const meshFirstExplicit = [10, 11, 20, 21, 10, 11, 100, 101, 110, 111, 6]
+    const meshFirstImplicit = [10, 11, 20, 21, 100, 101, 110, 111, 6]
+
+    expect(
+      canonicalizeLimitCycleStateForAnalysis(meshFirstExplicit, 2, 2, 1, 'pd_curve')
+    ).toEqual(meshFirstExplicit)
+    expect(
+      canonicalizeLimitCycleStateForAnalysis(meshFirstImplicit, 2, 2, 1, 'limit_cycle')
+    ).toEqual(meshFirstImplicit)
+    expect(() =>
+      canonicalizeLimitCycleStateForAnalysis(meshFirstImplicit, 2, 2, 1, 'pd_curve')
+    ).toThrow(/expected 11/)
+    expect(() =>
+      canonicalizeLimitCycleStateForAnalysis(meshFirstExplicit, 2, 2, 1, 'limit_cycle')
+    ).toThrow(/expected 9/)
+  })
+
   it('computes limit cycle metrics', () => {
     const metrics = computeLimitCycleMetrics(
       [
@@ -517,5 +564,18 @@ describe('continuation helpers', () => {
         { re: 1.1, im: 0.2 },
       ])
     ).toBe('unstable (torus)')
+    expect(
+      interpretLimitCycleStability([
+        { re: 1, im: 0 },
+        { re: -1.005, im: 0 },
+      ])
+    ).toBe('unstable (1D)')
+    expect(
+      interpretLimitCycleStability([
+        { re: 1.001, im: 0 },
+        { re: 1.005, im: 0 },
+      ])
+    ).toBe('unstable (1D)')
+    expect(interpretLimitCycleStability([{ re: 1, im: 0.2 }])).toBe('unknown')
   })
 })

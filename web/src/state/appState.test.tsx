@@ -6,9 +6,13 @@ import { useAppContext } from './appContext'
 import { MockForkCoreClient } from '../compute/mockClient'
 import { MemorySystemStore } from '../system/store'
 import { addBranch, addObject, addScene, createSystem } from '../system/model'
-import { createPeriodDoublingSystem } from '../system/fixtures'
+import {
+  createLimitCycleManifoldSystem,
+  createPeriodDoublingSystem,
+} from '../system/fixtures'
 import { normalizeBranchEigenvalues } from '../system/continuation'
 import { buildSubsystemSnapshot } from '../system/subsystemGateway'
+import { projectLimitCyclePackedStateForSnapshot } from '../system/limitCycleAnalysis'
 import type {
   AnalysisObject,
   ContinuationObject,
@@ -114,6 +118,175 @@ function withParam(system: System, name: string, value: number): System {
     },
   }
 }
+
+function createCodimCycleAnalysisSystem(): {
+  system: System
+  limitCycleId: string
+  selectedBranchId: string
+  expectedCycleState: number[]
+  frozenRuntimeParameterName: string
+} {
+  const base = createSystem({
+    name: 'Codim_Cycle_Analysis',
+    config: {
+      name: 'Codim_Cycle_Analysis',
+      equations: ['y', '-x + mu*x', 'z + nu'],
+      params: [0.1, 0.2],
+      paramNames: ['mu', 'nu'],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4',
+      type: 'flow',
+    },
+  })
+  const objectSnapshot = buildSubsystemSnapshot(base.config, {
+    frozenValuesByVarName: { z: 0.2 },
+  })
+  const limitCycle: LimitCycleObject = {
+    type: 'limit_cycle',
+    name: 'LC_Codim_Analysis',
+    systemName: base.config.name,
+    origin: { type: 'orbit', orbitName: 'Orbit_Codim_Analysis' },
+    ntst: 2,
+    ncol: 1,
+    period: 6,
+    // Standard limit-cycle storage: implicit mesh first, then stages, then period.
+    state: [10, 11, 12, 20, 21, 22, 100, 101, 102, 110, 111, 112, 6],
+    parameters: [0.1, 0.2],
+    parameterName: 'mu',
+    parameterRef: { kind: 'native_param', name: 'mu' },
+    paramValue: 0.1,
+    floquetMultipliers: [{ re: 7, im: 0 }],
+    frozenVariables: { frozenValuesByVarName: { z: 0.2 } },
+    subsystemSnapshot: objectSnapshot,
+    createdAt: new Date().toISOString(),
+  }
+  const withObject = addObject(base, limitCycle)
+  const branchSnapshot = buildSubsystemSnapshot(base.config, {
+    frozenValuesByVarName: { z: 0.4 },
+  })
+  const selectedBranch: ContinuationObject = {
+    type: 'continuation',
+    name: 'lpc_selected_z_nu',
+    systemName: base.config.name,
+    parameterName: 'var:z, nu',
+    parameterRef: { kind: 'frozen_var', variableName: 'z' },
+    parameter2Ref: { kind: 'native_param', name: 'nu' },
+    parentObjectId: withObject.nodeId,
+    startObjectId: withObject.nodeId,
+    parentObject: limitCycle.name,
+    startObject: limitCycle.name,
+    branchType: 'lpc_curve',
+    data: {
+      points: [
+        {
+          // LPC/NS/isoperiodic storage: stages first, then an explicit mesh closure.
+          state: [
+            100, 101, 102, 110, 111, 112,
+            10, 11, 12, 20, 21, 22, 10, 11, 12,
+            6,
+          ],
+          param_value: 0.7,
+          param2_value: 1.3,
+          stability: 'None',
+          eigenvalues: [],
+        },
+      ],
+      bifurcations: [],
+      indices: [0],
+      branch_type: {
+        type: 'LPCCurve',
+        param1_name: 'var:z',
+        param2_name: 'nu',
+        param1_ref: { kind: 'frozen_var', variableName: 'z' },
+        param2_ref: { kind: 'native_param', name: 'nu' },
+        ntst: 2,
+        ncol: 1,
+      },
+    },
+    settings: continuationSettings,
+    timestamp: '2026-01-01T00:00:00.000Z',
+    params: [0.15, 0.25],
+    subsystemSnapshot: branchSnapshot,
+  }
+  const withSelectedBranch = addBranch(withObject.system, selectedBranch, withObject.nodeId)
+
+  // A deliberately newer, different state with a bogus spectrum. Manifold analysis
+  // must never borrow this when the selected LPC point has no eigenvalues.
+  const unrelatedBranch: ContinuationObject = {
+    ...selectedBranch,
+    name: 'lc_unrelated_newer',
+    branchType: 'limit_cycle',
+    parameterName: 'mu',
+    parameterRef: { kind: 'native_param', name: 'mu' },
+    parameter2Ref: undefined,
+    data: {
+      points: [
+        {
+          state: [...limitCycle.state],
+          param_value: 0.9,
+          stability: 'None',
+          eigenvalues: [{ re: 99, im: 0 }],
+        },
+      ],
+      bifurcations: [],
+      indices: [0],
+      branch_type: { type: 'LimitCycle', ntst: 2, ncol: 1 },
+    },
+    timestamp: '2099-01-01T00:00:00.000Z',
+    subsystemSnapshot: objectSnapshot,
+  }
+  const withUnrelatedBranch = addBranch(
+    withSelectedBranch.system,
+    unrelatedBranch,
+    withObject.nodeId
+  )
+
+  return {
+    system: withUnrelatedBranch.system,
+    limitCycleId: withObject.nodeId,
+    selectedBranchId: withSelectedBranch.nodeId,
+    expectedCycleState: [
+      10, 11, 20, 21, 10, 11,
+      100, 101, 110, 111,
+      6,
+    ],
+    frozenRuntimeParameterName: branchSnapshot.frozenParameterNamesByVarName.z,
+  }
+}
+
+describe('appState limit-cycle state projection', () => {
+  it('uses the known explicit layout when reduced and full packed lengths collide', () => {
+    const config = createSystem({
+      name: 'Packed_Layout_Collision',
+      config: {
+        name: 'Packed_Layout_Collision',
+        equations: ['0', '0', '0', '0', '0', '0', '0'],
+        params: [0],
+        paramNames: ['mu'],
+        varNames: ['x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'frozen'],
+        solver: 'rk4',
+        type: 'flow',
+      },
+    }).config
+    const snapshot = buildSubsystemSnapshot(config, {
+      frozenValuesByVarName: { frozen: 0.25 },
+    })
+    // ntst=2, ncol=2 gives 7 explicit reduced points * 6 coordinates,
+    // which collides with 6 implicit full points * 7 coordinates.
+    const reducedExplicitState = Array.from({ length: 43 }, (_, index) => index + 0.5)
+
+    expect(
+      projectLimitCyclePackedStateForSnapshot(
+        snapshot,
+        reducedExplicitState,
+        2,
+        2,
+        'Collision state',
+        'explicit'
+      )
+    ).toEqual(reducedExplicitState)
+  })
+})
 
 describe('appState initialization', () => {
   it('supports initial error messaging', () => {
@@ -526,7 +699,7 @@ describe('appState limit cycle render targets', () => {
     })
   })
 
-  it('continues from orbit for map systems', async () => {
+  it('rejects flow limit-cycle continuation from map Orbit objects', async () => {
     const base = createSystem({ name: 'Orbit_Map' })
     const configured = withParam(
       {
@@ -598,10 +771,9 @@ describe('appState limit cycle render targets', () => {
 
     await waitFor(() => {
       const { state } = getContext()
-      expect(state.error).toBeNull()
-      expect(capturedSystemType).toBe('map')
-      const lcId = findObjectIdByName(state.system!, 'LC_Map')
-      expect(state.system!.objects[lcId].type).toBe('limit_cycle')
+      expect(state.error).toMatch(/flow systems only/)
+      expect(capturedSystemType).toBeNull()
+      expect(Object.values(state.system!.objects).some((obj) => obj.name === 'LC_Map')).toBe(false)
     })
   })
 
@@ -828,6 +1000,279 @@ describe('appState limit cycle render targets', () => {
       expect(capturedRequest!.ntst).toBe(4)
       expect(capturedRequest!.ncol).toBe(2)
       expect(getContext().state.error).toBeNull()
+    })
+  })
+
+  it('canonicalizes and projects selected codim1 cycle states for Floquet analysis', async () => {
+    const fixture = createCodimCycleAnalysisSystem()
+    const client = new MockForkCoreClient(0)
+    let capturedRequest:
+      | {
+          cycleState: number[]
+          systemParams: number[]
+          parameterName: string
+        }
+      | null = null
+    client.computeLimitCycleFloquetModes = async (request) => {
+      capturedRequest = {
+        cycleState: [...request.cycleState],
+        systemParams: [...request.system.params],
+        parameterName: request.parameterName,
+      }
+      return {
+        ntst: request.ntst,
+        ncol: request.ncol,
+        multipliers: [
+          { re: 1, im: 0 },
+          { re: 2, im: 0 },
+        ],
+        vectors: [],
+      }
+    }
+    const { getContext } = setupApp(fixture.system, client)
+
+    await act(async () => {
+      getContext().actions.setLimitCycleRenderTarget(fixture.limitCycleId, {
+        type: 'branch',
+        branchId: fixture.selectedBranchId,
+        pointIndex: 0,
+      })
+    })
+    await waitFor(() => {
+      expect(
+        getContext().state.system?.ui.limitCycleRenderTargets?.[fixture.limitCycleId]
+      ).toEqual({
+        type: 'branch',
+        branchId: fixture.selectedBranchId,
+        pointIndex: 0,
+      })
+    })
+
+    await act(async () => {
+      await getContext().actions.computeLimitCycleFloquetModes({
+        limitCycleId: fixture.limitCycleId,
+      })
+    })
+
+    await waitFor(() => {
+      expect(getContext().state.error).toBeNull()
+      expect(capturedRequest).not.toBeNull()
+      expect(capturedRequest!.cycleState).toEqual(fixture.expectedCycleState)
+      expect(capturedRequest!.systemParams).toEqual([0.15, 1.3, 0.7])
+      expect(capturedRequest!.parameterName).toBe(fixture.frozenRuntimeParameterName)
+    })
+  })
+
+  it('recomputes the exact selected cycle spectrum before manifold analysis and extension', async () => {
+    const fixture = createCodimCycleAnalysisSystem()
+    fixture.system.branches[fixture.selectedBranchId].data.points[0].eigenvalues = [
+      { re: 88, im: 0 },
+      { re: Number.NaN, im: 0 },
+    ]
+    const client = new MockForkCoreClient(0)
+    const computedMultipliers = [
+      { re: 1, im: 0 },
+      { re: 2, im: 0 },
+    ]
+    let floquetRequest:
+      | Parameters<MockForkCoreClient['computeLimitCycleFloquetModes']>[0]
+      | null = null
+    let manifoldRequest:
+      | Parameters<MockForkCoreClient['runLimitCycleManifold2D']>[0]
+      | null = null
+    client.computeLimitCycleFloquetModes = async (request) => {
+      floquetRequest = structuredClone(request)
+      return {
+        ntst: request.ntst,
+        ncol: request.ncol,
+        multipliers: computedMultipliers,
+        vectors: [],
+      }
+    }
+    const originalRunManifold = client.runLimitCycleManifold2D.bind(client)
+    client.runLimitCycleManifold2D = async (request, options) => {
+      manifoldRequest = structuredClone(request)
+      const result = await originalRunManifold(request, options)
+      const geometry = result.manifold_geometry
+      if (geometry?.type === 'Surface' && !('Surface' in geometry)) {
+        geometry.resume_state = {
+          type: 'GeodesicRings',
+          version: 1,
+          outer_ring: [
+            [0.1, 0],
+            [0, 0.1],
+            [-0.1, 0],
+            [0, -0.1],
+          ],
+          inward_anchors: [
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+          ],
+          current_leaf_delta: request.settings.leaf_delta,
+          accumulated_arclength: request.settings.target_arclength,
+          center: [0, 0],
+        }
+      }
+      return result
+    }
+    const { getContext } = setupApp(fixture.system, client)
+
+    await act(async () => {
+      getContext().actions.setLimitCycleRenderTarget(fixture.limitCycleId, {
+        type: 'branch',
+        branchId: fixture.selectedBranchId,
+        pointIndex: 0,
+      })
+    })
+    await waitFor(() => {
+      expect(
+        getContext().state.system?.ui.limitCycleRenderTargets?.[fixture.limitCycleId]
+      ).toEqual({
+        type: 'branch',
+        branchId: fixture.selectedBranchId,
+        pointIndex: 0,
+      })
+    })
+
+    await act(async () => {
+      await getContext().actions.createLimitCycleManifold2D({
+        limitCycleId: fixture.limitCycleId,
+        name: 'cycle_manifold_selected',
+        settings: {
+          stability: 'Unstable',
+          direction: 'Plus',
+          algorithm: 'GeodesicRings',
+          floquet_index: 1,
+          initial_radius: 0.01,
+          leaf_delta: 0.05,
+          delta_min: 0.01,
+          ring_points: 8,
+          min_spacing: 0.01,
+          max_spacing: 0.2,
+          alpha_min: 0.1,
+          alpha_max: 1,
+          delta_alpha_min: 0.01,
+          delta_alpha_max: 0.2,
+          integration_dt: 0.01,
+          target_arclength: 0.5,
+          caps: {
+            max_steps: 40,
+            max_points: 120,
+            max_rings: 40,
+            max_vertices: 120,
+            max_time: 10,
+          },
+        },
+      })
+    })
+
+    await waitFor(() => {
+      expect(getContext().state.error).toBeNull()
+      expect(floquetRequest).not.toBeNull()
+      expect(manifoldRequest).not.toBeNull()
+      expect(floquetRequest!.cycleState).toEqual(fixture.expectedCycleState)
+      expect(floquetRequest!.system.params).toEqual([0.15, 1.3, 0.7])
+      expect(floquetRequest!.parameterName).toBe(fixture.frozenRuntimeParameterName)
+      expect(manifoldRequest!.cycleState).toEqual(fixture.expectedCycleState)
+      expect(manifoldRequest!.system.params).toEqual([0.15, 1.3, 0.7])
+      expect(manifoldRequest!.floquetMultipliers).toEqual(computedMultipliers)
+      expect(manifoldRequest!.floquetMultipliers).not.toContainEqual({ re: 88, im: 0 })
+      expect(manifoldRequest!.floquetMultipliers).not.toContainEqual({ re: 99, im: 0 })
+      expect(
+        manifoldRequest!.floquetMultipliers.every(
+          (value) => Number.isFinite(value.re) && Number.isFinite(value.im)
+        )
+      ).toBe(true)
+      expect(manifoldRequest!.settings.parameter_index).toBe(2)
+
+      const createdBranchId = findBranchIdByName(
+        getContext().state.system!,
+        'cycle_manifold_selected'
+      )
+      const createdBranch = getContext().state.system!.branches[createdBranchId]
+      expect(createdBranch.params).toEqual([0.15, 1.3])
+      expect(createdBranch.subsystemSnapshot?.frozenValuesByVarName.z).toBe(0.7)
+      expect(createdBranch.subsystemSnapshot?.hash).not.toBe(
+        fixture.system.branches[fixture.selectedBranchId].subsystemSnapshot?.hash
+      )
+      expect(
+        createdBranch.manifoldSettings && 'parameter_index' in createdBranch.manifoldSettings
+          ? createdBranch.manifoldSettings.parameter_index
+          : undefined
+      ).toBe(2)
+    })
+
+    const createdBranchId = findBranchIdByName(
+      getContext().state.system!,
+      'cycle_manifold_selected'
+    )
+    let extensionSystemParams: number[] | null = null
+    client.runManifold2DExtension = async (request) => {
+      extensionSystemParams = [...request.system.params]
+      return normalizeBranchEigenvalues({
+        ...request.branchData,
+        points: [
+          ...request.branchData.points,
+          { state: [0.2, 0], param_value: 5, stability: 'None', eigenvalues: [] },
+        ],
+        indices: [...request.branchData.indices, request.branchData.points.length],
+      })
+    }
+
+    await act(async () => {
+      await getContext().actions.extendManifold2D({
+        branchId: createdBranchId,
+        targetArclength: 0.1,
+        integrationDt: 0.01,
+        caps: {
+          max_steps: 40,
+          max_points: 160,
+          max_rings: 50,
+          max_vertices: 160,
+          max_time: 10,
+        },
+      })
+    })
+
+    await waitFor(() => {
+      expect(getContext().state.error).toBeNull()
+      expect(extensionSystemParams).toEqual([0.15, 1.3, 0.7])
+    })
+  })
+
+  it('stores reduced-subsystem Floquet vectors in full display coordinates', async () => {
+    const { system } = createLimitCycleManifoldSystem()
+    const lcId = findObjectIdByName(system, 'LC_3D')
+    const limitCycle = system.objects[lcId]
+    if (!limitCycle || limitCycle.type !== 'limit_cycle') {
+      throw new Error('Expected limit cycle object.')
+    }
+    limitCycle.frozenVariables = { frozenValuesByVarName: { z: 0 } }
+    limitCycle.subsystemSnapshot = buildSubsystemSnapshot(
+      system.config,
+      limitCycle.frozenVariables
+    )
+    const { getContext } = setupApp(system, new MockForkCoreClient(0))
+
+    await act(async () => {
+      await getContext().actions.computeLimitCycleFloquetModes({ limitCycleId: lcId })
+    })
+
+    await waitFor(() => {
+      const updated = getContext().state.system?.objects[lcId]
+      if (!updated || updated.type !== 'limit_cycle') {
+        throw new Error('Expected updated limit cycle object.')
+      }
+      expect(getContext().state.error).toBeNull()
+      expect(updated.floquetModes?.vectors.length).toBeGreaterThan(0)
+      for (const pointVectors of updated.floquetModes?.vectors ?? []) {
+        for (const modeVector of pointVectors) {
+          expect(modeVector).toHaveLength(3)
+          expect(modeVector[2]).toEqual({ re: 0, im: 0 })
+        }
+      }
     })
   })
 

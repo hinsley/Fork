@@ -13,6 +13,24 @@ export interface LimitCycleMetrics {
   rmsAmplitudes: number[];
 }
 
+const FLOQUET_TRIVIAL_MODE_TOL = 1e-2;
+
+function resolveTrivialFloquetMultiplierIndex(
+  eigenvalues: ContinuationEigenvalue[]
+): number | null {
+  let bestIndex = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  eigenvalues.forEach((eigenvalue, index) => {
+    if (!Number.isFinite(eigenvalue.re) || !Number.isFinite(eigenvalue.im)) return;
+    const distance = Math.hypot(eigenvalue.re - 1, eigenvalue.im);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+  return bestIndex >= 0 && bestDistance <= FLOQUET_TRIVIAL_MODE_TOL ? bestIndex : null;
+}
+
 /**
  * Extract profile points from flat LC state.
  * Flat state format: [profile_0, profile_1, ..., profile_N, period]
@@ -73,12 +91,14 @@ export function interpretLCStability(eigenvalues: ContinuationEigenvalue[] | und
   // Floquet multipliers: stable if all |λ| < 1 (except trivial λ=1)
   let unstableCount = 0;
   let hasNeimarkSacker = false;
+  const trivialIndex = resolveTrivialFloquetMultiplierIndex(eigenvalues);
+  if (trivialIndex === null) return 'unknown';
 
-  for (const eig of eigenvalues) {
+  for (let index = 0; index < eigenvalues.length; index++) {
+    if (index === trivialIndex) continue;
+    const eig = eigenvalues[index];
+    if (!Number.isFinite(eig.re) || !Number.isFinite(eig.im)) return 'unknown';
     const magnitude = Math.sqrt(eig.re * eig.re + eig.im * eig.im);
-
-    // Skip trivial multiplier (≈1)
-    if (Math.abs(magnitude - 1.0) < 0.01 && Math.abs(eig.im) < 0.01) continue;
 
     if (magnitude > 1.0 + 1e-6) {
       unstableCount++;

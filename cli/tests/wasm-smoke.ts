@@ -339,7 +339,20 @@ const generalizedHopfSeed = generalizedHopfSystem.init_lpc_from_generalized_hopf
 );
 assert.equal(generalizedHopfSeed.target, 'LimitPointCycle');
 assert.ok(generalizedHopfSeed.corrected_residual < 1e-5);
-assert.ok(Math.abs(generalizedHopfSeed.param2_value + 0.04) < 5e-3);
+// For r' = mu*r + beta*r^3 + r^5, the cycle-fold locus is
+// beta = -2*r^2 and mu = r^4.  Validate the corrected cycle instead of the
+// normal-form predictor, which need not lie on the nonlinear collocation
+// curve before correction.
+const generalizedHopfFirstMesh = 8 * 2 * 2;
+const generalizedHopfRadiusSquared =
+  generalizedHopfSeed.state[generalizedHopfFirstMesh] ** 2 +
+  generalizedHopfSeed.state[generalizedHopfFirstMesh + 1] ** 2;
+assert.ok(
+  Math.abs(generalizedHopfSeed.param2_value + 2 * generalizedHopfRadiusSquared) < 5e-4
+);
+assert.ok(
+  Math.abs(generalizedHopfSeed.param1_value - generalizedHopfRadiusSquared ** 2) < 2e-4
+);
 const generalizedHopfLpcRunner = new wasm.WasmLPCCurveRunner(
   [
     'mu*x-y+beta*x*(x^2+y^2)+x*(x^2+y^2)^2',

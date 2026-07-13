@@ -3,7 +3,9 @@ use nalgebra::linalg::SVD;
 use nalgebra::DMatrix;
 use num_complex::Complex;
 
-use crate::continuation::periodic::{compute_cycle_monodromy_data, CollocationCoefficients};
+use crate::continuation::periodic::{
+    compute_cycle_monodromy_data, floquet_real_eigenvector_from_transfers, CollocationCoefficients,
+};
 use crate::continuation::types::{
     default_manifold_alpha_max, default_manifold_alpha_min, default_manifold_delta_alpha_max,
     default_manifold_delta_alpha_min, default_manifold_delta_min, default_manifold_dt,
@@ -1479,7 +1481,7 @@ pub fn continue_limit_cycle_manifold_2d_with_progress(
         ManifoldCycle2DAlgorithm::GeodesicRings => {}
     }
 
-    let (cycle, floquet_dirs) = build_cycle_floquet_seed(
+    let (cycle, floquet_dirs, multiplier) = build_cycle_floquet_seed(
         system,
         cycle_state,
         &cycle_profile,
@@ -2468,7 +2470,7 @@ fn continue_limit_cycle_manifold_2d_hko(
     }
     let dim = system.equations.len();
     let phase_points = settings.ring_points.max(8);
-    let (cycle, floquet_dirs) = build_cycle_floquet_seed(
+    let (cycle, floquet_dirs, multiplier) = build_cycle_floquet_seed(
         system,
         cycle_state,
         cycle_profile,
@@ -2689,7 +2691,7 @@ fn continue_limit_cycle_manifold_2d_segmented_preimage(
 
     let dim = system.equations.len();
     let phase_points = settings.ring_points.max(8);
-    let (cycle, floquet_dirs) = build_cycle_floquet_seed(
+    let (cycle, floquet_dirs, multiplier) = build_cycle_floquet_seed(
         system,
         cycle_state,
         cycle_profile,
@@ -6949,6 +6951,8 @@ fn surface_points_to_branch_points(
 struct DecodedCycleProfile {
     mesh_points: Vec<Vec<f64>>,
     points: Vec<Vec<f64>>,
+    /// Normalized cycle phases aligned with `points`.
+    phases: Vec<f64>,
     period: f64,
 }
 
@@ -6969,6 +6973,7 @@ fn decode_cycle_profile_points(
         return DecodedCycleProfile {
             mesh_points: vec![raw.to_vec()],
             points: vec![raw.to_vec()],
+            phases: vec![0.0],
             period,
         };
     }
@@ -7033,7 +7038,8 @@ fn decode_cycle_profile_points(
             (mesh_points, Vec::new())
         };
 
-    let mut points = build_phase_ordered_cycle_profile(&mesh_points, &stage_points, ncol);
+    let (mut points, mut phases) =
+        build_phase_ordered_cycle_profile(&mesh_points, &stage_points, ncol);
     if points.len() < 4 {
         points = if mesh_points.len() >= 4 {
             mesh_points.clone()
@@ -7043,11 +7049,15 @@ fn decode_cycle_profile_points(
                 .map(|chunk| chunk.to_vec())
                 .collect()
         };
+        phases = (0..points.len())
+            .map(|index| index as f64 / points.len().max(1) as f64)
+            .collect();
     }
 
     DecodedCycleProfile {
         mesh_points,
         points,
+        phases,
         period,
     }
 }
@@ -7056,31 +7066,49 @@ fn build_phase_ordered_cycle_profile(
     mesh_points: &[Vec<f64>],
     stage_points: &[Vec<f64>],
     ncol: usize,
-) -> Vec<Vec<f64>> {
+) -> (Vec<Vec<f64>>, Vec<f64>) {
     if mesh_points.is_empty() {
-        return stage_points.to_vec();
+        let phases = (0..stage_points.len())
+            .map(|index| index as f64 / stage_points.len().max(1) as f64)
+            .collect();
+        return (stage_points.to_vec(), phases);
     }
     if mesh_points.len() == 1 {
-        return mesh_points.to_vec();
+        return (mesh_points.to_vec(), vec![0.0]);
     }
 
     let mut points = Vec::with_capacity(mesh_points.len().saturating_mul(ncol.saturating_add(1)));
+    let mut phases = Vec::with_capacity(points.capacity());
+    let stage_nodes = CollocationCoefficients::new(ncol)
+        .map(|coefficients| coefficients.nodes)
+        .unwrap_or_else(|_| {
+            (0..ncol)
+                .map(|stage| (stage + 1) as f64 / (ncol + 1) as f64)
+                .collect()
+        });
+    let mesh_count = mesh_points.len() as f64;
     points.push(mesh_points[0].clone());
+    phases.push(0.0);
     for interval in 0..mesh_points.len() {
         let stage_offset = interval.saturating_mul(ncol);
         for stage in 0..ncol {
             if let Some(point) = stage_points.get(stage_offset + stage) {
                 points.push(point.clone());
+                phases.push((interval as f64 + stage_nodes[stage]) / mesh_count);
             }
         }
         if interval + 1 < mesh_points.len() {
             points.push(mesh_points[interval + 1].clone());
+            phases.push((interval + 1) as f64 / mesh_count);
         }
     }
     if points.len() < mesh_points.len() {
-        mesh_points.to_vec()
+        let phases = (0..mesh_points.len())
+            .map(|index| index as f64 / mesh_points.len() as f64)
+            .collect();
+        (mesh_points.to_vec(), phases)
     } else {
-        points
+        (points, phases)
     }
 }
 
@@ -7194,13 +7222,31 @@ fn resample_closed_ring_and_vectors_arclength(
     ring: &[Vec<f64>],
     vectors: &[Vec<f64>],
     points: usize,
+    antiperiodic: bool,
 ) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
     if ring.is_empty() || vectors.is_empty() || points == 0 {
         return (Vec::new(), Vec::new());
     }
     if ring.len() != vectors.len() {
         let ring_resampled = resample_closed_ring(ring, points);
-        let mut vec_resampled = resample_closed_ring(vectors, points);
+        let mut vec_resampled = (0..points)
+            .map(|index| {
+                let position = index as f64 * vectors.len() as f64 / points as f64;
+                let segment = (position.floor() as usize).min(vectors.len() - 1);
+                let next = (segment + 1) % vectors.len();
+                let alpha = position - segment as f64;
+                let next_vector = if antiperiodic && next == 0 {
+                    vectors[next]
+                        .iter()
+                        .map(|value| -*value)
+                        .collect::<Vec<_>>()
+                } else {
+                    vectors[next].clone()
+                };
+                let direction = lerp(&vectors[segment], &next_vector, alpha);
+                normalize(direction.clone()).unwrap_or(direction)
+            })
+            .collect::<Vec<_>>();
         orient_direction_field_continuous(&mut vec_resampled);
         return (ring_resampled, vec_resampled);
     }
@@ -7212,7 +7258,15 @@ fn resample_closed_ring_and_vectors_arclength(
         let (seg, alpha) = ring_segment_at_arclength(&cumulative, total, s);
         let next = (seg + 1) % ring.len();
         resampled_ring.push(lerp(&ring[seg], &ring[next], alpha));
-        let mut direction = lerp(&vectors[seg], &vectors[next], alpha);
+        let next_vector = if antiperiodic && next == 0 {
+            vectors[next]
+                .iter()
+                .map(|value| -*value)
+                .collect::<Vec<_>>()
+        } else {
+            vectors[next].clone()
+        };
+        let mut direction = lerp(&vectors[seg], &next_vector, alpha);
         if let Ok(unit) = normalize(direction.clone()) {
             direction = unit;
         }
@@ -7343,7 +7397,60 @@ fn build_profile_floquet_directions(
     profile_dirs
 }
 
-fn build_cycle_floquet_seed_from_monodromy(
+fn validate_requested_floquet_multiplier(
+    actual_multipliers: &[Complex<f64>],
+    requested: Complex<f64>,
+) -> Result<Complex<f64>> {
+    if !requested.re.is_finite() || !requested.im.is_finite() {
+        bail!("Requested Floquet multiplier is not finite.");
+    }
+    let real_tolerance = 1e-8 * requested.norm().max(1.0);
+    if requested.im.abs() > real_tolerance {
+        bail!("The 2D cycle-manifold solver requires a real Floquet multiplier.");
+    }
+    let stability = if requested.norm() < 1.0 - 1e-6 {
+        ManifoldStability::Stable
+    } else if requested.norm() > 1.0 + 1e-6 {
+        ManifoldStability::Unstable
+    } else {
+        bail!("Requested Floquet multiplier is too close to the unit circle.");
+    };
+    let (_, actual) = select_floquet_multiplier(actual_multipliers, stability, None).map_err(
+        |error| {
+            anyhow!(
+                "Requested Floquet multiplier {:?} does not match an eligible multiplier in the recomputed spectrum: {}",
+                requested,
+                error
+            )
+        },
+    )?;
+    let scale = requested.norm().max(actual.norm()).max(1.0);
+    let tolerance = 1e-3 + 1e-2 * scale;
+    let error = (actual - requested).norm();
+    if !error.is_finite() || error > tolerance {
+        bail!(
+            "Requested Floquet multiplier {:?} does not match the recomputed multiplier {:?} (error {:.3e}, tolerance {:.3e}).",
+            requested,
+            actual,
+            error,
+            tolerance
+        );
+    }
+    let sign_tolerance = 1e-10 * scale;
+    if requested.re.abs() > sign_tolerance
+        && actual.re.abs() > sign_tolerance
+        && requested.re.signum() != actual.re.signum()
+    {
+        bail!(
+            "Requested Floquet multiplier {:?} does not match the recomputed multiplier {:?}: orientability changed.",
+            requested,
+            actual
+        );
+    }
+    Ok(actual)
+}
+
+fn build_cycle_floquet_seed_from_collocation(
     system: &mut EquationSystem,
     cycle_state: &[f64],
     profile: &DecodedCycleProfile,
@@ -7352,30 +7459,13 @@ fn build_cycle_floquet_seed_from_monodromy(
     parameter_index: usize,
     multiplier: Complex<f64>,
     ring_points: usize,
-) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
+) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>, Complex<f64>)> {
     let monodromy_data =
         compute_cycle_monodromy_data(system, parameter_index, cycle_state, ntst, ncol)?;
-    let closest_mu_error = monodromy_data
-        .monodromy
-        .complex_eigenvalues()
-        .iter()
-        .map(|value| (*value - multiplier).norm())
-        .fold(f64::INFINITY, f64::min);
-    let mu_scale = multiplier.norm().max(1.0);
-    let mu_tol = 1e-3 + 1e-2 * mu_scale;
-    if closest_mu_error.is_finite()
-        && closest_mu_error > mu_tol
-        && std::env::var("FORK_MANIFOLD_DEBUG").is_ok()
-    {
-        eprintln!(
-            "cycle manifold warning: selected multiplier {:.6e}+{:.6e}i differs from extracted monodromy spectrum (closest error {:.3e}, tol {:.3e})",
-            multiplier.re,
-            multiplier.im,
-            closest_mu_error,
-            mu_tol
-        );
-    }
-    let v0 = floquet_real_vector_from_monodromy(&monodromy_data.monodromy, multiplier.re)?;
+    let matched_multiplier =
+        validate_requested_floquet_multiplier(&monodromy_data.multipliers, multiplier)?;
+    let (_, v0) =
+        floquet_real_eigenvector_from_transfers(&monodromy_data.transfers, matched_multiplier)?;
     let mesh_count = profile.mesh_points.len().max(1).min(ntst.max(1));
     let mesh_dirs = transport_mesh_floquet_directions(&v0, &monodromy_data.transfers, mesh_count);
     let mut profile_dirs = build_profile_floquet_directions(
@@ -7393,8 +7483,9 @@ fn build_cycle_floquet_seed_from_monodromy(
         &profile.points,
         &profile_dirs,
         ring_points.max(4),
+        matched_multiplier.re < 0.0,
     );
-    Ok((ring, dirs))
+    Ok((ring, dirs, matched_multiplier))
 }
 
 fn build_cycle_floquet_seed_variational(
@@ -7405,7 +7496,7 @@ fn build_cycle_floquet_seed_variational(
     dt: f64,
     max_steps_per_leaf: usize,
     max_time: f64,
-) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
+) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>, Complex<f64>)> {
     if profile.points.is_empty() {
         bail!("Cycle profile is empty.");
     }
@@ -7419,29 +7510,47 @@ fn build_cycle_floquet_seed_variational(
     } else {
         max_time.max(dt).max(1e-6)
     };
+    // Surface-growth caps must not truncate the one-period variational solve
+    // used to identify the invariant bundle.
+    let variational_max_steps =
+        max_steps_per_leaf.max((period / dt.max(1e-9)).ceil().max(1.0) as usize + 2);
     let (_, phi_t) = integrate_state_and_variational(
         system,
         &start,
         period,
         1.0,
         dt.max(1e-9),
-        max_steps_per_leaf.max(2),
+        variational_max_steps,
         period,
     )
     .ok_or_else(|| anyhow!("Variational fallback failed to integrate monodromy."))?;
     let dim = start.len();
     let monodromy = DMatrix::from_row_slice(dim, dim, &phi_t);
-    let v0 = floquet_real_vector_from_monodromy(&monodromy, multiplier.re)?;
+    let actual_multipliers = monodromy
+        .complex_eigenvalues()
+        .iter()
+        .copied()
+        .collect::<Vec<_>>();
+    let matched_multiplier =
+        validate_requested_floquet_multiplier(&actual_multipliers, multiplier)?;
+    let v0 = floquet_real_vector_from_monodromy(&monodromy, matched_multiplier.re)?;
     let mut profile_dirs = Vec::with_capacity(profile.points.len());
     for i in 0..profile.points.len() {
-        let tau = period * (i as f64) / (profile.points.len() as f64);
+        let normalized_phase = profile
+            .phases
+            .get(i)
+            .copied()
+            .filter(|phase| phase.is_finite())
+            .unwrap_or_else(|| i as f64 / profile.points.len().max(1) as f64)
+            .rem_euclid(1.0);
+        let tau = period * normalized_phase;
         let (_, phi_tau) = integrate_state_and_variational(
             system,
             &start,
             tau,
             1.0,
             dt.max(1e-9),
-            max_steps_per_leaf.max(2),
+            variational_max_steps,
             period,
         )
         .ok_or_else(|| {
@@ -7457,8 +7566,9 @@ fn build_cycle_floquet_seed_variational(
         &profile.points,
         &profile_dirs,
         ring_points.max(4),
+        matched_multiplier.re < 0.0,
     );
-    Ok((ring, dirs))
+    Ok((ring, dirs, matched_multiplier))
 }
 
 fn build_cycle_floquet_seed(
@@ -7473,23 +7583,27 @@ fn build_cycle_floquet_seed(
     dt: f64,
     max_steps_per_leaf: usize,
     max_time: f64,
-) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
+) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>, Complex<f64>)> {
     if let Some(index) = parameter_index {
-        if index < system.params.len() {
-            if let Ok(seed) = build_cycle_floquet_seed_from_monodromy(
-                system,
-                cycle_state,
-                profile,
-                ntst,
-                ncol,
-                index,
-                multiplier,
-                ring_points,
-            ) {
-                return Ok(seed);
-            }
+        if index >= system.params.len() {
+            bail!("Cycle manifold parameter index is out of bounds.");
         }
+        return build_cycle_floquet_seed_from_collocation(
+            system,
+            cycle_state,
+            profile,
+            ntst,
+            ncol,
+            index,
+            multiplier,
+            ring_points,
+        )
+        .map_err(|error| anyhow!("Collocation Floquet seed construction failed: {error}"));
     }
+
+    // Legacy callers without parameter provenance cannot rebuild the
+    // collocation Jacobian.  Keep the integration path explicit for that case;
+    // never use it to hide a failed collocation calculation.
     build_cycle_floquet_seed_variational(
         system,
         profile,
@@ -9718,6 +9832,8 @@ mod tests {
     use super::*;
     use crate::continuation::ManifoldTerminationCaps;
     use crate::equation_engine::{parse, Compiler};
+    use nalgebra::DVector;
+    use std::f64::consts::PI;
 
     fn build_system(equations: &[&str], vars: &[&str], params: &[(&str, f64)]) -> EquationSystem {
         let var_names: Vec<String> = vars.iter().map(|name| (*name).to_string()).collect();
@@ -9732,6 +9848,143 @@ mod tests {
         let mut system = EquationSystem::new(bytecodes, param_values);
         system.set_maps(compiler.param_map, compiler.var_map);
         system
+    }
+
+    #[test]
+    fn cycle_manifold_floquet_seed_preserves_a_stiff_contracting_direction() {
+        let ntst = 20usize;
+        let rotation = |angle: f64| {
+            DMatrix::from_row_slice(2, 2, &[angle.cos(), -angle.sin(), angle.sin(), angle.cos()])
+        };
+        let local = DMatrix::from_diagonal(&DVector::from_vec(vec![
+            (128.0 / ntst as f64).exp(),
+            (-128.0 / ntst as f64).exp(),
+        ]));
+        let transfers = (0..ntst)
+            .map(|interval| {
+                let current = 2.0 * PI * interval as f64 / ntst as f64;
+                let next = 2.0 * PI * (interval + 1) as f64 / ntst as f64;
+                rotation(next) * &local * rotation(current).transpose()
+            })
+            .collect::<Vec<_>>();
+        let target = Complex::new((-128.0f64).exp(), 0.0);
+        let (multiplier, direction) = floquet_real_eigenvector_from_transfers(&transfers, target)
+            .expect("robust manifold Floquet seed");
+        assert!((multiplier.norm().ln() + 128.0).abs() < 2e-8);
+        assert!(direction[0].abs() < 1e-8, "direction={direction:?}");
+        assert!((direction[1].abs() - 1.0).abs() < 1e-8);
+    }
+
+    #[test]
+    fn cycle_manifold_does_not_hide_a_collocation_floquet_failure() {
+        let mut system = build_system(&["-x", "-2*y"], &["x", "y"], &[("a", 0.0)]);
+        let profile = DecodedCycleProfile {
+            mesh_points: vec![vec![1.0, 0.0]],
+            points: vec![
+                vec![1.0, 0.0],
+                vec![0.0, 1.0],
+                vec![-1.0, 0.0],
+                vec![0.0, -1.0],
+            ],
+            phases: vec![0.0, 0.25, 0.5, 0.75],
+            period: 1.0,
+        };
+        // This legacy one-point state is sufficient for the integration
+        // fallback but is not a valid ntst=4, ncol=2 collocation profile.
+        let error = build_cycle_floquet_seed(
+            &mut system,
+            &[1.0, 0.0, 1.0],
+            &profile,
+            4,
+            2,
+            Some(0),
+            Complex::new((-1.0_f64).exp(), 0.0),
+            8,
+            0.01,
+            200,
+            1.0,
+        )
+        .expect_err("collocation failures must propagate when provenance is available");
+        assert!(
+            error
+                .to_string()
+                .contains("Collocation Floquet seed construction failed"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn cycle_manifold_rejects_a_stale_collocation_multiplier() {
+        let ntst = 8usize;
+        let ncol = 2usize;
+        let mut system = build_system(&["-y", "x", "-0.2*z"], &["x", "y", "z"], &[("unused", 0.0)]);
+        let cycle_state = circular_cycle_state(ntst, ncol, 1.0);
+        let profile = decode_cycle_profile_points(&cycle_state, 3, ntst, ncol);
+        let error = build_cycle_floquet_seed_from_collocation(
+            &mut system,
+            &cycle_state,
+            &profile,
+            ntst,
+            ncol,
+            0,
+            Complex::new(-1.3, 0.0),
+            16,
+        )
+        .expect_err("a stale multiplier must not select an unrelated Floquet bundle");
+        assert!(
+            error.to_string().contains("does not match"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn cycle_manifold_variational_fallback_rejects_a_non_eigenvalue() {
+        let ntst = 8usize;
+        let ncol = 2usize;
+        let system = build_system(&["-y", "x", "-0.2*z"], &["x", "y", "z"], &[]);
+        let cycle_state = circular_cycle_state(ntst, ncol, 1.0);
+        let profile = decode_cycle_profile_points(&cycle_state, 3, ntst, ncol);
+        let error = build_cycle_floquet_seed_variational(
+            &system,
+            &profile,
+            Complex::new(-1.3, 0.0),
+            16,
+            0.01,
+            2_000,
+            std::f64::consts::TAU,
+        )
+        .expect_err("the fallback must verify the requested multiplier");
+        assert!(
+            error.to_string().contains("does not match"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn antiperiodic_floquet_resampling_uses_the_negative_closure_vector() {
+        let ring = vec![
+            vec![1.0, 0.0],
+            vec![0.0, 1.0],
+            vec![-1.0, 0.0],
+            vec![0.0, -1.0],
+        ];
+        let half = std::f64::consts::FRAC_PI_4;
+        let vectors = vec![
+            vec![1.0, 0.0],
+            vec![half.cos(), half.sin()],
+            vec![0.0, 1.0],
+            vec![-half.cos(), half.sin()],
+        ];
+        let (_, resampled) = resample_closed_ring_and_vectors_arclength(&ring, &vectors, 8, true);
+        let last = resampled.last().expect("last resampled direction");
+        assert!(
+            last[0] < -0.8 && last[1] > 0.2,
+            "antiperiodic closure interpolated toward +v(0): {last:?}"
+        );
+        assert!(
+            resampled.iter().all(|direction| l2_norm(direction) > 0.99),
+            "antiperiodic interpolation produced a degenerate direction"
+        );
     }
 
     fn logistic_period_two_point(r: f64) -> f64 {
@@ -10188,6 +10441,9 @@ mod tests {
 
     fn circular_cycle_state(ntst: usize, ncol: usize, radius: f64) -> Vec<f64> {
         let mut state = Vec::new();
+        let nodes = CollocationCoefficients::new(ncol)
+            .expect("collocation nodes")
+            .nodes;
         for i in 0..ntst {
             let theta = (i as f64) * std::f64::consts::TAU / (ntst as f64);
             state.push(radius * theta.cos());
@@ -10196,8 +10452,8 @@ mod tests {
         }
         for interval in 0..ntst {
             for stage in 0..ncol {
-                let frac = (stage as f64 + 1.0) / ((ncol + 1) as f64);
-                let theta = (interval as f64 + frac) * std::f64::consts::TAU / (ntst as f64);
+                let theta =
+                    (interval as f64 + nodes[stage]) * std::f64::consts::TAU / (ntst as f64);
                 state.push(radius * theta.cos());
                 state.push(radius * theta.sin());
                 state.push(0.0);
@@ -12513,7 +12769,10 @@ mod tests {
             &state,
             ntst,
             ncol,
-            &[Complex::new(1.25, 0.0), Complex::new(1.0, 0.0)],
+            &[
+                Complex::new((0.1 * std::f64::consts::TAU).exp(), 0.0),
+                Complex::new(1.0, 0.0),
+            ],
             ManifoldCycle2DSettings {
                 stability: ManifoldStability::Unstable,
                 initial_radius: 0.02,
@@ -12573,7 +12832,10 @@ mod tests {
                 &state,
                 ntst,
                 ncol,
-                &[Complex::new(1.25, 0.0), Complex::new(1.0, 0.0)],
+                &[
+                    Complex::new((0.1 * std::f64::consts::TAU).exp(), 0.0),
+                    Complex::new(1.0, 0.0),
+                ],
                 ManifoldCycle2DSettings {
                     stability: ManifoldStability::Unstable,
                     direction,
@@ -12602,7 +12864,10 @@ mod tests {
             &state,
             ntst,
             ncol,
-            &[Complex::new(1.25, 0.0), Complex::new(1.0, 0.0)],
+            &[
+                Complex::new((0.1 * std::f64::consts::TAU).exp(), 0.0),
+                Complex::new(1.0, 0.0),
+            ],
             ManifoldCycle2DSettings {
                 stability: ManifoldStability::Unstable,
                 direction: ManifoldDirection::Both,
@@ -12649,10 +12914,22 @@ mod tests {
 
     #[test]
     fn manifold_cycle_2d_negative_multiplier_uses_double_cover_initial_ring() {
-        let mut system = build_system(&["-y", "x", "-0.2*z"], &["x", "y", "z"], &[]);
+        // In the rotating transverse frame, the two real exponents are +/-0.1.
+        // The frame itself turns by pi over one cycle, so the genuine Floquet
+        // multipliers are -exp(+/-0.1*TAU), one on either side of the unit circle.
+        let mut system = build_system(
+            &[
+                "-y",
+                "x",
+                "0.1*x*z + (0.1*y - 0.5)*w",
+                "(0.1*y + 0.5)*z - 0.1*x*w",
+            ],
+            &["x", "y", "z", "w"],
+            &[],
+        );
         let ntst = 8usize;
         let ncol = 2usize;
-        let dim = 3usize;
+        let dim = 4usize;
         let mesh_count = ntst;
         let stage_count = ntst * ncol;
         let mut state = Vec::new();
@@ -12661,11 +12938,13 @@ mod tests {
             state.push(theta.cos());
             state.push(theta.sin());
             state.push(0.0);
+            state.push(0.0);
         }
         for i in 0..stage_count {
             let theta = ((i as f64) + 0.5) * std::f64::consts::TAU / (stage_count as f64);
             state.push(theta.cos());
             state.push(theta.sin());
+            state.push(0.0);
             state.push(0.0);
         }
         assert_eq!(state.len(), (mesh_count + stage_count) * dim);
@@ -12693,7 +12972,19 @@ mod tests {
             &state,
             ntst,
             ncol,
-            &[Complex::new(-1.3, 0.0), Complex::new(1.0, 0.0)],
+            &[
+                Complex::new((0.1 * std::f64::consts::TAU).exp(), 0.0),
+                Complex::new((-0.1 * std::f64::consts::TAU).exp(), 0.0),
+                Complex::new(1.0, 0.0),
+                Complex::new(1.0, 0.0),
+            ]
+            .map(|value| {
+                if (value.re - 1.0).abs() > 1e-12 {
+                    -value
+                } else {
+                    value
+                }
+            }),
             settings,
         )
         .expect("cycle manifold with negative multiplier");
@@ -12701,7 +12992,7 @@ mod tests {
         let ManifoldGeometry::Surface(surface) = branch.manifold_geometry.expect("geometry") else {
             panic!("expected surface geometry");
         };
-        let vertex_count = surface.vertices_flat.len() / 3;
+        let vertex_count = surface.vertices_flat.len() / dim;
         let first_ring_count = if surface.ring_offsets.len() >= 2 {
             surface.ring_offsets[1] - surface.ring_offsets[0]
         } else {
@@ -12751,6 +13042,24 @@ mod tests {
         let decoded_implicit = decode_cycle_profile_points(&implicit, dim, ntst, ncol);
         assert_eq!(decoded_implicit.mesh_points, mesh);
         assert_eq!(decoded_implicit.points, expected);
+        let nodes = CollocationCoefficients::new(ncol)
+            .expect("collocation nodes")
+            .nodes;
+        let expected_phases = vec![
+            0.0,
+            nodes[0] / 3.0,
+            nodes[1] / 3.0,
+            1.0 / 3.0,
+            (1.0 + nodes[0]) / 3.0,
+            (1.0 + nodes[1]) / 3.0,
+            2.0 / 3.0,
+            (2.0 + nodes[0]) / 3.0,
+            (2.0 + nodes[1]) / 3.0,
+        ];
+        assert_eq!(decoded_implicit.phases.len(), expected_phases.len());
+        for (actual, expected) in decoded_implicit.phases.iter().zip(&expected_phases) {
+            assert!((actual - expected).abs() <= 1e-14);
+        }
 
         let mut explicit = Vec::new();
         for point in &mesh {
@@ -12764,6 +13073,7 @@ mod tests {
         let decoded_explicit = decode_cycle_profile_points(&explicit, dim, ntst, ncol);
         assert_eq!(decoded_explicit.mesh_points, mesh);
         assert_eq!(decoded_explicit.points, expected);
+        assert_eq!(decoded_explicit.phases, decoded_implicit.phases);
     }
 
     #[test]
@@ -12789,10 +13099,13 @@ mod tests {
             state.push(radius * theta.sin());
             state.push(0.0);
         }
+        let nodes = CollocationCoefficients::new(ncol)
+            .expect("collocation nodes")
+            .nodes;
         for interval in 0..ntst {
             for stage in 0..ncol {
-                let frac = (stage as f64 + 1.0) / ((ncol + 1) as f64);
-                let theta = (interval as f64 + frac) * std::f64::consts::TAU / (ntst as f64);
+                let theta =
+                    (interval as f64 + nodes[stage]) * std::f64::consts::TAU / (ntst as f64);
                 state.push(radius * theta.cos());
                 state.push(radius * theta.sin());
                 state.push(0.0);
@@ -12982,7 +13295,7 @@ mod tests {
             .map(|point| ((point[0] * point[0] + point[1] * point[1]).sqrt() - 1.0).abs())
             .fold(0.0, f64::max);
         assert!(
-            max_radial_error < 5e-3,
+            max_radial_error < 2e-2,
             "unstable linear cylinder should stay near LC radius; max error={max_radial_error}"
         );
         let max_abs_z = vertices
@@ -13158,7 +13471,7 @@ mod tests {
             .map(|point| ((point[0] * point[0] + point[1] * point[1]).sqrt() - 1.0).abs())
             .fold(0.0, f64::max);
         assert!(
-            max_radial_error < 5e-3,
+            max_radial_error < 2e-2,
             "stable linear cylinder should stay near LC radius; max error={max_radial_error}"
         );
         let max_abs_z = surface

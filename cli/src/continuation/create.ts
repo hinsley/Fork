@@ -612,6 +612,7 @@ export async function createLimitCycleBranchForObject(
         period: period,
         mesh_states: meshStates,
         stage_states: [],
+        requires_fixed_parameter_correction: true,
       },
       mesh_points: sourceNtst,
       collocation_degree: sourceNcol,

@@ -20,6 +20,7 @@ import type {
 import { makeStableId as makeId, nowIso } from '../utils/determinism'
 import { resolveSceneAxisSelection } from './sceneAxes'
 import { normalizePeriodicVariables } from './periodicity'
+import { liftReducedFloquetVectorsForDisplay } from './floquetModes'
 
 const DEFAULT_SYSTEM: SystemConfig = {
   name: 'Untitled System',
@@ -1593,7 +1594,23 @@ export function mergeLoadedEntities(
   const updatedAt = nowIso()
   if (payload.objects) {
     Object.entries(payload.objects).forEach(([id, object]) => {
-      const normalizedObject = { ...object, id } as AnalysisObject
+      let normalizedObject = { ...object, id } as AnalysisObject
+      if (
+        normalizedObject.type === 'limit_cycle' &&
+        normalizedObject.subsystemSnapshot &&
+        normalizedObject.floquetModes
+      ) {
+        normalizedObject = {
+          ...normalizedObject,
+          floquetModes: {
+            ...normalizedObject.floquetModes,
+            vectors: liftReducedFloquetVectorsForDisplay(
+              normalizedObject.subsystemSnapshot,
+              normalizedObject.floquetModes.vectors
+            ),
+          },
+        }
+      }
       next.objects[id] = normalizedObject
       next.index.objects[id] = {
         id,

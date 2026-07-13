@@ -7,6 +7,7 @@ import type {
   System,
 } from './types'
 import { isValidParameterSet } from './parameters'
+import { resolveTrivialFloquetModeIndex } from './floquetModes'
 
 type EigenvalueWire = [number, number]
 
@@ -83,6 +84,60 @@ export type LimitCycleMetrics = {
 }
 
 export type LimitCycleProfileLayout = 'mesh-first' | 'stage-first'
+
+const STAGE_FIRST_EXPLICIT_CYCLE_BRANCH_TYPES = new Set<
+  ContinuationObject['branchType']
+>(['lpc_curve', 'ns_curve', 'isoperiodic_curve'])
+
+/**
+ * Convert cycle coordinates selected from a continuation branch into the
+ * mesh-first layout consumed by the core Floquet and manifold analysis APIs.
+ * Standard limit-cycle and PD branches are already mesh-first. LPC, NS, and
+ * isoperiodic branches store an explicit closing mesh point after their stages.
+ */
+export function canonicalizeLimitCycleStateForAnalysis(
+  state: number[],
+  dimension: number,
+  ntst: number,
+  ncol: number,
+  branchType: ContinuationObject['branchType']
+): number[] {
+  const isStageFirstExplicit = STAGE_FIRST_EXPLICIT_CYCLE_BRANCH_TYPES.has(branchType)
+  const isMeshFirstExplicit = branchType === 'pd_curve'
+  const isMeshFirstImplicit = branchType === 'limit_cycle'
+  if (!isStageFirstExplicit && !isMeshFirstExplicit && !isMeshFirstImplicit) {
+    return [...state]
+  }
+  if (
+    !Number.isInteger(dimension) ||
+    dimension <= 0 ||
+    !Number.isInteger(ntst) ||
+    ntst <= 0 ||
+    !Number.isInteger(ncol) ||
+    ncol <= 0
+  ) {
+    throw new Error('Limit-cycle collocation metadata is invalid for analysis.')
+  }
+
+  const stageLength = ntst * ncol * dimension
+  const meshLength = (isMeshFirstImplicit ? ntst : ntst + 1) * dimension
+  const expectedLength = stageLength + meshLength + 1
+  if (state.length !== expectedLength) {
+    throw new Error(
+      `Selected ${branchType} state has length ${state.length}; expected ${expectedLength} ` +
+        `for ntst=${ntst}, ncol=${ncol}, and dimension=${dimension}.`
+    )
+  }
+  if (!isStageFirstExplicit) {
+    return [...state]
+  }
+
+  return [
+    ...state.slice(stageLength, stageLength + meshLength),
+    ...state.slice(0, stageLength),
+    state[state.length - 1],
+  ]
+}
 
 export function extractLimitCycleProfile(
   flatState: number[],
@@ -256,10 +311,14 @@ export function interpretLimitCycleStability(
 
   let unstableCount = 0
   let hasNeimarkSacker = false
+  const trivialIndex = resolveTrivialFloquetModeIndex(eigenvalues)
+  if (trivialIndex === null) return 'unknown'
 
-  for (const eig of eigenvalues) {
+  for (let index = 0; index < eigenvalues.length; index += 1) {
+    if (index === trivialIndex) continue
+    const eig = eigenvalues[index]
+    if (!Number.isFinite(eig.re) || !Number.isFinite(eig.im)) return 'unknown'
     const magnitude = Math.hypot(eig.re, eig.im)
-    if (Math.abs(magnitude - 1.0) < 0.01 && Math.abs(eig.im) < 0.01) continue
 
     if (magnitude > 1.0 + 1e-6) {
       unstableCount += 1

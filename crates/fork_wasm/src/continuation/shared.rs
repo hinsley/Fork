@@ -1,5 +1,6 @@
 //! Shared continuation helpers.
 
+pub(crate) use fork_core::continuation::compute_tangent_from_problem;
 use fork_core::continuation::util::{neimark_sacker_test_function, period_doubling_test_function};
 use fork_core::continuation::{
     compute_eigenvalues, hopf_test_function, neutral_saddle_test_function, ContinuationProblem,
@@ -166,55 +167,6 @@ impl ContinuationProblem for OwnedEquilibriumContinuationProblem {
             cycle_points,
         })
     }
-}
-
-pub(crate) fn compute_tangent_from_problem<P: ContinuationProblem>(
-    problem: &mut P,
-    aug_state: &DVector<f64>,
-) -> anyhow::Result<DVector<f64>> {
-    let dim = problem.dimension();
-    let jac = problem.extended_jacobian(aug_state)?;
-
-    if jac.nrows() != dim || jac.ncols() != dim + 1 {
-        anyhow::bail!(
-            "Jacobian has unexpected dimensions: {}x{}, expected {}x{}",
-            jac.nrows(),
-            jac.ncols(),
-            dim,
-            dim + 1
-        );
-    }
-
-    let bordering_candidates = [0, dim, 1];
-    for &idx in &bordering_candidates {
-        let mut c = DVector::zeros(dim + 1);
-        c[idx.min(dim)] = 1.0;
-
-        let mut bordered = DMatrix::zeros(dim + 1, dim + 1);
-        for i in 0..dim {
-            for j in 0..dim + 1 {
-                bordered[(i, j)] = jac[(i, j)];
-            }
-        }
-        for j in 0..dim + 1 {
-            bordered[(dim, j)] = c[j];
-        }
-
-        let mut rhs = DVector::zeros(dim + 1);
-        rhs[dim] = 1.0;
-
-        let lu = bordered.lu();
-        if let Some(sol) = lu.solve(&rhs) {
-            let norm = sol.norm();
-            if norm > 1e-10 && sol.iter().all(|v| v.is_finite()) {
-                return Ok(sol / norm);
-            }
-        }
-    }
-
-    let mut tangent = DVector::zeros(dim + 1);
-    tangent[0] = 1.0;
-    Ok(tangent)
 }
 
 #[cfg(test)]
@@ -490,16 +442,18 @@ mod tangent_tests {
     }
 
     #[test]
-    fn compute_tangent_falls_back_on_singular_system() {
+    fn compute_tangent_rejects_a_rank_zero_jacobian() {
         let mut problem = DummyProblem {
             jac: DMatrix::from_row_slice(1, 2, &[0.0, 0.0]),
         };
         let aug_state = DVector::from_vec(vec![0.0, 0.0]);
 
-        let tangent = compute_tangent_from_problem(&mut problem, &aug_state).expect("tangent");
-        assert_eq!(tangent.len(), 2);
-        assert_eq!(tangent[0], 1.0);
-        assert_eq!(tangent[1], 0.0);
+        let error = compute_tangent_from_problem(&mut problem, &aug_state)
+            .expect_err("a rank-zero Jacobian has no unique continuation tangent");
+        assert!(
+            error.to_string().contains("rank deficient"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

@@ -55,9 +55,58 @@ pub(crate) fn normalize_lc_seed_for_stage_first_explicit(
     ))
 }
 
+pub(crate) fn normalize_pd_lc_seed_for_mesh_first_explicit(
+    lc_state: &[f64],
+    ntst: usize,
+    ncol: usize,
+    dim: usize,
+) -> Result<Vec<f64>, String> {
+    let expected_ncoords = ntst * ncol * dim + (ntst + 1) * dim;
+    let implicit_ncoords = ntst * ncol * dim + ntst * dim;
+
+    if lc_state.len() == implicit_ncoords {
+        // Limit-cycle branches store mesh-first implicit periodic data:
+        // [mesh_0 .. mesh_(ntst-1), stages...].  PD continuation uses
+        // mesh-first explicit data, so insert mesh_ntst = mesh_0 before stages.
+        let mesh_len = ntst * dim;
+        let mut padded = Vec::with_capacity(expected_ncoords);
+        padded.extend_from_slice(&lc_state[..mesh_len]);
+        padded.extend_from_slice(&lc_state[..dim]);
+        padded.extend_from_slice(&lc_state[mesh_len..]);
+        return Ok(padded);
+    }
+
+    if lc_state.len() == expected_ncoords {
+        return Ok(lc_state.to_vec());
+    }
+
+    Err(format!(
+        "Invalid lc_state.len()={}, expected {} or {} (ntst={}, ncol={}, dim={})",
+        lc_state.len(),
+        expected_ncoords,
+        implicit_ncoords,
+        ntst,
+        ncol,
+        dim
+    ))
+}
+
+fn split_pd_curve_output_state(state: &[f64], explicit_lc_len: usize) -> Option<(Vec<f64>, f64)> {
+    if state.len() < explicit_lc_len + 2 {
+        return None;
+    }
+    Some((
+        state[..explicit_lc_len + 1].to_vec(),
+        state[explicit_lc_len + 1],
+    ))
+}
+
 #[cfg(test)]
 mod layout_tests {
-    use super::normalize_lc_seed_for_stage_first_explicit;
+    use super::{
+        normalize_lc_seed_for_stage_first_explicit, normalize_pd_lc_seed_for_mesh_first_explicit,
+        split_pd_curve_output_state,
+    };
 
     #[test]
     fn normalizes_mesh_first_implicit_state_for_isoperiodic_seed() {
@@ -65,6 +114,21 @@ mod layout_tests {
             normalize_lc_seed_for_stage_first_explicit(&[10.0, 20.0, 30.0, 40.0], 2, 1, 1)
                 .expect("normalize state");
         assert_eq!(normalized, vec![30.0, 40.0, 10.0, 20.0, 10.0]);
+    }
+
+    #[test]
+    fn normalizes_dim_two_mesh_first_implicit_state_for_ns_seed() {
+        let normalized = normalize_lc_seed_for_stage_first_explicit(
+            &[10.0, 11.0, 20.0, 21.0, 30.0, 31.0, 40.0, 41.0],
+            2,
+            1,
+            2,
+        )
+        .expect("normalize two-dimensional NS state");
+        assert_eq!(
+            normalized,
+            vec![30.0, 31.0, 40.0, 41.0, 10.0, 11.0, 20.0, 21.0, 10.0, 11.0,]
+        );
     }
 
     #[test]
@@ -80,6 +144,58 @@ mod layout_tests {
         let err =
             normalize_lc_seed_for_stage_first_explicit(&[1.0, 2.0, 3.0], 2, 1, 1).unwrap_err();
         assert!(err.contains("Invalid lc_state.len()"));
+    }
+
+    #[test]
+    fn pads_mesh_first_implicit_state_for_pd_seed() {
+        let normalized =
+            normalize_pd_lc_seed_for_mesh_first_explicit(&[10.0, 20.0, 30.0, 40.0], 2, 1, 1)
+                .expect("normalize PD state");
+        assert_eq!(normalized, vec![10.0, 20.0, 10.0, 30.0, 40.0]);
+    }
+
+    #[test]
+    fn pads_dim_two_pd_seed_at_the_mesh_stage_boundary() {
+        let normalized = normalize_pd_lc_seed_for_mesh_first_explicit(
+            &[10.0, 11.0, 20.0, 21.0, 30.0, 31.0, 40.0, 41.0],
+            2,
+            1,
+            2,
+        )
+        .expect("normalize two-dimensional PD state");
+        assert_eq!(
+            normalized,
+            vec![10.0, 11.0, 20.0, 21.0, 10.0, 11.0, 30.0, 31.0, 40.0, 41.0,]
+        );
+    }
+
+    #[test]
+    fn accepts_mesh_first_explicit_pd_state_unchanged() {
+        let normalized =
+            normalize_pd_lc_seed_for_mesh_first_explicit(&[10.0, 20.0, 10.0, 30.0, 40.0], 2, 1, 1)
+                .expect("normalize PD state");
+        assert_eq!(normalized, vec![10.0, 20.0, 10.0, 30.0, 40.0]);
+    }
+
+    #[test]
+    fn rejects_invalid_pd_state_length() {
+        let err = normalize_pd_lc_seed_for_mesh_first_explicit(&[1.0, 2.0, 3.0], 2, 1, 1)
+            .expect_err("invalid PD state should fail");
+        assert!(err.contains("Invalid lc_state.len()"));
+    }
+
+    #[test]
+    fn stepped_pd_output_keeps_explicit_coordinates_period_and_second_parameter_distinct() {
+        // dim=2, ntst=2, ncol=1 gives ten explicit LC coordinates. The
+        // continuation point then appends period and p2.
+        let state = vec![
+            10.0, 11.0, 20.0, 21.0, 10.0, 11.0, 30.0, 31.0, 40.0, 41.0, 6.25, 0.75,
+        ];
+        let (physical, p2) =
+            split_pd_curve_output_state(&state, 10).expect("valid stepped PD output layout");
+        assert_eq!(physical, state[..11]);
+        assert_eq!(physical.last().copied(), Some(6.25));
+        assert_eq!(p2, 0.75);
     }
 }
 
@@ -249,7 +365,7 @@ impl WasmFoldCurveRunner {
 mod tests {
     use super::{
         WasmFoldCurveRunner, WasmHopfCurveRunner, WasmIsoperiodicCurveRunner, WasmLPCCurveRunner,
-        WasmNSCurveRunner, WasmPDCurveRunner,
+        WasmNSCurveRunner,
     };
     use fork_core::continuation::{
         Codim1CurveBranch, Codim1CurveType, Codim2BifurcationType, ContinuationSettings,
@@ -300,18 +416,22 @@ mod tests {
     #[wasm_bindgen_test]
     fn isoperiodic_curve_runner_emits_expected_initial_point() {
         let period = 2.0;
+        // Keep the one-stage-per-interval Floquet blocks nonsingular.  This test exercises
+        // the wrapper's initial-point layout; singular-block propagation is
+        // covered explicitly by the core isoperiodic diagnostics tests.
+        let a = 0.25;
         let mut runner = WasmIsoperiodicCurveRunner::new(
             vec!["a * x + b".to_string()],
-            vec![1.0, 2.0],
+            vec![a, 2.0],
             vec!["a".to_string(), "b".to_string()],
             vec!["x".to_string()],
-            vec![0.5, 0.5],
+            vec![0.5, 0.5, 0.5, 0.5],
             period,
             "a",
-            1.0,
+            a,
             "b",
             2.0,
-            1,
+            2,
             1,
             settings_value(0),
             true,
@@ -325,9 +445,13 @@ mod tests {
         assert_eq!(branch.curve_type, Codim1CurveType::Isoperiodic);
         assert_eq!(branch.points.len(), 1);
         let point = &branch.points[0];
-        assert_eq!(point.param1_value, 1.0);
+        assert_eq!(point.param1_value, a);
         assert_eq!(point.param2_value, 2.0);
-        assert_eq!(point.state, vec![0.5, 0.5, period]);
+        // Isoperiodic points use stage-first coordinates with an explicit
+        // periodic endpoint: [stage0, stage1, mesh0, mesh1,
+        // mesh2 (= mesh0), period].  Two intervals also keep current and next
+        // mesh blocks distinct during Floquet condensation.
+        assert_eq!(point.state, vec![0.5, 0.5, 0.5, 0.5, 0.5, period]);
         assert_eq!(point.codim2_type, Codim2BifurcationType::None);
         assert!(point.auxiliary.is_none());
     }
@@ -463,39 +587,6 @@ mod tests {
         assert_eq!(point.param1_value, -1.0);
         assert_eq!(point.param2_value, 2.0);
         assert_eq!(point.auxiliary, Some(hopf_omega * hopf_omega));
-    }
-
-    #[wasm_bindgen_test]
-    fn pd_curve_runner_pads_implicit_state_and_includes_period() {
-        let period = 5.0;
-        let mut runner = WasmPDCurveRunner::new(
-            vec!["a * x + b".to_string()],
-            vec![1.0, 2.0],
-            vec!["a".to_string(), "b".to_string()],
-            vec!["x".to_string()],
-            vec![0.5, 0.75],
-            period,
-            "a",
-            1.0,
-            "b",
-            2.0,
-            1,
-            1,
-            settings_value(0),
-            true,
-        )
-        .expect("runner");
-
-        runner.run_steps(1).expect("run steps");
-        let branch_val = runner.get_result().expect("result");
-        let branch: Codim1CurveBranch = from_value(branch_val).expect("branch");
-
-        assert_eq!(branch.curve_type, Codim1CurveType::PeriodDoubling);
-        assert_eq!(branch.points.len(), 1);
-        let point = &branch.points[0];
-        assert_eq!(point.param1_value, 1.0);
-        assert_eq!(point.param2_value, 2.0);
-        assert_eq!(point.state, vec![0.5, 0.5, 0.75, period]);
     }
 }
 
@@ -1027,6 +1118,7 @@ pub struct WasmPDCurveRunner {
     param1_index: usize,
     param2_index: usize,
     full_lc_state: Vec<f64>,
+    period: f64,
     param2_value: f64,
 }
 
@@ -1068,30 +1160,9 @@ impl WasmPDCurveRunner {
         system.params[param2_index] = param2_value;
 
         let dim = system.equations.len();
-        let expected_ncoords = ntst * ncol * dim + (ntst + 1) * dim;
-        let implicit_ncoords = ntst * ncol * dim + ntst * dim;
-
-        let full_lc_state = if lc_state.len() == implicit_ncoords {
-            let u0: Vec<f64> = lc_state[0..dim].to_vec();
-            let mesh_end = ntst * dim;
-            let mut padded = Vec::with_capacity(lc_state.len() + dim);
-            padded.extend_from_slice(&lc_state[0..mesh_end]);
-            padded.extend_from_slice(&u0);
-            padded.extend_from_slice(&lc_state[mesh_end..]);
-            padded
-        } else if lc_state.len() == expected_ncoords {
-            lc_state.clone()
-        } else {
-            return Err(JsValue::from_str(&format!(
-                "Invalid lc_state.len()={}, expected {} or {} (ntst={}, ncol={}, dim={})",
-                lc_state.len(),
-                expected_ncoords,
-                implicit_ncoords,
-                ntst,
-                ncol,
-                dim
-            )));
-        };
+        let full_lc_state =
+            normalize_pd_lc_seed_for_mesh_first_explicit(&lc_state, ntst, ncol, dim)
+                .map_err(|message| JsValue::from_str(&message))?;
 
         let mut augmented_state = Vec::with_capacity(full_lc_state.len() + 2);
         augmented_state.extend_from_slice(&full_lc_state);
@@ -1132,6 +1203,7 @@ impl WasmPDCurveRunner {
             param1_index,
             param2_index,
             full_lc_state,
+            period,
             param2_value,
         })
     }
@@ -1151,21 +1223,15 @@ impl WasmPDCurveRunner {
     pub fn get_result(&mut self) -> Result<JsValue, JsValue> {
         let branch = self.runner.take_result()?;
         let n_lc = self.full_lc_state.len();
+        let mut fallback_physical_state = self.full_lc_state.clone();
+        fallback_physical_state.push(self.period);
 
         let codim1_points: Vec<Codim1CurvePoint> = branch
             .points
             .iter()
             .map(|pt| {
-                let p2 = if pt.state.len() >= n_lc + 2 {
-                    pt.state[n_lc + 1]
-                } else {
-                    self.param2_value
-                };
-                let physical_state: Vec<f64> = if pt.state.len() >= n_lc + 1 {
-                    pt.state[..(n_lc + 1)].to_vec()
-                } else {
-                    self.full_lc_state.clone()
-                };
+                let (physical_state, p2) = split_pd_curve_output_state(&pt.state, n_lc)
+                    .unwrap_or_else(|| (fallback_physical_state.clone(), self.param2_value));
 
                 Codim1CurvePoint {
                     state: physical_state,
@@ -1242,28 +1308,8 @@ impl WasmNSCurveRunner {
         system.params[param2_index] = param2_value;
 
         let dim = system.equations.len();
-        let expected_ncoords = ntst * ncol * dim + (ntst + 1) * dim;
-        let implicit_ncoords = ntst * ncol * dim + ntst * dim;
-
-        let full_lc_state = if lc_state.len() == implicit_ncoords {
-            let mut padded = lc_state.clone();
-            let stages_len = ntst * ncol * dim;
-            let u0: Vec<f64> = lc_state[stages_len..stages_len + dim].to_vec();
-            padded.extend(u0);
-            padded
-        } else if lc_state.len() == expected_ncoords {
-            lc_state.clone()
-        } else {
-            return Err(JsValue::from_str(&format!(
-                "Invalid lc_state.len()={}, expected {} or {} (ntst={}, ncol={}, dim={})",
-                lc_state.len(),
-                expected_ncoords,
-                implicit_ncoords,
-                ntst,
-                ncol,
-                dim
-            )));
-        };
+        let full_lc_state = normalize_lc_seed_for_stage_first_explicit(&lc_state, ntst, ncol, dim)
+            .map_err(|message| JsValue::from_str(&message))?;
 
         let mut augmented_state = Vec::with_capacity(full_lc_state.len() + 3);
         augmented_state.extend_from_slice(&full_lc_state);

@@ -94,15 +94,23 @@ export function createPeriodDoublingSystem(): { system: System } {
   const ntst = 4
   const ncol = 2
   const period = 6
-  const profilePointCount = ntst * ncol + 1
   const buildLimitCycleState = (radius: number) => {
-    const profile: number[] = []
-    for (let i = 0; i < profilePointCount; i += 1) {
-      const theta = (i / (profilePointCount - 1)) * Math.PI * 2
-      profile.push(radius * Math.cos(theta), radius * Math.sin(theta))
+    const state: number[] = []
+    // Standard continuation storage is mesh-first with an implicit periodic
+    // closure, followed by every collocation stage and the period.
+    for (let interval = 0; interval < ntst; interval += 1) {
+      const theta = (interval / ntst) * Math.PI * 2
+      state.push(radius * Math.cos(theta), radius * Math.sin(theta))
     }
-    profile.push(period)
-    return profile
+    for (let interval = 0; interval < ntst; interval += 1) {
+      for (let stage = 0; stage < ncol; stage += 1) {
+        const fraction = (stage + 1) / (ncol + 1)
+        const theta = ((interval + fraction) / ntst) * Math.PI * 2
+        state.push(radius * Math.cos(theta), radius * Math.sin(theta))
+      }
+    }
+    state.push(period)
+    return state
   }
   const baseState = buildLimitCycleState(1)
   const pdState = buildLimitCycleState(1.25)

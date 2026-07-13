@@ -161,29 +161,34 @@ Inspector → Limit Cycle from Orbit → Continue Limit Cycle
 
 The orbit-to-LC algorithm follows the steps below:
 
-#### 1. Reference Point Selection
+#### 1. Trajectory Validation and Tail Search
 
-Use the point at **1/3 of the orbit** as the reference. This skips any initial transient while the trajectory settles onto the attractor:
-
-```
-ref_idx = n / 3
-x_ref = orbit[ref_idx]
-t_ref = times[ref_idx]
-```
+For flows, the saved time coordinate must be finite and strictly increasing. Fork searches reference
+points backward from the settled tail rather than choosing a fixed fraction of the trajectory. This
+favors the latest, best-converged complete cycle while still leaving enough samples for a return.
+Map Orbits are not accepted here because a flow period and flow collocation BVP cannot be inferred
+from discrete iterations.
 
 #### 2. Cycle Detection
 
-Search forward from the reference point for the **first local minimum** of the distance function that falls within tolerance:
+For each tail reference, Fork first waits until the trajectory has left the tolerance ball. It then
+accepts the first local distance minimum that re-enters the ball with the same direction of travel:
 
 ```
-for i in skip_start..n:
-    dist = |x[i] - x_ref|
-    if dist is local minimum AND dist < tolerance:
-        cycle_end = i
-        break
+for ref_idx in reversed(tail_references):
+    wait until |x[i] - x[ref_idx]| > tolerance
+    for later i:
+        if distance is a local minimum
+           and distance <= tolerance
+           and tangent directions agree:
+            use [ref_idx, i] as one cycle
+            break
 ```
 
-The period is `T = times[cycle_end] - t_ref`.
+Waiting for departure avoids the zero-lag return. The orientation check distinguishes crossings that
+share the same observed state, including sparsely sampled scalar sequences, and prevents a two- or
+three-period alias from being chosen when the minimal return is present. The period is
+`T = times[cycle_end] - times[ref_idx]`.
 
 #### 3. Remeshing to Collocation Grid
 
@@ -197,9 +202,19 @@ for k in 0..ntst:
 
 Stage (collocation) points are then computed by interpolating between mesh points at the Gauss-Legendre nodes.
 
-#### 4. Phase Condition
+#### 4. Fixed-Parameter BVP Correction
 
-The phase anchor is set to the first mesh point, and the phase direction is the normalized velocity at that point:
+The remeshed Orbit is only a sampled guess. Before parameter continuation, Fork solves the complete
+collocation BVP for all mesh states, stage states, and the period while holding the selected parameter
+fixed. A scale-aware profile-variation test rejects collapse to an equilibrium, and an independent
+off-node defect estimate rejects an under-resolved polynomial.
+
+The serialized phase anchor/direction is retained for compatibility, but the actual BVP gauge is the
+mesh-independent integral phase condition against the complete stage profile. Hopf and PD branch
+predictors deliberately skip this fixed-parameter correction: they must be allowed to move away from
+the bifurcation parameter in the first pseudo-arclength correction.
+
+For backward-compatible metadata, the seed still records:
 
 ```
 phase_anchor = mesh[0]
@@ -219,11 +234,13 @@ phase_direction = normalize(mesh[1] - mesh[0])
 
 #### Period Is Wrong (Multiple Periods Detected)
 
-**Cause**: The algorithm found a return at 2T or 3T instead of T.
+**Cause**: The saved trajectory does not contain a resolved, same-orientation minimal return near its
+settled tail.
 
 **Solutions**:
-1. This was fixed by using a small fixed skip (`skip_start = ref_idx + 10`) instead of a percentage-based skip
-2. If still occurring, ensure the orbit has sufficient resolution near the first return
+1. Integrate for at least one more settled period
+2. Reduce the orbit integration step so the first return has a local sample minimum
+3. Adjust the return tolerance without making it large enough to merge distinct crossings
 
 #### Newton Corrector Fails After Initialization
 
@@ -248,7 +265,7 @@ phase_direction = normalize(mesh[1] - mesh[0])
 | **Period accuracy** | Exact from eigenvalue | Approximate from sampling |
 | **Requirements** | Hopf bifurcation point | Orbit converging to LC |
 | **Unstable LCs** | Yes (can continue backward) | No (orbit won't converge) |
-| **Transient handling** | Not needed | Skips first 1/3 of orbit |
+| **Transient handling** | Not needed | Searches backward through the settled tail |
 
 ## Numerical Background
 
@@ -409,7 +426,8 @@ Interval 1       Interval 2           Interval ntst
 ● = collocation point
 ```
 
-Total profile points: `ntst × ncol + 1` (including the starting point)
+Fork stores `ntst` periodic mesh states and `ntst × ncol` Gauss stage states. The endpoint at
+normalized time 1 is the first mesh state again; it is not stored as an independent unknown.
 
 ### Normalized Time
 
@@ -421,21 +439,25 @@ The actual time is t = τ · T.
 
 ### State Vector
 
-The unknowns for continuation are:
+At a fixed parameter, the collocation unknowns are:
 
 ```
-u = [x(τ₀), x(τ₁), ..., x(τₙ), T]
+u = [x_0, ..., x_(ntst-1), z_(0,1), ..., z_(ntst-1,ncol), T]
 ```
 
 where:
-- x(τᵢ) ∈ ℝᵈⁱᵐ is the state at mesh/collocation point τᵢ
+- `x_i` is the state at the start of mesh interval `i`
+- `z_(i,j)` is the state at Gauss node `j` in interval `i`
 - T ∈ ℝ is the period
 
-Total unknowns: (ntst × ncol + 1) × dim + 1
+Total fixed-parameter unknowns: `ntst × (ncol + 1) × dim + 1`. Parameter continuation prepends
+the free parameter to this vector.
 
 ### Lagrange Interpolation
 
-Within each interval, the solution is approximated by a polynomial passing through the collocation points. For ncol = 4, this is a degree-4 polynomial.
+Within each interval, the solution is represented by its left mesh state and Gauss-stage values.
+The equivalent degree-`ncol` collocation polynomial is integrated with the Gauss Runge-Kutta
+coefficients `A` and `b`.
 
 The **Lagrange basis polynomials** L_j(s) satisfy L_j(s_k) = δ_jk at the collocation nodes s_k.
 
@@ -467,7 +489,7 @@ At each collocation point τ in interval i:
 
 The left side is the polynomial derivative; the right side is T times the ODE right-hand side.
 
-#### 2. Continuity Equations (ntst × dim equations)
+#### 2. Continuity and Periodicity Equations (ntst × dim equations)
 
 At the boundary between intervals i and i+1:
 
@@ -475,17 +497,10 @@ At the boundary between intervals i and i+1:
 x_end(interval i) - x_start(interval i+1) = 0
 ```
 
-where x_end is computed by Lagrange interpolation at s = 1.
+where `x_end` is computed with the Gauss weights. For the last interval, `x_start(interval i+1)`
+is `x_0`, so periodicity is the final continuity equation rather than a separate boundary row.
 
-#### 3. Periodicity (dim equations)
-
-```
-x(τ = 1) - x(τ = 0) = 0
-```
-
-The orbit must close on itself.
-
-#### 4. Phase Condition (1 equation)
+#### 3. Phase Condition (1 equation)
 
 Periodic orbits have an arbitrary phase—we can shift t → t + Δt and get the same orbit. To remove this degeneracy, we add an **integral phase condition**:
 
@@ -497,15 +512,23 @@ This says the new orbit is orthogonal (in L²) to translations of the old orbit 
 
 ### The Augmented System
 
-For pseudo-arclength continuation, we add one more equation:
+For pseudo-arclength continuation, the parameter is added as one extra unknown and the bordered
+corrector adds one more equation:
 
 ```
-<(u - u_pred), tangent> = 0
+<(u - u_pred), tangent>_W = 0
 ```
 
-This constrains the solution to lie on a hyperplane perpendicular to the tangent direction, at a specified arclength from the previous point.
+`W` uses quadrature-scaled profile weights and unit weights for the parameter and period. This keeps
+tangent normalization, predictor size, and corrector damping approximately invariant when NTST or
+NCOL changes.
 
-Total system: (ntst × ncol × dim) + (ntst × dim) + dim + 1 + 1 equations and unknowns
+LPC, PD, NS, and isoperiodic cycle curves use the same profile metric. Their explicitly stored closing
+mesh point shares the periodic endpoint weight with the first mesh point, so duplicating that endpoint
+does not change the pseudo-arclength norm.
+
+The collocation BVP is square at fixed parameter. The free parameter plus the pseudo-arclength row
+keeps the continuation corrector square as well.
 
 ---
 
@@ -520,7 +543,8 @@ J · Δu = -F(u)
 u ← u + Δu
 ```
 
-until ||F(u)|| < tolerance.
+until the mesh-normalized residual is below the requested tolerance. A small Newton update with a
+larger residual is treated as stagnation, not convergence.
 
 ### Jacobian Structure
 
@@ -532,8 +556,6 @@ The Jacobian J = ∂F/∂u has a specific sparsity pattern:
 ├─────────────────────────────────┤
 │ Continuity (links intervals)    │
 ├─────────────────────────────────┤
-│ Periodicity (first & last)      │
-├─────────────────────────────────┤
 │ Phase condition (all states)    │
 ├─────────────────────────────────┤
 │ Arclength (tangent direction)   │
@@ -542,22 +564,25 @@ The Jacobian J = ∂F/∂u has a specific sparsity pattern:
 
 ### Automatic Differentiation
 
-Fork uses **forward-mode automatic differentiation** to compute exact Jacobian entries. For each residual equation, we:
-
-1. Evaluate the equation with dual numbers carrying derivatives
-2. Extract the derivative with respect to each unknown
+Fork uses automatic differentiation for the vector-field state Jacobian and continuation-parameter
+derivative at every stage. The collocation, continuity, phase, period, and parameter blocks are then
+assembled analytically from those derivatives and the Gauss coefficients.
 
 ### Inter-Interval Coupling
 
-A critical subtlety: the mesh point at the start of interval i (for i > 0) is computed by **interpolating the end of interval i-1**. This interpolation depends on all states in interval i-1, which in turn depends on interval i-2, etc.
+Mesh states are explicit unknowns. Each interval therefore couples only its left mesh state, its
+own stages, and the next mesh state; the last interval wraps directly to mesh state zero. There is
+no recursive interpolation of prior intervals in the nonlinear BVP.
 
-The derivative of mesh[i] with respect to profile states forms a **recursive chain**:
+### Independent Defect Check
 
-```
-∂mesh[i]/∂x(τⱼ) = Σₖ L_k(1) · ∂mesh[i-1]/∂x(τⱼ) + L_j(1)·δ(j in interval i-1)
-```
-
-Fork pre-computes these coefficients to handle the full inter-interval coupling correctly.
+Collocation equations are exactly enforced at the Gauss nodes, so their algebraic residual alone can
+hide an under-resolved orbit. Fork evaluates the reconstructed polynomial derivative at independent
+off-node check points and compares it with the vector field. An excessive scaled defect rejects the
+trial and retries with a smaller pseudo-arclength step while preserving the valid branch prefix.
+The same acceptance check applies to LPC, PD, NS, and isoperiodic cycle-curve trials. These paths
+require at least two mesh intervals because a one-interval periodic layout aliases the current and
+next mesh blocks needed by Floquet condensation.
 
 ---
 
@@ -592,19 +617,18 @@ This metadata ensures the correct continuation function is called when extending
 
 ### What Are Floquet Multipliers?
 
-Floquet multipliers are eigenvalues of the **monodromy matrix** M, which describes how perturbations evolve after one period. For an n-dimensional system:
-- One multiplier is always exactly 1 (trivial multiplier, corresponding to perturbations along the orbit)
-- Other multipliers determine stability:
-  - All |μ| < 1: stable limit cycle
-  - Any |μ| > 1: unstable limit cycle
+Floquet multipliers are eigenvalues of the **monodromy operator**, which describes how perturbations
+evolve after one period. For an autonomous n-dimensional flow:
+- One multiplier is theoretically +1 (the trivial flow-direction multiplier); numerically it should
+  be close to +1 at a resolved cycle
+- The remaining multipliers determine stability:
+  - All nontrivial |μ| < 1: stable limit cycle
+  - Any nontrivial |μ| > 1: unstable limit cycle
 
-### Algorithm: Sequential Block Elimination
+### Algorithm: Collocation Condensation and a Block-Cyclic Eigenproblem
 
-Fork extracts Floquet multipliers directly from the collocation Jacobian using **sequential block elimination**, chaining local transfer matrices through each mesh interval:
-
-```
-M = T_{ntst-1} × T_{ntst-2} × ... × T_1 × T_0
-```
+Fork extracts each local variational transfer from the same orthogonal-collocation Jacobian used by
+continuation. It does **not** multiply those transfers into a monodromy matrix.
 
 For each interval i:
 
@@ -624,40 +648,22 @@ For each interval i:
    T_i = -C_next^{-1} × effective_C_x
    ```
 
-4. **Chain accumulation**:
-   ```
-   M = T_i × M
-   ```
+The transfers are placed in one block-cyclic matrix `C` of size `(ntst × dim)`:
 
-The final matrix M is the monodromy, and its eigenvalues are the Floquet multipliers.
-
-### Comparison with Global S-matrix Approach
-
-Some implementations use a **global S-matrix reduction** algorithm:
-
-| Aspect | Fork (Sequential) | Global S-matrix |
-|--------|-------------------|-----------------|
-| **Build phase** | Chain T_i matrices one interval at a time | Build full (ntst×dim) × ((ntst+1)×dim) S-matrix |
-| **Elimination** | Sequential dim×dim solves | Banded Gaussian elimination with pivoting |
-| **Memory** | O(dim²) working memory | O(ntst × dim²) for S-matrix |
-| **Computational cost** | O(ntst × (ncol×dim)³ + ntst × dim³) | O(ntst × (ncol×dim)³ + ntst × dim³) |
-| **BVP structure** | Implicit periodicity (last equation wraps to x₀) | Explicit boundary row (x₀ - x_{ntst} = 0) |
-
-Both approaches are **mathematically equivalent** and extract the same monodromy eigenvalues. The primary differences are:
-
-1. **Memory efficiency**: Sequential approach avoids allocating the full S-matrix
-2. **BVP compatibility**: Sequential approach naturally handles implicit periodicity; explicit-boundary methods introduce an extra endpoint variable
-
-### Why Not Use the Full S-matrix Reduction?
-
-Fork's BVP uses **implicit periodicity**: the last continuity equation wraps x_{ntst} back to x₀, meaning both endpoints share the same Jacobian column. Full S-matrix formulations typically assume **explicit periodicity**: x_{ntst} is a separate variable with an explicit boundary equation x₀ - x_{ntst} = 0.
-
-The sequential approach correctly handles implicit periodicity by using modular indexing:
-```rust
-let next_mesh_col = mesh_col_start + ((interval + 1) % ntst) * dim;
+```
+C_(i+1,i) = T_i                 for i < ntst - 1
+C_(0,ntst-1) = T_(ntst-1)
 ```
 
-This makes the last transfer matrix T_{ntst-1} directly map from x_{ntst-1} back to x₀.
+If `gamma` is an eigenvalue of `C`, the physical Floquet multiplier is
+`mu = gamma^ntst`. Fork chooses one deterministic root from each root family and reconstructs the
+physical mesh mode with `y_i = gamma^i z_i`. Stage modes come from the stored stage sensitivities,
+and the closing vector is exactly `mu y_0`. Zero multipliers use a direct boundary-nullspace solve,
+because the balanced `gamma^i` reconstruction is singular at zero.
+
+This formulation avoids the overflow, underflow, and loss of strongly contracting directions caused
+by explicitly forming `T_(ntst-1) ... T_0`. Multiplier magnitudes are reconstructed in log-polar form,
+with representable overflow/underflow handled deterministically.
 
 ### Comparison with BifurcationKit.jl
 
@@ -665,27 +671,76 @@ BifurcationKit.jl (Julia) offers **multiple Floquet computation methods**:
 
 | Method | Description | Comparison to Fork |
 |--------|-------------|-------------------|
-| **FloquetQaD** | "Quick and Dirty" — sequential matrix products along orbit | **Same approach as Fork** |
-| **Periodic Schur** | Uses periodic Schur decomposition (via PeriodicSchurBifurcationKit.jl) | More numerically stable, but more complex |
+| **FloquetQaD** | "Quick and Dirty" — sequential matrix products along orbit | Fork avoids this product |
+| **Periodic Schur** | Uses periodic Schur decomposition (via PeriodicSchurBifurcationKit.jl) | Product-free and better-scaled for large problems |
 
-BifurcationKit.jl's documentation notes that `FloquetQaD` "may suffer from precision issues, especially when dealing with many time sections or large/small Floquet exponents, due to accumulated errors."
+BifurcationKit.jl's documentation notes that `FloquetQaD` can lose precision with many sections or
+large/small Floquet exponents. Fork's block-cyclic problem also avoids forming the product, but it is
+not a periodic-Schur implementation: its dense eigensolve scales with `ntst × dim` and can be more
+expensive for large meshes.
 
-Fork's approach is equivalent to `FloquetQaD`. For most practical systems (moderate ntst, dim ≤ 10), precision is sufficient. The Periodic Schur method would be preferable for high-precision needs or very large/stiff systems.
+**Future enhancement**: a periodic Schur backend would retain product-free scaling while reducing the
+dense block-cyclic cost. Reference implementations exist in SLICOT and
+PeriodicSchurBifurcationKit.jl.
 
-**Future enhancement**: To add Periodic Schur support, Fork would need to implement periodic QR iteration (computing eigenvalues of a matrix product without forming it). This would avoid error accumulation in the sequential products and provide better precision for extreme Floquet exponents (very stable or very unstable orbits). Reference implementations exist in SLICOT (Fortran) and PeriodicSchurBifurcationKit.jl (Julia).
+### Raw Floquet Eigenvectors
+
+The core returns unprojected variational eigenvectors at every mesh and stage point. These vectors
+satisfy the local cocycle and final closure relation and are the source of truth for PD branch
+switching and invariant-manifold seeds. Rendering may normalize a mode for display, but it must not
+project away the flow direction. Reduced frozen-variable calculations are lifted back to the full
+coordinate space with zeros in frozen components.
+
+Eigenvectors are accepted only when the shifted block-cyclic operator has the requested geometric
+multiplicity. Nearby but distinct roots therefore keep eigenvectors computed at their own roots. If
+an algebraically repeated root is defective, Fork reports the multiplicity failure instead of
+duplicating or orthogonalizing one vector into nonexistent independent modes.
+
+Production invariant-manifold paths with stored parameter provenance rebuild their Floquet seed from
+the collocation transfers and propagate any extraction failure. The stored multiplier must match the
+recomputed eligible root before its eigenvector is used; the recomputed root determines whether the
+bundle is periodic or antiperiodic. Stage directions are transported at the actual Gauss phases, and
+negative multipliers interpolate toward `-v(0)` at cycle closure so the nonorientable double cover
+does not pass through a spurious zero vector. Direct variational integration is an explicit
+compatibility fallback only for legacy cycle data that has no parameter provenance; it independently
+verifies the requested multiplier and is not used to hide a failed collocation calculation.
+
+When the displayed cycle comes from an LPC, PD, NS, or isoperiodic curve, Fork first converts that
+curve's explicit storage order to the canonical mesh-first cycle profile. Floquet and manifold work
+then uses the selected point's subsystem snapshot and both parameter values; it never combines that
+state with multipliers or parameters borrowed from another branch point.
 
 ### Sanity Check
 
 Fork validates the computed multipliers before using them for bifurcation detection:
 
 ```rust
-if trivial_distance > 0.5 {
+if trivial_distance > 1e-2 {
     // Multipliers are numerically corrupt
     return (NaN, NaN, NaN, values);
 }
 ```
 
-If no multiplier is within 0.5 of 1.0, the monodromy computation has broken down (often due to numerical issues on very stiff or long-period orbits). In this case, NaN test values are returned to prevent false bifurcation detections.
+Fork removes exactly one multiplier within `1e-2` of +1 before evaluating the LPC, PD, and
+Neimark-Sacker tests. If no such multiplier exists, the orbit or variational discretization is not
+credible enough for bifurcation flags, so the test values are returned as NaN. A second multiplier
+near +1 remains in the product and can therefore detect a limit point of cycles.
+
+### Neimark-Sacker Curve Conditions
+
+Neimark-Sacker curve continuation condenses the same collocation Jacobian into interval transfers
+and applies them over two copies of the base period. With `k = cos(theta)`, the real characteristic
+boundary condition is
+
+```
+v(0) - 2 k v(1) + v(2) = 0.
+```
+
+Its doubled-period operator has a two-dimensional real nullspace when the one-period Floquet map has
+a conjugate unit-circle pair satisfying `mu^2 - 2 k mu + 1 = 0`. A two-column bordered solve supplies
+the two scalar defining conditions. Fork takes one diagonal and one off-diagonal entry of its real
+2-by-2 reduced block; using both diagonal entries would repeat the same real condition and leave the
+system rank-deficient.
 
 ---
 
@@ -746,9 +801,9 @@ If the initial Newton correction fails, try a smaller amplitude.
 | Symptom | Likely Cause | Fix |
 |---------|--------------|-----|
 | Trivial multiplier ≠ 1.0 | Mesh too coarse | Increase ntst |
-| Multipliers are NaN | Monodromy computation failed | Check orbit validity, increase ntst |
+| Multipliers are NaN | No credible trivial mode or non-finite spectrum | Check orbit validity, increase ntst/ncol |
 | False bifurcation detection | Step size too large | Reduce step size, re-extend |
-| Very large/small multipliers | Highly unstable orbit | Consider Periodic Schur (future) |
+| Very large/small multipliers | Highly unstable/stable orbit | Refine the mesh; periodic Schur remains a future large-problem backend |
 
 ### Example: High-Precision Configuration
 
@@ -800,19 +855,24 @@ The PD branching algorithm follows the steps below:
 
 #### 1. PD Eigenvector Computation
 
-At a PD point, the monodromy matrix $M$ has an eigenvalue of -1 (the period-doubling multiplier). We first compute the corresponding eigenvector $v$:
-$$(M + I)v = 0$$
-where $I$ is the identity matrix. $v$ represents the direction in state space into which the orbit begins to "wobble" before splitting into a doubled period.
+At a PD point, the variational return has multiplier -1. Fork selects the corresponding raw mode
+from the block-cyclic collocation eigenproblem. The reconstructed mesh and stage eigenfunction is
+antiperiodic over one base period, so its sign reverses on the second copy. This phase-dependent mode,
+not one constant eigenvector copied around the orbit, represents the wobble into the doubled branch.
+
+Before constructing the predictor, Fork verifies that the closest collocation multiplier is within
+`1e-2` of -1 and that the antiperiodic state-only collocation operator has relative smallest singular
+value at most `1e-3`. A selected point that fails either test is rejected as an invalid PD source.
 
 #### 2. Doubled-Period Guess Construction
 
 We construct an initial guess for the doubled-period limit cycle by concatenating the original cycle with itself and adding a small perturbation in the direction of the PD eigenvector:
 
-1. **Base Mesh**: Concatenate two copies of the original mesh points. Adjust normalized time to $[0, 1]$.
-2. **Perturbation**: Add a small perturbation based on the PD eigenvector:
+1. **Base Profile**: Concatenate two copies of the stored mesh and collocation-stage profile.
+2. **Perturbation**: Add the antiperiodic mesh/stage mode with opposite signs on the two halves:
    $$x_{new}(\tau) \approx x_{orig}(\tau \pmod{1/2}) + h \cdot v(\tau)$$
    where $h$ is the perturbation amplitude (default 0.01).
-3. **Stage States**: Rebuild all collocation stage states using the perturbed mesh.
+3. **Period**: Double the stored period and retain all perturbed stage unknowns for the PALC solve.
 
 #### 3. Predictor-Corrector Continuation
 

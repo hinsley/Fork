@@ -7,10 +7,11 @@ use fork_core::continuation::homoclinic::HomoclinicProblem;
 use fork_core::continuation::homoclinic_init::decode_homoclinic_state_with_basis;
 use fork_core::continuation::periodic::PeriodicOrbitCollocationProblem;
 use fork_core::continuation::{
-    homoclinic_setup_from_homoclinic_point, pack_homoclinic_state, BranchType, ContinuationBranch,
-    ContinuationEndpointSeed, ContinuationPoint, ContinuationProblem, ContinuationResumeState,
-    ContinuationRunner, ContinuationSettings, HomoclinicBasis, HomoclinicBasisSnapshot,
-    HomoclinicExtraFlags, HomoclinicResumeContext, HomoclinicSetup,
+    homoclinic_setup_from_homoclinic_point, orient_problem_tangent, pack_homoclinic_state,
+    palc_norm, BranchType, ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint,
+    ContinuationProblem, ContinuationResumeState, ContinuationRunner, ContinuationSettings,
+    HomoclinicBasis, HomoclinicBasisSnapshot, HomoclinicExtraFlags, HomoclinicResumeContext,
+    HomoclinicSetup,
 };
 use fork_core::equation_engine::EquationSystem;
 use fork_core::equilibrium::SystemKind;
@@ -18,6 +19,14 @@ use fork_core::traits::DynamicalSystem;
 use nalgebra::DVector;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
+
+fn validate_limit_cycle_extension_system_type(system_type: &str) -> Result<(), &'static str> {
+    if system_type == "flow" {
+        Ok(())
+    } else {
+        Err("Limit-cycle collocation is available for flow systems only.")
+    }
+}
 
 struct ExtensionMergeContext {
     branch: ContinuationBranch,
@@ -56,17 +65,21 @@ fn orient_extension_tangent(
         return;
     }
 
-    let tangent_norm = tangent.norm();
-    let param_component_threshold = 0.01 * tangent_norm;
-
-    if tangent[0].abs() < param_component_threshold {
-        tangent[0] = param_component_threshold * forward_sign;
-        let norm = tangent.norm();
-        if norm > 1e-12 {
-            *tangent = &*tangent / norm;
-        }
-    } else if tangent[0] * forward_sign < 0.0 {
+    if tangent[0] * forward_sign < 0.0 {
         *tangent = -tangent.clone();
+    }
+}
+
+fn normalized_problem_secant<P: ContinuationProblem>(
+    problem: &P,
+    aug_state: &DVector<f64>,
+    secant: DVector<f64>,
+) -> anyhow::Result<(Option<DVector<f64>>, Option<f64>)> {
+    let norm = palc_norm(problem, aug_state, &secant)?;
+    if norm > 1e-12 {
+        Ok((Some(secant / norm), Some(norm)))
+    } else {
+        Ok((None, None))
     }
 }
 
@@ -165,12 +178,12 @@ fn homoclinic_tangent_is_nonlocal_in_parameter_plane(
 fn validate_resume_seed(
     seed: &ContinuationEndpointSeed,
     endpoint_index: i32,
-    expected_aug_len: usize,
+    endpoint_aug: &DVector<f64>,
 ) -> bool {
     if seed.endpoint_index != endpoint_index {
         return false;
     }
-    if seed.aug_state.len() != expected_aug_len || seed.tangent.len() != expected_aug_len {
+    if seed.aug_state.len() != endpoint_aug.len() || seed.tangent.len() != endpoint_aug.len() {
         return false;
     }
     if seed.aug_state.iter().any(|v| !v.is_finite()) {
@@ -182,6 +195,17 @@ fn validate_resume_seed(
     if !seed.step_size.is_finite() || seed.step_size <= 0.0 {
         return false;
     }
+    if seed
+        .aug_state
+        .iter()
+        .zip(endpoint_aug.iter())
+        .any(|(saved, endpoint)| {
+            let scale = 1.0 + saved.abs().max(endpoint.abs());
+            (saved - endpoint).abs() > 1e-12 * scale
+        })
+    {
+        return false;
+    }
     DVector::from_vec(seed.tangent.clone()).norm() > 1e-12
 }
 
@@ -189,7 +213,7 @@ fn select_resume_seed(
     branch: &ContinuationBranch,
     forward: bool,
     endpoint_index: i32,
-    expected_aug_len: usize,
+    endpoint_aug: &DVector<f64>,
 ) -> Option<ContinuationEndpointSeed> {
     let seed = if forward {
         branch
@@ -202,7 +226,7 @@ fn select_resume_seed(
             .as_ref()
             .and_then(|state| state.min_index_seed.clone())
     }?;
-    if validate_resume_seed(&seed, endpoint_index, expected_aug_len) {
+    if validate_resume_seed(&seed, endpoint_index, endpoint_aug) {
         Some(seed)
     } else {
         None
@@ -215,11 +239,7 @@ fn prepare_resume_seed_for_extension(
     secant_direction: Option<&DVector<f64>>,
     forward: bool,
 ) -> (Vec<f64>, Vec<f64>) {
-    let resume_aug = if seed.aug_state.len() == endpoint_aug.len() {
-        seed.aug_state
-    } else {
-        endpoint_aug.iter().copied().collect()
-    };
+    let resume_aug = endpoint_aug.iter().copied().collect();
 
     let mut resume_tangent = DVector::from_vec(seed.tangent);
     if let Some(secant) = secant_direction {
@@ -235,6 +255,13 @@ fn prepare_resume_seed_for_extension(
     }
 
     (resume_aug, resume_tangent.iter().copied().collect())
+}
+
+fn bounded_resume_step_size(
+    seed: &ContinuationEndpointSeed,
+    settings: ContinuationSettings,
+) -> f64 {
+    seed.step_size.min(settings.step_size)
 }
 
 fn merge_extension_resume_state(
@@ -639,7 +666,7 @@ impl WasmContinuationExtensionRunner {
                 for (i, &v) in endpoint.state.iter().enumerate() {
                     end_aug[i + 1] = v;
                 }
-                let resume_seed = select_resume_seed(&merge.branch, forward, last_index, dim + 1);
+                let resume_seed = select_resume_seed(&merge.branch, forward, last_index, &end_aug);
 
                 let (secant_direction, secant_norm) = if let Some(neighbor_pos) = neighbor_idx {
                     let neighbor = &merge.branch.points[neighbor_pos];
@@ -662,6 +689,7 @@ impl WasmContinuationExtensionRunner {
                 let mut settings = settings;
                 cap_extension_step_size(&mut settings, secant_norm);
                 let mut runner = if let Some(seed) = resume_seed {
+                    let resume_step_size = bounded_resume_step_size(&seed, settings);
                     let (resume_aug, resume_tangent) = prepare_resume_seed_for_extension(
                         seed,
                         &end_aug,
@@ -672,7 +700,7 @@ impl WasmContinuationExtensionRunner {
                         problem,
                         resume_aug,
                         resume_tangent,
-                        settings.step_size,
+                        resume_step_size,
                         settings,
                     )
                     .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?
@@ -704,6 +732,8 @@ impl WasmContinuationExtensionRunner {
                 ExtensionRunnerKind::Equilibrium { runner, merge }
             }
             BranchType::LimitCycle { ntst, ncol } => {
+                validate_limit_cycle_extension_system_type(system_type)
+                    .map_err(JsValue::from_str)?;
                 if merge.branch.upoldp.is_none() {
                     let dim = system.equations.len();
                     if endpoint.state.len() > dim {
@@ -760,7 +790,7 @@ impl WasmContinuationExtensionRunner {
                 for (i, &v) in endpoint.state.iter().enumerate() {
                     end_aug[i + 1] = v;
                 }
-                let resume_seed = select_resume_seed(&merge.branch, forward, last_index, dim + 1);
+                let resume_seed = select_resume_seed(&merge.branch, forward, last_index, &end_aug);
 
                 let (secant_direction, secant_norm) = if let Some(neighbor_pos) = neighbor_idx {
                     let neighbor = &merge.branch.points[neighbor_pos];
@@ -770,12 +800,12 @@ impl WasmContinuationExtensionRunner {
                         neighbor_aug[i + 1] = v;
                     }
                     let secant = &end_aug - &neighbor_aug;
-                    let norm = secant.norm();
-                    if norm > 1e-12 {
-                        (Some(secant.normalize()), Some(norm))
-                    } else {
-                        (None, None)
-                    }
+                    normalized_problem_secant(&problem, &end_aug, secant).map_err(|error| {
+                        JsValue::from_str(&format!(
+                            "Failed to measure LC extension secant: {}",
+                            error
+                        ))
+                    })?
                 } else {
                     (None, None)
                 };
@@ -784,17 +814,29 @@ impl WasmContinuationExtensionRunner {
                 cap_extension_step_size(&mut settings, secant_norm);
                 let mut problem: PeriodicOrbitCollocationProblem<'static> = problem;
                 let mut runner = if let Some(seed) = resume_seed {
+                    let resume_step_size = bounded_resume_step_size(&seed, settings);
                     let (resume_aug, resume_tangent) = prepare_resume_seed_for_extension(
                         seed,
                         &end_aug,
                         secant_direction.as_ref(),
                         forward,
                     );
+                    let mut resume_tangent = DVector::from_vec(resume_tangent);
+                    orient_problem_tangent(
+                        &problem,
+                        &end_aug,
+                        &mut resume_tangent,
+                        secant_direction.as_ref(),
+                        forward,
+                    )
+                    .map_err(|error| {
+                        JsValue::from_str(&format!("Failed to orient LC resume tangent: {}", error))
+                    })?;
                     ContinuationRunner::new_from_seed(
                         problem,
                         resume_aug,
-                        resume_tangent,
-                        settings.step_size,
+                        resume_tangent.iter().copied().collect(),
+                        resume_step_size,
                         settings,
                     )
                     .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?
@@ -806,7 +848,19 @@ impl WasmContinuationExtensionRunner {
                             .map_err(|e| JsValue::from_str(&format!("{}", e)))?
                     };
 
-                    orient_extension_tangent(&mut tangent, secant_direction.as_ref(), forward);
+                    orient_problem_tangent(
+                        &problem,
+                        &end_aug,
+                        &mut tangent,
+                        secant_direction.as_ref(),
+                        forward,
+                    )
+                    .map_err(|error| {
+                        JsValue::from_str(&format!(
+                            "Failed to orient LC extension tangent: {}",
+                            error
+                        ))
+                    })?;
                     let initial_point = ContinuationPoint {
                         state: endpoint.state.clone(),
                         param_value: endpoint.param_value,
@@ -939,7 +993,7 @@ impl WasmContinuationExtensionRunner {
                 for (i, &v) in packed_initial_state.iter().enumerate() {
                     end_aug[i + 1] = v;
                 }
-                let resume_seed = select_resume_seed(&merge.branch, forward, last_index, dim + 1);
+                let resume_seed = select_resume_seed(&merge.branch, forward, last_index, &end_aug);
                 let mut secant_direction: Option<DVector<f64>> = None;
                 let mut secant_norm: Option<f64> = None;
                 let mut secant_param_norm: Option<f64> = None;
@@ -1015,25 +1069,14 @@ impl WasmContinuationExtensionRunner {
                 let mut settings = settings;
                 cap_extension_step_size(&mut settings, secant_norm);
                 let mut problem: HomoclinicProblem<'static> = problem;
-                let phase_reference_aug = resume_seed
-                    .as_ref()
-                    .and_then(|seed| {
-                        if seed.aug_state.len() == dim + 1 {
-                            Some(DVector::from_vec(seed.aug_state.clone()))
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_else(|| end_aug.clone());
-                problem
-                    .update_after_step(&phase_reference_aug)
-                    .map_err(|e| {
-                        JsValue::from_str(&format!(
-                            "Failed to prepare homoclinic extension phase reference: {}",
-                            e
-                        ))
-                    })?;
+                problem.update_after_step(&end_aug).map_err(|e| {
+                    JsValue::from_str(&format!(
+                        "Failed to prepare homoclinic extension phase reference: {}",
+                        e
+                    ))
+                })?;
                 let mut runner = if let Some(seed) = resume_seed {
+                    let mut resume_step_size = bounded_resume_step_size(&seed, settings);
                     let (resume_aug, resume_tangent) = prepare_resume_seed_for_extension(
                         seed,
                         &end_aug,
@@ -1046,7 +1089,7 @@ impl WasmContinuationExtensionRunner {
                         secant_direction.as_ref(),
                         secant_param_norm,
                         p2_aug_index,
-                        settings.step_size,
+                        resume_step_size,
                     ) {
                         if let Some(secant) = secant_direction.as_ref() {
                             resume_tangent_vec = secant.clone();
@@ -1058,11 +1101,12 @@ impl WasmContinuationExtensionRunner {
                         secant_param_norm,
                         p2_aug_index,
                     );
+                    resume_step_size = resume_step_size.min(settings.step_size);
                     ContinuationRunner::new_from_seed(
                         problem,
                         resume_aug,
                         resume_tangent_vec.iter().copied().collect(),
-                        settings.step_size,
+                        resume_step_size,
                         settings,
                     )
                     .map_err(|e| JsValue::from_str(&format!("Continuation init failed: {}", e)))?
@@ -1221,6 +1265,19 @@ impl WasmContinuationExtensionRunner {
     }
 }
 
+#[cfg(test)]
+mod limit_cycle_system_type_tests {
+    use super::validate_limit_cycle_extension_system_type;
+
+    #[test]
+    fn limit_cycle_extension_accepts_flows_and_rejects_maps() {
+        assert!(validate_limit_cycle_extension_system_type("flow").is_ok());
+        let error = validate_limit_cycle_extension_system_type("map")
+            .expect_err("map limit-cycle extension must be rejected");
+        assert!(error.contains("flow systems only"));
+    }
+}
+
 #[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
     use super::WasmContinuationExtensionRunner;
@@ -1251,6 +1308,9 @@ mod tests {
             indices: Vec::new(),
             branch_type: BranchType::Equilibrium,
             upoldp: None,
+            homoc_context: None,
+            resume_state: None,
+            manifold_geometry: None,
         };
         let branch_val = to_value(&branch).expect("branch");
 
@@ -1276,6 +1336,46 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
+    fn extension_runner_rejects_limit_cycle_branches_for_map_systems() {
+        let branch = ContinuationBranch {
+            points: vec![ContinuationPoint {
+                state: vec![1.0, 1.0, 2.0],
+                param_value: 0.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            }],
+            bifurcations: Vec::new(),
+            indices: vec![0],
+            branch_type: BranchType::LimitCycle { ntst: 1, ncol: 1 },
+            upoldp: Some(vec![vec![1.0]]),
+            homoc_context: None,
+            resume_state: None,
+            manifold_geometry: None,
+        };
+        let branch_val = to_value(&branch).expect("branch");
+
+        let result = WasmContinuationExtensionRunner::new(
+            vec!["x + a".to_string()],
+            vec![0.0],
+            vec!["a".to_string()],
+            vec!["x".to_string()],
+            "map",
+            1,
+            branch_val,
+            "a",
+            settings_value(1),
+            true,
+        );
+
+        let message = match result {
+            Ok(_) => panic!("map limit-cycle extension must be rejected"),
+            Err(error) => error.as_string().unwrap_or_default(),
+        };
+        assert!(message.contains("flow systems only"));
+    }
+
+    #[wasm_bindgen_test]
     fn extension_runner_fills_missing_indices() {
         let branch = ContinuationBranch {
             points: vec![ContinuationPoint {
@@ -1289,6 +1389,9 @@ mod tests {
             indices: Vec::new(),
             branch_type: BranchType::Equilibrium,
             upoldp: None,
+            homoc_context: None,
+            resume_state: None,
+            manifold_geometry: None,
         };
         let branch_val = to_value(&branch).expect("branch");
 
@@ -1336,6 +1439,9 @@ mod tests {
             indices: vec![0, 1],
             branch_type: BranchType::Equilibrium,
             upoldp: None,
+            homoc_context: None,
+            resume_state: None,
+            manifold_geometry: None,
         };
         let branch_val = to_value(&branch).expect("branch");
 
@@ -1393,6 +1499,7 @@ mod tests {
                     step_size: 0.2,
                 }),
             }),
+            manifold_geometry: None,
         };
         let branch_val = to_value(&branch).expect("branch");
 
@@ -1456,6 +1563,9 @@ mod tests {
             indices: vec![0, 1],
             branch_type: BranchType::Equilibrium,
             upoldp: None,
+            homoc_context: None,
+            resume_state: None,
+            manifold_geometry: None,
         };
         let branch_val = to_value(&branch).expect("branch");
 
@@ -1523,6 +1633,9 @@ mod tests {
             indices: vec![0, -1, 1],
             branch_type: BranchType::Equilibrium,
             upoldp: None,
+            homoc_context: None,
+            resume_state: None,
+            manifold_geometry: None,
         };
         let branch_val = to_value(&branch).expect("branch");
 
@@ -1587,10 +1700,11 @@ mod tests {
             upoldp: None,
             homoc_context: None,
             resume_state: None,
+            manifold_geometry: None,
         };
         let branch_val = to_value(&branch).expect("branch");
 
-        let err = WasmContinuationExtensionRunner::new(
+        let result = WasmContinuationExtensionRunner::new(
             vec!["x".to_string()],
             vec![0.0, 0.0],
             vec!["a".to_string(), "b".to_string()],
@@ -1601,8 +1715,11 @@ mod tests {
             "a",
             settings_value(1),
             true,
-        )
-        .expect_err("legacy branch should require fixed metadata");
+        );
+        let err = match result {
+            Ok(_) => panic!("legacy branch should require fixed metadata"),
+            Err(err) => err,
+        };
 
         let msg = err
             .as_string()
@@ -1647,6 +1764,9 @@ mod tests {
             indices: vec![0, -1, 2],
             branch_type: BranchType::LimitCycle { ntst: 1, ncol: 1 },
             upoldp: None,
+            homoc_context: None,
+            resume_state: None,
+            manifold_geometry: None,
         };
         let branch_val = to_value(&branch).expect("branch");
 
@@ -1691,18 +1811,53 @@ mod tests {
 #[cfg(test)]
 mod orientation_tests {
     use super::{
-        apply_homoc_context_to_setup, canonicalize_homoclinic_point_state, cap_extension_step_size,
+        apply_homoc_context_to_setup, bounded_resume_step_size,
+        canonicalize_homoclinic_point_state, cap_extension_step_size,
         cap_homoclinic_step_size_in_parameter_plane,
         homoclinic_tangent_is_nonlocal_in_parameter_plane, hydrate_homoclinic_setup_from_endpoint,
-        orient_extension_tangent, prepare_resume_seed_for_extension,
+        normalized_problem_secant, orient_extension_tangent, prepare_resume_seed_for_extension,
     };
     use fork_core::continuation::{
-        pack_homoclinic_state, BifurcationType, BranchType, ContinuationBranch,
-        ContinuationEndpointSeed, ContinuationPoint, ContinuationResumeState, ContinuationSettings,
-        HomoclinicBasis, HomoclinicBasisSnapshot, HomoclinicExtraFlags, HomoclinicGuess,
-        HomoclinicResumeContext, HomoclinicSetup,
+        orient_problem_tangent, pack_homoclinic_state, BifurcationType, BranchType,
+        ContinuationBranch, ContinuationEndpointSeed, ContinuationPoint, ContinuationProblem,
+        ContinuationResumeState, ContinuationSettings, HomoclinicBasis, HomoclinicBasisSnapshot,
+        HomoclinicExtraFlags, HomoclinicGuess, HomoclinicResumeContext, HomoclinicSetup,
+        PointDiagnostics, TestFunctionValues,
     };
-    use nalgebra::DVector;
+    use nalgebra::{DMatrix, DVector};
+
+    struct WeightedMetricProblem;
+
+    impl ContinuationProblem for WeightedMetricProblem {
+        fn dimension(&self) -> usize {
+            1
+        }
+
+        fn residual(
+            &mut self,
+            _aug_state: &DVector<f64>,
+            out: &mut DVector<f64>,
+        ) -> anyhow::Result<()> {
+            out[0] = 0.0;
+            Ok(())
+        }
+
+        fn extended_jacobian(&mut self, _aug_state: &DVector<f64>) -> anyhow::Result<DMatrix<f64>> {
+            Ok(DMatrix::from_row_slice(1, 2, &[1.0, 0.0]))
+        }
+
+        fn palc_metric_weights(&self, _aug_state: &DVector<f64>) -> anyhow::Result<DVector<f64>> {
+            Ok(DVector::from_vec(vec![1.0, 100.0]))
+        }
+
+        fn diagnostics(&mut self, _aug_state: &DVector<f64>) -> anyhow::Result<PointDiagnostics> {
+            Ok(PointDiagnostics {
+                test_values: TestFunctionValues::equilibrium(1.0, 1.0, 1.0),
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            })
+        }
+    }
 
     #[test]
     fn orient_extension_tangent_aligns_with_secant_by_dot() {
@@ -1746,6 +1901,50 @@ mod orientation_tests {
             tangent.dot(&secant) > 0.0,
             "tangent must stay aligned with secant"
         );
+    }
+
+    #[test]
+    fn orient_extension_tangent_preserves_a_fold_tangent_without_a_secant() {
+        // J = [1, 0, 0], so this is a genuine J-null tangent at a parameter
+        // fold. Orientation may change its sign, but must not manufacture a
+        // parameter component and move it out of ker(J).
+        let mut tangent = DVector::from_vec(vec![0.0, 1.0, -0.5]);
+        let jacobian_row = DVector::from_vec(vec![1.0, 0.0, 0.0]);
+        let original = tangent.clone();
+
+        orient_extension_tangent(&mut tangent, None, true);
+
+        assert_eq!(tangent, original);
+        assert_eq!(jacobian_row.dot(&tangent), 0.0);
+    }
+
+    #[test]
+    fn limit_cycle_extension_uses_the_problem_palc_metric_for_secants() {
+        let problem = WeightedMetricProblem;
+        let aug_state = DVector::zeros(2);
+        let raw_secant = DVector::from_vec(vec![10.0, 2.0]);
+        let euclidean_norm = raw_secant.norm();
+        let (direction, norm) =
+            normalized_problem_secant(&problem, &aug_state, raw_secant).expect("weighted secant");
+        let direction = direction.expect("nonzero direction");
+        let norm = norm.expect("nonzero norm");
+
+        assert!((norm - 500.0_f64.sqrt()).abs() < 1e-12);
+        assert!((norm - euclidean_norm).abs() > 1.0);
+        let weights = problem
+            .palc_metric_weights(&aug_state)
+            .expect("PALC weights");
+        assert!((direction.dot(&weights.component_mul(&direction)) - 1.0).abs() < 1e-12);
+
+        // Euclidean and PALC orientation disagree for this pair. The LC path
+        // must follow the PALC sign used by its corrector hyperplane.
+        let mut tangent = DVector::from_vec(vec![10.0, -1.0]);
+        assert!(tangent.dot(&direction) > 0.0);
+        assert!(tangent.dot(&weights.component_mul(&direction)) < 0.0);
+        orient_problem_tangent(&problem, &aug_state, &mut tangent, Some(&direction), true)
+            .expect("weighted orientation");
+        assert!(tangent.dot(&weights.component_mul(&direction)) > 0.0);
+        assert_eq!(tangent, DVector::from_vec(vec![-10.0, 1.0]));
     }
 
     #[test]
@@ -2068,7 +2267,7 @@ mod orientation_tests {
     }
 
     #[test]
-    fn prepare_resume_seed_keeps_saved_aug_state_and_orients_tangent() {
+    fn prepare_resume_seed_uses_the_visible_endpoint_and_orients_tangent() {
         let seed = ContinuationEndpointSeed {
             endpoint_index: 5,
             aug_state: vec![0.0, 10.0, -10.0],
@@ -2080,7 +2279,7 @@ mod orientation_tests {
         let (resume_aug, resume_tangent) =
             prepare_resume_seed_for_extension(seed, &endpoint_aug, Some(&secant), true);
 
-        assert_eq!(resume_aug, vec![0.0, 10.0, -10.0]);
+        assert_eq!(resume_aug, vec![1.0, 2.0, 3.0]);
         assert!(
             (resume_tangent[0] - 0.0).abs() < 1e-12
                 && (resume_tangent[1] - 1.0).abs() < 1e-12
@@ -2091,7 +2290,7 @@ mod orientation_tests {
     }
 
     #[test]
-    fn prepare_resume_seed_keeps_local_seed_alignment() {
+    fn prepare_resume_seed_keeps_local_tangent_alignment_at_the_visible_endpoint() {
         let seed = ContinuationEndpointSeed {
             endpoint_index: 5,
             aug_state: vec![1.001, 2.001, 3.001],
@@ -2103,7 +2302,7 @@ mod orientation_tests {
         let (resume_aug, resume_tangent) =
             prepare_resume_seed_for_extension(seed, &endpoint_aug, Some(&secant), true);
 
-        assert_eq!(resume_aug, vec![1.001, 2.001, 3.001]);
+        assert_eq!(resume_aug, vec![1.0, 2.0, 3.0]);
         assert!(
             resume_tangent[1] > 0.0,
             "aligned tangent should preserve local direction"
@@ -2129,7 +2328,7 @@ mod orientation_tests {
                 min_index_seed: None,
                 max_index_seed: Some(fork_core::continuation::ContinuationEndpointSeed {
                     endpoint_index: 3,
-                    aug_state: vec![0.2, 0.0],
+                    aug_state: vec![0.0, 0.0],
                     tangent: vec![1.0, 0.0],
                     step_size: 0.02,
                 }),
@@ -2137,9 +2336,39 @@ mod orientation_tests {
             manifold_geometry: None,
         };
 
-        let seed = super::select_resume_seed(&branch, true, 3, 2).expect("seed");
+        let endpoint_aug = DVector::from_vec(vec![0.0, 0.0]);
+        let seed = super::select_resume_seed(&branch, true, 3, &endpoint_aug).expect("seed");
         assert_eq!(seed.step_size, 0.02);
-        assert!(super::select_resume_seed(&branch, true, 4, 2).is_none());
+        assert!(super::select_resume_seed(&branch, true, 4, &endpoint_aug).is_none());
+
+        let stale_endpoint = DVector::from_vec(vec![0.2, 0.0]);
+        assert!(
+            super::select_resume_seed(&branch, true, 3, &stale_endpoint).is_none(),
+            "a seed for a hidden unrefined state must not be attached to the visible endpoint"
+        );
+    }
+
+    #[test]
+    fn saved_resume_step_survives_fresh_settings_but_not_a_smaller_local_cap() {
+        let seed = ContinuationEndpointSeed {
+            endpoint_index: 2,
+            aug_state: vec![0.0, 0.0],
+            tangent: vec![1.0, 0.0],
+            step_size: 0.03,
+        };
+        let mut settings = ContinuationSettings {
+            step_size: 0.1,
+            min_step_size: 1e-4,
+            max_step_size: 0.2,
+            max_steps: 1,
+            corrector_steps: 2,
+            corrector_tolerance: 1e-8,
+            step_tolerance: 1e-8,
+        };
+
+        assert!((bounded_resume_step_size(&seed, settings) - 0.03).abs() < 1e-12);
+        cap_extension_step_size(&mut settings, Some(0.02));
+        assert!((bounded_resume_step_size(&seed, settings) - 0.02).abs() < 1e-12);
     }
 
     #[test]

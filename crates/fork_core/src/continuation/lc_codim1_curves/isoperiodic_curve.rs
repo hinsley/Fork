@@ -4,12 +4,13 @@
 //! - Standard periodic collocation BVP for the cycle
 //! - Isoperiodic condition: T - T_seed = 0
 
-use crate::continuation::periodic::{extract_multipliers_shooting, CollocationCoefficients};
+use super::{collocation_profile_is_acceptable, explicit_profile_palc_weights};
+use crate::continuation::periodic::{extract_multipliers_collocation, CollocationCoefficients};
 use crate::continuation::problem::{ContinuationProblem, PointDiagnostics, TestFunctionValues};
 use crate::equation_engine::EquationSystem;
 use crate::equilibrium::{compute_jacobian, SystemKind};
 use crate::traits::DynamicalSystem;
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use nalgebra::{DMatrix, DVector};
 
 /// Isoperiodic curve continuation problem.
@@ -68,6 +69,10 @@ impl<'a> IsoperiodicCurveProblem<'a> {
 
         if param1_index >= system.params.len() || param2_index >= system.params.len() {
             bail!("Unknown continuation parameter index");
+        }
+
+        if ntst < 2 {
+            bail!("Isoperiodic curve requires at least two mesh intervals");
         }
 
         let dim = system.equations.len();
@@ -295,7 +300,7 @@ impl<'a> IsoperiodicCurveProblem<'a> {
     }
 
     /// Remap this problem's stage-first explicit Jacobian layout to the
-    /// mesh-first implicit layout expected by `extract_multipliers_shooting`.
+    /// mesh-first implicit layout expected by `extract_multipliers_collocation`.
     fn remap_jac_for_multiplier_extraction(&self, jac: &DMatrix<f64>) -> DMatrix<f64> {
         let n_stages = self.ntst * self.ncol;
         let stage_cols = n_stages * self.dim;
@@ -303,16 +308,20 @@ impl<'a> IsoperiodicCurveProblem<'a> {
         let current_mesh_start = stage_cols;
         let current_period_col = stage_cols + mesh_cols;
 
-        // Expected by extract_multipliers_shooting:
+        // Expected by extract_multipliers_collocation:
         // [param_dummy, mesh_0..mesh_(ntst-1), stages..., period]
         let expected_mesh_cols = self.ntst * self.dim;
         let expected_stage_start = 1 + expected_mesh_cols;
         let expected_period_col = expected_stage_start + stage_cols;
         let expected_cols = expected_period_col + 1;
 
-        let mut remapped = DMatrix::<f64>::zeros(jac.nrows(), expected_cols);
+        // Folding mesh_ntst into mesh_0 makes the explicit periodic-BC rows
+        // identically zero.  Drop those redundant rows; the collocation
+        // extractor expects only stage, continuity, and phase equations.
+        let expected_rows = stage_cols + self.ntst * self.dim + 1;
+        let mut remapped = DMatrix::<f64>::zeros(expected_rows, expected_cols);
 
-        for row in 0..jac.nrows() {
+        for row in 0..expected_rows {
             // Stages: keep interval-major ordering, just move after mesh block.
             for stage_col in 0..stage_cols {
                 remapped[(row, expected_stage_start + stage_col)] = jac[(row, stage_col)];
@@ -345,6 +354,19 @@ impl<'a> IsoperiodicCurveProblem<'a> {
 impl<'a> ContinuationProblem for IsoperiodicCurveProblem<'a> {
     fn dimension(&self) -> usize {
         self.n_eqs()
+    }
+
+    fn palc_metric_weights(&self, _aug: &DVector<f64>) -> Result<DVector<f64>> {
+        let stage_dim = self.ntst * self.ncol * self.dim;
+        explicit_profile_palc_weights(
+            self.dimension() + 1,
+            self.ntst,
+            self.ncol,
+            self.dim,
+            &self.coeffs.nodes,
+            1 + stage_dim,
+            1,
+        )
     }
 
     fn residual(&mut self, aug: &DVector<f64>, out: &mut DVector<f64>) -> Result<()> {
@@ -462,17 +484,43 @@ impl<'a> ContinuationProblem for IsoperiodicCurveProblem<'a> {
 
         // Multiplier extraction expects mesh-first implicit Jacobian ordering.
         // Isoperiodic stores stage-first explicit, so remap before extraction.
-        // Keep this non-fatal so continuation can still proceed on poor points.
         let remapped_jac = self.remap_jac_for_multiplier_extraction(&jac);
         let multipliers =
-            extract_multipliers_shooting(&remapped_jac, self.dim, self.ntst, self.ncol)
-                .unwrap_or_default();
+            extract_multipliers_collocation(&remapped_jac, self.dim, self.ntst, self.ncol)
+                .map_err(|error| anyhow!("Isoperiodic Floquet extraction failed: {error}"))?;
 
         Ok(PointDiagnostics {
             test_values: TestFunctionValues::limit_cycle(1.0, 1.0, 1.0),
             eigenvalues: multipliers,
             cycle_points: None,
         })
+    }
+
+    fn is_step_acceptable(&mut self, aug: &DVector<f64>) -> Result<bool> {
+        let aug_slice = aug.as_slice();
+        let mesh_states = (0..=self.ntst)
+            .map(|mesh| self.mesh_slice(aug_slice, mesh).to_vec())
+            .collect::<Vec<_>>();
+        let stage_states = (0..self.ntst)
+            .flat_map(|interval| {
+                (0..self.ncol)
+                    .map(|stage| self.stage_slice(aug_slice, interval, stage).to_vec())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        collocation_profile_is_acceptable(
+            self.system,
+            self.param1_index,
+            self.param2_index,
+            self.get_p1(aug),
+            self.get_p2(aug),
+            &mesh_states,
+            &stage_states,
+            self.get_period(aug),
+            self.ntst,
+            self.ncol,
+            &self.coeffs.nodes,
+        )
     }
 
     fn update_after_step(&mut self, _aug: &DVector<f64>) -> Result<()> {
@@ -501,9 +549,9 @@ mod tests {
     #[test]
     fn rejects_invalid_seed_period() {
         let mut system = make_two_dim_flow_system();
-        let lc_state = vec![0.1; 6];
+        let lc_state = vec![0.1; 10];
 
-        let err = IsoperiodicCurveProblem::new(&mut system, lc_state, 0.0, 0, 1, 0.0, 0.0, 1, 1)
+        let err = IsoperiodicCurveProblem::new(&mut system, lc_state, 0.0, 0, 1, 0.0, 0.0, 2, 1)
             .err()
             .expect("expected invalid period to fail");
 
@@ -518,9 +566,9 @@ mod tests {
     #[test]
     fn rejects_identical_parameter_indices() {
         let mut system = make_two_dim_flow_system();
-        let lc_state = vec![0.1; 6];
+        let lc_state = vec![0.1; 10];
 
-        let err = IsoperiodicCurveProblem::new(&mut system, lc_state, 1.0, 0, 0, 0.0, 0.0, 1, 1)
+        let err = IsoperiodicCurveProblem::new(&mut system, lc_state, 1.0, 0, 0, 0.0, 0.0, 2, 1)
             .err()
             .expect("expected identical parameters to fail");
 
@@ -535,9 +583,9 @@ mod tests {
     #[test]
     fn rejects_unknown_parameter_index() {
         let mut system = make_two_dim_flow_system();
-        let lc_state = vec![0.1; 6];
+        let lc_state = vec![0.1; 10];
 
-        let err = IsoperiodicCurveProblem::new(&mut system, lc_state, 1.0, 0, 2, 0.0, 0.0, 1, 1)
+        let err = IsoperiodicCurveProblem::new(&mut system, lc_state, 1.0, 0, 2, 0.0, 0.0, 2, 1)
             .err()
             .expect("expected unknown parameter index to fail");
 
@@ -552,19 +600,19 @@ mod tests {
     #[test]
     fn residual_enforces_fixed_period_constraint() {
         let mut system = make_two_dim_flow_system();
-        let lc_state = vec![0.1, 0.2, 0.1, 0.2, 0.1, 0.2];
+        let lc_state = vec![0.1; 10];
 
         let mut problem =
-            IsoperiodicCurveProblem::new(&mut system, lc_state, 2.0, 0, 1, 0.0, 0.0, 1, 1)
+            IsoperiodicCurveProblem::new(&mut system, lc_state, 2.0, 0, 1, 0.0, 0.0, 2, 1)
                 .expect("create isoperiodic problem");
 
         // Build [p1, lc_state..., T, p2] with T != T_seed.
         let mut aug = DVector::zeros(problem.dimension() + 1);
         aug[0] = 0.0;
-        for i in 0..6 {
+        for i in 0..10 {
             aug[i + 1] = 0.1;
         }
-        let t_idx = 1 + 6;
+        let t_idx = 1 + 10;
         aug[t_idx] = 2.5;
 
         let mut out = DVector::zeros(problem.dimension());
@@ -577,26 +625,29 @@ mod tests {
     }
 
     #[test]
-    fn diagnostics_tolerates_singular_monodromy_blocks() {
+    fn diagnostics_reports_singular_floquet_blocks() {
         let mut system = make_two_dim_flow_system();
-        let lc_state = vec![0.1, 0.2, 0.1, 0.2, 0.1, 0.2];
+        let lc_state = vec![0.1; 10];
 
         let mut problem =
-            IsoperiodicCurveProblem::new(&mut system, lc_state, 2.0, 0, 1, 0.0, 0.0, 1, 1)
+            IsoperiodicCurveProblem::new(&mut system, lc_state, 2.0, 0, 1, 0.0, 0.0, 2, 1)
                 .expect("create isoperiodic problem");
 
-        let n_stages = 1usize;
-        let n_eqs = n_stages * 2 + 1 * 2 + 1 + 2;
-        let n_vars = (n_stages * 2 + (1 + 1) * 2) + 1;
+        let ntst = 2usize;
+        let n_stages = ntst;
+        let n_eqs = n_stages * 2 + ntst * 2 + 1 + 2;
+        let n_vars = (n_stages * 2 + (ntst + 1) * 2) + 1;
         problem.cached_jac = Some(DMatrix::<f64>::zeros(n_eqs, n_vars));
 
         let aug = DVector::zeros(problem.dimension() + 1);
-        let diag = problem
+        let error = problem
             .diagnostics(&aug)
-            .expect("diagnostics should not fail");
+            .expect_err("singular Floquet blocks must not be hidden");
         assert!(
-            diag.eigenvalues.is_empty(),
-            "singular monodromy should yield empty multipliers"
+            error
+                .to_string()
+                .contains("Isoperiodic Floquet extraction failed"),
+            "unexpected error: {error}"
         );
     }
 
@@ -633,5 +684,93 @@ mod tests {
             !diag.eigenvalues.is_empty(),
             "regular seed should produce floquet multipliers"
         );
+    }
+
+    #[test]
+    fn rejects_single_interval_layout() {
+        let mut system = make_two_dim_flow_system();
+        let ntst = 1;
+        let ncol = 1;
+        let ncoords = ntst * ncol * 2 + (ntst + 1) * 2;
+        let result = IsoperiodicCurveProblem::new(
+            &mut system,
+            vec![0.0; ncoords],
+            1.0,
+            0,
+            1,
+            0.0,
+            0.0,
+            ntst,
+            ncol,
+        );
+        let error = result
+            .err()
+            .expect("single-interval isoperiodic layout must be rejected");
+        assert!(error.to_string().contains("at least two mesh intervals"));
+    }
+
+    #[test]
+    fn palc_metric_normalizes_the_explicit_collocation_profile() {
+        let mut system = make_two_dim_flow_system();
+        let ntst = 3;
+        let ncol = 2;
+        let dim = 2;
+        let ncoords = ntst * ncol * dim + (ntst + 1) * dim;
+        let problem = IsoperiodicCurveProblem::new(
+            &mut system,
+            vec![0.0; ncoords],
+            1.0,
+            0,
+            1,
+            0.0,
+            0.0,
+            ntst,
+            ncol,
+        )
+        .expect("isoperiodic problem");
+        let aug = DVector::zeros(problem.dimension() + 1);
+        let weights = problem.palc_metric_weights(&aug).expect("PALC weights");
+        let stage_dim = ntst * ncol * dim;
+        let mesh_start = 1 + stage_dim;
+        let mut component_weight = 0.0;
+        for interval in 0..ntst {
+            for stage in 0..ncol {
+                component_weight += weights[1 + (interval * ncol + stage) * dim];
+            }
+        }
+        for mesh in 0..=ntst {
+            component_weight += weights[mesh_start + mesh * dim];
+        }
+        assert!((component_weight - 1.0).abs() < 1e-12);
+        assert!((weights[mesh_start] - weights[mesh_start + ntst * dim]).abs() < 1e-15);
+    }
+
+    #[test]
+    fn rejects_an_independently_underresolved_profile() {
+        let mut system = make_two_dim_flow_system();
+        let ntst = 2;
+        let ncol = 1;
+        let dim = 2;
+        let ncoords = ntst * ncol * dim + (ntst + 1) * dim;
+        let mut problem = IsoperiodicCurveProblem::new(
+            &mut system,
+            vec![0.0; ncoords],
+            1.0,
+            0,
+            1,
+            0.0,
+            0.0,
+            ntst,
+            ncol,
+        )
+        .expect("isoperiodic problem");
+        let mut aug = DVector::zeros(problem.dimension() + 1);
+        aug[problem.period_index()] = 1.0;
+        assert!(problem.is_step_acceptable(&aug).expect("resolved profile"));
+        let mesh_start = 1 + ntst * ncol * dim;
+        aug[mesh_start] = 10.0;
+        assert!(!problem
+            .is_step_acceptable(&aug)
+            .expect("under-resolved profile"));
     }
 }

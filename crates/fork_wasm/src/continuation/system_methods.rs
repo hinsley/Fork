@@ -44,6 +44,24 @@ struct ComplexWire {
     im: f64,
 }
 
+fn split_pd_curve_output_state(state: &[f64], explicit_lc_len: usize) -> Option<(Vec<f64>, f64)> {
+    if state.len() < explicit_lc_len + 2 {
+        return None;
+    }
+    Some((
+        state[..explicit_lc_len + 1].to_vec(),
+        state[explicit_lc_len + 1],
+    ))
+}
+
+fn validate_limit_cycle_system_type(system_type: &SystemType) -> Result<(), &'static str> {
+    if matches!(system_type, SystemType::Flow) {
+        Ok(())
+    } else {
+        Err("Limit-cycle collocation is available for flow systems only.")
+    }
+}
+
 fn manifold_ring_count(branch: &ContinuationBranch) -> usize {
     match branch.manifold_geometry.as_ref() {
         Some(ManifoldGeometry::Surface(surface)) => surface.ring_offsets.len(),
@@ -239,6 +257,7 @@ impl WasmSystem {
                 .map_err(|e| JsValue::from_str(&format!("Branch extension failed: {}", e)))?
             }
             BranchType::LimitCycle { ntst, ncol } => {
+                validate_limit_cycle_system_type(&self.system_type).map_err(JsValue::from_str)?;
                 // Extract phase anchor and direction from upoldp
                 let upoldp = branch
                     .upoldp
@@ -869,6 +888,7 @@ impl WasmSystem {
         ncol: u32,
         tolerance: f64,
     ) -> Result<JsValue, JsValue> {
+        validate_limit_cycle_system_type(&self.system_type).map_err(JsValue::from_str)?;
         let dim = self.system.equations.len();
 
         // Unflatten orbit_states: orbit_states_flat is [x0_0, x0_1, ..., x1_0, x1_1, ..., ...]
@@ -994,6 +1014,7 @@ impl WasmSystem {
         settings_val: JsValue,
         forward: bool,
     ) -> Result<JsValue, JsValue> {
+        validate_limit_cycle_system_type(&self.system_type).map_err(JsValue::from_str)?;
         let setup: LimitCycleSetup = from_value(setup_val)
             .map_err(|e| JsValue::from_str(&format!("Invalid limit cycle setup: {}", e)))?;
 
@@ -1979,24 +2000,17 @@ impl WasmSystem {
         let branch = continue_with_problem(&mut problem, initial_point, settings, forward)
             .map_err(|e| JsValue::from_str(&format!("PD curve continuation failed: {}", e)))?;
 
-        // State layout after prepend: [p1, lc_state, T, p2]
-        let n_lc = lc_state.len();
+        // Continuation points store [full_lc_state, T, p2].  Use the padded
+        // explicit length, not the caller's possibly implicit seed length.
+        let n_lc = full_lc_state.len();
+        let mut fallback_physical_state = full_lc_state.clone();
+        fallback_physical_state.push(period);
         let codim1_points: Vec<Codim1CurvePoint> = branch
             .points
             .iter()
             .map(|pt| {
-                // Extract p2 from end of state
-                let p2 = if pt.state.len() >= n_lc + 2 {
-                    pt.state[n_lc + 1]
-                } else {
-                    param2_value
-                };
-                // Extract physical LC state + T (everything except p2 at end)
-                let physical_state: Vec<f64> = if pt.state.len() >= n_lc + 1 {
-                    pt.state[..(n_lc + 1)].to_vec()
-                } else {
-                    lc_state.clone()
-                };
+                let (physical_state, p2) = split_pd_curve_output_state(&pt.state, n_lc)
+                    .unwrap_or_else(|| (fallback_physical_state.clone(), param2_value));
 
                 Codim1CurvePoint {
                     state: physical_state,
@@ -2055,32 +2069,9 @@ impl WasmSystem {
         self.system.params[param1_index] = param1_value;
         self.system.params[param2_index] = param2_value;
 
-        // Handle implicit periodicity: if lc_state has ntst mesh points instead of ntst+1,
-        // duplicate the first mesh point at the end (u_0 = u_ntst for periodic BC)
         let dim = self.system.equations.len();
-        let expected_ncoords = ntst * ncol * dim + (ntst + 1) * dim;
-        let implicit_ncoords = ntst * ncol * dim + ntst * dim; // Without u_ntst
-
-        let full_lc_state = if lc_state.len() == implicit_ncoords {
-            // Need to add the last mesh point (copy of first mesh point)
-            let mut padded = lc_state.clone();
-            let stages_len = ntst * ncol * dim;
-            let u0: Vec<f64> = lc_state[stages_len..stages_len + dim].to_vec();
-            padded.extend(u0); // Append u_ntst = u_0
-            padded
-        } else if lc_state.len() == expected_ncoords {
-            lc_state.clone()
-        } else {
-            return Err(JsValue::from_str(&format!(
-                "Invalid lc_state.len()={}, expected {} or {} (ntst={}, ncol={}, dim={})",
-                lc_state.len(),
-                expected_ncoords,
-                implicit_ncoords,
-                ntst,
-                ncol,
-                dim
-            )));
-        };
+        let full_lc_state = normalize_lc_seed_for_stage_first_explicit(&lc_state, ntst, ncol, dim)
+            .map_err(|error| JsValue::from_str(&error))?;
 
         let mut problem = NSCurveProblem::new(
             &mut self.system,
@@ -2232,6 +2223,33 @@ impl WasmSystem {
     }
 }
 
+#[cfg(test)]
+mod pd_output_layout_tests {
+    use super::{split_pd_curve_output_state, validate_limit_cycle_system_type};
+    use crate::system::SystemType;
+
+    #[test]
+    fn padded_pd_output_uses_the_explicit_seed_length() {
+        // A dim=2, ntst=2, ncol=1 implicit seed has 8 coordinates; the PD
+        // runner pads it to 10 before appending period and p2.
+        let state = vec![
+            10.0, 11.0, 20.0, 21.0, 10.0, 11.0, 30.0, 31.0, 40.0, 41.0, 6.25, 0.75,
+        ];
+        let (physical, p2) =
+            split_pd_curve_output_state(&state, 10).expect("explicit PD output layout");
+        assert_eq!(physical, state[..11]);
+        assert_eq!(p2, 0.75);
+    }
+
+    #[test]
+    fn public_limit_cycle_methods_accept_flows_and_reject_maps() {
+        assert!(validate_limit_cycle_system_type(&SystemType::Flow).is_ok());
+        let error = validate_limit_cycle_system_type(&SystemType::Map)
+            .expect_err("map limit-cycle collocation must be rejected");
+        assert!(error.contains("flow systems only"));
+    }
+}
+
 #[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
     use crate::system::WasmSystem;
@@ -2264,6 +2282,18 @@ mod tests {
             "flow",
         )
         .expect("system should build")
+    }
+
+    fn build_two_dim_map_with_param() -> WasmSystem {
+        WasmSystem::new(
+            vec!["x".to_string(), "y".to_string()],
+            vec![0.0],
+            vec!["p".to_string()],
+            vec!["x".to_string(), "y".to_string()],
+            "discrete",
+            "map",
+        )
+        .expect("map system should build")
     }
 
     fn continuation_settings(max_steps: usize) -> JsValue {
@@ -2303,6 +2333,56 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
+    fn init_lc_from_orbit_rejects_map_systems_before_cycle_detection() {
+        let system = build_two_dim_map_with_param();
+        let err = system
+            .init_lc_from_orbit(vec![], vec![], 0.0, 2, 2, 1e-6)
+            .expect_err("map Orbit seeds must be rejected");
+
+        let message = err.as_string().unwrap_or_default();
+        assert!(message.contains("flow systems only"));
+    }
+
+    #[wasm_bindgen_test]
+    fn legacy_limit_cycle_continuation_rejects_map_systems_before_setup_decode() {
+        let mut system = build_two_dim_map_with_param();
+        let err = system
+            .compute_limit_cycle_continuation(JsValue::NULL, "p", continuation_settings(1), true)
+            .expect_err("map limit-cycle continuation must be rejected");
+
+        let message = err.as_string().unwrap_or_default();
+        assert!(message.contains("flow systems only"));
+    }
+
+    #[wasm_bindgen_test]
+    fn legacy_limit_cycle_extension_rejects_map_systems() {
+        let mut system = build_two_dim_map_with_param();
+        let branch = ContinuationBranch {
+            points: vec![ContinuationPoint {
+                state: vec![1.0, 2.0, 1.5, 2.5, 6.25],
+                param_value: 0.0,
+                stability: BifurcationType::None,
+                eigenvalues: Vec::new(),
+                cycle_points: None,
+            }],
+            bifurcations: Vec::new(),
+            indices: vec![0],
+            branch_type: BranchType::LimitCycle { ntst: 1, ncol: 1 },
+            upoldp: Some(vec![vec![1.0, 0.0]]),
+            homoc_context: None,
+            resume_state: None,
+            manifold_geometry: None,
+        };
+        let branch_val = to_value(&branch).expect("branch");
+
+        let err = system
+            .extend_continuation(branch_val, "p", 1, continuation_settings(1), true)
+            .expect_err("map limit-cycle extension must be rejected");
+        let message = err.as_string().unwrap_or_default();
+        assert!(message.contains("flow systems only"));
+    }
+
+    #[wasm_bindgen_test]
     fn compute_continuation_rejects_unknown_parameter() {
         let mut system = build_two_dim_system_with_param();
         let err = system
@@ -2339,6 +2419,9 @@ mod tests {
             indices: vec![0],
             branch_type: BranchType::LimitCycle { ntst: 3, ncol: 2 },
             upoldp: None,
+            homoc_context: None,
+            resume_state: None,
+            manifold_geometry: None,
         };
         let branch_val = to_value(&branch).expect("branch");
 

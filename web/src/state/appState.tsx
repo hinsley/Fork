@@ -73,6 +73,7 @@ import {
 } from '../system/model'
 import type { ReorderPlacement } from '../system/model'
 import {
+  canonicalizeLimitCycleStateForAnalysis,
   ensureHomoclinicEndpointResumeSeeds,
   ensureBranchIndices,
   extractHopfOmega,
@@ -84,6 +85,11 @@ import {
   serializeBranchDataForWasm,
 } from '../system/continuation'
 import { hasCustomObjectParams, resolveObjectParams } from '../system/parameters'
+import { liftReducedFloquetVectorsForDisplay } from '../system/floquetModes'
+import {
+  projectLimitCyclePackedStateForSnapshot,
+  type LimitCyclePackedStateLayout,
+} from '../system/limitCycleAnalysis'
 import {
   buildReducedRunConfig,
   buildSubsystemSnapshot,
@@ -930,40 +936,212 @@ function projectStateForSnapshot(
   throw new Error(`${label} dimension mismatch for the selected frozen-variable subsystem.`)
 }
 
-function projectLimitCyclePackedStateForSnapshot(
-  snapshot: SubsystemSnapshot,
-  state: number[],
-  ntst: number,
-  ncol: number,
-  label: string
-): number[] {
-  const freeDimension = snapshot.freeVariableNames.length
-  const baseDimension = snapshot.baseVarNames.length
-  if (freeDimension === baseDimension) {
-    return [...state]
+function limitCyclePackedStateLayoutForBranchType(
+  branchType: ContinuationObject['branchType']
+): LimitCyclePackedStateLayout {
+  if (branchType === 'limit_cycle') return 'implicit'
+  if (
+    branchType === 'lpc_curve' ||
+    branchType === 'isoperiodic_curve' ||
+    branchType === 'pd_curve' ||
+    branchType === 'ns_curve'
+  ) {
+    return 'explicit'
   }
+  return 'auto'
+}
 
-  const safeNtst = Number.isFinite(ntst) ? Math.max(1, Math.round(ntst)) : 1
-  const safeNcol = Number.isFinite(ncol) ? Math.max(1, Math.round(ncol)) : 1
-  const pointCount = safeNtst * (safeNcol + 1)
-  const expectedReducedLength = pointCount * freeDimension + 1
-  const expectedBaseLength = pointCount * baseDimension + 1
+type LimitCycleAnalysisContext = {
+  baseParams: number[]
+  snapshot: SubsystemSnapshot
+  runConfig: SystemConfig
+  seedState: number[]
+  seedNtst: number
+  seedNcol: number
+  seedBranchType: ContinuationObject['branchType']
+  runtimeParameterRef: ParameterRef | null
+  selectedPoint: ContinuationPoint | null
+}
 
-  if (state.length === expectedReducedLength) {
-    return [...state]
-  }
-  if (state.length === expectedBaseLength) {
-    const reduced: number[] = []
-    for (let pointIndex = 0; pointIndex < pointCount; pointIndex += 1) {
-      const offset = pointIndex * baseDimension
-      const fullPoint = state.slice(offset, offset + baseDimension)
-      reduced.push(...projectStateToReduced(snapshot, fullPoint))
+function resolveLimitCycleAnalysisContext(
+  current: System,
+  limitCycleId: string,
+  limitCycle: LimitCycleObject
+): LimitCycleAnalysisContext {
+  const system = current.config
+  let baseParams = resolveObjectParams(system, limitCycle.customParameters)
+  let seedState = limitCycle.state
+  let seedNtst = limitCycle.ntst
+  let seedNcol = limitCycle.ncol
+  let seedBranchType: ContinuationObject['branchType'] = 'limit_cycle'
+  let snapshot = buildObjectSubsystemSnapshot(system, limitCycle)
+  let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+  let runtimeParameterRef: ParameterRef | null = null
+  let selectedPoint: ContinuationPoint | null = null
+
+  const renderTarget = current.ui.limitCycleRenderTargets?.[limitCycleId]
+  if (renderTarget?.type === 'branch') {
+    const seedBranch = current.branches[renderTarget.branchId]
+    const seedPoint = seedBranch?.data.points[renderTarget.pointIndex]
+    const parentObjectId = seedBranch ? resolveBranchParentObjectId(current, seedBranch) : null
+    if (seedBranch && seedPoint && parentObjectId === limitCycleId) {
+      selectedPoint = seedPoint
+      snapshot = buildBranchSubsystemSnapshot(system, seedBranch, limitCycle)
+      baseParams = getBranchParams(current, seedBranch)
+      const pointFrozenValuesByVarName = { ...snapshot.frozenValuesByVarName }
+      let pointFrozenValuesChanged = false
+      if (seedPoint.state.length > 0) {
+        seedState = seedPoint.state
+        seedBranchType = seedBranch.branchType
+      }
+
+      const branchType = seedBranch.data.branch_type
+      if (
+        branchType &&
+        typeof branchType === 'object' &&
+        'ntst' in branchType &&
+        'ncol' in branchType &&
+        Number.isFinite(branchType.ntst) &&
+        Number.isFinite(branchType.ncol)
+      ) {
+        seedNtst = Math.max(1, Math.trunc(branchType.ntst as number))
+        seedNcol = Math.max(1, Math.trunc(branchType.ncol as number))
+      }
+
+      const applyNativeParamValue = (ref: ParameterRef | null, value: number | undefined) => {
+        if (!ref || value === undefined || !Number.isFinite(value)) return
+        if (ref.kind !== 'native_param') return
+        const paramIndex = system.paramNames.indexOf(ref.name)
+        if (paramIndex < 0 || paramIndex >= baseParams.length) return
+        if (baseParams[paramIndex] !== value) {
+          baseParams = [...baseParams]
+          baseParams[paramIndex] = value
+        }
+      }
+      const applyFrozenParamValue = (ref: ParameterRef | null, value: number | undefined) => {
+        if (!ref || ref.kind !== 'frozen_var' || !Number.isFinite(value)) return
+        if (
+          !Object.prototype.hasOwnProperty.call(
+            pointFrozenValuesByVarName,
+            ref.variableName
+          )
+        ) {
+          return
+        }
+        if (pointFrozenValuesByVarName[ref.variableName] !== value) {
+          pointFrozenValuesByVarName[ref.variableName] = value as number
+          pointFrozenValuesChanged = true
+        }
+      }
+
+      const primaryParamRef =
+        (isTwoParameterBranchType(branchType) ? branchType.param1_ref : undefined) ??
+        seedBranch.parameterRef ??
+        (() => {
+          try {
+            return parseContinuationParameterAllowRuntimeName(
+              system,
+              snapshot,
+              seedBranch.parameterName
+            )
+          } catch {
+            return null
+          }
+        })()
+      runtimeParameterRef = primaryParamRef
+      applyNativeParamValue(primaryParamRef, seedPoint.param_value)
+      applyFrozenParamValue(primaryParamRef, seedPoint.param_value)
+
+      const secondaryParamRef =
+        resolveBranchParam2Ref(seedBranch) ??
+        (() => {
+          if (isTwoParameterBranchType(branchType) && branchType.param2_name) {
+            try {
+              return parseContinuationParameterAllowRuntimeName(
+                system,
+                snapshot,
+                branchType.param2_name
+              )
+            } catch {
+              return null
+            }
+          }
+          return null
+        })()
+      const secondaryValue = Number.isFinite(seedPoint.param2_value)
+        ? seedPoint.param2_value
+        : resolveContinuationPointParam2Value(
+            seedPoint,
+            branchType,
+            snapshot.freeVariableNames.length
+          )
+      applyNativeParamValue(secondaryParamRef, secondaryValue)
+      applyFrozenParamValue(secondaryParamRef, secondaryValue)
+
+      if (pointFrozenValuesChanged) {
+        snapshot = buildSubsystemSnapshot(system, {
+          frozenValuesByVarName: pointFrozenValuesByVarName,
+        })
+      }
+
+      runConfig = buildReducedRunConfig(system, snapshot, baseParams)
+      runConfig = applyReducedParamOverrides(
+        runConfig,
+        resolveBranchPointReducedParamOverrides(seedBranch, seedPoint)
+      )
     }
-    reduced.push(state[state.length - 1] ?? Number.NaN)
-    return reduced
   }
 
-  return projectStateForSnapshot(snapshot, state, label)
+  return {
+    baseParams,
+    snapshot,
+    runConfig,
+    seedState,
+    seedNtst,
+    seedNcol,
+    seedBranchType,
+    runtimeParameterRef,
+    selectedPoint,
+  }
+}
+
+function resolveLimitCycleAnalysisRuntimeParameterName(
+  system: SystemConfig,
+  limitCycle: LimitCycleObject,
+  context: LimitCycleAnalysisContext
+): string | null {
+  let runtimeParameterName: string | null = null
+  if (context.runtimeParameterRef) {
+    runtimeParameterName = resolveRuntimeParameterName(
+      context.snapshot,
+      context.runtimeParameterRef
+    )
+  } else if (limitCycle.parameterRef) {
+    runtimeParameterName = resolveRuntimeParameterName(context.snapshot, limitCycle.parameterRef)
+  } else if (typeof limitCycle.parameterName === 'string' && limitCycle.parameterName.trim()) {
+    try {
+      const ref = parseContinuationParameterAllowRuntimeName(
+        system,
+        context.snapshot,
+        limitCycle.parameterName
+      )
+      runtimeParameterName = resolveRuntimeParameterName(context.snapshot, ref)
+    } catch {
+      runtimeParameterName = null
+    }
+  }
+  if (!runtimeParameterName || !context.runConfig.paramNames.includes(runtimeParameterName)) {
+    runtimeParameterName = context.runConfig.paramNames[0] ?? null
+  }
+  return runtimeParameterName
+}
+
+function normalizeFiniteFloquetMultipliers(raw: unknown) {
+  const multipliers = normalizeEigenvalueArray(raw)
+  return multipliers.length > 0 &&
+    multipliers.every((value) => Number.isFinite(value.re) && Number.isFinite(value.im))
+    ? multipliers
+    : []
 }
 
 type ObjectSubsystemRun = {
@@ -2699,130 +2877,49 @@ export function AppProvider({
           throw new Error('Limit cycle mesh metadata is invalid.')
         }
 
-        let baseParams = resolveObjectParams(system, limitCycle.customParameters)
-        let seedState = limitCycle.state
-        let seedNtst = limitCycle.ntst
-        let seedNcol = limitCycle.ncol
-        let snapshot = buildObjectSubsystemSnapshot(system, limitCycle)
-        let runConfig = buildReducedRunConfig(system, snapshot, baseParams)
-        let runtimeParameterRef: ParameterRef | null = null
-        const renderTarget = current.ui.limitCycleRenderTargets?.[request.limitCycleId]
-        if (renderTarget?.type === 'branch') {
-          const seedBranch = current.branches[renderTarget.branchId]
-          const seedPoint = seedBranch?.data.points[renderTarget.pointIndex]
-          const parentObjectId = seedBranch ? resolveBranchParentObjectId(current, seedBranch) : null
-          if (seedBranch && seedPoint && parentObjectId === request.limitCycleId) {
-            snapshot = buildBranchSubsystemSnapshot(system, seedBranch, limitCycle)
-            baseParams = getBranchParams(current, seedBranch)
-            runConfig = buildReducedRunConfig(system, snapshot, baseParams)
-            if (seedPoint.state.length > 0) {
-              seedState = seedPoint.state
-            }
-            const branchType = seedBranch.data.branch_type
-            if (
-              branchType &&
-              typeof branchType === 'object' &&
-              'ntst' in branchType &&
-              'ncol' in branchType &&
-              Number.isFinite(branchType.ntst) &&
-              Number.isFinite(branchType.ncol)
-            ) {
-              seedNtst = Math.max(1, Math.trunc(branchType.ntst as number))
-              seedNcol = Math.max(1, Math.trunc(branchType.ncol as number))
-            }
-            const applyParamValue = (ref: ParameterRef | null, value: number | undefined) => {
-              if (!ref || value === undefined || !Number.isFinite(value)) return
-              if (ref.kind !== 'native_param') return
-              const paramIndex = system.paramNames.indexOf(ref.name)
-              if (paramIndex < 0 || paramIndex >= baseParams.length) return
-              if (baseParams[paramIndex] !== value) {
-                baseParams = [...baseParams]
-                baseParams[paramIndex] = value
-              }
-            }
-            const primaryParamRef =
-              seedBranch.parameterRef ??
-              (() => {
-                try {
-                  return parseContinuationParameterAllowRuntimeName(
-                    system,
-                    snapshot,
-                    seedBranch.parameterName
-                  )
-                } catch {
-                  return null
-                }
-              })()
-            runtimeParameterRef = primaryParamRef
-            applyParamValue(primaryParamRef, seedPoint.param_value)
-            const secondaryParamRef =
-              resolveBranchParam2Ref(seedBranch) ??
-              (() => {
-                if (
-                  branchType &&
-                  typeof branchType === 'object' &&
-                  'param2_name' in branchType &&
-                  branchType.param2_name
-                ) {
-                  try {
-                    return parseContinuationParameterAllowRuntimeName(
-                      system,
-                      snapshot,
-                      branchType.param2_name
-                    )
-                  } catch {
-                    return null
-                  }
-                }
-                return null
-              })()
-            const secondaryValue = Number.isFinite(seedPoint.param2_value)
-              ? seedPoint.param2_value
-              : resolveContinuationPointParam2Value(
-                  seedPoint,
-                  branchType,
-                  snapshot.freeVariableNames.length
-                )
-            applyParamValue(secondaryParamRef, secondaryValue)
-            runConfig = buildReducedRunConfig(system, snapshot, baseParams)
-            runConfig = applyReducedParamOverrides(
-              runConfig,
-              resolveBranchPointReducedParamOverrides(seedBranch, seedPoint)
-            )
-          }
-        }
+        const context = resolveLimitCycleAnalysisContext(
+          current,
+          request.limitCycleId,
+          limitCycle
+        )
+        const {
+          baseParams,
+          snapshot,
+          runConfig,
+          seedState,
+          seedNtst,
+          seedNcol,
+          seedBranchType,
+        } = context
         if (runConfig.paramNames.length === 0) {
           throw new Error(
             'Floquet mode computation requires at least one continuation parameter.'
           )
         }
-        const reducedState = projectLimitCyclePackedStateForSnapshot(
+        const projectedState = projectLimitCyclePackedStateForSnapshot(
           snapshot,
           seedState,
           seedNtst,
           seedNcol,
-          'Limit cycle state'
+          'Limit cycle state',
+          limitCyclePackedStateLayoutForBranchType(seedBranchType)
         )
-
-        let runtimeParameterName: string | null = null
-        if (runtimeParameterRef) {
-          runtimeParameterName = resolveRuntimeParameterName(snapshot, runtimeParameterRef)
-        } else if (limitCycle.parameterRef) {
-          runtimeParameterName = resolveRuntimeParameterName(snapshot, limitCycle.parameterRef)
-        } else if (typeof limitCycle.parameterName === 'string' && limitCycle.parameterName.trim()) {
-          try {
-            const ref = parseContinuationParameterAllowRuntimeName(
-              system,
-              snapshot,
-              limitCycle.parameterName
-            )
-            runtimeParameterName = resolveRuntimeParameterName(snapshot, ref)
-          } catch {
-            runtimeParameterName = null
-          }
-        }
-        if (!runtimeParameterName || !runConfig.paramNames.includes(runtimeParameterName)) {
-          runtimeParameterName = runConfig.paramNames[0]
+        const reducedState = canonicalizeLimitCycleStateForAnalysis(
+          projectedState,
+          snapshot.freeVariableNames.length,
+          seedNtst,
+          seedNcol,
+          seedBranchType
+        )
+        const runtimeParameterName = resolveLimitCycleAnalysisRuntimeParameterName(
+          system,
+          limitCycle,
+          context
+        )
+        if (!runtimeParameterName) {
+          throw new Error(
+            'Floquet mode computation requires at least one continuation parameter.'
+          )
         }
 
         const payload: CoreLimitCycleFloquetModesRequest = {
@@ -2851,7 +2948,7 @@ export function AppProvider({
         }
 
         const multipliers = normalizeEigenvalueArray(result.multipliers)
-        const vectors = Array.isArray(result.vectors)
+        const reducedVectors = Array.isArray(result.vectors)
           ? result.vectors.map((pointVectors) =>
               Array.isArray(pointVectors)
                 ? pointVectors.map((modeVector) =>
@@ -2862,19 +2959,22 @@ export function AppProvider({
                 : []
             )
           : []
+        const vectors = liftReducedFloquetVectorsForDisplay(snapshot, reducedVectors)
 
         const updated = updateObject(current, request.limitCycleId, {
           floquetMultipliers: multipliers,
           floquetModes: {
-            ntst: Math.max(1, Math.trunc(result.ntst ?? limitCycle.ntst)),
-            ncol: Math.max(1, Math.trunc(result.ncol ?? limitCycle.ncol)),
+            ntst: Math.max(1, Math.trunc(result.ntst ?? seedNtst)),
+            ncol: Math.max(1, Math.trunc(result.ncol ?? seedNcol)),
             multipliers,
             vectors,
             computedAt: new Date().toISOString(),
           },
           parameters: [...baseParams],
           subsystemSnapshot: snapshot,
-          frozenVariables: normalizeObjectFrozenVariables(system, limitCycle),
+          frozenVariables: {
+            frozenValuesByVarName: { ...snapshot.frozenValuesByVarName },
+          },
         })
         dispatch({ type: 'SET_SYSTEM', system: updated })
         await store.save(updated)
@@ -4088,71 +4188,69 @@ export function AppProvider({
           throw new Error('NCOL must be a positive integer.')
         }
 
-        const baseParams = resolveObjectParams(system, limitCycle.customParameters)
-        const { snapshot, runConfig } = buildObjectSubsystemRunConfig(
-          system,
-          limitCycle,
-          baseParams
+        const context = resolveLimitCycleAnalysisContext(
+          state.system,
+          request.limitCycleId,
+          limitCycle
         )
-        let seedState = limitCycle.state
-        let seedNtst = limitCycle.ntst
-        let seedNcol = limitCycle.ncol
-        let floquet = normalizeEigenvalueArray(limitCycle.floquetMultipliers)
-
-        const renderTarget = state.system.ui.limitCycleRenderTargets?.[request.limitCycleId]
-        if (renderTarget?.type === 'branch') {
-          const seedBranch = state.system.branches[renderTarget.branchId]
-          const seedPoint = seedBranch?.data.points[renderTarget.pointIndex]
-          if (seedPoint?.state.length) {
-            seedState = seedPoint.state
-          }
-          if (seedPoint?.eigenvalues && normalizeEigenvalueArray(seedPoint.eigenvalues).length > 0) {
-            floquet = normalizeEigenvalueArray(seedPoint.eigenvalues)
-          }
-          const branchType = seedBranch?.data.branch_type
-          if (
-            branchType &&
-            typeof branchType === 'object' &&
-            'ntst' in branchType &&
-            'ncol' in branchType &&
-            Number.isFinite(branchType.ntst) &&
-            Number.isFinite(branchType.ncol)
-          ) {
-            seedNtst = Math.max(1, Math.trunc(branchType.ntst as number))
-            seedNcol = Math.max(1, Math.trunc(branchType.ncol as number))
-          }
-        }
-
-        if (floquet.length === 0) {
-          const fallbackBranch = Object.values(state.system.branches)
-            .filter(
-              (branch) =>
-                branch.parentObject === limitCycle.name &&
-                branch.data.points.length > 0 &&
-                (branch.branchType === 'limit_cycle' || branch.branchType === 'isoperiodic_curve')
-            )
-            .sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0]
-          if (fallbackBranch) {
-            const fallbackPoint = fallbackBranch.data.points[fallbackBranch.data.points.length - 1]
-            floquet = normalizeEigenvalueArray(fallbackPoint?.eigenvalues)
-          }
-        }
-
-        if (floquet.length === 0) {
-          throw new Error(
-            'Floquet multipliers are unavailable for this limit cycle. Continue a limit-cycle branch first.'
-          )
-        }
-
-        const cycleState = projectLimitCyclePackedStateForSnapshot(
+        const {
+          baseParams,
+          snapshot,
+          runConfig,
+          seedState,
+          seedNtst,
+          seedNcol,
+          seedBranchType,
+          selectedPoint,
+        } = context
+        const projectedState = projectLimitCyclePackedStateForSnapshot(
           snapshot,
           seedState,
           seedNtst,
           seedNcol,
-          'Limit cycle'
+          'Limit cycle',
+          limitCyclePackedStateLayoutForBranchType(seedBranchType)
         )
-        const parameterName = limitCycle.parameterName ?? ''
-        const parameterIndex = system.paramNames.indexOf(parameterName)
+        const cycleState = canonicalizeLimitCycleStateForAnalysis(
+          projectedState,
+          snapshot.freeVariableNames.length,
+          seedNtst,
+          seedNcol,
+          seedBranchType
+        )
+        const runtimeParameterName = resolveLimitCycleAnalysisRuntimeParameterName(
+          system,
+          limitCycle,
+          context
+        )
+        let floquet = runtimeParameterName
+          ? []
+          : normalizeFiniteFloquetMultipliers(
+              selectedPoint ? selectedPoint.eigenvalues : limitCycle.floquetMultipliers
+            )
+        if (runtimeParameterName) {
+          const floquetResult = await client.computeLimitCycleFloquetModes({
+            system: runConfig,
+            cycleState,
+            ntst: seedNtst,
+            ncol: seedNcol,
+            parameterName: runtimeParameterName,
+          })
+          floquet = normalizeFiniteFloquetMultipliers(floquetResult.multipliers)
+          if (floquet.length === 0) {
+            throw new Error(
+              'Floquet multiplier computation returned no finite multipliers for the selected limit-cycle state.'
+            )
+          }
+        } else if (floquet.length === 0) {
+          throw new Error(
+            'Finite Floquet multipliers are unavailable for the selected limit-cycle state and cannot be recomputed without a continuation parameter.'
+          )
+        }
+
+        const parameterIndex = runtimeParameterName
+          ? runConfig.paramNames.indexOf(runtimeParameterName)
+          : -1
         const resolvedManifoldSettings = {
           ...settings,
           direction: settings.direction ?? ('Plus' as const),
@@ -5836,6 +5934,11 @@ export function AppProvider({
         if (!validation.valid) {
           throw new Error('System settings are invalid.')
         }
+        if (system.type !== 'flow') {
+          throw new Error(
+            'Limit-cycle continuation from an Orbit is available for flow systems only.'
+          )
+        }
         const orbit = state.system.objects[request.orbitId]
         if (!orbit || orbit.type !== 'orbit') {
           throw new Error('Select a valid orbit for limit cycle continuation.')
@@ -6308,7 +6411,8 @@ export function AppProvider({
               point.state,
               runNtst,
               runNcol,
-              'PD point'
+              'PD point',
+              'implicit'
             ),
             parameterName,
             paramValue: point.param_value,
@@ -6540,7 +6644,8 @@ export function AppProvider({
               point.state,
               sourceNtst,
               sourceNcol,
-              'Large-cycle point'
+              'Large-cycle point',
+              'implicit'
             ),
             sourceNtst,
             sourceNcol,

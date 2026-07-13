@@ -11,6 +11,7 @@ import {
   isNodeEffectivelyVisible,
   moveNodeIntoParent,
   moveNode,
+  mergeLoadedEntities,
   normalizeSystem,
   removeNode,
   reorderNode,
@@ -23,6 +24,7 @@ import {
   updateScene,
   updateSystem,
 } from './model'
+import { buildSubsystemSnapshot } from './subsystemGateway'
 import type { ContinuationObject, LimitCycleObject, OrbitObject } from './types'
 
 describe('system model', () => {
@@ -997,6 +999,51 @@ describe('system model', () => {
     const cleaned = removeNode(configured, withOrbitA.nodeId)
 
     expect(cleaned.analysisViewports[0]?.sourceNodeIds).toEqual([withOrbitB.nodeId])
+  })
+
+  it('migrates persisted reduced Floquet vectors to full coordinates on load', () => {
+    const config = {
+      name: 'Floquet_Migration',
+      equations: ['x', 'y', 'z'],
+      params: [0],
+      paramNames: ['p'],
+      varNames: ['x', 'y', 'z'],
+      solver: 'rk4' as const,
+      type: 'flow' as const,
+    }
+    const system = createSystem({ name: config.name, config })
+    const snapshot = buildSubsystemSnapshot(config, {
+      frozenValuesByVarName: { y: 3 },
+    })
+    const limitCycle: LimitCycleObject = {
+      type: 'limit_cycle',
+      name: 'Legacy reduced cycle',
+      systemName: config.name,
+      origin: { type: 'orbit', orbitId: 'orbit-1', orbitName: 'Orbit' },
+      ntst: 1,
+      ncol: 1,
+      period: 1,
+      state: [1, 0, 1, 0, 1],
+      createdAt: '2026-07-13T00:00:00.000Z',
+      subsystemSnapshot: snapshot,
+      floquetModes: {
+        ntst: 1,
+        ncol: 1,
+        multipliers: [{ re: 0.5, im: 0 }],
+        vectors: [[[{ re: 1, im: 2 }, { re: 4, im: 5 }]]],
+        computedAt: '2026-07-13T00:00:00.000Z',
+      },
+    }
+
+    const merged = mergeLoadedEntities(system, {
+      objects: { 'cycle-1': limitCycle },
+    })
+    const loaded = merged.objects['cycle-1']
+    expect(loaded.type).toBe('limit_cycle')
+    if (loaded.type !== 'limit_cycle') throw new Error('Expected limit cycle')
+    expect(loaded.floquetModes?.vectors).toEqual([
+      [[{ re: 1, im: 2 }, { re: 0, im: 0 }, { re: 4, im: 5 }]],
+    ])
   })
 
 })

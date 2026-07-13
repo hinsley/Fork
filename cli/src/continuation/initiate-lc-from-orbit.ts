@@ -28,6 +28,12 @@ export type InitiateLcFromOrbitOptions = {
   autoInspect?: boolean;
 };
 
+export function limitCycleFromOrbitSystemTypeError(systemType: string): string | null {
+  return systemType === 'flow'
+    ? null
+    : 'Limit-cycle continuation from an Orbit is available for flow systems only.';
+}
+
 /**
  * Initiates limit cycle continuation from a computed orbit.
  * 
@@ -50,6 +56,12 @@ export async function initiateLCFromOrbit(
 ): Promise<ContinuationObject | null> {
   const sysConfig = Storage.loadSystem(sysName);
   const autoInspect = opts.autoInspect ?? true;
+
+  const systemTypeError = limitCycleFromOrbitSystemTypeError(sysConfig.type);
+  if (systemTypeError) {
+    printError(systemTypeError);
+    return null;
+  }
 
   if (sysConfig.paramNames.length === 0) {
     printError("System has no parameters to continue. Add at least one parameter first.");

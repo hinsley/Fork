@@ -672,7 +672,8 @@ export async function initiateLCBranchFromPoint(
         param_value: newParamValue,
         period: period,
         mesh_states: meshStates,
-        stage_states: []  // Will be built by the core
+        stage_states: [],  // Will be built by the core
+        requires_fixed_parameter_correction: true
       },
       mesh_points: sourceNtst,
       collocation_degree: sourceNcol,

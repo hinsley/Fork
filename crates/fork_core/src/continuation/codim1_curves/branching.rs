@@ -624,8 +624,20 @@ mod tests {
         .expect("generalized-Hopf LPC seed");
 
         assert_eq!(seed.target, Codim2BranchTarget::LimitPointCycle);
-        assert!((seed.param2_value + 0.04).abs() < 5e-3);
-        assert!((seed.param1_value - 0.0004).abs() < 2e-3);
+        // For r' = mu*r + beta*r^3 + r^5, the cycle-fold locus is
+        // beta = -2*r^2 and mu = r^4.  Check the corrected cycle itself
+        // instead of the normal-form predictor, which need not already lie on
+        // the nonlinear collocation curve.
+        let first_mesh = 8 * 2 * 2;
+        let radius_squared = seed.state[first_mesh].powi(2) + seed.state[first_mesh + 1].powi(2);
+        assert!(
+            (seed.param2_value + 2.0 * radius_squared).abs() < 5e-4,
+            "seed={seed:?}"
+        );
+        assert!(
+            (seed.param1_value - radius_squared.powi(2)).abs() < 2e-4,
+            "seed={seed:?}"
+        );
         assert!(seed.corrected_residual < 1e-5, "seed={seed:?}");
         assert!(
             seed.corrected_residual <= seed.predictor_residual,
