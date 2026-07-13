@@ -6,6 +6,8 @@ import {
   normalizePeriodicVariables,
   parsePeriodExpression,
 } from '../../system/periodicity'
+import type { SystemStringDefinition } from '../../system/systemString'
+import { SystemStringTools } from './SystemStringTools'
 import type { SystemEditorActions } from './types'
 
 const FLOW_SOLVERS = ['rk4', 'tsit5']
@@ -255,9 +257,29 @@ function SystemEditorSession({ config, actions }: SystemEditorPanelProps) {
   const toggle = (section: keyof EditorState['sections']) =>
     dispatch({ type: 'toggle-section', section })
 
+  const replaceFromSystemString = (definition: SystemStringDefinition) => {
+    setDraft((previous) => ({
+      ...previous,
+      varNames: definition.varNames,
+      equations: definition.equations,
+      paramNames: definition.paramNames,
+      params: definition.params.map(String),
+      periodicVariables: definition.varNames.map(() => ({
+        enabled: false,
+        period: String(DEFAULT_VARIABLE_PERIOD),
+      })),
+    }))
+    dispatch({ type: 'clear-validation' })
+  }
+
   return (
     <div className="inspector-panel system-editor" data-testid="inspector-panel-body">
       <div className="system-editor__scroll">
+        <SystemStringTools
+          definition={systemConfig}
+          canCopy={validation.valid}
+          onImport={replaceFromSystemString}
+        />
         <section className={`inspector-section system-editor__card${sections.model ? '' : ' is-collapsed'}`}>
           <header className="system-editor__card-header">
             <button type="button" className="system-editor__section-toggle" aria-expanded={sections.model} onClick={() => toggle('model')} data-testid="system-toggle-model">
